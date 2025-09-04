@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+DTAtools.Rproj
+inst/doc
+testdata
+/doc/
+/Meta/
+example/

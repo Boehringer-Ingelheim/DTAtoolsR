@@ -1,0 +1,307 @@
+metadata:
+  - version: "1.0.0"
+    author: "Test User"
+    created: "2025-07-04"
+    description: "GF Domain Specification"
+columns:
+  - id: STUDYID
+    label: Study Identifier
+    type: Char
+    format: $9
+    nullable: No
+    description: "Unique identifier for a study"
+    values: "1234-5678"
+  - id: DOMAIN
+    label: Domain Abbreviation
+    type: Char
+    format: $8
+    nullable: No
+    description: "Two-character abbreviation for the domain: GF"
+    values: "GF"
+  - id: SUBJIDN
+    label: Subject Identifier for the study
+    type: Num
+    format: 10.
+    nullable: No
+    pattern: "^[0-9]{10}$"
+  - id: GFGRPID
+    label: Group name
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Used to link together a block of related records within a subject."
+    values:
+      - "Test"
+  - id: GFREFID
+    label: Reference name
+    type: Char
+    format: $50
+    nullable: No
+    description: "Data supplier’s internal accession number used to trace the genetic specimen."
+    example: TEST0001_17
+    pattern: "^TEST0001_[0-9]+$"
+  - id: GFTESTCD
+    label: Short Name of Genomic Measurement
+    type: Char
+    format: $8
+    nullable: No
+    description: "Short name of the measurement, test, or examination described in GFTEST, can be up to 8 characters. GFTESTCD and GFTEST should not include genomic names or symbols. SDTM controlled terminology shall be followed. (See Table 2 Measurement Specification) TRNSCPTN"
+    values: "TRNSCPTN"
+  - id: GFTEST
+    label: Name of Genomic Measurement
+    type: Char
+    format: $40
+    nullable: No
+    description: "Name of Genomic Measurement, can be up to 40 characters. GFTESTCD and GFTEST should not include genomic names or symbols. SDTM Controlled Terminology should be followed. (See Table 2 Measurement Specification) Transcription"
+    values: "Transcription"
+  - id: GFTSTDTL
+    label: Measurement, Test, or Examination Detail
+    type: Char
+    format: $60
+    nullable: Yes
+    description: "Description of a reportable qualifying the assessment in GFTESTCD and GFTEST. (See Table 2 Measurement Specification) toRNA: FRAGMENT COUNT or NORMALIZED LEVEL miRNA: FRAGMENT COUNT, Leave blank when sample is reported as empty"
+    values:
+      - "FRAGMENT COUNT"
+      - "NORMALIZED LEVEL"
+  - id: GFCAT
+    label: Category for Genomic Finding
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Used to define a category of topic-variable values. Leave blank"
+  - id: GFORRES
+    label: Result or Finding in Original Units
+    type: Num
+    format: $50
+    nullable: Yes
+    description: "Result of the measurement or finding as originally received or collected. Result to report if sample passed QC, otherwise leave blank for samples that did not pass QC or shall be reported as empty."
+    pattern: "^[0-9]*.*[0-9]$"
+  - id: GFORRESU
+    label: Original Units
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Unit for GFORRES, if applicable. SDTM Controlled Terminology should be followed."
+    values:
+  - id: GFORREF
+    label: Reference Result in Original Units
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Reference value for the result/ finding is available, for example the standard nucleotide sequence."
+  - id: GFRESCAT
+    label: Result Category
+    type: Char
+    format: $100
+    nullable: Yes
+    description: "Can be added when the results/findings need to be further categorized."
+  - id: GFGENREF
+    label: Genome Reference
+    type: Char
+    format: $50
+    nullable: Yes
+    description: 'Can be used as an identifier for the genome reference. For example, Genome Reference Consortium (GRC) Human Build 38 patch release 13 may be represented as "GRCh38.p13" (Note: GRCh38 is GRC Human genome build 38. As of May 7, 2014 it is the standard reference assembly sequence used by NCBI).'
+    values:
+      - "hs38d1 + GRCh38.86 Ensembl"
+      - "GRCh38 miRBase V22"
+  - id: GFSYM
+    label: Genomic Symbol
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "A published symbol for the portion of the genome serving as a locus for the experiment/test. Obtained from the genomic symbol list maintained in the HUGO Gene Nomenclature Committee (HGNC) database for human genetic data (www.genenames.org). Example: toRNA: POSTN (Example) miRNA: Leave blank"
+    example:
+      - toRNA: POSTN
+  - id: GFGENLOC
+    label: Genetic Location
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Location within a sequence for GFORRES observed value needs to be specified. For example, at chromosome 3 from position 8733082 to 8746058 can be presented as “3: 8733082-8746058”."
+  - id: GFGENSR
+    label: Genetic Sub-Region
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "The portion of the locus in which the variation was found. Examples: Exon 15, Kinase domain."
+  - id: GFSEQID
+    label: Sequence Identifier
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "A unique identifier for the sequence used as the reference to identify the genetic variation in the result. Should reflect the level of granularity collected."
+    example:
+      - Ensembl Gene name
+      - miRBase name
+  - id: GFPVRID
+    label: Published Variant Identifier
+    type: Char
+    format: $50
+    nullable: Yes
+    description: 'A unique identifier for the variation that has been publicly characterized in an external database. Examples: "rs2231142", "COSM41596". Leave blank'
+  - id: GFSTAT
+    label: Test Status
+    type: Char
+    format: $8
+    nullable: Yes
+    description: "Used to indicate that a test was not done, or was attempted but did not generate a result. Should be null or have a value of “NOT DONE”. When sample passes QC: leave blank Otherwise: NOT DONE."
+    values:
+      - NOT DONE
+  - id: GFREASND
+    label: Reason Test Not Done
+    type: Char
+    format: $60
+    nullable: Yes
+    description: "The description why a measurement was not performed. Example: GFREASND='DATA ANALYSIS QC FAILED' in case data Analysis QC failed and no data reported for sample; GFREASND ='POOR SAMPLE CONDITION' in case the sample did not pass lab QC parameters and no data reported."
+    values:
+      - DATA ANALYSIS QC FAILED
+      - NOT ANALYZED
+      - POOR SAMPLE CONDITION
+      - WITHDRAWN IC
+      - SAMPLE DEVIATION
+  - id: GFNAM
+    label: Vendor Name
+    type: Char
+    format: $60
+    nullable: No
+    description: "Name or identifier of the data supplier who provides the test results."
+    values:
+      - ExternalSupplierName
+  - id: GFSPEC
+    label: Specimen Material Type
+    type: Char
+    format: $40
+    nullable: Yes
+    description: "Defines the type of specimen used for a measurement."
+    values:
+      - miRNA
+      - toRNA
+  - id: MATRIX
+    label: Specimen Material Source
+    type: Char
+    format: $40
+    nullable: Yes
+    description: "Defines the matrix from which the sample was taken. Examples: BLOOD, PLASMA, URINE, TUMOR TISSUE. miRNA: PLASMA toRNA: BLOOD"
+    values:
+      - BLOOD
+      - PLASMA
+  - id: GFMETHOD
+    label: Method of Test or Examination
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Method of the test. Examples: NEXT GENERATION SEQUENCING, NUCLEIC ACname HYBRIDIZATION."
+    values:
+      - "NEXT GENERATION SEQUENCING"
+  - id: GFANMETH
+    label: Analysis Method
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "The method of secondary processing performed by the dry lab to yield the result reported in the dataset. toRNA: Leave Blank or TRANSCRIPTS PER MILLION FORMULA miRNA: Leave Blank"
+    values:
+      - "TRANSCRIPTS PER MILLION FORMULA"
+  - id: VISIT
+    label: Visit Name
+    type: Char
+    format: $40
+    nullable: Yes
+    description: "Visit name. ( Visit Table 1)"
+    values:
+      - VISIT 02
+      - VISIT 05
+  - id: GFDTC
+    label: Date/Time of Specimen Collection
+    type: Char
+    format: $20
+    nullable: Yes
+    description: "Date/Time of Assessment in ISO 8601 format, e.g. 2019-05-25T07:45:59. Leave blank"
+  - id: GFTPT
+    label: Planned Time
+    type: Char
+    format: $20
+    nullable: Yes
+    description: "Text description of the time when a measurement or observation should be taken as defined in the protocol. This may be represented as an elapsed time relative to a fixed reference point, such as time of the last dose. Leave blank"
+  - id: GFTPTREF
+    label: Time Point Reference
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Name of the fixed reference point referred to by GFTPTNUM, and GFTPT. Examples: PREVIOUS DOSE, PREVIOUS MEAL. Leave blank"
+  - id: GFTPTNUM
+    label: Planned Time Point Number
+    type: Num
+    format: 8.
+    nullable: Yes
+    description: "The numerical version of GFTPT. Leave blank"
+  - id: GFSIGDTL
+    label: Gene Signature Details
+    type: Char
+    format: $200
+    nullable: Yes
+    description: "More detailed description to uniquely identify the signature. Leave blank"
+  - id: SWVER
+    label: Software Version
+    type: Char
+    format: $50
+    nullable: Yes
+    description: "Software version if applicable."
+    values:
+      - "nf-core/smrnaseq: v2.3.1-g5901bea"
+
+rules:
+  - id: check_equals
+    description: "If STUDYID is '1234-5678', then DOMAIN must be 'GF'"
+    type: check_condition
+    condition:
+      STUDYID:
+        equals: "1234-5678"
+    then:
+      DOMAIN:
+        equals: "GF"
+  - id: unequal_check
+    description: "If STUDYID is '1234-5678', then DOMAIN must not be 'DF'"
+    type: check_condition
+    condition:
+      STUDYID:
+        equals: "1234-5678"
+    then:
+      DOMAIN:
+        not_equals: "DF"
+  - id: unique_check
+    type: check_unique
+    column: 
+      - SUBJIDN
+      - VISIT
+      - GFSEQID
+  - id: GFORRES must have a range
+    description: "GFORRES must be between 1 and 10M"
+    type: check_range
+    column: GFORRES
+    range: [0, 100000000]
+  - id: dependency_check
+    description: "If GFREASND is 'DATA ANALYSIS QC FAILED', then GFSTAT must not be null"
+    type: check_condition
+    condition:
+      GFREASND:
+        equals: "DATA ANALYSIS QC FAILED"
+    then:
+      GFSTAT:
+        empty: false
+  - id: mutual_exclusivity_check
+    description: "If GFREASND is populated GFORRES must be empty"
+    type: check_condition
+    condition:
+      GFREASND:
+        empty: false
+    then:
+      GFORRES:
+        empty: true
+  - id: overlap_check
+    type: check_condition
+    condition:
+      GFSPEC:
+        equals: miRNA
+    then:
+      GFTESTCD:
+        equals: TRNSCPTN

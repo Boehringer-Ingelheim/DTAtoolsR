@@ -1,0 +1,152 @@
+metadata:
+  author: User Name
+  version: "1.1"
+
+columns:
+  - id: STUDYID
+    label: Study Identifier
+    type: Char
+    nullable: false
+    values:
+      - 1234-5678
+    pattern: ^[0-9]{4}-[0-9]{4}$
+    description: Unique study ID
+  - id: VISIT
+    label: Visit
+    type: Char
+    nullable: false
+    values:
+      - V01
+      - V02
+      - V03
+      - EOT
+    description: Visit code
+  - id: AGE
+    label: Age
+    type: Num
+    nullable: false
+    description: Age in years
+  - id: GENDER
+    label: Gender
+    type: Char
+    nullable: false
+    values:
+      - Male
+      - Female
+      - Other
+    description: Gender of subject
+  - id: INCLUDE
+    label: Include in analysis
+    type: Char
+    nullable: true
+    values:
+      - "Y"
+      - "N"
+    description: Flag for inclusion
+  - id: HEIGHT
+    label: Height (cm)
+    type: Num
+    nullable: false
+    description: Height in centimeters
+  - id: WEIGHT
+    label: Weight (kg)
+    type: Num
+    nullable: false
+    description: Weight in kilograms
+  - id: BMI
+    label: Body Mass Index
+    type: Num
+    nullable: false
+    description: Calculated BMI
+  - id: STATUS
+    label: Visit Status
+    type: Char
+    nullable: true
+    values:
+      - COMPLETED
+      - DROPPED
+      - PENDING
+    description: Status of visit
+  - id: CONSENT
+    label: Consent Given
+    type: Char
+    nullable: true
+    values:
+      - "YES"
+      - "NO"
+    description: Consent status
+  - id: CONSENT_DATE
+    label: Consent Date
+    type: Char
+    nullable: true
+    description: Date of consent
+  - id: AE_TERM
+    label: Adverse Event Term
+    type: Char
+    nullable: true
+    description: Adverse event term
+  - id: SAE_TERM
+    label: Serious Adverse Event Term
+    type: Char
+    nullable: true
+    description: Serious adverse event term
+  - id: SUBJECT_ID
+    label: Subject Identifier
+    type: Char
+    nullable: false
+    description: Unique subject ID
+
+rules:
+  - id: rule_equal_example
+    type: check_condition
+    condition:
+      VISIT:
+        equals: V03
+    then:
+      STATUS:
+        equals: COMPLETED
+  - id: rule_unequal_example
+    type: check_condition
+    condition:
+      VISIT:
+        equals: V03
+    then:
+      STATUS:
+        not_equals: DROPPED
+  - id: rule_range_example
+    type: check_range
+    column: AGE
+    range:
+      - 18
+      - 65
+  - id: rule_dependency_example
+    type: check_condition
+    condition:
+      CONSENT:
+        equals: "YES"
+    then:
+      CONSENT_DATE:
+        empty: false
+  - id: rule_unique_example
+    type: check_unique
+    column: 
+      - SUBJECT_ID
+      - VISIT
+  - id: check_condition_example
+    type: check_condition
+    condition:
+      VISIT:
+        equals: V03
+    then:
+      STATUS:
+        equals: COMPLETED
+      VISIT:
+        in:
+          - V03
+          - EOT
+      AGE:
+        range:
+          - 10
+          - 100
+      WEIGHT:
+        greater_equal: 5
