@@ -1,5 +1,7 @@
 # DTAtools R-Package
 
+<img src="img/dtatools_logo.png" alt="DTAtools Logo" width="700" />
+
 Data Transfer Agreements (DTAs) or data transmission statements (DTS) play a pivotal role in the secure and compliant exchange of data between stakeholders such as research organizations or vendors with pharma companies, particularly in clinical or regulatory environments where data integrity and specification adherence are critical. However, the manual process of validating these data transfers is both error-prone and time-consuming, leading to repeated submissions and significant time loss.
 
 Introducing `DTAtools`, a comprehensive solution designed to streamline the management of DTAs / DTS. `DTAtools` stores DTA definitions in the user-friendly YAML format, offering flexibility and compatibility across various DTA scenarios.
