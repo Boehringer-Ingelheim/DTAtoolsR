@@ -12,8 +12,10 @@
 #' @return Flextable object that is saved.
 #' @export
 #' @examples
+#' \dontrun{
 #' column_collection <- importDTAColumnSpecCollectionFromYaml("spec.yaml")
 #' exportDTASpecTable(column_collection, "dta_spec_table.docx")
+#' }
 exportDTASpecTable <- function(
   DTAColumnSpecCollection,
   file = "dta_spec_table.docx",
@@ -130,9 +132,9 @@ exportDTASpecTable <- function(
     cli::cli_abort(c(
       "colnames not supported!",
       x = "Specify one of these two: ",
-      i = 'c("Variable Name", "Variable Label", "Type", 
+      i = 'c("Variable Name", "Variable Label", "Type",
       "Length", "Format", "Nullable", "Description")',
-      i = 'c("Variable Name", "Variable Label", 
+      i = 'c("Variable Name", "Variable Label",
       "Type", "Format", "Nullable", "Description")'
     ))
   }
@@ -165,8 +167,9 @@ exportDTASpecTable <- function(
 #' @return None. The function creates a Word document.
 #' @export
 #' @examples
-#'
+#' \dontrun{
 #' exportColumnValueTable(DTAColumnSpecCollection, "column_value_table.docx")
+#' }
 exportColumnValueTable <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",

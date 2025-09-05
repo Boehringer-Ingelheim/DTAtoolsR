@@ -117,8 +117,10 @@ method(getSpecs, DTAContainer) <- function(x) {
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @return A data.frame.
 #' @examples
+#' \dontrun{
 #' getData(container)           # returns first table
 #' getData(container, "lab")   # returns table named "lab"
+#' }
 #' @name getData-DTAContainer
 if (!exists("getData", mode = "function")) {
   getData <- new_generic("getData", "x")
@@ -156,7 +158,9 @@ method(getData, DTAContainer) <- function(x, id = 1) {
 #' @param x An object of class DTAContainer
 #' @return A vector
 #' @examples
+#' \dontrun{
 #' labels <- labels(dtadata)
+#' }
 #' @name labels-DTAContainer
 #' @export
 labels <- new_generic("labels", "x")
@@ -297,7 +301,9 @@ writeTableToFile <- function(
 #' @param x An object of class DTAContainer
 #' @return A list with metadata information
 #' @examples
+#' \dontrun{
 #' getMetadata(DTAContainer)
+#' }
 #' @name getMetadata-DTAContainer
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
@@ -312,7 +318,9 @@ method(getMetadata, DTAContainer) <- function(x) {
 #' @param x An object of class DTAContainer
 #' @return A list with rules information
 #' @examples
+#' \dontrun{
 #' getRules(DTAContainer)
+#' }
 #' @name getRules-DTAContainer
 if (!exists("getRules", mode = "function")) {
   getRules <- new_generic("getRules", "x")
