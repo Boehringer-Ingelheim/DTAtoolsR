@@ -90,6 +90,7 @@ makeDTAContainer <- function(specs, data) {
 if (!exists("getColumn", mode = "function")) {
   getColumn <- new_generic("getColumn", "x")
 }
+#' @export
 method(getColumn, DTAContainer) <- function(x, id) {
   return(x@specs@columns[[id]])
 }
@@ -162,8 +163,8 @@ method(getData, DTAContainer) <- function(x, id = 1) {
 #' labels <- labels(dtadata)
 #' }
 #' @name labels-DTAContainer
-#' @export
 labels <- new_generic("labels", "x")
+#' @export
 method(labels, DTAContainer) <- function(x) {
   return(names(x@data))
 }
@@ -308,6 +309,7 @@ writeTableToFile <- function(
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
 }
+#' @export
 method(getMetadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
@@ -325,6 +327,7 @@ method(getMetadata, DTAContainer) <- function(x) {
 if (!exists("getRules", mode = "function")) {
   getRules <- new_generic("getRules", "x")
 }
+#' @export
 method(getRules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }
