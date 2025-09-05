@@ -55,6 +55,7 @@ checkNullable <- function(vector, nullable) {
 #' @return The modified vector with NAs replaced by an empty string if the type is character.
 #' @examples
 #' changeNAs(c(NA, "b", "c"), "character")
+#' @export
 changeNAs <- function(vector, var_type) {
   tmp <- vector
   if (var_type == "character") {
@@ -76,6 +77,7 @@ changeNAs <- function(vector, var_type) {
 #' @return The vector converted to the specified type.
 #' @examples
 #' changeType(c("1", "2", "3"), "numeric")
+#' @export
 changeType <- function(vector, var_type) {
   if (var_type == "numeric") {
     return(as.numeric(vector))
