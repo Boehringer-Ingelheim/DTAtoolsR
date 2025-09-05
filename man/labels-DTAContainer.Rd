@@ -17,5 +17,7 @@ A vector
 Method to get a all data labels within a DTAContainer Object.
 }
 \examples{
+\dontrun{
 labels <- labels(dtadata)
+}
 }

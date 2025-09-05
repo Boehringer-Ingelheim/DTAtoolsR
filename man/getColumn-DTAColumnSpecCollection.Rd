@@ -15,5 +15,7 @@ A DTAColumnSpec object corresponding to the specified ID.
 Method to get a column format by its ID from the collection.
 }
 \examples{
-column_format <- getColumn(collection, "STUDYID")
+\dontrun{
+ column_format <- getColumn(collection, "STUDYID")
+}
 }

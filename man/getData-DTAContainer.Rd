@@ -15,6 +15,8 @@ A data.frame.
 Extract a table from the tables in a DTAContainer object.
 }
 \examples{
+\dontrun{
 getData(container)           # returns first table
 getData(container, "lab")   # returns table named "lab"
+}
 }

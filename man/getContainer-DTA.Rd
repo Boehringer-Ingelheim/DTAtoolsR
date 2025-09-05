@@ -15,7 +15,9 @@ Either a list of DTRContainer objects s or a single named DTAContainer.
 Method to get one or more containers from a DTA object.
 }
 \examples{
+\dontrun{
 getContainer(DTAContainer)
 getContainer(DTAContainer, "container1")
 getContainer(DTAContainer, c("container1", "container2"))
+}
 }

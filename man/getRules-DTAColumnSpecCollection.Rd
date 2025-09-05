@@ -13,5 +13,7 @@ A list with rules defined
 Method to get Rules from DTAColumnSpecCollection
 }
 \examples{
-getRules(collection)
+\dontrun{
+ getRules(collection)
+}
 }
