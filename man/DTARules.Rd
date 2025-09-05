@@ -21,7 +21,7 @@ compliance with predefined rules.
 \examples{
 # Define some example rules
 #example_rules <- list(
-´#    list(
+#    list(
 #     id = "rule1",
 #    type = "check_range",
 #   column = "age",
