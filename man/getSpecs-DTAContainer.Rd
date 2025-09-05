@@ -17,7 +17,7 @@ A DTAColumnSpecCollection object.
 Method to extract the full DTAColumnSpecCollection from a DTAContainer object.
 }
 \examples{
-\dontrun {
+\dontrun{
   getSpecs(container)
 }
 }
