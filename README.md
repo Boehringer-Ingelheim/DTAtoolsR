@@ -2,7 +2,6 @@
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/Boehringer-Ingelheim/DTAtoolsR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/Boehringer-Ingelheim/DTAtoolsR/actions/workflows/R-CMD-check.yaml)
-[![Codecov test coverage](https://codecov.io/gh/Boehringer-Ingelheim/DTAtoolsR/graph/badge.svg)](https://app.codecov.io/gh/Boehringer-Ingelheim/DTAtoolsR)
 <!-- badges: end -->
   
 <img src="img/dtatools_logo.png" alt="DTAtools Logo" width="900" />
