@@ -7,6 +7,7 @@
 #' @return Logical. TRUE if all elements are within the specified format length, FALSE otherwise.
 #' @examples
 #' checkFormat(c("abc", "defg"), 4)
+#' @export
 checkFormat <- function(value, var_format) {
   value[is.na(value)] <- ""
   return(all(nchar(value) <= var_format))
@@ -21,6 +22,7 @@ checkFormat <- function(value, var_format) {
 #' @return Logical. TRUE if the vector matches the specified type, FALSE otherwise.
 #' @examples
 #' checkType(c(1, 2, 3), "numeric")
+#' @export
 checkType <- function(vector, var_type) {
   if (all(is.na(vector))) {
     return(TRUE)
@@ -38,6 +40,7 @@ checkType <- function(vector, var_type) {
 #' @return Logical. TRUE if the vector meets the nullable condition, FALSE otherwise.
 #' @examples
 #' checkNullable(c(1, 2, NA), FALSE)
+#' @export
 checkNullable <- function(vector, nullable) {
   if (!nullable) {
     return(all(!is.na(vector) & vector != ""))
