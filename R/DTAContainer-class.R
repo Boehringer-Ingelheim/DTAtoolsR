@@ -126,7 +126,7 @@ if (!exists("getData", mode = "function")) {
 
 #' @export
 method(getData, DTAContainer) <- function(x, id = 1) {
-  if (!inherits(x, "DTAContainer")) {
+  if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
 

@@ -3,3 +3,5 @@
 ^LICENSE\.md$
 ^doc$
 ^Meta$
+.github
+.pre-commit-config.yaml

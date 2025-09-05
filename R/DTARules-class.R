@@ -41,7 +41,7 @@ DTARules <- new_class(
 
   # Constructor for the DTARules class
   constructor = function(rules) {
-    if (!all(sapply(rules, inherits, "DTARule"))) {
+    if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTARule'"
       )

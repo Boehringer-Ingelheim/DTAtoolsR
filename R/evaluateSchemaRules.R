@@ -202,7 +202,7 @@ validateRules <- function(DTAColumnSpecCollection, table) {
 }
 
 checkDTARule <- function(x) {
-  if (inherits(x, "DTARule")) {
+  if (inherits(x, "DTAtools::DTARule")) {
     invisible(TRUE)
   } else {
     cli::cli_abort("Rule is not of class 'DTARule'")

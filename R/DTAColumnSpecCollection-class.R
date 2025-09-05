@@ -17,14 +17,14 @@ DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
   constructor = function(columns, metadata = list(), rules = list()) {
     # Ensure columns is a list of DTAColumnSpec objects
-    if (!all(sapply(columns, inherits, "DTAColumnSpec"))) {
+    if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
       )
     }
 
     if (length(rules) > 0) {
-      if (!all(sapply(rules, inherits, "DTARule"))) {
+      if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
         cli::cli_abort(
           "All elements in 'rules' must be of class 'DTARule'"
         )
