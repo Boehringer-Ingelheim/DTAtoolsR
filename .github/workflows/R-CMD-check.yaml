@@ -45,6 +45,12 @@ jobs:
           extra-packages: any::rcmdcheck
           needs: check
 
+      - name: Install S7 from GitHub
+        run: |
+          install.packages("remotes")
+          remotes::install_github("RConsortium/S7")
+        shell: Rscript {0}
+
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true

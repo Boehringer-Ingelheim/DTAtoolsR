@@ -30,7 +30,7 @@ Imports:
     flextable
 Depends:
     R (>= 3.5.0),
-    S7
+    S7 (>= 0.2.0)
 Suggests: 
     knitr,
     rmarkdown,
