@@ -60,7 +60,9 @@ DTAColumnSpecCollection <- new_class(
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A character vector of column names.
 #' @examples
+#' \dontrun{
 #' names <- getColumnIds(collection)
+#' }
 #' @name getColumnIds-DTAColumnSpecCollection
 #' @export
 getColumnIds <- new_generic("getColumnIds", "x")
@@ -75,7 +77,9 @@ method(getColumnIds, DTAColumnSpecCollection) <- function(x) {
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
-#' column_format <- getColumn(collection, "STUDYID")
+#' \dontrun{
+#'  column_format <- getColumn(collection, "STUDYID")
+#' }
 #' @name getColumn-DTAColumnSpecCollection
 if (!exists("getColumn", mode = "function")) {
   getColumn <- new_generic("getColumn", "x")
@@ -90,7 +94,9 @@ method(getColumn, DTAColumnSpecCollection) <- function(x, id) {
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with metadata information
 #' @examples
-#' getMetadata(collection)
+#' \dontrun{
+#'  getMetadata(collection)
+#' }
 #' @name getMetadata-DTAColumnSpecCollection
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
@@ -105,7 +111,9 @@ method(getMetadata, DTAColumnSpecCollection) <- function(x) {
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with rules defined
 #' @examples
-#' getRules(collection)
+#' \dontrun{
+#'  getRules(collection)
+#' }
 #' @name getRules-DTAColumnSpecCollection
 if (!exists("getRules", mode = "function")) {
   getRules <- new_generic("getRules", "x")
