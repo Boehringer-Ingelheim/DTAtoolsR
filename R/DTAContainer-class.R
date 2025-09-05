@@ -104,7 +104,9 @@ method(getColumn, DTAContainer) <- function(x, id) {
 #' @param x An object of class DTAContainer.
 #' @return A DTAColumnSpecCollection object.
 #' @examples
-#' getSpecs(container)
+#' \dontrun {
+#'   getSpecs(container)
+#' }
 #' @name getSpecs-DTAContainer
 getSpecs <- new_generic("getSpecs", "x")
 
