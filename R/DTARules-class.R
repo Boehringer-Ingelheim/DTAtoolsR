@@ -14,27 +14,27 @@
 #'
 #' @examples
 #' # Define some example rules
-#' example_rules <- list(
-#'   list(
-#'     id = "rule1",
-#'     type = "check_range",
-#'     column = "age",
-#'     range = c(18, 65)
-#'   ),
-#'   list(
-#'     id = "rule2",
-#'     type = "check_unique",
-#'     column = "id"
-#'   )
-#' )
-#'
+#' #example_rules <- list(
+#'´#    list(
+#' #     id = "rule1",
+#' #    type = "check_range",
+#' #   column = "age",
+#' #    range = c(18, 65)
+#' #   ),
+#' #  list(
+#' #   id = "rule2",
+#' #   type = "check_unique",
+#' #   column = "id"
+#' # )
+#' # )
+#' #
 #' # Create a DTARules object
-#' rules_obj <- DTARules(
-#'   rules = example_rules
-#' )
+#' #rules_obj <- DTARules(
+#' #   rules = example_rules
+#' #)
 #'
 #' # Print the object
-#' print(rules_obj)
+#' # print(rules_obj)
 
 DTARules <- new_class(
   "DTARules",
