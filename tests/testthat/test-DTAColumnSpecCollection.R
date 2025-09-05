@@ -22,7 +22,7 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
 
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_equal(getColumnIds(collection), c("STUDYID", "VISIT"))
-  #expect_equal(getColumn(collection, "VISIT")@label, "Visit") # TODO debug
+  expect_equal(getColumn(collection, "VISIT")@label, "Visit")
 })
 
 test_that("DTAColumnSpecCollectionFromList constructs valid object", {

@@ -84,7 +84,9 @@ makeDTAContainer <- function(specs, data) {
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
+#' \dontrun{
 #' column_format <- getColumn(dtadata, "STUDYID")
+#' }
 # Define the generic only if it doesn't already exist
 #' @name getColumn-DTAContainer
 if (!exists("getColumn", mode = "function")) {
