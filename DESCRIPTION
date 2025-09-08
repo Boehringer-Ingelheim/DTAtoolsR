@@ -3,7 +3,7 @@ Title: Tools for handling data from data transfer agreements (DTAs) / data trans
 Version: 0.8.1
 Authors@R: 
     person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com", 
-        role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000"))
+        role = c("aut", "cre", "maintainer"), comment = c(ORCID = "0000-0001-7697-7000"))
     person("Daniel", "Schreyer", 
         email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "cre"))
 Description: Provides a comprehensive set of tools for importing, validating,

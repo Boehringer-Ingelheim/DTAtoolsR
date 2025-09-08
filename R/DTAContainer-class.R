@@ -200,10 +200,10 @@ method(labels, DTAContainer) <- function(x) {
 #' @param write_md5sum_to_file Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
 #' @param ... Additional arguments passed to write.table.
 #' @return NULL. The function writes the table to a file.
-
 #' @examples
 #' \dontrun{
-#' writeTableToFile(dtadata, table = "my_table", filename = "table.tsv.gz", sep = "\t", arrange_by = c("STUDYID", "VISIT"))
+#' writeTableToFile(dtadata, table = "my_table", filename = "table.tsv.gz", 
+#'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
 writeTableToFile <- function(
   DTAContainer,

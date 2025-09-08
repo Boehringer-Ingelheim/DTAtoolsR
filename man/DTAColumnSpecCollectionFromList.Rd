@@ -21,9 +21,13 @@ Constructs a DTAColumnSpecCollection object from separate components: columns, m
 Supports both named and unnamed lists of column specifications.
 }
 \examples{
+\dontrun{
 columns <- list(
-  list(id = "STUDYID", label = "Study ID", type = "Char", nullable = FALSE, values = list("1234-5678")),
-  list(id = "VISIT", label = "Visit", type = "Char", nullable = TRUE, values = list("V01", "EOT"))
+  DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "Char",
+       nullable = FALSE, values = list("1234-5678")),
+  DTAColumnSpec(id = "VISIT", label = "Visit", type = "Char", nullable = TRUE,
+       values = list("V01", "EOT"))
 )
 dta_spec <- DTAColumnSpecCollectionFromList(columns)
+}
 }
