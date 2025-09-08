@@ -9,6 +9,8 @@ labels(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTAContainer}
+
+\item{...}{void}
 }
 \value{
 A vector

@@ -54,7 +54,9 @@ checkNullable <- function(vector, nullable) {
 #' @param var_type Character. The type of the vector.
 #' @return The modified vector with NAs replaced by an empty string if the type is character.
 #' @examples
+#' \dontrun{
 #' changeNAs(c(NA, "b", "c"), "character")
+#' }
 changeNAs <- function(vector, var_type) {
   tmp <- vector
   if (var_type == "character") {
@@ -93,7 +95,7 @@ changeType <- function(vector, var_type) {
 #' @description Validates a data.frame against a JSON Schema using jsonvalidate. The table is split into smaller chunks for validation to avoid argument limits.
 #' @importFrom jsonlite toJSON
 #' @importFrom jsonvalidate json_schema
-#' @importFrom dplyr select mutate group_by summarise across n distinct
+#' @importFrom dplyr select mutate group_by summarise across n distinct where
 #' @importFrom tidyr separate_wider_delim
 #' @importFrom cli cli_alert_danger cli_alert_success cli_h3 cli_abort cli_alert_info
 #' @param table A data.frame to validate.

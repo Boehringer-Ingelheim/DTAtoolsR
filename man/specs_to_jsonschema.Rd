@@ -7,7 +7,7 @@
 specs_to_jsonschema(specs)
 }
 \arguments{
-\item{columns}{A list containing column spec information}
+\item{specs}{Column spec information}
 }
 \value{
 A list representing the JSON Schema.

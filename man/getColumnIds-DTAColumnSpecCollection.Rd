@@ -9,6 +9,8 @@ getColumnIds(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
+
+\item{...}{void}
 }
 \value{
 A character vector of column names.

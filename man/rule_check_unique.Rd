@@ -6,6 +6,11 @@
 \usage{
 rule_check_unique(rule, df)
 }
+\arguments{
+\item{rule}{DTA rule}
+
+\item{df}{data}
+}
 \description{
 Ensures that all values in a column are unique.
 }

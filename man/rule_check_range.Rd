@@ -6,6 +6,11 @@
 \usage{
 rule_check_range(rule, df)
 }
+\arguments{
+\item{rule}{DTA rule}
+
+\item{df}{data}
+}
 \description{
 Ensures a column's values fall within a specified numeric range.
 }

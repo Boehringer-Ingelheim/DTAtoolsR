@@ -18,5 +18,7 @@ The modified vector with NAs replaced by an empty string if the type is characte
 This function replaces NA values in a vector with an empty string if the vector type is character.
 }
 \examples{
+\dontrun{
 changeNAs(c(NA, "b", "c"), "character")
+}
 }

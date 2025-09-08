@@ -1,4 +1,6 @@
 #' @title Rule: check_range
+#' @param rule DTA rule
+#' @param df data
 #' @description Ensures a column's values fall within a specified numeric range.
 #' @export
 rule_check_range <- function(rule, df) {
@@ -26,6 +28,8 @@ rule_check_range <- function(rule, df) {
 }
 
 #' @title Rule: check_unique
+#' @param rule DTA rule
+#' @param df data
 #' @description Ensures that all values in a column are unique.
 #' @export
 rule_check_unique <- function(rule, df) {

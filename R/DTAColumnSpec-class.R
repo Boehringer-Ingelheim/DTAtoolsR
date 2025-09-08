@@ -26,6 +26,7 @@ class_character_or_numeric_or_null_or_list <- class_character |
 #' @param label Character or NA. The label of the column.
 #' @param type Character or NA. The type of the column.
 #' @param format Character or NA. The format of the column.
+#' @param length Numeric or NA. The max character length.
 #' @param nullable Logical or NA. Whether the column can be null.
 #' @param pattern Character or NA. The pattern of the column.
 #' @param values Any or NA. The values of the column.

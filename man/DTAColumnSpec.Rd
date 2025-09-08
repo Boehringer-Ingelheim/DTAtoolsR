@@ -25,6 +25,8 @@ DTAColumnSpec(
 
 \item{format}{Character or NA. The format of the column.}
 
+\item{length}{Numeric or NA. The max character length.}
+
 \item{nullable}{Logical or NA. Whether the column can be null.}
 
 \item{pattern}{Character or NA. The pattern of the column.}

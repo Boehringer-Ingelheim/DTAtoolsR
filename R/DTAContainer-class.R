@@ -99,6 +99,7 @@ method(getColumn, DTAContainer) <- function(x, id) {
 #' @description
 #' Method to extract the full DTAColumnSpecCollection from a DTAContainer object.
 #' @param x An object of class DTAContainer.
+#' @param ... void
 #' @return A DTAColumnSpecCollection object.
 #' @examples
 #' getSpecs(container)
@@ -154,6 +155,7 @@ method(getData, DTAContainer) <- function(x, id = 1) {
 #' @description
 #' Method to get a all data labels within a DTAContainer Object.
 #' @param x An object of class DTAContainer
+#' @param ... void
 #' @return A vector
 #' @examples
 #' labels <- labels(dtadata)
@@ -167,7 +169,7 @@ method(labels, DTAContainer) <- function(x) {
 #' @title Write DTA Table to File
 #' @description
 #' Write a named DTA table saved in a DTAContainer object to a file.
-#' @importFrom dplyr arrange across
+#' @importFrom dplyr arrange across everything
 #' @importFrom magrittr %>%
 #' @importFrom utils write.table
 #' @importFrom R.utils gzip
@@ -181,11 +183,12 @@ method(labels, DTAContainer) <- function(x) {
 #' @param arrange_desc Logical. Whether to arrange the table in descending order. Default is FALSE.
 #' @param sep Character. The field separator string. Default is ",".
 #' @param na Character. The string to use for missing values in the data. Default is "".
+#' @param row.names Logical. Row names provided.
+#' @param quote Logical. Use of quotes
 #' @param overwrite Logical. Whether to overwrite the file if it exists. Default is FALSE.
 #' @param compression Character. Compression method, either "none" or "gzip". Default is "none".
 #' @param get_md5sum Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
 #' @param write_md5sum_to_file Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
-#' @param return_metadata Logical. Whether to return metadata (MD5 checksum and dimensions) as a list. Default is FALSE.
 #' @param ... Additional arguments passed to write.table.
 #' @return NULL. The function writes the table to a file.
 

@@ -21,13 +21,13 @@ compliance with predefined rules.
 \examples{
 # Define some example rules
 example_rules <- list(
-  list(
+  DTARule(
     id = "rule1",
     type = "check_range",
     column = "age",
     range = c(18, 65)
   ),
-  list(
+  DTARule(
     id = "rule2",
     type = "check_unique",
     column = "id"

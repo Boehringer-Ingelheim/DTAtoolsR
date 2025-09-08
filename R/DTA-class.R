@@ -5,8 +5,8 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param metadata A list of metadata information.
 #' @param container A names list of DTAContainer objects
+#' @param ... arguments will be passed to DTAMetadata(...)
 #' @return An object of class DTA.
 #'
 #' @examples

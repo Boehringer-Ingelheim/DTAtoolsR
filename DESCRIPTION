@@ -6,15 +6,13 @@ Authors@R:
         role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000"))
     person("Daniel", "Schreyer", 
         email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "cre"))
-Description: Provides tools to work with data from data transfer agreements (DTAs)
+Description: Provides a comprehensive set of tools for importing, validating, transforming, and exporting data governed by data transfer agreements (DTAs) or data transfer specifications (DTS). The package supports workflows for handling structured data, ensuring compliance with agreement requirements, and facilitating reproducible data processing. Key features include flexible data import/export, schema validation, metadata management, and integration with common R data analysis pipelines.
 License: LGPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports:
     yaml,
-    methods,
-    S7,
     dplyr,
     cli,
     utils,
@@ -35,7 +33,6 @@ Suggests:
     knitr,
     rmarkdown,
     testthat (>= 3.0.0),
-    dso,
-    yaml
+    qpdf
 Config/testthat/edition: 3
 VignetteBuilder: knitr

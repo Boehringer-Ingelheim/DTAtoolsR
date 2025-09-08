@@ -9,7 +9,7 @@ DTA(container = NULL, ...)
 \arguments{
 \item{container}{A names list of DTAContainer objects}
 
-\item{metadata}{A list of metadata information.}
+\item{...}{arguments will be passed to DTAMetadata(...)}
 }
 \value{
 An object of class DTA.

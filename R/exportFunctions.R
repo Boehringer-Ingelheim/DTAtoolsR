@@ -2,6 +2,7 @@
 #' @description
 #' This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.
 #' @importFrom yaml read_yaml
+#' @importFrom dplyr any_of everything where
 #' @importFrom cli cli_alert_success cli_abort
 #' @importFrom magrittr %>%
 #' @importFrom flextable flextable font bold bg width border_outer border_inner align padding valign save_as_docx

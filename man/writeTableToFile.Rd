@@ -36,7 +36,11 @@ writeTableToFile(
 
 \item{na}{Character. The string to use for missing values in the data. Default is "".}
 
+\item{row.names}{Logical. Row names provided.}
+
 \item{overwrite}{Logical. Whether to overwrite the file if it exists. Default is FALSE.}
+
+\item{quote}{Logical. Use of quotes}
 
 \item{compression}{Character. Compression method, either "none" or "gzip". Default is "none".}
 
@@ -45,8 +49,6 @@ writeTableToFile(
 \item{write_md5sum_to_file}{Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.}
 
 \item{...}{Additional arguments passed to write.table.}
-
-\item{return_metadata}{Logical. Whether to return metadata (MD5 checksum and dimensions) as a list. Default is FALSE.}
 }
 \value{
 NULL. The function writes the table to a file.

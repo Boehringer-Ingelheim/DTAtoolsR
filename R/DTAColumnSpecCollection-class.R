@@ -58,6 +58,7 @@ DTAColumnSpecCollection <- new_class(
 #' @description
 #' Method to get the names of columns in the collection.
 #' @param x An object of class DTAColumnSpecCollection.
+#' @param ... void
 #' @return A character vector of column names.
 #' @examples
 #' names <- getColumnIds(collection)
@@ -526,7 +527,7 @@ writeDTAColumnSpecCollectionToJson <- function(
 
 #' @title Convert DTAColumnSpec s to JSON Schema
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
-#' @param columns A list containing column spec information
+#' @param specs Column spec information
 #' @return A list representing the JSON Schema.
 specs_to_jsonschema <- function(specs) {
   properties <- lapply(specs, function(spec) {
