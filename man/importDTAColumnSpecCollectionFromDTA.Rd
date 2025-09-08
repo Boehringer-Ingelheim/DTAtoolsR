@@ -4,12 +4,7 @@
 \alias{importDTAColumnSpecCollectionFromDTA}
 \title{Create DTAColumnSpecCollection from DTA Word Document}
 \usage{
-importDTAColumnSpecCollectionFromDTA(
-  file,
-  table_position = 1,
-  colnames = c("id", "label", "type", "length", "format", "nullable", "description"),
-  value_sep = ";"
-)
+importDTAColumnSpecCollectionFromDTA(file)
 }
 \arguments{
 \item{file}{Character. Path to the Word document.}
@@ -25,4 +20,9 @@ A DTAColumnSpecCollection object.
 }
 \description{
 Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
+}
+\examples{
+\dontrun{
+  importDTAColumnSpecCollectionFromDTA(file)
+}
 }

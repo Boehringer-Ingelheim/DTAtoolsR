@@ -4,7 +4,7 @@
 \alias{importDTAColumnSpecCollectionFromYaml}
 \title{Create DTAColumnSpecCollection from YAML File}
 \usage{
-importDTAColumnSpecCollectionFromYaml(file)
+importDTAColumnSpecCollectionFromYaml(yaml_file)
 }
 \arguments{
 \item{file}{Character. Path to the YAML file containing specifications.}

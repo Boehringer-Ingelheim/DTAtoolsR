@@ -15,3 +15,9 @@ A DTAColumnSpecCollection object.
 \description{
 Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
 }
+\examples{
+\dontrun{
+  importDTAColumnSpecCollectionFromJson(file)
+}
+
+}
