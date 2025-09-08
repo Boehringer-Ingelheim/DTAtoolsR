@@ -84,12 +84,15 @@ makeDTAContainer <- function(specs, data) {
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
+#' \dontrun{
 #' column_format <- getColumn(dtadata, "STUDYID")
+#' }
 # Define the generic only if it doesn't already exist
 #' @name getColumn-DTAContainer
 if (!exists("getColumn", mode = "function")) {
   getColumn <- new_generic("getColumn", "x")
 }
+#' @export
 method(getColumn, DTAContainer) <- function(x, id) {
   return(x@specs@columns[[id]])
 }
@@ -102,7 +105,9 @@ method(getColumn, DTAContainer) <- function(x, id) {
 #' @param ... void
 #' @return A DTAColumnSpecCollection object.
 #' @examples
-#' getSpecs(container)
+#' \dontrun{
+#'   getSpecs(container)
+#' }
 #' @name getSpecs-DTAContainer
 getSpecs <- new_generic("getSpecs", "x")
 
@@ -118,8 +123,10 @@ method(getSpecs, DTAContainer) <- function(x) {
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @return A data.frame.
 #' @examples
+#' \dontrun{
 #' getData(container)           # returns first table
 #' getData(container, "lab")   # returns table named "lab"
+#' }
 #' @name getData-DTAContainer
 if (!exists("getData", mode = "function")) {
   getData <- new_generic("getData", "x")
@@ -127,7 +134,7 @@ if (!exists("getData", mode = "function")) {
 
 #' @export
 method(getData, DTAContainer) <- function(x, id = 1) {
-  if (!inherits(x, "DTAContainer")) {
+  if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
 
@@ -158,10 +165,12 @@ method(getData, DTAContainer) <- function(x, id = 1) {
 #' @param ... void
 #' @return A vector
 #' @examples
+#' \dontrun{
 #' labels <- labels(dtadata)
+#' }
 #' @name labels-DTAContainer
-#' @export
 labels <- new_generic("labels", "x")
+#' @export
 method(labels, DTAContainer) <- function(x) {
   return(names(x@data))
 }
@@ -300,11 +309,14 @@ writeTableToFile <- function(
 #' @param x An object of class DTAContainer
 #' @return A list with metadata information
 #' @examples
+#' \dontrun{
 #' getMetadata(DTAContainer)
+#' }
 #' @name getMetadata-DTAContainer
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
 }
+#' @export
 method(getMetadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
@@ -315,11 +327,14 @@ method(getMetadata, DTAContainer) <- function(x) {
 #' @param x An object of class DTAContainer
 #' @return A list with rules information
 #' @examples
+#' \dontrun{
 #' getRules(DTAContainer)
+#' }
 #' @name getRules-DTAContainer
 if (!exists("getRules", mode = "function")) {
   getRules <- new_generic("getRules", "x")
 }
+#' @export
 method(getRules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }

@@ -7,7 +7,7 @@ test_that("DTAColumnSpec constructor works", {
     nullable = FALSE,
     description = "Study identifier"
   )
-  expect_s3_class(spec, "DTAColumnSpec")
+  expect_s3_class(spec, "DTAtools::DTAColumnSpec")
   expect_equal(spec@id, "STUDYID")
   expect_false(spec@nullable)
 })

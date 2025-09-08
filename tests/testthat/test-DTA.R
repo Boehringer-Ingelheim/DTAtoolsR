@@ -18,12 +18,12 @@ test_that("DTA object is constructed correctly", {
   dta_obj <- DTA(container = list(main = container_obj), author = "Test Author")
 
   # Check class
-  expect_equal(class(dta_obj), c("DTA", "S7_object"))
+  expect_equal(class(dta_obj), c("DTAtools::DTA", "S7_object"))
 
   # Check metadata
   meta <- getMetadata(dta_obj)
 
-  expect_equal(class(meta), c("DTAMetaData", "S7_object"))
+  expect_equal(class(meta), c("DTAtools::DTAMetaData", "S7_object"))
 
   expect_equal(meta@author, "Test Author")
 
@@ -34,7 +34,7 @@ test_that("DTA object is constructed correctly", {
 
   # Retrieve by name
   main_container <- getContainer(dta_obj, "main")
-  expect_s3_class(main_container, "DTAContainer")
+  expect_s3_class(main_container, "DTAtools::DTAContainer")
 
   # Retrieve by vector
   expect_equal(getContainer(dta_obj, c("main")), all_containers[["main"]])

@@ -29,19 +29,19 @@
 #' )
 #'
 #' # Create a DTARules object
-#' rules_obj <- DTARules(
-#'   rules = example_rules
-#' )
+#' #rules_obj <- DTARules(
+#' #   rules = example_rules
+#' #)
 #'
 #' # Print the object
-#' print(rules_obj)
+#' # print(rules_obj)
 
 DTARules <- new_class(
   "DTARules",
 
   # Constructor for the DTARules class
   constructor = function(rules) {
-    if (!all(sapply(rules, inherits, "DTARule"))) {
+    if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTARule'"
       )

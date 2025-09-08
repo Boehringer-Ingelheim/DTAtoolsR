@@ -28,11 +28,15 @@ Imports:
     flextable
 Depends:
     R (>= 3.5.0),
-    S7
+    S7 (>= 0.2.0)
 Suggests: 
     knitr,
     rmarkdown,
     testthat (>= 3.0.0),
+<<<<<<< HEAD
     qpdf
+=======
+    yaml
+>>>>>>> f878237ed9fd646bc58a929fd9f17739761d5b68
 Config/testthat/edition: 3
 VignetteBuilder: knitr

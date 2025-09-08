@@ -20,7 +20,7 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
     columns = list(STUDYID = col1, VISIT = col2)
   )
 
-  expect_s3_class(collection, "DTAColumnSpecCollection")
+  expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_equal(getColumnIds(collection), c("STUDYID", "VISIT"))
   expect_equal(getColumn(collection, "VISIT")@label, "Visit")
 })
@@ -63,12 +63,12 @@ test_that("DTAColumnSpecCollectionFromList constructs valid object", {
   )
 
   # Assertions
-  expect_s3_class(collection, "DTAColumnSpecCollection")
+  expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_named(collection@columns, c("STUDYID", "VISIT"))
   expect_equal(collection@columns$STUDYID@id, "STUDYID")
   expect_equal(collection@columns$VISIT@values, list("V01", "EOT"))
-  expect_equal(class(collection@columns[[1]]), c("DTAColumnSpec", "S7_object"))
-  expect_equal(class(collection@rules[[1]]), c("DTARule", "S7_object"))
+  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
+  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
 
   # check getMetadata method
   expect_equal(getMetadata(collection), list())

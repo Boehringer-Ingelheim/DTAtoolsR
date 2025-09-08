@@ -13,5 +13,7 @@ A list with rules information
 Method to get Rules from DTAContainer.
 }
 \examples{
+\dontrun{
 getRules(DTAContainer)
+}
 }

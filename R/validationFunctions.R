@@ -7,6 +7,7 @@
 #' @return Logical. TRUE if all elements are within the specified format length, FALSE otherwise.
 #' @examples
 #' checkFormat(c("abc", "defg"), 4)
+#' @export
 checkFormat <- function(value, var_format) {
   value[is.na(value)] <- ""
   return(all(nchar(value) <= var_format))
@@ -21,6 +22,7 @@ checkFormat <- function(value, var_format) {
 #' @return Logical. TRUE if the vector matches the specified type, FALSE otherwise.
 #' @examples
 #' checkType(c(1, 2, 3), "numeric")
+#' @export
 checkType <- function(vector, var_type) {
   if (all(is.na(vector))) {
     return(TRUE)
@@ -38,6 +40,7 @@ checkType <- function(vector, var_type) {
 #' @return Logical. TRUE if the vector meets the nullable condition, FALSE otherwise.
 #' @examples
 #' checkNullable(c(1, 2, NA), FALSE)
+#' @export
 checkNullable <- function(vector, nullable) {
   if (!nullable) {
     return(all(!is.na(vector) & vector != ""))
@@ -57,6 +60,7 @@ checkNullable <- function(vector, nullable) {
 #' \dontrun{
 #' changeNAs(c(NA, "b", "c"), "character")
 #' }
+#' @export
 changeNAs <- function(vector, var_type) {
   tmp <- vector
   if (var_type == "character") {
@@ -78,6 +82,7 @@ changeNAs <- function(vector, var_type) {
 #' @return The vector converted to the specified type.
 #' @examples
 #' changeType(c("1", "2", "3"), "numeric")
+#' @export
 changeType <- function(vector, var_type) {
   if (var_type == "numeric") {
     return(as.numeric(vector))
@@ -95,9 +100,10 @@ changeType <- function(vector, var_type) {
 #' @description Validates a data.frame against a JSON Schema using jsonvalidate. The table is split into smaller chunks for validation to avoid argument limits.
 #' @importFrom jsonlite toJSON
 #' @importFrom jsonvalidate json_schema
-#' @importFrom dplyr select mutate group_by summarise across n distinct where
+#' @importFrom dplyr select mutate group_by summarise across n distinct filter any_of everything where
 #' @importFrom tidyr separate_wider_delim
 #' @importFrom cli cli_alert_danger cli_alert_success cli_h3 cli_abort cli_alert_info
+#' @importFrom utils txtProgressBar setTxtProgressBar
 #' @param table A data.frame to validate.
 #' @param DTAColumnSpecCollection A DTAColumnSpecCollection object.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.

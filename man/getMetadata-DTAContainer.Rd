@@ -13,5 +13,7 @@ A list with metadata information
 Method to get Metadata from DTAContainer.
 }
 \examples{
+\dontrun{
 getMetadata(DTAContainer)
+}
 }

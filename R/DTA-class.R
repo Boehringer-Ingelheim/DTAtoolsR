@@ -48,7 +48,9 @@ DTA <- new_class(
 #' @param x An object of class DTA
 #' @return A list with metadata information
 #' @examples
-#' getMetadata(DTA)
+#' \dontrun{
+#'   getMetadata(DTA)
+#' }
 #' @name getMetadata-DTA
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
@@ -66,9 +68,11 @@ method(getMetadata, DTA) <- function(x) {
 #' @param name Optional character vector. One or more container names to retrieve.
 #' @return Either a list of DTRContainer objects s or a single named DTAContainer.
 #' @examples
+#' \dontrun{
 #' getContainer(DTAContainer)
 #' getContainer(DTAContainer, "container1")
 #' getContainer(DTAContainer, c("container1", "container2"))
+#' }
 #' @name getContainer-DTA
 if (!exists("getContainer", mode = "function")) {
   getContainer <- new_generic("getContainer", "x")

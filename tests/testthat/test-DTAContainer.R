@@ -12,7 +12,7 @@ test_that("DTAContainer object is created and tables are accessible", {
 
   data_obj <- DTAContainer(specs = collection, data = list(test = df))
 
-  expect_s3_class(data_obj, "DTAContainer")
+  expect_s3_class(data_obj, "DTAtools::DTAContainer")
   expect_equal(getData(data_obj), df)
   expect_equal(getData(data_obj, 1), df)
   expect_equal(getData(data_obj, "test"), df)

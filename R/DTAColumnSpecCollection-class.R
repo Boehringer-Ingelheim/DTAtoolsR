@@ -3,28 +3,29 @@
 #' This class represents a collection of DTAColumnSpec objects with optional metadata.
 #' @import S7
 #' @importFrom cli cli_abort
-#' @export
 #'
 #' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
 #' @param metadata A list of metadata information.
 #' @param rules A list of DTARule object.
 #' @return An object of class DTAColumnSpecCollection.
+#' @usage DTAColumnSpecCollection(columns, metadata = list(), rules = list())
 #' @examples
 #' col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
 #' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
 #' collection <- DTAColumnSpecCollection(columns = list(STUDIYID = col1, VISIT = col2))
+#' @export
 DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
   constructor = function(columns, metadata = list(), rules = list()) {
     # Ensure columns is a list of DTAColumnSpec objects
-    if (!all(sapply(columns, inherits, "DTAColumnSpec"))) {
+    if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
       )
     }
 
     if (length(rules) > 0) {
-      if (!all(sapply(rules, inherits, "DTARule"))) {
+      if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
         cli::cli_abort(
           "All elements in 'rules' must be of class 'DTARule'"
         )
@@ -60,8 +61,11 @@ DTAColumnSpecCollection <- new_class(
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param ... void
 #' @return A character vector of column names.
+#' @usage getColumnIds(collection)
 #' @examples
+#' \dontrun{
 #' names <- getColumnIds(collection)
+#' }
 #' @name getColumnIds-DTAColumnSpecCollection
 #' @export
 getColumnIds <- new_generic("getColumnIds", "x")
@@ -75,8 +79,11 @@ method(getColumnIds, DTAColumnSpecCollection) <- function(x) {
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
+#' @usage getColumn(collection, "STUDYID")
 #' @examples
-#' column_format <- getColumn(collection, "STUDYID")
+#' \dontrun{
+#'  column_format <- getColumn(collection, "STUDYID")
+#' }
 #' @name getColumn-DTAColumnSpecCollection
 if (!exists("getColumn", mode = "function")) {
   getColumn <- new_generic("getColumn", "x")
@@ -90,8 +97,11 @@ method(getColumn, DTAColumnSpecCollection) <- function(x, id) {
 #' Method to get Metadata from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with metadata information
+#' @usage getMetadata(collection)
 #' @examples
-#' getMetadata(collection)
+#' \dontrun{
+#'  getMetadata(collection)
+#' }
 #' @name getMetadata-DTAColumnSpecCollection
 if (!exists("getMetadata", mode = "function")) {
   getMetadata <- new_generic("getMetadata", "x")
@@ -105,8 +115,11 @@ method(getMetadata, DTAColumnSpecCollection) <- function(x) {
 #' Method to get Rules from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with rules defined
+#' @usage getRules(collection)
 #' @examples
-#' getRules(collection)
+#' \dontrun{
+#'  getRules(collection)
+#' }
 #' @name getRules-DTAColumnSpecCollection
 if (!exists("getRules", mode = "function")) {
   getRules <- new_generic("getRules", "x")
@@ -123,6 +136,7 @@ method(getRules, DTAColumnSpecCollection) <- function(x) {
 #'
 #' @param file Character. Path to the YAML file containing specifications.
 #' @return An object of class DTAColumnSpecCollection.
+#' @usage importDTAColumnSpecCollectionFromYaml(yaml_file)
 #' @examples
 #' \dontrun{
 #' # Sample YAML file content
@@ -209,6 +223,7 @@ importDTAColumnSpecCollectionFromYaml <- function(file) {
 #' @param rules Optional list of schema rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
+#' @usage DTAColumnSpecCollectionFromList(columns)
 #' @export
 #'
 #' @examples
@@ -286,6 +301,11 @@ DTAColumnSpecCollectionFromList <- function(
 #' @param yaml_file Character. Path to the YAML file.
 #' @param json_file Character. Path to the output JSON file.
 #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
+#' @usage convertYamlToJson(yaml_file, json_file)
+#' @examples
+#' \dontrun{
+#'   convertYamlToJson(yaml_file, json_file)
+#' }
 #' @return NULL. Writes JSON to file.
 convertYamlToJson <- function(yaml_file, json_file, pretty = TRUE) {
   yaml_content <- yaml::read_yaml(yaml_file)
@@ -303,6 +323,12 @@ convertYamlToJson <- function(yaml_file, json_file, pretty = TRUE) {
 #' @importFrom jsonlite fromJSON
 #' @export
 #' @param file Character. Path to the JSON file containing specifications.
+#' @usage importDTAColumnSpecCollectionFromJson(file)
+#' @examples
+#' \dontrun{
+#'   importDTAColumnSpecCollectionFromJson(file)
+#' }
+#'
 #' @return A DTAColumnSpecCollection object.
 importDTAColumnSpecCollectionFromJson <- function(file) {
   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
@@ -333,6 +359,11 @@ importDTAColumnSpecCollectionFromJson <- function(file) {
 #' @importFrom purrr map set_names
 #' @importFrom dplyr mutate
 #' @export
+#' @usage importDTAColumnSpecCollectionFromDTA(file)
+#' @examples
+#' \dontrun{
+#'   importDTAColumnSpecCollectionFromDTA(file)
+#' }
 #' @param file Character. Path to the Word document.
 #' @param table_position Integer. Index of the table to extract.
 #' @param colnames Vector. Vector containing column names of the table. Essential column names are: id Variable Name), label (Variable Label), type (Type), nullable (Nullable), description (Description)
@@ -435,6 +466,7 @@ importDTAColumnSpecCollectionFromDTA <- function(
 #' @param DTAColumnSpecCollection An object of class DTAColumnSpecCollection.
 #' @param file Character. Path to the YAML file to write the specifications to.
 #' @return NULL. The function writes the DTAColumnSpecCollection to a YAML file.
+#' @usage writeDTAColumnSpecCollectionToYaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object

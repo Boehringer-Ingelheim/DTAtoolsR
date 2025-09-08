@@ -13,5 +13,7 @@ A list with metadata information
 Method to get Metadata from DTA.
 }
 \examples{
-getMetadata(DTA)
+\dontrun{
+  getMetadata(DTA)
+}
 }
