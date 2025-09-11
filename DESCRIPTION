@@ -1,9 +1,9 @@
 Package: DTAtools
-Title: Tools for Handling Data From Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
+Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
 Version: 0.8.1
 Authors@R: c(
     person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com", 
-        role = c("aut", "ctb"), comment = c(ORCID = "0000-0001-7697-7000"))
+        role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
     person("Daniel", "Schreyer", 
         email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
 Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
@@ -39,7 +39,6 @@ Depends:
 Suggests: 
     knitr,
     rmarkdown,
-    qpdf,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 VignetteBuilder: knitr

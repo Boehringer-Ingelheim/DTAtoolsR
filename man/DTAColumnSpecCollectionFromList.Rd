@@ -4,7 +4,7 @@
 \alias{DTAColumnSpecCollectionFromList}
 \title{Create DTAColumnSpecCollection from Components}
 \usage{
-DTAColumnSpecCollectionFromList(columns)
+DTAColumnSpecCollectionFromList(columns, metadata = list(), rules = list())
 }
 \arguments{
 \item{columns}{A list of column specification lists. Each must contain at least an \code{id}.}

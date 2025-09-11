@@ -3,9 +3,6 @@
 \name{getColumn-DTAColumnSpecCollection}
 \alias{getColumn-DTAColumnSpecCollection}
 \title{Get Column by ID Method}
-\usage{
-getColumn(collection, "STUDYID")
-}
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
 

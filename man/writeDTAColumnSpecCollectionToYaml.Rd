@@ -4,7 +4,7 @@
 \alias{writeDTAColumnSpecCollectionToYaml}
 \title{Write DTAColumnSpecCollection to YAML File}
 \usage{
-writeDTAColumnSpecCollectionToYaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
+writeDTAColumnSpecCollectionToYaml(DTAColumnSpecCollection, file)
 }
 \arguments{
 \item{DTAColumnSpecCollection}{An object of class DTAColumnSpecCollection.}

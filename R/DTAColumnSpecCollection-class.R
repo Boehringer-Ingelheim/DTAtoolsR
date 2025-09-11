@@ -8,7 +8,6 @@
 #' @param metadata A list of metadata information.
 #' @param rules A list of DTARule object.
 #' @return An object of class DTAColumnSpecCollection.
-#' @usage DTAColumnSpecCollection(columns, metadata = list(), rules = list())
 #' @examples
 #' col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
 #' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
@@ -61,7 +60,6 @@ DTAColumnSpecCollection <- new_class(
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param ... void
 #' @return A character vector of column names.
-#' @usage getColumnIds(collection)
 #' @examples
 #' \dontrun{
 #' names <- getColumnIds(collection)
@@ -79,7 +77,6 @@ method(getColumnIds, DTAColumnSpecCollection) <- function(x) {
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
-#' @usage getColumn(collection, "STUDYID")
 #' @examples
 #' \dontrun{
 #'  column_format <- getColumn(collection, "STUDYID")
@@ -97,7 +94,6 @@ method(getColumn, DTAColumnSpecCollection) <- function(x, id) {
 #' Method to get Metadata from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with metadata information
-#' @usage getMetadata(collection)
 #' @examples
 #' \dontrun{
 #'  getMetadata(collection)
@@ -115,7 +111,6 @@ method(getMetadata, DTAColumnSpecCollection) <- function(x) {
 #' Method to get Rules from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
 #' @return A list with rules defined
-#' @usage getRules(collection)
 #' @examples
 #' \dontrun{
 #'  getRules(collection)
@@ -136,7 +131,6 @@ method(getRules, DTAColumnSpecCollection) <- function(x) {
 #'
 #' @param file Character. Path to the YAML file containing specifications.
 #' @return An object of class DTAColumnSpecCollection.
-#' @usage importDTAColumnSpecCollectionFromYaml(yaml_file)
 #' @examples
 #' \dontrun{
 #' # Sample YAML file content
@@ -223,7 +217,6 @@ importDTAColumnSpecCollectionFromYaml <- function(file) {
 #' @param rules Optional list of schema rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
-#' @usage DTAColumnSpecCollectionFromList(columns)
 #' @export
 #'
 #' @examples
@@ -305,7 +298,6 @@ DTAColumnSpecCollectionFromList <- function(
 #' @param yaml_file Character. Path to the YAML file.
 #' @param json_file Character. Path to the output JSON file.
 #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
-#' @usage convertYamlToJson(yaml_file, json_file)
 #' @examples
 #' \dontrun{
 #'   convertYamlToJson(yaml_file, json_file)
@@ -327,7 +319,6 @@ convertYamlToJson <- function(yaml_file, json_file, pretty = TRUE) {
 #' @importFrom jsonlite fromJSON
 #' @export
 #' @param file Character. Path to the JSON file containing specifications.
-#' @usage importDTAColumnSpecCollectionFromJson(file)
 #' @examples
 #' \dontrun{
 #'   importDTAColumnSpecCollectionFromJson(file)
@@ -363,7 +354,6 @@ importDTAColumnSpecCollectionFromJson <- function(file) {
 #' @importFrom purrr map set_names
 #' @importFrom dplyr mutate
 #' @export
-#' @usage importDTAColumnSpecCollectionFromDTA(file)
 #' @examples
 #' \dontrun{
 #'   importDTAColumnSpecCollectionFromDTA(file)
@@ -470,7 +460,6 @@ importDTAColumnSpecCollectionFromDTA <- function(
 #' @param DTAColumnSpecCollection An object of class DTAColumnSpecCollection.
 #' @param file Character. Path to the YAML file to write the specifications to.
 #' @return NULL. The function writes the DTAColumnSpecCollection to a YAML file.
-#' @usage writeDTAColumnSpecCollectionToYaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object

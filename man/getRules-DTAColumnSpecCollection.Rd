@@ -3,9 +3,6 @@
 \name{getRules-DTAColumnSpecCollection}
 \alias{getRules-DTAColumnSpecCollection}
 \title{Get Rules}
-\usage{
-getRules(collection)
-}
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
 }

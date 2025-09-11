@@ -4,7 +4,7 @@
 \alias{convertYamlToJson}
 \title{Convert YAML Spec File to JSON}
 \usage{
-convertYamlToJson(yaml_file, json_file)
+convertYamlToJson(yaml_file, json_file, pretty = TRUE)
 }
 \arguments{
 \item{yaml_file}{Character. Path to the YAML file.}

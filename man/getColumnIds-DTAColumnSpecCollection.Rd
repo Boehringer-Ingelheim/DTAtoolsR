@@ -5,7 +5,7 @@
 \alias{getColumnIds}
 \title{Get Names Method}
 \usage{
-getColumnIds(collection)
+getColumnIds(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}

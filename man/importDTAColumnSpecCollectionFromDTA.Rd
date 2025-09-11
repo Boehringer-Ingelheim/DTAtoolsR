@@ -4,7 +4,12 @@
 \alias{importDTAColumnSpecCollectionFromDTA}
 \title{Create DTAColumnSpecCollection from DTA Word Document}
 \usage{
-importDTAColumnSpecCollectionFromDTA(file)
+importDTAColumnSpecCollectionFromDTA(
+  file,
+  table_position = 1,
+  colnames = c("id", "label", "type", "length", "format", "nullable", "description"),
+  value_sep = ";"
+)
 }
 \arguments{
 \item{file}{Character. Path to the Word document.}
