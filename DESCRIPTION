@@ -1,11 +1,12 @@
 Package: DTAtools
-Title: Tools for handling data from data transfer agreements (DTAs) / data transfer specifications (DTS)
+Title: Tools for Handling Data From Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
 Version: 0.8.1
-Authors@R: 
+Authors@R: c(
     person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com", 
-        role = c("aut", "cre", "maintainer"), comment = c(ORCID = "0000-0001-7697-7000"))
+        role = c("aut", "ctb"), comment = c(ORCID = "0000-0001-7697-7000"))
     person("Daniel", "Schreyer", 
-        email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "cre"))
+        email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
+Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
 Description: Provides a comprehensive set of tools for importing, validating,
     transforming, and exporting data governed by data transfer agreements (DTAs)
     or data transfer specifications (DTS). The package supports workflows for
@@ -42,3 +43,4 @@ Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
