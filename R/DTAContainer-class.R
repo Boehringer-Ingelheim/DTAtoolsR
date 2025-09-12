@@ -4,6 +4,7 @@
 #' @importFrom cli cli_h1
 #'
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
+#' @param fileinfo a list of DTAFileInfo objects specifying input file information.
 #' @param data List. A list of tables to be validated and included in the DTAContainer object.
 #' @return An object of class DTAContainer. If validation fails, returns a list containing summarised and full error data frames.
 #'
@@ -25,7 +26,8 @@ DTAContainer <- new_class(
   "DTAContainer",
   constructor = function(
     specs,
-    data
+    data,
+    fileinfo = list()
   ) {
     names <- names(data)
     for (name in names(data)) {
@@ -41,12 +43,14 @@ DTAContainer <- new_class(
     new_object(
       S7_object(),
       specs = specs,
-      data = data
+      data = data,
+      fileinfo = fileinfo
     )
   },
   properties = list(
-    specs = class_any,
-    data = class_list
+    specs = class_any, # list of DTAColumnSpecCollection
+    data = class_list,
+    fileinfo = class_any # list of DTAFileInfo
   )
 )
 
@@ -239,7 +243,7 @@ writeTableToFile <- function(
     if (arrange_by == "all") {
       cli::cli_alert_info("Arrange table by all columns.")
       table_data <- table_data %>%
-        dplyr::arrange(dplyr::across(everything()), desc = arrange_desc)
+        dplyr::arrange(dplyr::across(dplyr::everything()), desc = arrange_desc)
     } else {
       cli::cli_alert_info("Arrange table by {arrange_by}.")
       table_data <- table_data %>%
@@ -338,3 +342,29 @@ if (!exists("getRules", mode = "function")) {
 method(getRules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }
+
+
+#' @title get max number of files
+#' @description
+#' Returns the number of files specified in the DTAFileInfo object.
+#' @param x An object of class DTAContainer
+#' @return number of files
+#' @examples
+#' \dontrun{
+#' column_format <- numberOfFiles(dtafileinfo)
+#' }
+# Define the generic only if it doesn't already exist
+#' @name getMaxNumberOfFiles-DTAContainer
+if (!exists("getMaxNumberOfFiles", mode = "function")) {
+    getMaxNumberOfFiles <- new_generic("getMaxNumberOfFiles", "x")
+}
+#' @export
+method(getMaxNumberOfFiles, DTAContainer) <- function(x) {
+    n_files = sapply(x@fileinfo, function(y) y@number_of_files)
+    if(any(is.null(n_files))) {
+        return(NA)
+    } else {
+        return(max(n_files))
+    } 
+}
+

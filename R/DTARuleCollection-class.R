@@ -1,6 +1,6 @@
-#' @title DTARules Class
+#' @title DTARuleCollection Class
 #' @description
-#' The `DTARules` class represents a collection of rules for validating data tables.
+#' The `DTARuleCollection` class represents a collection of rules for validating data tables.
 #' It provides functionality to define, store, and validate rules using a structured schema.
 #' This class is designed to be used in data validation workflows, particularly for ensuring
 #' compliance with predefined rules.
@@ -10,7 +10,7 @@
 #' @export
 #'
 #' @param rules A list of DTARule objects.
-#' @return An object of class `DTARules`.
+#' @return An object of class `DTARuleCollection`.
 #'
 #' @examples
 #' # Define some example rules
@@ -28,18 +28,18 @@
 #'   )
 #' )
 #'
-#' # Create a DTARules object
-#' #rules_obj <- DTARules(
+#' # Create a DTARuleCollection object
+#' #rules_obj <- DTARuleCollection(
 #' #   rules = example_rules
 #' #)
 #'
 #' # Print the object
 #' # print(rules_obj)
 
-DTARules <- new_class(
-  "DTARules",
+DTARuleCollection <- new_class(
+  "DTARuleCollection",
 
-  # Constructor for the DTARules class
+  # Constructor for the DTARuleCollection class
   constructor = function(rules) {
     if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
       cli::cli_abort(
