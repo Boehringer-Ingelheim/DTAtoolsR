@@ -62,12 +62,12 @@ DTAColumnSpecCollection <- new_class(
 #' @return A character vector of column names.
 #' @examples
 #' \dontrun{
-#' names <- getColumnIds(collection)
+#' names <- get_column_ids(collection)
 #' }
-#' @name getColumnIds-DTAColumnSpecCollection
+#' @name get_column_ids-DTAColumnSpecCollection
 #' @export
-getColumnIds <- new_generic("getColumnIds", "x")
-method(getColumnIds, DTAColumnSpecCollection) <- function(x) {
+get_column_ids <- new_generic("get_column_ids", "x")
+method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
   return(names(x@columns))
 }
 
@@ -79,13 +79,13 @@ method(getColumnIds, DTAColumnSpecCollection) <- function(x) {
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' \dontrun{
-#'  column_format <- getColumn(collection, "STUDYID")
+#'  column_format <- get_column(collection, "STUDYID")
 #' }
-#' @name getColumn-DTAColumnSpecCollection
-if (!exists("getColumn", mode = "function")) {
-  getColumn <- new_generic("getColumn", "x")
+#' @name get_column-DTAColumnSpecCollection
+if (!exists("get_column", mode = "function")) {
+  get_column <- new_generic("get_column", "x")
 }
-method(getColumn, DTAColumnSpecCollection) <- function(x, id) {
+method(get_column, DTAColumnSpecCollection) <- function(x, id) {
   return(x@columns[[id]])
 }
 
@@ -96,13 +96,13 @@ method(getColumn, DTAColumnSpecCollection) <- function(x, id) {
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#'  getMetadata(collection)
+#'  get_metadata(collection)
 #' }
-#' @name getMetadata-DTAColumnSpecCollection
-if (!exists("getMetadata", mode = "function")) {
-  getMetadata <- new_generic("getMetadata", "x")
+#' @name get_metadata-DTAColumnSpecCollection
+if (!exists("get_metadata", mode = "function")) {
+  get_metadata <- new_generic("get_metadata", "x")
 }
-method(getMetadata, DTAColumnSpecCollection) <- function(x) {
+method(get_metadata, DTAColumnSpecCollection) <- function(x) {
   return(x@metadata)
 }
 
@@ -113,13 +113,13 @@ method(getMetadata, DTAColumnSpecCollection) <- function(x) {
 #' @return A list with rules defined
 #' @examples
 #' \dontrun{
-#'  getRules(collection)
+#'  get_rules(collection)
 #' }
-#' @name getRules-DTAColumnSpecCollection
-if (!exists("getRules", mode = "function")) {
-  getRules <- new_generic("getRules", "x")
+#' @name get_rules-DTAColumnSpecCollection
+if (!exists("get_rules", mode = "function")) {
+  get_rules <- new_generic("get_rules", "x")
 }
-method(getRules, DTAColumnSpecCollection) <- function(x) {
+method(get_rules, DTAColumnSpecCollection) <- function(x) {
   return(x@rules)
 }
 
@@ -156,9 +156,9 @@ method(getRules, DTAColumnSpecCollection) <- function(x) {
 #' writeLines(yaml_content, yaml_file)
 #'
 #' # Create the DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- importDTAColumnSpecCollectionFromYaml(yaml_file)
+#' DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
 #' }
-importDTAColumnSpecCollectionFromYaml <- function(file) {
+import_specs_from_yaml <- function(file) {
   yaml <- yaml::read_yaml(file)
   specs <- yaml$columns
   metadata <- ifelse(is.null(yaml$metadata), list(), yaml$metadata)
@@ -227,10 +227,10 @@ importDTAColumnSpecCollectionFromYaml <- function(file) {
 #'   DTAColumnSpec(id = "VISIT", label = "Visit", type = "Char", nullable = TRUE,
 #'        values = list("V01", "EOT"))
 #' )
-#' dta_spec <- DTAColumnSpecCollectionFromList(columns)
+#' dta_spec <- specs_from_list(columns)
 #' }
 
-DTAColumnSpecCollectionFromList <- function(
+specs_from_list <- function(
   columns,
   metadata = list(),
   rules = list()
@@ -300,10 +300,10 @@ DTAColumnSpecCollectionFromList <- function(
 #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
 #' @examples
 #' \dontrun{
-#'   convertYamlToJson(yaml_file, json_file)
+#'   convert_yaml_to_json(yaml_file, json_file)
 #' }
 #' @return NULL. Writes JSON to file.
-convertYamlToJson <- function(yaml_file, json_file, pretty = TRUE) {
+convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
   yaml_content <- yaml::read_yaml(yaml_file)
   jsonlite::write_json(
     yaml_content,
@@ -321,11 +321,11 @@ convertYamlToJson <- function(yaml_file, json_file, pretty = TRUE) {
 #' @param file Character. Path to the JSON file containing specifications.
 #' @examples
 #' \dontrun{
-#'   importDTAColumnSpecCollectionFromJson(file)
+#'   import_specs_from_json(file)
 #' }
 #'
 #' @return A DTAColumnSpecCollection object.
-importDTAColumnSpecCollectionFromJson <- function(file) {
+import_specs_from_json <- function(file) {
   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
   specs <- json$columns
   metadata <- if (is.null(json$metadata)) list() else json$metadata
@@ -356,14 +356,14 @@ importDTAColumnSpecCollectionFromJson <- function(file) {
 #' @export
 #' @examples
 #' \dontrun{
-#'   importDTAColumnSpecCollectionFromDTA(file)
+#'   import_specs_from_word(file)
 #' }
 #' @param file Character. Path to the Word document.
 #' @param table_position Integer. Index of the table to extract.
 #' @param colnames Vector. Vector containing column names of the table. Essential column names are: id Variable Name), label (Variable Label), type (Type), nullable (Nullable), description (Description)
 #' @param value_sep Character. Separator dividing the values. Default: ";"
 #' @return A DTAColumnSpecCollection object.
-importDTAColumnSpecCollectionFromDTA <- function(
+import_specs_from_word <- function(
   file,
   table_position = 1,
   colnames = c(
@@ -463,12 +463,12 @@ importDTAColumnSpecCollectionFromDTA <- function(
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- importDTAColumnSpecCollectionFromYaml("path/to/yaml/file.yaml")
+#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
 #'
 #' # Write the DTAColumnSpecCollection object to a YAML file
-#' writeDTAColumnSpecCollectionToYaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
+#' write_specs_to_yaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
 #' }
-writeDTAColumnSpecCollectionToYaml <- function(
+write_specs_to_yaml <- function(
   DTAColumnSpecCollection,
   file
 ) {
@@ -517,7 +517,7 @@ writeDTAColumnSpecCollectionToYaml <- function(
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- importDTAColumnSpecCollectionFromYaml("path/to/yaml/file.yaml")
+#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
 #'
 #' # Write the DTAColumnSpecCollection object to a JSON file
 #' writeDTAColumnSpecCollectionToJson(DTAColumnSpecCollection, "path/to/output/file.json")
@@ -639,7 +639,7 @@ specs_to_jsonschema <- function(specs) {
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- importDTAColumnSpecCollectionFromYaml("path/to/yaml/file.yaml")
+#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
 #'
 #' # Write the DTAColumnSpecCollection object to a YAML file
 #' DTAColumnSpecCollectionToList(DTAColumnSpecCollection)
@@ -672,7 +672,7 @@ DTAColumnSpecCollectionToList <- function(
     )
   })
 
-  metadata <- getMetadata(DTAColumnSpecCollection)
+  metadata <- get_metadata(DTAColumnSpecCollection)
 
   return(list(columns = specs, rules = rules, metadata = metadata))
 }

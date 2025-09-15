@@ -2,10 +2,10 @@
 #' @description Handles tables  based on column specifications. Every table will be validated using the column specifications.
 #' @import S7
 #' @importFrom cli cli_h1
-#'
+#' @importFrom arrow arrow_table
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param fileinfo a list of DTAFileInfo objects specifying input file information.
-#' @param data List. A list of tables to be validated and included in the DTAContainer object.
+#' @param data List. A list of arrow Table to be validated and included in the DTAContainer object.
 #' @return An object of class DTAContainer. If validation fails, returns a list containing summarised and full error data frames.
 #'
 #' @examples
@@ -34,7 +34,7 @@ DTAContainer <- new_class(
       data_entry <- data[[name]]
       data_entry[data_entry == ""] <- NA
       cli::cli_h1("Checking {name} data entry")
-      data_entry <- validateTable(
+      data_entry <- validate_table(
         specs,
         data_entry
       )
@@ -49,7 +49,7 @@ DTAContainer <- new_class(
   },
   properties = list(
     specs = class_any, # list of DTAColumnSpecCollection
-    data = class_list,
+    data = class_list,  # list of arrow tables
     fileinfo = class_any # list of DTAFileInfo
   )
 )
@@ -74,9 +74,9 @@ DTAContainer <- new_class(
 #' data <- list(table1 = table1, table2 = table2)
 #'
 #' # Create the DTAContainer object
-#' data_obj <- makeDTAContainer(specs = NULL, data)
+#' data_obj <- new_DTAContainer(specs = NULL, data)
 #' }
-makeDTAContainer <- function(specs, data) {
+new_DTAContainer <- function(specs, data) {
   # Create and return the DTAContainer object
   DTAContainer(specs, data)
 }
@@ -89,15 +89,15 @@ makeDTAContainer <- function(specs, data) {
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' \dontrun{
-#' column_format <- getColumn(dtadata, "STUDYID")
+#' column_format <- get_column(dtadata, "STUDYID")
 #' }
 # Define the generic only if it doesn't already exist
-#' @name getColumn-DTAContainer
-if (!exists("getColumn", mode = "function")) {
-  getColumn <- new_generic("getColumn", "x")
+#' @name get_column-DTAContainer
+if (!exists("get_column", mode = "function")) {
+  get_column <- new_generic("get_column", "x")
 }
 #' @export
-method(getColumn, DTAContainer) <- function(x, id) {
+method(get_column, DTAContainer) <- function(x, id) {
   return(x@specs@columns[[id]])
 }
 
@@ -110,13 +110,13 @@ method(getColumn, DTAContainer) <- function(x, id) {
 #' @return A DTAColumnSpecCollection object.
 #' @examples
 #' \dontrun{
-#'   getSpecs(container)
+#'   get_specs(container)
 #' }
-#' @name getSpecs-DTAContainer
-getSpecs <- new_generic("getSpecs", "x")
+#' @name get_specs-DTAContainer
+get_specs <- new_generic("get_specs", "x")
 
 #' @export
-method(getSpecs, DTAContainer) <- function(x) {
+method(get_specs, DTAContainer) <- function(x) {
   return(x@specs)
 }
 
@@ -128,16 +128,16 @@ method(getSpecs, DTAContainer) <- function(x) {
 #' @return A data.frame.
 #' @examples
 #' \dontrun{
-#' getData(container)           # returns first table
-#' getData(container, "lab")   # returns table named "lab"
+#' get_data(container)           # returns first table
+#' get_data(container, "lab")   # returns table named "lab"
 #' }
-#' @name getData-DTAContainer
-if (!exists("getData", mode = "function")) {
-  getData <- new_generic("getData", "x")
+#' @name get_data-DTAContainer
+if (!exists("get_data", mode = "function")) {
+  get_data <- new_generic("get_data", "x")
 }
 
 #' @export
-method(getData, DTAContainer) <- function(x, id = 1) {
+method(get_data, DTAContainer) <- function(x, id = 1) {
   if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
@@ -206,10 +206,10 @@ method(labels, DTAContainer) <- function(x) {
 #' @return NULL. The function writes the table to a file.
 #' @examples
 #' \dontrun{
-#' writeTableToFile(dtadata, table = "my_table", filename = "table.tsv.gz", 
+#' write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz", 
 #'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
-writeTableToFile <- function(
+write_table_to_file <- function(
   DTAContainer,
   table,
   filename,
@@ -291,7 +291,7 @@ writeTableToFile <- function(
 
   # Calculate md5sum
   if (get_md5sum) {
-    md5sum <- writeMetadata(
+    md5sum <- write_metadata(
       filename,
       table_data,
       write_to_file = write_md5sum_to_file
@@ -314,14 +314,14 @@ writeTableToFile <- function(
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#' getMetadata(DTAContainer)
+#' get_metadata(DTAContainer)
 #' }
-#' @name getMetadata-DTAContainer
-if (!exists("getMetadata", mode = "function")) {
-  getMetadata <- new_generic("getMetadata", "x")
+#' @name metadata-DTAContainer
+if (!exists("get_metadata", mode = "function")) {
+  get_metadata <- new_generic("get_metadata", "x")
 }
 #' @export
-method(getMetadata, DTAContainer) <- function(x) {
+method(get_metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
 
@@ -332,14 +332,14 @@ method(getMetadata, DTAContainer) <- function(x) {
 #' @return A list with rules information
 #' @examples
 #' \dontrun{
-#' getRules(DTAContainer)
+#' get_rules(DTAContainer)
 #' }
-#' @name getRules-DTAContainer
-if (!exists("getRules", mode = "function")) {
-  getRules <- new_generic("getRules", "x")
+#' @name get_rules-DTAContainer
+if (!exists("get_rules", mode = "function")) {
+  get_rules <- new_generic("get_rules", "x")
 }
 #' @export
-method(getRules, DTAContainer) <- function(x) {
+method(get_rules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }
 
@@ -351,15 +351,15 @@ method(getRules, DTAContainer) <- function(x) {
 #' @return number of files
 #' @examples
 #' \dontrun{
-#' column_format <- numberOfFiles(dtafileinfo)
+#' column_format <- number_of_files(dtafileinfo)
 #' }
 # Define the generic only if it doesn't already exist
-#' @name getMaxNumberOfFiles-DTAContainer
-if (!exists("getMaxNumberOfFiles", mode = "function")) {
-    getMaxNumberOfFiles <- new_generic("getMaxNumberOfFiles", "x")
+#' @name get_max_number_of_files-DTAContainer
+if (!exists("get_max_number_of_files", mode = "function")) {
+    get_max_number_of_files <- new_generic("get_max_number_of_files", "x")
 }
 #' @export
-method(getMaxNumberOfFiles, DTAContainer) <- function(x) {
+method(get_max_number_of_files, DTAContainer) <- function(x) {
     n_files = sapply(x@fileinfo, function(y) y@number_of_files)
     if(any(is.null(n_files))) {
         return(NA)

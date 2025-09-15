@@ -100,7 +100,7 @@ Load the specifications and data:
 
 ```{r eval=FALSE}
 # Load specifications from a YAML file
-specs <- importDTAColumnSpecCollectionFromYaml("specs.yaml")
+specs <- import_specs_from_yaml("specs.yaml")
 
 # Load data from a TSV file
 data <- data.table::fread("data.tsv")
@@ -139,10 +139,10 @@ First, you import the specifications from a YAML file.
 library(DTAtools)
 params_yaml <- system.file("extdata", "params_gf.yaml", package = "DTAtools")
 
-specs <- importDTAColumnSpecCollectionFromYaml(params_yaml)
+specs <- import_specs_from_yaml(params_yaml)
 ```
 
-> Note: Use the `tag` argument of `importDTAColumnSpecCollectionFromYaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
+> Note: Use the `tag` argument of `import_specs_from_yaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
 
 ### Load and validate data
 
@@ -174,19 +174,19 @@ data <- DTAContainer(
 TODO!
 
 ```{r, eval=FALSE}
-#applySchemaRules()
-#validateTable(column_collection, table)
+#apply_schema_rules()
+#validate_table(column_collection, table)
 
-#exportDTASpecTable(column_collection, overwrite = TRUE)
+#export_specs_table(column_collection, overwrite = TRUE)
 
-#imported_collection <- importDTAColumnSpecCollectionFromDTA("imported_collection.docx", colnames = c("id", "label", "type", "format", "nullable", "description"))
+#imported_collection <- import_specs_from_word("imported_collection.docx", colnames = c("id", "label", "type", "format", "nullable", "description"))
 
-# exportDTASpecTable(imported_collection, file = "imported_collection.docx")
-# exportDTASpecTable(imported_collection, file = "imported_collection_new.docx", overwrite = TRUE)
+# export_specs_table(imported_collection, file = "imported_collection.docx")
+# export_specs_table(imported_collection, file = "imported_collection_new.docx", overwrite = TRUE)
 
 # dtatools <- DTAContainer(DTAColumnSpecCollection = imported_collection, tables = list("DTA" = table))
 
-writeTableToFile(
+write_table_to_file(
   dtatools,
   "DTA",
   filename = "test.csv",
@@ -202,18 +202,18 @@ TODO!
 
 ```{r, eval=FALSE}
 
-writeDTAColumnSpecCollectionToYaml(column_collection, "test_params.yaml")
+write_specs_to_yaml(column_collection, "test_params.yaml")
 
-column_collection <- importDTAColumnSpecCollectionFromYaml("test_params.yaml")
+column_collection <- import_specs_from_yaml("test_params.yaml")
 
-writeTableToFile(dtatools, "DTA")
+write_table_to_file(dtatools, "DTA")
 ```
 
 ## Additional features
 
 ### Export Spec Table to Word
 
-The `exportDTASpecTable()` function generates a Word document containing a table of all specifications defined in the YAML file. The table can be directly imported into a DTA Word document.
+The `export_specs_table()` function generates a Word document containing a table of all specifications defined in the YAML file. The table can be directly imported into a DTA Word document.
 
 - **Inputs**:
   - `specs`: The specifications object loaded from a YAML file, which defines the column constraints and schema rules.
@@ -225,12 +225,12 @@ The `exportDTASpecTable()` function generates a Word document containing a table
 The following code exports the specifications to a Word document:
 
 ```{r, eval=FALSE}
-exportDTASpecTable(specs, "dta_spec_table.docx")
+export_specs_table(specs, "dta_spec_table.docx")
 ```
 
 ### Export Column Values Table
 
-The `exportColumnValueTable()` function generates a Word document containing a table of all possible values for specified columns based on the provided specifications. This is particularly useful for reviewing or sharing the expected values for specific columns in your dataset.
+The `export_column_value_table()` function generates a Word document containing a table of all possible values for specified columns based on the provided specifications. This is particularly useful for reviewing or sharing the expected values for specific columns in your dataset.
 
 - **Inputs**:
   - `specs`: The specifications object loaded from a YAML file, which defines the column constraints and expected values.
@@ -239,7 +239,7 @@ The `exportColumnValueTable()` function generates a Word document containing a t
   - A Word document (`column_value_table.docx`) containing a table of possible values for the specified column.
 
 ```{r, eval=FALSE}
-exportColumnValueTable(specs, "column_value_table.docx", id = "VISIT")
+export_column_value_table(specs, "column_value_table.docx", id = "VISIT")
 ```
 
 ## YAML Column Format {#yaml-column-format}
@@ -415,11 +415,11 @@ metadata:
 
 #### Accessing Metadata in R
 
-The `getMetadata()` method returns a list containing the metadata fields. For example:
+The `metadata()` method returns a list containing the metadata fields. For example:
 
 ```{r}
 # Access metadata
-metadata <- DTAtools:::getMetadata(specs)
+metadata <- DTAtools:::metadata(specs)
 
 # Print metadata
 print(metadata)
@@ -446,8 +446,8 @@ print(metadata)
 
 `DTAtools` provides a range of functions for validating data:
 
-- `validateTable()`: Validates an entire data frame against a specification collection using `jsonschema`.
-- `applySchemaRules` validates the data by applying the defined schema rules 
+- `validate_table()`: Validates an entire data frame against a specification collection using `jsonschema`.
+- `apply_schema_rules` validates the data by applying the defined schema rules 
 
 #### Rules Engine
 
@@ -468,11 +468,11 @@ The rules engine supports a variety of validation types to ensure data integrity
 
 - **Export Validated Data**:
 
-  - `writeTableToFile()`: Writes validated tables to disk with optional compression and metadata.
+  - `write_table_to_file()`: Writes validated tables to disk with optional compression and metadata.
 
 - **Export Documentation**:
-  - `exportDTASpecTable()`: Exports full specification documentation to a Word file.
-  - `exportColumnValueTable()`: Exports allowed values for a specific column to a Word file.
+  - `export_specs_table()`: Exports full specification documentation to a Word file.
+  - `export_column_value_table()`: Exports allowed values for a specific column to a Word file.
 
 ### Manually Adding Specifications
 

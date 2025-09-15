@@ -49,13 +49,13 @@ DTA <- new_class(
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#'   getMetadata(DTA)
+#'   get_metadata(DTA)
 #' }
-#' @name getMetadata-DTA
-if (!exists("getMetadata", mode = "function")) {
-  getMetadata <- new_generic("getMetadata", "x")
+#' @name metadata-DTA
+if (!exists("get_metadata", mode = "function")) {
+  get_metadata <- new_generic("get_metadata", "x")
 }
-method(getMetadata, DTA) <- function(x) {
+method(get_metadata, DTA) <- function(x) {
   return(x@metadata)
 }
 
@@ -69,17 +69,17 @@ method(getMetadata, DTA) <- function(x) {
 #' @return Either a list of DTRContainer objects s or a single named DTAContainer.
 #' @examples
 #' \dontrun{
-#' getContainer(DTAContainer)
-#' getContainer(DTAContainer, "container1")
-#' getContainer(DTAContainer, c("container1", "container2"))
+#' container(DTAContainer)
+#' container(DTAContainer, "container1")
+#' container(DTAContainer, c("container1", "container2"))
 #' }
-#' @name getContainer-DTA
-if (!exists("getContainer", mode = "function")) {
-  getContainer <- new_generic("getContainer", "x")
+#' @name container-DTA
+if (!exists("container", mode = "function")) {
+  container <- new_generic("container", "x")
 }
 
 #' @export
-method(getContainer, DTA) <- function(x, name = NULL) {
+method(container, DTA) <- function(x, name = NULL) {
   all_containers <- x@container
 
   if (is.null(name)) {

@@ -144,7 +144,7 @@ rule_check_condition <- function(rule, df) {
 #' @param df A data.frame to validate.
 #' @return List of rule validation results.
 #' @export
-applySchemaRules <- function(rules, df) {
+apply_schema_rules <- function(rules, df) {
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
@@ -192,8 +192,8 @@ applySchemaRules <- function(rules, df) {
 #' @param table A table that will be validated
 #' @return a list containing the results of the rules validation
 validateRules <- function(DTAColumnSpecCollection, table) {
-  rules <- getRules(DTAColumnSpecCollection)
-  results <- applySchemaRules(rules, table)
+  rules <- get_rules(DTAColumnSpecCollection)
+  results <- apply_schema_rules(rules, table)
 
   failed <- Filter(function(x) !x$valid, results)
 

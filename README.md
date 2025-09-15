@@ -41,7 +41,7 @@ Validate data stored in `data.tsv` with specifications stored in `spec.yaml`
 
 ```{r}
 # Load specs
-specs <- importDTAColumnSpecCollectionFromYaml("specs.yaml")
+specs <- import_specs_from_yaml("specs.yaml")
 
 # Load data
 data <- fread("data.tsv")
@@ -72,10 +72,10 @@ Specification contain definitions of:
 First, you import the specifications from a YAML file.
 
 ```{r}
-specs <- importDTAColumnSpecCollectionFromYaml("spec.yaml")
+specs <- import_specs_from_yaml("spec.yaml")
 ```
 
-> Note: Use the `tag` argument of `importDTAColumnSpecCollectionFromYaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
+> Note: Use the `tag` argument of `import_specs_from_yaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
 
 ### Load and validate data
 
@@ -95,7 +95,7 @@ TODO: DESCRIBE what happens next
 If you want to export the specifications stored in the YAML as a table to Word file you can use this function:
 
 ``` r
-exportDTASpecTable(specs, "dta_spec_table.docx")
+export_specs_table(specs, "dta_spec_table.docx")
 ```
 
 ### Export Column Values Table
@@ -103,7 +103,7 @@ exportDTASpecTable(specs, "dta_spec_table.docx")
 TODO: insert what it is exactly doing
 
 ``` r
-exportColumnValueTable(specs, "column_value_table.docx", id = "VISIT")
+export_column_value_table(specs, "column_value_table.docx", id = "VISIT")
 ```
 
 ## YAML Column Format {#yaml-column-format}
@@ -281,15 +281,15 @@ metadata:
 
 ### Validation Functions
 
--   `validateTable()`: Validates a data frame against a spec specs
+-   `validate_table()`: Validates a data frame against a spec specs
 -   `validateColumn()`: Validates a single column
 -   `checkType(), checkFormat(), checkNullable(), checkValues(), checkPattern()`: Low-level validators
 
 ### Export Functions
 
--   `writeTableToFile()`: Write validated tables to disk with optional compression and metadata
--   `exportDTASpecTable()`: Export full spec documentation to Word
--   `exportColumnValueTable()`: Export allowed values of a column to Word
+-   `write_table_to_file()`: Write validated tables to disk with optional compression and metadata
+-   `export_specs_table()`: Export full spec documentation to Word
+-   `export_column_value_table()`: Export allowed values of a column to Word
 
 #### Rules Engine
 
