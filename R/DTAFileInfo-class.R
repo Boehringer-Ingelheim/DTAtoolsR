@@ -80,10 +80,10 @@ DTAFileInfo <- new_class(
 #' }
 # Define the generic only if it doesn't already exist
 #' @name number_of_files-DTAFileInfo
-#' @export
 if (!exists("number_of_files", mode = "function")) {
   number_of_files <- new_generic("number_of_files", "x")
 }
+#' @export
 method(number_of_files, DTAFileInfo) <- function(x) {
   return(sum(x@number_of_files))
 }
@@ -102,10 +102,10 @@ method(number_of_files, DTAFileInfo) <- function(x) {
 #' matches_filename(dtafileinfo, "exact_file_name.tsv")
 #' matches_filename(dtafileinfo, "\\.tsv$")
 #' }
-#' @export
 if (!exists("matches_filename", mode = "function")) {
   matches_filename <- new_generic("matches_filename", "x")
 }
+#' @export
 method(matches_filename, DTAFileInfo) <- function(x, file) {
   if (x@pattern) {
     return(stringr::str_detect(file, x@filename))
@@ -124,10 +124,10 @@ method(matches_filename, DTAFileInfo) <- function(x, file) {
 #' @return An arrow table containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 #' @name read_file-DTAFileInfo
-#' @export
 if (!exists("read_file", mode = "function")) {
   read_file <- new_generic("read_file", "x")
 }
+#' @export
 method(read_file, DTAFileInfo) <- function(x, file) {
   stop("This method is not implemented. You need to 
   use an object of a class which is derived from this class.")

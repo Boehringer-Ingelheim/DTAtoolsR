@@ -19,7 +19,7 @@
 #' to \code{NULL}.
 #'
 #' @return An object of class \code{DTAFileInfoTSV}.
-#' @name read_file-DTAFileInfoTSV
+#' @name DTAFileInfoTSV-class
 #' @seealso \code{\link{DTAFileInfo}}
 #'
 #' @export
@@ -47,6 +47,9 @@ DTAFileInfoTSV <- S7::new_class(
   }
 )
 
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
 #' @title Read File for DTAFileInfoTSV Objects
 #' @description
 #' Reads a TSV file using the parameters specified in a
@@ -59,20 +62,24 @@ DTAFileInfoTSV <- S7::new_class(
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-#' @name read_file-DTAFileInfoTSV
 #' @seealso \code{\link{readr::read_tsv}}
+#' @name read_file-DTAFileInfoTSV
 #' @export
 method(read_file, DTAFileInfoTSV) <- function(x, file) {
   if (DTAtools::matches_filename(x, file)) {
     return(arrow::read_delim_arrow(
       file,
-      #col_types = x@col_types,
       quote = x@quote,
       skip = if (x@has_header) 0 else 1,
       col_names = x@has_header,
       as_data_frame = FALSE
     ))
   } else {
-    stop(simpleError("The provided file does not match the filename in the DTAFileInfoTSV object."))
+    stop(simpleError(
+      paste(
+        "The provided file does not match the filename in the",
+        "DTAFileInfoTSV object."
+      )
+    ))
   }
 }
