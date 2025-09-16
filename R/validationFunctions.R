@@ -81,9 +81,9 @@ changeNAs <- function(vector, var_type) {
 #' @param var_type Character. The desired type of the vector.
 #' @return The vector converted to the specified type.
 #' @examples
-#' changeType(c("1", "2", "3"), "numeric")
+#' change_type(c("1", "2", "3"), "numeric")
 #' @export
-changeType <- function(vector, var_type) {
+change_type <- function(vector, var_type) {
   if (var_type == "numeric") {
     return(as.numeric(vector))
   } else if (var_type == "character") {
@@ -108,7 +108,7 @@ changeType <- function(vector, var_type) {
 #' @param DTAColumnSpecCollection A DTAColumnSpecCollection object.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
 #' @export
-validateTable <- function(DTAColumnSpecCollection, table) {
+validate_table <- function(DTAColumnSpecCollection, table) {
   # Confirm JSON schema
   obj <- jsonvalidate::json_schema$new(DTAColumnSpecCollection@json_schema)
 
@@ -211,10 +211,10 @@ validateTable <- function(DTAColumnSpecCollection, table) {
     "Table format, length, pattern, and values are valid."
   )
 
-  rules <- getRules(DTAColumnSpecCollection)
+  rules <- get_rules(DTAColumnSpecCollection)
   if (length(rules) > 0) {
     cli::cli_h2("Checking schema rules")
-    results <- applySchemaRules(rules, table)
+    results <- apply_schema_rules(rules, table)
     failed <- Filter(function(x) !x$valid, results)
     if (length(failed) > 0) {
       messages <- vapply(failed, function(x) x$message, character(1))

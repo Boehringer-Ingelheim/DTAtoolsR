@@ -25,13 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- `writeDTAColumnSpecCollectionToYaml` exports also rules
+- `write_specs_to_yaml` exports also rules
 
 ## [0.8.0] - 2025-08-18
 
 ### Added
 
-- methods: `getRules`, `getMetadata`
+- methods: `get_rules`, `metadata`
 - better `cli` messages for improved reporing
 - `DTARule` class for object-oriented usage of defined rules
 - new tests, including tests with the test data sets
@@ -50,13 +50,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Deprecated
 
-- `validateTable` without using jsonschema
+- `validate_table` without using jsonschema
 
 ## [0.7.5] - 2025-07-07
 
 ### Added
 
-- `DTAColumnSpecCollectionFromList`: Simple import from lists. Can be used in combination with `params.yaml` files managed by dso
+- `specs_from_list`: Simple import from lists. Can be used in combination with `params.yaml` files managed by dso
 
 ### Updates
 
@@ -106,8 +106,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Updates
 
-- `importDTAColumnSpecCollectionFromDTA` has been updated to new value and pattern format, making it easier to read and extract
-- `exportDTASpecTable`, similarly to above. Values and pattern will now be printed in a new format
+- `import_specs_from_word` has been updated to new value and pattern format, making it easier to read and extract
+- `export_specs_table`, similarly to above. Values and pattern will now be printed in a new format
 
 ## [0.5.0] - 2025-06-13
 
@@ -149,16 +149,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `check_mutual_exclusive`
   - `check_unique`
   - `check_allowed_combinations`
-- `applySchemaRules()` to evaluate all rules with CLI feedback
+- `apply_schema_rules()` to evaluate all rules with CLI feedback
 
 #### Utilities
 
-- `checkFormat`, `checkType`, `checkNullable`, `checkValues`, `checkPattern`, `changeType`, `changeNAs`, `prepareTable`, `validateColumn`
+- `checkFormat`, `checkType`, `checkNullable`, `checkValues`, `checkPattern`, `change_type`, `changeNAs`, `prepareTable`, `validateColumn`
 - `validateSchemaRulesFormat()` to validate schema rule structure before use
 
 #### Output
 
-- `writeTableToFile()` to export validated tables with optional sorting, compression, and metadata
+- `write_table_to_file()` to export validated tables with optional sorting, compression, and metadata
 - MD5 checksum and dimension reporting
 
 #### Developer Support
@@ -190,7 +190,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Improved information printouts
 - improved naming conventions
-- added writeTableToFile function to write valid DTA table
+- added write_table_to_file function to write valid DTA table
 - added methods to extract tables, columns and columncollections
 
 ## [0.1.0]

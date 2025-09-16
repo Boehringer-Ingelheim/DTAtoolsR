@@ -14,10 +14,10 @@
 #' @export
 #' @examples
 #' \dontrun{
-#' column_collection <- importDTAColumnSpecCollectionFromYaml("spec.yaml")
-#' exportDTASpecTable(column_collection, "dta_spec_table.docx")
+#' column_collection <- import_specs_from_yaml("spec.yaml")
+#' export_specs_table(column_collection, "dta_spec_table.docx")
 #' }
-exportDTASpecTable <- function(
+export_specs_table <- function(
   DTAColumnSpecCollection,
   file = "dta_spec_table.docx",
   overwrite = FALSE,
@@ -169,9 +169,9 @@ exportDTASpecTable <- function(
 #' @export
 #' @examples
 #' \dontrun{
-#' exportColumnValueTable(DTAColumnSpecCollection, "column_value_table.docx")
+#' export_column_value_table(DTAColumnSpecCollection, "column_value_table.docx")
 #' }
-exportColumnValueTable <- function(
+export_column_value_table <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
   id
@@ -211,7 +211,7 @@ exportColumnValueTable <- function(
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom tools md5sum
 #' @export
-writeMetadata <- function(file, table, write_to_file) {
+write_metadata <- function(file, table, write_to_file) {
   if (!file.exists(file)) {
     cli::cli_abort("File does not exist: {file}")
   }

@@ -2,7 +2,7 @@ test_that("Examples are loaded and correctly formatted.", {
   validate_table <- function(data_filename, data_sep, params_filename) {
     table <- read.table(data_filename, sep = data_sep, header = TRUE)
 
-    column_collection <- importDTAColumnSpecCollectionFromYaml(
+    column_collection <- import_specs_from_yaml(
       params_filename
     )
 

@@ -116,3 +116,29 @@ DTAColumnSpec <- new_class(
     }
   }
 )
+
+
+#' @title Get Arrow Schema Type
+#' @description
+#' Returns the corresponding Arrow schema type for a given DTAColumnSpec
+#' object based on its `type` property.
+#' @param x A DTAColumnSpec object.
+#' @return A character string representing the Arrow schema type.
+#' @examples
+#' col <- DTAColumnSpec(id = "AGE", type = "Char")
+#' get_arrow_schema_type(col)
+get_arrow_schema_type <- function(x) {
+  if (!inherits(x, "DTAColumnSpec")) {
+    stop("Input must be a DTAColumnSpec object.")
+  }
+  type <- x@type
+  if (is.null(type)) {
+    stop(str_glue("Type is not set for {x$id}."))
+  }
+  switch(type,
+         "Char" = "utf8",
+         "Num" = "double",
+         "Int" = "int32",
+         "Bool" = "bool",
+         NA_character_)
+}

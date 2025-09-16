@@ -188,7 +188,7 @@ rule_check_condition <- function(rule, df) {
 #' @return (Invisibly) a list of rule validation results, each as a list with
 #'   elements `id`, `valid`, and `message`.
 #' @export
-applySchemaRules <- function(rules, df) {
+apply_schema_rules <- function(rules, df) {
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
@@ -239,8 +239,8 @@ applySchemaRules <- function(rules, df) {
 #' @return (Invisibly) the list of rule results from `applySchemaRules()`.
 #' @export
 validateRules <- function(DTAColumnSpecCollection, table) {
-  rules <- getRules(DTAColumnSpecCollection)
-  results <- applySchemaRules(rules, table)
+  rules <- get_rules(DTAColumnSpecCollection)
+  results <- apply_schema_rules(rules, table)
 
   failed <- Filter(function(x) isFALSE(x$valid), results)
   if (length(failed) > 0) {

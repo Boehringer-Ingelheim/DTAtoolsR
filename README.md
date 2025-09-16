@@ -43,7 +43,7 @@ Validate a table using specifications stored in a yaml file.
 ```{r}
 # Load specs
 specs_path <- system.file("extdata", "params_spec.yaml", package = "DTAtools")
-specs <- importDTAColumnSpecCollectionFromYaml(specs_path)
+specs <- import_specs_from_yaml(specs_path)
 
 # Load data
 data_path <- system.file("extdata", "data_spec.yaml", package = "DTAtools")
@@ -68,10 +68,10 @@ Specification contain definitions of:
 First, you import the specifications from a YAML file.
 
 ```{r}
-specs <- importDTAColumnSpecCollectionFromYaml("spec.yaml")
+specs <- import_specs_from_yaml("spec.yaml")
 ```
 
-> Note: Use the `tag` argument of `importDTAColumnSpecCollectionFromYaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
+> Note: Use the `tag` argument of `import_specs_from_yaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
 
 ### Load and validate data
 
@@ -105,16 +105,16 @@ writeTableToFile(
 
 If you want to export the specifications stored in the YAML as a table to Word file you can use this function:
 
-```r
-exportDTASpecTable(specs, "dta_spec_table.docx")
+``` r
+export_specs_table(specs, "dta_spec_table.docx")
 ```
 
 ### Export Column Values Table
 
 Exporting all defined potential values in a column to a word table.
 
-```r
-exportColumnValueTable(specs, "column_value_table.docx", id = "VISIT")
+``` r
+export_column_value_table(specs, "column_value_table.docx", id = "VISIT")
 ```
 
 ## YAML Column Format {#yaml-column-format}
@@ -184,6 +184,8 @@ Implemented operators are:
 - `range`: List of Two Numbers
 - `in`: List of Strings / Numbers
 - `not_in`: List of Strings / Numbers
+- `empty`: Boolean
+- `pattern`: String
 
 ```yaml
 - id: rule_equal_example
@@ -228,6 +230,42 @@ Implemented operators are:
         - 100
     WEIGHT:
       greater_equal: 5
+- id: check_gfreasnd
+  type: check_condition
+  condition:
+    GFREASND:
+      empty: true
+  then:
+    GFSTAT:
+      empty: true
+    GFORRES:
+      empty: false
+- id: check_gfreasnd2
+  type: check_condition
+  condition:
+    GFREASND:
+      empty: false
+  then:
+    GFSTAT:
+      empty: false
+    GFORRES:
+      empty: true
+- id: check_sequencing_facility
+  type: check_condition
+  condition:
+    GFREFID:
+      pattern: "^Internal_[0-9]*$"
+  then:
+    GFNAM:
+      equals: "Internal"
+- id: check_sequencing_facility2
+  type: check_condition
+  condition:
+    GFREFID:
+      pattern: "^External_[0-9]*$"
+  then:
+    GFNAM:
+      equals: "External"
 ```
 
 #### `check_range`
@@ -294,13 +332,13 @@ metadata:
 
 ### Validation Functions
 
-- `validateTable()`: Validates a data frame against specifications
+-   `validate_table()`: Validates a data frame against a spec specs
 
 ### Export Functions
 
-- `writeTableToFile()`: Write validated tables to disk with optional compression and metadata
-- `exportDTASpecTable()`: Export full spec documentation to Word
-- `exportColumnValueTable()`: Export allowed values of a column to Word
+-   `write_table_to_file()`: Write validated tables to disk with optional compression and metadata
+-   `export_specs_table()`: Export full spec documentation to Word
+-   `export_column_value_table()`: Export allowed values of a column to Word
 
 #### Rules Engine
 

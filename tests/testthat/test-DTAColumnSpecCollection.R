@@ -21,11 +21,11 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
   )
 
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
-  expect_equal(getColumnIds(collection), c("STUDYID", "VISIT"))
-  expect_equal(getColumn(collection, "VISIT")@label, "Visit")
+  expect_equal(get_column_ids(collection), c("STUDYID", "VISIT"))
+  expect_equal(get_column(collection, "VISIT")@label, "Visit")
 })
 
-test_that("DTAColumnSpecCollectionFromList constructs valid object", {
+test_that("specs_from_list constructs valid object", {
   # Sample input
   columns <- list(
     list(
@@ -57,7 +57,7 @@ test_that("DTAColumnSpecCollectionFromList constructs valid object", {
   rules <- list(rule1)
 
   # Run function
-  collection <- DTAColumnSpecCollectionFromList(
+  collection <- specs_from_list(
     columns = columns,
     rules = rules
   )
@@ -70,8 +70,8 @@ test_that("DTAColumnSpecCollectionFromList constructs valid object", {
   expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
   expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
 
-  # check getMetadata method
-  expect_equal(getMetadata(collection), list())
+  # check metadata method
+  expect_equal(metadata(collection), list())
 
   # Test DTAColumnSpecCollectionToList
 

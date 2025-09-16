@@ -21,24 +21,24 @@ test_that("DTA object is constructed correctly", {
   expect_equal(class(dta_obj), c("DTAtools::DTA", "S7_object"))
 
   # Check metadata
-  meta <- getMetadata(dta_obj)
+  meta <- get_metadata(dta_obj)
 
   expect_equal(class(meta), c("DTAtools::DTAMetaData", "S7_object"))
 
   expect_equal(meta@author, "Test Author")
 
   # Check container retrieval
-  all_containers <- getContainer(dta_obj)
+  all_containers <- container(dta_obj)
   expect_type(all_containers, "list")
   expect_named(all_containers, "main")
 
   # Retrieve by name
-  main_container <- getContainer(dta_obj, "main")
+  main_container <- container(dta_obj, "main")
   expect_s3_class(main_container, "DTAtools::DTAContainer")
 
   # Retrieve by vector
-  expect_equal(getContainer(dta_obj, c("main")), all_containers[["main"]])
+  expect_equal(container(dta_obj, c("main")), all_containers[["main"]])
 
   # Error on missing container
-  expect_error(getContainer(dta_obj, "missing"), "not found")
+  expect_error(container(dta_obj, "missing"), "not found")
 })

@@ -9,7 +9,7 @@ DTAContainer(specs, data, fileinfo = list())
 \arguments{
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
-\item{data}{List. A list of tables to be validated and included in the DTAContainer object.}
+\item{data}{List. A list of arrow Table to be validated and included in the DTAContainer object.}
 
 \item{fileinfo}{a list of DTAFileInfo objects specifying input file information.}
 }

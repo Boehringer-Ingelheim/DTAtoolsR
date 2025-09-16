@@ -26,7 +26,7 @@ This function writes a DTAColumnSpecCollection object to a JSON file.
 \examples{
 \dontrun{
 # Create a DTAColumnSpecCollection object
-DTAColumnSpecCollection <- importDTAColumnSpecCollectionFromYaml("path/to/yaml/file.yaml")
+DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
 
 # Write the DTAColumnSpecCollection object to a JSON file
 writeDTAColumnSpecCollectionToJson(DTAColumnSpecCollection, "path/to/output/file.json")
