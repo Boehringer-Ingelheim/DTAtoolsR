@@ -1,4 +1,3 @@
-
 #' @title DTAFileInfoTSV Class Constructor
 #'
 #' @description
@@ -40,6 +39,10 @@ DTAFileInfoTSV <- S7::new_class(
     self$has_header <- has_header
     self$quote <- quote
     self$col_types <- col_types
+    new_object(
+      S7_object(),
+      fileinfo = self
+    )
   }
 )
 
@@ -68,6 +71,8 @@ method(readFile, DTAFileInfoTSV) <- function(x, file) {
       col_names = x@has_header
     ))
   } else {
-    stop(simpleError("The provided file does not match the filename in the DTAFileInfoTSV object."))
+    stop(simpleError(
+      "The provided file does not match the filename in the DTAFileInfoTSV object."
+    ))
   }
 }

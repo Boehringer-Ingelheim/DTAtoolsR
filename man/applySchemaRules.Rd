@@ -7,12 +7,13 @@
 applySchemaRules(rules, df)
 }
 \arguments{
-\item{rules}{A list of rule definitions.}
+\item{rules}{A list of DTARule objects.}
 
 \item{df}{A data.frame to validate.}
 }
 \value{
-List of rule validation results.
+(Invisibly) a list of rule validation results, each as a list with
+elements \code{id}, \code{valid}, and \code{message}.
 }
 \description{
 Applies all schema rules to a data frame with CLI feedback.

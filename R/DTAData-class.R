@@ -4,17 +4,17 @@
 #'
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param data List. A list of tables to be validated and included in the DTAData object.
-#' @return An object of class DTAData. 
+#' @return An object of class DTAData.
 #
 #' @examples
 #'
 #' \dontrun{
 #' }
 #' @export
-DTAData <- new_class(
-  "DTAData",
-  constructor = function(
-  ) {
-  
-  }
-)
+# DTAData <- new_class(
+#   "DTAData",
+#   constructor = function(
+#   ) {
+#
+#   }
+# )

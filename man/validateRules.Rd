@@ -7,13 +7,14 @@
 validateRules(DTAColumnSpecCollection, table)
 }
 \arguments{
-\item{DTAColumnSpecCollection}{A DTAColumnSpecCollection object with rules defined.}
+\item{DTAColumnSpecCollection}{A \code{DTAColumnSpecCollection} with rules defined.}
 
-\item{table}{A table that will be validated}
+\item{table}{A data.frame to validate.}
 }
 \value{
-a list containing the results of the rules validation
+(Invisibly) the list of rule results from \code{applySchemaRules()}.
 }
 \description{
-Validates the structure of table using predefined rules.
+Validates a table using rules defined in a \code{DTAColumnSpecCollection}.
+Aborts with a CLI error if any rule fails.
 }

@@ -49,6 +49,10 @@ DTAFileInfo <- new_class(
     self$rownames <- row_names
     self$quote <- quote
     self$col_types <- col_types
+    new_object(
+      S7_object(),
+      fileinfo = self
+    )
   },
   properties = list(
     filename = class_any, # class_list or class_character
@@ -60,7 +64,6 @@ DTAFileInfo <- new_class(
     col_types = class_character
   )
 )
-
 
 
 #' @title get max number of files
@@ -82,6 +85,9 @@ method(numberOfFiles, DTAFileInfo) <- function(x) {
   return(sum(x@number_of_files))
 }
 
+if (!exists("matchesFilename", mode = "function")) {
+  matchesFilename <- new_generic("matchesFilename", "x")
+}
 #' Check if a filename matches a given pattern
 #'
 #' Determines whether the provided filename matches the specified pattern.
@@ -125,11 +131,13 @@ if (!exists("readFile", mode = "function")) {
 #' @export
 method(readFile, DTAFileInfo) <- function(x, file) {
   if (DTAtools::matchesFilename(x, file)) {
-    return(readr::read_delim(file,
-                             sep = x@sep,
-                             header = x@has_header,
-                             quote = x@quote,
-                             col_types = x@col_types))
+    return(readr::read_delim(
+      file,
+      sep = x@sep,
+      header = x@has_header,
+      quote = x@quote,
+      col_types = x@col_types
+    ))
   }
 
   return()
