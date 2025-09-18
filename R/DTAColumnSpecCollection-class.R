@@ -497,7 +497,7 @@ write_specs_to_yaml <- function(
     )
   })
 
-  metadata <- DTAColumnSpecCollection@metadata
+  metadata <- list(DTAColumnSpecCollection@metadata)
   yaml::write_yaml(
     list(metadata = metadata, columns = specs, rules = rules),
     file
@@ -644,7 +644,7 @@ specs_to_jsonschema <- function(specs) {
 #' # Write the DTAColumnSpecCollection object to a YAML file
 #' DTAColumnSpecCollectionToList(DTAColumnSpecCollection)
 #' }
-DTAColumnSpecCollectionToList <- function(
+specs_to_list <- function(
   DTAColumnSpecCollection
 ) {
   specs <- lapply(DTAColumnSpecCollection@columns, function(column) {

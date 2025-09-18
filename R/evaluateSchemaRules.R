@@ -13,7 +13,7 @@
 #' # rule_check_range(rule, df)
 #' @export
 rule_check_range <- function(rule, df) {
-  checkDTARule(rule)
+  check_rule_class(rule)
   col <- rule@column
   range <- rule@range
 
@@ -53,20 +53,20 @@ rule_check_range <- function(rule, df) {
 #' # rule_check_unique(rule, df)
 #' @export
 rule_check_unique <- function(rule, df) {
-  checkDTARule(rule)
-  col <- rule@column
+  check_rule_class(rule)
+  cols <- rule@column
 
-  # Use vector, not data.frame
-  duplicated_vals <- duplicated(df[[col]])
+  # Check for uniqueness across combined columns
+  duplicated_rows <- duplicated(df[, cols, drop = FALSE])
 
-  if (any(duplicated_vals, na.rm = TRUE)) {
+  if (any(duplicated_rows, na.rm = TRUE)) {
     list(
       id = rule@id,
       valid = FALSE,
       message = sprintf(
         "Rule '%s' violated: %d duplicate values found in column %s",
         rule@id,
-        sum(duplicated_vals, na.rm = TRUE),
+        sum(duplicated_rows, na.rm = TRUE),
         col
       )
     )
@@ -153,7 +153,7 @@ evaluate_conditions <- function(conditions, df) {
 #' # rule_check_condition(rule, iris)
 #' @export
 rule_check_condition <- function(rule, df) {
-  checkDTARule(rule)
+  check_rule_class(rule)
   if_conditions <- rule@condition
   then_conditions <- rule@then
 
@@ -238,7 +238,7 @@ apply_schema_rules <- function(rules, df) {
 #' @param table A data.frame to validate.
 #' @return (Invisibly) the list of rule results from `applySchemaRules()`.
 #' @export
-validateRules <- function(DTAColumnSpecCollection, table) {
+validate_rules <- function(DTAColumnSpecCollection, table) {
   rules <- get_rules(DTAColumnSpecCollection)
   results <- apply_schema_rules(rules, table)
 
@@ -257,8 +257,8 @@ validateRules <- function(DTAColumnSpecCollection, table) {
 }
 
 #' @keywords internal
-checkDTARule <- function(x) {
-  if (methods::is(x, "DTARule")) {
+check_rule_class <- function(x) {
+  if (methods::is(x, "DTAtools::DTARule")) {
     invisible(TRUE)
   } else {
     cli::cli_abort("Rule is not of class 'DTARule'")

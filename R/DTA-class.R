@@ -34,7 +34,7 @@ DTA <- new_class(
       S7_object(),
       container = container,
       metadata = DTAMetaData(...)
-    ) 
+    )
   },
   properties = list(
     container = class_list,

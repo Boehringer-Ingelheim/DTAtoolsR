@@ -68,69 +68,56 @@ DTAFileInfo <- new_class(
   )
 )
 
+#' @title Generic: number_of_files
+#' @description Generic function to get the number of files from an object.
+#' @param x An object.
+#' @return Depends on the method.
+#' @export
+number_of_files <- new_generic("number_of_files", "x")
 
-#' @title get max number of files
-#' @description
-#' Returns the number of files specified in the DTAFileInfo object.
-#' @param x An object of class DTAContainer
-#' @return number of files
+#' @title Get Number of Files
+#' @description Returns the number of files specified in the DTAFileInfo object.
+#' @param x An object of class DTAFileInfo.
+#' @return Integer: number of files.
 #' @examples
 #' \dontrun{
-#' column_format <- number_of_files(dtafileinfo)
+#' number_of_files(dtafileinfo)
 #' }
-# Define the generic only if it doesn't already exist
-#' @name number_of_files-DTAFileInfo
+#' @name number_of_files
+#' @method number_of_files DTAFileInfo
 #' @export
-if (!exists("number_of_files", mode = "function")) {
-  number_of_files <- new_generic("number_of_files", "x")
-}
 method(number_of_files, DTAFileInfo) <- function(x) {
-  return(sum(x@number_of_files))
+  sum(x@number_of_files)
 }
 
-if (!exists("matches_filename", mode = "function")) {
-  matches_filename <- new_generic("matches_filename", "x")
-}
-#' Check if a filename matches a given pattern
-#'
-#' Determines whether the provided filename matches the specified pattern.
-#'
+#' @title Check if Filename Matches Pattern
+#' @description Determines whether the provided filename matches the specified pattern.
+#' @param x A DTAFileInfo object
 #' @param file A character string representing the name of the file to check.
-#' @return A logical value indicating whether the filename matches the pattern.
+#' @return Logical: TRUE if match, FALSE otherwise
 #' @examples
 #' \dontrun{
 #' matches_filename(dtafileinfo, "exact_file_name.tsv")
 #' matches_filename(dtafileinfo, "\\.tsv$")
 #' }
+#' @name matches_filename
 #' @export
-if (!exists("matches_filename", mode = "function")) {
-  matches_filename <- new_generic("matches_filename", "x")
-}
+matches_filename <- new_generic("matches_filename", "x")
 method(matches_filename, DTAFileInfo) <- function(x, file) {
   if (x@pattern) {
-    return(stringr::str_detect(file, x@filename))
+    stringr::str_detect(file, x@filename)
   } else {
-    return(file %in% x@filename)
+    file %in% x@filename
   }
 }
 
 #' @title Read File for DTAFileInfo Objects
-#' @description
-#' This is a protype funnction for reading in files.
-#'
-#' @param x A \code{DTAFileInfo} object containing file reading parameters.
+#' @description Prototype function for reading files.
+#' @param x A DTAFileInfo object
 #' @param file A character string specifying the path to the file to be read.
-#'
-#' @return An arrow table containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#' @return NULL (not implemented)
 #' @name read_file-DTAFileInfo
-#' @export
-if (!exists("read_file", mode = "function")) {
-  read_file <- new_generic("read_file", "x")
-}
+read_file <- new_generic("read_file", "x")
 method(read_file, DTAFileInfo) <- function(x, file) {
-  stop(
-    "This method is not implemented. You need to 
-  use an object of a class which is derived from this class."
-  )
+  stop("This method is not implemented. Use a derived class.")
 }

@@ -49,18 +49,21 @@ DTAFileInfoTSV <- S7::new_class(
 #' @title Read File for DTAFileInfoTSV Objects
 #' @description
 #' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileInfoTSV} object. This method uses \code{readr::read_tsv}
+#' \code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
 #'
-#' @importFrom arrow read_delim_arrow
 #' @param x A \code{DTAFileInfoTSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'
 #' @return A tibble containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#' matches; otherwise, throws an error.
+#'
+#' @seealso \code{\link[arrow]{read_delim_arrow}}
+#' @importFrom arrow read_delim_arrow
 #' @name read_file-DTAFileInfoTSV
-#' @seealso \code{\link{readr::read_tsv}}
-#' @export
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
 method(read_file, DTAFileInfoTSV) <- function(x, file) {
   if (DTAtools::matches_filename(x, file)) {
     return(arrow::read_delim_arrow(
