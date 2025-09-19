@@ -1,9 +1,8 @@
-
-#' @title DTAFileInfoTSV Class Constructor
+#' @title DTAFileInfoDelim Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileInfoTSV}, which extends \code{DTAFileInfo}
-#' to represent metadata and configuration for TSV (Tab-Separated Values)
+#' Defines the S7 class \code{DTAFileInfoDelim}, which extends \code{DTAFileInfo}
+#' to represent metadata and configuration for Delim (Tab-Separated Values)
 #'  data files.
 #'
 #' @param filename Character vector of file names or regular expression patterns
@@ -18,19 +17,23 @@
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
+#' @param col_types Character string specifying the type of each column (e.g.,
+#'   \code{"cccidcl"}). Default is \code{NULL}.
 #'
-#' @return An object of class \code{DTAFileInfoTSV}.
-#' @name DTAFileInfoTSV-class
+#' @name DTAFileInfoDelim-class
+#' @return An object of class \code{DTAFileInfoDelim}.
+#'
 #' @seealso \code{\link{DTAFileInfo}}
 #'
 #' @export
-DTAFileInfoTSV <- S7::new_class(
-  "DTAFileInfoTSV",
-  parent = DTAFileInfoDelim,
+DTAFileInfoDelim <- S7::new_class(
+  "DTAFileInfo",
+  parent = DTAFileInfo,
   constructor = function(
     filename,
     pattern = FALSE,
     number_of_files = 1,
+    sep = "\t",
     has_header = TRUE,
     quote = '"'
   ) {
@@ -39,31 +42,35 @@ DTAFileInfoTSV <- S7::new_class(
       filename = filename,
       number_of_files = number_of_files,
       pattern = pattern,
+      sep = sep,
       has_header = has_header,
       quote = quote,
-      sep = "\t"
+      col_types = col_types
     )
-  }
+  },
+  properties = list(
+    sep = class_character,
+    has_header = class_logical,
+    quote = class_character
+  )
 )
 
 
-#' @title Read File for DTAFileInfoTSV Objects
+#' @title Read File for DTAFileInfoDelim Objects
+##' @name read_file_execution-DTAFileInfoDelim
 #' @description
-#' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileInfoTSV} object. This method uses \code{readr::read_tsv}
-#' for efficient TSV parsing.
-#'
+#' Reads a Delim file using the parameters specified in a
+#' \code{DTAFileInfoDelim} object. This method uses \code{readr::read_Delim}
+#' for efficient Delim parsing.
 #' @importFrom arrow read_delim_arrow
-#' @param x A \code{DTAFileInfoTSV} object containing file reading parameters.
+#' @param x A \code{DTAFileInfoDelim} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
-#'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-##' @seealso \code{\link{readr::read_tsv}}
-##' @name read_file_execution-DTAFileInfoTSV
-method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
-  return(arrow::read_delim_arrow(
-    path,
+method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
+  return(arrow::read_Delim_arrow(
+    file,
+    #col_types = x@col_types,
     quote = x@quote,
     skip = if (x@has_header) 0 else 1,
     #col_names = x@has_header,

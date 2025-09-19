@@ -7,30 +7,30 @@
 \usage{
 DTAFileInfoTSV(
   filename,
+  pattern = FALSE,
   number_of_files = 1,
-  sep = "\\t",
   has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
+  quote = "\\""
 )
 }
 \arguments{
-\item{filename}{Character. Path to the TSV file.}
+\item{filename}{Character vector of file names or regular expression patterns
+to match files.}
 
-\item{number_of_files}{Integer. Number of files to be processed.
-Defaults to 1.}
+\item{pattern}{Logical; if \code{TRUE}, \code{filename} is treated as a regex
+pattern. Default is \code{FALSE}.}
+
+\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
+expected. Default is \code{1}.}
+
+\item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
+is \code{TRUE}.}
+
+\item{quote}{Character or \code{NULL}; quoting character for fields. Default
+is \code{'"'}.}
 
 \item{sep}{Character. Field separator used in the TSV file.
 Defaults to tab ("\\t").}
-
-\item{has_header}{Logical. Indicates if the TSV file contains
-a header row. Defaults to \code{TRUE}.}
-
-\item{quote}{Character. Quoting character used in the TSV file.
-Defaults to double quote ('"').}
-
-\item{col_types}{Optional. Column types specification. Defaults
-to \code{NULL}.}
 }
 \value{
 An object of class \code{DTAFileInfoTSV}.

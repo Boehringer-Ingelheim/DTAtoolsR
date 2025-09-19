@@ -6,30 +6,32 @@
 #' to represent metadata and configuration for CSV (Tab-Separated Values)
 #'  data files.
 #'
-#' @param filename Character. Path to the CSV file.
-#' @param number_of_files Integer. Number of files to be processed.
-#'  Defaults to 1.
-#' @param sep Character. Field separator used in the CSV file.
+#' @param filename Character vector of file names or regular expression patterns
+#'   to match files.
+#' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
+#'   pattern. Default is \code{FALSE}.
+#' @param number_of_files Numeric or \code{NULL}; maximum number of files
+#'   expected. Default is \code{1}.
+#' @param sep Character. Field separator used in the TSV file.
 #'  Defaults to tab ("\\t").
-#' @param has_header Logical. Indicates if the CSV file contains
-#' a header row. Defaults to \code{TRUE}.
-#' @param quote Character. Quoting character used in the CSV file.
-#'  Defaults to double quote ('"').
-#' @param col_types Optional. Column types specification. Defaults
-#' to \code{NULL}.
+#' @param has_header Logical; \code{TRUE} if the first row is a header. Default
+#'   is \code{TRUE}.
+#' @param quote Character or \code{NULL}; quoting character for fields. Default
+#'   is \code{'"'}.
+#'
 #' @name DTAFileInfoCSV-class
 #' @return An object of class \code{DTAFileInfoCSV}.
 #'
 #' @seealso \code{\link{DTAFileInfo}}
-#'
+#' @include DTAFileInfoDelim-class.R
 #' @export
 DTAFileInfoCSV <- S7::new_class(
   "DTAFileInfoCSV",
-  parent = DTAFileInfo,
+  parent = DTAFileInfoDelim,
   constructor = function(
     filename,
+    pattern = FALSE,
     number_of_files = 1,
-    sep = "\t",
     has_header = TRUE,
     quote = '"',
     col_types = NULL
@@ -38,20 +40,18 @@ DTAFileInfoCSV <- S7::new_class(
       S7_object(),
       filename = filename,
       number_of_files = number_of_files,
-      sep = sep,
+      pattern = pattern,
+      sep = ",",
       has_header = has_header,
-      rownames = row_names,
       quote = quote,
       col_types = col_types
-    ) 
+    )
   }
 )
 
-if (!exists("read_file", mode = "function")) {
-  read_file <- new_generic("read_file", "x")
-}
+
 #' @title Read File for DTAFileInfoCSV Objects
-##' @name read_file-DTAFileInfoCSV
+##' @name read_file_execution-DTAFileInfoCSV
 #' @description
 #' Reads a CSV file using the parameters specified in a
 #' \code{DTAFileInfoCSV} object. This method uses \code{readr::read_CSV}
@@ -61,17 +61,13 @@ if (!exists("read_file", mode = "function")) {
 #' @param file A character string specifying the path to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-method(read_file, DTAFileInfoCSV) <- function(x, file) {
-  if (DTAtools::matches_filename(x, file)) {
-    return(arrow::read_csv_arrow(
-      file,
-      #col_types = x@col_types,
-      quote = x@quote,
-      skip = if (x@has_header) 0 else 1,
-      col_names = x@has_header,
-      as_data_frame = FALSE
-    ))
-  } else {
-    stop(simpleError("The provided file does not match the filename in the DTAFileInfoCSV object."))
-  }
+method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
+  return(arrow::read_csv_arrow(
+    file,
+    #col_types = x@col_types,
+    quote = x@quote,
+    skip = if (x@has_header) 0 else 1,
+    #col_names = x@has_header,
+    as_data_frame = FALSE
+  ))
 }
