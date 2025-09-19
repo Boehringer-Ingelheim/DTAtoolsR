@@ -1,4 +1,5 @@
 class_null <- S7::new_S3_class("NULL")
+class_DTAColumnSpec <- S7::new_class("DTAtools::DTAColumnSpec")
 class_character_or_null <- class_character | class_null
 class_numeric_or_null <- class_numeric | class_null
 class_character_or_numeric_or_null <- class_character |
@@ -74,45 +75,6 @@ DTAColumnSpec <- new_class(
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
       "@id cannot have whitespaces and needs to be defined."
-    } else if (
-      !((is.character(self@label) & length(self@label) == 1) ||
-        is.null(self@label))
-    ) {
-      sprintf("@label in %s has to be either character or null.", self@id)
-    } else if (
-      !((is.character(self@type) & length(self@type) == 1) ||
-        is.null(self@type))
-    ) {
-      sprintf("@type in %s has to be either character or null.", self@id)
-    } else if (
-      !((is.character(self@pattern) & length(self@pattern) == 1) ||
-        is.null(self@pattern))
-    ) {
-      sprintf("@pattern in %s has to be either character or null.", self@id)
-    } else if (
-      !((is.character(self@format) & length(self@format) == 1) ||
-        is.null(self@format) ||
-        is.numeric(self@format))
-    ) {
-      sprintf(
-        "@format in %s has to be either character, numeric, or null.",
-        self@id
-      )
-    } else if (
-      !((is.numeric(self@length) & length(self@length) == 1) ||
-        is.null(self@length))
-    ) {
-      sprintf("@length in %s has to be either numeric or null.", self@id)
-    } else if (
-      !((is.logical(self@nullable) & length(self@nullable) == 1) ||
-        is.null(self@nullable))
-    ) {
-      sprintf("@nullable in %s has to be either character or null.", self@id)
-    } else if (
-      !((is.character(self@description) & length(self@description) == 1) ||
-        is.null(self@description))
-    ) {
-      sprintf("@description in %s has to be either character or null.", self@id)
     }
   }
 )
@@ -135,10 +97,12 @@ get_arrow_schema_type <- function(x) {
   if (is.null(type)) {
     stop(str_glue("Type is not set for {x$id}."))
   }
-  switch(type,
-         "Char" = "utf8",
-         "Num" = "double",
-         "Int" = "int32",
-         "Bool" = "bool",
-         NA_character_)
+  switch(
+    type,
+    "Char" = "utf8",
+    "Num" = "double",
+    "Int" = "int32",
+    "Bool" = "bool",
+    NA_character_
+  )
 }
