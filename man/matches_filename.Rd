@@ -2,24 +2,29 @@
 % Please edit documentation in R/DTAFileInfo-class.R
 \name{matches_filename}
 \alias{matches_filename}
-\title{Check if Filename Matches Pattern}
-\usage{
-matches_filename(x, ...)
-}
+\title{Matches Filename}
 \arguments{
-\item{x}{A DTAFileInfo object}
+\item{x}{A \code{DTAFileInfo} object.}
 
 \item{file}{A character string representing the name of the file to check.}
 }
 \value{
-Logical: TRUE if match, FALSE otherwise
+A logical value indicating whether the filename matches.
 }
 \description{
-Determines whether the provided filename matches the specified pattern.
+Checks if a given filename matches the pattern in a \code{DTAFileInfo} object.
 }
+\section{Methods}{
+
+\describe{
+\item{\code{DTAFileInfo}}{Returns \code{TRUE} if the filename matches the pattern.}
+}
+}
+
 \examples{
 \dontrun{
-matches_filename(dtafileinfo, "exact_file_name.tsv")
-matches_filename(dtafileinfo, "\\\\.tsv$")
+  file_info <- DTAFileInfo("file.txt")
+  matches_filename(file_info, "file.txt")
 }
+
 }

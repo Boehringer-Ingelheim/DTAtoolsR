@@ -16,7 +16,7 @@
 #'  Defaults to double quote ('"').
 #' @param col_types Optional. Column types specification. Defaults
 #' to \code{NULL}.
-#' @name read_file-DTAFileInfoCSV
+#' @name DTAFileInfoCSV-class
 #' @return An object of class \code{DTAFileInfoCSV}.
 #'
 #' @seealso \code{\link{DTAFileInfo}}
@@ -47,23 +47,20 @@ DTAFileInfoCSV <- S7::new_class(
   }
 )
 
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
 #' @title Read File for DTAFileInfoCSV Objects
+##' @name read_file-DTAFileInfoCSV
 #' @description
 #' Reads a CSV file using the parameters specified in a
 #' \code{DTAFileInfoCSV} object. This method uses \code{arrow::read_csv_arrow}
 #' for efficient CSV parsing.
-#'
+#' @importFrom arrow read_delim_arrow
 #' @param x A \code{DTAFileInfoCSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
-#'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-#'
-#' @seealso \code{\link[arrow]{read_csv_arrow}}
-#' @name read_file
-#' @method read_file DTAFileInfoCSV
-#' @importFrom arrow read_csv_arrow
-#' @export
 method(read_file, DTAFileInfoCSV) <- function(x, file) {
   if (DTAtools::matches_filename(x, file)) {
     return(arrow::read_csv_arrow(

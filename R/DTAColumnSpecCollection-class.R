@@ -81,7 +81,8 @@ method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
 #' \dontrun{
 #'  column_format <- get_column(collection, "STUDYID")
 #' }
-#' @name get_column-DTAColumnSpecCollection
+#' @name get_column
+#' @rdname get_column-DTAColumnSpecCollection
 if (!exists("get_column", mode = "function")) {
   get_column <- new_generic("get_column", "x")
 }
@@ -98,7 +99,9 @@ method(get_column, DTAColumnSpecCollection) <- function(x, id) {
 #' \dontrun{
 #'  get_metadata(collection)
 #' }
-#' @name get_metadata-DTAColumnSpecCollection
+#' @name get_metadata
+#' @rdname get_metadata-DTAColumnSpecCollection
+#' @export
 if (!exists("get_metadata", mode = "function")) {
   get_metadata <- new_generic("get_metadata", "x")
 }
@@ -115,7 +118,8 @@ method(get_metadata, DTAColumnSpecCollection) <- function(x) {
 #' \dontrun{
 #'  get_rules(collection)
 #' }
-#' @name get_rules-DTAColumnSpecCollection
+#' @name get_rules
+#' @export
 if (!exists("get_rules", mode = "function")) {
   get_rules <- new_generic("get_rules", "x")
 }

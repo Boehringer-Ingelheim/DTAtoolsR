@@ -2,57 +2,21 @@
 % Please edit documentation in R/DTAFileInfoTSV-class.R
 \name{read_file-DTAFileInfoTSV}
 \alias{read_file-DTAFileInfoTSV}
-\alias{DTAFileInfoTSV}
-\title{DTAFileInfoTSV Class Constructor}
-\usage{
-DTAFileInfoTSV(
-  filename,
-  number_of_files = 1,
-  sep = "\\t",
-  has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
-)
-}
+\title{Read File for DTAFileInfoTSV Objects}
 \arguments{
-\item{filename}{Character. Path to the TSV file.}
-
-\item{number_of_files}{Integer. Number of files to be processed.
-Defaults to 1.}
-
-\item{sep}{Character. Field separator used in the TSV file.
-Defaults to tab ("\\t").}
-
-\item{has_header}{Logical. Indicates if the TSV file contains
-a header row. Defaults to \code{TRUE}.}
-
-\item{quote}{Character. Quoting character used in the TSV file.
-Defaults to double quote ('"').}
-
-\item{col_types}{Optional. Column types specification. Defaults
-to \code{NULL}.}
-
 \item{x}{A \code{DTAFileInfoTSV} object containing file reading parameters.}
 
 \item{file}{A character string specifying the path to the file to be read.}
 }
 \value{
-An object of class \code{DTAFileInfoTSV}.
-
 A tibble containing the contents of the file if the filename
 matches; otherwise, throws an error.
 }
 \description{
-Defines the S7 class \code{DTAFileInfoTSV}, which extends \code{DTAFileInfo}
-to represent metadata and configuration for TSV (Tab-Separated Values)
-data files.
-
 Reads a TSV file using the parameters specified in a
 \code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
 for efficient TSV parsing.
 }
 \seealso{
-\code{\link{DTAFileInfo}}
-
-\code{\link[arrow]{read_delim_arrow}}
+\code{\link{readr::read_tsv}}
 }

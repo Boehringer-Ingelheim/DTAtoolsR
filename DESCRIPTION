@@ -17,7 +17,7 @@ Description: Provides a comprehensive set of tools for importing, validating,
 License: LGPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 Imports:
     yaml,
     dplyr,
@@ -32,7 +32,8 @@ Imports:
     magrittr,
     jsonlite,
     jsonvalidate,
-    flextable
+    flextable,
+    arrow
 Depends:
     R (>= 3.5.0),
     S7 (>= 0.2.0)

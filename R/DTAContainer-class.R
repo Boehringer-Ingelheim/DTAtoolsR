@@ -365,4 +365,10 @@ method(get_max_number_of_files, DTAContainer) <- function(x) {
   } else {
     return(max(n_files))
   }
+  n_files <- sapply(x@fileinfo, function(y) y@number_of_files)
+  if (any(is.null(n_files))) {
+    return(NA)
+  } else {
+    return(max(n_files))
+  }
 }

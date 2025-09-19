@@ -2,25 +2,27 @@
 % Please edit documentation in R/DTAFileInfo-class.R
 \name{number_of_files}
 \alias{number_of_files}
-\title{Generic: number_of_files}
-\usage{
-number_of_files(x, ...)
-}
+\title{Get number of files}
 \arguments{
-\item{x}{An object of class DTAFileInfo.}
+\item{x}{An object of class \code{DTAFileInfo}.}
 }
 \value{
-Depends on the method.
-
-Integer: number of files.
+The number of files.
 }
 \description{
-Generic function to get the number of files from an object.
-
-Returns the number of files specified in the DTAFileInfo object.
+Returns the number of files specified in a \code{DTAFileInfo} object.
 }
+\section{Methods}{
+
+\describe{
+\item{\code{DTAFileInfo}}{Returns the sum of the \code{number_of_files} property.}
+}
+}
+
 \examples{
 \dontrun{
-number_of_files(dtafileinfo)
+  file_info <- DTAFileInfo("file.txt", number_of_files = 1)
+  number_of_files(file_info)
 }
+
 }

@@ -51,7 +51,8 @@ DTA <- new_class(
 #' \dontrun{
 #'   get_metadata(DTA)
 #' }
-#' @name metadata-DTA
+#' @name get_metadata
+#' @export
 if (!exists("get_metadata", mode = "function")) {
   get_metadata <- new_generic("get_metadata", "x")
 }
@@ -73,7 +74,8 @@ method(get_metadata, DTA) <- function(x) {
 #' container(DTAContainer, "container1")
 #' container(DTAContainer, c("container1", "container2"))
 #' }
-#' @name container-DTA
+#' @name container
+#' @export
 if (!exists("container", mode = "function")) {
   container <- new_generic("container", "x")
 }
