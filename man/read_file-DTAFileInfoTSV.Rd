@@ -40,7 +40,7 @@ to \code{NULL}.}
 An object of class \code{DTAFileInfoTSV}.
 
 A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+matches; otherwise, throws an error.
 }
 \description{
 Defines the S7 class \code{DTAFileInfoTSV}, which extends \code{DTAFileInfo}
@@ -48,11 +48,11 @@ to represent metadata and configuration for TSV (Tab-Separated Values)
 data files.
 
 Reads a TSV file using the parameters specified in a
-\code{DTAFileInfoTSV} object. This method uses \code{readr::read_tsv}
+\code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
 for efficient TSV parsing.
 }
 \seealso{
 \code{\link{DTAFileInfo}}
 
-\code{\link{readr::read_tsv}}
+\code{\link[arrow]{read_delim_arrow}}
 }

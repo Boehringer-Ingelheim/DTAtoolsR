@@ -67,14 +67,20 @@ test_that("specs_from_list constructs valid object", {
   expect_named(collection@columns, c("STUDYID", "VISIT"))
   expect_equal(collection@columns$STUDYID@id, "STUDYID")
   expect_equal(collection@columns$VISIT@values, list("V01", "EOT"))
-  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
-  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
+  expect_equal(
+    class(collection@columns[[1]]),
+    c("DTAtools::DTAColumnSpec", "S7_object")
+  )
+  expect_equal(
+    class(collection@rules[[1]]),
+    c("DTAtools::DTARule", "S7_object")
+  )
 
   # check metadata method
   expect_equal(metadata(collection), list())
 
-  # Test DTAColumnSpecCollectionToList
+  # Test specs_to_list
 
-  list <- DTAColumnSpecCollectionToList(collection)
+  list <- specs_to_list(collection)
   expect_type(list, "list")
 })

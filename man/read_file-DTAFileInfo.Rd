@@ -2,16 +2,19 @@
 % Please edit documentation in R/DTAFileInfo-class.R
 \name{read_file-DTAFileInfo}
 \alias{read_file-DTAFileInfo}
+\alias{read_file}
 \title{Read File for DTAFileInfo Objects}
+\usage{
+read_file(x, ...)
+}
 \arguments{
-\item{x}{A \code{DTAFileInfo} object containing file reading parameters.}
+\item{x}{A DTAFileInfo object}
 
 \item{file}{A character string specifying the path to the file to be read.}
 }
 \value{
-An arrow table containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
+NULL (not implemented)
 }
 \description{
-This is a protype funnction for reading in files.
+Prototype function for reading files.
 }

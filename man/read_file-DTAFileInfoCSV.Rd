@@ -2,18 +2,7 @@
 % Please edit documentation in R/DTAFileInfoCSV-class.R
 \name{read_file-DTAFileInfoCSV}
 \alias{read_file-DTAFileInfoCSV}
-\alias{DTAFileInfoCSV}
 \title{DTAFileInfoCSV Class Constructor}
-\usage{
-DTAFileInfoCSV(
-  filename,
-  number_of_files = 1,
-  sep = "\\t",
-  has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
-)
-}
 \arguments{
 \item{filename}{Character. Path to the CSV file.}
 
@@ -31,28 +20,15 @@ Defaults to double quote ('"').}
 
 \item{col_types}{Optional. Column types specification. Defaults
 to \code{NULL}.}
-
-\item{x}{A \code{DTAFileInfoCSV} object containing file reading parameters.}
-
-\item{file}{A character string specifying the path to the file to be read.}
 }
 \value{
 An object of class \code{DTAFileInfoCSV}.
-
-A tibble containing the contents of the file if the filename
-matches; otherwise, returns \code{NULL}.
 }
 \description{
 Defines the S7 class \code{DTAFileInfoCSV}, which extends \code{DTAFileInfo}
 to represent metadata and configuration for CSV (Tab-Separated Values)
 data files.
-
-Reads a CSV file using the parameters specified in a
-\code{DTAFileInfoCSV} object. This method uses \code{readr::read_CSV}
-for efficient CSV parsing.
 }
 \seealso{
 \code{\link{DTAFileInfo}}
-
-\code{\link{readr::read_CSV}}
 }

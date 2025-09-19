@@ -417,7 +417,7 @@ metadata:
 
 The `metadata()` method returns a list containing the metadata fields. For example:
 
-```{r}
+```{r, eval=FALSE}
 # Access metadata
 metadata <- DTAtools:::metadata(specs)
 
