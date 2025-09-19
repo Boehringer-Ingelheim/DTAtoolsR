@@ -10,7 +10,7 @@
 }
 \value{
 A tibble containing the contents of the file if the filename
-matches; otherwise, throws an error.
+matches; otherwise, returns \code{NULL}.
 }
 \description{
 Reads a TSV file using the parameters specified in a

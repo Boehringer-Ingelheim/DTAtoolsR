@@ -14,6 +14,6 @@ matches; otherwise, returns \code{NULL}.
 }
 \description{
 Reads a CSV file using the parameters specified in a
-\code{DTAFileInfoCSV} object. This method uses \code{readr::read_CSV}
+\code{DTAFileInfoCSV} object. This method uses \code{arrow::read_csv_arrow}
 for efficient CSV parsing.
 }

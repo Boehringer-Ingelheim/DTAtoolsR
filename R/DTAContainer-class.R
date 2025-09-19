@@ -48,7 +48,7 @@ DTAContainer <- new_class(
     )
   },
   properties = list(
-    specs = class_any, # list of DTAColumnSpecCollection
+    specs = class_DTAColumnSpecCollection, # list of DTAColumnSpecCollection
     data = class_list, # list of arrow tables
     fileinfo = class_any # list of DTAFileInfo
   )

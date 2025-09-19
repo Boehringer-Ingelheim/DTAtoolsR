@@ -38,7 +38,7 @@ DTA <- new_class(
   },
   properties = list(
     container = class_list,
-    metadata = class_any #TODO: should be class DTAMetaData
+    metadata = class_DTAMetadata
   )
 )
 
