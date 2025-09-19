@@ -165,7 +165,12 @@ method(get_rules, DTAColumnSpecCollection) <- function(x) {
 import_specs_from_yaml <- function(file) {
   yaml <- yaml::read_yaml(file)
   specs <- yaml$columns
-  metadata <- ifelse(is.null(yaml$metadata), list(), yaml$metadata)
+  if (is.null(yaml$metadata)) {
+    metadata <- list()
+  } else {
+    metadata <- yaml$metadata
+  }
+
   if (is.null(yaml$rules)) {
     rules <- list()
   } else {
@@ -501,7 +506,7 @@ write_specs_to_yaml <- function(
     )
   })
 
-  metadata <- list(DTAColumnSpecCollection@metadata)
+  metadata <- DTAColumnSpecCollection@metadata
   yaml::write_yaml(
     list(metadata = metadata, columns = specs, rules = rules),
     file
