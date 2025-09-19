@@ -356,15 +356,14 @@ method(get_rules, DTAContainer) <- function(x) {
 # Define the generic only if it doesn't already exist
 #' @name get_max_number_of_files-DTAContainer
 if (!exists("get_max_number_of_files", mode = "function")) {
-    get_max_number_of_files <- new_generic("get_max_number_of_files", "x")
+  get_max_number_of_files <- new_generic("get_max_number_of_files", "x")
 }
 #' @export
 method(get_max_number_of_files, DTAContainer) <- function(x) {
-    n_files = sapply(x@fileinfo, function(y) y@number_of_files)
-    if(any(is.null(n_files))) {
-        return(NA)
-    } else {
-        return(max(n_files))
-    } 
+  n_files <- sapply(x@fileinfo, function(y) y@number_of_files)
+  if (any(is.null(n_files))) {
+    return(NA)
+  } else {
+    return(max(n_files))
+  }
 }
-

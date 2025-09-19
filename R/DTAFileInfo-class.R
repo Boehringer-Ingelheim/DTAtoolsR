@@ -69,42 +69,53 @@ DTAFileInfo <- new_class(
 )
 
 
-#' @title get max number of files
-#' @description
-#' Returns the number of files specified in the DTAFileInfo object.
-#' @param x An object of class DTAContainer
-#' @return number of files
-#' @examples
-#' \dontrun{
-#' column_format <- number_of_files(dtafileinfo)
-#' }
-# Define the generic only if it doesn't already exist
-#' @name number_of_files-DTAFileInfo
 if (!exists("number_of_files", mode = "function")) {
   number_of_files <- new_generic("number_of_files", "x")
 }
+#' @title Get number of files
+#' @description Returns the number of files specified in a `DTAFileInfo` object.
+#'
+#' @param x An object of class `DTAFileInfo`.
+#' @return The number of files.
+#'
+#' @examples
+#' \dontrun{
+#'   file_info <- DTAFileInfo("file.txt", number_of_files = 1)
+#'   number_of_files(file_info)
+#' }
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFileInfo}}{Returns the sum of the \code{number_of_files} property.}
+#' }
+#' @name number_of_files
 #' @export
 method(number_of_files, DTAFileInfo) <- function(x) {
   return(sum(x@number_of_files))
 }
 
-
-#' @name matches_filename-DTAFileInfo
-#' @title Matches Filename
-#' @description Check if a filename matches a given pattern
-#'
-#' Determines whether the provided filename matches the specified pattern.
-#'
-#' @param file A character string representing the name of the file to check.
-#' @return A logical value indicating whether the filename matches the pattern.
-#' @examples
-#' \dontrun{
-#' matches_filename(dtafileinfo, "exact_file_name.tsv")
-#' matches_filename(dtafileinfo, "\\.tsv$")
-#' }
 if (!exists("matches_filename", mode = "function")) {
   matches_filename <- new_generic("matches_filename", "x")
 }
+#' @title Matches Filename
+#' @description Checks if a given filename matches the pattern in a `DTAFileInfo` object.
+#'
+#' @param x A `DTAFileInfo` object.
+#' @param file A character string representing the name of the file to check.
+#' @return A logical value indicating whether the filename matches.
+#'
+#' @examples
+#' \dontrun{
+#'   file_info <- DTAFileInfo("file.txt")
+#'   matches_filename(file_info, "file.txt")
+#' }
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFileInfo}}{Returns `TRUE` if the filename matches the pattern.}
+#' }
+#' @name matches_filename
+#' @rdname matches_filename
 #' @export
 method(matches_filename, DTAFileInfo) <- function(x, file) {
   if (x@pattern) {
@@ -114,19 +125,26 @@ method(matches_filename, DTAFileInfo) <- function(x, file) {
   }
 }
 
-#' @title Read File for DTAFileInfo Objects
-#' @description
-#' This is a protype funnction for reading in files.
-#'
-#' @param x A \code{DTAFileInfo} object containing file reading parameters.
-#' @param file A character string specifying the path to the file to be read.
-#'
-#' @return An arrow table containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
-#' @name read_file-DTAFileInfo
 if (!exists("read_file", mode = "function")) {
   read_file <- new_generic("read_file", "x")
 }
+#' @title Read a file based on DTAFileInfo
+#' @description Reads a data file using the parameters specified in a
+#'   \code{DTAFileInfo} object or one of its subclasses.
+#'
+#' @param x A \code{DTAFileInfo} object (or subclass) containing file reading
+#'   parameters.
+#' @param file A character string specifying the path to the file to be read.
+#'
+#' @return An Arrow Table containing the file's contents.
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFileInfo}}{This is a base implementation that throws an error,
+#'   as it must be implemented by a subclass.}
+#' }
+#' @name read_file
+#' @rdname read_file
 #' @export
 method(read_file, DTAFileInfo) <- function(x, file) {
   stop("This method is not implemented. You need to 

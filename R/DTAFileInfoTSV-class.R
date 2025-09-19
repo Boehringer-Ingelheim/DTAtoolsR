@@ -62,9 +62,8 @@ if (!exists("read_file", mode = "function")) {
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-#' @seealso \code{\link{readr::read_tsv}}
-#' @name read_file-DTAFileInfoTSV
-#' @export
+##' @seealso \code{\link{readr::read_tsv}}
+##' @name read_file-DTAFileInfoTSV
 method(read_file, DTAFileInfoTSV) <- function(x, file) {
   if (DTAtools::matches_filename(x, file)) {
     return(arrow::read_delim_arrow(
