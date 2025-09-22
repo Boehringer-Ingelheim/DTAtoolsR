@@ -258,6 +258,7 @@ validate_rules <- function(DTAColumnSpecCollection, table) {
 }
 
 #' @keywords internal
+#' @importFrom methods is
 check_rule_class <- function(x) {
   if (methods::is(x, "DTAtools::DTARule")) {
     invisible(TRUE)

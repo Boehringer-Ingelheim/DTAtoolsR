@@ -325,17 +325,6 @@ method(get_metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
 
-#' @title Get Rules
-#' @description
-#' Method to get Rules from DTAContainer.
-#' @param x An object of class DTAContainer
-#' @return A list with rules information
-#' @examples
-#' \dontrun{
-#' get_rules(DTAContainer)
-#' }
-#' @name get_rules
-#' @rdname get_rules-DTAContainer
 #' @export
 if (!exists("get_rules", mode = "function")) {
   get_rules <- new_generic("get_rules", "x")

@@ -122,7 +122,6 @@ method(get_metadata, DTAColumnSpecCollection) <- function(x) {
 #'  get_rules(collection)
 #' }
 #' @name get_rules
-#' @rdname get_rules-DTAColumnSpecCollection
 #' @export
 if (!exists("get_rules", mode = "function")) {
   get_rules <- new_generic("get_rules", "x")

@@ -26,6 +26,7 @@ Imports:
     tools,
     tidyr,
     glue,
+    methods,
     R.utils,
     rlang,
     docxtractr,
