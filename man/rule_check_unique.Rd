@@ -7,10 +7,22 @@
 rule_check_unique(rule, df)
 }
 \arguments{
-\item{rule}{DTA rule}
+\item{rule}{A DTARule object of type \code{"check_unique"}. Expected slots:
+\itemize{
+\item \verb{@id} character
+\item \verb{@type} = "check_unique"
+\item \verb{@column} character: name of the column to check
+}}
 
-\item{df}{data}
+\item{df}{A data.frame to validate.}
+}
+\value{
+A list with elements \code{id}, \code{valid}, and \code{message}.
 }
 \description{
-Ensures that all values in a column are unique.
+Ensures that all values in the specified column are unique.
+Repeated \code{NA} values are considered duplicates by base R \code{duplicated()}.
+}
+\examples{
+# rule_check_unique(rule, df)
 }

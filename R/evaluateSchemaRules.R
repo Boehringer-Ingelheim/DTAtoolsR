@@ -1,14 +1,27 @@
 #' @title Rule: check_range
-#' @param rule DTA rule
-#' @param df data
-#' @description Ensures a column's values fall within a specified numeric range.
+#' @param rule A DTARule object of type `"check_range"`. Expected slots:
+#'   - `@id` character
+#'   - `@type` = "check_range"
+#'   - `@column` character: name of the column to check
+#'   - `@range` numeric(2): inclusive lower/upper bounds, e.g. c(0, 1)
+#' @param df A data.frame to validate.
+#' @description Ensures all non-missing values in `rule@column` fall within
+#' an **inclusive** numeric range `[lower, upper]`. Missing values are ignored.
+#' @return A list with elements `id`, `valid`, and `message`.
+#' @examples
+#' # Suppose `rule` is a DTARule with column="age", range=c(18, 65)
+#' # rule_check_range(rule, df)
 #' @export
 rule_check_range <- function(rule, df) {
-  checkDTARule(rule)
+  check_rule_class(rule)
   col <- rule@column
   range <- rule@range
-  violated <- !(as.numeric(df[[col]]) >= range[1] &
-    as.numeric(df[[col]]) <= range[2])
+
+  x <- as.numeric(df[[col]])
+  in_range <- x >= range[1] & x <= range[2]
+  violated <- !in_range
+
+  # NA handling: ignore NAs (they neither pass nor count as violations)
   if (any(violated, na.rm = TRUE)) {
     list(
       id = rule@id,
@@ -28,23 +41,32 @@ rule_check_range <- function(rule, df) {
 }
 
 #' @title Rule: check_unique
-#' @param rule DTA rule
-#' @param df data
-#' @description Ensures that all values in a column are unique.
+#' @param rule A DTARule object of type `"check_unique"`. Expected slots:
+#'   - `@id` character
+#'   - `@type` = "check_unique"
+#'   - `@column` character: name of the column to check
+#' @param df A data.frame to validate.
+#' @description Ensures that all values in the specified column are unique.
+#' Repeated `NA` values are considered duplicates by base R `duplicated()`.
+#' @return A list with elements `id`, `valid`, and `message`.
+#' @examples
+#' # rule_check_unique(rule, df)
 #' @export
 rule_check_unique <- function(rule, df) {
-  checkDTARule(rule)
-  col <- rule@column
-  duplicated_vals <- duplicated(df[col])
+  check_rule_class(rule)
+  cols <- rule@column
 
-  if (any(duplicated_vals, na.rm = TRUE)) {
+  # Check for uniqueness across combined columns
+  duplicated_rows <- duplicated(df[, cols, drop = FALSE])
+
+  if (any(duplicated_rows, na.rm = TRUE)) {
     list(
       id = rule@id,
       valid = FALSE,
       message = sprintf(
         "Rule '%s' violated: %d duplicate values found in column %s",
         rule@id,
-        sum(duplicated_vals, na.rm = TRUE),
+        sum(duplicated_rows, na.rm = TRUE),
         col
       )
     )
@@ -53,83 +75,104 @@ rule_check_unique <- function(rule, df) {
   }
 }
 
-
+#' @keywords internal
 evaluate_condition <- function(column_name, condition, df) {
+  x <- df[[column_name]]
+
   if (!is.null(condition$equals)) {
-    return(df[[column_name]] == condition$equals)
+    return(x == condition$equals)
   } else if (!is.null(condition$not_equals)) {
-    return(df[[column_name]] != condition$not_equals)
+    return(x != condition$not_equals)
   } else if (!is.null(condition[["in"]])) {
-    return(df[[column_name]] %in% condition[["in"]])
+    return(x %in% condition[["in"]])
   } else if (!is.null(condition$not_in)) {
-    return(!df[[column_name]] %in% condition$not_in)
+    return(!(x %in% condition$not_in))
   } else if (!is.null(condition$greater)) {
-    return(df[[column_name]] > condition$greater)
+    return(x > condition$greater)
   } else if (!is.null(condition$less)) {
-    return(df[[column_name]] < condition$less)
+    return(x < condition$less)
   } else if (!is.null(condition$greater_equal)) {
-    return(df[[column_name]] >= condition$greater_equal)
+    return(x >= condition$greater_equal)
   } else if (!is.null(condition$less_equal)) {
-    return(df[[column_name]] <= condition$less_equal)
+    return(x <= condition$less_equal)
   } else if (!is.null(condition$range)) {
-    return(
-      df[[column_name]] >= condition$range[1] &
-        df[[column_name]] <= condition$range[2]
-    )
+    return(x >= condition$range[1] & x <= condition$range[2])
   } else if (!is.null(condition$empty)) {
-    if (condition$empty) {
-      return(
-        is.na(df[[column_name]]) |
-          df[[column_name]] == "" |
-          is.nan(df[[column_name]])
-      )
+    if (isTRUE(condition$empty)) {
+      return(is.na(x) | is.nan(x) | x == "")
     } else {
-      return(
-        !(is.na(df[[column_name]]) | df[[column_name]] == "") |
-          is.nan(df[[column_name]])
-      )
+      # not empty
+      return(!(is.na(x) | is.nan(x) | x == ""))
     }
   } else {
     stop(sprintf("Unsupported condition type for column '%s'.", column_name))
   }
 }
 
-# Evaluate the `if` and `then` conditions
+#' @keywords internal
 evaluate_conditions <- function(conditions, df) {
-  # Iterate over each condition (column name and its rules)
+  if (length(conditions) == 0L) {
+    # No conditions => no restriction (all TRUE)
+    return(rep(TRUE, nrow(df)))
+  }
+
+  # Iterate over each condition (column name and its rule)
   results <- lapply(names(conditions), function(column_name) {
     condition <- conditions[[column_name]]
     evaluate_condition(column_name, condition, df)
   })
-  # Combine results using logical AND
+
+  # Combine results using logical AND (NA propagates)
   Reduce(`&`, results)
 }
 
-
-# Main function to evaluate the rule
+#' @title Rule: check_condition
+#' @param rule A DTARule object of type `"check_condition"`. Expected slots:
+#'   - `@id` character
+#'   - `@type` = "check_condition"
+#'   - `@condition` list: named by column, each with one of:
+#'       `equals`, `not_equals`, `in`, `not_in`,
+#'       `greater`, `less`, `greater_equal`, `less_equal`, `range`, `empty`
+#'   - `@then` list: same structure as `@condition`
+#' @param df A data.frame to validate.
+#' @description Evaluates an **IF/THEN** rule across rows:
+#'   If all `@condition` predicates are TRUE for a row, then all `@then`
+#'   predicates must also be TRUE. For rows where the IF holds, `NA` in THEN
+#'   is considered a **violation**.
+#' @details
+#' Supported operators per column (single operator per column):
+#' - Equality: `equals`, `not_equals`
+#' - Set: `in`, `not_in`
+#' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`, `range`
+#' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
+#'
+#' If `@condition` is empty, the `@then` part applies to **all rows**.
+#' @return A list with elements `id`, `valid`, and `message`.
+#' @examples
+#' # Example: If species == "setosa", then petal_length in [1.0, 1.9]
+#' # rule_check_condition(rule, iris)
+#' @export
 rule_check_condition <- function(rule, df) {
-  checkDTARule(rule)
+  check_rule_class(rule)
   if_conditions <- rule@condition
   then_conditions <- rule@then
 
-  # Evaluate `if` conditions
+  # Evaluate IF and THEN
   if_rows <- evaluate_conditions(if_conditions, df)
-
-  # Evaluate `then` conditions for rows that meet the `if` conditions
   then_rows <- evaluate_conditions(then_conditions, df)
 
-  # Identify rows where the `then` conditions are violated
-  violated <- !(if_rows & then_rows)[if_rows]
+  # Violations: rows where IF is TRUE but THEN is FALSE or NA
+  violated_mask <- if_rows & (is.na(then_rows) | !then_rows)
+  violated_count <- sum(violated_mask, na.rm = TRUE)
 
-  # Generate the result
-  if (any(violated, na.rm = TRUE)) {
+  if (violated_count > 0) {
     list(
       id = rule@id,
       valid = FALSE,
       message = sprintf(
-        "Rule '%s' violated: %d rows failed the `then` conditions after meeting the `if` conditions.",
+        "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
         rule@id,
-        sum(violated, na.rm = TRUE)
+        violated_count
       )
     )
   } else {
@@ -139,10 +182,11 @@ rule_check_condition <- function(rule, df) {
 
 #' @title Apply Schema Rules
 #' @description Applies all schema rules to a data frame with CLI feedback.
-#' @importFrom cli cli_h2 cli_alert_success cli_alert_danger cli_alert_info
-#' @param rules A list of rule definitions.
+#' @importFrom cli cli_alert_success cli_alert_danger cli_alert_info
+#' @param rules A list of DTARule objects.
 #' @param df A data.frame to validate.
-#' @return List of rule validation results.
+#' @return (Invisibly) a list of rule validation results, each as a list with
+#'   elements `id`, `valid`, and `message`.
 #' @export
 apply_schema_rules <- function(rules, df) {
   rule_functions <- list(
@@ -154,26 +198,27 @@ apply_schema_rules <- function(rules, df) {
   results <- lapply(rules, function(rule) {
     rule_type <- rule@type
     if (!rule_type %in% names(rule_functions)) {
-      cli::cli_alert_danger("Unknown rule type: {rule_type}")
+      msg <- paste("Unknown rule type:", rule_type)
+      cli::cli_alert_danger(msg)
       return(list(
         id = rule@id,
         valid = FALSE,
-        message = paste("Unknown rule type:", rule_type)
+        message = msg
       ))
     }
 
     result <- rule_functions[[rule_type]](rule, df)
 
-    if (result$valid) {
+    if (isTRUE(result$valid)) {
       cli::cli_alert_success("Rule '{result$id}' passed.")
     } else {
       cli::cli_alert_danger(result$message)
     }
 
-    return(result)
+    result
   })
 
-  failed <- Filter(function(x) !x$valid, results)
+  failed <- Filter(function(x) isFALSE(x$valid), results)
 
   if (length(failed) == 0) {
     cli::cli_alert_success("All schema rules passed.")
@@ -187,26 +232,33 @@ apply_schema_rules <- function(rules, df) {
 }
 
 #' @title Validate Rules defined in DTAColumnSpecCollection and a Table
-#' @description Validates the structure of table using predefined rules.
-#' @param DTAColumnSpecCollection A DTAColumnSpecCollection object with rules defined.
-#' @param table A table that will be validated
-#' @return a list containing the results of the rules validation
-validateRules <- function(DTAColumnSpecCollection, table) {
+#' @description Validates a table using rules defined in a `DTAColumnSpecCollection`.
+#'   Aborts with a CLI error if any rule fails.
+#' @param DTAColumnSpecCollection A `DTAColumnSpecCollection` with rules defined.
+#' @param table A data.frame to validate.
+#' @return (Invisibly) the list of rule results from `applySchemaRules()`.
+#' @export
+validate_rules <- function(DTAColumnSpecCollection, table) {
   rules <- get_rules(DTAColumnSpecCollection)
   results <- apply_schema_rules(rules, table)
 
-  failed <- Filter(function(x) !x$valid, results)
-
+  failed <- Filter(function(x) isFALSE(x$valid), results)
   if (length(failed) > 0) {
     messages <- vapply(failed, function(x) x$message, character(1))
-    cli::cli_abort(c("Schema rule violations:", messages))
+    # Bulleted abort for nice CLI output
+    bullets <- c(
+      "Schema rule violations:" = "!",
+      setNames(messages, rep("x", length(messages)))
+    )
+    cli::cli_abort(bullets)
   }
 
   invisible(results)
 }
 
-checkDTARule <- function(x) {
-  if (inherits(x, "DTAtools::DTARule")) {
+#' @keywords internal
+check_rule_class <- function(x) {
+  if (methods::is(x, "DTAtools::DTARule")) {
     invisible(TRUE)
   } else {
     cli::cli_abort("Rule is not of class 'DTARule'")

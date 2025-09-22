@@ -2,18 +2,7 @@
 % Please edit documentation in R/DTAFileInfoCSV-class.R
 \name{DTAFileInfoCSV-class}
 \alias{DTAFileInfoCSV-class}
-\alias{DTAFileInfoCSV}
 \title{DTAFileInfoCSV Class Constructor}
-\usage{
-DTAFileInfoCSV(
-  filename,
-  number_of_files = 1,
-  sep = "\\t",
-  has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
-)
-}
 \arguments{
 \item{filename}{Character. Path to the CSV file.}
 

@@ -1,4 +1,3 @@
-
 #' @title DTAFileInfoTSV Class Constructor
 #'
 #' @description
@@ -43,7 +42,7 @@ DTAFileInfoTSV <- S7::new_class(
       rownames = row_names,
       quote = quote,
       col_types = col_types
-    ) 
+    )
   }
 )
 
@@ -53,10 +52,9 @@ if (!exists("read_file", mode = "function")) {
 #' @title Read File for DTAFileInfoTSV Objects
 #' @description
 #' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileInfoTSV} object. This method uses \code{readr::read_tsv}
+#' \code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
 #'
-#' @importFrom arrow read_delim_arrow
 #' @param x A \code{DTAFileInfoTSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'

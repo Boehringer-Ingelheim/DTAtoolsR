@@ -14,7 +14,7 @@ matches; otherwise, returns \code{NULL}.
 }
 \description{
 Reads a TSV file using the parameters specified in a
-\code{DTAFileInfoTSV} object. This method uses \code{readr::read_tsv}
+\code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
 for efficient TSV parsing.
 }
 \seealso{
