@@ -315,11 +315,12 @@ write_table_to_file <- function(
 #' \dontrun{
 #' get_metadata(DTAContainer)
 #' }
-#' @name metadata-DTAContainer
+#' @name get_metadata
+#' @rdname get_metadata-DTAContainer
+#' @export
 if (!exists("get_metadata", mode = "function")) {
   get_metadata <- new_generic("get_metadata", "x")
 }
-#' @export
 method(get_metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
@@ -333,11 +334,12 @@ method(get_metadata, DTAContainer) <- function(x) {
 #' \dontrun{
 #' get_rules(DTAContainer)
 #' }
-#' @name get_rules-DTAContainer
+#' @name get_rules
+#' @rdname get_rules-DTAContainer
+#' @export
 if (!exists("get_rules", mode = "function")) {
   get_rules <- new_generic("get_rules", "x")
 }
-#' @export
 method(get_rules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }
@@ -353,7 +355,8 @@ method(get_rules, DTAContainer) <- function(x) {
 #' column_format <- number_of_files(dtafileinfo)
 #' }
 # Define the generic only if it doesn't already exist
-#' @name get_max_number_of_files-DTAContainer
+#' @name get_max_number_of_files
+#' @rdname get_max_number_of_files-DTAContainer
 if (!exists("get_max_number_of_files", mode = "function")) {
   get_max_number_of_files <- new_generic("get_max_number_of_files", "x")
 }

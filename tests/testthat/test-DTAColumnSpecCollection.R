@@ -77,7 +77,7 @@ test_that("specs_from_list constructs valid object", {
   )
 
   # check metadata method
-  expect_equal(metadata(collection), list())
+  expect_equal(get_metadata(collection), list())
 
   # Test specs_to_list
 

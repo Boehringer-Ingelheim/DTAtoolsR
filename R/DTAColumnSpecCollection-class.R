@@ -64,9 +64,12 @@ DTAColumnSpecCollection <- new_class(
 #' \dontrun{
 #' names <- get_column_ids(collection)
 #' }
-#' @name get_column_ids-DTAColumnSpecCollection
+#' @name get_column_ids
+#' @rdname get_column_ids-DTAColumnSpecCollection
 #' @export
-get_column_ids <- new_generic("get_column_ids", "x")
+if (!exists("get_column_ids", mode = "function")) {
+  get_column_ids <- new_generic("get_column_ids", "x")
+}
 method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
   return(names(x@columns))
 }
@@ -119,6 +122,7 @@ method(get_metadata, DTAColumnSpecCollection) <- function(x) {
 #'  get_rules(collection)
 #' }
 #' @name get_rules
+#' @rdname get_rules-DTAColumnSpecCollection
 #' @export
 if (!exists("get_rules", mode = "function")) {
   get_rules <- new_generic("get_rules", "x")
