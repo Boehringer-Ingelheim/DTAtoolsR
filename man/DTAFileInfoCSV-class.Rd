@@ -2,6 +2,7 @@
 % Please edit documentation in R/DTAFileInfoCSV-class.R
 \name{DTAFileInfoCSV-class}
 \alias{DTAFileInfoCSV-class}
+\alias{DTAFileInfoCSV}
 \title{DTAFileInfoCSV Class Constructor}
 \usage{
 DTAFileInfoCSV(

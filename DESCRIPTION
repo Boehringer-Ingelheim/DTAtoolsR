@@ -33,7 +33,8 @@ Imports:
     jsonlite,
     jsonvalidate,
     flextable,
-    arrow
+    arrow,
+    stringr
 Depends:
     R (>= 3.5.0),
     S7 (>= 0.2.0)
@@ -45,6 +46,7 @@ Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
 Collate: 
+    '00_helpers.R'
     'DTA-class.R'
     'DTAColumnSpec-class.R'
     'DTAColumnSpecCollection-class.R'

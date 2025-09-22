@@ -32,6 +32,8 @@ quoting, and column types.
 }
 \details{
 This class is used internally by the DTAtoolsR package to
+
+This class is used internally by the DTAtoolsR package to
 manage metadata and properties of DTA files.
 }
 \examples{

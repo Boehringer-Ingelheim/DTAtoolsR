@@ -57,10 +57,10 @@ DTAFileInfoTSV <- S7::new_class(
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-##' @seealso \code{\link{readr::read_tsv}}
+##' @seealso \code{\link{arrow::read_tsv_arrow}}
 ##' @name read_file_execution-DTAFileInfoTSV
 method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
-  return(arrow::read_delim_arrow(
+  return(arrow::read_tsv_arrow(
     path,
     quote = x@quote,
     skip = if (x@has_header) 0 else 1,
