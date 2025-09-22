@@ -80,7 +80,7 @@ get_arrow_schema_type <- function(x) {
   }
   type <- x@type
   if (is.null(type)) {
-    stop(glue::str_glue("Type is not set for {x$id}."))
+    stop(stringr::str_glue("Type is not set for {x$id}."))
   }
   switch(
     type,
