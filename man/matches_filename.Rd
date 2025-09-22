@@ -6,7 +6,8 @@
 \arguments{
 \item{x}{A \code{DTAFileInfo} object.}
 
-\item{file}{A character string representing the name of the file to check.}
+\item{file}{A character string representing the name of the file to check against
+the stored filename or pattern}
 }
 \value{
 A logical value indicating whether the filename matches.

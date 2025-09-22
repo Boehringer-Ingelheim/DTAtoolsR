@@ -15,17 +15,11 @@
 #'   expected. Default is \code{1}.
 #' @param sep Character; field separator used in the file (e.g., \code{","},
 #'   \code{"\\t"}).
-#' @param has_header Logical; \code{TRUE} if the first row is a header. Default
-#'   is \code{TRUE}.
-#' @param quote Character or \code{NULL}; quoting character for fields. Default
-#'   is \code{'"'}.
-#' @param col_types Character string specifying the type of each column (e.g.,
-#'   \code{"cccidcl"}). Default is \code{NULL}.
 #'
 #' @return An object of class \code{DTAFileInfo} containing file parsing
 #'   information.
 #' @name DTAFileInfo-class
-#' @details This class is used internally by the DTAtoolsR package to 
+#' @details This class is used internally by the DTAtoolsR package to
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples
@@ -40,31 +34,19 @@ DTAFileInfo <- new_class(
   constructor = function(
     filename,
     pattern = FALSE,
-    number_of_files = 1,
-    sep,
-    has_header = TRUE,
-    quote = '"',
-    col_types = NULL
+    number_of_files = 1
   ) {
     new_object(
       S7_object(),
       filename = filename,
-      number_of_files = number_of_files,
-      sep = sep,
-      has_header = has_header,
-      rownames = row_names,
-      quote = quote,
-      col_types = col_types
-    ) 
+      pattern = pattern,
+      number_of_files = number_of_files
+    )
   },
   properties = list(
-    filename = class_any, # class_list or class_character
-    number_of_files = class_numeric_or_null,
-    sep = class_character,
-    has_header = class_logical,
-    rownames = class_logical,
-    quote = class_logical_or_null,
-    col_types = class_character
+    filename = class_character, # class_list or class_character
+    pattern = class_logical,
+    number_of_files = class_numeric_or_null
   )
 )
 
@@ -101,7 +83,8 @@ if (!exists("matches_filename", mode = "function")) {
 #' @description Checks if a given filename matches the pattern in a `DTAFileInfo` object.
 #'
 #' @param x A `DTAFileInfo` object.
-#' @param file A character string representing the name of the file to check.
+#' @param file A character string representing the name of the file to check against
+#'   the stored filename or pattern
 #' @return A logical value indicating whether the filename matches.
 #'
 #' @examples
@@ -125,6 +108,33 @@ method(matches_filename, DTAFileInfo) <- function(x, file) {
   }
 }
 
+if (!exists("read_file_execution", mode = "function")) {
+  read_file_execution <- new_generic("read_file", "x")
+}
+#' @title Read a file
+#' @description Reads a data file using the parameters specified in a
+#'   \code{DTAFileInfo} object or one of its subclasses.
+#'
+#' @param x A \code{DTAFileInfo} object (or subclass) containing file reading
+#'   parameters.
+#' @param file A character string specifying the path to the file to be read.
+#'
+#' @return An Arrow Table containing the file's contents.
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFileInfo}}{This is a base implementation that throws an error,
+#'   as it must be implemented by a subclass.}
+#' }
+#' @name read_file_execution
+#' @rdname read_file_execution
+#' @export
+method(read_file_execution, DTAFileInfo) <- function(x, file) {
+  stop("This method is not implemented. You need to
+  use an object of a class which is derived from this class.")
+}
+
+
 if (!exists("read_file", mode = "function")) {
   read_file <- new_generic("read_file", "x")
 }
@@ -143,10 +153,20 @@ if (!exists("read_file", mode = "function")) {
 #'   \item{\code{DTAFileInfo}}{This is a base implementation that throws an error,
 #'   as it must be implemented by a subclass.}
 #' }
+#' @importFrom stringr str_glue
 #' @name read_file
 #' @rdname read_file
 #' @export
 method(read_file, DTAFileInfo) <- function(x, file) {
-  stop("This method is not implemented. You need to 
-  use an object of a class which is derived from this class.")
+  if (DTAtools::matches_filename(x, basename(file))) {
+      if(file.exists(file)) {
+        read_file_execution(x, file)
+      } else {
+        stop(simpleError(str_glue("File '{file}' cannot be found.")))
+      }
+  } else {
+    stop(simpleError("The provided file does not match the filename in the DTAFileInfoDelim object."))
+  }
 }
+
+

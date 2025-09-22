@@ -49,7 +49,7 @@ DTAContainer <- new_class(
   },
   properties = list(
     specs = class_any, # list of DTAColumnSpecCollection
-    data = class_list,  # list of arrow tables
+    data = class_list,  # list of DTAFileInfo
     fileinfo = class_any # list of DTAFileInfo
   )
 )
@@ -206,7 +206,7 @@ method(labels, DTAContainer) <- function(x) {
 #' @return NULL. The function writes the table to a file.
 #' @examples
 #' \dontrun{
-#' write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz", 
+#' write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz",
 #'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
 write_table_to_file <- function(

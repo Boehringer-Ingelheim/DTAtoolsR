@@ -5,15 +5,7 @@
 \alias{DTAFileInfo}
 \title{DTAFileInfo Class}
 \usage{
-DTAFileInfo(
-  filename,
-  pattern = FALSE,
-  number_of_files = 1,
-  sep,
-  has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
-)
+DTAFileInfo(filename, pattern = FALSE, number_of_files = 1)
 }
 \arguments{
 \item{filename}{Character vector of file names or regular expression patterns
@@ -27,15 +19,6 @@ expected. Default is \code{1}.}
 
 \item{sep}{Character; field separator used in the file (e.g., \code{","},
 \code{"\\t"}).}
-
-\item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
-is \code{TRUE}.}
-
-\item{quote}{Character or \code{NULL}; quoting character for fields. Default
-is \code{'"'}.}
-
-\item{col_types}{Character string specifying the type of each column (e.g.,
-\code{"cccidcl"}). Default is \code{NULL}.}
 }
 \value{
 An object of class \code{DTAFileInfo} containing file parsing

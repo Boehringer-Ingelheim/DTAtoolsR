@@ -58,7 +58,7 @@ Write a named DTA table saved in a DTAContainer object to a file.
 }
 \examples{
 \dontrun{
-write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz", 
+write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz",
                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 }
 }

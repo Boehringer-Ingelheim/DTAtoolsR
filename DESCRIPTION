@@ -44,3 +44,19 @@ Suggests:
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
+Collate: 
+    'DTA-class.R'
+    'DTAColumnSpec-class.R'
+    'DTAColumnSpecCollection-class.R'
+    'DTAContainer-class.R'
+    'DTAFileInfo-class.R'
+    'DTAFileInfoDelim-class.R'
+    'DTAFileInfoCSV-class.R'
+    'DTAFileInfoTSV-class.R'
+    'DTAMetaData-class.R'
+    'DTARule-class.R'
+    'DTARuleCollection-class.R'
+    'evaluateSchemaRules.R'
+    'exportFunctions.R'
+    'validationFunctions.R'
+    'zzz.R'
