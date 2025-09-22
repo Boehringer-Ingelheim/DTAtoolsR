@@ -48,8 +48,8 @@ DTAContainer <- new_class(
     )
   },
   properties = list(
-    specs = class_any, # list of DTAColumnSpecCollection
-    data = class_list,  # list of DTAFileInfo
+    specs = class_DTAColumnSpecCollection, # list of DTAColumnSpecCollection
+    data = class_list, # list of arrow tables
     fileinfo = class_any # list of DTAFileInfo
   )
 )
@@ -91,7 +91,6 @@ new_DTAContainer <- function(specs, data) {
 #' \dontrun{
 #' column_format <- get_column(dtadata, "STUDYID")
 #' }
-# Define the generic only if it doesn't already exist
 #' @name get_column-DTAContainer
 if (!exists("get_column", mode = "function")) {
   get_column <- new_generic("get_column", "x")
@@ -360,6 +359,12 @@ if (!exists("get_max_number_of_files", mode = "function")) {
 }
 #' @export
 method(get_max_number_of_files, DTAContainer) <- function(x) {
+  n_files = sapply(x@fileinfo, function(y) y@number_of_files)
+  if (any(is.null(n_files))) {
+    return(NA)
+  } else {
+    return(max(n_files))
+  }
   n_files <- sapply(x@fileinfo, function(y) y@number_of_files)
   if (any(is.null(n_files))) {
     return(NA)

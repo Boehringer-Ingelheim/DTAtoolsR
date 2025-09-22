@@ -1,4 +1,3 @@
-
 #' @title DTAFileInfoCSV Class Constructor
 #'
 #' @description
@@ -54,7 +53,7 @@ DTAFileInfoCSV <- S7::new_class(
 ##' @name read_file_execution-DTAFileInfoCSV
 #' @description
 #' Reads a CSV file using the parameters specified in a
-#' \code{DTAFileInfoCSV} object. This method uses \code{readr::read_CSV}
+#' \code{DTAFileInfoCSV} object. This method uses \code{arrow::read_csv_arrow}
 #' for efficient CSV parsing.
 #' @importFrom arrow read_delim_arrow
 #' @param x A \code{DTAFileInfoCSV} object containing file reading parameters.

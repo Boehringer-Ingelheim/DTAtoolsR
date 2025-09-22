@@ -38,18 +38,24 @@ export_specs_table <- function(
     `Variable Name` = sapply(specs, function(x) x@id),
     `Variable Label` = sapply(specs, function(x) x@label),
     `Type` = sapply(specs, function(x) x@type),
-    `Format` = sapply(specs, function(x) x@format),
-    `Nullable` = sapply(
-      specs,
-      function(x) ifelse(x@nullable, "Yes", "No")
-    ),
+    `Format` = sapply(specs, function(x) {
+      ifelse(is.null(x@format), NA, x@format)
+    }),
+    `Length` = sapply(specs, function(x) {
+      ifelse(is.null(x@length), NA, x@length)
+    }),
+    `Nullable` = sapply(specs, function(x) {
+      if (is.null(x@nullable)) NA else ifelse(x@nullable, "Yes", "No")
+    }),
     `Description` = sapply(specs, function(x) {
-      desc <- x@description
+      desc <- if (!is.null(x@description)) x@description else ""
       values <- x@values
       pattern <- x@pattern
-
       if (!is.null(values)) {
-        value_line <- paste0("\n#@values: ", paste(values, collapse = "; "))
+        value_line <- paste0(
+          "\n#@values: ",
+          paste(as.vector(values), collapse = "; ")
+        )
         desc <- paste(desc, value_line, sep = "\n")
       }
 
@@ -108,7 +114,6 @@ export_specs_table <- function(
     ))
   ) {
     df <- df %>%
-      mutate(Length = gsub("[^0-9.-]", "", Format)) %>%
       select(any_of(colnames))
 
     ft <- flextable::flextable(df) %>%

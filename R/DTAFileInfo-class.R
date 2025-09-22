@@ -20,6 +20,7 @@
 #'   information.
 #' @name DTAFileInfo-class
 #' @details This class is used internally by the DTAtoolsR package to
+#' @details This class is used internally by the DTAtoolsR package to
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples
@@ -73,7 +74,7 @@ if (!exists("number_of_files", mode = "function")) {
 #' @name number_of_files
 #' @export
 method(number_of_files, DTAFileInfo) <- function(x) {
-  return(sum(x@number_of_files))
+  sum(x@number_of_files)
 }
 
 if (!exists("matches_filename", mode = "function")) {
@@ -102,7 +103,7 @@ if (!exists("matches_filename", mode = "function")) {
 #' @export
 method(matches_filename, DTAFileInfo) <- function(x, file) {
   if (x@pattern) {
-    return(stringr::str_detect(file, x@filename))
+    stringr::str_detect(file, x@filename)
   } else {
     return(file %in% x@filename)
   }
