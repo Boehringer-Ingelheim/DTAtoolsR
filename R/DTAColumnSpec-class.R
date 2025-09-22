@@ -68,7 +68,7 @@ DTAColumnSpec <- new_class(
 #' @description
 #' Returns the corresponding Arrow schema type for a given DTAColumnSpec
 #' object based on its `type` property.
-#' @importFrom stringr str_glue
+#' @importFrom glue glue
 #' @param x A DTAColumnSpec object.
 #' @return A character string representing the Arrow schema type.
 #' @examples
@@ -80,7 +80,7 @@ get_arrow_schema_type <- function(x) {
   }
   type <- x@type
   if (is.null(type)) {
-    stop(stringr::str_glue("Type is not set for {x$id}."))
+    stop(glue::glue("Type is not set for {x$id}."))
   }
   switch(
     type,
