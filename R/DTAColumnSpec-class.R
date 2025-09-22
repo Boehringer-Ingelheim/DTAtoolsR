@@ -74,8 +74,9 @@ DTAColumnSpec <- new_class(
 #' @examples
 #' col <- DTAColumnSpec(id = "AGE", type = "Char")
 #' get_arrow_schema_type(col)
+#' @export
 get_arrow_schema_type <- function(x) {
-  if (!inherits(x, "DTAColumnSpec")) {
+  if (!inherits(x, "DTAtools::DTAColumnSpec")) {
     stop("Input must be a DTAColumnSpec object.")
   }
   type <- x@type
