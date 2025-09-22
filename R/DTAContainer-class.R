@@ -26,9 +26,13 @@ DTAContainer <- new_class(
   "DTAContainer",
   constructor = function(
     specs,
-    data,
+    data = list(),
     fileinfo = list()
   ) {
+    if(inherits(fileinfo, "DTAtools::DTAFileInfo")) {
+      fileinfo = list(fileinfo)
+    }
+
     names <- names(data)
     for (name in names(data)) {
       data_entry <- data[[name]]
@@ -48,38 +52,25 @@ DTAContainer <- new_class(
     )
   },
   properties = list(
-    specs = class_DTAColumnSpecCollection, # list of DTAColumnSpecCollection
+    specs = class_DTAColumnSpecCollection,
     data = class_list, # list of arrow tables
     fileinfo = class_any # list of DTAFileInfo
-  )
+  ),
+  validator = function(self) {
+    # check if all elements of list self@data inherit from "Table"
+    if (!all(sapply(self@data, inherits, "Table"))) {
+      cli::cli_abort("All elements in 'data' must be of class 'Table'")
+    }
+    if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
+      cli::cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
+    }
+    if (!all(sapply(self@fileinfo, inherits, "DTAtools::DTAFileInfo"))) {
+      cli::cli_abort("All elements in 'fileinfo' must be of class 'DTAFileInfo'")
+    }
+  }
 )
 
 
-#' @title Generate DTAContainer Object
-#' @description
-#' This function generates a DTAContainer object from a DTAColumnSpecCollection object and a list of tables.
-#' @export
-#'
-#' @param specs A DTAColumnSpecCollection object specifying the column specs.
-#' @param data List. A list of tables to be validated and included in the DTAContainer object.
-#' @return An object of class DTAContainer.
-#' @examples
-#' #'
-#' \dontrun{
-#' # Create sample tables
-#' table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))
-#' table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05", "EOT"))
-#'
-#' # List of tables
-#' data <- list(table1 = table1, table2 = table2)
-#'
-#' # Create the DTAContainer object
-#' data_obj <- new_DTAContainer(specs = NULL, data)
-#' }
-new_DTAContainer <- function(specs, data) {
-  # Create and return the DTAContainer object
-  DTAContainer(specs, data)
-}
 
 #' @title Get Column by ID Method
 #' @description
@@ -89,14 +80,14 @@ new_DTAContainer <- function(specs, data) {
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' \dontrun{
-#' column_format <- get_column(dtadata, "STUDYID")
+#' column_format <- column(dtadata, "STUDYID")
 #' }
-#' @name get_column-DTAContainer
-if (!exists("get_column", mode = "function")) {
-  get_column <- new_generic("get_column", "x")
+#' @name column-DTAContainer
+if (!exists("column", mode = "function")) {
+  column <- new_generic("column", "x")
 }
 #' @export
-method(get_column, DTAContainer) <- function(x, id) {
+method(column, DTAContainer) <- function(x, id) {
   return(x@specs@columns[[id]])
 }
 
@@ -109,13 +100,13 @@ method(get_column, DTAContainer) <- function(x, id) {
 #' @return A DTAColumnSpecCollection object.
 #' @examples
 #' \dontrun{
-#'   get_specs(container)
+#'   specs(container)
 #' }
-#' @name get_specs-DTAContainer
-get_specs <- new_generic("get_specs", "x")
+#' @name specs-DTAContainer
+specs <- new_generic("specs", "x")
 
 #' @export
-method(get_specs, DTAContainer) <- function(x) {
+method(specs, DTAContainer) <- function(x) {
   return(x@specs)
 }
 
@@ -127,16 +118,16 @@ method(get_specs, DTAContainer) <- function(x) {
 #' @return A data.frame.
 #' @examples
 #' \dontrun{
-#' get_data(container)           # returns first table
-#' get_data(container, "lab")   # returns table named "lab"
+#' data(container)           # returns first table
+#' data(container, "lab")   # returns table named "lab"
 #' }
-#' @name get_data-DTAContainer
-if (!exists("get_data", mode = "function")) {
-  get_data <- new_generic("get_data", "x")
+#' @name data-DTAContainer
+if (!exists("data", mode = "function")) {
+  data <- new_generic("data", "x")
 }
 
 #' @export
-method(get_data, DTAContainer) <- function(x, id = 1) {
+method(data, DTAContainer) <- function(x, id = 1) {
   if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
@@ -209,20 +200,20 @@ method(labels, DTAContainer) <- function(x) {
 #'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
 write_table_to_file <- function(
-  DTAContainer,
-  table,
-  filename,
-  arrange_by = "all",
-  arrange_desc = FALSE,
-  sep = "\t",
-  na = "",
-  row.names = FALSE,
-  overwrite = TRUE,
-  quote = FALSE,
-  compression = c("none", "gzip"),
-  get_md5sum = TRUE,
-  write_md5sum_to_file = TRUE,
-  ...
+    DTAContainer,
+    table,
+    filename,
+    arrange_by = "all",
+    arrange_desc = FALSE,
+    sep = "\t",
+    na = "",
+    row.names = FALSE,
+    overwrite = TRUE,
+    quote = FALSE,
+    compression = c("none", "gzip"),
+    get_md5sum = TRUE,
+    write_md5sum_to_file = TRUE,
+    ...
 ) {
   compression <- match.arg(compression)
 
@@ -313,14 +304,14 @@ write_table_to_file <- function(
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#' get_metadata(DTAContainer)
+#' metadata(DTAContainer)
 #' }
 #' @name metadata-DTAContainer
-if (!exists("get_metadata", mode = "function")) {
-  get_metadata <- new_generic("get_metadata", "x")
+if (!exists("metadata", mode = "function")) {
+  metadata <- new_generic("metadata", "x")
 }
 #' @export
-method(get_metadata, DTAContainer) <- function(x) {
+method(metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
 }
 
@@ -331,44 +322,56 @@ method(get_metadata, DTAContainer) <- function(x) {
 #' @return A list with rules information
 #' @examples
 #' \dontrun{
-#' get_rules(DTAContainer)
+#' rules(DTAContainer)
 #' }
-#' @name get_rules-DTAContainer
-if (!exists("get_rules", mode = "function")) {
-  get_rules <- new_generic("get_rules", "x")
+#' @name rules-DTAContainer
+if (!exists("rules", mode = "function")) {
+  rules <- new_generic("rules", "x")
 }
 #' @export
-method(get_rules, DTAContainer) <- function(x) {
+method(rules, DTAContainer) <- function(x) {
   return(x@specs@rules)
 }
 
 
 #' @title get max number of files
 #' @description
-#' Returns the number of files specified in the DTAFileInfo object.
+#' Returns the sum of max number of files specified all associated DTAFileInfo
+#' objects.
 #' @param x An object of class DTAContainer
-#' @return number of files
+#' @return numeric: number of files
 #' @examples
 #' \dontrun{
-#' column_format <- number_of_files(dtafileinfo)
+#' column_format <- max_number_of_files(dtafileinfo)
 #' }
 # Define the generic only if it doesn't already exist
-#' @name get_max_number_of_files-DTAContainer
-if (!exists("get_max_number_of_files", mode = "function")) {
-  get_max_number_of_files <- new_generic("get_max_number_of_files", "x")
+#' @name max_number_of_files-DTAContainer
+if (!exists("max_number_of_files", mode = "function")) {
+  max_number_of_files <- new_generic("max_number_of_files", "x")
 }
 #' @export
-method(get_max_number_of_files, DTAContainer) <- function(x) {
-  n_files = sapply(x@fileinfo, function(y) y@number_of_files)
-  if (any(is.null(n_files))) {
-    return(NA)
-  } else {
-    return(max(n_files))
-  }
-  n_files <- sapply(x@fileinfo, function(y) y@number_of_files)
-  if (any(is.null(n_files))) {
-    return(NA)
-  } else {
-    return(max(n_files))
-  }
+method(max_number_of_files, DTAContainer) <- function(x) {
+  sum(unlist(sapply(x@fileinfo, max_number_of_files)))
 }
+
+
+#' @title get min number of files
+#' @description
+#' Returns the sum of min number of files specified all associated DTAFileInfo
+#' objects.
+#' @param x An object of class DTAContainer
+#' @return numeric: number of files
+#' @examples
+#' \dontrun{
+#' column_format <- min_number_of_files(dtafileinfo)
+#' }
+# Define the generic only if it doesn't already exist
+#' @name min_number_of_files-DTAContainer
+if (!exists("min_number_of_files", mode = "function")) {
+  min_number_of_files <- new_generic("min_number_of_files", "x")
+}
+#' @export
+method(min_number_of_files, DTAContainer) <- function(x) {
+  sum(unlist(sapply(x@fileinfo, min_number_of_files)))
+}
+

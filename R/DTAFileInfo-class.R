@@ -11,8 +11,9 @@
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
 #'   pattern. Default is \code{FALSE}.
-#' @param number_of_files Numeric or \code{NULL}; maximum number of files
-#'   expected. Default is \code{1}.
+#' @param number_of_files Numeric or \code{NULL}; number of files
+#'   expected. Default is \code{1}. If two numbers are provided,
+#'   they represent min and maximum of files expected.
 #' @param sep Character; field separator used in the file (e.g., \code{","},
 #'   \code{"\\t"}).
 #'
@@ -37,26 +38,63 @@ DTAFileInfo <- new_class(
     pattern = FALSE,
     number_of_files = 1
   ) {
+    if (!pattern && number_of_files != 1) {
+      stop("if pattern is FALSE, then number_of_files must be 1.")
+    }
+
+    if (!is.numeric(number_of_files) ||
+        any(number_of_files < 0) ||
+        length(number_of_files) > 2) {
+      stop("'number_of_files' must be NULL, a single non-negative number, or a vector of two non-negative numbers (min and max).")
+    }
+
+    min_number_of_files = number_of_files
+    max_number_of_files = number_of_files
+
+    if(length(number_of_files) == 2) {
+      if (number_of_files[1] >= number_of_files[2] ) {
+        stop("If 'number_of_files' has two elements min and max, min must be less than max.")
+      }
+      min_number_of_files = number_of_files[1]
+      max_number_of_files = number_of_files[2]
+    }
+
     new_object(
       S7_object(),
       filename = filename,
       pattern = pattern,
-      number_of_files = number_of_files
+      min_number_of_files = min_number_of_files,
+      max_number_of_files = max_number_of_files
     )
   },
   properties = list(
-    filename = class_character, # class_list or class_character
+    filename = class_character,
     pattern = class_logical,
-    number_of_files = class_numeric_or_null
-  )
+    min_number_of_files = class_numeric_or_null,
+    max_number_of_files = class_numeric_or_null
+  ),
+  validator = function(self) {
+    if (!is.character(self@filename)) {
+      stop("The 'filename' property must be a character vector.")
+    }
+    if (!is.logical(self@pattern) || length(self@pattern) != 1) {
+      stop("The 'pattern' property must be a single logical value.")
+    }
+    if (!is.numeric(self@min_number_of_files)) {
+      stop("The 'min_number_of_files' property must be numeric.")
+    }
+    if (!is.numeric(self@max_number_of_files)) {
+      stop("The 'max_number_of_files' property must be numeric.")
+    }
+  }
 )
 
 
-if (!exists("number_of_files", mode = "function")) {
-  number_of_files <- new_generic("number_of_files", "x")
+if (!exists("min_number_of_files", mode = "function")) {
+  min_number_of_files <- new_generic("min_number_of_files", "x")
 }
-#' @title Get number of files
-#' @description Returns the number of files specified in a `DTAFileInfo` object.
+#' @title Get min number of files
+#' @description Returns the min number of files specified in a `DTAFileInfo` object.
 #'
 #' @param x An object of class `DTAFileInfo`.
 #' @return The number of files.
@@ -64,18 +102,45 @@ if (!exists("number_of_files", mode = "function")) {
 #' @examples
 #' \dontrun{
 #'   file_info <- DTAFileInfo("file.txt", number_of_files = 1)
-#'   number_of_files(file_info)
+#'   min_number_of_files(file_info)
 #' }
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{Returns the sum of the \code{number_of_files} property.}
+#'   \item{\code{DTAFileInfo}}{Returns the \code{min_number_of_files} property.}
 #' }
-#' @name number_of_files
+#' @name min_number_of_files
 #' @export
-method(number_of_files, DTAFileInfo) <- function(x) {
-  sum(x@number_of_files)
+method(min_number_of_files, DTAFileInfo) <- function(x) {
+  x@min_number_of_files[1]
 }
+
+
+if (!exists("max_number_of_files", mode = "function")) {
+  max_number_of_files <- new_generic("max_number_of_files", "x")
+}
+#' @title Get max number of files
+#' @description Returns the max number of files specified in a `DTAFileInfo` object.
+#'
+#' @param x An object of class `DTAFileInfo`.
+#' @return The number of files.
+#'
+#' @examples
+#' \dontrun{
+#'   file_info <- DTAFileInfo("file.txt", number_of_files = 1)
+#'   max_number_of_files(file_info)
+#' }
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFileInfo}}{Returns the \code{max_number_of_files} property.}
+#' }
+#' @name max_number_of_files
+#' @export
+method(max_number_of_files, DTAFileInfo) <- function(x) {
+  x@max_number_of_files
+}
+
 
 if (!exists("matches_filename", mode = "function")) {
   matches_filename <- new_generic("matches_filename", "x")
@@ -160,11 +225,11 @@ if (!exists("read_file", mode = "function")) {
 #' @export
 method(read_file, DTAFileInfo) <- function(x, file) {
   if (DTAtools::matches_filename(x, basename(file))) {
-      if(file.exists(file)) {
-        read_file_execution(x, file)
-      } else {
-        stop(simpleError(str_glue("File '{file}' cannot be found.")))
-      }
+    if(file.exists(file)) {
+      read_file_execution(x, file)
+    } else {
+      stop(simpleError(str_glue("File '{file}' cannot be found.")))
+    }
   } else {
     stop(simpleError("The provided file does not match the filename in the DTAFileInfoDelim object."))
   }

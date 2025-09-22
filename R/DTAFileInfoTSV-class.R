@@ -34,13 +34,13 @@ DTAFileInfoTSV <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      S7_object(),
-      filename = filename,
-      number_of_files = number_of_files,
-      pattern = pattern,
-      has_header = has_header,
-      quote = quote,
-      sep = "\t"
+      DTAFileInfoDelim(
+        filename = filename,
+        number_of_files = number_of_files,
+        pattern = pattern,
+        has_header = has_header,
+        quote = quote,
+        sep = "\t")
     )
   }
 )

@@ -1,3 +1,9 @@
+test_that("testing import_specs_from_yaml", {
+  specs <- import_specs_from_yaml(system.file("extdata", "params_gf.yaml", package = "DTAtools"))
+
+  expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
+})
+
 test_that("DTAColumnSpecCollection stores and retrieves specs", {
   col1 <- DTAColumnSpec(
     id = "STUDYID",

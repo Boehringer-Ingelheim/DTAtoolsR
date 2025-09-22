@@ -14,8 +14,9 @@ to match files.}
 \item{pattern}{Logical; if \code{TRUE}, \code{filename} is treated as a regex
 pattern. Default is \code{FALSE}.}
 
-\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
-expected. Default is \code{1}.}
+\item{number_of_files}{Numeric or \code{NULL}; number of files
+expected. Default is \code{1}. If two numbers are provided,
+they represent min and maximum of files expected.}
 
 \item{sep}{Character; field separator used in the file (e.g., \code{","},
 \code{"\\t"}).}

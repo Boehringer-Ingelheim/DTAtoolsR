@@ -38,14 +38,12 @@ DTAFileInfoDelim <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      S7_object(),
-      filename = filename,
-      number_of_files = number_of_files,
-      pattern = pattern,
+      .parent = DTAFileInfo(filename = filename,
+                  number_of_files = number_of_files,
+                  pattern = pattern),
       sep = sep,
       has_header = has_header,
-      quote = quote,
-      col_types = col_types
+      quote = quote
     )
   },
   properties = list(
@@ -68,7 +66,7 @@ DTAFileInfoDelim <- S7::new_class(
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
-  return(arrow::read_Delim_arrow(
+  return(arrow::read_delim_arrow(
     file,
     #col_types = x@col_types,
     quote = x@quote,

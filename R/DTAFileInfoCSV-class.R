@@ -32,18 +32,17 @@ DTAFileInfoCSV <- S7::new_class(
     pattern = FALSE,
     number_of_files = 1,
     has_header = TRUE,
-    quote = '"',
-    col_types = NULL
+    quote = '"'
   ) {
     new_object(
-      S7_object(),
-      filename = filename,
-      number_of_files = number_of_files,
-      pattern = pattern,
-      sep = ",",
-      has_header = has_header,
-      quote = quote,
-      col_types = col_types
+      DTAFileInfoDelim(
+        filename = filename,
+        number_of_files = number_of_files,
+        pattern = pattern,
+        sep = ",",
+        has_header = has_header,
+        quote = quote
+      )
     )
   }
 )

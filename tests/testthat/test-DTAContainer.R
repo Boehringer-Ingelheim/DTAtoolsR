@@ -1,23 +1,26 @@
 test_that("DTAContainer object is created and tables are accessible", {
-  spec <- DTAColumnSpec(
-    id = "STUDYID",
-    label = "Study ID",
-    type = "Char",
-    length = 8,
-    nullable = FALSE,
-    description = "ID"
-  )
-  collection <- DTAColumnSpecCollection(columns = list(STUDYID = spec))
-  df <- data.frame(STUDYID = c("1234", "5678"))
+  specs <- import_specs_from_yaml(system.file("extdata", "params_gf.yaml", package = "DTAtools"))
+  path <- system.file("extdata", "data_gf_small.tsv", package = "DTAtools")
+  file_info <- DTAFileInfoTSV("data_gf_small.tsv")
+  container <- DTAContainer(specs = specs, fileinfo = file_info)
 
-  data_obj <- DTAContainer(specs = collection, data = list(test = df))
+  expect_equal(max_number_of_files(container), 1)
+  expect_equal(min_number_of_files(container), 1)
 
-  expect_s3_class(data_obj, "DTAtools::DTAContainer")
-  expect_equal(get_data(data_obj), df)
-  expect_equal(get_data(data_obj, 1), df)
-  expect_equal(get_data(data_obj, "test"), df)
-  expect_equal(get_data(data_obj, "test")$STUDYID[1], "1234")
+  expect_s3_class(container, "DTAtools::DTAContainer")
+
+  container2 <- DTAContainer(specs = specs, fileinfo =
+                              list(file_info, file_info))
+  expect_equal(max_number_of_files(container2), 2)
+  expect_equal(min_number_of_files(container2), 2)
+
+
+
+  expect_equal(data(container), df)
+  expect_equal(data(container, 1), df)
+  expect_equal(data(container, "test"), df)
+  expect_equal(data(container, "test")$STUDYID[1], "1234")
 
   # check metadata method
-  expect_equal(metadata(data_obj), list())
+  expect_equal(metadata(container), list())
 })

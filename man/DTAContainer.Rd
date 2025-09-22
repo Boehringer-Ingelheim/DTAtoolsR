@@ -4,7 +4,7 @@
 \alias{DTAContainer}
 \title{DTAContainer Class}
 \usage{
-DTAContainer(specs, data, fileinfo = list())
+DTAContainer(specs, data = list(), fileinfo = list())
 }
 \arguments{
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}

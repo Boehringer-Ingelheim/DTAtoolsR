@@ -10,8 +10,7 @@ DTAFileInfoCSV(
   pattern = FALSE,
   number_of_files = 1,
   has_header = TRUE,
-  quote = "\\"",
-  col_types = NULL
+  quote = "\\""
 )
 }
 \arguments{

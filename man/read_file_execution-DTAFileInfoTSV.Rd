@@ -18,5 +18,5 @@ Reads a TSV file using the parameters specified in a
 for efficient TSV parsing.
 }
 \seealso{
-\code{\link{readr::read_tsv}}
+\code{\link{arrow::read_tsv_arrow}}
 }
