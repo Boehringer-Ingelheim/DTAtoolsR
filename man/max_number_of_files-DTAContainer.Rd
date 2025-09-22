@@ -15,6 +15,6 @@ objects.
 }
 \examples{
 \dontrun{
-column_format <- number_of_files(dtafileinfo)
+column_format <- max_number_of_files(dtafileinfo)
 }
 }

@@ -14,6 +14,6 @@ Method to get Metadata from DTAContainer.
 }
 \examples{
 \dontrun{
-get_metadata(DTAContainer)
+metadata(DTAContainer)
 }
 }

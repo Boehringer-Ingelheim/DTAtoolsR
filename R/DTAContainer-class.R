@@ -82,12 +82,12 @@ DTAContainer <- new_class(
 #' \dontrun{
 #' column_format <- column(dtadata, "STUDYID")
 #' }
-#' @name column-DTAContainer
-if (!exists("column", mode = "function")) {
-  column <- new_generic("column", "x")
+#' @name colspec-DTAContainer
+if (!exists("colspec", mode = "function")) {
+  colspec <- new_generic("colspec", "x")
 }
 #' @export
-method(column, DTAContainer) <- function(x, id) {
+method(colspec, DTAContainer) <- function(x, id) {
   return(x@specs@columns[[id]])
 }
 
@@ -110,24 +110,26 @@ method(specs, DTAContainer) <- function(x) {
   return(x@specs)
 }
 
+
 #' @title Get table from DTAContainer Object
 #' @description
 #' Extract a table from the tables in a DTAContainer object.
 #' @param x An object of class DTAContainer.
 #' @param id Character or numeric. Name or index of the table to retrieve.
-#' @return A data.frame.
+#' @return A Table object
 #' @examples
 #' \dontrun{
-#' data(container)           # returns first table
-#' data(container, "lab")   # returns table named "lab"
+#' datatable(container)           # returns first table
+#' datatable(container, "lab")   # returns table named "lab"
 #' }
-#' @name data-DTAContainer
-if (!exists("data", mode = "function")) {
-  data <- new_generic("data", "x")
-}
+#' @name datatable-DTAContainer
+
+datatable <- new_generic("datatable", "x", function(x, id = 1, ...) {
+  S7_dispatch()
+})
 
 #' @export
-method(data, DTAContainer) <- function(x, id = 1) {
+method(datatable, DTAContainer) <- function(x, id = 1) {
   if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
