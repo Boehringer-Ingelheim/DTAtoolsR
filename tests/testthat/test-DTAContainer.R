@@ -16,10 +16,10 @@ test_that("DTAContainer object is created and tables are accessible", {
 
 
 
-  expect_equal(data(container), df)
-  expect_equal(data(container, 1), df)
-  expect_equal(data(container, "test"), df)
-  expect_equal(data(container, "test")$STUDYID[1], "1234")
+  expect_equal(datatable(container), df)
+  expect_equal(datatable(container, 1), df)
+  expect_equal(datatable(container, "test"), df)
+  expect_equal(datatable(container, "test")$STUDYID[1], "1234")
 
   # check metadata method
   expect_equal(metadata(container), list())
