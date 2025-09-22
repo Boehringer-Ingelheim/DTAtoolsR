@@ -40,7 +40,6 @@ DTAFileInfoTSV <- S7::new_class(
       number_of_files = number_of_files,
       sep = sep,
       has_header = has_header,
-      rownames = row_names,
       quote = quote,
       col_types = col_types
     ) 
