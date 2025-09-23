@@ -2,7 +2,11 @@
 % Please edit documentation in R/DTAContainer-class.R
 \name{colspec-DTAContainer}
 \alias{colspec-DTAContainer}
+\alias{colspec}
 \title{Get Column by ID Method}
+\usage{
+colspec(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTAContainer}
 

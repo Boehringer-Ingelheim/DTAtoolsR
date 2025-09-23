@@ -26,6 +26,9 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
     columns = list(STUDYID = col1, VISIT = col2)
   )
 
+  expect_equal(colspec(collection, 1), col1)
+
+
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_equal(get_column_ids(collection), c("STUDYID", "VISIT"))
   expect_equal(get_column(collection, "VISIT")@label, "Visit")

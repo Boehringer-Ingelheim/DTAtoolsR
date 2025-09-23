@@ -83,12 +83,12 @@ DTAContainer <- new_class(
 #' column_format <- column(dtadata, "STUDYID")
 #' }
 #' @name colspec-DTAContainer
-if (!exists("colspec", mode = "function")) {
-  colspec <- new_generic("colspec", "x")
-}
+#' @export
+colspec <- new_generic("colspec", "x")
+
 #' @export
 method(colspec, DTAContainer) <- function(x, id) {
-  return(x@specs@columns[[id]])
+  return(colspec(x@specs, id))
 }
 
 
@@ -103,6 +103,7 @@ method(colspec, DTAContainer) <- function(x, id) {
 #'   specs(container)
 #' }
 #' @name specs-DTAContainer
+#' @export
 specs <- new_generic("specs", "x")
 
 #' @export
@@ -117,24 +118,29 @@ method(specs, DTAContainer) <- function(x) {
 #' @param x An object of class DTAContainer.
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @return A Table object
+#' @importFrom cli cli_abort
 #' @examples
 #' \dontrun{
-#' datatable(container)           # returns first table
-#' datatable(container, "lab")   # returns table named "lab"
+#' data(container)           # returns first table
+#' data(container, "lab")   # returns table named "lab"
 #' }
-#' @name datatable-DTAContainer
-
-datatable <- new_generic("datatable", "x", function(x, id = 1, ...) {
+#' @name data-DTAContainer
+#' @export
+data <- new_generic("data", "x", function(x, id = 1, ...) {
   S7_dispatch()
 })
 
 #' @export
-method(datatable, DTAContainer) <- function(x, id = 1) {
+method(data, DTAContainer) <- function(x, id = 1) {
   if (!inherits(x, "DTAtools::DTAContainer")) {
     cli::cli_abort("Input must be a DTAContainer object.")
   }
 
   tables <- x@data
+
+  if(length(tables) == 0) {
+    cli::cli_abort("No tables found in the container.")
+  }
 
   if (is.character(id)) {
     if (!id %in% names(tables)) {
@@ -309,9 +315,8 @@ write_table_to_file <- function(
 #' metadata(DTAContainer)
 #' }
 #' @name metadata-DTAContainer
-if (!exists("metadata", mode = "function")) {
-  metadata <- new_generic("metadata", "x")
-}
+metadata <- new_generic("metadata", "x")
+
 #' @export
 method(metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
@@ -327,9 +332,8 @@ method(metadata, DTAContainer) <- function(x) {
 #' rules(DTAContainer)
 #' }
 #' @name rules-DTAContainer
-if (!exists("rules", mode = "function")) {
-  rules <- new_generic("rules", "x")
-}
+rules <- new_generic("rules", "x")
+
 #' @export
 method(rules, DTAContainer) <- function(x) {
   return(x@specs@rules)

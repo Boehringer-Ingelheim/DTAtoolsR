@@ -2,7 +2,11 @@
 % Please edit documentation in R/DTAContainer-class.R
 \name{metadata-DTAContainer}
 \alias{metadata-DTAContainer}
+\alias{metadata}
 \title{Get Metadata}
+\usage{
+metadata(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTAContainer}
 }

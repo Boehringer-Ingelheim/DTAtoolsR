@@ -2,7 +2,11 @@
 % Please edit documentation in R/DTAContainer-class.R
 \name{rules-DTAContainer}
 \alias{rules-DTAContainer}
+\alias{rules}
 \title{Get Rules}
+\usage{
+rules(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTAContainer}
 }

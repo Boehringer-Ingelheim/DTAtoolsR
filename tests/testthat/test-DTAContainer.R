@@ -14,12 +14,18 @@ test_that("DTAContainer object is created and tables are accessible", {
   expect_equal(max_number_of_files(container2), 2)
   expect_equal(min_number_of_files(container2), 2)
 
+  expect_equal(specs(container), specs)
 
 
-  expect_equal(datatable(container), df)
-  expect_equal(datatable(container, 1), df)
-  expect_equal(datatable(container, "test"), df)
-  expect_equal(datatable(container, "test")$STUDYID[1], "1234")
+
+
+  colspec(container, 1)
+
+
+  expect_equal(data(container), df)
+  expect_equal(data(container, 1), df)
+  expect_equal(data(container, "test"), df)
+  expect_equal(data(container, "test")$STUDYID[1], "1234")
 
   # check metadata method
   expect_equal(metadata(container), list())

@@ -62,12 +62,12 @@ DTAColumnSpecCollection <- new_class(
 #' @return A character vector of column names.
 #' @examples
 #' \dontrun{
-#' names <- get_column_ids(collection)
+#' names <- specids(collection)
 #' }
-#' @name get_column_ids-DTAColumnSpecCollection
+#' @name specids-DTAColumnSpecCollection
 #' @export
-get_column_ids <- new_generic("get_column_ids", "x")
-method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
+specids <- new_generic("specids", "x")
+method(specids, DTAColumnSpecCollection) <- function(x) {
   return(names(x@columns))
 }
 
@@ -79,14 +79,17 @@ method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' \dontrun{
-#'  column_format <- get_column(collection, "STUDYID")
+#'  column_format <- colspec(collection, "STUDYID")
 #' }
-#' @name get_column
-#' @rdname get_column-DTAColumnSpecCollection
-if (!exists("get_column", mode = "function")) {
-  get_column <- new_generic("get_column", "x")
-}
-method(get_column, DTAColumnSpecCollection) <- function(x, id) {
+#' @name colspec
+#' @rdname colspec-DTAColumnSpecCollection
+#' @export
+colspec <- new_generic("colspec", "x", function(x, ...) {
+  S7_dispatch()
+})
+
+#' @export
+method(colspec, DTAColumnSpecCollection) <- function(x, id) {
   return(x@columns[[id]])
 }
 
@@ -97,15 +100,14 @@ method(get_column, DTAColumnSpecCollection) <- function(x, id) {
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#'  get_metadata(collection)
+#'  metadata(collection)
 #' }
-#' @name get_metadata
-#' @rdname get_metadata-DTAColumnSpecCollection
+#' @name metadata
+#' @rdname metadata-DTAColumnSpecCollection
 #' @export
-if (!exists("get_metadata", mode = "function")) {
-  get_metadata <- new_generic("get_metadata", "x")
-}
-method(get_metadata, DTAColumnSpecCollection) <- function(x) {
+metadata <- new_generic("get_metadata", "x")
+
+method(metadata, DTAColumnSpecCollection) <- function(x) {
   return(x@metadata)
 }
 
@@ -116,14 +118,13 @@ method(get_metadata, DTAColumnSpecCollection) <- function(x) {
 #' @return A list with rules defined
 #' @examples
 #' \dontrun{
-#'  get_rules(collection)
+#'  rules(collection)
 #' }
-#' @name get_rules
+#' @name rules
 #' @export
-if (!exists("get_rules", mode = "function")) {
-  get_rules <- new_generic("get_rules", "x")
-}
-method(get_rules, DTAColumnSpecCollection) <- function(x) {
+rules <- new_generic("rules", "x")
+
+method(rules, DTAColumnSpecCollection) <- function(x) {
   return(x@rules)
 }
 
