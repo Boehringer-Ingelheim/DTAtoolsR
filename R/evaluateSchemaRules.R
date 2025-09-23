@@ -64,10 +64,10 @@ rule_check_unique <- function(rule, df) {
       id = rule@id,
       valid = FALSE,
       message = sprintf(
-        "Rule '%s' violated: %d duplicate values found in column %s",
+        "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
         rule@id,
         sum(duplicated_rows, na.rm = TRUE),
-        col
+        paste(cols, collapse = ", ")
       )
     )
   } else {
@@ -236,6 +236,7 @@ apply_schema_rules <- function(rules, df) {
 #'   Aborts with a CLI error if any rule fails.
 #' @param DTAColumnSpecCollection A `DTAColumnSpecCollection` with rules defined.
 #' @param table A data.frame to validate.
+#' @importFrom stats setNames
 #' @return (Invisibly) the list of rule results from `applySchemaRules()`.
 #' @export
 validate_rules <- function(DTAColumnSpecCollection, table) {
@@ -257,6 +258,7 @@ validate_rules <- function(DTAColumnSpecCollection, table) {
 }
 
 #' @keywords internal
+#' @importFrom methods is
 check_rule_class <- function(x) {
   if (methods::is(x, "DTAtools::DTARule")) {
     invisible(TRUE)

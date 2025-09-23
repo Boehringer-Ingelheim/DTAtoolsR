@@ -29,4 +29,5 @@ test_that("DTAContainer object is created and tables are accessible", {
 
   # check metadata method
   expect_equal(metadata(container), list())
+
 })

@@ -7,13 +7,14 @@ columns:
     label: Study Identifier
     type: Char
     nullable: false
+    length: 10
     values:
       - 1234-5678
-    pattern: ^[0-9]{4}-[0-9]{4}$
     description: Unique study ID
   - id: VISIT
     label: Visit
     type: Char
+    length: 12
     nullable: false
     values:
       - V01
@@ -38,6 +39,7 @@ columns:
   - id: INCLUDE
     label: Include in analysis
     type: Char
+    length: 1
     nullable: true
     values:
       - "Y"
