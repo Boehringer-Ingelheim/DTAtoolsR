@@ -84,9 +84,10 @@ method(specids, DTAColumnSpecCollection) <- function(x) {
 #' @name colspec
 #' @rdname colspec-DTAColumnSpecCollection
 #' @export
-colspec <- new_generic("colspec", "x", function(x, ...) {
-  S7_dispatch()
-})
+# colspec <- new_generic("colspec", "x", function(x, ...) {
+#   S7_dispatch()
+# })
+colspec <- new_generic("colspec", "x")
 
 #' @export
 method(colspec, DTAColumnSpecCollection) <- function(x, id) {
