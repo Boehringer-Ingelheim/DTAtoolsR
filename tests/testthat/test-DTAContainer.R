@@ -19,5 +19,5 @@ test_that("DTAContainer object is created and tables are accessible", {
   expect_equal(get_data(data_obj, "test")$STUDYID[1], "1234")
 
   # check metadata method
-  expect_equal(metadata(data_obj), list())
+  expect_equal(get_metadata(data_obj), list())
 })

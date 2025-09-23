@@ -64,9 +64,12 @@ DTAColumnSpecCollection <- new_class(
 #' \dontrun{
 #' names <- get_column_ids(collection)
 #' }
-#' @name get_column_ids-DTAColumnSpecCollection
+#' @name get_column_ids
+#' @rdname get_column_ids-DTAColumnSpecCollection
 #' @export
-get_column_ids <- new_generic("get_column_ids", "x")
+if (!exists("get_column_ids", mode = "function")) {
+  get_column_ids <- new_generic("get_column_ids", "x")
+}
 method(get_column_ids, DTAColumnSpecCollection) <- function(x) {
   return(names(x@columns))
 }

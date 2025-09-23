@@ -52,6 +52,7 @@ DTA <- new_class(
 #'   get_metadata(DTA)
 #' }
 #' @name get_metadata
+#' @rdname get_metadata-DTA
 #' @export
 if (!exists("get_metadata", mode = "function")) {
   get_metadata <- new_generic("get_metadata", "x")

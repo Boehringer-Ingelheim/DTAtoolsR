@@ -4,7 +4,7 @@ class_DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection"
 )
 class_DTAContainer <- S7::new_class("DTAContainer")
-class_DTAMetadata <- S7::new_class("DTAMetadata")
+class_DTAMetadata <- S7::new_class("DTAMetaData")
 class_character_or_null <- class_character | class_null
 class_numeric_or_null <- class_numeric | class_null
 class_character_or_numeric_or_null <- class_character |
