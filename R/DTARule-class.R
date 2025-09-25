@@ -109,5 +109,64 @@ DTARule <- new_class(
     then = class_character_or_null_or_list,
     column = class_character_or_null_or_list,
     range = class_vector_or_null
-  )
+  ),
+  validator = function(self) {
+    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
+      "@id cannot have whitespaces and needs to be defined."
+    }
+  }
 )
+
+
+
+
+#' @title print
+#' @description
+#' Print overview for DTARule
+#' @param x An object of class DTARule
+#' @importFrom stringr str_glue
+#' @importFrom stringr str_flatten_comma
+#' @examples
+#' \dontrun{
+#'  print(rule)
+#' }
+#' @name print
+#' @export
+print <- new_generic("print", "x")
+
+method(print, DTARule) <- function(x) {
+
+  cat(str_glue("{x@id}:<DTAtools::DTARule>\n"))
+  cat(str_glue("- type: {x@type}\n"))
+  cat(str_glue("- condition: {x@condition}\n"))
+  cat(str_glue("- then: {x@then}\n"))
+  cat(str_glue("- column: {x@column}\n"))
+  cat(str_glue("- range: {x@range}"))
+}
+
+
+#' @title create_example_rule
+#' @description
+#' create example for DTARule
+#' @param index rule selector
+#' @importFrom cli abort
+#' @examples
+#'  library(DTAtools)
+#'  create_example_rule()
+#' @name create_example_rule
+#' @export
+create_example_rule <- new_generic("create_example_rule", "x")
+
+create_example_rule <- function(index = 1) {
+  if(index == 1) {
+    DTARule (
+      id = "rule1",
+      type = "check_range",
+      column = "age",
+      range = list(18, 65)
+    )
+  } else {
+    cli::abort("index not found")
+  }
+}
+

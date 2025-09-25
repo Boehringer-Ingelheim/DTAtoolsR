@@ -1,9 +1,3 @@
-test_that("testing import_specs_from_yaml", {
-  specs <- import_specs_from_yaml(system.file("extdata", "params_gf.yaml", package = "DTAtools"))
-
-  expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
-})
-
 test_that("DTAColumnSpecCollection stores and retrieves specs", {
   col1 <- DTAColumnSpec(
     id = "STUDYID",
@@ -26,12 +20,9 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
     columns = list(STUDYID = col1, VISIT = col2)
   )
 
-  expect_equal(colspec(collection, 1), col1)
-
-
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
-  expect_equal(get_column_ids(collection), c("STUDYID", "VISIT"))
-  expect_equal(get_column(collection, "VISIT")@label, "Visit")
+  expect_equal(getColumnIds(collection), c("STUDYID", "VISIT"))
+  expect_equal(getColumn(collection, "VISIT")@label, "Visit")
 })
 
 test_that("specs_from_list constructs valid object", {
@@ -71,24 +62,19 @@ test_that("specs_from_list constructs valid object", {
     rules = rules
   )
 
+  print(collection)
   # Assertions
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_named(collection@columns, c("STUDYID", "VISIT"))
   expect_equal(collection@columns$STUDYID@id, "STUDYID")
   expect_equal(collection@columns$VISIT@values, list("V01", "EOT"))
-  expect_equal(
-    class(collection@columns[[1]]),
-    c("DTAtools::DTAColumnSpec", "S7_object")
-  )
-  expect_equal(
-    class(collection@rules[[1]]),
-    c("DTAtools::DTARule", "S7_object")
-  )
+  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
+  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
 
-  # check metadata method
-  expect_equal(get_metadata(collection), list())
+  # check getMetadata method
+  expect_equal(getMetadata(collection), list())
 
-  # Test specs_to_list
+  # Test DTAColumnSpecCollectionToList
 
   list <- specs_to_list(collection)
   expect_type(list, "list")

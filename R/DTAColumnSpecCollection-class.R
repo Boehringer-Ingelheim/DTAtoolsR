@@ -16,19 +16,10 @@
 DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
   constructor = function(columns, metadata = list(), rules = list()) {
-    # Ensure columns is a list of DTAColumnSpec objects
     if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
       )
-    }
-
-    if (length(rules) > 0) {
-      if (!all(sapply(rules, inherits, "DTAtools::DTARule"))) {
-        cli::cli_abort(
-          "All elements in 'rules' must be of class 'DTARule'"
-        )
-      }
     }
 
     # Transform to column specs schema to jsonschema
@@ -51,8 +42,74 @@ DTAColumnSpecCollection <- new_class(
     json_schema = class_character,
     metadata = class_list,
     rules = class_any
-  )
+  ),
+  validator = function(self) {
+    # Ensure columns is a list of DTAColumnSpec objects
+  if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
+      cli::cli_abort(
+        "All elements in 'columns' must be of class 'DTAColumnSpec'"
+      )
+    }
+
+    if (length(rules) > 0) {
+      if (!all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
+        cli::cli_abort(
+          "All elements in 'rules' must be of class 'DTARule'"
+        )
+      }
+    }
+  }
 )
+
+
+#' @title print
+#' @description
+#' Print overview for DTAColumnSpecCollection
+#' @param x An object of class DTAColumnSpecCollection.
+#' @importFrom stringr str_c
+#' @importFrom stringr str_flatten_comma
+#' @examples
+#' \dontrun{
+#'  print(specs)
+#' }
+#' @name print
+#' @export
+print <- new_generic("print", "x")
+
+method(print, DTAColumnSpecCollection) <- function(x) {
+  if (length(x@columns) > 5) {
+    col_preview <- str_flatten_comma(
+        map(x@columns[1:4], function(y) y@id),
+        "...",
+        x@columns[length(x@columns)]@id
+    )
+
+  } else if (length(x@columns) <= 5) {
+    col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
+  } else {
+    col_preview <- "not set"
+  }
+
+  if (length(x@rules) > 5) {
+    rule_preview <- str_flatten_comma(
+      map(x@columns[1:4], function(y) y@id),
+      "...",
+      x@rules[length(x@rules)]@id
+    )
+
+  } else if (length(x@rules) <= 5) {
+    rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
+  } else {
+    rule_preview <- "not set"
+  }
+
+  cat("<DTAColumnSpecCollection>:\n")
+  cat(str_c("- columns (", length(x@columns), "): ", col_preview, "\n"))
+  cat(str_c("- schema: ", ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross), "\n"))
+  cat(str_c("- rules (", length(x@rules), "): ", rule_preview, "\n"))
+  cat(str_c("- metadata ",ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross)))
+}
+
 
 #' @title Get Names Method
 #' @description
@@ -687,3 +744,7 @@ specs_to_list <- function(
 
   return(list(columns = specs, rules = rules, metadata = metadata))
 }
+
+
+
+

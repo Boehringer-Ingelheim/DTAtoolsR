@@ -92,3 +92,4 @@ get_arrow_schema_type <- function(x) {
     NA_character_
   )
 }
+
