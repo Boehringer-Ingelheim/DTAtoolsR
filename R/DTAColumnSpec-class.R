@@ -93,3 +93,94 @@ get_arrow_schema_type <- function(x) {
   )
 }
 
+
+#' @title Create Example DTAColumnSpec
+#' @description
+#' S7 method to create and return an example DTAColumnSpec object.
+#' @export
+create_example_DTAColumnSpec <- new_generic("create_example_DTAColumnSpec", "x")
+
+method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
+  switch(
+    index,
+    `1` = {
+      col1 <- DTAtools::DTAColumnSpec(
+        id = "STUDYID",
+        label = "Study Identifier",
+        type = "Char",
+        nullable = FALSE,
+        values = list("1234", "5678"),
+        description = "Unique study identifier"
+      )
+      col2 <- DTAtools::DTAColumnSpec(
+        id = "VISIT",
+        label = "Visit",
+        type = "Char",
+        nullable = FALSE,
+        values = list("V01", "EOT"),
+        description = "Visit code"
+      )
+      example_metadata <- list(author = "Example Author", version = "1.0")
+      example_rules <- list()
+      DTAColumnSpecCollection(
+        columns = list(STUDYID = col1, VISIT = col2),
+        metadata = example_metadata,
+        rules = example_rules
+      )
+    },
+    `2` = {
+      col1 <- DTAtools::DTAColumnSpec(
+        id = "SUBJID",
+        label = "Subject Identifier",
+        type = "Char",
+        nullable = FALSE,
+        values = list("001", "002"),
+        description = "Unique subject identifier"
+      )
+      col2 <- DTAtools::DTAColumnSpec(
+        id = "AGE",
+        label = "Age",
+        type = "Int",
+        nullable = TRUE,
+        values = list(18, 65),
+        description = "Age in years"
+      )
+      example_metadata <- list(author = "Example Author", version = "2.0")
+      example_rules <- list()
+      DTAColumnSpecCollection(
+        columns = list(SUBJID = col1, AGE = col2),
+        metadata = example_metadata,
+        rules = example_rules
+      )
+    },
+    {
+      stop("Invalid index value for example DTAColumnSpec.")
+    }
+  )
+  col1 <- DTAtools::DTAColumnSpec(
+    id = "STUDYID",
+    label = "Study Identifier",
+    type = "Char",
+    nullable = FALSE,
+    values = list("1234", "5678"),
+    description = "Unique study identifier"
+  )
+  col2 <- DTAtools::DTAColumnSpec(
+    id = "VISIT",
+    label = "Visit",
+    type = "Char",
+    nullable = FALSE,
+    values = list("V01", "EOT"),
+    description = "Visit code"
+  )
+  example_metadata <- list(author = "Example Author", version = "1.0")
+  example_rules <- list()
+  DTAColumnSpecCollection(
+    columns = list(STUDYID = col1, VISIT = col2),
+    metadata = example_metadata,
+    rules = example_rules
+  )
+}
+
+
+

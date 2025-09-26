@@ -100,7 +100,7 @@ columns:
 
 rules:
   - id: rule_equal_example
-    type: check_condition
+    type: check_col_condition
     condition:
       VISIT:
         equals: V03
@@ -108,7 +108,7 @@ rules:
       STATUS:
         equals: COMPLETED
   - id: rule_unequal_example
-    type: check_condition
+    type: check_col_condition
     condition:
       VISIT:
         equals: V03
@@ -122,7 +122,7 @@ rules:
       - 18
       - 65
   - id: rule_dependency_example
-    type: check_condition
+    type: check_col_condition
     condition:
       CONSENT:
         equals: "YES"
@@ -134,8 +134,8 @@ rules:
     column: 
       - SUBJECT_ID
       - VISIT
-  - id: check_condition_example
-    type: check_condition
+  - id: check_col_condition_example
+    type: check_col_condition
     condition:
       VISIT:
         equals: V03

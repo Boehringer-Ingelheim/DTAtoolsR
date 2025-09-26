@@ -10,3 +10,6 @@ testdata
 example/
 *Rproj
 helper.R
+renv
+renv/
+

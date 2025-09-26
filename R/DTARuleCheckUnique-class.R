@@ -1,0 +1,129 @@
+#' @title DTARuleCheckUnique Class
+#' @description
+#' Represents a single rule for validating data tables. The rule can be of various types,
+#' such as `check_range`, `check_unique`, or `check_col_condition`
+#'
+#' @import S7
+#' @importFrom cli cli_abort
+#' @export
+#'
+#' @param id Character. A unique identifier for the rule.
+#' @param column list of columns that will be collectively checked if the 
+#' combinations are unique throughout the table
+#' @return An object of class `DTARule`.
+#'
+#' @examples
+#' # Create a check_unique rule
+#' rule2 <- DTAtools::DTARuleCheckUnique(
+#'   id = "rule2",
+#'   columns = "id"
+#' )
+#' @include DTARule-class.R
+DTARuleCheckUnique <- new_class(
+  "DTARuleCheckUnique",
+  parent = DTARule,
+
+  constructor = function(
+    id,
+    type,
+    columns = NULL
+  ) {
+    new_object(
+      .parent = DTAtools::DTARule(
+        id = id,
+        type = "check_unique"
+      ),
+      columns = columns
+    )
+  },
+
+  # Define the properties of the class
+  properties = list(
+    id = class_character, # Unique identifier for the rule
+    type = class_character, # Type of the rule
+    columns = class_character_or_list
+  ),
+  validator = function(self) {
+    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
+      "@id cannot have whitespaces and needs to be defined."
+    }
+
+    if (!self@type == "check_unique") {
+      "'type' must be 'check_unique'."
+    }
+
+    if (is.null(self@columns) || length(self@columns) < 1) {
+      "'columns' must be a non-empty list of column names."
+    }
+  }
+)
+
+ 
+#' @title print
+#' @description
+#' Print overview for DTARule
+#' @param x An object of class DTARule
+#' @importFrom stringr str_glue
+#' @importFrom stringr str_flatten_comma
+#' @examples
+#' \dontrun{
+#'  print(rule)
+#' }
+#' @name print
+#' @export
+print <- new_generic("print", "x")
+
+method(print, DTARule) <- function(x) {
+
+  cat(str_glue("{x@id}:<DTAtools::DTARule>\n"))
+}
+
+#' @title create_example_DTARuleCheckUnique
+#' @description
+#' create example for DTARuleCheckUnique
+#' @param index rule selector
+#' @importFrom cli cli_abort
+#' @examples
+#'  library(DTAtools)
+#'  create_example_DTARuleCheckUnique()
+#' @name create_example_DTARuleCheckUnique
+#' @export
+create_example_DTARuleCheckUnique <- function(index = 1) { # nolint
+  if (index == 1) {
+    return(DTAtools::DTARuleCheckUnique(
+      id = "rule_unique1",
+      type = "check_unique",
+      column = "id"
+    ))
+  } else if (index == 2) {
+    return(DTAtools::DTARuleCheckUnique(
+      id = "rule_unqiue2",
+      type = "check_unique",
+      column = c("id", "visit")
+    ))
+  } else {
+    cli::cli_abort("No example found with index {index}.")
+  }
+}
+
+
+#' @title check
+#' @description
+#' check rule against data
+#' @importFrom cli cli_abort
+#' @importFrom arrow Table
+#' @examples
+#' \dontrun{
+#'  # TODO
+#' }
+#' @name check
+#' @export
+method(check, DTARuleCheckUnique) <- function(x, tab) { # nolint
+
+  if (!inherits(tab, "Table")) {
+    cli::cli_abort("The 'tab' argument must be an arrow Table.")
+  }
+
+  # TODO from here
+}
+

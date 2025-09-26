@@ -168,7 +168,7 @@ Rules must be defined under the top-level key `rules` in the YAML file. Each rul
 
 ### Supported Rule Types
 
-#### `check_condition`
+#### `check_col_condition`
 
 Implements logic to evaluate the validity of the table composition.
 
@@ -189,7 +189,7 @@ Implemented operators are:
 
 ```yaml
 - id: rule_equal_example
-  type: check_condition
+  type: check_col_condition
   condition:
     VISIT:
       equals: V03
@@ -197,7 +197,7 @@ Implemented operators are:
     STATUS:
       equals: COMPLETED
 - id: rule_unequal_example
-  type: check_condition
+  type: check_col_condition
   condition:
     VISIT:
       equals: V03
@@ -205,15 +205,15 @@ Implemented operators are:
     STATUS:
       not_equals: DROPPED
 - id: rule_dependency_example
-  type: check_condition
+  type: check_col_condition
   condition:
     CONSENT:
       equals: "YES"
   then:
     CONSENT_DATE:
       empty: false
-- id: check_condition_example
-  type: check_condition
+- id: check_col_condition_example
+  type: check_col_condition
   condition:
     VISIT:
       equals: V03
@@ -231,7 +231,7 @@ Implemented operators are:
     WEIGHT:
       greater_equal: 5
 - id: check_gfreasnd
-  type: check_condition
+  type: check_col_condition
   condition:
     GFREASND:
       empty: true
@@ -241,7 +241,7 @@ Implemented operators are:
     GFORRES:
       empty: false
 - id: check_gfreasnd2
-  type: check_condition
+  type: check_col_condition
   condition:
     GFREASND:
       empty: false
@@ -251,7 +251,7 @@ Implemented operators are:
     GFORRES:
       empty: true
 - id: check_sequencing_facility
-  type: check_condition
+  type: check_col_condition
   condition:
     GFREFID:
       pattern: "^Internal_[0-9]*$"
@@ -259,7 +259,7 @@ Implemented operators are:
     GFNAM:
       equals: "Internal"
 - id: check_sequencing_facility2
-  type: check_condition
+  type: check_col_condition
   condition:
     GFREFID:
       pattern: "^External_[0-9]*$"
@@ -345,7 +345,7 @@ metadata:
 - Rule types implemented:
   - `check_range`
   - `check_unique`
-  - `check_condition`
+  - `check_col_condition`
 
 ### Manually add specs
 

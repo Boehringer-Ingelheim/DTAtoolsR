@@ -252,7 +252,7 @@ columns:
 rules:
   - id: check_equals
     description: "If STUDYID is '1234-5678', then DOMAIN must be 'GF'"
-    type: check_condition
+    type: check_col_condition
     condition:
       STUDYID:
         equals: "1234-5678"
@@ -261,7 +261,7 @@ rules:
         equals: "GF"
   - id: unequal_check
     description: "If STUDYID is '1234-5678', then DOMAIN must not be 'DF'"
-    type: check_condition
+    type: check_col_condition
     condition:
       STUDYID:
         equals: "1234-5678"
@@ -281,7 +281,7 @@ rules:
     range: [0, 100000000]
   - id: dependency_check
     description: "If GFREASND is 'DATA ANALYSIS QC FAILED', then GFSTAT must not be null"
-    type: check_condition
+    type: check_col_condition
     condition:
       GFREASND:
         equals: "DATA ANALYSIS QC FAILED"
@@ -290,7 +290,7 @@ rules:
         empty: false
   - id: mutual_exclusivity_check
     description: "If GFREASND is populated GFORRES must be empty"
-    type: check_condition
+    type: check_col_condition
     condition:
       GFREASND:
         empty: false
@@ -298,7 +298,7 @@ rules:
       GFORRES:
         empty: true
   - id: overlap_check
-    type: check_condition
+    type: check_col_condition
     condition:
       GFSPEC:
         equals: miRNA

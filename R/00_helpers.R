@@ -11,10 +11,10 @@ class_character_or_numeric_or_null <- class_character |
   class_numeric |
   class_null
 class_logical_or_null <- class_logical | class_null
-class_character_or_null_or_list <- class_character |
-  class_null |
+class_character_or_list <- class_character |
   class_list
 class_character_or_numeric_or_null_or_list <- class_character |
   class_numeric |
   class_null |
   class_list
+#class_vector_or_null <- class_vector | class_null

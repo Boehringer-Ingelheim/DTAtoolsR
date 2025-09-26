@@ -19,10 +19,10 @@ test_that("Rules validation with test data frame", {
     WEIGHT = c(15, 4, 15, 20)
   )
 
-  # Rule: check_condition - rule_equal_example
-  result <- rule_check_condition(
+  # Rule: check_col_condition - rule_equal_example
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "rule_equal_example",
       condition = list(VISIT = list(equals = "V03")),
       then = list(STATUS = list(equals = "COMPLETED")),
@@ -31,10 +31,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_false(result$valid)
 
-  # Rule: check_condition - rule_unequal_example
-  result <- rule_check_condition(
+  # Rule: check_col_condition - rule_unequal_example
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "rule_unequal_example",
       condition = list(VISIT = list(equals = "V03")),
       then = list(STATUS = list(not_equals = "DROPPED"))
@@ -67,10 +67,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - rule_dependency_example
-  result <- rule_check_condition(
+  # Rule: check_col_condition - rule_dependency_example
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "rule_dependency_example",
       "condition" = list(CONSENT = list(equals = "YES")),
       then = list(CONSENT_DATE = list(empty = FALSE))
@@ -79,10 +79,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - rule_exclusivity
-  result <- rule_check_condition(
+  # Rule: check_col_condition - rule_exclusivity
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "rule_exclusivity_example",
       "condition" = list(CONSENT = list(equals = "YES")),
       then = list(CONSENT_DATE = list(empty = TRUE))
@@ -91,10 +91,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_false(result$valid)
 
-  # Rule: check_condition - rule_dependency_column
-  result <- rule_check_condition(
+  # Rule: check_col_condition - rule_dependency_column
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "rule_dependency_column",
       condition = list(CONSENT = list(empty = FALSE)),
       then = list(CONSENT_DATE = list(empty = FALSE))
@@ -125,11 +125,11 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - check_condition_example
-  result <- rule_check_condition(
+  # Rule: check_col_condition - check_col_condition_example
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
-      id = "check_condition_example",
+      type = "check_col_condition",
+      id = "check_col_condition_example",
       "condition" = list(VISIT = list(equals = "V03")),
       then = list(
         STATUS = list(`in` = c("COMPLETED", "IN_PROGRESS")),
@@ -142,10 +142,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - check_equals
-  result <- rule_check_condition(
+  # Rule: check_col_condition - check_equals
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "check_equals",
       condition = list(STUDYID = list(equals = "1234-5678")),
       then = list(DOMAIN = list(equals = "GF"))
@@ -154,10 +154,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - unequal_check
-  result <- rule_check_condition(
+  # Rule: check_col_condition - unequal_check
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "unequal_check",
       condition = list(STUDYID = list(equals = "1234-5678")),
       then = list(DOMAIN = list(not_equals = "DF"))
@@ -178,10 +178,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - dependency_check
-  result <- rule_check_condition(
+  # Rule: check_col_condition - dependency_check
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "dependency_check",
       "condition" = list(GFREASND = list(empty = FALSE)),
       then = list(GFORRES = list(empty = TRUE))
@@ -190,10 +190,10 @@ test_that("Rules validation with test data frame", {
   )
   expect_true(result$valid)
 
-  # Rule: check_condition - overlap_check
-  result <- rule_check_condition(
+  # Rule: check_col_condition - overlap_check
+  result <- rule_check_col_condition(
     DTARule(
-      type = "check_condition",
+      type = "check_col_condition",
       id = "overlap_check",
       "condition" = list(GFSPEC = list(equals = "toRNA")),
       then = list(GFTESTCD = list(equals = "TRNSCPTN"))

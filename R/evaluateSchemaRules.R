@@ -126,10 +126,10 @@ evaluate_conditions <- function(conditions, df) {
   Reduce(`&`, results)
 }
 
-#' @title Rule: check_condition
-#' @param rule A DTARule object of type `"check_condition"`. Expected slots:
+#' @title Rule: check_col_condition
+#' @param rule A DTARule object of type `"check_col_condition"`. Expected slots:
 #'   - `@id` character
-#'   - `@type` = "check_condition"
+#'   - `@type` = "check_col_condition"
 #'   - `@condition` list: named by column, each with one of:
 #'       `equals`, `not_equals`, `in`, `not_in`,
 #'       `greater`, `less`, `greater_equal`, `less_equal`, `range`, `empty`
@@ -150,9 +150,9 @@ evaluate_conditions <- function(conditions, df) {
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' # Example: If species == "setosa", then petal_length in [1.0, 1.9]
-#' # rule_check_condition(rule, iris)
+#' # rule_check_col_condition(rule, iris)
 #' @export
-rule_check_condition <- function(rule, df) {
+rule_check_col_condition <- function(rule, df) {
   check_rule_class(rule)
   if_conditions <- rule@condition
   then_conditions <- rule@then
@@ -192,7 +192,7 @@ apply_schema_rules <- function(rules, df) {
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
-    check_condition = rule_check_condition
+    check_col_condition = rule_check_col_condition
   )
 
   results <- lapply(rules, function(rule) {
@@ -240,7 +240,7 @@ apply_schema_rules <- function(rules, df) {
 #' @return (Invisibly) the list of rule results from `applySchemaRules()`.
 #' @export
 validate_rules <- function(DTAColumnSpecCollection, table) {
-  rules <- get_rules(DTAColumnSpecCollection)
+  rules <- rules(DTAColumnSpecCollection)
   results <- apply_schema_rules(rules, table)
 
   failed <- Filter(function(x) isFALSE(x$valid), results)

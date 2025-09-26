@@ -746,5 +746,35 @@ specs_to_list <- function(
 }
 
 
+#' @title Create Example DTAColumnSpecCollection
+#' @description
+#' S7 method to create and return an example DTAColumnSpecCollection object.
+#' @export
+create_example_DTAColumnSpecCollection <- new_generic("create_example_DTAColumnSpecCollection", "x")
 
+method(create_example_DTAColumnSpecCollection, DTAColumnSpecCollection) <- function(x) {
+  col1 <- DTAtools::DTAColumnSpec(
+    id = "STUDYID",
+    label = "Study Identifier",
+    type = "Char",
+    nullable = FALSE,
+    values = list("1234", "5678"),
+    description = "Unique study identifier"
+  )
+  col2 <- DTAtools::DTAColumnSpec(
+    id = "VISIT",
+    label = "Visit",
+    type = "Char",
+    nullable = FALSE,
+    values = list("V01", "EOT"),
+    description = "Visit code"
+  )
+  example_metadata <- list(author = "Example Author", version = "1.0")
+  example_rules <- list()
+  DTAColumnSpecCollection(
+    columns = list(STUDYID = col1, VISIT = col2),
+    metadata = example_metadata,
+    rules = example_rules
+  )
+}
 
