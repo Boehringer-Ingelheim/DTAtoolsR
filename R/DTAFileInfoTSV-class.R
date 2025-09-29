@@ -79,7 +79,7 @@ method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
 #' create_example_DTAFileInfoTSV()
 #' @export
 create_example_DTAFileInfoTSV <- function(index = 1) {
-  if (index != 1) {
+  if (index == 1) {
     example_file <- system.file("extdata", "data_spec.tsv", package = "DTAtoolsR")
     DTAFileInfoTSV(
       filename = basename(example_file) # makes sure this was derived from existing example
