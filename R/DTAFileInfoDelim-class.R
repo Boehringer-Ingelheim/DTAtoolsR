@@ -2,7 +2,7 @@
 #'
 #' @description
 #' Defines the S7 class \code{DTAFileInfoDelim}, which extends \code{DTAFileInfo}
-#' to represent metadata and configuration for Delim (Tab-Separated Values)
+#' to represent metadata and configuration for TSV (Tab-Separated Values)
 #'  data files.
 #'
 #' @param filename Character vector of file names or regular expression patterns
@@ -17,54 +17,48 @@
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
-#' @param col_types Character string specifying the type of each column (e.g.,
-#'   \code{"cccidcl"}). Default is \code{NULL}.
 #'
-#' @name DTAFileInfoDelim-class
 #' @return An object of class \code{DTAFileInfoDelim}.
-#'
+#' @name DTAFileInfoDelim-class
 #' @seealso \code{\link{DTAFileInfo}}
 #'
 #' @export
 DTAFileInfoDelim <- S7::new_class(
-  "DTAFileInfo",
-  parent = DTAFileInfo,
+  "DTAFileInfoDelim",
+  parent = DTAFileInfoTabular,
   constructor = function(
     filename,
     pattern = FALSE,
     number_of_files = 1,
-    sep = "\t",
     has_header = TRUE,
     quote = '"'
   ) {
     new_object(
-      .parent = DTAFileInfo(filename = filename,
-                  number_of_files = number_of_files,
-                  pattern = pattern),
-      sep = sep,
-      has_header = has_header,
-      quote = quote
+      DTAFileInfoTabular(
+        filename = filename,
+        number_of_files = number_of_files,
+        pattern = pattern,
+        has_header = has_header,
+        quote = quote,
+        sep = "\t")
     )
-  },
-  properties = list(
-    sep = class_character,
-    has_header = class_logical,
-    quote = class_character
-  )
+  }
 )
 
 
 #' @title Read File for DTAFileInfoDelim Objects
-##' @name read_file_execution-DTAFileInfoDelim
 #' @description
-#' Reads a Delim file using the parameters specified in a
-#' \code{DTAFileInfoDelim} object. This method uses \code{readr::read_Delim}
-#' for efficient Delim parsing.
-#' @importFrom arrow read_delim_arrow
+#' Reads a TSV file using the parameters specified in a
+#' \code{DTAFileInfoDelim} object. This method uses \code{arrow::read_delim_arrow}
+#' for efficient TSV parsing.
+#'
 #' @param x A \code{DTAFileInfoDelim} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
+#'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
+##' @seealso \code{\link{arrow::read_tsv_arrow}}
+##' @name read_file_execution-DTAFileInfoDelim
 method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
   return(arrow::read_delim_arrow(
     file,

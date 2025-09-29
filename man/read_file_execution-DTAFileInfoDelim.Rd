@@ -13,7 +13,10 @@ A tibble containing the contents of the file if the filename
 matches; otherwise, returns \code{NULL}.
 }
 \description{
-Reads a Delim file using the parameters specified in a
-\code{DTAFileInfoDelim} object. This method uses \code{readr::read_Delim}
-for efficient Delim parsing.
+Reads a TSV file using the parameters specified in a
+\code{DTAFileInfoDelim} object. This method uses \code{arrow::read_delim_arrow}
+for efficient TSV parsing.
+}
+\seealso{
+\code{\link{arrow::read_tsv_arrow}}
 }

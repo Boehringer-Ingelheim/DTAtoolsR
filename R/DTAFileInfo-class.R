@@ -231,7 +231,7 @@ method(read_file, DTAFileInfo) <- function(x, file) {
       stop(simpleError(str_glue("File '{file}' cannot be found.")))
     }
   } else {
-    stop(simpleError("The provided file does not match the filename in the DTAFileInfoDelim object."))
+    stop(simpleError("The provided file does not match the filename in the DTAFileInfoTabular object."))
   }
 }
 

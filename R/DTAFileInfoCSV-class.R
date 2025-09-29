@@ -22,11 +22,11 @@
 #' @return An object of class \code{DTAFileInfoCSV}.
 #'
 #' @seealso \code{\link{DTAFileInfo}}
-#' @include DTAFileInfoDelim-class.R
+#' @include DTAFileInfoTabular-class.R
 #' @export
 DTAFileInfoCSV <- S7::new_class(
   "DTAFileInfoCSV",
-  parent = DTAFileInfoDelim,
+  parent = DTAFileInfoTabular,
   constructor = function(
     filename,
     pattern = FALSE,
@@ -35,7 +35,7 @@ DTAFileInfoCSV <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      DTAFileInfoDelim(
+      DTAFileInfoTabular(
         filename = filename,
         number_of_files = number_of_files,
         pattern = pattern,

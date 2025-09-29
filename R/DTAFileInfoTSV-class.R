@@ -25,7 +25,7 @@
 #' @export
 DTAFileInfoTSV <- S7::new_class(
   "DTAFileInfoTSV",
-  parent = DTAFileInfoDelim,
+  parent = DTAFileInfoTabular,
   constructor = function(
     filename,
     pattern = FALSE,
@@ -34,7 +34,7 @@ DTAFileInfoTSV <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      DTAFileInfoDelim(
+      DTAFileInfoTabular(
         filename = filename,
         number_of_files = number_of_files,
         pattern = pattern,
@@ -61,7 +61,7 @@ DTAFileInfoTSV <- S7::new_class(
 ##' @name read_file_execution-DTAFileInfoTSV
 method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
   return(arrow::read_tsv_arrow(
-    path,
+    file,
     quote = x@quote,
     skip = if (x@has_header) 0 else 1,
     #col_names = x@has_header,
