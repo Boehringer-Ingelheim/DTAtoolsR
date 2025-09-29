@@ -1,7 +1,7 @@
 #' @title DTAContainer Class
 #' @description Handles tables  based on column specifications. Every table will be validated using the column specifications.
 #' @import S7
-#' @importFrom cli cli_h1
+#' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param fileinfo a list of DTAFileInfo objects specifying input file information.
@@ -33,17 +33,21 @@ DTAContainer <- new_class(
       fileinfo = list(fileinfo)
     }
 
-    names <- names(data)
-    for (name in names(data)) {
-      data_entry <- data[[name]]
-      data_entry[data_entry == ""] <- NA
-      cli::cli_h1("Checking {name} data entry")
-      data_entry <- validate_table(
-        specs,
-        data_entry
-      )
-      data[[name]] <- data_entry
+    if(inherits(data, "Table")) {
+      data = list(data)
     }
+
+    # names <- names(data)
+    # for (name in names(data)) {
+    #   data_entry <- data[[name]]
+    #   #data_entry[data_entry == ""] <- NA
+    #   cli_alert_info("Checking {name} data entry")
+    #   data_entry <- validate_table(
+    #     specs,
+    #     data_entry
+    #   )
+    #   data[[name]] <- data_entry
+    # }
     new_object(
       S7_object(),
       specs = specs,
@@ -54,18 +58,18 @@ DTAContainer <- new_class(
   properties = list(
     specs = class_DTAColumnSpecCollection,
     data = class_list, # list of arrow tables
-    fileinfo = class_any # list of DTAFileInfo
+    fileinfo = class_list # list of DTAFileInfo
   ),
   validator = function(self) {
     # check if all elements of list self@data inherit from "Table"
     if (!all(sapply(self@data, inherits, "Table"))) {
-      cli::cli_abort("All elements in 'data' must be of class 'Table'")
+      cli_abort("All elements in 'data' must be of class 'Table'")
     }
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
-      cli::cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
+      cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
     }
     if (!all(sapply(self@fileinfo, inherits, "DTAtools::DTAFileInfo"))) {
-      cli::cli_abort("All elements in 'fileinfo' must be of class 'DTAFileInfo'")
+      cli_abort("All elements in 'fileinfo' must be of class 'DTAFileInfo'")
     }
   }
 )
@@ -394,11 +398,37 @@ method(min_number_of_files, DTAContainer) <- function(x) {
 #' create_example_DTAContainer()
 #' @export
 create_example_DTAContainer <- function(index = 1) {
+  # Create sample tables
+  table1 <- arrow_table(data.frame(
+    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
+    SUBJID = c("001", "002", "003"),
+    VISIT = c("SCREENING", "BASELINE", "WEEK_4"),
+    AGE = c(25, 34, 29)
+  ))
 
+  table2 <- arrow_table(data.frame(
+    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
+    SUBJID = c("001", "002", "003"),
+    PARAM = c("HEIGHT", "WEIGHT", "BMI"),
+    AVAL = c(175.2, 68.5, 22.3)
+  ))
+  
   switch(index,
     `1` = {
       DTAtools::DTAContainer(
-        specs = create_example_DTAColumnSpecCollection(),
+        specs = create_example_DTAColumnSpecCollection(1),
+      )
+    },
+    `2` = {
+      DTAtools::DTAContainer( 
+        specs = create_example_DTAColumnSpecCollection(1),
+        data = list("demographics" = table1)
+      )
+    },
+    `3` = {
+      DTAtools::DTAContainer( 
+        specs = create_example_DTAColumnSpecCollection(2),
+        data = list(vitals = table2)
       )
     },
     cli::cli_abort("No example available for the provided index.")
@@ -409,23 +439,24 @@ create_example_DTAContainer <- function(index = 1) {
 #' @title Print Method for DTAContainer
 #' @description Print a summary of a DTAContainer object.
 #' @param x A DTAContainer object.
+#' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAContainer())
 #' @name print
 #' @export
 method(print, DTAContainer) <- function(x) {
-  cat("DTAContainer object\n")
-  cat("Number of tables: ", length(x@data), "\n")
+  cli_text("<DTAContainer>")
+  cli_alert("Number of tables: {length(x@data)}")
   n_tables <- length(x@data)
   table_names <- names(x@data)
   if (n_tables > 5) {
     shown_names <- c(table_names[1:4], "...", table_names[n_tables])
-    cat("Table names: ", paste(shown_names, collapse = ", "), "\n")
+    cli_alert_info("Table names: {paste(shown_names, collapse = ', ')}")
   } else {
-    cat("Table names: ", paste(table_names, collapse = ", "), "\n")
+    cli_alert_info("Table names: {paste(table_names, collapse = ', ')}")
   }
-  cat("Number of fileinfo entries: ", length(x@fileinfo), "\n")
+  cli_alert("Number of fileinfo entries: {length(x@fileinfo)}")
   invisible(x)
 }
 

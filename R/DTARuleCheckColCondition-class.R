@@ -78,6 +78,7 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' @description
 #' Print overview for DTADTARuleCheckColConditionRule
 #' @param x An object of class DTARuleCheckColCondition
+#' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -86,9 +87,9 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' @export
 method(print, DTARuleCheckColCondition) <- function(x) { # nolint
 
-  cat(stringr::str_glue("{x@id}:<DTAtools::DTARuleCheckColCondition>\n"))
-  cat(stringr::str_glue("- condition: {x@condition}\n"))
-  cat(stringr::str_glue("- then: {x@then}\n"))
+  cli_text("{x@id}:<DTAtools::DTARuleCheckColCondition>")
+  cli_alert_info("condition: {x@condition}")
+  cli_alert("then: {x@then}")
 }
 
 

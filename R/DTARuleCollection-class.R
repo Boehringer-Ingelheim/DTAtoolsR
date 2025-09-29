@@ -95,7 +95,7 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return Invisibly returns the input \code{DTARuleCollection} object.
-#'
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' library(DTAtools)
 #' collection <- create_example_DTARuleCollection()
@@ -103,15 +103,15 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
 #' @name print
 #' @export
 method(print, DTARuleCollection) <- function(x, ...) {
-  cat(str_glue("<DTARuleCollection>: {length(x@rules)} rules\n"))
+  cli_text("<DTARuleCollection>: {length(x@rules)} rules")
   rule_ids <- sapply(x@rules, function(rule) rule@id)
   n_rules <- length(rule_ids)
   max_display <- 10
   if (n_rules <= max_display) {
-    cat(paste0(" - ", rule_ids, collapse = "\n"), "\n")
+    cli_alert("{rule_ids}")
   } else {
-    cat(paste0(" - ", rule_ids[1:9], collapse = "\n"), "\n")
-    cat(" ...\n")
+    cli_alert("{rule_ids[1:9]}")
+    cli_alert("...")
   }
   invisible(x)
 }

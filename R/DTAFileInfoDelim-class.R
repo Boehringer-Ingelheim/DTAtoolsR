@@ -75,6 +75,7 @@ method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
 #' Print method for DTAFileInfoDelim objects.
 #' @param x An object of class DTAFileInfoDelim
 #' @param ... Additional arguments (not used)
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @return Invisibly returns the input object
 #' @examples
 #' library(DTAtools)
@@ -83,13 +84,13 @@ method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
 #' @name print
 #' @export
 method(print, DTAFileInfoDelim) <- function(x, ...) {
-  cat("<DTAFileInfoDelim>\n")
+  cli_text("<DTAFileInfoDelim>\n")
   cli::cli_alert_info("Filename: {x@filename}")
-  cli::cli_alert_info("Pattern: {x@pattern}")
-  cli::cli_alert_info("Number of files: {x@number_of_files}")
-  cli::cli_alert_info("Separator: {x@sep}")
-  cli::cli_alert_info("Has header: {x@has_header}")
-  cli::cli_alert_info("Quote: {x@quote}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  cli::cli_alert("Number of files: {x@number_of_files}")
+  cli::cli_alert("Separator: {x@sep}")
+  cli::cli_alert("Has header: {x@has_header}")
+  cli::cli_alert("Quote: {x@quote}")
   invisible(x)
 }
 

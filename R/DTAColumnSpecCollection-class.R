@@ -25,10 +25,6 @@ DTAColumnSpecCollection <- new_class(
     # Transform to column specs schema to jsonschema
     json_schema <- specs_to_jsonschema(columns)
 
-    # Validate json_schema
-    invisible(jsonvalidate::json_schema$new(json_schema))
-    cli::cli_alert_success("Column spec schema is correctly structured.")
-
     new_object(
       S7_object(),
       columns = columns,
@@ -45,17 +41,19 @@ DTAColumnSpecCollection <- new_class(
   ),
   validator = function(self) {
     # Ensure columns is a list of DTAColumnSpec objects
-  if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
-      cli::cli_abort(
-        "All elements in 'columns' must be of class 'DTAColumnSpec'"
-      )
+    if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
+      "All elements in 'columns' must be of class 'DTAColumnSpec'"
     }
 
+    # Validate json_schema #TODO check this
+    if(!is.null(self@json_schema)) {
+      #TODO error on check
+      invisible(jsonvalidate::json_schema$new(self@json_schema))
+    } 
+  
     if (length(rules) > 0) {
       if (!all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
-        cli::cli_abort(
-          "All elements in 'rules' must be of class 'DTARule'"
-        )
+        "All elements in 'rules' must be of class 'DTARule'"
       }
     }
   }
@@ -66,8 +64,8 @@ DTAColumnSpecCollection <- new_class(
 #' @description
 #' Print overview for DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
-#' @importFrom stringr str_c
-#' @importFrom stringr str_flatten_comma
+#' @importFrom stringr str_c str_flatten_comma
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' \dontrun{
 #'  print(specs)
@@ -101,11 +99,11 @@ method(print, DTAColumnSpecCollection) <- function(x) {
     rule_preview <- "not set"
   }
 
-  cat("<DTAColumnSpecCollection>:\n")
-  cat(str_c("- columns (", length(x@columns), "): ", col_preview, "\n"))
-  cat(str_c("- schema: ", ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross), "\n"))
-  cat(str_c("- rules (", length(x@rules), "): ", rule_preview, "\n"))
-  cat(str_c("- metadata ",ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross), "\n"))
+  cli_text("<DTAColumnSpecCollection>:\n")
+  cli_alert_info("columns ({length(x@columns)}): {col_preview}")
+  cli_alert("schema: {ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross)}")
+  cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
+  cli_alert("metadata {ifelse(length(x@metadata) > 0, cli::symbol$tick, cli::symbol$cross)}")
 }
 
 
@@ -161,7 +159,7 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @name metadata
 #' @rdname metadata-DTAColumnSpecCollection
 #' @export
-metadata <- new_generic("get_metadata", "x")
+metadata <- new_generic("metadata", "x")
 
 method(metadata, DTAColumnSpecCollection) <- function(x) {
   return(x@metadata)
@@ -511,7 +509,7 @@ import_specs_from_word <- function(
       description = row$clean_description
     )
   }) %>%
-    purrr::set_names(specs$id)
+    set_names(specs$id)
 
   DTAColumnSpecCollection(columns = column_list)
 }
@@ -758,12 +756,23 @@ specs_to_list <- function(
 create_example_DTAColumnSpecCollection <- function(index = 1) {
   col1 <- DTAtools::create_example_DTAColumnSpec(1)
   col2 <- DTAtools::create_example_DTAColumnSpec(2)
-
+  col3 <- DTAtools::create_example_DTAColumnSpec(3)
+  col4 <- DTAtools::create_example_DTAColumnSpec(4)
+  col5 <- DTAtools::create_example_DTAColumnSpec(5)
+  
   switch(index,
     `1` = {
       example_rules <- list()
       DTAColumnSpecCollection(
-        columns = setNames(list(col1, col2), c(col1@id, col2@id)),
+        columns = setNames(list(col1, col2, col3, col4), c(col1@id, col2@id, col3@id, col4@id)),
+        metadata = list(),
+        rules = example_rules
+      )
+    },
+    `2` = {
+      example_rules <- list()
+      DTAColumnSpecCollection(
+        columns = setNames(list(col1, col2, col3, col5), c(col1@id, col2@id, col3@id, col5@id)),
         metadata = list(),
         rules = example_rules
       )

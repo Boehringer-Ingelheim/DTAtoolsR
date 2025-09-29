@@ -6,7 +6,8 @@
 #' quoting, and column types.
 #'
 #' @import S7
-#'
+#' @importFrom cli cli_abort cli_alert_info symbol
+#' @importFrom stringr str_detect str_glue
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
@@ -38,14 +39,15 @@ DTAFileInfo <- new_class(
     pattern = FALSE,
     number_of_files = 1
   ) {
+
     if (!pattern && number_of_files != 1) {
-      stop("if pattern is FALSE, then number_of_files must be 1.")
+      cli::cli_abort("if pattern is FALSE, then number_of_files must be 1.")
     }
 
     if (!is.numeric(number_of_files) ||
         any(number_of_files < 0) ||
         length(number_of_files) > 2) {
-      stop("'number_of_files' must be NULL, a single non-negative number, or a vector of two non-negative numbers (min and max).")
+      cli::cli_abort("'number_of_files' must be NULL, a single non-negative number, or a vector of two non-negative numbers (min and max).")
     }
 
     min_number_of_files = number_of_files
@@ -53,7 +55,7 @@ DTAFileInfo <- new_class(
 
     if(length(number_of_files) == 2) {
       if (number_of_files[1] >= number_of_files[2] ) {
-        stop("If 'number_of_files' has two elements min and max, min must be less than max.")
+        cli::cli_abort("If 'number_of_files' has two elements min and max, min must be less than max.")
       }
       min_number_of_files = number_of_files[1]
       max_number_of_files = number_of_files[2]
@@ -74,17 +76,20 @@ DTAFileInfo <- new_class(
     max_number_of_files = class_numeric_or_null
   ),
   validator = function(self) {
+    if (is.null(filename) || filename == "") {
+      cli::cli_abort("'filename' must be a non-empty character vector.")
+    }
     if (!is.character(self@filename)) {
-      stop("The 'filename' property must be a character vector.")
+      cli::cli_abort("The 'filename' property must be a character vector.")
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
-      stop("The 'pattern' property must be a single logical value.")
+      cli::cli_abort("The 'pattern' property must be a single logical value.")
     }
     if (!is.numeric(self@min_number_of_files)) {
-      stop("The 'min_number_of_files' property must be numeric.")
+      cli::cli_abort("The 'min_number_of_files' property must be numeric.")
     }
     if (!is.numeric(self@max_number_of_files)) {
-      stop("The 'max_number_of_files' property must be numeric.")
+      cli::cli_abort("The 'max_number_of_files' property must be numeric.")
     }
   }
 )
@@ -152,7 +157,7 @@ if (!exists("matches_filename", mode = "function")) {
 #' @param file A character string representing the name of the file to check against
 #'   the stored filename or pattern
 #' @return A logical value indicating whether the filename matches.
-#'
+#' @importFrom stringr str_detect
 #' @examples
 #' \dontrun{
 #'   file_info <- DTAFileInfo("file.txt")
@@ -220,6 +225,7 @@ if (!exists("read_file", mode = "function")) {
 #'   as it must be implemented by a subclass.}
 #' }
 #' @importFrom stringr str_glue
+#' @importFrom cli cli_abort
 #' @name read_file
 #' @rdname read_file
 #' @export
@@ -228,10 +234,10 @@ method(read_file, DTAFileInfo) <- function(x, file) {
     if(file.exists(file)) {
       read_file_execution(x, file)
     } else {
-      stop(simpleError(str_glue("File '{file}' cannot be found.")))
+      cli_abort(simpleError(str_glue("File '{file}' cannot be found.")))
     }
   } else {
-    stop(simpleError("The provided file does not match the filename in the DTAFileInfoTabular object."))
+    cli_abort(simpleError("The provided file does not match the filename in the DTAFileInfoTabular object."))
   }
 }
 
@@ -241,6 +247,7 @@ method(read_file, DTAFileInfo) <- function(x, file) {
 #' @param x An object of class DTAFileInfo
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_text
 #' @examples
 #' \dontrun{
 #'  # do not use this, use derived classes instead, e.g.
@@ -250,11 +257,11 @@ method(read_file, DTAFileInfo) <- function(x, file) {
 #' @name print
 #' @export
 method(print, DTAFileInfo) <- function(x, ...) {
-  cat("<DTAFileInfo>\n")
-  cli::cli_alert_info("Filename: {x@filename}")
-  cli::cli_alert_info("Pattern: {x@pattern}")
-  cli::cli_alert_info("Min number of files: {x@min_number_of_files}")
-  cli::cli_alert_info("Max number of files: {x@max_number_of_files}")
+  cli_text("<DTAFileInfo>\n")
+  cli_alert_info("Filename: {x@filename}")
+  cli_alert("Pattern: {x@pattern}")
+  cli_alert("Min number of files: {x@min_number_of_files}")
+  cli_alert("Max number of files: {x@max_number_of_files}")
   invisible(x)
 }
 

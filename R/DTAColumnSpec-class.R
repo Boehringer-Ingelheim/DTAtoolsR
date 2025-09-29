@@ -143,12 +143,22 @@ create_example_DTAColumnSpec <- function(index = 1) {
         label = "Age",
         type = "Int",
         nullable = TRUE,
-        values = list(18, 65),
+        pattern = "^[0-9]{1,3}$",
         description = "Age in years"
       )
     },
+    `5` = {
+      DTAtools::DTAColumnSpec(
+        id = "AVAL",
+        label = "Analysis Value",
+        type = "Int",
+        nullable = FALSE,
+        pattern = "^[0-9]+(\\.[0-9]{1,2})?$",
+        description = "Analysis value"
+      )
+    },
     {
-      cli::cli_abort("Invalid index value for example DTAColumnSpec.")
+      cli_abort("Invalid index value for example DTAColumnSpec.")
     }
   )
 }
@@ -159,18 +169,18 @@ create_example_DTAColumnSpec <- function(index = 1) {
 #' S7 print method for DTAColumnSpec objects.
 #' @param x A DTAColumnSpec object.
 #' @param ... Additional arguments (ignored).
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @name print
 #' @export
 method(print, DTAColumnSpec) <- function(x) {
-  cat("<DTAColumnSpec>\n")
-  cat("  id         :", x@id, "\n")
-  if (!is.null(x@label))        cat("  label      :", x@label, "\n")
-  if (!is.null(x@type))         cat("  type       :", x@type, "\n")
-  if (!is.null(x@format))       cat("  format     :", x@format, "\n")
-  if (!is.null(x@length))       cat("  length     :", x@length, "\n")
-  if (!is.null(x@nullable))     cat("  nullable   :", ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross), "\n")
-  if (!is.null(x@pattern))      cat("  pattern    :", x@pattern, "\n")
-  if (!is.null(x@values))       cat("  values     :", paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = " "), "\n")
-  if (!is.null(x@description))  cat("  description:", x@description, "\n")
+  cli_text("<DTAColumnSpec>: {x@id}")
+  if (!is.null(x@label))        cli_alert("label      : {x@label}")
+  if (!is.null(x@type))         cli_alert("type       : {x@type}")
+  if (!is.null(x@format))       cli_alert("format     : {x@format}")
+  if (!is.null(x@length))       cli_alert("length     : {x@length}")
+  if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
+  if (!is.null(x@pattern))      cli_alert("pattern    : {x@pattern}")
+  if (!is.null(x@values))       cli_alert("values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}")
+  if (!is.null(x@description))  cli_alert("description: {x@description}")
   invisible(x)
 }

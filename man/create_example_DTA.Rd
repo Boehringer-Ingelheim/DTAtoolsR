@@ -4,7 +4,7 @@
 \alias{create_example_DTA}
 \title{Create Example DTA Object}
 \usage{
-create_example_DTA(title = "Example DTA", version = "1.0")
+create_example_DTA()
 }
 \arguments{
 \item{title}{Character string. Title for the DTA object.}

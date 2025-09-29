@@ -38,6 +38,7 @@ DTAMetaData <- new_class(
 #' @param x An object of class DTAMetadata
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAMetaData())
@@ -45,10 +46,10 @@ DTAMetaData <- new_class(
 #' @name print
 #' @export
 method(print, DTAMetaData) <- function(x, ...) {
-  cat("<DTAMetadata>\n")
+  cli_text("<DTAMetadata>")
 
-  cli::cli_alert_info("Version: {x@version}")
-  cli::cli_alert_info("Author: {x@author}")
+  cli_alert_info("Version: {x@version}")
+  cli_alert("Author: {x@author}")
 
   invisible(x)
 }

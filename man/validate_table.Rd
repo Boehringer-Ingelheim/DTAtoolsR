@@ -4,10 +4,10 @@
 \alias{validate_table}
 \title{Validate Table Against JSON Schema}
 \usage{
-validate_table(DTAColumnSpecCollection, table)
+validate_table(specs, table)
 }
 \arguments{
-\item{DTAColumnSpecCollection}{A DTAColumnSpecCollection object.}
+\item{specs}{A specs object.}
 
 \item{table}{A data.frame to validate.}
 }

@@ -63,8 +63,8 @@ DTARuleCheckUnique <- new_class(
 #' @description
 #' Print overview for DTARule
 #' @param x An object of class DTARule
-#' @importFrom stringr str_glue
-#' @importFrom stringr str_flatten_comma
+#' @importFrom cli cli_alert_info cli_alert cli_text
+
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -72,8 +72,7 @@ DTARuleCheckUnique <- new_class(
 #' @name print
 #' @export
 method(print, DTARule) <- function(x) {
-
-  cat(str_glue("{x@id}:<DTAtools::DTARule>\n"))
+  cli_text("{x@id}:<DTAtools::DTARule>")
 }
 
 #' @title create_example_DTARuleCheckUnique

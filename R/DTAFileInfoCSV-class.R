@@ -97,6 +97,7 @@ create_example_DTAFileInfoCSV <- function(index = 1) {
 #' @param x An object of class DTAFileInfoCSV
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAFileInfoCSV())
@@ -104,13 +105,13 @@ create_example_DTAFileInfoCSV <- function(index = 1) {
 #' @name print
 #' @export
 method(print, DTAFileInfoCSV) <- function(x, ...) {
-  cat("<DTAFileInfoCSV>\n")
+  cli_text("<DTAFileInfoCSV>\n")
   cli::cli_alert_info("Filename: {x@filename}")
-  cli::cli_alert_info("Pattern: {x@pattern}")
-  cli::cli_alert_info("Number of files: {x@number_of_files}")
-  cli::cli_alert_info("Separator: {x@sep}")
-  cli::cli_alert_info("Has header: {x@has_header}")
-  cli::cli_alert_info("Quote: {x@quote}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  cli::cli_alert("Number of files: {x@number_of_files}")
+  cli::cli_alert("Separator: {x@sep}")
+  cli::cli_alert("Has header: {x@has_header}")
+  cli::cli_alert("Quote: {x@quote}")
   invisible(x)
 }
 

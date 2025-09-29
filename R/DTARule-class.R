@@ -49,6 +49,7 @@ DTARule <- new_class(
 #' Print overview for DTARule
 #' @param x An object of class DTARule
 #' @importFrom stringr str_glue
+#' @importFrom cli cli_alert cli_text
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -56,8 +57,8 @@ DTARule <- new_class(
 #' @name print
 #' @export
 method(print, DTARule) <- function(x) {
-  cat(stringr::str_glue("{x@id}:<DTAtools::DTARule>\n"))
-  cat(stringr::str_glue("- type: {x@type}\n"))
+  cli_text("{x@id}:<DTAtools::DTARule>")
+  cli_alert("type: {x@type}")
 }
 
 

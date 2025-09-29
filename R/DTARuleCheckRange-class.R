@@ -52,6 +52,7 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
         id = id,
         type = type
       ),
+      column = column,
       min_range = min_range,
       max_range = max_range
     )
@@ -61,6 +62,7 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
   properties = list(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
+    column = class_character, # Column(s) the rule applies to
     min_range = class_numeric, # Minimum value of the range
     max_range = class_numeric # Maximum value of the range
   ),
@@ -71,6 +73,10 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 
     if (!self@type == "check_range") {
       "'type' must be 'check_range'."
+    }
+
+    if (is.null(self@column) || length(self@column) < 1) {
+      "A 'column' must be set."
     }
 
     if (!is.numeric(self@min_range) || !is.numeric(self@max_range)) {
@@ -89,6 +95,7 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 #' @description
 #' Print overview for DTARuleCheckRange
 #' @param x An object of class DTARuleCheckRange
+#' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -96,10 +103,10 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 #' @name print
 #' @export
 method(print, DTARuleCheckRange) <- function(x) {
-
-  cat(stringr::str_glue("{x@id}:<DTAtools::DTARuleCheckRange>\n"))
-  cat(stringr::str_glue("- min: {x@min_range}\n"))
-  cat(stringr::str_glue("- max: {x@max_range}\n"))
+  cli_text("{x@id}:<DTAtools::DTARuleCheckRange>")
+  cli_alert_info("column(s): {paste(x@column, collapse = ', ')}")
+  cli_alert("min: {x@min_range}")
+  cli_alert("max: {x@max_range}")
 }
 
 
@@ -116,8 +123,8 @@ method(print, DTARuleCheckRange) <- function(x) {
 create_example_DTARuleCheckRange <- function(index = 1) { # nolint
   if (index == 1) {
     return(DTAtools::DTARuleCheckRange(
-      id = "rule1",
-      column = "age",
+      id = "check_age_range",
+      column = "AGE",
       range = list(18, 65)
     ))
   } else {

@@ -107,6 +107,7 @@ method(container, DTA) <- function(x, name = NULL) {
 #' @param x An object of class DTA
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text
 #' @examples
 #' \dontrun{
 #'   print(dta_obj)
@@ -114,13 +115,13 @@ method(container, DTA) <- function(x, name = NULL) {
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
-  cli::cli_h1("DTA Object")
+  cli_text("<DTA> object")
 
-  print(metadata(x))
-  cli::cli_alert_info("Number of containers: {length(x@container)}")
+  print(x@metadata)
+  cli_alert("Number of containers: {length(x@container)}")
 
-  if (length(containers) > 0) {
-    cli::cli_alert_info("Container names: {names(containers)}")
+  if (length(x@container) > 0) {
+    cli_alert_info("Container names: {names(x@container)}")
   }
 
   invisible(x)
@@ -131,6 +132,7 @@ method(print, DTA) <- function(x, ...) {
 #' Creates an example DTA object for demonstration purposes.
 #' @param title Character string. Title for the DTA object.
 #' @param version Character string. Version of the DTA object.
+#' @importFrom arrow arrow_table
 #' @return An object of class DTA with example data
 #' @examples
 #' \dontrun{
@@ -138,32 +140,14 @@ method(print, DTA) <- function(x, ...) {
 #'   print(example_dta)
 #' }
 #' @export
-create_example_DTA <- function(title = "Example DTA", version = "1.0") {
-  # Create sample tables
-  table1 <- data.frame(
-    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
-    SUBJID = c("001", "002", "003"),
-    VISIT = c("SCREENING", "BASELINE", "WEEK_4"),
-    AGE = c(25, 34, 29)
-  )
-
-  table2 <- data.frame(
-    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
-    SUBJID = c("001", "002", "003"),
-    PARAM = c("HEIGHT", "WEIGHT", "BMI"),
-    AVAL = c(175.2, 68.5, 22.3)
-  )
-
-  # List of tables
-  tables <- list(demographics = table1, vitals = table2)
-
-  # Create the DTAContainer object
-  data_container <- DTAContainer(DTAColumnSpecCollection(), tables)
-
+create_example_DTA <- function() {
+  cont1 <- create_example_DTAContainer(2)
+  cont2 <- create_example_DTAContainer(3)
+  
   # Create DTA object
   DTA(
-    container = list(example_data = data_container),
-    title = title,
-    version = version
+    container = list(cont1, cont2),
+    author = "create example function",
+    version = "0.1"
   )
 }

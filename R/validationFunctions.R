@@ -105,12 +105,13 @@ change_type <- function(vector, var_type) {
 #' @importFrom cli cli_alert_danger cli_alert_success cli_h3 cli_abort cli_alert_info
 #' @importFrom utils txtProgressBar setTxtProgressBar
 #' @param table A data.frame to validate.
-#' @param DTAColumnSpecCollection A DTAColumnSpecCollection object.
+#' @param specs A specs object.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
 #' @export
-validate_table <- function(DTAColumnSpecCollection, table) {
+#TODO: move validate table to DTAContainer-class.R
+validate_table <- function(specs, table) {
   # Confirm JSON schema
-  obj <- jsonvalidate::json_schema$new(DTAColumnSpecCollection@json_schema)
+  obj <- jsonvalidate::json_schema$new(specs@json_schema)
 
   # Split the table into smaller chunks
   num_rows <- nrow(table)
@@ -211,7 +212,7 @@ validate_table <- function(DTAColumnSpecCollection, table) {
     "Table format, length, pattern, and values are valid."
   )
 
-  rules <- get_rules(DTAColumnSpecCollection)
+  rules <- get_rules(specs)
   if (length(rules) > 0) {
     cli::cli_h2("Checking schema rules")
     results <- apply_schema_rules(rules, table)

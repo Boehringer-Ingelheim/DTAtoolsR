@@ -3,6 +3,7 @@ class_DTAColumnSpec <- S7::new_class("DTAColumnSpec")
 class_DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection"
 )
+
 class_DTAContainer <- S7::new_class("DTAContainer")
 class_DTAMetadata <- S7::new_class("DTAMetaData")
 class_character_or_null <- class_character | class_null
