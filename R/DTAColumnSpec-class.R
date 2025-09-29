@@ -97,14 +97,18 @@ get_arrow_schema_type <- function(x) {
 #' @title Create Example DTAColumnSpec
 #' @description
 #' S7 method to create and return an example DTAColumnSpec object.
+#' @param index Numeric. Selector for different example objects.
+#' @importFrom cli cli_abort
+#' @return An example DTAColumnSpec object based on the provided index.
+#' @examples
+#' library(DTAtools)
+#' create_example_DTAColumnSpec()
 #' @export
-create_example_DTAColumnSpec <- new_generic("create_example_DTAColumnSpec", "x")
-
-method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
+create_example_DTAColumnSpec <- function(index = 1) {
   switch(
     index,
     `1` = {
-      col1 <- DTAtools::DTAColumnSpec(
+      DTAtools::DTAColumnSpec(
         id = "STUDYID",
         label = "Study Identifier",
         type = "Char",
@@ -112,7 +116,9 @@ method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
         values = list("1234", "5678"),
         description = "Unique study identifier"
       )
-      col2 <- DTAtools::DTAColumnSpec(
+    },
+    `2` = {
+      DTAtools::DTAColumnSpec(
         id = "VISIT",
         label = "Visit",
         type = "Char",
@@ -120,16 +126,9 @@ method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
         values = list("V01", "EOT"),
         description = "Visit code"
       )
-      example_metadata <- list(author = "Example Author", version = "1.0")
-      example_rules <- list()
-      DTAColumnSpecCollection(
-        columns = list(STUDYID = col1, VISIT = col2),
-        metadata = example_metadata,
-        rules = example_rules
-      )
     },
-    `2` = {
-      col1 <- DTAtools::DTAColumnSpec(
+    `3` = {
+      DTAtools::DTAColumnSpec(
         id = "SUBJID",
         label = "Subject Identifier",
         type = "Char",
@@ -137,7 +136,9 @@ method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
         values = list("001", "002"),
         description = "Unique subject identifier"
       )
-      col2 <- DTAtools::DTAColumnSpec(
+    },
+    `4` = {
+      DTAtools::DTAColumnSpec(
         id = "AGE",
         label = "Age",
         type = "Int",
@@ -145,42 +146,31 @@ method(create_example_DTAColumnSpec, DTAColumnSpec) <- function(x, index = 1) {
         values = list(18, 65),
         description = "Age in years"
       )
-      example_metadata <- list(author = "Example Author", version = "2.0")
-      example_rules <- list()
-      DTAColumnSpecCollection(
-        columns = list(SUBJID = col1, AGE = col2),
-        metadata = example_metadata,
-        rules = example_rules
-      )
     },
     {
-      stop("Invalid index value for example DTAColumnSpec.")
+      cli::cli_abort("Invalid index value for example DTAColumnSpec.")
     }
-  )
-  col1 <- DTAtools::DTAColumnSpec(
-    id = "STUDYID",
-    label = "Study Identifier",
-    type = "Char",
-    nullable = FALSE,
-    values = list("1234", "5678"),
-    description = "Unique study identifier"
-  )
-  col2 <- DTAtools::DTAColumnSpec(
-    id = "VISIT",
-    label = "Visit",
-    type = "Char",
-    nullable = FALSE,
-    values = list("V01", "EOT"),
-    description = "Visit code"
-  )
-  example_metadata <- list(author = "Example Author", version = "1.0")
-  example_rules <- list()
-  DTAColumnSpecCollection(
-    columns = list(STUDYID = col1, VISIT = col2),
-    metadata = example_metadata,
-    rules = example_rules
   )
 }
 
 
-
+#' @title Print Method for DTAColumnSpec
+#' @description
+#' S7 print method for DTAColumnSpec objects.
+#' @param x A DTAColumnSpec object.
+#' @param ... Additional arguments (ignored).
+#' @name print
+#' @export
+method(print, DTAColumnSpec) <- function(x) {
+  cat("<DTAColumnSpec>\n")
+  cat("  id         :", x@id, "\n")
+  if (!is.null(x@label))        cat("  label      :", x@label, "\n")
+  if (!is.null(x@type))         cat("  type       :", x@type, "\n")
+  if (!is.null(x@format))       cat("  format     :", x@format, "\n")
+  if (!is.null(x@length))       cat("  length     :", x@length, "\n")
+  if (!is.null(x@nullable))     cat("  nullable   :", ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross), "\n")
+  if (!is.null(x@pattern))      cat("  pattern    :", x@pattern, "\n")
+  if (!is.null(x@values))       cat("  values     :", paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = " "), "\n")
+  if (!is.null(x@description))  cat("  description:", x@description, "\n")
+  invisible(x)
+}

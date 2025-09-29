@@ -49,7 +49,7 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
     # Create the class object
     new_object(
       .parent = DTAtools::DTARule(
-        id = id, 
+        id = id,
         type = type
       ),
       min_range = min_range,
@@ -72,11 +72,11 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
     if (!self@type == "check_range") {
       "'type' must be 'check_range'."
     }
-    
+
     if (!is.numeric(self@min_range) || !is.numeric(self@max_range)) {
       "Min and max range must be numeric."
     }
-    
+
     if (self@min_range >= self@max_range) {
       "Min range must be less than max."
     }
@@ -95,13 +95,11 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 #' }
 #' @name print
 #' @export
-print <- new_generic("print", "x")
-
 method(print, DTARuleCheckRange) <- function(x) {
 
   cat(stringr::str_glue("{x@id}:<DTAtools::DTARuleCheckRange>\n"))
   cat(stringr::str_glue("- min: {x@min_range}\n"))
-  cat(stringr::str_glue("- max: {x@max_range}"))
+  cat(stringr::str_glue("- max: {x@max_range}\n"))
 }
 
 

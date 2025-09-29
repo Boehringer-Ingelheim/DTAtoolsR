@@ -24,7 +24,7 @@
 #' @seealso \code{\link{DTAFileInfo}}
 #' @include DTAFileInfoTabular-class.R
 #' @export
-DTAFileInfoCSV <- S7::new_class(
+DTAFileInfoCSV <- S7::new_class( # nolint
   "DTAFileInfoCSV",
   parent = DTAFileInfoTabular,
   constructor = function(
@@ -62,10 +62,8 @@ DTAFileInfoCSV <- S7::new_class(
 method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
   return(arrow::read_csv_arrow(
     file,
-    #col_types = x@col_types,
     quote = x@quote,
     skip = if (x@has_header) 0 else 1,
-    #col_names = x@has_header,
     as_data_frame = FALSE
   ))
 }

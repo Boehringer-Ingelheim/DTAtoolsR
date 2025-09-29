@@ -15,7 +15,7 @@
 #' @export
 DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
-  constructor = function(columns, metadata = list(), rules = list()) {
+  constructor = function(columns, rules = list(), metadata = list()) {
     if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
@@ -74,8 +74,6 @@ DTAColumnSpecCollection <- new_class(
 #' }
 #' @name print
 #' @export
-print <- new_generic("print", "x")
-
 method(print, DTAColumnSpecCollection) <- function(x) {
   if (length(x@columns) > 5) {
     col_preview <- str_flatten_comma(
@@ -107,7 +105,7 @@ method(print, DTAColumnSpecCollection) <- function(x) {
   cat(str_c("- columns (", length(x@columns), "): ", col_preview, "\n"))
   cat(str_c("- schema: ", ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross), "\n"))
   cat(str_c("- rules (", length(x@rules), "): ", rule_preview, "\n"))
-  cat(str_c("- metadata ",ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross)))
+  cat(str_c("- metadata ",ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross), "\n"))
 }
 
 
@@ -238,7 +236,7 @@ import_specs_from_yaml <- function(file) {
 
   if (length(rules) > 0) {
     rules <- lapply(rules, function(x) {
-      DTARule(
+      DTAtools::DTARule(
         id = x$id,
         type = x$type,
         column = x$column,
@@ -251,7 +249,7 @@ import_specs_from_yaml <- function(file) {
 
   column_list <- list()
   for (column in specs) {
-    dta_column <- DTAColumnSpec(
+    dta_column <- DTAtools::DTAColumnSpec(
       id = column$id,
       label = column$label,
       type = column$type,
@@ -312,7 +310,7 @@ specs_from_list <- function(
 
   if (length(rules) > 0) {
     rules <- lapply(rules, function(x) {
-      DTARule(
+      DTAtools::DTARule(
         id = x$id,
         type = x$type,
         column = x$column,
@@ -749,32 +747,28 @@ specs_to_list <- function(
 #' @title Create Example DTAColumnSpecCollection
 #' @description
 #' S7 method to create and return an example DTAColumnSpecCollection object.
+#' @importFrom cli cli_abort
+#' @param index Integer. Index of the example to create.
+#'
+#' @return An example DTAColumnSpecCollection object.
+#' @examples
+#' library(DTAtools)
+#' create_example_DTAColumnSpecCollection()
 #' @export
-create_example_DTAColumnSpecCollection <- new_generic("create_example_DTAColumnSpecCollection", "x")
+create_example_DTAColumnSpecCollection <- function(index = 1) {
+  col1 <- DTAtools::create_example_DTAColumnSpec(1)
+  col2 <- DTAtools::create_example_DTAColumnSpec(2)
 
-method(create_example_DTAColumnSpecCollection, DTAColumnSpecCollection) <- function(x) {
-  col1 <- DTAtools::DTAColumnSpec(
-    id = "STUDYID",
-    label = "Study Identifier",
-    type = "Char",
-    nullable = FALSE,
-    values = list("1234", "5678"),
-    description = "Unique study identifier"
+  switch(index,
+    `1` = {
+      example_rules <- list()
+      DTAColumnSpecCollection(
+        columns = setNames(list(col1, col2), c(col1@id, col2@id)),
+        metadata = list(),
+        rules = example_rules
+      )
+    },
+    cli::cli_abort("No example available for the provided index.")
   )
-  col2 <- DTAtools::DTAColumnSpec(
-    id = "VISIT",
-    label = "Visit",
-    type = "Char",
-    nullable = FALSE,
-    values = list("V01", "EOT"),
-    description = "Visit code"
-  )
-  example_metadata <- list(author = "Example Author", version = "1.0")
-  example_rules <- list()
-  DTAColumnSpecCollection(
-    columns = list(STUDYID = col1, VISIT = col2),
-    metadata = example_metadata,
-    rules = example_rules
-  )
+
 }
-

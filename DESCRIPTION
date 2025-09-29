@@ -36,7 +36,8 @@ Imports:
     jsonvalidate,
     flextable,
     arrow,
-    stringr
+    stringr,
+    tzdb
 Depends:
     R (>= 3.5.0),
     S7 (>= 0.2.0)

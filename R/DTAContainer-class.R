@@ -381,3 +381,51 @@ method(min_number_of_files, DTAContainer) <- function(x) {
   sum(unlist(sapply(x@fileinfo, min_number_of_files)))
 }
 
+
+#' @title Create Example DTAContainer
+#' @description
+#' S7 method to create and return an example DTAContainer object.
+#' @importFrom cli cli_abort
+#' @param index Integer. Index of the example to create.
+#'
+#' @return An example DTAContainer object.
+#' @examples
+#' library(DTAtools)
+#' create_example_DTAContainer()
+#' @export
+create_example_DTAContainer <- function(index = 1) {
+
+  switch(index,
+    `1` = {
+      DTAtools::DTAContainer(
+        specs = create_example_DTAColumnSpecCollection(),
+      )
+    },
+    cli::cli_abort("No example available for the provided index.")
+  )
+
+}
+
+#' @title Print Method for DTAContainer
+#' @description Print a summary of a DTAContainer object.
+#' @param x A DTAContainer object.
+#' @examples
+#' library(DTAtools)
+#' print(create_example_DTAContainer())
+#' @name print
+#' @export
+method(print, DTAContainer) <- function(x) {
+  cat("DTAContainer object\n")
+  cat("Number of tables: ", length(x@data), "\n")
+  n_tables <- length(x@data)
+  table_names <- names(x@data)
+  if (n_tables > 5) {
+    shown_names <- c(table_names[1:4], "...", table_names[n_tables])
+    cat("Table names: ", paste(shown_names, collapse = ", "), "\n")
+  } else {
+    cat("Table names: ", paste(table_names, collapse = ", "), "\n")
+  }
+  cat("Number of fileinfo entries: ", length(x@fileinfo), "\n")
+  invisible(x)
+}
+

@@ -4,8 +4,18 @@
 \alias{create_example_DTAColumnSpec}
 \title{Create Example DTAColumnSpec}
 \usage{
-create_example_DTAColumnSpec(x, ...)
+create_example_DTAColumnSpec(index = 1)
+}
+\arguments{
+\item{index}{Numeric. Selector for different example objects.}
+}
+\value{
+An example DTAColumnSpec object based on the provided index.
 }
 \description{
 S7 method to create and return an example DTAColumnSpec object.
+}
+\examples{
+library(DTAtools)
+create_example_DTAColumnSpec()
 }

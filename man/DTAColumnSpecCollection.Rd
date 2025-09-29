@@ -4,14 +4,14 @@
 \alias{DTAColumnSpecCollection}
 \title{DTAColumnSpecCollection Class}
 \usage{
-DTAColumnSpecCollection(columns, metadata = list(), rules = list())
+DTAColumnSpecCollection(columns, rules = list(), metadata = list())
 }
 \arguments{
 \item{columns}{A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns}
 
-\item{metadata}{A list of metadata information.}
-
 \item{rules}{A list of DTARule object.}
+
+\item{metadata}{A list of metadata information.}
 }
 \value{
 An object of class DTAColumnSpecCollection.

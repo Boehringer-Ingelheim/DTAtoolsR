@@ -58,3 +58,62 @@ DTARuleCollection <- new_class(
     rules = class_list # A list of rule definitions
   )
 )
+
+
+
+#' @title create_example_DTARuleCollection
+#' @description
+#' create example for DTARuleCollection
+#' @param index rule selector
+#' @importFrom cli cli_abort
+#' @examples
+#'  library(DTAtools)
+#'  create_example_DTARuleCollection()
+#' @export
+create_example_DTARuleCollection <- function(index = 1) { # nolint
+  if (index == 1) {
+    return(
+      DTAtools::DTARuleCollection(
+        rules = list(
+          DTAtools::create_example_DTARuleCheckRange(1),
+          DTAtools::create_example_DTARuleCheckUnique(1),
+          DTAtools::create_example_DTARuleCheckColCondition(1)
+        )
+      )
+    )
+  } else {
+    cli::cli_abort("No example found with index {index}.")
+  }
+}
+
+
+#' @title Print Method for DTARuleCollection Objects
+#' @description
+#' Prints a summary of a \code{DTARuleCollection} object, including the number of rules and their IDs.
+#'
+#' @param x A \code{DTARuleCollection} object.
+#' @param ... Additional arguments (currently unused).
+#'
+#' @return Invisibly returns the input \code{DTARuleCollection} object.
+#'
+#' @examples
+#' library(DTAtools)
+#' collection <- create_example_DTARuleCollection()
+#' print(collection)
+#' @name print
+#' @export
+method(print, DTARuleCollection) <- function(x, ...) {
+  cat(str_glue("<DTARuleCollection>: {length(x@rules)} rules\n"))
+  rule_ids <- sapply(x@rules, function(rule) rule@id)
+  n_rules <- length(rule_ids)
+  max_display <- 10
+  if (n_rules <= max_display) {
+    cat(paste0(" - ", rule_ids, collapse = "\n"), "\n")
+  } else {
+    cat(paste0(" - ", rule_ids[1:9], collapse = "\n"), "\n")
+    cat(" ...\n")
+  }
+  invisible(x)
+}
+
+

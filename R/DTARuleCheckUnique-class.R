@@ -8,7 +8,7 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param column list of columns that will be collectively checked if the 
+#' @param column list of columns that will be collectively checked if the
 #' combinations are unique throughout the table
 #' @return An object of class `DTARule`.
 #'
@@ -58,7 +58,7 @@ DTARuleCheckUnique <- new_class(
   }
 )
 
- 
+
 #' @title print
 #' @description
 #' Print overview for DTARule
@@ -71,8 +71,6 @@ DTARuleCheckUnique <- new_class(
 #' }
 #' @name print
 #' @export
-print <- new_generic("print", "x")
-
 method(print, DTARule) <- function(x) {
 
   cat(str_glue("{x@id}:<DTAtools::DTARule>\n"))

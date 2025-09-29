@@ -84,13 +84,11 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' }
 #' @name print
 #' @export
-print <- new_generic("print", "x")
-
 method(print, DTARuleCheckColCondition) <- function(x) { # nolint
 
   cat(stringr::str_glue("{x@id}:<DTAtools::DTARuleCheckColCondition>\n"))
   cat(stringr::str_glue("- condition: {x@condition}\n"))
-  cat(stringr::str_glue("- then: {x@then}"))
+  cat(stringr::str_glue("- then: {x@then}\n"))
 }
 
 

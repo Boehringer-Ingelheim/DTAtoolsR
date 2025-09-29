@@ -48,16 +48,17 @@ DTA <- new_class(
 #' @param x An object of class DTA
 #' @return A list with metadata information
 #' @examples
-#' \dontrun{
-#'   get_metadata(DTA)
-#' }
-#' @name get_metadata
-#' @rdname get_metadata-DTA
+#' library(DTAtools)
+#' DTA <- create_example_DTA()
+#' metadata(DTA)
+#'
+#' @name metadata
+#' @rdname metadata-DTA
 #' @export
-if (!exists("get_metadata", mode = "function")) {
-  get_metadata <- new_generic("get_metadata", "x")
+if (!exists("metadata", mode = "function")) {
+  metadata <- new_generic("metadata", "x")
 }
-method(get_metadata, DTA) <- function(x) {
+method(metadata, DTA) <- function(x) {
   return(x@metadata)
 }
 
@@ -97,4 +98,71 @@ method(container, DTA) <- function(x, name = NULL) {
 
   cli::cli_alert_info("Returning the DTAContainer with the name{?s}: '{name}'")
   return(all_containers[[name]])
+}
+
+
+#' @title Print DTA Object
+#' @description
+#' Print method for DTA objects.
+#' @param x An object of class DTA
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @examples
+#' \dontrun{
+#'   print(dta_obj)
+#' }
+#' @export
+method(print, DTA) <- function(x, ...) {
+  cli::cli_h1("DTA Object")
+
+  print(metadata(x))
+  cli::cli_alert_info("Number of containers: {length(x@container)}")
+
+  if (length(containers) > 0) {
+    cli::cli_alert_info("Container names: {names(containers)}")
+  }
+
+  invisible(x)
+}
+
+#' @title Create Example DTA Object
+#' @description
+#' Creates an example DTA object for demonstration purposes.
+#' @param title Character string. Title for the DTA object.
+#' @param version Character string. Version of the DTA object.
+#' @return An object of class DTA with example data
+#' @examples
+#' \dontrun{
+#'   example_dta <- create_example_DTA()
+#'   print(example_dta)
+#' }
+#' @export
+create_example_DTA <- function(title = "Example DTA", version = "1.0") {
+  # Create sample tables
+  table1 <- data.frame(
+    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
+    SUBJID = c("001", "002", "003"),
+    VISIT = c("SCREENING", "BASELINE", "WEEK_4"),
+    AGE = c(25, 34, 29)
+  )
+
+  table2 <- data.frame(
+    STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
+    SUBJID = c("001", "002", "003"),
+    PARAM = c("HEIGHT", "WEIGHT", "BMI"),
+    AVAL = c(175.2, 68.5, 22.3)
+  )
+
+  # List of tables
+  tables <- list(demographics = table1, vitals = table2)
+
+  # Create the DTAContainer object
+  data_container <- DTAContainer(DTAColumnSpecCollection(), tables)
+
+  # Create DTA object
+  DTA(
+    container = list(example_data = data_container),
+    title = title,
+    version = version
+  )
 }
