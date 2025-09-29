@@ -39,15 +39,16 @@ DTAMetaData <- new_class(
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
 #' @examples
-#' \dontrun{
-#'   print(dta_obj)
-#' }
+#' library(DTAtools)
+#' print(create_example_DTAMetaData())
+#'
+#' @name print
 #' @export
 method(print, DTAMetaData) <- function(x, ...) {
-  cli::cli_h1("<DTA Metadata>")
+  cat("<DTAMetadata>\n")
 
-  cli::cli_alert_info("Version: {metadata@version}")
-  cli::cli_alert_info("Created: {metadata@author}")
+  cli::cli_alert_info("Version: {x@version}")
+  cli::cli_alert_info("Author: {x@author}")
 
   invisible(x)
 }

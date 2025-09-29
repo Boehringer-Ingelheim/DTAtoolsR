@@ -69,3 +69,29 @@ method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
     as_data_frame = FALSE
   ))
 }
+
+#' @title Print DTAFileInfoDelim Object
+#' @description
+#' Print method for DTAFileInfoDelim objects.
+#' @param x An object of class DTAFileInfoDelim
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @examples
+#' library(DTAtools)
+#' print(DTAFileInfoDelim("example.tsv"))
+#'
+#' @name print
+#' @export
+method(print, DTAFileInfoDelim) <- function(x, ...) {
+  cat("<DTAFileInfoDelim>\n")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert_info("Pattern: {x@pattern}")
+  cli::cli_alert_info("Number of files: {x@number_of_files}")
+  cli::cli_alert_info("Separator: {x@sep}")
+  cli::cli_alert_info("Has header: {x@has_header}")
+  cli::cli_alert_info("Quote: {x@quote}")
+  invisible(x)
+}
+
+
+

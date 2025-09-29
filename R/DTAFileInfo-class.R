@@ -235,4 +235,28 @@ method(read_file, DTAFileInfo) <- function(x, file) {
   }
 }
 
+#' @title Print DTAFileInfo Object
+#' @description
+#' Print method for DTAFileInfo objects.
+#' @param x An object of class DTAFileInfo
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @examples
+#' \dontrun{
+#'  # do not use this, use derived classes instead, e.g.
+#'  # DTAFileInfoCSV or DTAFileInfoTSV
+#'  DTAFileInfo("example.tsv")
+#' }
+#' @name print
+#' @export
+method(print, DTAFileInfo) <- function(x, ...) {
+  cat("<DTAFileInfo>\n")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert_info("Pattern: {x@pattern}")
+  cli::cli_alert_info("Min number of files: {x@min_number_of_files}")
+  cli::cli_alert_info("Max number of files: {x@max_number_of_files}")
+  invisible(x)
+}
+
+
 

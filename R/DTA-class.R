@@ -111,6 +111,7 @@ method(container, DTA) <- function(x, name = NULL) {
 #' \dontrun{
 #'   print(dta_obj)
 #' }
+#' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
   cli::cli_h1("DTA Object")

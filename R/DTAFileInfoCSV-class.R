@@ -20,7 +20,9 @@
 #'
 #' @name DTAFileInfoCSV-class
 #' @return An object of class \code{DTAFileInfoCSV}.
-#'
+#' @examples
+#'  \dontrun{
+#' }
 #' @seealso \code{\link{DTAFileInfo}}
 #' @include DTAFileInfoTabular-class.R
 #' @export
@@ -67,3 +69,49 @@ method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
     as_data_frame = FALSE
   ))
 }
+
+#' @title Create Example DTAFileInfoCSV Object
+#' @description
+#' Creates an example \code{DTAFileInfoCSV} object using example files.
+#' @param index example selector.
+#' @return An example \code{DTAFileInfoCSV} object.
+#' @examples
+#' library(DTAtools)
+#' create_example_DTAFileInfoCSV()
+#' @export
+create_example_DTAFileInfoCSV <- function(index = 1) {
+  if (index != 1) {
+    example_file <- system.file("extdata", "data_spec.csv", package = "DTAtoolsR")
+    DTAFileInfoCSV(
+      filename = basename(example_file) # makes sure this was derived from existing example
+    )
+  } else {
+    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileInfoCSV().")
+  }
+}
+
+
+#' @title Print DTAFileInfoCSV Object
+#' @description
+#' Print method for DTAFileInfoCSV objects.
+#' @param x An object of class DTAFileInfoCSV
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @examples
+#' library(DTAtools)
+#' print(create_example_DTAFileInfoCSV())
+#'
+#' @name print
+#' @export
+method(print, DTAFileInfoCSV) <- function(x, ...) {
+  cat("<DTAFileInfoCSV>\n")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert_info("Pattern: {x@pattern}")
+  cli::cli_alert_info("Number of files: {x@number_of_files}")
+  cli::cli_alert_info("Separator: {x@sep}")
+  cli::cli_alert_info("Has header: {x@has_header}")
+  cli::cli_alert_info("Quote: {x@quote}")
+  invisible(x)
+}
+
+

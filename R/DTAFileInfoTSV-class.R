@@ -68,3 +68,48 @@ method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
     as_data_frame = FALSE
   ))
 }
+
+#' @title Create Example DTAFileInfoTSV Object
+#' @description
+#' Creates an example \code{DTAFileInfoTSV} object using example files.
+#' @param index example selector.
+#' @return An example \code{DTAFileInfoTSV} object.
+#' @examples
+#' library(DTAtools)
+#' create_example_DTAFileInfoTSV()
+#' @export
+create_example_DTAFileInfoTSV <- function(index = 1) {
+  if (index != 1) {
+    example_file <- system.file("extdata", "data_spec.tsv", package = "DTAtoolsR")
+    DTAFileInfoTSV(
+      filename = basename(example_file) # makes sure this was derived from existing example
+    )
+  } else {
+    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileInfoTSV().")
+  }
+}
+
+#' @title Print DTAFileInfoTSV Object
+#' @description
+#' Print method for DTAFileInfoTSV objects.
+#' @param x An object of class DTAFileInfoTSV
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @examples
+#' library(DTAtools)
+#' print(create_example_DTAFileInfoTSV())
+#'
+#' @name print
+#' @export
+method(print, DTAFileInfoTSV) <- function(x, ...) {
+  cat("<DTAFileInfoTSV>\n")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert_info("Pattern: {x@pattern}")
+  cli::cli_alert_info("Number of files: {x@number_of_files}")
+  cli::cli_alert_info("Separator: {x@sep}")
+  cli::cli_alert_info("Has header: {x@has_header}")
+  cli::cli_alert_info("Quote: {x@quote}")
+  invisible(x)
+}
+
+

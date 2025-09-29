@@ -40,6 +40,10 @@ Defines the S7 class \code{DTAFileInfoCSV}, which extends \code{DTAFileInfo}
 to represent metadata and configuration for CSV (Tab-Separated Values)
 data files.
 }
+\examples{
+ \dontrun{
+}
+}
 \seealso{
 \code{\link{DTAFileInfo}}
 }
