@@ -343,6 +343,7 @@ method(metadata, DTAContainer) <- function(x) {
 #' rules(DTAContainer)
 #' }
 #' @name rules-DTAContainer
+#' @export
 rules <- new_generic("rules", "x")
 
 #' @export

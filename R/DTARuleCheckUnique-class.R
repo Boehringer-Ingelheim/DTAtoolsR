@@ -74,7 +74,7 @@ method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleCheckUnique}> : {.field {x@id}}")
 
-  message <- paste0("Columns: ", 
+  message <- paste0("column(s): ", 
                       paste(paste0("{.field ", x@columns, "}"), 
                           collapse = ", "))
   cli_text(message)

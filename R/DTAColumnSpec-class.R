@@ -177,8 +177,8 @@ create_example_DTAColumnSpec <- function(index = 1) {
 #' @export
 method(print, DTAColumnSpec) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAColumnSpec}> : {.field {x@id}}")
-
+  cli_text("<{.emph DTAColumnSpec}> ")
+  if (!is.null(x@label))        cli_alert("id         : {.field {x@id}}")
   if (!is.null(x@label))        cli_alert("label      : {x@label}")
   if (!is.null(x@type))         cli_alert("type       : {x@type}")
   if (!is.null(x@format))       cli_alert("format     : {x@format}")

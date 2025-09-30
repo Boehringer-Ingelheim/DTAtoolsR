@@ -78,7 +78,7 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' @description
 #' Print overview for DTADTARuleCheckColConditionRule
 #' @param x An object of class DTARuleCheckColCondition
-#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -89,8 +89,26 @@ method(print, DTARuleCheckColCondition) <- function(x) { # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleCheckColCondition}> : {.field {x@id}}")
 
-  cli_alert_info("condition: {x@condition}")
-  cli_alert("then: {x@then}")
+  # TODO: check more complicated scenarios
+  if (is.list(x@condition)) {
+    for (i in 1:length(x@condition)) {
+        for (nm in names(x@condition[[i]])) { 
+          cli_alert_info("  {.field {nm}}: {format(x@condition[[i]][[nm]])}")
+        }
+    }
+  } else {
+    cli_alert_info("  {format(x@condition)}")
+  }
+
+  cli_alert("then:")
+  # TODO: check more complicated scenarios
+  if (is.list(x@then)) {
+    for (nm in names(x@then)) {
+      cli_text("  {.field {nm}}: {format(x@then[[nm]])}")
+    }
+  } else {
+    cli_text("  {format(x@then)}")
+  }
 }
 
 

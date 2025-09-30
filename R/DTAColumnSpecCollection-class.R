@@ -127,9 +127,17 @@ method(print, DTAColumnSpecCollection) <- function(x) {
   cli_text("<{.emph DTAColumnSpecCollection}>")
 
   cli_alert_info("columns ({length(x@columns)}): {col_preview}")
-  cli_alert("schema: {ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross)}")
+  if (length(x@json_schema) > 0) {
+    cli_alert_info("schema: {cli::symbol$tick}")
+  } else {
+    cli_alert("schema: {cli::symbol$cross}")
+  }
   cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
-  cli_alert("metadata {ifelse(length(x@metadata) > 0, cli::symbol$tick, cli::symbol$cross)}")
+  if (length(x@metadata) > 0) {
+    cli_alert_info("metadata: {cli::symbol$tick}")
+  } else {
+    cli_alert("metadata: {cli::symbol$cross}")
+  }
 }
 
 
