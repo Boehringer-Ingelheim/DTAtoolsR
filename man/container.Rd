@@ -6,18 +6,20 @@
 \arguments{
 \item{x}{An object of class DTA.}
 
-\item{name}{Optional character vector. One or more container names to retrieve.}
+\item{name}{Optional single character or single integer. if NULL, returns a
+list of all containers. If character, returns the container with the specified name.
+If integer, returns the container at the specified index.}
 }
 \value{
-Either a list of DTRContainer objects s or a single named DTAContainer.
+Either a list of DTAContainer objects or a single DTAContainer.
 }
 \description{
 Method to get one or more containers from a DTA object.
 }
 \examples{
-\dontrun{
-container(DTAContainer)
-container(DTAContainer, "container1")
-container(DTAContainer, c("container1", "container2"))
-}
+libary(DTAtools)
+x <- create_example_DTA()
+container(x)
+container(x, "vitals")
+container(x, 1)
 }

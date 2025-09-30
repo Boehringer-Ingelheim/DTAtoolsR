@@ -103,7 +103,9 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
 #' @name print
 #' @export
 method(print, DTARuleCollection) <- function(x, ...) {
-  cli_text("<DTARuleCollection>: {length(x@rules)} rules")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTARuleCollection}> : {length(x@rules)} rules")
+
   rule_ids <- sapply(x@rules, function(rule) rule@id)
   n_rules <- length(rule_ids)
   max_display <- 10

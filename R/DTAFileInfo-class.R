@@ -76,11 +76,8 @@ DTAFileInfo <- new_class(
     max_number_of_files = class_numeric_or_null
   ),
   validator = function(self) {
-    if (is.null(filename) || filename == "") {
-      cli::cli_abort("'filename' must be a non-empty character vector.")
-    }
-    if (!is.character(self@filename)) {
-      cli::cli_abort("The 'filename' property must be a character vector.")
+    if (!is.character(self@filename) || is.null(self@filename) || self@filename == "") {
+      cli::cli_abort("The 'filename' property must be a non-empty character vector.")
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
@@ -247,7 +244,7 @@ method(read_file, DTAFileInfo) <- function(x, file) {
 #' @param x An object of class DTAFileInfo
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_text
+#' @importFrom cli cli_alert_info cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  # do not use this, use derived classes instead, e.g.
@@ -257,7 +254,9 @@ method(read_file, DTAFileInfo) <- function(x, file) {
 #' @name print
 #' @export
 method(print, DTAFileInfo) <- function(x, ...) {
-  cli_text("<DTAFileInfo>\n")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAFileInfo}> : {.field {x@name}}")
+
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")
   cli_alert("Min number of files: {x@min_number_of_files}")

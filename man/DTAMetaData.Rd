@@ -4,7 +4,7 @@
 \alias{DTAMetaData}
 \title{DTAMetaData Class}
 \usage{
-DTAMetaData(version = NULL, author = NULL)
+DTAMetaData(name, version = NULL, author = NULL)
 }
 \arguments{
 \item{version}{version}

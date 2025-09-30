@@ -80,7 +80,7 @@ method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
 #' @export
 create_example_DTAFileInfoTSV <- function(index = 1) {
   if (index == 1) {
-    example_file <- system.file("extdata", "data_spec.tsv", package = "DTAtoolsR")
+    example_file <- system.file("extdata", "data_gf_small.tsv", package = "DTAtools")
     DTAFileInfoTSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
@@ -103,10 +103,19 @@ create_example_DTAFileInfoTSV <- function(index = 1) {
 #' @name print
 #' @export
 method(print, DTAFileInfoTSV) <- function(x, ...) {
-  cli_text("<DTAFileInfoTSV>\n")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAFileInfoTSV}>")
+
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")
-  cli_alert("Number of files: {x@number_of_files}")
+  if (!is.null(x@min_number_of_files) && !is.null(x@max_number_of_files)) {
+    if (x@min_number_of_files == x@max_number_of_files) {
+      cli_alert("Files required: {x@min_number_of_files}")
+    } else {
+      cli_alert("Files required: {x@min_number_of_files} to {x@max_number_of_files}")
+    }
+  }
+
   cli_alert("Separator: {x@sep}")
   cli_alert("Has header: {x@has_header}")
   cli_alert("Quote: {x@quote}")

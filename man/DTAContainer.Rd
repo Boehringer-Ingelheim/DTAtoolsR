@@ -4,9 +4,11 @@
 \alias{DTAContainer}
 \title{DTAContainer Class}
 \usage{
-DTAContainer(specs, data = list(), fileinfo = list())
+DTAContainer(name, specs, data = list(), fileinfo = list())
 }
 \arguments{
+\item{name}{Character. Name of the container.}
+
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
 \item{data}{List. A list of arrow Table to be validated and included in the DTAContainer object.}

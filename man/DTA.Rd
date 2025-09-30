@@ -4,7 +4,7 @@
 \alias{DTA}
 \title{DTA Class}
 \usage{
-DTA(container = NULL, ...)
+DTA(container = NULL, metadata = NULL, ...)
 }
 \arguments{
 \item{container}{A names list of DTAContainer objects}

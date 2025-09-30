@@ -3,9 +3,6 @@
 \name{metadata}
 \alias{metadata}
 \title{Get Metadata}
-\usage{
-metadata(x, ...)
-}
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
 }

@@ -57,7 +57,8 @@ DTARule <- new_class(
 #' @name print
 #' @export
 method(print, DTARule) <- function(x) {
-  cli_text("{x@id}:<DTAtools::DTARule>")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTARule}> : {.field {x@id}}")
   cli_alert("type: {x@type}")
 }
 

@@ -13,6 +13,7 @@ DTAColumnSpec(
   nullable = NULL,
   pattern = NULL,
   values = NULL,
+  examples = NULL,
   description = NULL
 )
 }

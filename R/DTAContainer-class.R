@@ -3,6 +3,7 @@
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
+#' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param fileinfo a list of DTAFileInfo objects specifying input file information.
 #' @param data List. A list of arrow Table to be validated and included in the DTAContainer object.
@@ -25,6 +26,7 @@
 DTAContainer <- new_class(
   "DTAContainer",
   constructor = function(
+    name,
     specs,
     data = list(),
     fileinfo = list()
@@ -50,17 +52,22 @@ DTAContainer <- new_class(
     # }
     new_object(
       S7_object(),
+      name = name,
       specs = specs,
       data = data,
       fileinfo = fileinfo
     )
   },
   properties = list(
+    name = class_character, 
     specs = class_DTAColumnSpecCollection,
-    data = class_list, # list of arrow tables
+    data = class_list, # list of arrow Table
     fileinfo = class_list # list of DTAFileInfo
   ),
   validator = function(self) {
+    if (!is.character(self@name) || length(self@name) != 1 || self@name == "") {
+      cli_abort("Property 'name' must be a single non-empty string.")
+    }
     # check if all elements of list self@data inherit from "Table"
     if (!all(sapply(self@data, inherits, "Table"))) {
       cli_abort("All elements in 'data' must be of class 'Table'")
@@ -309,6 +316,7 @@ write_table_to_file <- function(
   ))
 }
 
+
 #' @title Get Metadata
 #' @description
 #' Method to get Metadata from DTAContainer.
@@ -318,9 +326,8 @@ write_table_to_file <- function(
 #' \dontrun{
 #' metadata(DTAContainer)
 #' }
-#' @name metadata-DTAContainer
-metadata <- new_generic("metadata", "x")
-
+#' @name metadata
+#' @rdname metadata-DTAContainer
 #' @export
 method(metadata, DTAContainer) <- function(x) {
   return(x@specs@metadata)
@@ -354,7 +361,6 @@ method(rules, DTAContainer) <- function(x) {
 #' \dontrun{
 #' column_format <- max_number_of_files(dtafileinfo)
 #' }
-# Define the generic only if it doesn't already exist
 #' @name max_number_of_files-DTAContainer
 if (!exists("max_number_of_files", mode = "function")) {
   max_number_of_files <- new_generic("max_number_of_files", "x")
@@ -375,7 +381,6 @@ method(max_number_of_files, DTAContainer) <- function(x) {
 #' \dontrun{
 #' column_format <- min_number_of_files(dtafileinfo)
 #' }
-# Define the generic only if it doesn't already exist
 #' @name min_number_of_files-DTAContainer
 if (!exists("min_number_of_files", mode = "function")) {
   min_number_of_files <- new_generic("min_number_of_files", "x")
@@ -416,19 +421,22 @@ create_example_DTAContainer <- function(index = 1) {
   switch(index,
     `1` = {
       DTAtools::DTAContainer(
+        name = "example_container_specs_without_data",
         specs = create_example_DTAColumnSpecCollection(1),
       )
     },
     `2` = {
       DTAtools::DTAContainer( 
+        name = "demographics",
         specs = create_example_DTAColumnSpecCollection(1),
-        data = list("demographics" = table1)
+        data = list("tab1" = table1)
       )
     },
     `3` = {
-      DTAtools::DTAContainer( 
+      DTAtools::DTAContainer(
+        name = "vitals", 
         specs = create_example_DTAColumnSpecCollection(2),
-        data = list(vitals = table2)
+        data = list("tab2" = table2)
       )
     },
     cli::cli_abort("No example available for the provided index.")
@@ -439,24 +447,49 @@ create_example_DTAContainer <- function(index = 1) {
 #' @title Print Method for DTAContainer
 #' @description Print a summary of a DTAContainer object.
 #' @param x A DTAContainer object.
-#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom cli cli_alert_info cli_alert cli_text
+#' @importFrom stringr str_c str_glue
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAContainer())
 #' @name print
 #' @export
 method(print, DTAContainer) <- function(x) {
-  cli_text("<DTAContainer>")
-  cli_alert("Number of tables: {length(x@data)}")
-  n_tables <- length(x@data)
-  table_names <- names(x@data)
-  if (n_tables > 5) {
-    shown_names <- c(table_names[1:4], "...", table_names[n_tables])
-    cli_alert_info("Table names: {paste(shown_names, collapse = ', ')}")
+
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAContainer}> : {.field {x@name}}")
+  if(!is.null(x@specs)) {
+    cli_alert_info("Column specs ({length(x@specs@columns)}): {column_preview(x@specs)}")
   } else {
-    cli_alert_info("Table names: {paste(table_names, collapse = ', ')}")
+    cli_alert_info("Column specs: none")
   }
-  cli_alert("Number of fileinfo entries: {length(x@fileinfo)}")
+  n_tables <- length(x@data)
+  
+  if (n_tables > 0) {
+    table_names <- names(x@data)
+    
+    if (n_tables > 5) {
+      shown_names <- c(table_names[1:4], "...", table_names[n_tables])
+    } else {
+      shown_names <- table_names
+    }
+    
+    # Build the message with proper cli markup, need paste and paste0
+    # instead of stringr functions to work with cli
+    alert_message <- paste0("Data tables (", n_tables, "): ", 
+                           paste(paste0("{.field ", shown_names, "}"), 
+                                collapse = ", "))
+    cli_alert_info(alert_message)
+  } else {
+    cli_alert("Data tables: {.emph none}")
+  }
+
+  if (is.null(x@fileinfo) || length(x@fileinfo) == 0) {
+    cli_alert("Fileinfo entries: {.emph none}")
+  } else {
+    cli_alert_info("Fileinfo entries: {length(x@fileinfo)}")
+  }
+
   invisible(x)
 }
 

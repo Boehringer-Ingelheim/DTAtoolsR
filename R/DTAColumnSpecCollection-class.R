@@ -60,19 +60,25 @@ DTAColumnSpecCollection <- new_class(
 )
 
 
-#' @title print
+#' @title Preview Column IDs in a DTAColumnSpecCollection
+#'
 #' @description
-#' Print overview for DTAColumnSpecCollection
-#' @param x An object of class DTAColumnSpecCollection.
-#' @importFrom stringr str_c str_flatten_comma
-#' @importFrom cli cli_alert_info cli_alert cli_text
+#' Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
+#' If the collection contains more than 5 columns, it returns the IDs of the first four columns,
+#' an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+#'
+#' @param x A \code{DTAColumnSpecCollection} object.
+#'
+#' @return A character string representing a preview of the column IDs.
+#'
+#' @seealso \code{\link{DTAColumnSpecCollection}}
 #' @examples
-#' \dontrun{
-#'  print(specs)
-#' }
-#' @name print
+#' library(DTAtools)
+#' x <- create_example_DTAColumnSpecCollection()
+#' column_preview(x)
 #' @export
-method(print, DTAColumnSpecCollection) <- function(x) {
+column_preview <- new_generic("column_preview", "x")
+method(column_preview, DTAColumnSpecCollection) <- function(x) {
   if (length(x@columns) > 5) {
     col_preview <- str_flatten_comma(
         map(x@columns[1:4], function(y) y@id),
@@ -85,6 +91,24 @@ method(print, DTAColumnSpecCollection) <- function(x) {
   } else {
     col_preview <- "not set"
   }
+
+  col_preview
+}
+
+#' @title print
+#' @description
+#' Print overview for DTAColumnSpecCollection
+#' @param x An object of class DTAColumnSpecCollection.
+#' @importFrom stringr str_c str_flatten_comma
+#' @importFrom cli cli_alert_info cli_alert cli_text cli_div
+#' @examples
+#' \dontrun{
+#'  print(specs)
+#' }
+#' @name print
+#' @export
+method(print, DTAColumnSpecCollection) <- function(x) {
+  col_preview <- column_preview(x)
 
   if (length(x@rules) > 5) {
     rule_preview <- str_flatten_comma(
@@ -99,7 +123,9 @@ method(print, DTAColumnSpecCollection) <- function(x) {
     rule_preview <- "not set"
   }
 
-  cli_text("<DTAColumnSpecCollection>:\n")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAColumnSpecCollection}>")
+
   cli_alert_info("columns ({length(x@columns)}): {col_preview}")
   cli_alert("schema: {ifelse(length(x@json_schema) > 0, cli::symbol$tick, cli::symbol$cross)}")
   cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
@@ -159,8 +185,6 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @name metadata
 #' @rdname metadata-DTAColumnSpecCollection
 #' @export
-metadata <- new_generic("metadata", "x")
-
 method(metadata, DTAColumnSpecCollection) <- function(x) {
   return(x@metadata)
 }

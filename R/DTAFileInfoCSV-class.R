@@ -80,8 +80,8 @@ method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
 #' create_example_DTAFileInfoCSV()
 #' @export
 create_example_DTAFileInfoCSV <- function(index = 1) {
-  if (index != 1) {
-    example_file <- system.file("extdata", "data_spec.csv", package = "DTAtoolsR")
+  if (index == 1) {
+    example_file <- system.file("extdata", "data_spec.csv", package = "DTAtools")
     DTAFileInfoCSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
@@ -105,10 +105,17 @@ create_example_DTAFileInfoCSV <- function(index = 1) {
 #' @name print
 #' @export
 method(print, DTAFileInfoCSV) <- function(x, ...) {
-  cli_text("<DTAFileInfoCSV>\n")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAFileInfoCSV}>")
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
-  cli::cli_alert("Number of files: {x@number_of_files}")
+  if (!is.null(x@min_number_of_files) && !is.null(x@max_number_of_files)) {
+    if (x@min_number_of_files == x@max_number_of_files) {
+      cli_alert("Files required: {x@min_number_of_files}")
+    } else {
+      cli_alert("Files required: {x@min_number_of_files} to {x@max_number_of_files}")
+    }
+  }
   cli::cli_alert("Separator: {x@sep}")
   cli::cli_alert("Has header: {x@has_header}")
   cli::cli_alert("Quote: {x@quote}")

@@ -63,8 +63,7 @@ DTARuleCheckUnique <- new_class(
 #' @description
 #' Print overview for DTARule
 #' @param x An object of class DTARule
-#' @importFrom cli cli_alert_info cli_alert cli_text
-
+#' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -72,7 +71,13 @@ DTARuleCheckUnique <- new_class(
 #' @name print
 #' @export
 method(print, DTARule) <- function(x) {
-  cli_text("{x@id}:<DTAtools::DTARule>")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTARuleCheckUnique}> : {.field {x@id}}")
+
+  message <- paste0("Columns: ", 
+                      paste(paste0("{.field ", x@columns, "}"), 
+                          collapse = ", "))
+  cli_text(message)
 }
 
 #' @title create_example_DTARuleCheckUnique

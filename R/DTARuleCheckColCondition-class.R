@@ -86,8 +86,9 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' @name print
 #' @export
 method(print, DTARuleCheckColCondition) <- function(x) { # nolint
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTARuleCheckColCondition}> : {.field {x@id}}")
 
-  cli_text("{x@id}:<DTAtools::DTARuleCheckColCondition>")
   cli_alert_info("condition: {x@condition}")
   cli_alert("then: {x@then}")
 }

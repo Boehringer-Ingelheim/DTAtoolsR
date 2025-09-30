@@ -3,6 +3,9 @@
 \name{metadata}
 \alias{metadata}
 \title{Get Metadata}
+\usage{
+metadata(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTA}
 }
@@ -10,11 +13,10 @@
 A list with metadata information
 }
 \description{
-Method to get Metadata from DTA.
+Method to get Metadata from a DTA object.
 }
 \examples{
 library(DTAtools)
-DTA <- create_example_DTA()
-metadata(DTA)
-
+dta_obj <- create_example_DTA()
+metadata(dta_obj)
 }

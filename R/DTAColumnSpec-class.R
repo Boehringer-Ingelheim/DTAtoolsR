@@ -30,6 +30,7 @@ DTAColumnSpec <- new_class(
     nullable = NULL,
     pattern = NULL,
     values = NULL,
+    examples = NULL,
     description = NULL
   ) {
     new_object(
@@ -42,6 +43,7 @@ DTAColumnSpec <- new_class(
       nullable = nullable,
       description = description,
       values = values,
+      examples = examples,
       pattern = pattern
     )
   },
@@ -54,6 +56,7 @@ DTAColumnSpec <- new_class(
     nullable = class_logical_or_null,
     description = class_character_or_null,
     values = class_character_or_numeric_or_null_or_list,
+    examples = class_character_or_numeric_or_null_or_list,
     pattern = class_character_or_null
   ),
   validator = function(self) {
@@ -173,7 +176,9 @@ create_example_DTAColumnSpec <- function(index = 1) {
 #' @name print
 #' @export
 method(print, DTAColumnSpec) <- function(x) {
-  cli_text("<DTAColumnSpec>: {x@id}")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAColumnSpec}> : {.field {x@id}}")
+
   if (!is.null(x@label))        cli_alert("label      : {x@label}")
   if (!is.null(x@type))         cli_alert("type       : {x@type}")
   if (!is.null(x@format))       cli_alert("format     : {x@format}")

@@ -103,7 +103,9 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 #' @name print
 #' @export
 method(print, DTARuleCheckRange) <- function(x) {
-  cli_text("{x@id}:<DTAtools::DTARuleCheckRange>")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTARuleCheckRange}> : {.field {x@id}}")
+  
   cli_alert_info("column(s): {paste(x@column, collapse = ', ')}")
   cli_alert("min: {x@min_range}")
   cli_alert("max: {x@max_range}")

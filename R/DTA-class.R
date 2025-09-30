@@ -24,16 +24,29 @@
 #'
 #' DTA(container = list(data = data_obj))
 #' }
+#' @export
 DTA <- new_class(
   "DTA",
   constructor = function(
     container = NULL,
+    metadata = NULL,
     ...
   ) {
+    if (inherits(container, "DTAtools::DTAContainer")) {
+      container <- list(container)
+      names(container) <- container[[1]]@name
+    }
+    if (is.list(container) && !is.null(container) && is.null(names(container))) {
+      names(container) <- vapply(container, function(x) x@name, character(1))
+    }
+
+    if (is.null(metadata)) {
+      metadata <- DTAMetaData(...)
+    }
     new_object(
       S7_object(),
       container = container,
-      metadata = DTAMetaData(...)
+      metadata = metadata
     )
   },
   properties = list(
@@ -42,22 +55,20 @@ DTA <- new_class(
   )
 )
 
+
 #' @title Get Metadata
 #' @description
-#' Method to get Metadata from DTA.
+#' Method to get Metadata from a DTA object.
 #' @param x An object of class DTA
 #' @return A list with metadata information
 #' @examples
 #' library(DTAtools)
-#' DTA <- create_example_DTA()
-#' metadata(DTA)
-#'
+#' dta_obj <- create_example_DTA()
+#' metadata(dta_obj)
 #' @name metadata
 #' @rdname metadata-DTA
+metadata <- new_generic("metadata", "x")
 #' @export
-if (!exists("metadata", mode = "function")) {
-  metadata <- new_generic("metadata", "x")
-}
 method(metadata, DTA) <- function(x) {
   return(x@metadata)
 }
@@ -68,14 +79,16 @@ method(metadata, DTA) <- function(x) {
 #' Method to get one or more containers from a DTA object.
 #' @importFrom cli cli_alert_info
 #' @param x An object of class DTA.
-#' @param name Optional character vector. One or more container names to retrieve.
-#' @return Either a list of DTRContainer objects s or a single named DTAContainer.
+#' @param name Optional single character or single integer. if NULL, returns a 
+#' list of all containers. If character, returns the container with the specified name.
+#' If integer, returns the container at the specified index.
+#' @return Either a list of DTAContainer objects or a single DTAContainer.
 #' @examples
-#' \dontrun{
-#' container(DTAContainer)
-#' container(DTAContainer, "container1")
-#' container(DTAContainer, c("container1", "container2"))
-#' }
+#' libary(DTAtools)
+#' x <- create_example_DTA()
+#' container(x)
+#' container(x, "vitals")
+#' container(x, 1)
 #' @name container
 #' @export
 if (!exists("container", mode = "function")) {
@@ -84,11 +97,20 @@ if (!exists("container", mode = "function")) {
 
 #' @export
 method(container, DTA) <- function(x, name = NULL) {
+  if(!is.null(name) && !is.character(name) && !is.numeric(name) && length(name) != 1) {
+    cli::cli_abort("'name' must be a single character vector, single numeric index or NULL.")
+  }
   all_containers <- x@container
 
   if (is.null(name)) {
-    cli::cli_alert_info("Returning all containers in the DTA Object as a list")
     return(all_containers)
+  }
+
+  if (is.numeric(name)) {
+    if (any(name < 1) || any(name > length(all_containers))) {
+      cli::cli_abort("Numeric 'name' index out of bounds.")
+    }
+    return(all_containers[[name]])
   }
 
   missing <- setdiff(name, names(all_containers))
@@ -96,7 +118,6 @@ method(container, DTA) <- function(x, name = NULL) {
     cli::cli_abort("The following container{?s} not found: {.field {missing}}")
   }
 
-  cli::cli_alert_info("Returning the DTAContainer with the name{?s}: '{name}'")
   return(all_containers[[name]])
 }
 
@@ -115,13 +136,18 @@ method(container, DTA) <- function(x, name = NULL) {
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
-  cli_text("<DTA> object")
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTA}>")
+  cli_alert_info("Metadata: {x@metadata@name} {x@metadata@version}")
 
-  print(x@metadata)
-  cli_alert("Number of containers: {length(x@container)}")
 
-  if (length(x@container) > 0) {
-    cli_alert_info("Container names: {names(x@container)}")
+  if (!is.null(x@container) && length(x@container) > 0) {
+    message <- paste0("Containers ({length(x@container)}): ", 
+                  paste(paste0("{.field ", names(x@container), "}"), 
+                      collapse = ", "))
+    cli_alert_info(message)
+  } else {
+    cli_alert("Containers: none")
   }
 
   invisible(x)
@@ -147,7 +173,6 @@ create_example_DTA <- function() {
   # Create DTA object
   DTA(
     container = list(cont1, cont2),
-    author = "create example function",
-    version = "0.1"
+    metadata = create_example_DTAMetaData()
   )
 }
