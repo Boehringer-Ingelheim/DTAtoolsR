@@ -81,7 +81,7 @@ method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
 #' @export
 create_example_DTAFileInfoCSV <- function(index = 1) {
   if (index == 1) {
-    example_file <- system.file("extdata", "data_spec.csv", package = "DTAtools")
+    example_file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
     DTAFileInfoCSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )

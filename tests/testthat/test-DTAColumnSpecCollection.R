@@ -1,3 +1,23 @@
+test_that("Import specs from YAML file", {
+  path <- system.file("extdata", "gf_container.yaml", package = "DTAtools")
+  collection <- import_specs_from_yaml(path)
+
+  expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
+  expect_named(collection@columns, c("STUDYID", "VISIT", "AGE", "COUNTRY"))
+  expect_equal(collection@columns$STUDYID@id, "STUDYID")
+  expect_equal(collection@columns$VISIT@values, list("V01", "EOT", "V02", "V03"))
+  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
+  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
+
+  # check getMetadata method
+  expect_equal(getMetadata(collection), list())
+
+  # Test DTAColumnSpecCollectionToList
+
+  list <- specs_to_list(collection)
+  expect_type(list, "list")
+})
+
 test_that("DTAColumnSpecCollection stores and retrieves specs", {
   col1 <- DTAColumnSpec(
     id = "STUDYID",

@@ -1,11 +1,11 @@
 #' @title DTAColumnSpecCollection Class
 #' @description
-#' This class represents a collection of DTAColumnSpec objects with optional metadata.
+#' This class represents a collection of DTAColumnSpec objects with optional attributes.
 #' @import S7
 #' @importFrom cli cli_abort
 #'
 #' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
-#' @param metadata A list of metadata information.
+#' @param attributes A list of attributes information.
 #' @param rules A list of DTARule object.
 #' @return An object of class DTAColumnSpecCollection.
 #' @examples
@@ -15,7 +15,7 @@
 #' @export
 DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
-  constructor = function(columns, rules = list(), metadata = list()) {
+  constructor = function(columns, rules = list(), attributes = list()) {
     if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
@@ -29,14 +29,14 @@ DTAColumnSpecCollection <- new_class(
       S7_object(),
       columns = columns,
       json_schema = json_schema,
-      metadata = metadata,
+      attributes = attributes,
       rules = rules
     )
   },
   properties = list(
     columns = class_list,
     json_schema = class_character,
-    metadata = class_list,
+    attributes = class_list,
     rules = class_any
   ),
   validator = function(self) {
@@ -133,10 +133,10 @@ method(print, DTAColumnSpecCollection) <- function(x) {
     cli_alert("schema: {cli::symbol$cross}")
   }
   cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
-  if (length(x@metadata) > 0) {
-    cli_alert_info("metadata: {cli::symbol$tick}")
+  if (length(x@attributes) > 0) {
+    cli_alert_info("attributes: {cli::symbol$tick}")
   } else {
-    cli_alert("metadata: {cli::symbol$cross}")
+    cli_alert("attributes: {cli::symbol$cross}")
   }
 }
 
@@ -185,16 +185,16 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @description
 #' Method to get Metadata from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
-#' @return A list with metadata information
+#' @return A list with attributes information
 #' @examples
 #' \dontrun{
-#'  metadata(collection)
+#'  attributes(collection)
 #' }
-#' @name metadata
-#' @rdname metadata-DTAColumnSpecCollection
+#' @name attributes
+#' @rdname attributes-DTAColumnSpecCollection
 #' @export
-method(metadata, DTAColumnSpecCollection) <- function(x) {
-  return(x@metadata)
+method(attributes, DTAColumnSpecCollection) <- function(x) {
+  return(x@attributes)
 }
 
 #' @title Get Rules
@@ -252,10 +252,10 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 import_specs_from_yaml <- function(file) {
   yaml <- yaml::read_yaml(file)
   specs <- yaml$columns
-  if (is.null(yaml$metadata)) {
-    metadata <- list()
+  if (is.null(yaml$attributes)) {
+    attributes <- list()
   } else {
-    metadata <- yaml$metadata
+    attributes <- yaml$attributes
   }
 
   if (is.null(yaml$rules)) {
@@ -290,19 +290,19 @@ import_specs_from_yaml <- function(file) {
   })
   return(DTAColumnSpecCollection(
     columns = column_list,
-    metadata = metadata,
+    attributes = attributes,
     rules = rules
   ))
 }
 
 #' @title Create DTAColumnSpecCollection from Components
 #' @description
-#' Constructs a DTAColumnSpecCollection object from separate components: columns, metadata, and schema rules.
+#' Constructs a DTAColumnSpecCollection object from separate components: columns, attributes, and schema rules.
 #' Supports both named and unnamed lists of column specifications.
 #'
 #' @importFrom cli cli_abort
 #' @param columns A list of column specification lists. Each must contain at least an `id`.
-#' @param metadata Optional list of metadata fields (e.g., author, version).
+#' @param attributes Optional list of attributes fields (e.g., author, version).
 #' @param rules Optional list of schema rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
@@ -321,7 +321,7 @@ import_specs_from_yaml <- function(file) {
 
 specs_from_list <- function(
   columns,
-  metadata = list(),
+  attributes = list(),
   rules = list()
 ) {
   if (!is.list(columns)) {
@@ -372,7 +372,7 @@ specs_from_list <- function(
 
   return(DTAColumnSpecCollection(
     columns = column_list,
-    metadata = metadata,
+    attributes = attributes,
     rules = rules
   ))
 }
@@ -417,7 +417,7 @@ convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
 import_specs_from_json <- function(file) {
   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
   specs <- json$columns
-  metadata <- if (is.null(json$metadata)) list() else json$metadata
+  attributes <- if (is.null(json$attributes)) list() else json$attributes
 
   column_list <- lapply(specs, function(column) {
     DTAColumnSpec(
@@ -433,7 +433,7 @@ import_specs_from_json <- function(file) {
     )
   })
   names(column_list) <- vapply(specs, function(x) x$id, character(1))
-  DTAColumnSpecCollection(columns = column_list, metadata = metadata)
+  DTAColumnSpecCollection(columns = column_list, attributes = attributes)
 }
 
 #' @title Create DTAColumnSpecCollection from DTA Word Document
@@ -586,9 +586,9 @@ write_specs_to_yaml <- function(
     )
   })
 
-  metadata <- DTAColumnSpecCollection@metadata
+  attributes <- DTAColumnSpecCollection@attributes
   yaml::write_yaml(
-    list(metadata = metadata, columns = specs, rules = rules),
+    list(attributes = attributes, columns = specs, rules = rules),
     file
   )
 }
@@ -629,10 +629,10 @@ writeDTAColumnSpecCollectionToJson <- function(
       description = column@description
     )
   })
-  metadata <- DTAColumnSpecCollection@metadata
+  attributes <- DTAColumnSpecCollection@attributes
   rules <- DTAColumnSpecCollection@rules
   jsonlite::write_json(
-    list(metadata = metadata, columns = specs, rules = rules),
+    list(attributes = attributes, columns = specs, rules = rules),
     path = file,
     pretty = pretty,
     auto_unbox = TRUE
@@ -761,9 +761,9 @@ specs_to_list <- function(
     )
   })
 
-  metadata <- get_metadata(DTAColumnSpecCollection)
+  attributes <- get_attributes(DTAColumnSpecCollection)
 
-  return(list(columns = specs, rules = rules, metadata = metadata))
+  return(list(columns = specs, rules = rules, attributes = attributes))
 }
 
 
@@ -790,7 +790,7 @@ create_example_DTAColumnSpecCollection <- function(index = 1) {
       example_rules <- list()
       DTAColumnSpecCollection(
         columns = setNames(list(col1, col2, col3, col4), c(col1@id, col2@id, col3@id, col4@id)),
-        metadata = list(),
+        attributes = list(),
         rules = example_rules
       )
     },
@@ -798,7 +798,7 @@ create_example_DTAColumnSpecCollection <- function(index = 1) {
       example_rules <- list()
       DTAColumnSpecCollection(
         columns = setNames(list(col1, col2, col3, col5), c(col1@id, col2@id, col3@id, col5@id)),
-        metadata = list(),
+        attributes = list(),
         rules = example_rules
       )
     },

@@ -12,13 +12,13 @@ test_that("Examples are loaded and correctly formatted.", {
     ))
   }
   validate_table(
-    system.file("extdata", "data_gf_small.tsv", package = "DTAtools"),
+    system.file("extdata", "gf_data_small.tsv", package = "DTAtools"),
     "\t",
-    system.file("extdata", "params_gf.yaml", package = "DTAtools")
+    system.file("extdata", "gf_container.yaml", package = "DTAtools")
   )
   validate_table(
-    system.file("extdata", "data_spec.csv", package = "DTAtools"),
+    system.file("extdata", "clinical_data.csv", package = "DTAtools"),
     ",",
-    system.file("extdata", "params_spec.yaml", package = "DTAtools")
+    system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
   )
 })

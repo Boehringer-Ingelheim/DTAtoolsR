@@ -1,7 +1,7 @@
 test_that("DTAContainer object is created and tables are accessible", {
-  specs <- import_specs_from_yaml(system.file("extdata", "params_gf.yaml", package = "DTAtools"))
-  path <- system.file("extdata", "data_gf_small.tsv", package = "DTAtools")
-  file_info <- DTAFileInfoTSV("data_gf_small.tsv")
+  specs <- import_specs_from_yaml(system.file("extdata", "gf_container.yaml", package = "DTAtools"))
+  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+  file_info <- DTAFileInfoTSV("gf_data_small.tsv")
   container <- DTAContainer(specs = specs, fileinfo = file_info)
 
   expect_equal(max_number_of_files(container), 1)

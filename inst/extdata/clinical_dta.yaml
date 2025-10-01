@@ -1,6 +1,13 @@
-metadata:
-  author: User Name
-  version: "1.1"
+name: patient data
+
+attributes:
+  description: "tables containing the clinical data"
+  template: "DTS clinical table test"
+  template_version: "v3.0"
+
+fileinfo:
+  filename: "data_spec.csv"
+  type: "csv"
 
 columns:
   - id: STUDYID
