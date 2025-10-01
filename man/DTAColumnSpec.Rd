@@ -14,7 +14,8 @@ DTAColumnSpec(
   pattern = NULL,
   values = NULL,
   examples = NULL,
-  description = NULL
+  description = NULL,
+  colclass = NULL
 )
 }
 \arguments{

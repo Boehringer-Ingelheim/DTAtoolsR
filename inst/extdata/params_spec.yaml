@@ -5,7 +5,7 @@ metadata:
 columns:
   - id: STUDYID
     label: Study Identifier
-    type: Char
+    type: SAS Char
     nullable: false
     length: 10
     values:
@@ -13,7 +13,7 @@ columns:
     description: Unique study ID
   - id: VISIT
     label: Visit
-    type: Char
+    type: SAS Char
     length: 12
     nullable: false
     values:
@@ -24,12 +24,12 @@ columns:
     description: Visit code
   - id: AGE
     label: Age
-    type: Num
+    type: SAS Num
     nullable: false
     description: Age in years
   - id: GENDER
     label: Gender
-    type: Char
+    type: SAS Char
     nullable: false
     values:
       - Male
@@ -38,7 +38,7 @@ columns:
     description: Gender of subject
   - id: INCLUDE
     label: Include in analysis
-    type: Char
+    type: SAS Char
     length: 1
     nullable: true
     values:
@@ -47,22 +47,22 @@ columns:
     description: Flag for inclusion
   - id: HEIGHT
     label: Height (cm)
-    type: Num
+    type: SAS Num
     nullable: false
     description: Height in centimeters
   - id: WEIGHT
     label: Weight (kg)
-    type: Num
+    type: SAS Num
     nullable: false
     description: Weight in kilograms
   - id: BMI
     label: Body Mass Index
-    type: Num
+    type: SAS Num
     nullable: false
     description: Calculated BMI
   - id: STATUS
     label: Visit Status
-    type: Char
+    type: SAS Char
     nullable: true
     values:
       - COMPLETED
@@ -71,7 +71,7 @@ columns:
     description: Status of visit
   - id: CONSENT
     label: Consent Given
-    type: Char
+    type: SAS Char
     nullable: true
     values:
       - "YES"
@@ -79,22 +79,22 @@ columns:
     description: Consent status
   - id: CONSENT_DATE
     label: Consent Date
-    type: Char
+    type: SAS Char
     nullable: true
     description: Date of consent
   - id: AE_TERM
     label: Adverse Event Term
-    type: Char
+    type: SAS Char
     nullable: true
     description: Adverse event term
   - id: SAE_TERM
     label: Serious Adverse Event Term
-    type: Char
+    type: SAS Char
     nullable: true
     description: Serious adverse event term
   - id: SUBJECT_ID
     label: Subject Identifier
-    type: Char
+    type: SAS Char
     nullable: false
     description: Unique subject ID
 

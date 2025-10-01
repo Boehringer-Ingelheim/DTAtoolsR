@@ -53,6 +53,8 @@ Collate:
     'DTA-class.R'
     'DTAColumnSpec-class.R'
     'DTAColumnSpecCollection-class.R'
+    'DTAColumnSpecStructure-class.R'
+    'DTAColumnSpecStructureSAS-class.R'
     'DTAContainer-class.R'
     'DTAFileInfo-class.R'
     'DTAFileInfoTabular-class.R'

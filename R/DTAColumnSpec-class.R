@@ -34,13 +34,21 @@ DTAColumnSpec <- new_class(
     description = NULL,
     colclass = NULL
   ) {
+    structure <- NULL
+
+    if (!is.null(type) || !is.null(format || !is.null(length))) {
+      structure = DTAtools::DTAColumnSpecStructure(
+        type = type,
+        format = format,
+        length = length
+      )
+    }
+    
     new_object(
       S7_object(),
       id = id,
       label = label,
-      type = type,
-      format = format,
-      length = length,
+      structure = structure,
       nullable = nullable,
       description = description,
       values = values,
@@ -52,9 +60,7 @@ DTAColumnSpec <- new_class(
   properties = list(
     id = class_character,
     label = class_character_or_null,
-    type = class_character_or_null,
-    format = class_character_or_numeric_or_null,
-    length = class_numeric_or_null,
+    structure = class_DTAColumnSpecStructure_or_null,
     nullable = class_logical_or_null,
     description = class_character_or_null,
     values = class_character_or_numeric_or_null_or_list,
@@ -149,7 +155,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       DTAtools::DTAColumnSpec(
         id = "STUDYID",
         label = "Study Identifier",
-        type = "Char",
+        type = "SAS Char",
         nullable = FALSE,
         values = list("1234", "5678"),
         description = "Unique study identifier"
@@ -159,7 +165,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       DTAtools::DTAColumnSpec(
         id = "VISIT",
         label = "Visit",
-        type = "Char",
+        type = "SAS Char",
         nullable = FALSE,
         values = list("V01", "EOT"),
         description = "Visit code"
@@ -169,7 +175,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       DTAtools::DTAColumnSpec(
         id = "SUBJID",
         label = "Subject Identifier",
-        type = "Char",
+        type = "SAS Char",
         nullable = FALSE,
         values = list("001", "002"),
         description = "Unique subject identifier"
@@ -179,7 +185,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       DTAtools::DTAColumnSpec(
         id = "AGE",
         label = "Age",
-        type = "Int",
+        type = "SAS Int",
         nullable = TRUE,
         pattern = "^[0-9]{1,3}$",
         description = "Age in years"
@@ -189,7 +195,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       DTAtools::DTAColumnSpec(
         id = "AVAL",
         label = "Analysis Value",
-        type = "Int",
+        type = "SAS Int",
         nullable = FALSE,
         pattern = "^[0-9]+(\\.[0-9]{1,2})?$",
         description = "Analysis value"
@@ -215,9 +221,12 @@ method(print, DTAColumnSpec) <- function(x) {
   cli_text("<{.emph DTAColumnSpec}> ")
   if (!is.null(x@label))        cli_alert("id         : {.field {x@id}}")
   if (!is.null(x@label))        cli_alert("label      : {x@label}")
-  if (!is.null(x@type))         cli_alert("type       : {x@type}")
-  if (!is.null(x@format))       cli_alert("format     : {x@format}")
-  if (!is.null(x@length))       cli_alert("length     : {x@length}")
+  if (!is.null(x@structure))  {
+    if (!is.null(x@type))              cli_alert("type       : {x@structure@type}")
+    if (!is.null(x@format))            cli_alert("format     : {x@structure@format}")
+    if (!is.null(x@length))            cli_alert("length     : {x@structure@length}")
+    if (!is.null(x@structure@backend)) cli_alert("backend    : {x@structure@backend}")
+  }
   if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
   if (!is.null(x@pattern))      cli_alert("pattern    : {x@pattern}")
   if (!is.null(x@values))       cli_alert("values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}")
