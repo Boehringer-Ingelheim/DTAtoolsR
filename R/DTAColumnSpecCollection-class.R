@@ -229,12 +229,12 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' columns:
 #'   - id: STUDYID
 #'     label: Study Identifier
-#'     type: Char
+#'     type: SAS Char
 #'     nullable: false
 #'     values: '1234'
 #'   - id: VISIT
 #'     label: Visit
-#'     type: Char
+#'     type: SAS Char
 #'     nullable: true
 #'     values:
 #'       - 'V03'
@@ -266,14 +266,7 @@ import_specs_from_yaml <- function(file) {
 
   if (length(rules) > 0) {
     rules <- lapply(rules, function(x) {
-      DTAtools::DTARule(
-        id = x$id,
-        type = x$type,
-        column = x$column,
-        range = x$range,
-        condition = x$condition,
-        then = x$then
-      )
+      do.call(create_DTARule, x)
     })
   }
 
@@ -653,7 +646,7 @@ writeDTAColumnSpecCollectionToJson <- function(
 specs_to_jsonschema <- function(specs) {
   properties <- lapply(specs, function(spec) {
     type <- switch(
-      spec@type,
+      spec@structure@type,
       "Char" = "string",
       "Num" = "number",
       "Int" = "integer",
@@ -669,8 +662,8 @@ specs_to_jsonschema <- function(specs) {
       }
     }
 
-    if (!is.null(spec@length) && !is.na(spec@length)) {
-      schema$maxLength <- as.integer(spec@length)
+    if (!is.null(spec@structure@length) && !is.na(spec@structure@length)) {
+      schema$maxLength <- as.integer(spec@structure@length)
     }
 
     if (!is.null(spec@values)) {

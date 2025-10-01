@@ -22,12 +22,12 @@ yaml_content <- "
 columns:
   - id: STUDYID
     label: Study Identifier
-    type: Char
+    type: SAS Char
     nullable: false
     values: '1234'
   - id: VISIT
     label: Visit
-    type: Char
+    type: SAS Char
     nullable: true
     values:
       - 'V03'

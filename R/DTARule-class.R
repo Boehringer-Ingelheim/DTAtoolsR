@@ -79,3 +79,41 @@ method(check, DTARule) <- function(x, index = 1) { #nolint
   cli::cli_abort(stringr::str_c("Check needs to be run from Class",
     " derived from DTAtools::DTARule class."))
 }
+
+
+#' Create a DTARule Object
+#'
+#' Factory function to create a DTARule object of a specified type.
+#'
+#' @param id A character string specifying the rule identifier.
+#' @param type A character string specifying the type of rule to create. 
+#'   Supported types are \code{"col_condition"}, \code{"col_range"}, and \code{"col_unique"}.
+#' @param ... Additional arguments passed to the specific DTARule constructor.
+#'
+#' @return An object of class \code{DTARuleColCondition}, \code{DTARuleColRange}, or \code{DTARuleColUnique}, depending on \code{type}.
+#' @export
+#'
+#' @examples
+#' create_DTARule("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
+#' create_DTARule("rule2", "col_range", column = "score", min = 0, max = 100)
+#' create_DTARule("rule3", "col_unique", column = "id")
+create_DTARule <- function(id, type, ...) {
+  switch(type,
+    col_condition = DTAtools::DTARuleColCondition(
+      id = id,
+      ...
+    ),
+    col_range = DTAtools::DTARuleColRange(
+      id = id,
+      ...
+    ),
+    col_unique = DTAtools::DTARuleColUnique(
+      id = id,
+      ...
+    ),
+    {
+      cli::cli_abort("Unknown rule type: {type}")
+    }
+  )
+}
+

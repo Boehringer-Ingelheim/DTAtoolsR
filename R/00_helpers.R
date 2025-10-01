@@ -59,12 +59,12 @@ class_character_or_numeric_or_null_or_list <- class_character |
 #'
 #' @examples
 #' library(DTAtools)
-#' create_DTAColumnSpecStructure_object(type = "SAS Char", format = "SAS $10.", length = 10)
+#' create_DTAColumnSpecStructure(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
 #' @seealso \code{\link{DTAtools::DTAColumnSpecStructureSAS}}, \code{\link{DTAtools::DTAColumnSpecStructureR}}
 #' @export
 
-create_DTAColumnSpecStructure_object <- function(
+create_DTAColumnSpecStructure <- function(
     type = NULL,
     format = NULL,
     length = NULL) {

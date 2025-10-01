@@ -100,7 +100,7 @@ columns:
 
 rules:
   - id: rule_equal_example
-    type: check_col_condition
+    type: col_condition
     condition:
       VISIT:
         equals: V03
@@ -108,7 +108,7 @@ rules:
       STATUS:
         equals: COMPLETED
   - id: rule_unequal_example
-    type: check_col_condition
+    type: col_condition
     condition:
       VISIT:
         equals: V03
@@ -116,13 +116,13 @@ rules:
       STATUS:
         not_equals: DROPPED
   - id: rule_range_example
-    type: check_range
+    type: col_range
     column: AGE
     range:
       - 18
       - 65
   - id: rule_dependency_example
-    type: check_col_condition
+    type: col_condition
     condition:
       CONSENT:
         equals: "YES"
@@ -130,12 +130,12 @@ rules:
       CONSENT_DATE:
         empty: false
   - id: rule_unique_example
-    type: check_unique
+    type: col_unique
     column: 
       - SUBJECT_ID
       - VISIT
   - id: check_col_condition_example
-    type: check_col_condition
+    type: col_condition
     condition:
       VISIT:
         equals: V03

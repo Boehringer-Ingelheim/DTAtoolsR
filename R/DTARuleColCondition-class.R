@@ -36,6 +36,7 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
   # Constructor for the DTARule class
   constructor = function(
     id,
+    description = NULL,
     condition = NULL,
     then = NULL
   ) {
@@ -43,8 +44,9 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
     new_object(
       DTAtools::DTARule(
         id = id,
-        type = "check_col_condition"
+        type = "col_condition"
       ),
+      description = description,
       condition = condition,
       then = then
     )
@@ -54,6 +56,7 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
   properties = list(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
+    description = class_character_or_null,
     condition = class_character_or_list,
     then = class_character_or_list
   ),
@@ -69,6 +72,11 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
     }
     if (is.null(self@then) || length(self@then) < 1) {
       "'then' must be a non-empty list of conditions."
+    }
+    # description can be NULL or a character of length 1
+    if (!is.null(self@description) &&
+        (!is.character(self@description) || length(self@description) != 1)) {
+      "'description' must be NULL or a character of length 1."
     }
   }
 )

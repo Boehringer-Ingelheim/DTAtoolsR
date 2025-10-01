@@ -4,7 +4,7 @@
 \alias{DTARuleColCondition}
 \title{DTARuleColCondition Class}
 \usage{
-DTARuleColCondition(id, condition = NULL, then = NULL)
+DTARuleColCondition(id, description = NULL, condition = NULL, then = NULL)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}

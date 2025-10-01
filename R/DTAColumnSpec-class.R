@@ -37,7 +37,7 @@ DTAColumnSpec <- new_class(
     structure <- NULL
 
     if (!is.null(type) || !is.null(format || !is.null(length))) {
-      structure = DTAtools::DTAColumnSpecStructure(
+      structure = create_DTAColumnSpecStructure(
         type = type,
         format = format,
         length = length
@@ -97,7 +97,7 @@ DTAColumnSpec <- new_class(
       }
     }
 
-    if (!isnull(self@colclass)) {
+    if (!is.null(self@colclass)) {
       valid_colclasses <- c("patient_info", "measurement_patient", "measurement", "visit_related", "date_related", "study_info", "wide_format", "long_format", "wide_and_long_format")
       if (!(self@colclass %in% valid_colclasses)) {
         str_glue("'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}")

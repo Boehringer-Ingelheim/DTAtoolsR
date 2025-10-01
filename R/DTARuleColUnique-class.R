@@ -31,7 +31,7 @@ DTARuleColUnique <- new_class(
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "check_unique"
+        type = "col_unique"
       ),
       columns = columns
     )
