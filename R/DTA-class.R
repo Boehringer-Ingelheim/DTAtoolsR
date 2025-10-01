@@ -156,9 +156,8 @@ method(print, DTA) <- function(x, ...) {
 #' @title Create Example DTA Object
 #' @description
 #' Creates an example DTA object for demonstration purposes.
-#' @param title Character string. Title for the DTA object.
-#' @param version Character string. Version of the DTA object.
-#' @importFrom arrow arrow_table
+#' @param index index of the example to create 
+#' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples
 #' \dontrun{
@@ -166,13 +165,18 @@ method(print, DTA) <- function(x, ...) {
 #'   print(example_dta)
 #' }
 #' @export
-create_example_DTA <- function() {
-  cont1 <- create_example_DTAContainer(2)
-  cont2 <- create_example_DTAContainer(3)
-  
-  # Create DTA object
-  DTA(
-    container = list(cont1, cont2),
-    metadata = create_example_DTAMetaData()
+create_example_DTA <- function(index = 1) {
+  switch (index,
+    `1` = {
+      DTA(
+        container = list(
+          create_example_DTAContainer(2),
+          concreate_example_DTAContainer(3)
+        ),
+        metadata = create_example_DTAMetaData()
+      )
+    },
+    cli_abort("No example found with index {index}.")
   )
+
 }
