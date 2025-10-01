@@ -75,9 +75,9 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
     return(
       DTAtools::DTARuleCollection(
         rules = list(
-          DTAtools::create_example_DTARuleCheckRange(1),
-          DTAtools::create_example_DTARuleCheckUnique(1),
-          DTAtools::create_example_DTARuleCheckColCondition(1)
+          DTAtools::create_example_DTARuleColRange(1),
+          DTAtools::create_example_DTARuleColUnique(1),
+          DTAtools::create_example_DTARuleColCondition(1)
         )
       )
     )

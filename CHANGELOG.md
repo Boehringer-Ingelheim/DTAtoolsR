@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - next
+
+### Added
+
+- name to DTAContainer
+- print method to all instantiable classes
+- examples in `DTAColumnSpecs`
+- file handling with classes: `DTAFileInfo`, `DTAFileInfoTabular`, `DTAFileInfoCSV`, `DTAFileInfoTSV`, `DTAFileInfoDelim`
+- classes `DTARule`, `DTARuleCollection`, `DTARuleColCondition`, `DTARuleColRange`, `DTARuleColUnique`
+- functions to access slots
+- S7 validators
+- example factory: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTAContainer()`, `create_example_DTAFileInfoCSV()`, `create_example_DTAFileInfoTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
+
+### Changes
+
+- improved GitHub Action workflows
+- renamed functions to snake_case
+- reworked data backend to use arrow::Table for better performance and memory usage
+- improved vignette and README.md
+- improved testthat tests
+- improved CLI messages
+- moved rules to `DTARule` and derivate classes
+- renamed getter functions to shorter names
+- renamed constructor variables
+- DTA-class constructor to handle DTAMetaData  
+
 ## [0.9.0] - 2025-09-11
 
 ### Added

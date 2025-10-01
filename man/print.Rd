@@ -3,8 +3,8 @@
 %   R/DTAColumnSpecCollection-class.R, R/DTAContainer-class.R,
 %   R/DTAFileInfo-class.R, R/DTAFileInfoCSV-class.R, R/DTAFileInfoDelim-class.R,
 %   R/DTAFileInfoTSV-class.R, R/DTAMetaData-class.R, R/DTARule-class.R,
-%   R/DTARuleCheckColCondition-class.R, R/DTARuleCheckRange-class.R,
-%   R/DTARuleCheckUnique-class.R, R/DTARuleCollection-class.R
+%   R/DTARuleColCondition-class.R, R/DTARuleColRange-class.R,
+%   R/DTARuleColUnique-class.R, R/DTARuleCollection-class.R
 \name{print}
 \alias{print}
 \title{Print DTA Object}
@@ -49,9 +49,9 @@ Print method for DTAMetadata objects.
 
 Print overview for DTARule
 
-Print overview for DTADTARuleCheckColConditionRule
+Print overview for DTADTARuleColConditionRule
 
-Print overview for DTARuleCheckRange
+Print overview for DTARuleColRange
 
 Print overview for DTARule
 

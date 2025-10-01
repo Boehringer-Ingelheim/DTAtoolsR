@@ -1,4 +1,4 @@
-#' @title DTARuleCheckUnique Class
+#' @title DTARuleColUnique Class
 #' @description
 #' Represents a single rule for validating data tables. The rule can be of various types,
 #' such as `check_range`, `check_unique`, or `check_col_condition`
@@ -14,13 +14,13 @@
 #'
 #' @examples
 #' # Create a check_unique rule
-#' rule2 <- DTAtools::DTARuleCheckUnique(
+#' rule2 <- DTAtools::DTARuleColUnique(
 #'   id = "rule2",
 #'   columns = "id"
 #' )
 #' @include DTARule-class.R
-DTARuleCheckUnique <- new_class(
-  "DTARuleCheckUnique",
+DTARuleColUnique <- new_class(
+  "DTARuleColUnique",
   parent = DTARule,
 
   constructor = function(
@@ -72,7 +72,7 @@ DTARuleCheckUnique <- new_class(
 #' @export
 method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARuleCheckUnique}> : {.field {x@id}}")
+  cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
 
   message <- paste0("column(s): ", 
                       paste(paste0("{.field ", x@columns, "}"), 
@@ -80,25 +80,25 @@ method(print, DTARule) <- function(x) {
   cli_text(message)
 }
 
-#' @title create_example_DTARuleCheckUnique
+#' @title create_example_DTARuleColUnique
 #' @description
-#' create example for DTARuleCheckUnique
+#' create example for DTARuleColUnique
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
 #'  library(DTAtools)
-#'  create_example_DTARuleCheckUnique()
-#' @name create_example_DTARuleCheckUnique
+#'  create_example_DTARuleColUnique()
+#' @name create_example_DTARuleColUnique
 #' @export
-create_example_DTARuleCheckUnique <- function(index = 1) { # nolint
+create_example_DTARuleColUnique <- function(index = 1) { # nolint
   if (index == 1) {
-    return(DTAtools::DTARuleCheckUnique(
+    return(DTAtools::DTARuleColUnique(
       id = "rule_unique1",
       type = "check_unique",
       column = "id"
     ))
   } else if (index == 2) {
-    return(DTAtools::DTARuleCheckUnique(
+    return(DTAtools::DTARuleColUnique(
       id = "rule_unqiue2",
       type = "check_unique",
       column = c("id", "visit")
@@ -120,7 +120,7 @@ create_example_DTARuleCheckUnique <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleCheckUnique) <- function(x, tab) { # nolint
+method(check, DTARuleColUnique) <- function(x, tab) { # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")

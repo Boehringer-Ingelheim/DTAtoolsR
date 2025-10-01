@@ -1,4 +1,4 @@
-#' @title DTARuleCheckColCondition Class
+#' @title DTARuleColCondition Class
 #' @description
 #' A rule for validating data tables with conditions
 #'
@@ -10,7 +10,7 @@
 #' @param condition List. A list of conditions to check
 #' @param then List. A list of conditions that must be true if the
 #'   conditions are met
-#' @return An object of class `DTARuleCheckColCondition`.
+#' @return An object of class `DTARuleColCondition`.
 #'
 #' @examples
 #' # Create a check_range rule
@@ -30,8 +30,8 @@
 #'    )
 #'  )
 #' @include DTARule-class.R
-DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
-  "DTARuleCheckColCondition",
+DTARuleColCondition <- new_class( # nolint: object_name_linter.
+  "DTARuleColCondition",
   parent = DTARule,
   # Constructor for the DTARule class
   constructor = function(
@@ -76,8 +76,8 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 
 #' @title print
 #' @description
-#' Print overview for DTADTARuleCheckColConditionRule
-#' @param x An object of class DTARuleCheckColCondition
+#' Print overview for DTADTARuleColConditionRule
+#' @param x An object of class DTARuleColCondition
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' \dontrun{
@@ -85,9 +85,9 @@ DTARuleCheckColCondition <- new_class( # nolint: object_name_linter.
 #' }
 #' @name print
 #' @export
-method(print, DTARuleCheckColCondition) <- function(x) { # nolint
+method(print, DTARuleColCondition) <- function(x) { # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARuleCheckColCondition}> : {.field {x@id}}")
+  cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
 
   # TODO: check more complicated scenarios
   if (is.list(x@condition)) {
@@ -112,19 +112,19 @@ method(print, DTARuleCheckColCondition) <- function(x) { # nolint
 }
 
 
-#' @title create_example_DTARuleCheckColCondition
+#' @title create_example_DTARuleColCondition
 #' @description
 #' create example for DTARule
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
 #'  library(DTAtools)
-#'  create_example_DTARuleCheckColCondition()
-#' @name create_example_DTARuleCheckColCondition
+#'  create_example_DTARuleColCondition()
+#' @name create_example_DTARuleColCondition
 #' @export
-create_example_DTARuleCheckColCondition <- function(index = 1) { # nolint
+create_example_DTARuleColCondition <- function(index = 1) { # nolint
   if (index == 1) {
-    return(DTAtools::DTARuleCheckColCondition(
+    return(DTAtools::DTARuleColCondition(
       id = "rule3",
       condition = list(list("age" = 18)),
       then = list("status" = list(equal = 'adult'))
@@ -146,7 +146,7 @@ create_example_DTARuleCheckColCondition <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleCheckColCondition) <- function(x, tab) { # nolint
+method(check, DTARuleColCondition) <- function(x, tab) { # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")

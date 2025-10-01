@@ -1,4 +1,4 @@
-#' @title DTARuleCheckRange Class
+#' @title DTARuleColRange Class
 #' @description
 #' Represents a rule for checking the range of values in a specific column of
 #'  a data table.
@@ -13,20 +13,20 @@
 #'   it is a list of columns checked for unique combinations.
 #' @param range Vector or List. Used in check_range to check value ranges in a
 #'   column.
-#' @return An object of class `DTARuleCheckRange`.
+#' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
 #' # Create a check_range rule
-#' rule1 <- DTAtools::DTARuleCheckRange(
+#' rule1 <- DTAtools::DTARuleColRange(
 #'   id = "rule1",
 #'   column = "age",
 #'   range = c(18, 65)
 #' )
 #' @include DTARule-class.R
-DTARuleCheckRange <- new_class( # nolint: object_name_linter.
-  "DTARuleCheckRange",
+DTARuleColRange <- new_class( # nolint: object_name_linter.
+  "DTARuleColRange",
   parent = DTARule,
-  # Constructor for the DTARuleCheckRange class
+  # Constructor for the DTARuleColRange class
   constructor = function(
     id,
     column = NULL,
@@ -93,8 +93,8 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 
 #' @title print
 #' @description
-#' Print overview for DTARuleCheckRange
-#' @param x An object of class DTARuleCheckRange
+#' Print overview for DTARuleColRange
+#' @param x An object of class DTARuleColRange
 #' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' \dontrun{
@@ -102,9 +102,9 @@ DTARuleCheckRange <- new_class( # nolint: object_name_linter.
 #' }
 #' @name print
 #' @export
-method(print, DTARuleCheckRange) <- function(x) {
+method(print, DTARuleColRange) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARuleCheckRange}> : {.field {x@id}}")
+  cli_text("<{.emph DTARuleColRange}> : {.field {x@id}}")
   
   cli_alert_info("column(s): {paste(x@column, collapse = ', ')}")
   cli_alert("min: {x@min_range}")
@@ -112,19 +112,19 @@ method(print, DTARuleCheckRange) <- function(x) {
 }
 
 
-#' @title create_example_DTARuleCheckRange
+#' @title create_example_DTARuleColRange
 #' @description
-#' create example for DTARuleCheckRange
+#' create example for DTARuleColRange
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
 #'  library(DTAtools)
-#'  create_example_DTARuleCheckRange()
-#' @name create_example_DTARuleCheckRange
+#'  create_example_DTARuleColRange()
+#' @name create_example_DTARuleColRange
 #' @export
-create_example_DTARuleCheckRange <- function(index = 1) { # nolint
+create_example_DTARuleColRange <- function(index = 1) { # nolint
   if (index == 1) {
-    return(DTAtools::DTARuleCheckRange(
+    return(DTAtools::DTARuleColRange(
       id = "check_age_range",
       column = "AGE",
       range = list(18, 65)
@@ -145,7 +145,7 @@ create_example_DTARuleCheckRange <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleCheckRange) <- function(x, tab) { # nolint
+method(check, DTARuleColRange) <- function(x, tab) { # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")
