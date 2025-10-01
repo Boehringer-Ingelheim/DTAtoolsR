@@ -10,11 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - name to DTAContainer
 - print method to all instantiable classes
-- examples in `DTAColumnSpecs`
+- added `examples` to `DTAColumnSpecs`, which need to be following a pattern if provided and are mutatially exclusive from `values`
+- introducted `colclass`, which is a placeholder for further addition for automatic preprocessing efforts
 - file handling with classes: `DTAFileInfo`, `DTAFileInfoTabular`, `DTAFileInfoCSV`, `DTAFileInfoTSV`, `DTAFileInfoDelim`
 - classes `DTARule`, `DTARuleCollection`, `DTARuleColCondition`, `DTARuleColRange`, `DTARuleColUnique`
 - functions to access slots
-- S7 validators
+- S7 validators for all classes
 - example factory: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTAContainer()`, `create_example_DTAFileInfoCSV()`, `create_example_DTAFileInfoTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
 
 ### Changes

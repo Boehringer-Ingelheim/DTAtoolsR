@@ -31,7 +31,8 @@ DTAColumnSpec <- new_class(
     pattern = NULL,
     values = NULL,
     examples = NULL,
-    description = NULL
+    description = NULL,
+    colclass = NULL
   ) {
     new_object(
       S7_object(),
@@ -44,7 +45,8 @@ DTAColumnSpec <- new_class(
       description = description,
       values = values,
       examples = examples,
-      pattern = pattern
+      pattern = pattern,
+      colclass = colclass
     )
   },
   properties = list(
@@ -57,12 +59,45 @@ DTAColumnSpec <- new_class(
     description = class_character_or_null,
     values = class_character_or_numeric_or_null_or_list,
     examples = class_character_or_numeric_or_null_or_list,
-    pattern = class_character_or_null
+    pattern = class_character_or_null,
+    colclass = class_character_or_null
   ),
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
       "@id cannot have whitespaces and needs to be defined."
     }
+    
+    # if values are provided, there cannot be a pattern or examples
+    if (!is.null(self@values)) {
+      if (!is.null(self@pattern)) {
+        str_glue("{self@id}: 'pattern' cannot be set if 'values' are provided.")
+      }
+      if (!is.null(self@examples)) {
+        str_glue("{self@id}: 'examples' cannot be set if 'values' are provided.")
+      }
+    }
+    
+    # if a pattern is provided, there cannot be values and examples must conform with pattern provided
+    if (!is.null(self@pattern)) {
+      if (!is.null(self@values)) {
+        str_glue("{self@id}: 'values' cannot be set if pattern is provided.")
+      }
+      if (!is.null(self@examples)) {
+        for (ex in self@examples) {
+          if (!grepl(ex, pattern = self@pattern)) {
+            str_glue("{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided.")
+          }
+        }
+      }
+    }
+
+    if (!isnull(self@colclass)) {
+      valid_colclasses <- c("patient_info", "measurement_patient", "measurement", "visit_related", "date_related", "study_info", "wide_format", "long_format", "wide_and_long_format")
+      if (!(self@colclass %in% valid_colclasses)) {
+        str_glue("'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}")
+      }
+    }
+    
   }
 )
 
@@ -186,6 +221,7 @@ method(print, DTAColumnSpec) <- function(x) {
   if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
   if (!is.null(x@pattern))      cli_alert("pattern    : {x@pattern}")
   if (!is.null(x@values))       cli_alert("values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}")
+  if (!is.null(x@examples))     cli_alert("examples   : {paste0(capture.output(str(x@examples, give.attr = FALSE)), collapse = ' ')}")
   if (!is.null(x@description))  cli_alert("description: {x@description}")
   invisible(x)
 }
