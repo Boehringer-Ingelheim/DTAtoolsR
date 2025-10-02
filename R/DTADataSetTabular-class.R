@@ -1,13 +1,13 @@
-#' @title DTAContainer Class
-#' @description Handles tables  based on column specifications. Every table will be validated using the column specifications.
+#' @title DTADataSetTabular Class
+#' @description Handles tabular data with column specifications and rules.
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
-#' @param fileinfo a list of DTAFileInfo objects specifying input file information.
-#' @param data List. A list of arrow Table to be validated and included in the DTAContainer object.
-#' @return An object of class DTAContainer. If validation fails, returns a list containing summarised and full error data frames.
+#' @param fileinfo a list of DTAFile objects specifying input file information.
+#' @param datasets List. A list of arrow Table to be validated and included in the DTADataSetTabular object.
+#' @return An object of class DTADataSetTabular
 #'
 #' @examples
 #'
@@ -19,64 +19,49 @@
 #' # List of tables
 #' tables <- list(table1 = table1, table2 = table2)
 #'
-#' # Create the DTAContainer object
-#' data_obj <- DTAContainer(DTAColumnSpecCollection, tables)
+#' # Create the DTADataSetTabular object
+#' data_obj <- DTADataSetTabular(DTAColumnSpecCollection, tables)
 #' }
 #' @export
-DTAContainer <- new_class(
-  "DTAContainer",
+DTADataSetTabular <- new_class(
+  "DTADataSetTabular",
+  parent = DTADataset,
   constructor = function(
     name,
     specs,
-    data = list(),
+    datasets = list(),
     fileinfo = list()
   ) {
-    if(inherits(fileinfo, "DTAtools::DTAFileInfo")) {
+    if(inherits(fileinfo, "DTAtools::DTAFile")) {
       fileinfo = list(fileinfo)
     }
 
-    if(inherits(data, "Table")) {
-      data = list(data)
+    if(inherits(datasets, "Table")) {
+      datasets = list(datasets)
     }
 
-    # names <- names(data)
-    # for (name in names(data)) {
-    #   data_entry <- data[[name]]
-    #   #data_entry[data_entry == ""] <- NA
-    #   cli_alert_info("Checking {name} data entry")
-    #   data_entry <- validate_table(
-    #     specs,
-    #     data_entry
-    #   )
-    #   data[[name]] <- data_entry
-    # }
     new_object(
-      S7_object(),
-      name = name,
+      .parent = DTADataSetTabular(
+        name = name,
+        type = "tabular",
+        fileinfo = fileinfo
+      ),
+      
       specs = specs,
-      data = data,
-      fileinfo = fileinfo
+      datasets = datasets
     )
   },
   properties = list(
-    name = class_character, 
     specs = class_DTAColumnSpecCollection,
-    data = class_list, # list of arrow Table
-    fileinfo = class_list # list of DTAFileInfo
+    datasets = class_list, # list of arrow Table
   ),
   validator = function(self) {
-    if (!is.character(self@name) || length(self@name) != 1 || self@name == "") {
-      cli_abort("Property 'name' must be a single non-empty string.")
-    }
-    # check if all elements of list self@data inherit from "Table"
-    if (!all(sapply(self@data, inherits, "Table"))) {
-      cli_abort("All elements in 'data' must be of class 'Table'")
+    # check if all elements of list self@datasets inherit from "Table"
+    if (!all(sapply(self@datasets, inherits, "Table"))) {
+      cli_abort("All elements in 'datasets' must be of class 'Table'")
     }
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
-    }
-    if (!all(sapply(self@fileinfo, inherits, "DTAtools::DTAFileInfo"))) {
-      cli_abort("All elements in 'fileinfo' must be of class 'DTAFileInfo'")
     }
   }
 )
@@ -86,68 +71,68 @@ DTAContainer <- new_class(
 #' @title Get Column by ID Method
 #' @description
 #' Method to get a column format by its ID from the collection.
-#' @param x An object of class DTAContainer
+#' @param x An object of class DTADataSetTabular
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' \dontrun{
 #' column_format <- column(dtadata, "STUDYID")
 #' }
-#' @name colspec-DTAContainer
+#' @name colspec-DTADataSetTabular
 #' @export
 colspec <- new_generic("colspec", "x")
 
 #' @export
-method(colspec, DTAContainer) <- function(x, id) {
+method(colspec, DTADataSetTabular) <- function(x, id) {
   return(colspec(x@specs, id))
 }
 
 
-#' @title Get DTAColumnSpecCollection (specs) from DTAContainer Object
+#' @title Get DTAColumnSpecCollection (specs) from DTADataSetTabular Object
 #' @description
-#' Method to extract the full DTAColumnSpecCollection from a DTAContainer object.
-#' @param x An object of class DTAContainer.
+#' Method to extract the full DTAColumnSpecCollection from a DTADataSetTabular object.
+#' @param x An object of class DTADataSet.
 #' @param ... void
 #' @return A DTAColumnSpecCollection object.
 #' @examples
 #' \dontrun{
 #'   specs(container)
 #' }
-#' @name specs-DTAContainer
+#' @name specs-DTADataSetTabular
 #' @export
 specs <- new_generic("specs", "x")
 
 #' @export
-method(specs, DTAContainer) <- function(x) {
+method(specs, DTADataSetTabular) <- function(x) {
   return(x@specs)
 }
 
 
-#' @title Get table from DTAContainer Object
+#' @title Get table from DTADataSetTabular Object
 #' @description
-#' Extract a table from the tables in a DTAContainer object.
-#' @param x An object of class DTAContainer.
+#' Extract a table from the tables in a DTADataSetTabular object.
+#' @param x An object of class DTADataSet.
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @return A Table object
 #' @importFrom cli cli_abort
 #' @examples
 #' \dontrun{
-#' data(container)           # returns first table
-#' data(container, "lab")   # returns table named "lab"
+#' datasets(container)           # returns first table
+#' datasets(container, "lab")   # returns table named "lab"
 #' }
-#' @name data-DTAContainer
+#' @name dataset-DTADataSetTabular
 #' @export
-data <- new_generic("data", "x", function(x, id = 1, ...) {
+dataset <- new_generic("dataset", "x", function(x, id = 1, ...) {
   S7_dispatch()
 })
 
 #' @export
-method(data, DTAContainer) <- function(x, id = 1) {
-  if (!inherits(x, "DTAtools::DTAContainer")) {
-    cli::cli_abort("Input must be a DTAContainer object.")
+method(dataset, DTADataSetTabular) <- function(x, id = 1) {
+  if (!inherits(x, "DTAtools::DTADataSetTabular")) {
+    cli::cli_abort("Input must be a DTADataSetTabular object.")
   }
 
-  tables <- x@data
+  tables <- x@datasets
 
   if(length(tables) == 0) {
     cli::cli_abort("No tables found in the container.")
@@ -171,26 +156,26 @@ method(data, DTAContainer) <- function(x, id = 1) {
 }
 
 
-#' @title List of data labels within DTAContainer Object
+#' @title List of datasets labels within DTADataSetTabular Object
 #' @description
-#' Method to get a all data labels within a DTAContainer Object.
-#' @param x An object of class DTAContainer
+#' Method to get a all datasets labels within a DTADataSetTabular Object.
+#' @param x An object of class DTADataSetTabular
 #' @param ... void
 #' @return A vector
 #' @examples
 #' \dontrun{
 #' labels <- labels(dtadata)
 #' }
-#' @name labels-DTAContainer
+#' @name labels-DTADataSetTabular
 labels <- new_generic("labels", "x")
 #' @export
-method(labels, DTAContainer) <- function(x) {
-  return(names(x@data))
+method(labels, DTADataSetTabular) <- function(x) {
+  return(names(x@datasets))
 }
 
 #' @title Write DTA Table to File
 #' @description
-#' Write a named DTA table saved in a DTAContainer object to a file.
+#' Write a named DTA table saved in a DTADataSetTabular object to a file.
 #' @importFrom dplyr arrange across everything
 #' @importFrom magrittr %>%
 #' @importFrom utils write.table
@@ -198,8 +183,8 @@ method(labels, DTAContainer) <- function(x) {
 #' @importFrom cli cli_alert_info cli_alert_success format_message cli_abort
 #' @importFrom tools md5sum
 #' @export
-#' @param DTAContainer An object of class DTAContainer.
-#' @param table Character. The name of the table within the DTAContainer object to write.
+#' @param DTADataSetTabular An object of class DTADataSet.
+#' @param table Character. The name of the table within the DTADataSetTabular object to write.
 #' @param filename Character. The name of the file to write to.
 #' @param arrange_by Character vector. Columns to arrange the table by. NULL, Table won't be arranged. "all" (Default) -> Table will be arranged by all columns.
 #' @param arrange_desc Logical. Whether to arrange the table in descending order. Default is FALSE.
@@ -219,7 +204,7 @@ method(labels, DTAContainer) <- function(x) {
 #'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
 write_table_to_file <- function(
-    DTAContainer,
+    DTADataSetTabular,
     table,
     filename,
     arrange_by = "all",
@@ -236,16 +221,16 @@ write_table_to_file <- function(
 ) {
   compression <- match.arg(compression)
 
-  # Check if the table exists in the DTAContainer
-  if (!table %in% names(DTAContainer@data)) {
+  # Check if the table exists in the DTADataSetTabular
+  if (!table %in% names(DTADataSetTabular@datasets)) {
     cli::cli_abort(c(
       "Table name not found!",
-      x = "Table with the name '{table}' not found in the DTAContainer object.",
-      i = "Use 'labels(<DTAContainer>)' to print names of all tables in object."
+      x = "Table with the name '{table}' not found in the DTADataSetTabular object.",
+      i = "Use 'labels(<DTADataSetTabular>)' to print names of all tables in object."
     ))
   }
 
-  table_data <- DTAContainer@data[[table]]
+  table_data <- DTADataSetTabular@datasets[[table]]
 
   # Arrange the table by specified columns
   if (!is.null(arrange_by)) {
@@ -310,7 +295,7 @@ write_table_to_file <- function(
   }
 
   invisible(list(
-    data = table_data,
+    datasets = table_data,
     table = table,
     md5sum = md5sum
   ))
@@ -319,91 +304,51 @@ write_table_to_file <- function(
 
 #' @title Get Metadata
 #' @description
-#' Method to get Metadata from DTAContainer.
-#' @param x An object of class DTAContainer
+#' Method to get Metadata from DTADataSet.
+#' @param x An object of class DTADataSetTabular
 #' @return A list with metadata information
 #' @examples
 #' \dontrun{
-#' metadata(DTAContainer)
+#' metadata(DTADataSetTabular)
 #' }
 #' @name metadata
-#' @rdname metadata-DTAContainer
+#' @rdname metadata-DTADataSetTabular
 #' @export
-method(metadata, DTAContainer) <- function(x) {
+method(metadata, DTADataSetTabular) <- function(x) {
   return(x@specs@metadata)
 }
 
 #' @title Get Rules
 #' @description
-#' Method to get Rules from DTAContainer.
-#' @param x An object of class DTAContainer
+#' Method to get Rules from DTADataSet.
+#' @param x An object of class DTADataSetTabular
 #' @return A list with rules information
 #' @examples
 #' \dontrun{
-#' rules(DTAContainer)
+#' rules(DTADataSetTabular)
 #' }
-#' @name rules-DTAContainer
+#' @name rules-DTADataSetTabular
 #' @export
 rules <- new_generic("rules", "x")
 
 #' @export
-method(rules, DTAContainer) <- function(x) {
+method(rules, DTADataSetTabular) <- function(x) {
   return(x@specs@rules)
 }
 
 
-#' @title get max number of files
+#' @title Create Example DTADataSetTabular
 #' @description
-#' Returns the sum of max number of files specified all associated DTAFileInfo
-#' objects.
-#' @param x An object of class DTAContainer
-#' @return numeric: number of files
-#' @examples
-#' \dontrun{
-#' column_format <- max_number_of_files(dtafileinfo)
-#' }
-#' @name max_number_of_files-DTAContainer
-if (!exists("max_number_of_files", mode = "function")) {
-  max_number_of_files <- new_generic("max_number_of_files", "x")
-}
-#' @export
-method(max_number_of_files, DTAContainer) <- function(x) {
-  sum(unlist(sapply(x@fileinfo, max_number_of_files)))
-}
-
-
-#' @title get min number of files
-#' @description
-#' Returns the sum of min number of files specified all associated DTAFileInfo
-#' objects.
-#' @param x An object of class DTAContainer
-#' @return numeric: number of files
-#' @examples
-#' \dontrun{
-#' column_format <- min_number_of_files(dtafileinfo)
-#' }
-#' @name min_number_of_files-DTAContainer
-if (!exists("min_number_of_files", mode = "function")) {
-  min_number_of_files <- new_generic("min_number_of_files", "x")
-}
-#' @export
-method(min_number_of_files, DTAContainer) <- function(x) {
-  sum(unlist(sapply(x@fileinfo, min_number_of_files)))
-}
-
-
-#' @title Create Example DTAContainer
-#' @description
-#' S7 method to create and return an example DTAContainer object.
+#' S7 method to create and return an example DTADataSetTabular object.
 #' @importFrom cli cli_abort
 #' @param index Integer. Index of the example to create.
 #'
-#' @return An example DTAContainer object.
+#' @return An example DTADataSetTabular object.
 #' @examples
 #' library(DTAtools)
-#' create_example_DTAContainer()
+#' create_example_DTADataSetTabularTabular()
 #' @export
-create_example_DTAContainer <- function(index = 1) {
+create_example_DTADataSetTabularTabular <- function(index = 1) {
   # Create sample tables
   table1 <- arrow_table(data.frame(
     STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
@@ -421,23 +366,23 @@ create_example_DTAContainer <- function(index = 1) {
   
   switch(index,
     `1` = {
-      DTAtools::DTAContainer(
+      DTAtools::DTADataSetTabular(
         name = "example_container_specs_without_data",
         specs = create_example_DTAColumnSpecCollection(1),
       )
     },
     `2` = {
-      DTAtools::DTAContainer( 
+      DTAtools::DTADataSetTabular( 
         name = "demographics",
         specs = create_example_DTAColumnSpecCollection(1),
-        data = list("tab1" = table1)
+        datasets = list("tab1" = table1)
       )
     },
     `3` = {
-      DTAtools::DTAContainer(
+      DTAtools::DTADataSetTabular(
         name = "vitals", 
         specs = create_example_DTAColumnSpecCollection(2),
-        data = list("tab2" = table2)
+        datasets = list("tab2" = table2)
       )
     },
     cli::cli_abort("No example available for the provided index.")
@@ -445,29 +390,29 @@ create_example_DTAContainer <- function(index = 1) {
 
 }
 
-#' @title Print Method for DTAContainer
-#' @description Print a summary of a DTAContainer object.
-#' @param x A DTAContainer object.
+#' @title Print Method for DTADataSetTabular
+#' @description Print a summary of a DTADataSetTabular object.
+#' @param x A DTADataSetTabular object.
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @importFrom stringr str_c str_glue
 #' @examples
 #' library(DTAtools)
-#' print(create_example_DTAContainer())
+#' print(create_example_DTADataSetTabular())
 #' @name print
 #' @export
-method(print, DTAContainer) <- function(x) {
+method(print, DTADataSetTabular) <- function(x) {
 
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAContainer}> : {.field {x@name}}")
+  cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
   if(!is.null(x@specs)) {
     cli_alert_info("Column specs ({length(x@specs@columns)}): {column_preview(x@specs)}")
   } else {
     cli_alert_info("Column specs: none")
   }
-  n_tables <- length(x@data)
+  n_tables <- length(x@datasets)
   
   if (n_tables > 0) {
-    table_names <- names(x@data)
+    table_names <- names(x@datasets)
     
     if (n_tables > 5) {
       shown_names <- c(table_names[1:4], "...", table_names[n_tables])

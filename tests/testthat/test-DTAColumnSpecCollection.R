@@ -1,5 +1,5 @@
 test_that("Import specs from YAML file", {
-  path <- system.file("extdata", "gf_container.yaml", package = "DTAtools")
+  path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   collection <- import_specs_from_yaml(path)
 
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")

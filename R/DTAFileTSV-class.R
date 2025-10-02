@@ -1,7 +1,7 @@
-#' @title DTAFileInfoTSV Class Constructor
+#' @title DTAFileTSV Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileInfoTSV}, which extends \code{DTAFileInfo}
+#' Defines the S7 class \code{DTAFileTSV}, which extends \code{DTAFile}
 #' to represent metadata and configuration for TSV (Tab-Separated Values)
 #'  data files.
 #'
@@ -18,14 +18,14 @@
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
 #'
-#' @return An object of class \code{DTAFileInfoTSV}.
-#' @name DTAFileInfoTSV-class
-#' @seealso \code{\link{DTAFileInfo}}
+#' @return An object of class \code{DTAFileTSV}.
+#' @name DTAFileTSV-class
+#' @seealso \code{\link{DTAFile}}
 #'
 #' @export
-DTAFileInfoTSV <- S7::new_class(
-  "DTAFileInfoTSV",
-  parent = DTAFileInfoTabular,
+DTAFileTSV <- S7::new_class(
+  "DTAFileTSV",
+  parent = DTAFileTabular,
   constructor = function(
     filename,
     pattern = FALSE,
@@ -34,7 +34,7 @@ DTAFileInfoTSV <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      DTAFileInfoTabular(
+      DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
         pattern = pattern,
@@ -46,20 +46,20 @@ DTAFileInfoTSV <- S7::new_class(
 )
 
 
-#' @title Read File for DTAFileInfoTSV Objects
+#' @title Read File for DTAFileTSV Objects
 #' @description
 #' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileInfoTSV} object. This method uses \code{arrow::read_delim_arrow}
+#' \code{DTAFileTSV} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
 #'
-#' @param x A \code{DTAFileInfoTSV} object containing file reading parameters.
+#' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 ##' @seealso \code{\link{arrow::read_tsv_arrow}}
-##' @name read_file_execution-DTAFileInfoTSV
-method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
+##' @name read_file_execution-DTAFileTSV
+method(read_file_execution, DTAFileTSV) <- function(x, file) {
   return(arrow::read_tsv_arrow(
     file,
     quote = x@quote,
@@ -69,42 +69,42 @@ method(read_file_execution, DTAFileInfoTSV) <- function(x, file) {
   ))
 }
 
-#' @title Create Example DTAFileInfoTSV Object
+#' @title Create Example DTAFileTSV Object
 #' @description
-#' Creates an example \code{DTAFileInfoTSV} object using example files.
+#' Creates an example \code{DTAFileTSV} object using example files.
 #' @param index example selector.
-#' @return An example \code{DTAFileInfoTSV} object.
+#' @return An example \code{DTAFileTSV} object.
 #' @examples
 #' library(DTAtools)
-#' create_example_DTAFileInfoTSV()
+#' create_example_DTAFileTSV()
 #' @export
-create_example_DTAFileInfoTSV <- function(index = 1) {
+create_example_DTAFileTSV <- function(index = 1) {
   if (index == 1) {
     example_file <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
-    DTAFileInfoTSV(
+    DTAFileTSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
   } else {
-    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileInfoTSV().")
+    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileTSV().")
   }
 }
 
-#' @title Print DTAFileInfoTSV Object
+#' @title Print DTAFileTSV Object
 #' @description
-#' Print method for DTAFileInfoTSV objects.
-#' @param x An object of class DTAFileInfoTSV
+#' Print method for DTAFileTSV objects.
+#' @param x An object of class DTAFileTSV
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' library(DTAtools)
-#' print(create_example_DTAFileInfoTSV())
+#' print(create_example_DTAFileTSV())
 #'
 #' @name print
 #' @export
-method(print, DTAFileInfoTSV) <- function(x, ...) {
+method(print, DTAFileTSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileInfoTSV}>")
+  cli_text("<{.emph DTAFileTSV}>")
 
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")

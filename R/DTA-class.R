@@ -5,7 +5,7 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param container A names list of DTAContainer objects
+#' @param container A names list of DTADataSet objects
 #' @param ... arguments will be passed to DTAMetadata(...)
 #' @return An object of class DTA.
 #'
@@ -19,8 +19,8 @@
 #' # List of tables
 #' tables <- list(table1 = table1, table2 = table2)
 #'
-#' # Create the DTAContainer object
-#' data_obj <- DTAContainer(DTAColumnSpecCollection, tables)
+#' # Create the DTADataSet object
+#' data_obj <- DTADataSet(DTAColumnSpecCollection, tables)
 #'
 #' DTA(container = list(data = data_obj))
 #' }
@@ -32,7 +32,7 @@ DTA <- new_class(
     metadata = NULL,
     ...
   ) {
-    if (inherits(container, "DTAtools::DTAContainer")) {
+    if (inherits(container, "DTAtools::DTADataSet")) {
       container <- list(container)
       names(container) <- container[[1]]@name
     }
@@ -82,7 +82,7 @@ method(metadata, DTA) <- function(x) {
 #' @param name Optional single character or single integer. if NULL, returns a 
 #' list of all containers. If character, returns the container with the specified name.
 #' If integer, returns the container at the specified index.
-#' @return Either a list of DTAContainer objects or a single DTAContainer.
+#' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
 #' libary(DTAtools)
 #' x <- create_example_DTA()
@@ -170,12 +170,15 @@ create_example_DTA <- function(index = 1) {
     `1` = {
       DTA(
         container = list(
-          create_example_DTAContainer(2),
-          concreate_example_DTAContainer(3)
+          create_example_DTADataSetTabular(2),
+          concreate_example_DTADataSetTabular(3)
         ),
         metadata = create_example_DTAMetaData()
       )
     },
+    `2` = {
+
+    }
     cli_abort("No example found with index {index}.")
   )
 

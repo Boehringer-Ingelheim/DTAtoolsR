@@ -1,6 +1,6 @@
-#' @title DTAFileInfo Class
+#' @title DTAFile Class
 #' @description
-#' The \code{DTAFileInfo} class stores metadata and parsing instructions for
+#' The \code{DTAFile} class stores metadata and parsing instructions for
 #' delimited data files. It specifies file names (or patterns), the expected
 #' number of files, and how to read them, including separator, header presence,
 #' quoting, and column types.
@@ -18,25 +18,26 @@
 #' @param sep Character; field separator used in the file (e.g., \code{","},
 #'   \code{"\\t"}).
 #'
-#' @return An object of class \code{DTAFileInfo} containing file parsing
+#' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
-#' @name DTAFileInfo-class
+#' @name DTAFile-class
 #' @details This class is used internally by the DTAtoolsR package to
 #' @details This class is used internally by the DTAtoolsR package to
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples
 #' \dontrun{
-#'   DTAFileInfo("file.txt")
-#'   DTAFileInfo(c("file1.txt", "file2.txt"))
-#'   DTAFileInfo("file\\d+\\.txt", pattern = TRUE)
+#'   DTAFile("file.txt")
+#'   DTAFile(c("file1.txt", "file2.txt"))
+#'   DTAFile("file\\d+\\.txt", pattern = TRUE)
 #' }
 #' @export
-DTAFileInfo <- new_class(
-  "DTAFileInfo",
+DTAFile <- new_class(
+  "DTAFile",
   constructor = function(
     filename,
     pattern = FALSE,
+    pattern_description = NULL,
     number_of_files = 1
   ) {
 
@@ -65,6 +66,7 @@ DTAFileInfo <- new_class(
       S7_object(),
       filename = filename,
       pattern = pattern,
+      pattern_description = pattern_description,
       min_number_of_files = min_number_of_files,
       max_number_of_files = max_number_of_files
     )
@@ -72,6 +74,7 @@ DTAFileInfo <- new_class(
   properties = list(
     filename = class_character,
     pattern = class_logical,
+    pattern_description = class_character_or_null,
     min_number_of_files = class_numeric_or_null,
     max_number_of_files = class_numeric_or_null
   ),
@@ -96,24 +99,24 @@ if (!exists("min_number_of_files", mode = "function")) {
   min_number_of_files <- new_generic("min_number_of_files", "x")
 }
 #' @title Get min number of files
-#' @description Returns the min number of files specified in a `DTAFileInfo` object.
+#' @description Returns the min number of files specified in a `DTAFile` object.
 #'
-#' @param x An object of class `DTAFileInfo`.
+#' @param x An object of class `DTAFile`.
 #' @return The number of files.
 #'
 #' @examples
 #' \dontrun{
-#'   file_info <- DTAFileInfo("file.txt", number_of_files = 1)
+#'   file_info <- DTAFile("file.txt", number_of_files = 1)
 #'   min_number_of_files(file_info)
 #' }
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{Returns the \code{min_number_of_files} property.}
+#'   \item{\code{DTAFile}}{Returns the \code{min_number_of_files} property.}
 #' }
 #' @name min_number_of_files
 #' @export
-method(min_number_of_files, DTAFileInfo) <- function(x) {
+method(min_number_of_files, DTAFile) <- function(x) {
   x@min_number_of_files[1]
 }
 
@@ -122,24 +125,24 @@ if (!exists("max_number_of_files", mode = "function")) {
   max_number_of_files <- new_generic("max_number_of_files", "x")
 }
 #' @title Get max number of files
-#' @description Returns the max number of files specified in a `DTAFileInfo` object.
+#' @description Returns the max number of files specified in a `DTAFile` object.
 #'
-#' @param x An object of class `DTAFileInfo`.
+#' @param x An object of class `DTAFile`.
 #' @return The number of files.
 #'
 #' @examples
 #' \dontrun{
-#'   file_info <- DTAFileInfo("file.txt", number_of_files = 1)
+#'   file_info <- DTAFile("file.txt", number_of_files = 1)
 #'   max_number_of_files(file_info)
 #' }
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{Returns the \code{max_number_of_files} property.}
+#'   \item{\code{DTAFile}}{Returns the \code{max_number_of_files} property.}
 #' }
 #' @name max_number_of_files
 #' @export
-method(max_number_of_files, DTAFileInfo) <- function(x) {
+method(max_number_of_files, DTAFile) <- function(x) {
   x@max_number_of_files
 }
 
@@ -148,27 +151,27 @@ if (!exists("matches_filename", mode = "function")) {
   matches_filename <- new_generic("matches_filename", "x")
 }
 #' @title Matches Filename
-#' @description Checks if a given filename matches the pattern in a `DTAFileInfo` object.
+#' @description Checks if a given filename matches the pattern in a `DTAFile` object.
 #'
-#' @param x A `DTAFileInfo` object.
+#' @param x A `DTAFile` object.
 #' @param file A character string representing the name of the file to check against
 #'   the stored filename or pattern
 #' @return A logical value indicating whether the filename matches.
 #' @importFrom stringr str_detect
 #' @examples
 #' \dontrun{
-#'   file_info <- DTAFileInfo("file.txt")
+#'   file_info <- DTAFile("file.txt")
 #'   matches_filename(file_info, "file.txt")
 #' }
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{Returns `TRUE` if the filename matches the pattern.}
+#'   \item{\code{DTAFile}}{Returns `TRUE` if the filename matches the pattern.}
 #' }
 #' @name matches_filename
 #' @rdname matches_filename
 #' @export
-method(matches_filename, DTAFileInfo) <- function(x, file) {
+method(matches_filename, DTAFile) <- function(x, file) {
   if (x@pattern) {
     stringr::str_detect(file, x@filename)
   } else {
@@ -181,9 +184,9 @@ if (!exists("read_file_execution", mode = "function")) {
 }
 #' @title Read a file
 #' @description Reads a data file using the parameters specified in a
-#'   \code{DTAFileInfo} object or one of its subclasses.
+#'   \code{DTAFile} object or one of its subclasses.
 #'
-#' @param x A \code{DTAFileInfo} object (or subclass) containing file reading
+#' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'
@@ -191,13 +194,13 @@ if (!exists("read_file_execution", mode = "function")) {
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{This is a base implementation that throws an error,
+#'   \item{\code{DTAFile}}{This is a base implementation that throws an error,
 #'   as it must be implemented by a subclass.}
 #' }
 #' @name read_file_execution
 #' @rdname read_file_execution
 #' @export
-method(read_file_execution, DTAFileInfo) <- function(x, file) {
+method(read_file_execution, DTAFile) <- function(x, file) {
   stop("This method is not implemented. You need to
   use an object of a class which is derived from this class.")
 }
@@ -206,11 +209,11 @@ method(read_file_execution, DTAFileInfo) <- function(x, file) {
 if (!exists("read_file", mode = "function")) {
   read_file <- new_generic("read_file", "x")
 }
-#' @title Read a file based on DTAFileInfo
+#' @title Read a file based on DTAFile
 #' @description Reads a data file using the parameters specified in a
-#'   \code{DTAFileInfo} object or one of its subclasses.
+#'   \code{DTAFile} object or one of its subclasses.
 #'
-#' @param x A \code{DTAFileInfo} object (or subclass) containing file reading
+#' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'
@@ -218,7 +221,7 @@ if (!exists("read_file", mode = "function")) {
 #'
 #' @section Methods:
 #' \describe{
-#'   \item{\code{DTAFileInfo}}{This is a base implementation that throws an error,
+#'   \item{\code{DTAFile}}{This is a base implementation that throws an error,
 #'   as it must be implemented by a subclass.}
 #' }
 #' @importFrom stringr str_glue
@@ -226,7 +229,7 @@ if (!exists("read_file", mode = "function")) {
 #' @name read_file
 #' @rdname read_file
 #' @export
-method(read_file, DTAFileInfo) <- function(x, file) {
+method(read_file, DTAFile) <- function(x, file) {
   if (DTAtools::matches_filename(x, basename(file))) {
     if(file.exists(file)) {
       read_file_execution(x, file)
@@ -234,28 +237,28 @@ method(read_file, DTAFileInfo) <- function(x, file) {
       cli_abort(simpleError(str_glue("File '{file}' cannot be found.")))
     }
   } else {
-    cli_abort(simpleError("The provided file does not match the filename in the DTAFileInfoTabular object."))
+    cli_abort(simpleError("The provided file does not match the filename in the DTAFileTabular object."))
   }
 }
 
-#' @title Print DTAFileInfo Object
+#' @title Print DTAFile Object
 #' @description
-#' Print method for DTAFileInfo objects.
-#' @param x An object of class DTAFileInfo
+#' Print method for DTAFile objects.
+#' @param x An object of class DTAFile
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  # do not use this, use derived classes instead, e.g.
-#'  # DTAFileInfoCSV or DTAFileInfoTSV
-#'  DTAFileInfo("example.tsv")
+#'  # DTAFileCSV or DTAFileTSV
+#'  DTAFile("example.tsv")
 #' }
 #' @name print
 #' @export
-method(print, DTAFileInfo) <- function(x, ...) {
+method(print, DTAFile) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileInfo}> : {.field {x@name}}")
+  cli_text("<{.emph DTAFile}> : {.field {x@name}}")
 
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")

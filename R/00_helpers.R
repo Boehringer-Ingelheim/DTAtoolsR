@@ -7,7 +7,7 @@ class_DTAColumnSpecStructure <- S7::new_class(
   "DTAColumnSpecStructure"
 )
 class_DTAColumnSpecStructure_or_null <- class_DTAColumnSpecStructure | class_null
-class_DTAContainer <- S7::new_class("DTAContainer")
+class_DTADataSet <- S7::new_class("DTADataSet")
 class_DTAMetadata <- S7::new_class("DTAMetaData")
 class_character_or_null <- class_character | class_null
 class_numeric_or_null <- class_numeric | class_null
@@ -36,7 +36,7 @@ class_character_or_numeric_or_null_or_list <- class_character |
 }
 
 `__DTAtools_supported_backends__` <- c("SAS")
-
+`__DTAtools_supported_datasets__` <- c("tabular")
 
 #' Create a DTAColumnSpecStructure Object
 #'

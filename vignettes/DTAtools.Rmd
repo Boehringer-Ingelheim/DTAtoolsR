@@ -108,11 +108,11 @@ data <- data.table::fread("data.tsv")
 
 ### Step 3: Validate the Data
 
-Use the `DTAContainer` function to validate the data against the specifications:
+Use the `DTADataSet` function to validate the data against the specifications:
 
 ```{r eval=FALSE}
 # Validate the data
-dt <- DTAContainer(specs, list(my_data = data))
+dt <- DTADataSet(specs, list(my_data = data))
 ```
 
 ### Step 4: Handle Validation Results
@@ -146,7 +146,7 @@ specs <- import_specs_from_yaml(params_yaml)
 
 ### Load and validate data
 
-The next step is to import the data and create a `DTAContainer` object. Once created, the `DTAContainer` object will validate the data for the specifications right away.
+The next step is to import the data and create a `DTADataSet` object. Once created, the `DTADataSet` object will validate the data for the specifications right away.
 
 Here we load example data. We recommend to load large tables with `fread` or
 small to medium sized data with `tibble` related functions like `read_csv` or
@@ -158,12 +158,12 @@ example_file <- system.file("extdata", "data_gf_small.tsv", package="DTAtools")
 example_data <- read.table(example_file, sep = "\t", header = T)
 ```
 
-The data along with DTA column specifications is used to create a DTAContainer
+The data along with DTA column specifications is used to create a DTADataSet
 object. Upon creation, the data is checked for validity using the extremely
 efficient `jsonschema` package.
 
 ```{r}
-data <- DTAContainer(
+data <- DTADataSet(
   specs = specs,
   data = list("example_data" = example_data)
 )
@@ -184,7 +184,7 @@ Tabular data is not only checked for an expected structure, but also whether it 
 # export_specs_table(imported_collection, file = "imported_collection.docx")
 # export_specs_table(imported_collection, file = "imported_collection_new.docx", overwrite = TRUE)
 
-# dtatools <- DTAContainer(DTAColumnSpecCollection = imported_collection, tables = list("DTA" = table))
+# dtatools <- DTADataSet(DTAColumnSpecCollection = imported_collection, tables = list("DTA" = table))
 
 write_table_to_file(
   dtatools,
@@ -458,14 +458,14 @@ print(metadata)
 
 - **Column Specifications**: Define individual column metadata and constraints using `DTAColumnSpec`.
 - **Specification Collections**: Group multiple column specifications into collections using `DTAColumnSpecCollection`.
-- **Data Validation**: Validate data frames against specifications using `DTAContainer`.
+- **Data Validation**: Validate data frames against specifications using `DTADataSet`.
 - **Documentation Export**: Generate documentation tables in Word format using `flextable`.
 
 ### Core Classes
 
 - **`DTAColumnSpec`**: Represents the metadata and constraints for a single column.
 - **`DTAColumnSpecCollection`**: A named collection of `DTAColumnSpec` objects.
-- **`DTAContainer`**: A container for validating data frames against a specification collection.
+- **`DTADataSet`**: A container for validating data frames against a specification collection.
 
 ### Validation Functions
 

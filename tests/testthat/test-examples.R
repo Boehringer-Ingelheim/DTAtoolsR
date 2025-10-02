@@ -6,7 +6,7 @@ test_that("Examples are loaded and correctly formatted.", {
       params_filename
     )
 
-    expect_no_error(DTAContainer(
+    expect_no_error(DTADataSet(
       specs = column_collection,
       data = list("DTA" = table)
     ))
@@ -14,7 +14,7 @@ test_that("Examples are loaded and correctly formatted.", {
   validate_table(
     system.file("extdata", "gf_data_small.tsv", package = "DTAtools"),
     "\t",
-    system.file("extdata", "gf_container.yaml", package = "DTAtools")
+    system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   )
   validate_table(
     system.file("extdata", "clinical_data.csv", package = "DTAtools"),

@@ -108,7 +108,7 @@ change_type <- function(vector, var_type) {
 #' @param specs A specs object.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
 #' @export
-#TODO: move validate table to DTAContainer-class.R
+#TODO: move validate table to DTADataSet-class.R
 validate_table <- function(specs, table) {
   # Confirm JSON schema
   obj <- jsonvalidate::json_schema$new(specs@json_schema)

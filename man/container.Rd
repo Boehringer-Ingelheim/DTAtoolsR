@@ -11,7 +11,7 @@ list of all containers. If character, returns the container with the specified n
 If integer, returns the container at the specified index.}
 }
 \value{
-Either a list of DTAContainer objects or a single DTAContainer.
+Either a list of DTADataSet objects or a single DTADataSet.
 }
 \description{
 Method to get one or more containers from a DTA object.

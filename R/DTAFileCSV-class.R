@@ -1,7 +1,7 @@
-#' @title DTAFileInfoCSV Class Constructor
+#' @title DTAFileCSV Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileInfoCSV}, which extends \code{DTAFileInfo}
+#' Defines the S7 class \code{DTAFileCSV}, which extends \code{DTAFile}
 #' to represent metadata and configuration for CSV (Tab-Separated Values)
 #'  data files.
 #'
@@ -18,17 +18,17 @@
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
 #'
-#' @name DTAFileInfoCSV-class
-#' @return An object of class \code{DTAFileInfoCSV}.
+#' @name DTAFileCSV-class
+#' @return An object of class \code{DTAFileCSV}.
 #' @examples
 #'  \dontrun{
 #' }
-#' @seealso \code{\link{DTAFileInfo}}
-#' @include DTAFileInfoTabular-class.R
+#' @seealso \code{\link{DTAFile}}
+#' @include DTAFileTabular-class.R
 #' @export
-DTAFileInfoCSV <- S7::new_class( # nolint
-  "DTAFileInfoCSV",
-  parent = DTAFileInfoTabular,
+DTAFileCSV <- S7::new_class( # nolint
+  "DTAFileCSV",
+  parent = DTAFileTabular,
   constructor = function(
     filename,
     pattern = FALSE,
@@ -37,7 +37,7 @@ DTAFileInfoCSV <- S7::new_class( # nolint
     quote = '"'
   ) {
     new_object(
-      DTAFileInfoTabular(
+      DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
         pattern = pattern,
@@ -50,18 +50,18 @@ DTAFileInfoCSV <- S7::new_class( # nolint
 )
 
 
-#' @title Read File for DTAFileInfoCSV Objects
-##' @name read_file_execution-DTAFileInfoCSV
+#' @title Read File for DTAFileCSV Objects
+##' @name read_file_execution-DTAFileCSV
 #' @description
 #' Reads a CSV file using the parameters specified in a
-#' \code{DTAFileInfoCSV} object. This method uses \code{arrow::read_csv_arrow}
+#' \code{DTAFileCSV} object. This method uses \code{arrow::read_csv_arrow}
 #' for efficient CSV parsing.
 #' @importFrom arrow read_delim_arrow
-#' @param x A \code{DTAFileInfoCSV} object containing file reading parameters.
+#' @param x A \code{DTAFileCSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
+method(read_file_execution, DTAFileCSV) <- function(x, file) {
   return(arrow::read_csv_arrow(
     file,
     quote = x@quote,
@@ -70,43 +70,43 @@ method(read_file_execution, DTAFileInfoCSV) <- function(x, file) {
   ))
 }
 
-#' @title Create Example DTAFileInfoCSV Object
+#' @title Create Example DTAFileCSV Object
 #' @description
-#' Creates an example \code{DTAFileInfoCSV} object using example files.
+#' Creates an example \code{DTAFileCSV} object using example files.
 #' @param index example selector.
-#' @return An example \code{DTAFileInfoCSV} object.
+#' @return An example \code{DTAFileCSV} object.
 #' @examples
 #' library(DTAtools)
-#' create_example_DTAFileInfoCSV()
+#' create_example_DTAFileCSV()
 #' @export
-create_example_DTAFileInfoCSV <- function(index = 1) {
+create_example_DTAFileCSV <- function(index = 1) {
   if (index == 1) {
     example_file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-    DTAFileInfoCSV(
+    DTAFileCSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
   } else {
-    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileInfoCSV().")
+    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileCSV().")
   }
 }
 
 
-#' @title Print DTAFileInfoCSV Object
+#' @title Print DTAFileCSV Object
 #' @description
-#' Print method for DTAFileInfoCSV objects.
-#' @param x An object of class DTAFileInfoCSV
+#' Print method for DTAFileCSV objects.
+#' @param x An object of class DTAFileCSV
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
 #' library(DTAtools)
-#' print(create_example_DTAFileInfoCSV())
+#' print(create_example_DTAFileCSV())
 #'
 #' @name print
 #' @export
-method(print, DTAFileInfoCSV) <- function(x, ...) {
+method(print, DTAFileCSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileInfoCSV}>")
+  cli_text("<{.emph DTAFileCSV}>")
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
   if (!is.null(x@min_number_of_files) && !is.null(x@max_number_of_files)) {

@@ -11,8 +11,8 @@ test_that("DTA object is constructed correctly", {
     columns = list(STUDYID = col1, VISIT = col2)
   )
 
-  # Create DTAContainer
-  container_obj <- DTAContainer(collection, tables)
+  # Create DTADataSet
+  container_obj <- DTADataSet(collection, tables)
 
   # Create DTA object
   dta_obj <- DTA(container = list(main = container_obj), author = "Test Author")
@@ -34,7 +34,7 @@ test_that("DTA object is constructed correctly", {
 
   # Retrieve by name
   main_container <- container(dta_obj, "main")
-  expect_s3_class(main_container, "DTAtools::DTAContainer")
+  expect_s3_class(main_container, "DTAtools::DTADataSet")
 
   # Retrieve by vector
   expect_equal(container(dta_obj, c("main")), all_containers[["main"]])

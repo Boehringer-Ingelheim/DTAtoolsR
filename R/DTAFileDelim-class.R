@@ -1,7 +1,7 @@
-#' @title DTAFileInfoDelim Class Constructor
+#' @title DTAFileDelim Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileInfoDelim}, which extends \code{DTAFileInfo}
+#' Defines the S7 class \code{DTAFileDelim}, which extends \code{DTAFile}
 #' to represent metadata and configuration for TSV (Tab-Separated Values)
 #'  data files.
 #'
@@ -18,14 +18,14 @@
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
 #'
-#' @return An object of class \code{DTAFileInfoDelim}.
-#' @name DTAFileInfoDelim-class
-#' @seealso \code{\link{DTAFileInfo}}
+#' @return An object of class \code{DTAFileDelim}.
+#' @name DTAFileDelim-class
+#' @seealso \code{\link{DTAFile}}
 #'
 #' @export
-DTAFileInfoDelim <- S7::new_class(
-  "DTAFileInfoDelim",
-  parent = DTAFileInfoTabular,
+DTAFileDelim <- S7::new_class(
+  "DTAFileDelim",
+  parent = DTAFileTabular,
   constructor = function(
     filename,
     pattern = FALSE,
@@ -34,7 +34,7 @@ DTAFileInfoDelim <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      DTAFileInfoTabular(
+      DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
         pattern = pattern,
@@ -46,20 +46,20 @@ DTAFileInfoDelim <- S7::new_class(
 )
 
 
-#' @title Read File for DTAFileInfoDelim Objects
+#' @title Read File for DTAFileDelim Objects
 #' @description
 #' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileInfoDelim} object. This method uses \code{arrow::read_delim_arrow}
+#' \code{DTAFileDelim} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
 #'
-#' @param x A \code{DTAFileInfoDelim} object containing file reading parameters.
+#' @param x A \code{DTAFileDelim} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 ##' @seealso \code{\link{arrow::read_tsv_arrow}}
-##' @name read_file_execution-DTAFileInfoDelim
-method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
+##' @name read_file_execution-DTAFileDelim
+method(read_file_execution, DTAFileDelim) <- function(x, file) {
   return(arrow::read_delim_arrow(
     file,
     #col_types = x@col_types,
@@ -70,22 +70,22 @@ method(read_file_execution, DTAFileInfoDelim) <- function(x, file) {
   ))
 }
 
-#' @title Print DTAFileInfoDelim Object
+#' @title Print DTAFileDelim Object
 #' @description
-#' Print method for DTAFileInfoDelim objects.
-#' @param x An object of class DTAFileInfoDelim
+#' Print method for DTAFileDelim objects.
+#' @param x An object of class DTAFileDelim
 #' @param ... Additional arguments (not used)
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @return Invisibly returns the input object
 #' @examples
 #' library(DTAtools)
-#' print(DTAFileInfoDelim("example.tsv"))
+#' print(DTAFileDelim("example.tsv"))
 #'
 #' @name print
 #' @export
-method(print, DTAFileInfoDelim) <- function(x, ...) {
+method(print, DTAFileDelim) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileInfoDelim}>")
+  cli_text("<{.emph DTAFileDelim}>")
 
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")

@@ -1,7 +1,7 @@
-#' @title DTAFileInfoTabular Class Constructor
+#' @title DTAFileTabular Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{C}, which extends \code{DTAFileInfo}
+#' Defines the S7 class \code{C}, which extends \code{DTAFile}
 #' to represent metadata and configuration for Delim (Tab-Separated Values)
 #'  data files.
 #'
@@ -20,52 +20,69 @@
 #' @param col_types Character string specifying the type of each column (e.g.,
 #'   \code{"cccidcl"}). Default is \code{NULL}.
 #'
-#' @name DTAFileInfoTabular-class
-#' @return An object of class \code{DTAFileInfoTabular}.
+#' @name DTAFileTabular-class
+#' @return An object of class \code{DTAFileTabular}.
 #'
-#' @seealso \code{\link{DTAFileInfo}}
+#' @seealso \code{\link{DTAFile}}
 #'
 #' @export
-DTAFileInfoTabular <- S7::new_class(
-  "DTAFileInfo",
-  parent = DTAFileInfo,
+DTAFileTabular <- S7::new_class(
+  "DTAFile",
+  parent = DTAFile,
   constructor = function(
     filename,
     pattern = FALSE,
     number_of_files = 1,
+    missing_values = "",
     sep = "\t",
     has_header = TRUE,
-    quote = '"'
+    quote = '"',
+    encoding = "UTF-8"
   ) {
     new_object(
-      .parent = DTAFileInfo(filename = filename,
+      .parent = DTAFile(filename = filename,
                   number_of_files = number_of_files,
                   pattern = pattern),
       sep = sep,
       has_header = has_header,
-      quote = quote
+      quote = quote,
+      missing_values = missing_values
     )
   },
   properties = list(
     sep = class_character,
     has_header = class_logical,
-    quote = class_character
-  )
+    quote = class_character,
+    missing_values = class_character
+  ),
+  validator = function(self) {
+    if (!is.character(self@sep) || nchar(self@sep) != 1) {
+      "'sep' must be a single character."
+    }
+
+    if (!is.logical(self@has_header) || length(self@has_header) != 1) {
+      "'has_header' must be a single logical value."
+    }
+
+    if (!is.character(self@quote) || nchar(self@quote) != 1) {
+      "'quote' must be a single character."
+    }
+  }
 )
 
 
-#' @title Read File for DTAFileInfoTabular Objects
-#' @name read_file_execution-DTAFileInfoTabular
+#' @title Read File for DTAFileTabular Objects
+#' @name read_file_execution-DTAFileTabular
 #' @description
-#' \code{DTAFileInfoTabular} is a virtual class. This method needs to be
-#' implemented in derived classes like \code{DTAFileInfoTSV},
-#' \code{DTAFileInfoCSV} or \code{DTAFileInfoDelim}.
+#' \code{DTAFileTabular} is a virtual class. This method needs to be
+#' implemented in derived classes like \code{DTAFileTSV},
+#' \code{DTAFileCSV} or \code{DTAFileDelim}.
 #' @importFrom cli cli_abort
-#' @param x A \code{DTAFileInfoTabular} object containing file reading parameters.
+#' @param x A \code{DTAFileTabular} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-method(read_file_execution, DTAFileInfoTabular) <- function(x, file) {
+method(read_file_execution, DTAFileTabular) <- function(x, file) {
   cli::cli_abort("This method is not implemented. You need to
-  use an object of a class which is derived from DTAFileInfoTabular class.")
+  use an object of a class which is derived from DTAFileTabular class.")
 }

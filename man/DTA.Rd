@@ -7,7 +7,7 @@
 DTA(container = NULL, metadata = NULL, ...)
 }
 \arguments{
-\item{container}{A names list of DTAContainer objects}
+\item{container}{A names list of DTADataSet objects}
 
 \item{...}{arguments will be passed to DTAMetadata(...)}
 }
@@ -29,8 +29,8 @@ table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05"
 # List of tables
 tables <- list(table1 = table1, table2 = table2)
 
-# Create the DTAContainer object
-data_obj <- DTAContainer(DTAColumnSpecCollection, tables)
+# Create the DTADataSet object
+data_obj <- DTADataSet(DTAColumnSpecCollection, tables)
 
 DTA(container = list(data = data_obj))
 }

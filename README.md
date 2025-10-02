@@ -50,7 +50,7 @@ data_path <- system.file("extdata", "data_spec.yaml", package = "DTAtools")
 data <- fread(data_path)
 
 # Validate
-dt <- DTAContainer(specs, list(my_data = data))
+dt <- DTADataSet(specs, list(my_data = data))
 ```
 
 ## Usage
@@ -75,11 +75,11 @@ specs <- import_specs_from_yaml("spec.yaml")
 
 ### Load and validate data
 
-The next step is to import the data and create a `DTAContainer` object. Once created, the `DTAContainer` object will validate the data for the specifications right away.
+The next step is to import the data and create a `DTADataSet` object. Once created, the `DTADataSet` object will validate the data for the specifications right away.
 
 ```r
 table <- data.frame(STUDYID = c("1234", "1234"), VISIT = c("V01", "V02"))
-data_obj <- DTAContainer(specs, list(my_table = table))
+data_obj <- DTADataSet(specs, list(my_table = table))
 ```
 
 ### Write validated data to file
@@ -88,7 +88,7 @@ Use the `writeTableToFile()` function to export validated tables with optional s
 
 ```r
 writeTableToFile(
-  DTAContainer = data_obj,
+  DTADataSet = data_obj,
   table = "my_table",
   filename = "validated_table.tsv",
   arrange_by = "all",
@@ -321,14 +321,14 @@ metadata:
 
 - Define column specifications with `DTAColumnSpec`
 - Group specifications into collections with `DTAColumnSpecCollection`
-- Validate data frames against specifications and logic using `DTAContainer`
+- Validate data frames against specifications and logic using `DTADataSet`
 - Export documentation tables to Word using `flextable`
 
 ### Core Classes
 
 - `DTAColumnSpec`: Defines a single column's metadata and constraints
 - `DTAColumnSpecCollection`: A named list of DTAColumnSpec objects
-- `DTAContainer`: A validated specs of data frames against specifications
+- `DTADataSet`: A validated specs of data frames against specifications
 
 ### Validation Functions
 
