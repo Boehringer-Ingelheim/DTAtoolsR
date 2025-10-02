@@ -17,6 +17,8 @@ class_character_or_numeric_or_null <- class_character |
 class_logical_or_null <- class_logical | class_null
 class_character_or_list <- class_character |
   class_list
+class_character_or_list_or_null <- class_character |
+  class_list | class_null
 class_character_or_numeric_or_null_or_list <- class_character |
   class_numeric |
   class_null |
@@ -141,7 +143,8 @@ DTADataSetFactory <- function(
   switch(type,
     "tabular" = {
       return(DTADataSetTabular(
-        specs = specs_from_list(columns = columns, rules = rules)
+        specs = specs_from_list(columns = columns, rules = rules),
+        files = DTAFileFactory(files),
         ...))
     },
     cli_abort("Dataset type '{type}' not implemented.")

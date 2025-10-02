@@ -4,10 +4,10 @@
 \alias{specs_from_list}
 \title{Create DTAColumnSpecCollection from Components}
 \usage{
-specs_from_list(specs, rules = list())
+specs_from_list(columns, rules = list())
 }
 \arguments{
-\item{specs}{A list of column specification lists. Each must contain at least an \code{id}.}
+\item{columns}{A list of column specification lists. Each must contain at least an \code{id}.}
 
 \item{rules}{Optional list of schema rules.}
 }
@@ -15,17 +15,18 @@ specs_from_list(specs, rules = list())
 An object of class DTAColumnSpecCollection.
 }
 \description{
-Constructs a DTAColumnSpecCollection object from separate components: specs and schema rules.
+Constructs a DTAColumnSpecCollection object from separate components: columns and schema rules.
 Supports both named and unnamed lists of column specifications.
 }
 \examples{
 library(DTAtools)
-specs <- list(
+columns <- list(
   DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "SAS Char",
        nullable = FALSE, values = list("1234-5678")),
   DTAColumnSpec(id = "VISIT", label = "Visit", type = "SAS Char", nullable = TRUE,
        values = list("V01", "EOT"))
 )
-dta_spec <- specs_from_list(specs)
+
+dta_spec <- specs_from_list(columns)
 
 }

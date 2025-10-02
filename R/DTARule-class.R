@@ -21,24 +21,33 @@ DTARule <- new_class(
   # Constructor for the DTARule class
   constructor = function(
     id,
-    type
+    type,
+    description
   ) {
     # Create the class object
     new_object(
       S7_object(),
       id = id,
-      type = type
+      type = type,
+      description = description
     )
   },
 
   # Define the properties of the class
   properties = list(
     id = class_character, # Unique identifier for the rule
-    type = class_character # Type of the rule
+    type = class_character, # Type of the rule
+    description = class_character_or_null
   ),
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
       "@id cannot have whitespaces and needs to be defined."
+    }
+
+    # description can be NULL or a character of length 1
+    if (!is.null(self@description) &&
+        (!is.character(self@description) || length(self@description) != 1)) {
+      "'description' must be NULL or a character of length 1."
     }
   }
 )

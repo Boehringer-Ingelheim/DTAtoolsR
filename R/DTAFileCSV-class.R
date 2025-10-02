@@ -32,7 +32,7 @@ DTAFileCSV <- S7::new_class( # nolint
   constructor = function(
     filename,
     pattern = FALSE,
-    number_of_files = 1,
+    number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL,
@@ -43,9 +43,9 @@ DTAFileCSV <- S7::new_class( # nolint
       DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
-        min_number_of_files = NULL,
-        max_number_of_files = NULL,
-        info = NULL,
+        min_number_of_files = min_number_of_files,
+        max_number_of_files = max_number_of_files,
+        info = info,
         pattern = pattern,
         sep = ",",
         has_header = has_header,
@@ -113,18 +113,9 @@ create_example_DTAFileCSV <- function(index = 1) {
 method(print, DTAFileCSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAFileCSV}>")
-  cli::cli_alert_info("Filename: {x@filename}")
-  cli::cli_alert("Pattern: {x@pattern}")
-  if (!is.null(x@min_number_of_files) && !is.null(x@max_number_of_files)) {
-    if (x@min_number_of_files == x@max_number_of_files) {
-      cli_alert("Files required: {x@min_number_of_files}")
-    } else {
-      cli_alert("Files required: {x@min_number_of_files} to {x@max_number_of_files}")
-    }
-  }
-  cli::cli_alert("Separator: {x@sep}")
-  cli::cli_alert("Has header: {x@has_header}")
-  cli::cli_alert("Quote: {x@quote}")
+
+  print_file_info(x)
+
   invisible(x)
 }
 

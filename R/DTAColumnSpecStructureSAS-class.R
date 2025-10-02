@@ -2,6 +2,7 @@
 #' @description
 #' Class for column types for SAS structures
 #' @import S7
+#' @importFrom stringr str_glue
 #' @export
 #'
 #' @description
@@ -44,7 +45,7 @@ DTAColumnSpecStructureSAS <- new_class(
 
     if (!is.null(self@type) && self@type == "Char" && !is.null(self@format)) {
       if (!grepl("^\\$[0-9]+\\.$", self@format)) {
-        "'format' must be of the form '$[number].' when 'type' is 'Char'."
+        str_glue("'format' must be of the form '$[number].' when 'type' is 'Char': {self@format}")
       }
     }
   }

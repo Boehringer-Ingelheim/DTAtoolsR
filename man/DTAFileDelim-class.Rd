@@ -8,7 +8,10 @@
 DTAFileDelim(
   filename,
   pattern = FALSE,
-  number_of_files = 1,
+  number_of_files = NULL,
+  min_number_of_files = NULL,
+  max_number_of_files = NULL,
+  info = info,
   has_header = TRUE,
   quote = "\\""
 )

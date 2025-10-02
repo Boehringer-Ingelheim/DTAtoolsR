@@ -4,7 +4,7 @@
 \alias{DTARule}
 \title{DTARule Class}
 \usage{
-DTARule(id, type)
+DTARule(id, type, description)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}

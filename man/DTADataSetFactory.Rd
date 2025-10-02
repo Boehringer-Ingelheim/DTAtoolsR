@@ -4,10 +4,16 @@
 \alias{DTADataSetFactory}
 \title{Create a DTADataSetFactory Object}
 \usage{
-DTADataSetFactory(type, ...)
+DTADataSetFactory(type, columns = NULL, rules = NULL, files = NULL, ...)
 }
 \arguments{
 \item{type}{Character. The type specification, potentially prefixed with a backend identifier.}
+
+\item{columns}{A list with column specifications (optional)}
+
+\item{rules}{A list of rules specifications (optional)}
+
+\item{files}{A list of for conversion to DTAFile objects (optional)}
 
 \item{...}{Character. Arguments passed on to the specific backend constructor.}
 }

@@ -4,7 +4,7 @@
 \alias{DTARuleColUnique}
 \title{DTARuleColUnique Class}
 \usage{
-DTARuleColUnique(id, type, column = NULL)
+DTARuleColUnique(id, type, column = NULL, description = NULL)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}

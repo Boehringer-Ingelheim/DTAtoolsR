@@ -38,17 +38,28 @@ DTAFile <- new_class(
     filename,
     pattern = FALSE,
     pattern_description = NULL,
-    number_of_files = 1,
+    number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL
   ) {
-   
+
     if (!pattern && number_of_files != 1) {
-      cli::cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
+      cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
     }
 
-    
+    if(length(number_of_files) > 1) {
+      cli_abort("'number_of_files' can only be length 1.")
+    }
+
+    if (!is.null(number_of_files) && (!is.null(min_number_of_files) || !is.null(max_number_of_files))) {
+      cli_abort("You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach.")
+    }
+
+    if(is.null(number_of_files) && is.null(min_number_of_files) && is.null(max_number_of_files)) {
+      min_number_of_files <- 1
+      max_number_of_files <- 1
+    }
 
     new_object(
       S7_object(),
@@ -250,12 +261,41 @@ method(print, DTAFile) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAFile}> : {.field {x@name}}")
 
-  cli_alert_info("Filename: {x@filename}")
-  cli_alert("Pattern: {x@pattern}")
-  cli_alert("Min number of files: {x@min_number_of_files}")
-  cli_alert("Max number of files: {x@max_number_of_files}")
+  print_file_info(x)
+
   invisible(x)
 }
 
 
+#' Print Information About a DTAFile Object
+#'
+#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
+#'
+#' @param x A \code{DTAFile} object whose information is to be printed.
+#'
+#' @return The input object \code{x}, returned invisibly.
+#'
+#' @details
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#'
+#' @examples
+#' \dontrun{
+#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' print_file_info(dta_file)
+#' }
+#'
+#' @seealso \code{\link{DTAFile}}
+#' @export
+print_file_info <- new_generic("print_file_info", "x")
 
+method(print_file_info, DTAFile) <- function(x) {
+  cli_alert_info("Filename: {x@filename}")
+  cli_alert("Pattern: {x@pattern}")
+  if(x@min_number_of_files == x@max_number_of_files) {
+    cli_alert("Number of files: {x@min_number_of_files}")
+  } else {
+    cli_alert("Min number of files: {x@min_number_of_files}")
+    cli_alert("Max number of files: {x@max_number_of_files}")
+  } 
+  invisible(x)
+}

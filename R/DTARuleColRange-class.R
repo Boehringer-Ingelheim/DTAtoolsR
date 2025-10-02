@@ -30,7 +30,8 @@ DTARuleColRange <- new_class( # nolint: object_name_linter.
   constructor = function(
     id,
     column = NULL,
-    range = NULL
+    range = NULL,
+    description = NULL
   ) {
     type <- "check_range"
 
@@ -50,7 +51,8 @@ DTARuleColRange <- new_class( # nolint: object_name_linter.
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "col_range"
+        type = "col_range",
+        description = description
       ),
       column = column,
       min_range = min_range,

@@ -32,7 +32,7 @@ DTAFileTabular <- S7::new_class(
   constructor = function(
     filename,
     pattern = FALSE,
-    number_of_files = 1,
+    number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL,
@@ -91,4 +91,36 @@ DTAFileTabular <- S7::new_class(
 method(read_file_execution, DTAFileTabular) <- function(x, file) {
   cli::cli_abort("This method is not implemented. You need to
   use an object of a class which is derived from DTAFileTabular class.")
+}
+
+print_file_info <- new_generic("print_file_info", "x")
+
+#' Print Information About a DTAFile Object
+#'
+#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
+#'
+#' @param x A \code{DTAFile} object whose information is to be printed.
+#'
+#' @return The input object \code{x}, returned invisibly.
+#'
+#' @details
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#'
+#' @examples
+#' \dontrun{
+#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' print_file_info(dta_file)
+#' }
+#'
+#' @name print_file_info
+#' @seealso \code{\link{DTAFile}}
+#' @export
+method(print_file_info, DTAFile) <- function(x) {
+  super(print_file_info, x)
+
+  cli_alert("Separator: {x@sep}")
+  cli_alert("Has header: {x@has_header}")
+  cli_alert("Quote: {x@quote}")
+
+  invisible(x)
 }

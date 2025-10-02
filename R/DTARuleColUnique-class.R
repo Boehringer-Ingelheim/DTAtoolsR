@@ -26,12 +26,14 @@ DTARuleColUnique <- new_class(
   constructor = function(
     id,
     type,
-    column = NULL
+    column = NULL,
+    description = NULL
   ) {
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "col_unique"
+        type = "col_unique",
+        description = description
       ),
       column = column
     )

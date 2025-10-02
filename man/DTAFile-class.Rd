@@ -9,7 +9,10 @@ DTAFile(
   filename,
   pattern = FALSE,
   pattern_description = NULL,
-  number_of_files = 1
+  number_of_files = NULL,
+  min_number_of_files = NULL,
+  max_number_of_files = NULL,
+  info = NULL
 )
 }
 \arguments{

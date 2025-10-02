@@ -44,9 +44,10 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
     new_object(
       DTAtools::DTARule(
         id = id,
-        type = "col_condition"
+        type = "col_condition",
+        description = description
       ),
-      description = description,
+      
       condition = condition,
       then = then
     )
@@ -56,7 +57,6 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
   properties = list(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
-    description = class_character_or_null,
     condition = class_character_or_list,
     then = class_character_or_list
   ),

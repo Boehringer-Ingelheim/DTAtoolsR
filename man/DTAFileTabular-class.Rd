@@ -8,7 +8,10 @@
 DTAFileTabular(
   filename,
   pattern = FALSE,
-  number_of_files = 1,
+  number_of_files = NULL,
+  min_number_of_files = NULL,
+  max_number_of_files = NULL,
+  info = NULL,
   missing_values = "",
   sep = "\\t",
   has_header = TRUE,

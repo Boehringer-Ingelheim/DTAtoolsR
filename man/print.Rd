@@ -64,7 +64,7 @@ Prints a summary of a \code{DTARuleCollection} object, including the number of r
   print(dta_obj)
 }
 \dontrun{
- print(specs)
+ print(columns)
 }
 library(DTAtools)
 print(create_example_DTADataSetTabular())

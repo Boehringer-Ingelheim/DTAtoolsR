@@ -4,7 +4,7 @@
 \alias{DTARuleColRange}
 \title{DTARuleColRange Class}
 \usage{
-DTARuleColRange(id, column = NULL, range = NULL)
+DTARuleColRange(id, column = NULL, range = NULL, description = NULL)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
