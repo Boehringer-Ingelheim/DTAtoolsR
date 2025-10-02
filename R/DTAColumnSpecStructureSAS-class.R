@@ -51,6 +51,21 @@ DTAColumnSpecStructureSAS <- new_class(
 )
 
 
+#' @title as.list method for as.list.DTAColumnSpecStructureSAS
+#' @description
+#' Converts a as.list.DTAColumnSpecStructureSAS object to a named list.
+#' @param x A as.list.DTAColumnSpecStructureSAS object.
+#' @param ... Additional arguments (ignored).
+#' @return A named list with the DTAColumnSpecStructureSAS properties.
+#' @export
+as.list.DTAColumnSpecStructureSAS <- function(x, ...) {
+  list(
+    type = paste(x@backend, x@type),
+    format = paste(x@backend, x@format),
+    length = x@length
+  )
+}
+
 ## SAS Formats
 # Character formats in SAS always begin with a dollar sign ($) followed by a number indicating the width of the field.
 # For example, $10. indicates a character format with a width of 10 characters.

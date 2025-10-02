@@ -16,7 +16,7 @@ specids(x, ...)
 A character vector of column names.
 }
 \description{
-Method to get the names of columns in the collection.
+Method to get the names of specs in the collection.
 }
 \examples{
 \dontrun{

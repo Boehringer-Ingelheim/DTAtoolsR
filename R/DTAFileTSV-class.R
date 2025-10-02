@@ -37,6 +37,9 @@ DTAFileTSV <- S7::new_class(
       DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
+        min_number_of_files = min_number_of_files,
+        max_number_of_files = max_number_of_files,
+        info = info,
         pattern = pattern,
         has_header = has_header,
         quote = quote,

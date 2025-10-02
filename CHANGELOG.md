@@ -8,21 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- name to DTAContainer
 - print method to all instantiable classes
 - added `examples` to `DTAColumnSpecs`, which need to be following a pattern if provided and are mutatially exclusive from `values`
 - introducted `colclass`, which is a placeholder for further addition for automatic preprocessing efforts
 - file handling with classes: `DTAFileInfo`, `DTAFileInfoTabular`, `DTAFileInfoCSV`, `DTAFileInfoTSV`, `DTAFileInfoDelim`
-- classes `DTARule`, `DTARuleCollection`, `DTARuleColCondition`, `DTARuleColRange`, `DTARuleColUnique`
+- introduced classes `DTARule`, `DTARuleCollection`, `DTARuleColCondition`, `DTARuleColRange`, `DTARuleColUnique` for rules
+- introducted classes `DTADataSetTabular` handling tabular data, deriving from `DTADataSet`
 - functions to access slots
 - S7 validators for all classes
 - introduced `DTAColumnSpecStructure` and `DTAColumnSpecStructureSAS` for handling `type`, `format`, `length` of a column spec
-- example factory functions: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTAContainer()`, `create_example_DTAFileInfoCSV()`, `create_example_DTAFileInfoTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
+- info variables to `DTADataSet` and `DTADataSetTabular` 
+- example factory functions: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTADataSetTabular()`, `create_example_DTAFileCSV()`, `create_example_DTAFileTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
+- `as.list` functions to `DTAColumnSpecCollection`, `DTAColumnSpecCollection` and `DTARules` derivates 
 
 ### Changes
 
-- improved GitHub Action workflows
 - renamed functions to snake_case
+- renamed DTAFileInfo to DTAFile
+- renamed DTAContainer to DTADataSet
+- improved GitHub Action workflows
 - reworked data backend to use arrow::Table for better performance and memory usage
 - improved vignette and README.md
 - improved testthat tests
@@ -31,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - renamed getter functions to shorter names
 - renamed constructor variables
 - DTA-class constructor to handle DTAMetaData  
+- changed `container` to `datasets` in class DTA
 
 ## [0.9.0] - 2025-09-11
 

@@ -5,12 +5,10 @@
 #' @importFrom arrow arrow_table
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
-#' @param fileinfo a list of DTAFile objects specifying input file information.
+#' @param files a list of DTAFile objects specifying input file information.
 #' @param datasets List. A list of arrow Table to be validated and included in the DTADataSetTabular object.
 #' @return An object of class DTADataSetTabular
-#'
 #' @examples
-#'
 #' \dontrun{
 #' # Create sample tables
 #' table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))
@@ -25,15 +23,19 @@
 #' @export
 DTADataSetTabular <- new_class(
   "DTADataSetTabular",
-  parent = DTADataset,
+  parent = DTADataSet,
   constructor = function(
     name,
     specs,
     datasets = list(),
-    fileinfo = list()
+    files = list(),
+    description = NULL,
+    template_source = NULL,
+    template_version = NULL,
+    template_date = NULL
   ) {
-    if(inherits(fileinfo, "DTAtools::DTAFile")) {
-      fileinfo = list(fileinfo)
+    if(inherits(files, "DTAtools::DTAFile")) {
+      files = list(files)
     }
 
     if(inherits(datasets, "Table")) {
@@ -41,10 +43,14 @@ DTADataSetTabular <- new_class(
     }
 
     new_object(
-      .parent = DTADataSetTabular(
+      .parent = DTADataSet(
         name = name,
         type = "tabular",
-        fileinfo = fileinfo
+        files = files,
+        template_source = template_source,
+        template_version = template_version,
+        template_date = template_date,
+        description = description
       ),
       
       specs = specs,
@@ -53,7 +59,7 @@ DTADataSetTabular <- new_class(
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    datasets = class_list, # list of arrow Table
+    datasets = class_list # list of arrow Table
   ),
   validator = function(self) {
     # check if all elements of list self@datasets inherit from "Table"
@@ -346,9 +352,9 @@ method(rules, DTADataSetTabular) <- function(x) {
 #' @return An example DTADataSetTabular object.
 #' @examples
 #' library(DTAtools)
-#' create_example_DTADataSetTabularTabular()
+#' create_example_DTADataSetTabular()
 #' @export
-create_example_DTADataSetTabularTabular <- function(index = 1) {
+create_example_DTADataSetTabular <- function(index = 1) {
   # Create sample tables
   table1 <- arrow_table(data.frame(
     STUDYID = c("STUDY001", "STUDY001", "STUDY001"),
@@ -366,20 +372,20 @@ create_example_DTADataSetTabularTabular <- function(index = 1) {
   
   switch(index,
     `1` = {
-      DTAtools::DTADataSetTabular(
+      DTADataSetTabular(
         name = "example_container_specs_without_data",
         specs = create_example_DTAColumnSpecCollection(1),
       )
     },
     `2` = {
-      DTAtools::DTADataSetTabular( 
+      DTADataSetTabular( 
         name = "demographics",
         specs = create_example_DTAColumnSpecCollection(1),
         datasets = list("tab1" = table1)
       )
     },
     `3` = {
-      DTAtools::DTADataSetTabular(
+      DTADataSetTabular(
         name = "vitals", 
         specs = create_example_DTAColumnSpecCollection(2),
         datasets = list("tab2" = table2)
@@ -401,14 +407,17 @@ create_example_DTADataSetTabularTabular <- function(index = 1) {
 #' @name print
 #' @export
 method(print, DTADataSetTabular) <- function(x) {
-
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
+
+  
+  print_dataset_info(x)
+  
   if(!is.null(x@specs)) {
     cli_alert_info("Column specs ({length(x@specs@columns)}): {column_preview(x@specs)}")
   } else {
     cli_alert_info("Column specs: none")
   }
+
   n_tables <- length(x@datasets)
   
   if (n_tables > 0) {
@@ -428,12 +437,6 @@ method(print, DTADataSetTabular) <- function(x) {
     cli_alert_info(alert_message)
   } else {
     cli_alert("Data tables: {.emph none}")
-  }
-
-  if (is.null(x@fileinfo) || length(x@fileinfo) == 0) {
-    cli_alert("Fileinfo entries: {.emph none}")
-  } else {
-    cli_alert_info("Fileinfo entries: {length(x@fileinfo)}")
   }
 
   invisible(x)

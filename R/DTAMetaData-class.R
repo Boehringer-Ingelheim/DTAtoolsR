@@ -15,32 +15,42 @@
 DTAMetaData <- new_class(
   "DTAMetaData",
   constructor = function(
-    name,
+    title,
     version = NULL,
-    author = NULL
+    date = NULL,
+    header = NULL,
+    receiver = list(),
+    supplier = list(),
+    transmission = list()
   ) {
     new_object(
       S7_object(),
-      name = name,
+      title = title,
       version = version,
-      author = author
+      date = date,
+      header = header,
+      receiver = receiver, 
+      supplier = supplier,
+      transmission = transmission
     )
   },
   properties = list(
-    name = class_character,
+    title = class_character,
     version = class_character_or_null,
-    author = class_character_or_null
+    date = class_Date,
+    header = class_character_or_null,
+    receiver = class_list,
+    supplier = class_list,
+    transmission = class_list
   ),
   validator = function(self) {
     if (!is.null(self@version) && self@version == "") {
       "'version' cannot be an empty string."
     }
-    if (is.null(self@name) || self@name == "") {
-      "'name' cannot be an empty."
+    if (is.null(self@title) || self@title == "") {
+      "'title' cannot be an empty."
     }
-    if (!is.null(self@author) && self@author == "") {
-      "'author' cannot be an empty string."
-    }
+    
   }
 )
 
@@ -83,14 +93,12 @@ method(print, DTAMetaData) <- function(x, ...) {
 create_example_DTAMetaData <- function(index = 1) {
   switch(index,
     `1` = DTAMetaData(
-      name = "Example DTA",
-      version = "1.0",
-      author = "John Doe"
+      title = "Example DTA",
+      version = "1.0"
     ),
     `2` = DTAMetaData(
-      name = "Example DTA",
-      version = "2.0",
-      author = "Jane Smith"
+      title = "Example DTA",
+      version = "2.0"
     ),
     cli::cli_abort("Invalid index: {index}.")
   )

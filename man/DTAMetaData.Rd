@@ -4,7 +4,15 @@
 \alias{DTAMetaData}
 \title{DTAMetaData Class}
 \usage{
-DTAMetaData(name, version = NULL, author = NULL)
+DTAMetaData(
+  title,
+  version = NULL,
+  date = NULL,
+  header = NULL,
+  receiver = list(),
+  supplier = list(),
+  transmission = list()
+)
 }
 \arguments{
 \item{version}{version}

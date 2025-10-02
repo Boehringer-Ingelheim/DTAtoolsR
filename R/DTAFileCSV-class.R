@@ -33,6 +33,9 @@ DTAFileCSV <- S7::new_class( # nolint
     filename,
     pattern = FALSE,
     number_of_files = 1,
+    min_number_of_files = NULL,
+    max_number_of_files = NULL,
+    info = NULL,
     has_header = TRUE,
     quote = '"'
   ) {
@@ -40,6 +43,9 @@ DTAFileCSV <- S7::new_class( # nolint
       DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
+        min_number_of_files = NULL,
+        max_number_of_files = NULL,
+        info = NULL,
         pattern = pattern,
         sep = ",",
         has_header = has_header,

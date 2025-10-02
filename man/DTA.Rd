@@ -4,12 +4,14 @@
 \alias{DTA}
 \title{DTA Class}
 \usage{
-DTA(container = NULL, metadata = NULL, ...)
+DTA(datasets = NULL, metadata = NULL, ...)
 }
 \arguments{
-\item{container}{A names list of DTADataSet objects}
+\item{datasets}{A names list of DTADataSet objects}
 
-\item{...}{arguments will be passed to DTAMetadata(...)}
+\item{metadata}{a DTAMetadata object}
+
+\item{...}{if metadata is not set, ... arguments will be passed to create DTAMetadata(...)}
 }
 \value{
 An object of class DTA.
@@ -32,6 +34,6 @@ tables <- list(table1 = table1, table2 = table2)
 # Create the DTADataSet object
 data_obj <- DTADataSet(DTAColumnSpecCollection, tables)
 
-DTA(container = list(data = data_obj))
+DTA(datasets = list(data = data_obj))
 }
 }

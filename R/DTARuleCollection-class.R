@@ -119,3 +119,15 @@ method(print, DTARuleCollection) <- function(x, ...) {
 }
 
 
+#' @title as.list for DTARuleCollection
+#' @description
+#' Convert a DTARuleCollection object to a list.
+#' @param x An object of class DTARuleCollection
+#' @param ... Additional arguments (not used).
+#' @return A named list containing the properties of the DTARuleCollection object.
+#' @export
+as.list.DTARuleCollection <- function(x, ...) {
+  lapply(x@rules, function(y) {
+    as.list(y)
+  })
+}

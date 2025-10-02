@@ -19,7 +19,7 @@ This function parses a YAML file to extract column specifications and create a D
 \dontrun{
 # Sample YAML file content
 yaml_content <- "
-columns:
+specs:
   - id: STUDYID
     label: Study Identifier
     type: SAS Char

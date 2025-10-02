@@ -4,12 +4,10 @@
 \alias{create_example_DTA}
 \title{Create Example DTA Object}
 \usage{
-create_example_DTA()
+create_example_DTA(index = 1)
 }
 \arguments{
-\item{title}{Character string. Title for the DTA object.}
-
-\item{version}{Character string. Version of the DTA object.}
+\item{index}{index of the example to create}
 }
 \value{
 An object of class DTA with example data

@@ -37,7 +37,7 @@ DTAColumnSpec <- new_class(
     structure <- NULL
 
     if (!is.null(type) || !is.null(format || !is.null(length))) {
-      structure = create_DTAColumnSpecStructure(
+      structure = DTAColumnSpecStructureFactory(
         type = type,
         format = format,
         length = length
@@ -222,9 +222,9 @@ method(print, DTAColumnSpec) <- function(x) {
   if (!is.null(x@label))        cli_alert("id         : {.field {x@id}}")
   if (!is.null(x@label))        cli_alert("label      : {x@label}")
   if (!is.null(x@structure))  {
-    if (!is.null(x@type))              cli_alert("type       : {x@structure@type}")
-    if (!is.null(x@format))            cli_alert("format     : {x@structure@format}")
-    if (!is.null(x@length))            cli_alert("length     : {x@structure@length}")
+    if (!is.null(x@structure@type))    cli_alert("type       : {x@structure@type}")
+    if (!is.null(x@structure@format))  cli_alert("format     : {x@structure@format}")
+    if (!is.null(x@structure@length))  cli_alert("length     : {x@structure@length}")
     if (!is.null(x@structure@backend)) cli_alert("backend    : {x@structure@backend}")
   }
   if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
@@ -233,4 +233,29 @@ method(print, DTAColumnSpec) <- function(x) {
   if (!is.null(x@examples))     cli_alert("examples   : {paste0(capture.output(str(x@examples, give.attr = FALSE)), collapse = ' ')}")
   if (!is.null(x@description))  cli_alert("description: {x@description}")
   invisible(x)
+}
+
+#' @title as.list method for DTAColumnSpec
+#' @description
+#' Converts a DTAColumnSpec object to a named list.
+#' @param x A DTAColumnSpec object.
+#' @param ... Additional arguments (ignored).
+#' @return A named list with the DTAColumnSpec properties.
+#' @export
+as.list.DTAColumnSpec <- function(x, ...) {
+  x <- list(
+    id = x@id,
+    label = x@label,
+    
+    nullable = x@nullable,
+    description = x@description,
+    values = x@values,
+    examples = x@examples,
+    pattern = x@pattern,
+    colclass = x@colclass
+  )
+
+  y <- as.list(x@structure)
+
+  c(x, y)
 }

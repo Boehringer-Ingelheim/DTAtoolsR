@@ -38,29 +38,17 @@ DTAFile <- new_class(
     filename,
     pattern = FALSE,
     pattern_description = NULL,
-    number_of_files = 1
+    number_of_files = 1,
+    min_number_of_files = NULL,
+    max_number_of_files = NULL,
+    info = NULL
   ) {
-
+   
     if (!pattern && number_of_files != 1) {
-      cli::cli_abort("if pattern is FALSE, then number_of_files must be 1.")
+      cli::cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
     }
 
-    if (!is.numeric(number_of_files) ||
-        any(number_of_files < 0) ||
-        length(number_of_files) > 2) {
-      cli::cli_abort("'number_of_files' must be NULL, a single non-negative number, or a vector of two non-negative numbers (min and max).")
-    }
-
-    min_number_of_files = number_of_files
-    max_number_of_files = number_of_files
-
-    if(length(number_of_files) == 2) {
-      if (number_of_files[1] >= number_of_files[2] ) {
-        cli::cli_abort("If 'number_of_files' has two elements min and max, min must be less than max.")
-      }
-      min_number_of_files = number_of_files[1]
-      max_number_of_files = number_of_files[2]
-    }
+    
 
     new_object(
       S7_object(),
@@ -68,7 +56,8 @@ DTAFile <- new_class(
       pattern = pattern,
       pattern_description = pattern_description,
       min_number_of_files = min_number_of_files,
-      max_number_of_files = max_number_of_files
+      max_number_of_files = max_number_of_files,
+      info = info
     )
   },
   properties = list(
@@ -76,7 +65,8 @@ DTAFile <- new_class(
     pattern = class_logical,
     pattern_description = class_character_or_null,
     min_number_of_files = class_numeric_or_null,
-    max_number_of_files = class_numeric_or_null
+    max_number_of_files = class_numeric_or_null,
+    info = class_character_or_list_or_null
   ),
   validator = function(self) {
     if (!is.character(self@filename) || is.null(self@filename) || self@filename == "") {

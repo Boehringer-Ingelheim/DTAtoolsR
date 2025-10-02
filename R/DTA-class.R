@@ -5,8 +5,9 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param container A names list of DTADataSet objects
-#' @param ... arguments will be passed to DTAMetadata(...)
+#' @param datasets A names list of DTADataSet objects
+#' @param metadata a DTAMetadata object
+#' @param ... if metadata is not set, ... arguments will be passed to create DTAMetadata(...)
 #' @return An object of class DTA.
 #'
 #' @examples
@@ -22,22 +23,22 @@
 #' # Create the DTADataSet object
 #' data_obj <- DTADataSet(DTAColumnSpecCollection, tables)
 #'
-#' DTA(container = list(data = data_obj))
+#' DTA(datasets = list(data = data_obj))
 #' }
 #' @export
 DTA <- new_class(
   "DTA",
   constructor = function(
-    container = NULL,
+    datasets = NULL,
     metadata = NULL,
     ...
   ) {
-    if (inherits(container, "DTAtools::DTADataSet")) {
-      container <- list(container)
-      names(container) <- container[[1]]@name
+    if (inherits(datasets, "DTAtools::DTADataSet")) {
+      datasets <- list(datasets)
+      names(datasets) <- datasets[[1]]@name
     }
-    if (is.list(container) && !is.null(container) && is.null(names(container))) {
-      names(container) <- vapply(container, function(x) x@name, character(1))
+    if (is.list(datasets) && !is.null(datasets) && is.null(names(datasets))) {
+      names(datasets) <- vapply(datasets, function(x) x@name, character(1))
     }
 
     if (is.null(metadata)) {
@@ -45,12 +46,12 @@ DTA <- new_class(
     }
     new_object(
       S7_object(),
-      container = container,
+      datasets = datasets,
       metadata = metadata
     )
   },
   properties = list(
-    container = class_list,
+    datasets = class_list,
     metadata = class_DTAMetadata
   )
 )
@@ -74,51 +75,51 @@ method(metadata, DTA) <- function(x) {
 }
 
 
-#' @title Get container
+#' @title Get datasets
 #' @description
-#' Method to get one or more containers from a DTA object.
-#' @importFrom cli cli_alert_info
+#' Method to get one or more datasetss from a DTA object.
+#' @importFrom cli cli_alert_info cli_abort
 #' @param x An object of class DTA.
 #' @param name Optional single character or single integer. if NULL, returns a 
-#' list of all containers. If character, returns the container with the specified name.
-#' If integer, returns the container at the specified index.
+#' list of all datasetss. If character, returns the datasets with the specified name.
+#' If integer, returns the datasets at the specified index.
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
 #' libary(DTAtools)
 #' x <- create_example_DTA()
-#' container(x)
-#' container(x, "vitals")
-#' container(x, 1)
-#' @name container
+#' datasets(x)
+#' datasets(x, "vitals")
+#' datasets(x, 1)
+#' @name datasets
 #' @export
-if (!exists("container", mode = "function")) {
-  container <- new_generic("container", "x")
+if (!exists("datasets", mode = "function")) {
+  datasets <- new_generic("datasets", "x")
 }
 
 #' @export
-method(container, DTA) <- function(x, name = NULL) {
+method(datasets, DTA) <- function(x, name = NULL) {
   if(!is.null(name) && !is.character(name) && !is.numeric(name) && length(name) != 1) {
-    cli::cli_abort("'name' must be a single character vector, single numeric index or NULL.")
+    cli_abort("'name' must be a single character vector, single numeric index or NULL.")
   }
-  all_containers <- x@container
+  all_datasetss <- x@datasets
 
   if (is.null(name)) {
-    return(all_containers)
+    return(all_datasetss)
   }
 
   if (is.numeric(name)) {
-    if (any(name < 1) || any(name > length(all_containers))) {
-      cli::cli_abort("Numeric 'name' index out of bounds.")
+    if (any(name < 1) || any(name > length(all_datasetss))) {
+      cli_abort("Numeric 'name' index out of bounds.")
     }
-    return(all_containers[[name]])
+    return(all_datasetss[[name]])
   }
 
-  missing <- setdiff(name, names(all_containers))
+  missing <- setdiff(name, names(all_datasetss))
   if (length(missing) > 0) {
-    cli::cli_abort("The following container{?s} not found: {.field {missing}}")
+    cli_abort("The following datasets{?s} not found: {.field {missing}}")
   }
 
-  return(all_containers[[name]])
+  return(all_datasetss[[name]])
 }
 
 
@@ -128,7 +129,7 @@ method(container, DTA) <- function(x, name = NULL) {
 #' @param x An object of class DTA
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text
+#' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text cli_div
 #' @examples
 #' \dontrun{
 #'   print(dta_obj)
@@ -141,9 +142,9 @@ method(print, DTA) <- function(x, ...) {
   cli_alert_info("Metadata: {x@metadata@name} {x@metadata@version}")
 
 
-  if (!is.null(x@container) && length(x@container) > 0) {
-    message <- paste0("Containers ({length(x@container)}): ", 
-                  paste(paste0("{.field ", names(x@container), "}"), 
+  if (!is.null(x@datasets) && length(x@datasets) > 0) {
+    message <- paste0("Containers ({length(x@datasets)}): ", 
+                  paste(paste0("{.field ", names(x@datasets), "}"), 
                       collapse = ", "))
     cli_alert_info(message)
   } else {
@@ -169,17 +170,115 @@ create_example_DTA <- function(index = 1) {
   switch (index,
     `1` = {
       DTA(
-        container = list(
+        datasets = list(
           create_example_DTADataSetTabular(2),
-          concreate_example_DTADataSetTabular(3)
+          create_example_DTADataSetTabular(3)
         ),
         metadata = create_example_DTAMetaData()
       )
     },
     `2` = {
 
-    }
+    },
     cli_abort("No example found with index {index}.")
   )
 
 }
+
+
+#' @title Read DTA from YAML
+#' @description
+#' Constructs a DTA object from a YAML file specification.
+#' @param file Path to the YAML file containing DTA specification
+#' @importFrom yaml read_yaml
+#' @importFrom cli cli_abort cli_alert_warning
+#' @return An object of class DTA
+#' @examples
+#' require(DTAtools)
+#' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+#' dta_obj <- read_dta_from_yaml(file)
+#' @export
+read_dta_from_yaml <- function(file) {
+  if (!file.exists(file)) {
+    cli_abort("YAML file does not exist: {.file {file}}")
+  }
+  
+  yaml_data <- yaml::read_yaml(file)
+  
+  # Check required top-level elements
+  if (is.null(yaml_data$metadata)) {
+    cli_abort("YAML file must contain 'metadata' section")
+  }
+  
+  read_dta_from_list(yaml_data)
+}
+
+
+#' @title Read DTA from List
+#' @description
+#' Constructs a DTA object from a list.
+#' @param x list
+#' @importFrom cli cli_abort cli_alert_warning
+#' @return An object of class DTA
+#' @examples
+#' require(DTAtools)
+#' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+#' yaml_data <- yaml::read_yaml(file)
+#' dta_obj <- read_dta_from_yaml(yaml_data)
+#' 
+#' @export
+read_dta_from_list <- function(x) {
+  if (!is.list(x)) {
+    cli_abort("x is not a list")
+  }
+  
+  # Check required top-level elements
+  if (is.null(x$metadata)) {
+    cli_abort("x contain 'metadata' section")
+  }
+  
+  if (is.null(x$datasets)) {
+    cli_alert_warning("No 'datasets' section found in list")
+    x$datasets <- list()
+  }
+  
+  # Validate metadata structure
+  if (is.null(x$metadata$title)) {
+    cli_abort("Metadata section must contain 'title' field")
+  }
+  
+  if (is.null(x$metadata$version)) {
+    cli_abort("Metadata section must contain 'version' field")
+  }
+  
+  # Create metadata object
+  metadata <- do.call(DTAMetaData, x$metadata)
+  
+  # Create dataset objects
+  datasets_list <- list()
+  if (length(x$datasets) > 0) {
+    datasets_list <- lapply(x$datasets, function(dataset_spec) {
+      dataset_name <- dataset_spec$name
+      if (is.null(dataset_name)) {
+        cli_abort("Dataset must contain a 'name'.")
+      }
+      
+      # Validate dataset structure
+      if (is.null(dataset_spec$type)) {
+        cli_abort("Dataset '{dataset_name}' must contain a 'type'")
+      }
+
+      # Create dataset object
+      do.call(dataset_spec, DTADataSetFactory)
+    })
+  }
+  
+  # Create and return DTA object
+  DTA(
+    datasets = datasets_list,
+    metadata = metadata
+  )
+}
+
+
+

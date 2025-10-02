@@ -7,9 +7,9 @@
 write_specs_to_yaml(DTAColumnSpecCollection, file)
 }
 \arguments{
-\item{DTAColumnSpecCollection}{An object of class DTAColumnSpecCollection.}
-
 \item{file}{Character. Path to the YAML file to write the specifications to.}
+
+\item{specs}{An object of class DTAColumnSpecCollection.}
 }
 \value{
 NULL. The function writes the DTAColumnSpecCollection to a YAML file.
@@ -20,9 +20,9 @@ This function writes a DTAColumnSpecCollection object to a YAML file.
 \examples{
 \dontrun{
 # Create a DTAColumnSpecCollection object
-DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
+specs <- import_specs_from_yaml("path/to/yaml/file.yaml")
 
 # Write the DTAColumnSpecCollection object to a YAML file
-write_specs_to_yaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
+write_specs_to_yaml(specs, "path/to/output/file.yaml")
 }
 }

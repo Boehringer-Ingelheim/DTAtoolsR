@@ -14,8 +14,8 @@ A character string representing a preview of the column IDs.
 }
 \description{
 Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
-If the collection contains more than 5 columns, it returns the IDs of the first four columns,
-an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+If the collection contains more than 5 specs, it returns the IDs of the first four specs,
+an ellipsis, and the last column's ID. If there are 5 or fewer specs, it returns all column IDs.
 }
 \examples{
 library(DTAtools)

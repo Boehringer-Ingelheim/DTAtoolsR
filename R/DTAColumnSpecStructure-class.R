@@ -44,3 +44,18 @@ DTAColumnSpecStructure <- new_class(
     }
   }
 )
+#' @title as.list method for as.list.DTAColumnSpecStructure
+#' @description
+#' Converts a as.list.DTAColumnSpecStructure object to a named list.
+#' @param x A as.list.DTAColumnSpecStructure object.
+#' @param ... Additional arguments (ignored).
+#' @return A named list with the DTAColumnSpecStructure properties.
+#' @export
+as.list.DTAColumnSpecStructure <- function(x, ...) {
+  list(
+    type = x@type,
+    format = x@format,
+    length = x@length,
+    backend = x@backend
+  )
+}

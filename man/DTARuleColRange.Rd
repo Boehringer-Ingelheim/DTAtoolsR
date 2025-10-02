@@ -10,10 +10,10 @@ DTARuleColRange(id, column = NULL, range = NULL)
 \item{id}{Character. A unique identifier for the rule.}
 
 \item{column}{List. Used in check_range and check_unique. For check_unique,
-it is a list of columns checked for unique combinations.}
+it is a list of columnss checked for unique combinations.}
 
 \item{range}{Vector or List. Used in check_range to check value ranges in a
-column.}
+columns.}
 
 \item{type}{Character. The rule type (e.g., "check_range", "check_unique").}
 }

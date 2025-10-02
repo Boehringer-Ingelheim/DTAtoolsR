@@ -94,10 +94,10 @@ method(check, DTARule) <- function(x, index = 1) { #nolint
 #' @export
 #'
 #' @examples
-#' create_DTARule("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
-#' create_DTARule("rule2", "col_range", column = "score", min = 0, max = 100)
-#' create_DTARule("rule3", "col_unique", column = "id")
-create_DTARule <- function(id, type, ...) {
+#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
+#' DTARuleFactory("rule2", "col_range", column = "score", min = 0, max = 100)
+#' DTARuleFactory("rule3", "col_unique", column = "id")
+DTARuleFactory <- function(id, type, ...) {
   switch(type,
     col_condition = DTAtools::DTARuleColCondition(
       id = id,
@@ -114,6 +114,21 @@ create_DTARule <- function(id, type, ...) {
     {
       cli::cli_abort("Unknown rule type: {type}")
     }
+  )
+}
+
+
+#' @title as.list for DTARule
+#' @description
+#' Convert a DTARule object to a list.
+#' @param x An object of class DTARule.
+#' @param ... Additional arguments (not used).
+#' @return A named list containing the properties of the DTARule object.
+#' @export
+as.list.DTARule <- function(x, ...) {
+  list(
+    id = x@id,
+    type = x@type
   )
 }
 

@@ -4,51 +4,46 @@
 #' @import S7
 #' @importFrom cli cli_abort
 #'
-#' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
+#' @param specs A named list of DTAColumnSpec objects. The names should correspond to the ids of the specs
 #' @param template A list of template information.
 #' @param rules A list of DTARule object.
 #' @return An object of class DTAColumnSpecCollection.
 #' @examples
 #' col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
 #' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
-#' collection <- DTAColumnSpecCollection(columns = list(STUDIYID = col1, VISIT = col2))
+#' collection <- DTAColumnSpecCollection(specs = list(STUDIYID = col1, VISIT = col2))
 #' @export
 DTAColumnSpecCollection <- new_class(
   "DTAColumnSpecCollection",
   constructor = function(
-      columns,
-      rules = list(),
-      template = list()) {
-    if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
+      specs,
+      rules = list()) {
+    
+    if (!all(sapply(specs, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
-        "All elements
-            in '
-              columns' must be of class 'DTAColumnSpec'"
+        "All elements in 'specs' must be of class 'DTAColumnSpec'"
       )
     }
 
-    # Transform
-    to column specs schema to jsonschema
-    json_schema <- specs_to_jsonschema(columns)
+    # Transform to column specs schema to jsonschema
+    json_schema <- specs_to_jsonschema(specs)
 
     new_object(
       S7_object(),
-      columns = columns,
+      specs = specs,
       json_schema = json_schema,
-      template = template,
       rules = rules
     )
   },
   properties = list(
-    columns = class_list,
+    specs = class_list,
     json_schema = class_character,
-    template = class_list,
     rules = class_any
   ),
   validator = function(self) {
-    # Ensure columns is a list of DTAColumnSpec objects
-    if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
-      "All elements in 'columns' must be of class 'DTAColumnSpec'"
+    # Ensure specs is a list of DTAColumnSpec objects
+    if (!all(sapply(self@specs, inherits, "DTAtools::DTAColumnSpec"))) {
+      "All elements in 'specs' must be of class 'DTAColumnSpec'"
     }
 
     # Validate json_schema #TODO check this
@@ -70,8 +65,8 @@ DTAColumnSpecCollection <- new_class(
 #'
 #' @description
 #' Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
-#' If the collection contains more than 5 columns, it returns the IDs of the first four columns,
-#' an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+#' If the collection contains more than 5 specs, it returns the IDs of the first four specs,
+#' an ellipsis, and the last column's ID. If there are 5 or fewer specs, it returns all column IDs.
 #'
 #' @param x A \code{DTAColumnSpecCollection} object.
 #'
@@ -85,15 +80,15 @@ DTAColumnSpecCollection <- new_class(
 #' @export
 column_preview <- new_generic("column_preview", "x")
 method(column_preview, DTAColumnSpecCollection) <- function(x) {
-  if (length(x@columns) > 5) {
+  if (length(x@specs) > 5) {
     col_preview <- str_flatten_comma(
-        map(x@columns[1:4], function(y) y@id),
+        map(x@specs[1:4], function(y) y@id),
         "...",
-        x@columns[length(x@columns)]@id
+        x@specs[length(x@specs)]@id
     )
 
-  } else if (length(x@columns) <= 5) {
-    col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
+  } else if (length(x@specs) <= 5) {
+    col_preview <- str_flatten_comma(map(x@specs, function(y) y@id))
   } else {
     col_preview <- "not set"
   }
@@ -118,38 +113,35 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 
   if (length(x@rules) > 5) {
     rule_preview <- str_flatten_comma(
-      map(x@columns[1:4], function(y) y@id),
+      map(x@specs[1:4], function(y) y@id),
       "...",
       x@rules[length(x@rules)]@id
     )
 
   } else if (length(x@rules) <= 5) {
     rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
-  } else {
-    rule_preview <- "not set"
-  }
+  } 
 
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpecCollection}>")
 
-  cli_alert_info("columns ({length(x@columns)}): {col_preview}")
+  cli_alert_info("specs ({length(x@specs)}): {col_preview}")
   if (length(x@json_schema) > 0) {
     cli_alert_info("schema: {cli::symbol$tick}")
   } else {
     cli_alert("schema: {cli::symbol$cross}")
   }
-  cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
-  if (length(x@template) > 0) {
-    cli_alert_info("template: {cli::symbol$tick}")
+  if (length(x@rules) > 0) {
+    cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
   } else {
-    cli_alert("template: {cli::symbol$cross}")
+    cli_alert("rules: {cli::symbol$cross}")
   }
 }
 
 
 #' @title Get Names Method
 #' @description
-#' Method to get the names of columns in the collection.
+#' Method to get the names of specs in the collection.
 #' @param x An object of class DTAColumnSpecCollection.
 #' @param ... void
 #' @return A character vector of column names.
@@ -161,7 +153,7 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 #' @export
 specids <- new_generic("specids", "x")
 method(specids, DTAColumnSpecCollection) <- function(x) {
-  return(names(x@columns))
+  return(names(x@specs))
 }
 
 #' @title Get Column by ID Method
@@ -184,24 +176,9 @@ colspec <- new_generic("colspec", "x")
 
 #' @export
 method(colspec, DTAColumnSpecCollection) <- function(x, id) {
-  return(x@columns[[id]])
+  return(x@specs[[id]])
 }
 
-#' @title Get Metadata
-#' @description
-#' Method to get Metadata from DTAColumnSpecCollection
-#' @param x An object of class DTAColumnSpecCollection.
-#' @return A list with template information
-#' @examples
-#' \dontrun{
-#'  template(collection)
-#' }
-#' @name template
-#' @rdname template-DTAColumnSpecCollection
-#' @export
-method(template, DTAColumnSpecCollection) <- function(x) {
-  return(x@template)
-}
 
 #' @title Get Rules
 #' @description
@@ -224,6 +201,7 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' @description
 #' This function parses a YAML file to extract column specifications and create a DTAColumnSpecCollection object.
 #' @importFrom yaml read_yaml
+#' @importFrom cli cli_abort
 #' @export
 #'
 #' @param file Character. Path to the YAML file containing specifications.
@@ -232,7 +210,7 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' \dontrun{
 #' # Sample YAML file content
 #' yaml_content <- "
-#' columns:
+#' specs:
 #'   - id: STUDYID
 #'     label: Study Identifier
 #'     type: SAS Char
@@ -256,129 +234,71 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
 #' }
 import_specs_from_yaml <- function(file) {
-  yaml <- yaml::read_yaml(file)
-  specs <- yaml$columns
-  if (is.null(yaml$template)) {
-    template <- list()
-  } else {
-    template <- yaml$template
+  yaml <- read_yaml(file)
+
+  if (is.null(yaml$specs)) {
+    cli_abort("YAML file must contain a 'specs' section.")
   }
+
+  specs <- yaml$specs
 
   if (is.null(yaml$rules)) {
     rules <- list()
+    cli_alert("No 'rules' section found in YAML. Proceeding without rules.")
   } else {
     rules <- yaml$rules
   }
 
-  if (length(rules) > 0) {
-    rules <- lapply(rules, function(x) {
-      do.call(create_DTARule, x)
-    })
-  }
-
-  column_list <- list()
-  for (column in specs) {
-    dta_column <- DTAtools::DTAColumnSpec(
-      id = column$id,
-      label = column$label,
-      type = column$type,
-      format = column$format,
-      length = column$length,
-      nullable = column$nullable,
-      values = column$values,
-      pattern = column$pattern,
-      description = column$description
-    )
-    column_list <- append(column_list, list(dta_column))
-  }
-  names(column_list) <- sapply(specs, function(x) {
-    return(x$id)
-  })
-  return(DTAColumnSpecCollection(
-    columns = column_list,
-    template = template,
-    rules = rules
-  ))
+  return(specs_from_list(specs, rules))
 }
 
 #' @title Create DTAColumnSpecCollection from Components
 #' @description
-#' Constructs a DTAColumnSpecCollection object from separate components: columns, template, and schema rules.
+#' Constructs a DTAColumnSpecCollection object from separate components: specs and schema rules.
 #' Supports both named and unnamed lists of column specifications.
 #'
 #' @importFrom cli cli_abort
-#' @param columns A list of column specification lists. Each must contain at least an `id`.
-#' @param template Optional list of template fields (e.g., author, version).
+#' @param specs A list of column specification lists. Each must contain at least an `id`.
 #' @param rules Optional list of schema rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
 #' @export
 #'
 #' @examples
-#' \dontrun{
-#' columns <- list(
-#'   DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "Char",
+#' library(DTAtools)
+#' specs <- list(
+#'   DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "SAS Char",
 #'        nullable = FALSE, values = list("1234-5678")),
-#'   DTAColumnSpec(id = "VISIT", label = "Visit", type = "Char", nullable = TRUE,
+#'   DTAColumnSpec(id = "VISIT", label = "Visit", type = "SAS Char", nullable = TRUE,
 #'        values = list("V01", "EOT"))
 #' )
-#' dta_spec <- specs_from_list(columns)
-#' }
-
+#' dta_spec <- specs_from_list(specs)
+#' 
 specs_from_list <- function(
-  columns,
-  template = list(),
+  specs,
   rules = list()
 ) {
-  if (!is.list(columns)) {
-    cli::cli_abort("`columns` must be a list of column specifications.")
+  if (!is.list(specs)) {
+    cli_abort("`specs` must be a list.")
   }
-  if (!is.list(rules)) {
-    cli::cli_abort("`rules` must be a list of rule specifications.")
+  if (!is.null && !is.list(rules)) {
+    cli_abort("`rules` must be a list or null.")
   }
 
   if (length(rules) > 0) {
-    rules <- lapply(rules, function(x) {
-      DTAtools::DTARule(
-        id = x$id,
-        type = x$type,
-        column = x$column,
-        range = x$range,
-        condition = x$condition,
-        then = x$then
-      )
+    dta_rules <- lapply(rules, function(x) {
+      do.call(DTARuleFactory, x)
     })
   }
 
-  column_list <- list()
-  for (column in columns) {
-    if (is.null(column$id)) {
-      cli::cli_abort("Each column specification must include an `id` field.")
-    }
-
-    dta_column <- DTAColumnSpec(
-      id = column$id,
-      label = column$label,
-      type = column$type,
-      format = column$format,
-      length = column$length,
-      nullable = column$nullable,
-      values = column$values,
-      pattern = column$pattern,
-      description = column$description
-    )
-
-    column_list <- append(column_list, list(dta_column))
-  }
-
-  # Assign names to the list based on column IDs if not already named
-  if (is.null(names(column_list)) || any(names(column_list) == "")) {
-    names(column_list) <- sapply(column_list, function(x) x@id)
+  if (length(specs) > 0) {
+    dta_specs <- lapply(specs, function(x) {
+      do.call(DTAColumnSpec, x)
+    })
   }
 
   return(DTAColumnSpecCollection(
-    columns = column_list,
-    template = template,
+    specs = column_list,
     rules = rules
   ))
 }
@@ -412,6 +332,7 @@ convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
 #' @description
 #' Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
 #' @importFrom jsonlite fromJSON
+#' @importFrom cli cli_abort
 #' @export
 #' @param file Character. Path to the JSON file containing specifications.
 #' @examples
@@ -422,24 +343,18 @@ convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
 #' @return A DTAColumnSpecCollection object.
 import_specs_from_json <- function(file) {
   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
-  specs <- json$columns
-  template <- if (is.null(json$template)) list() else json$template
+  specs <- json$specs
+  rules <- json$rules
 
-  column_list <- lapply(specs, function(column) {
-    DTAColumnSpec(
-      id = column$id,
-      label = column$label,
-      type = column$type,
-      format = column$format,
-      length = column$format,
-      nullable = column$nullable,
-      values = column$values,
-      pattern = column$pattern,
-      description = column$description
-    )
-  })
-  names(column_list) <- vapply(specs, function(x) x$id, character(1))
-  DTAColumnSpecCollection(columns = column_list, template = template)
+  if (!is.list(specs)) {
+    cli_abort("`specs` must be a list.")
+  }
+  if (!is.null && !is.list(rules)) {
+    cli_abort("`rules` must be a list or null.")
+  }
+
+  specs_from_list(specs, rules)
+  # TODO check this function, was heavily modified
 }
 
 #' @title Create DTAColumnSpecCollection from DTA Word Document
@@ -542,114 +457,17 @@ import_specs_from_word <- function(
   }) %>%
     set_names(specs$id)
 
-  DTAColumnSpecCollection(columns = column_list)
+  DTAColumnSpecCollection(specs = column_list)
 }
 
-
-#' @title Write DTAColumnSpecCollection to YAML File
-#' @description
-#' This function writes a DTAColumnSpecCollection object to a YAML file.
-#' @importFrom yaml write_yaml
-#' @export
-#'
-#' @param DTAColumnSpecCollection An object of class DTAColumnSpecCollection.
-#' @param file Character. Path to the YAML file to write the specifications to.
-#' @return NULL. The function writes the DTAColumnSpecCollection to a YAML file.
-#' @examples
-#' \dontrun{
-#' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
-#'
-#' # Write the DTAColumnSpecCollection object to a YAML file
-#' write_specs_to_yaml(DTAColumnSpecCollection, "path/to/output/file.yaml")
-#' }
-write_specs_to_yaml <- function(
-  DTAColumnSpecCollection,
-  file
-) {
-  specs <- lapply(DTAColumnSpecCollection@columns, function(column) {
-    list(
-      id = column@id,
-      label = column@label,
-      type = column@type,
-      format = column@format,
-      length = column@length,
-      nullable = column@nullable,
-      values = column@values,
-      pattern = column@pattern,
-      description = column@description
-    )
-  })
-
-  rules <- lapply(DTAColumnSpecCollection@rules, function(rule) {
-    list(
-      id = rule@id,
-      type = rule@type,
-      condition = rule@condition,
-      then = rule@then,
-      column = rule@column,
-      range = rule@range
-    )
-  })
-
-  template <- DTAColumnSpecCollection@template
-  yaml::write_yaml(
-    list(template = template, columns = specs, rules = rules),
-    file
-  )
-}
-
-#' @title Write DTAColumnSpecCollection to JSON File
-#' @description
-#' This function writes a DTAColumnSpecCollection object to a JSON file.
-#' @importFrom jsonlite write_json
-#' @export
-#'
-#' @param DTAColumnSpecCollection An object of class DTAColumnSpecCollection.
-#' @param file Character. Path to the JSON file to write the specifications to.
-#' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
-#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file.
-#' @examples
-#' \dontrun{
-#' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
-#'
-#' # Write the DTAColumnSpecCollection object to a JSON file
-#' writeDTAColumnSpecCollectionToJson(DTAColumnSpecCollection, "path/to/output/file.json")
-#' }
-writeDTAColumnSpecCollectionToJson <- function(
-  DTAColumnSpecCollection,
-  file,
-  pretty = TRUE
-) {
-  specs <- lapply(DTAColumnSpecCollection@columns, function(column) {
-    list(
-      id = column@id,
-      label = column@label,
-      type = column@type,
-      format = column@format,
-      length = column@length,
-      nullable = column@nullable,
-      values = column@values,
-      pattern = column@pattern,
-      description = column@description
-    )
-  })
-  template <- DTAColumnSpecCollection@template
-  rules <- DTAColumnSpecCollection@rules
-  jsonlite::write_json(
-    list(template = template, columns = specs, rules = rules),
-    path = file,
-    pretty = pretty,
-    auto_unbox = TRUE
-  )
-}
 
 #' @title Convert DTAColumnSpec s to JSON Schema
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
 #' @param specs Column spec information
 #' @return A list representing the JSON Schema.
 specs_to_jsonschema <- function(specs) {
+  #TODO: this needs to be moved to DTAColumnSpecStructure
+
   properties <- lapply(specs, function(spec) {
     type <- switch(
       spec@structure@type,
@@ -724,52 +542,30 @@ specs_to_jsonschema <- function(specs) {
   return(json_schema)
 }
 
-#' @title Transform DTAColumnSpecCollection to List
+#' @title as.list for DTAColumnSpecCollection
 #' @description
 #' This function transforms a DTAColumnSpecCollection object to a list.
 #' @export
 #'
-#' @param DTAColumnSpecCollection An object of class DTAColumnSpecCollection.
-#' @return List.
+#' @param x An object of class DTAColumnSpecCollection.
+#' @param ... Additional arguments (not used)
+#' @return A list representation of the DTAColumnSpecCollection object.
 #' @examples
 #' \dontrun{
 #' # Create a DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- import_specs_from_yaml("path/to/yaml/file.yaml")
+#' x <- import_specs_from_yaml("path/to/yaml/file.yaml")
 #'
 #' # Write the DTAColumnSpecCollection object to a YAML file
-#' DTAColumnSpecCollectionToList(DTAColumnSpecCollection)
+#' as.list(x)
 #' }
-specs_to_list <- function(
-  DTAColumnSpecCollection
-) {
-  specs <- lapply(DTAColumnSpecCollection@columns, function(column) {
-    list(
-      id = column@id,
-      label = column@label,
-      type = column@type,
-      format = column@format,
-      length = column@length,
-      nullable = column@nullable,
-      values = column@values,
-      pattern = column@pattern,
-      description = column@description
-    )
+as.list.DTAColumnSpecCollection <- function(x, ...) {
+  specs <- lapply(x@specs, function(column) {
+    as.list(column)
   })
 
-  rules <- lapply(DTAColumnSpecCollection@rules, function(rule) {
-    list(
-      id = rule@id,
-      type = rule@type,
-      condition = rule@condition,
-      then = rule@then,
-      column = rule@column,
-      range = rule@range
-    )
-  })
+  rules <- as.list(x@rules)
 
-  template <- get_template(DTAColumnSpecCollection)
-
-  return(list(columns = specs, rules = rules, template = template))
+  return(list(specs = specs, rules = rules))
 }
 
 
@@ -795,20 +591,78 @@ create_example_DTAColumnSpecCollection <- function(index = 1) {
     `1` = {
       example_rules <- list()
       DTAColumnSpecCollection(
-        columns = setNames(list(col1, col2, col3, col4), c(col1@id, col2@id, col3@id, col4@id)),
-        template = list(),
+        specs = setNames(list(col1, col2, col3, col4), c(col1@id, col2@id, col3@id, col4@id)),
         rules = example_rules
       )
     },
     `2` = {
       example_rules <- list()
       DTAColumnSpecCollection(
-        columns = setNames(list(col1, col2, col3, col5), c(col1@id, col2@id, col3@id, col5@id)),
-        template = list(),
+        specs = setNames(list(col1, col2, col3, col5), c(col1@id, col2@id, col3@id, col5@id)),
         rules = example_rules
       )
     },
     cli::cli_abort("No example available for the provided index.")
   )
 
+}
+
+
+
+#' @title Write DTAColumnSpecCollection to YAML File
+#' @description
+#' This function writes a DTAColumnSpecCollection object to a YAML file.
+#' @importFrom yaml write_yaml
+#' @export
+#'
+#' @param specs An object of class DTAColumnSpecCollection.
+#' @param file Character. Path to the YAML file to write the specifications to.
+#' @return NULL. The function writes the DTAColumnSpecCollection to a YAML file.
+#' @examples
+#' \dontrun{
+#' # Create a DTAColumnSpecCollection object
+#' specs <- import_specs_from_yaml("path/to/yaml/file.yaml")
+#'
+#' # Write the DTAColumnSpecCollection object to a YAML file
+#' write_specs_to_yaml(specs, "path/to/output/file.yaml")
+#' }
+write_specs_to_yaml <- function(
+  DTAColumnSpecCollection,
+  file
+) {
+  yaml::write_yaml(
+    as.list(specs),
+    file
+  )
+}
+
+#' @title Write DTAColumnSpecCollection to JSON File
+#' @description
+#' This function writes a DTAColumnSpecCollection object to a JSON file.
+#' @importFrom jsonlite write_json
+#' @export
+#'
+#' @param specs An object of class DTAColumnSpecCollection.
+#' @param file Character. Path to the JSON file to write the specifications to.
+#' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
+#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file.
+#' @examples
+#' \dontrun{
+#' # Create a DTAColumnSpecCollection object
+#' specs <- import_specs_from_yaml("path/to/yaml/file.yaml")
+#'
+#' # Write the DTAColumnSpecCollection object to a JSON file
+#' write_specs_to_json(specs, "path/to/output/file.json")
+#' }
+write_specs_to_json <- function(
+  specs,
+  file,
+  pretty = TRUE
+) {
+  jsonlite::write_json(
+    as.list(specs),
+    path = file,
+    pretty = pretty,
+    auto_unbox = TRUE
+  )
 }

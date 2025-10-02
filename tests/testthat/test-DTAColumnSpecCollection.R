@@ -14,7 +14,7 @@ test_that("Import specs from YAML file", {
 
   # Test DTAColumnSpecCollectionToList
 
-  list <- specs_to_list(collection)
+  list <- as.list.DTAColumnSpecCollection(collection)
   expect_type(list, "list")
 })
 
@@ -37,7 +37,7 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
   )
 
   collection <- DTAColumnSpecCollection(
-    columns = list(STUDYID = col1, VISIT = col2)
+    specs = list(STUDYID = col1, VISIT = col2)
   )
 
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
@@ -78,7 +78,7 @@ test_that("specs_from_list constructs valid object", {
 
   # Run function
   collection <- specs_from_list(
-    columns = columns,
+    specs = columns,
     rules = rules
   )
 
@@ -96,6 +96,6 @@ test_that("specs_from_list constructs valid object", {
 
   # Test DTAColumnSpecCollectionToList
 
-  list <- specs_to_list(collection)
+  list <- as.list.DTAColumnSpecCollection(collection)
   expect_type(list, "list")
 })

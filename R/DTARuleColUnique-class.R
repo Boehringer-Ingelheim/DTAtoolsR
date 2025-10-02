@@ -8,7 +8,7 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param column list of columns that will be collectively checked if the
+#' @param column list of column that will be collectively checked if the
 #' combinations are unique throughout the table
 #' @return An object of class `DTARule`.
 #'
@@ -16,7 +16,7 @@
 #' # Create a check_unique rule
 #' rule2 <- DTAtools::DTARuleColUnique(
 #'   id = "rule2",
-#'   columns = "id"
+#'   column = "id"
 #' )
 #' @include DTARule-class.R
 DTARuleColUnique <- new_class(
@@ -26,14 +26,14 @@ DTARuleColUnique <- new_class(
   constructor = function(
     id,
     type,
-    columns = NULL
+    column = NULL
   ) {
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
         type = "col_unique"
       ),
-      columns = columns
+      column = column
     )
   },
 
@@ -41,7 +41,7 @@ DTARuleColUnique <- new_class(
   properties = list(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
-    columns = class_character_or_list
+    column = class_character_or_list
   ),
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
@@ -52,8 +52,8 @@ DTARuleColUnique <- new_class(
       "'type' must be 'check_unique'."
     }
 
-    if (is.null(self@columns) || length(self@columns) < 1) {
-      "'columns' must be a non-empty list of column names."
+    if (is.null(self@column) || length(self@column) < 1) {
+      "'column' must be a non-empty list of column names."
     }
   }
 )
@@ -75,7 +75,7 @@ method(print, DTARule) <- function(x) {
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
 
   message <- paste0("column(s): ", 
-                      paste(paste0("{.field ", x@columns, "}"), 
+                      paste(paste0("{.field ", x@column, "}"), 
                           collapse = ", "))
   cli_text(message)
 }
@@ -129,3 +129,19 @@ method(check, DTARuleColUnique) <- function(x, tab) { # nolint
   # TODO from here
 }
 
+#' @title as.list for DTARuleColCondition
+#' @description
+#' Convert a DTARuleColCondition object to a list.
+#' @param x An object of class DTARuleColCondition
+#' @param ... Additional arguments (not used).
+#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @export
+as.list.DTARuleColCondition <- function(x, ...) {
+  list(
+    id = x@id,
+    type = x@type,
+    column = x@column,
+    min_range = x@min_range,
+    max_range = x@max_range
+  )
+}

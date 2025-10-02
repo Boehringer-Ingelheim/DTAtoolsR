@@ -8,7 +8,7 @@ test_that("DTA object is constructed correctly", {
   col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
   col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
   collection <- DTAColumnSpecCollection(
-    columns = list(STUDYID = col1, VISIT = col2)
+    specs = list(STUDYID = col1, VISIT = col2)
   )
 
   # Create DTADataSet

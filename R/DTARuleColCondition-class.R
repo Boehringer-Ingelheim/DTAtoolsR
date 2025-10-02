@@ -162,3 +162,22 @@ method(check, DTARuleColCondition) <- function(x, tab) { # nolint
 
   # TODO from here
 }
+
+#' @title as.list for DTARuleColCondition
+#' @description
+#' Convert a DTARuleColCondition object to a list.
+#' @param x An object of class DTARuleColCondition
+#' @param ... Additional arguments (not used).
+#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @export
+as.list.DTARuleColCondition <- function(x, ...) {
+  list(
+    id = x@id,
+    type = x@type,
+    description = x@description,
+    condition = x@condition,
+    then = x@then
+  )
+}
+
+

@@ -4,8 +4,8 @@
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom stringr str_flatten_comma
 #' @param name Character. Name of the container.
-#' @param type Character. Dataset type, must be one of `__DTAtools_supported_datasets__`.
-#' @param fileinfo a list of DTAFile objects specifying input file information.
+#' @param type Character. Dataset type, must be one of `__DTAtools_supported_dataset_types__`.
+#' @param files a list of DTAFile objects specifying input file information.
 #' @return An object of class DTADataSet. If validation fails, returns a list containing summarised and full error data frames.
 #'
 #' @examples
@@ -19,33 +19,41 @@ DTADataSet <- new_class(
   constructor = function(
     name,
     type,
-    fileinfo = list()
+    files = list(),
+    description = NULL,
+    template_source = NULL,
+    template_version = NULL,
+    template_date = NULL
   ) {
-    if(inherits(fileinfo, "DTAtools::DTAFile")) {
-      fileinfo = list(fileinfo)
+    if(inherits(files, "DTAtools::DTAFile")) {
+      files = list(files)
     }
 
     new_object(
       S7_object(),
       name = name,
       type = type,
-      fileinfo = fileinfo
+      files = files
     )
   },
   properties = list(
     name = class_character, 
     type = class_character,
-    fileinfo = class_list # list of DTAFile
+    files = class_list, # list of DTAFile
+    template_source = class_character_or_null,
+    template_version = class_character_or_null,
+    template_date = class_character_or_null,
+    description = class_character_or_null
   ),
   validator = function(self) {
     if (!is.character(self@name) || length(self@name) != 1 || self@name == "") {
       cli_abort("Property 'name' must be a single non-empty string.")
     }
-    if (!all(sapply(self@fileinfo, inherits, "DTAtools::DTAFile"))) {
-      cli_abort("All elements in 'fileinfo' must be of class 'DTAFile'")
+    if (!all(sapply(self@files, inherits, "DTAtools::DTAFile"))) {
+      cli_abort("All elements in 'files' must be of class 'DTAFile'")
     }
-    if (!self@type %in% `__DTAtools_supported_datasets__`) {
-      cli_abort("Property 'type' is '{self@type})', must be one of: {str_flatten_comma(`__DTAtools_supported_datasets__`)}")
+    if (!self@type %in% `__DTAtools_supported_dataset_types__`) {
+      cli_abort("Property 'type' is '{self@type})', must be one of: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}")
     }
   }
 )
@@ -58,7 +66,7 @@ DTADataSet <- new_class(
 #' @return numeric: number of files
 #' @examples
 #' \dontrun{
-#' column_format <- max_number_of_files(dtafileinfo)
+#' column_format <- max_number_of_files(dtafiles)
 #' }
 #' @name max_number_of_files-DTADataSet
 if (!exists("max_number_of_files", mode = "function")) {
@@ -66,7 +74,7 @@ if (!exists("max_number_of_files", mode = "function")) {
 }
 #' @export
 method(max_number_of_files, DTADataSet) <- function(x) {
-  sum(unlist(sapply(x@fileinfo, max_number_of_files)))
+  sum(unlist(sapply(x@files, max_number_of_files)))
 }
 
 
@@ -78,7 +86,7 @@ method(max_number_of_files, DTADataSet) <- function(x) {
 #' @return numeric: number of files
 #' @examples
 #' \dontrun{
-#' column_format <- min_number_of_files(dtafileinfo)
+#' column_format <- min_number_of_files(dtafiles)
 #' }
 #' @name min_number_of_files-DTADataSet
 if (!exists("min_number_of_files", mode = "function")) {
@@ -86,7 +94,7 @@ if (!exists("min_number_of_files", mode = "function")) {
 }
 #' @export
 method(min_number_of_files, DTADataSet) <- function(x) {
-  sum(unlist(sapply(x@fileinfo, min_number_of_files)))
+  sum(unlist(sapply(x@files, min_number_of_files)))
 }
 
 #' @title Print Method for DTADataSet
@@ -103,12 +111,106 @@ method(print, DTADataSet) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSet}> : {.field {x@name}}")
   
-  if (is.null(x@fileinfo) || length(x@fileinfo) == 0) {
-    cli_alert("Fileinfo entries: {.emph none}")
-  } else {
-    cli_alert_info("Fileinfo entries: {length(x@fileinfo)}")
-  }
-
+  print_dataset_info(x)
   invisible(x)
 }
 
+#' @title Print Dataset Information
+#' @description
+#' Prints information about a \code{DTADataSet} object, including template source, version, date, and file information.
+#'
+#' @param x A \code{DTADataSet} object whose information is to be printed.
+#'
+#' @details
+#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
+#'
+#' @return
+#' No return value. This function is called for its side effects (printing to the console).
+#'
+#' @seealso
+#' \code{\link{DTADataSet}}
+#'
+#' @examples
+#' # Assuming 'ds' is a DTADataSet object:
+#' print_dataset_info(ds)
+#'
+#' @export
+print_dataset_info <- new_generic("print_dataset_info", "x")
+method(print_dataset_info, DTADataSet) <- function(x) {
+  if (!is.null(x@description)) {
+    cli_text("- Description: {x@description}")
+  }
+  
+  if (!is.null(x@template_source)) {
+    cli_text("- Template source: {.emph {x@template_source}}")
+  }
+  
+  if (!is.null(x@template_source)) {
+    cli_text("- Template source: {.emph {x@template_source}}")
+  }
+  if (!is.null(x@template_version)) {
+    cli_text("- Template version: {.emph {x@template_version}}")
+  }
+  if (!is.null(x@template_date)) {
+    cli_text("- Template date: {.emph {x@template_date}}")
+  }
+  if (is.null(x@files) || length(x@files) == 0) {
+    cli_alert("Fileinfo entries: {.emph none}")
+  } else {
+    cli_alert_info("Fileinfo entries: {length(x@files)}")
+  }
+}
+
+
+#' @title Read DTADataSet from YAML
+#' @description
+#' Constructs a DTADataSet object from a YAML file specification.
+#' @param file Path to the YAML file containing DTADataSet specification
+#' @importFrom yaml read_yaml
+#' @importFrom cli cli_abort
+#' @return An object of class DTADataSet
+#' @examples
+#' require(DTAtools)
+#' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+#' dta_obj <- read_dta_dataset_from_yaml(file)
+#' @export
+read_dta_dataset_from_yaml <- function(file) {
+  if (!file.exists(file)) {
+    cli_abort("YAML file does not exist: {.file {file}}")
+  }
+  
+  yaml_data <- yaml::read_yaml(file)
+  
+  dta_dataset_from_list(yaml_data)
+}
+
+
+#' @title DTADataSet from list
+#' @description
+#' Constructs a DTADataSet object from a list
+#' @param x List
+#' @param recursive Logical, if TRUE (default) processes nested datasets
+#' @importFrom cli cli_abort
+#' @return An object of class DTADataSet
+#' @examples
+#' require(DTAtools)
+#' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+#' yaml_data <- yaml::read_yaml(file)
+#' dta_obj <- dta_dataset_from_list(yaml_data)
+#' @export
+dta_dataset_from_list <- function(x, recursive = TRUE) {
+  if(is.null(x$name)) {
+    if(!is.null(x[[1]]$name)) {
+      # there are multiple datasets which need to be processed separately
+      return(lapply(x, dta_dataset_from_list, recursive = FALSE))
+    } else {
+      cli_abort("List must contain a 'name' field or be a list of datasets.")
+    }
+  }
+  
+  if (is.null(x$type)) {
+    cli_abort("Dataset '{x$name}' must contain a 'type'")
+  }
+
+  do.call(DTADataSetFactory, x)
+}

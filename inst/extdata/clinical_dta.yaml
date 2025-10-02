@@ -1,6 +1,6 @@
 metadata: 
   title: Clinical Data Specification
-  dta_version: 0.1
+  version: 0.1
   date: 2024-06-19
   header: Company
 
@@ -42,26 +42,26 @@ metadata:
         department: Bioinformatics
         backup: yes
 
-    sender:
-      affiliation:
-        name: Test Company 2
-        address: Test Address 2
-        country: Test Country
-      
-      contacts:
-        - name: Emily Turner
-          role: Senior Data Manager
-          email: emily.turner@testcompany2.com
-          department: Data Management
-          phone: "321-654-0987"
-          signature: yes
+  supplier:
+    affiliation:
+      name: Test Company 2
+      address: Test Address 2
+      country: Test Country
+    
+    contacts:
+      - name: Emily Turner
+        role: Senior Data Manager
+        email: emily.turner@testcompany2.com
+        department: Data Management
+        phone: "321-654-0987"
+        signature: yes
 
-        - name: Michael Brown
-          role: Lead Bioinformatician
-          email: michael.brown@testcompany2.com
-          company: Test Company 2
-          department: Bioinformatics
-          phone: "789-012-3456"
+      - name: Michael Brown
+        role: Lead Bioinformatician
+        email: michael.brown@testcompany2.com
+        company: Test Company 2
+        department: Bioinformatics
+        phone: "789-012-3456"
 
   
   transmission:

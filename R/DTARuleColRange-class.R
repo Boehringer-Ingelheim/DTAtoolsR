@@ -10,9 +10,9 @@
 #' @param id Character. A unique identifier for the rule.
 #' @param type Character. The rule type (e.g., "check_range", "check_unique").
 #' @param column List. Used in check_range and check_unique. For check_unique,
-#'   it is a list of columns checked for unique combinations.
+#'   it is a list of columnss checked for unique combinations.
 #' @param range Vector or List. Used in check_range to check value ranges in a
-#'   column.
+#'   columns.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
@@ -154,3 +154,19 @@ method(check, DTARuleColRange) <- function(x, tab) { # nolint
   # TODO from here
 }
 
+#' @title as.list for DTARuleColCondition
+#' @description
+#' Convert a DTARuleColCondition object to a list.
+#' @param x An object of class DTARuleColCondition
+#' @param ... Additional arguments (not used).
+#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @export
+as.list.DTARuleColCondition <- function(x, ...) {
+  list(
+    id = x@id,
+    type = x@type,
+    column = x@column,
+    min_range = x@min_range,
+    max_range = x@max_range
+  )
+}

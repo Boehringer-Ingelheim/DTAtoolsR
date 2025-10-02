@@ -36,7 +36,8 @@ class_character_or_numeric_or_null_or_list <- class_character |
 }
 
 `__DTAtools_supported_backends__` <- c("SAS")
-`__DTAtools_supported_datasets__` <- c("tabular")
+`__DTAtools_supported_dataset_types__` <- c("tabular")
+`__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
 
 #' Create a DTAColumnSpecStructure Object
 #'
@@ -59,12 +60,11 @@ class_character_or_numeric_or_null_or_list <- class_character |
 #'
 #' @examples
 #' library(DTAtools)
-#' create_DTAColumnSpecStructure(type = "SAS Char", format = "SAS $10.", length = 10)
+#' DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
 #' @seealso \code{\link{DTAtools::DTAColumnSpecStructureSAS}}, \code{\link{DTAtools::DTAColumnSpecStructureR}}
 #' @export
-
-create_DTAColumnSpecStructure <- function(
+DTAColumnSpecStructureFactory <- function(
     type = NULL,
     format = NULL,
     length = NULL) {
@@ -73,11 +73,11 @@ create_DTAColumnSpecStructure <- function(
   format_info <- `__extract_prefix_and_rest__`(format)
 
   if (!is.null(type_info$prefix) && !type_info$prefix %in% `__DTAtools_supported_backends__`) {
-    cli_abort("'type' prefix '{type_info$prefix}'must be one of the supported backends: {str_flatten_comma(self@supported_backends)}")
+    cli_abort("'type' prefix '{type_info$prefix}'must be one of the supported backends: {str_flatten_comma(`__DTAtools_supported_backends__`)}")
   } 
 
   if (!is.null(format_info$prefix) && !format_info$prefix %in% `__DTAtools_supported_backends__`) {
-    cli_abort("'format' prefix '{format_info$prefix}' must be one of the supported backends: {str_flatten_comma(self@supported_backends)}")
+    cli_abort("'format' prefix '{format_info$prefix}' must be one of the supported backends: {str_flatten_comma(`__DTAtools_supported_backends__`)}")
   } 
 
   # If both type and format are provided, check backend support and that prefixes match
@@ -102,3 +102,94 @@ create_DTAColumnSpecStructure <- function(
   )
 }
 
+
+
+
+#' @title Create a DTADataSetFactory Object
+#'
+#' @description
+#' Constructs a DTADataSetFactory object for a specified backend (e.g., SAS or R), 
+#' based on the provided type.  
+#'
+#' @param type Character. The type specification, potentially prefixed with a backend identifier.
+#' @param columns A list with column specifications (optional)
+#' @param rules A list of rules specifications (optional)
+#' @param files A list of for conversion to DTAFile objects (optional)
+#' @param ... Character. Arguments passed on to the specific backend constructor.
+#' @importFrom cli cli_abort
+#' @return An object derived from class \code{DTADataSet} like \code{DTADataSetTabular}, 
+#' depending on the backend specified.
+#'
+#' @examples
+#' library(DTAtools)
+#' DTAColumnSpecStructureFactory(type = "tabular", name = "mydataset")
+#'
+#' @seealso \code{\link{DTAtools::DTADataSet}}, \code{\link{DTAtools::DTADataSetTabular}}
+#' @export
+DTADataSetFactory <- function(
+    type,
+    columns = NULL,
+    rules = NULL,
+    files = NULL,
+    ...) {
+
+  # check that type is not NULL and  
+  if (!type %in% `__DTAtools_supported_dataset_types__`) {
+    cli_abort("'type' prefix '{type}'must be one of the supported: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}")
+  }
+
+  switch(type,
+    "tabular" = {
+      return(DTADataSetTabular(
+        specs = specs_from_list(columns = columns, rules = rules)
+        ...))
+    },
+    cli_abort("Dataset type '{type}' not implemented.")
+  )
+}
+
+
+
+#' @title Create a DTAFile Object
+#'
+#' @description
+#' Constructs a DTAFile object for a specified backend (e.g., SAS or R), 
+#' based on the provided type and file path.
+#'
+#' @param type Character. The type specification, potentially prefixed with a backend identifier.
+#' @param path Character. The file path for the DTAFile object.
+#' @param ... Additional arguments passed to the specific backend constructor.
+#'
+#' @return An object derived from class \code{DTAFile}, depending on the backend specified.
+#'
+#' @examples
+#' library(DTAtools)
+#' DTAFileFactory(type = "SAS sas7bdat", path = "data/myfile.sas7bdat")
+#'
+#' @seealso \code{\link{DTAtools::DTAFile}}
+#' @export
+DTAFileFactory <- function(
+  type,
+  path,
+  ...) {
+
+  if (is.null(type) || type == "") {
+    cli_abort("'type' must be a non-empty string.")
+  }
+
+  if (!type %in% `  __DTAtools_supported_file_types__`) {
+    cli_abort("'type' '{type}' must be one of the supported file types: {str_flatten_comma(`__DTAtools_supported_file_types__`)}")
+  }
+
+  switch(type,
+  csv = DTAFileCSV(
+    path = path,
+    ...
+  ),
+  tsv = DTAFileTSV(
+    path = path,
+    ...
+  ),
+  cli_abort("Filetype '{type}' not implemented.")
+  )
+}

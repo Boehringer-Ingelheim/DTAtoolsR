@@ -507,7 +507,7 @@ col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = TRUE)
 
 # Group specifications into a collection
 
-specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
+specs <- DTAColumnSpecCollection(specs = list(STUDYID = col1, VISIT = col2))
 ```
 
 ### Important Notes
