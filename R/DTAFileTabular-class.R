@@ -121,7 +121,6 @@ method(print_info, DTAFileTabular) <- function(x) {
   # TODO This does not work, currently a workaround
   #super(print_info, x)
   #method(print_info, DTAFile)(x)
-  cli_alert("works")
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")
   if(x@min_number_of_files == x@max_number_of_files) {
