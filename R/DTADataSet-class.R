@@ -197,17 +197,20 @@ method(print_info, DTADataSet) <- function(x) {
 #' \code{\link{DTADataSet}}
 #'
 #' @examples
-#' # Assuming 'ds' is a DTADataSet object:
+#' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' print_short_info(ds)
 #' @name print_short_info
 #' @export
-print_short_info <- new_generic("print_short_info", "x")
+if (!exists("print_short_info", mode = "function")) {
+  print_short_info <- new_generic("print_short_info", "x")
+}
 method(print_short_info, DTADataSet) <- function(x) {
   min_n <- min_number_of_files(x)
   max_n <- max_number_of_files(x)
-
-  if (min_n == max_n) {
+  if (max_n == 0) {
+    file_info <- "0 files"
+  } else if (min_n == max_n) {
     if (min_n == 1) {
       file_info <- "1 file"
     } else {
@@ -217,11 +220,15 @@ method(print_short_info, DTADataSet) <- function(x) {
     file_info <- str_glue("{min_n} to {max_n} files")
   }
 
-  message <- str_glue(
-    str_c('{.field ', names(x@name), '}'), " ({file_info}, {x@type})"
-  )
+  if(max_n == 0) {
+    message <- str_c('Files: none associated, type: {x@type}')
+  } else {
+   message <- paste0("Files: ", str_c('{.field ', names(x@name), '}'), str_glue(" ({file_info}, {x@type})"))
+  }
    
   cli_alert(message)
+
+  return(invisible(x))
 }
 
 

@@ -48,6 +48,10 @@ DTAFile <- new_class(
       pattern <- FALSE
     }
 
+    if (is.null(number_of_files) && is.null(min_number_of_files) && is.null(max_number_of_files)) {
+      number_of_files <- 1
+    }
+
     if (!pattern && number_of_files != 1) {
       cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
     }
@@ -297,9 +301,9 @@ method(print, DTAFile) <- function(x, ...) {
 #' @seealso \code{\link{DTAFile}}
 #' @name print_info
 #' @export
-if (!exists("print_info", mode = "function")) {
-  print_info <- new_generic("print_info", "x")
-}
+#if (!exists("print_info", mode = "function")) {
+#  print_info <- new_generic("print_info", "x")
+#}
 method(print_info, DTAFile) <- function(x) {
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")
@@ -328,14 +332,15 @@ method(print_info, DTAFile) <- function(x) {
 #' @examples
 #' \dontrun{
 #' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
-#' print_info(dta_file)
+#' print_short_info(dta_file)
 #' }
 #'
 #' @seealso \code{\link{DTAFile}}
 #' @name print_short_info
 #' @export
-print_short_info <- new_generic("print_short_info", "x")
-
+if (!exists("print_short_info", mode = "function")) {
+  print_short_info <- new_generic("print_short_info", "x")
+}
 method(print_short_info, DTAFile) <- function(x) {
   if (!x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)) {
     cli_alert("{x@filename} ({x@min_number_of_files})")

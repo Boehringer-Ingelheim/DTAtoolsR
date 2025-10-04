@@ -141,14 +141,24 @@ method(print, DTA) <- function(x, ...) {
   cli_text("<{.emph DTA}>")
   print_short_info(x@metadata)
 
-  if (!is.null(x@datasets) && length(x@datasets) > 0) {
+
+  n_ds <- length(x@datasets)
+
+  if (!is.null(x@datasets) && n_ds > 0) {
+    ds_names <- names(x@datasets)
     
-    cli_alert("Datasets ({length(x@datasets)}):")
-    for (ds in x@datasets) {
-      print_short_info(ds)
-    }       
+    if (n_ds > 10) {
+      shown_names <- c(ds_names[1:9], "...", ds_names[n_ds])
+    } else {
+      shown_names <- ds_names
+    }
+    
+    alert_message <- paste0("Datasets (", n_ds, "): ", 
+                           paste(paste0("{.field ", shown_names, "}"), 
+                                collapse = ", "))
+    cli_alert_info(alert_message)
   } else {
-    cli_alert("Datasets: none")
+    cli_alert_info("Datasets: {.emph none}")
   }
 
   invisible(x)

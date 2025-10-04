@@ -417,7 +417,7 @@ method(print, DTADataSetTabular) <- function(x) {
     cli_alert("columns ({length(x@specs@columns)}): {column_preview(x@specs)}")
     cli_alert("rules ({length(x@specs@rules)}): {rule_preview(x@specs)}")
   } else {
-    cli_alert_info("specs: none")
+    cli_alert_info("Specs: none")
   }
 
   n_tables <- length(x@datasets)
@@ -444,3 +444,48 @@ method(print, DTADataSetTabular) <- function(x) {
   invisible(x)
 }
 
+
+
+
+#' @title Print Short Information for DTADataSetTabular
+#' @description
+#' Prints short information about a \code{DTADataSetTabular} object.
+#'
+#' @param x A \code{DTADataSetTabular} object whose information is to be printed.
+#'
+#' @details
+#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
+#'
+#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom stringr str_c str_glue
+#' @return
+#' No return value. This function is called for its side effects (printing to the console).
+#'
+#' @seealso
+#' \code{\link{DTADataSetTabular}}
+#'
+#' @examples
+#' library(DTAtools)
+#' ds <- create_example_DTADataSetTabular()
+#' print_short_info(ds)
+#' @name print_short_info
+#' @export
+method(print_short_info, DTADataSetTabular) <- function(x) {
+  #super(print_short_info, x)
+  method(print_short_info, DTADataSet)(x)
+  if(!is.null(x@specs)) {
+    cli_alert("Specs: {length(x@specs@columns)} columns, {length(x@specs@rules)}, rules")
+  } else {
+    cli_alert("Specs: none")
+  }
+
+  n_tables <- length(x@datasets)
+  
+  if (n_tables > 0) {
+    cli_alert("Tables: ({n_tables})")
+  } else {
+    cli_alert("Tables: {.emph none}")
+  }
+   
+  return(invisible(x))
+}
