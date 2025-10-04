@@ -158,11 +158,7 @@ method(print, DTAColumnSpecCollection) <- function(x) {
   cli_text("<{.emph DTAColumnSpecCollection}>")
 
   cli_alert_info("columns ({length(x@columns)}): {col_preview}")
-  if (length(x@json_schema) > 0) {
-    cli_alert_info("schema: {cli::symbol$tick}")
-  } else {
-    cli_alert("schema: {cli::symbol$cross}")
-  }
+
   if (length(x@rules) > 0) {
     cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
   } else {
