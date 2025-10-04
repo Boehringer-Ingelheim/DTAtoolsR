@@ -17,6 +17,7 @@
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
+#' @param info Character or list or \code{NULL}; additional information about the file.
 #'
 #' @return An object of class \code{DTAFileTSV}.
 #' @name DTAFileTSV-class
@@ -32,6 +33,7 @@ DTAFileTSV <- S7::new_class(
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
+    info = NULL,
     has_header = TRUE,
     quote = '"'
   ) {
@@ -111,7 +113,7 @@ method(print, DTAFileTSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAFileTSV}>")
 
-  print_file_info(x)
+  print_info(x)
 
   invisible(x)
 }

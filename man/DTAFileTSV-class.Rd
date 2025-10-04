@@ -11,6 +11,7 @@ DTAFileTSV(
   number_of_files = NULL,
   min_number_of_files = NULL,
   max_number_of_files = NULL,
+  info = NULL,
   has_header = TRUE,
   quote = "\\""
 )
@@ -24,6 +25,8 @@ pattern. Default is \code{FALSE}.}
 
 \item{number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected. Default is \code{1}.}
+
+\item{info}{Character or list or \code{NULL}; additional information about the file.}
 
 \item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
 is \code{TRUE}.}

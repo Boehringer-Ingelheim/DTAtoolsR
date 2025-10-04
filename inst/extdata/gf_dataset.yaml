@@ -2,7 +2,7 @@ name: gf_data_specs_pattern
 type: tabular
 description: Genomic Findings data table with pattern for filename
 template_source: GF domain smrnaseq
-template_version: 3.0
+template_version: "3.0"
 template_date: 2024-12-17
 
 files:

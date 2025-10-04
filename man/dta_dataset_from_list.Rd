@@ -20,6 +20,6 @@ Constructs a DTADataSet object from a list
 \examples{
 require(DTAtools)
 file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-yaml_data <- yaml::read_yaml(file)
-dta_obj <- dta_dataset_from_list(yaml_data)
+yaml_dataset <- yaml::read_yaml(file)
+dataset <- dta_dataset_from_list(yaml_dataset)
 }

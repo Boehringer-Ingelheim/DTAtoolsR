@@ -93,7 +93,6 @@ method(read_file_execution, DTAFileTabular) <- function(x, file) {
   use an object of a class which is derived from DTAFileTabular class.")
 }
 
-print_file_info <- new_generic("print_file_info", "x")
 
 #' Print Information About a DTAFile Object
 #'
@@ -109,15 +108,28 @@ print_file_info <- new_generic("print_file_info", "x")
 #' @examples
 #' \dontrun{
 #' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
-#' print_file_info(dta_file)
+#' print_info(dta_file)
 #' }
 #'
-#' @name print_file_info
+#' @name print_info
 #' @seealso \code{\link{DTAFile}}
 #' @export
-method(print_file_info, DTAFile) <- function(x) {
-  super(print_file_info, x)
-
+if (!exists("print_info", mode = "function")) {
+  print_info <- new_generic("print_info", "x")
+}
+method(print_info, DTAFileTabular) <- function(x) {
+  # TODO This does not work, currently a workaround
+  #super(print_info, x)
+  #method(print_info, DTAFile)(x)
+  cli_alert("works")
+  cli_alert_info("Filename: {x@filename}")
+  cli_alert("Pattern: {x@pattern}")
+  if(x@min_number_of_files == x@max_number_of_files) {
+    cli_alert("Number of files: {x@min_number_of_files}")
+  } else {
+    cli_alert("Min number of files: {x@min_number_of_files}")
+    cli_alert("Max number of files: {x@max_number_of_files}")
+  } 
   cli_alert("Separator: {x@sep}")
   cli_alert("Has header: {x@has_header}")
   cli_alert("Quote: {x@quote}")

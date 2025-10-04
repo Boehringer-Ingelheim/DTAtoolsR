@@ -23,6 +23,9 @@ DTAMetaData <- new_class(
     supplier = list(),
     transmission = list()
   ) {
+    if (is.character(date)) {
+      date <- as.Date(date, format = "%Y-%m-%d")
+    }
     new_object(
       S7_object(),
       title = title,
@@ -72,12 +75,91 @@ DTAMetaData <- new_class(
 method(print, DTAMetaData) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAMetaData}>")
-
-  cli_alert_info("Version: {x@version}")
-  cli_alert("Author: {x@author}")
+  
+  print_info(x) 
 
   invisible(x)
 }
+
+#' @title Print Info DTAMetaData Object
+#' @description
+#' Print method for DTAMetadata objects.
+#' @param x An object of class DTAMetadata
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_alert
+#' @examples
+#' library(DTAtools)
+#' print(create_example_DTAMetaData())
+#'
+#' @name print_info
+#' @export
+if (!exists("print_info", mode = "function")) {
+  print_info <- new_generic("print_info", "x")
+}
+method(print_info, DTAMetaData) <- function(x, ...) {
+
+  if (!is.null(x@title))   cli_alert_info("Title: {x@title}")
+  if (!is.null(x@version)) cli_alert_info("Version: {x@version}")
+  if (!is.null(x@date))    cli_alert_info("Date: {x@date}")
+  if (!is.null(x@header))  cli_alert_info("Header: {x@header}")
+
+  if (length(x@receiver) > 0) {
+    cli_alert_info("Receiver:")
+    for (nm in names(x@receiver)) {
+      cli_alert("  {nm}: {x@receiver[[nm]]}")
+    }
+  }
+
+  if (length(x@supplier) > 0) {
+    cli_alert_info("Supplier:")
+    for (nm in names(x@supplier)) {
+      cli_alert("  {nm}: {x@supplier[[nm]]}")
+    }
+  }
+
+  if (length(x@transmission) > 0) {
+    cli_alert_info("Transmission:")
+    for (nm in names(x@transmission)) {
+      cli_alert("  {nm}: {x@transmission[[nm]]}")
+    }
+  }
+
+  invisible(x)
+}
+
+
+#' @title Print short info from DTAMetaData Object
+#' @description
+#' Print short info method for DTAMetadata objects.
+#' @param x An object of class DTAMetadata
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @importFrom cli cli_alert_info cli_alert
+#' @examples
+#' library(DTAtools)
+#' print_short_info(create_example_DTAMetaData())
+#'
+#' @name print_short_info
+#' @export
+if (!exists("print_short_info", mode = "function")) {
+  print_info <- new_generic("print_short_info", "x")
+}
+method(print_short_info, DTAMetaData) <- function(x, ...) {
+  message <- "Metadata: {x@title}"
+  
+  if (!is.null(x@version)) {
+    message <- paste0(message, " ", x@version)  
+  }
+  if (!is.null(x@date)) {
+    message <- paste0(message, " ", format(x@date, "%Y-%m-%d"))  
+  }
+
+  cli_alert_info(message)
+
+  invisible(x)
+}
+
 
 
 #' @title Create Example DTAMetaData Object
@@ -91,7 +173,8 @@ method(print, DTAMetaData) <- function(x, ...) {
 #' print(example_metadata)
 #' @export
 create_example_DTAMetaData <- function(index = 1) {
-  switch(index,
+  switch(
+    index,
     `1` = DTAMetaData(
       title = "Example DTA",
       version = "1.0"

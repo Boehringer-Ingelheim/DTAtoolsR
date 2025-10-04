@@ -144,7 +144,7 @@ DTADataSetFactory <- function(
     "tabular" = {
       return(DTADataSetTabular(
         specs = specs_from_list(columns = columns, rules = rules),
-        files = DTAFileFactory(files),
+        files = do.call(DTAFileFactory, files),
         ...))
     },
     cli_abort("Dataset type '{type}' not implemented.")
@@ -160,7 +160,6 @@ DTADataSetFactory <- function(
 #' based on the provided type and file path.
 #'
 #' @param type Character. The type specification, potentially prefixed with a backend identifier.
-#' @param path Character. The file path for the DTAFile object.
 #' @param ... Additional arguments passed to the specific backend constructor.
 #'
 #' @return An object derived from class \code{DTAFile}, depending on the backend specified.
@@ -173,24 +172,21 @@ DTADataSetFactory <- function(
 #' @export
 DTAFileFactory <- function(
   type,
-  path,
   ...) {
 
   if (is.null(type) || type == "") {
     cli_abort("'type' must be a non-empty string.")
   }
 
-  if (!type %in% `  __DTAtools_supported_file_types__`) {
+  if (!type %in% `__DTAtools_supported_file_types__`) {
     cli_abort("'type' '{type}' must be one of the supported file types: {str_flatten_comma(`__DTAtools_supported_file_types__`)}")
   }
 
   switch(type,
   csv = DTAFileCSV(
-    path = path,
     ...
   ),
   tsv = DTAFileTSV(
-    path = path,
     ...
   ),
   cli_abort("Filetype '{type}' not implemented.")

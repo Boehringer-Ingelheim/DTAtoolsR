@@ -20,13 +20,10 @@ Supports both named and unnamed lists of column specifications.
 }
 \examples{
 library(DTAtools)
-columns <- list(
-  DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "SAS Char",
-       nullable = FALSE, values = list("1234-5678")),
-  DTAColumnSpec(id = "VISIT", label = "Visit", type = "SAS Char", nullable = TRUE,
-       values = list("V01", "EOT"))
-)
+# Load example YAML file from package extdata
+yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+input_list <- yaml::read_yaml(yaml_file)
+specs <- specs_from_list(input_list$columns, input_list$rules)
 
-dta_spec <- specs_from_list(columns)
 
 }

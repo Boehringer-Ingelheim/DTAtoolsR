@@ -111,7 +111,7 @@ method(print, DTADataSet) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSet}> : {.field {x@name}}")
   
-  print_dataset_info(x)
+  print_info(x)
   invisible(x)
 }
 
@@ -132,11 +132,13 @@ method(print, DTADataSet) <- function(x) {
 #'
 #' @examples
 #' # Assuming 'ds' is a DTADataSet object:
-#' print_dataset_info(ds)
-#'
+#' print_info(ds)
+#' @name print_info
 #' @export
-print_dataset_info <- new_generic("print_dataset_info", "x")
-method(print_dataset_info, DTADataSet) <- function(x) {
+if (!exists("print_info", mode = "function")) {
+  print_info <- new_generic("print_info", "x")
+}
+method(print_info, DTADataSet) <- function(x) {
   if (!is.null(x@description)) {
     cli_text("- Description: {x@description}")
   }
@@ -155,11 +157,73 @@ method(print_dataset_info, DTADataSet) <- function(x) {
     cli_text("- Template date: {.emph {x@template_date}}")
   }
   if (is.null(x@files) || length(x@files) == 0) {
-    cli_alert("Fileinfo entries: {.emph none}")
+    cli_alert("Files: {.emph none}")
   } else {
-    cli_alert_info("Fileinfo entries: {length(x@files)}")
+    min_number_of_files <- min_number_of_files(x)
+    max_number_of_files <- max_number_of_files(x)
+    entry_label <- if (length(x@files) == 1) "entry" else "entries"
+    file_label_min <- if (min_number_of_files == 1) "file" else "files"
+    file_label_max <- if (max_number_of_files == 1) "file" else "files"
+    if (min_number_of_files == max_number_of_files) {
+      alert_message <- str_glue("Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} {file_label_min}")
+    } else {
+      alert_message <- str_glue("Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} to {max_number_of_files} {file_label_max}")
+    }
+    cli_alert_info(alert_message) 
+    for (f in x@files) {
+      print_short_info(f)
+    }
   }
 }
+
+
+  
+
+#' @title Print Short Information for DTADataset
+#' @description
+#' Prints short information about a \code{DTADataSet} object.
+#'
+#' @param x A \code{DTADataSet} object whose information is to be printed.
+#'
+#' @details
+#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
+#'
+#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom stringr str_c str_glue
+#' @return
+#' No return value. This function is called for its side effects (printing to the console).
+#'
+#' @seealso
+#' \code{\link{DTADataSet}}
+#'
+#' @examples
+#' # Assuming 'ds' is a DTADataSet object:
+#' ds <- create_example_DTADataSetTabular()
+#' print_short_info(ds)
+#' @name print_short_info
+#' @export
+print_short_info <- new_generic("print_short_info", "x")
+method(print_short_info, DTADataSet) <- function(x) {
+  min_n <- min_number_of_files(x)
+  max_n <- max_number_of_files(x)
+
+  if (min_n == max_n) {
+    if (min_n == 1) {
+      file_info <- "1 file"
+    } else {
+      file_info <- str_glue("{min_n} files")
+    }
+  } else {
+    file_info <- str_glue("{min_n} to {max_n} files")
+  }
+
+  message <- str_glue(
+    str_c('{.field ', names(x@name), '}'), " ({file_info}, {x@type})"
+  )
+   
+  cli_alert(message)
+}
+
 
 
 #' @title Read DTADataSet from YAML
@@ -172,7 +236,7 @@ method(print_dataset_info, DTADataSet) <- function(x) {
 #' @examples
 #' require(DTAtools)
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-#' dta_obj <- read_dta_dataset_from_yaml(file)
+#' dta <- read_dta_dataset_from_yaml(file)
 #' @export
 read_dta_dataset_from_yaml <- function(file) {
   if (!file.exists(file)) {
@@ -195,8 +259,8 @@ read_dta_dataset_from_yaml <- function(file) {
 #' @examples
 #' require(DTAtools)
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-#' yaml_data <- yaml::read_yaml(file)
-#' dta_obj <- dta_dataset_from_list(yaml_data)
+#' yaml_dataset <- yaml::read_yaml(file)
+#' dataset <- dta_dataset_from_list(yaml_dataset)
 #' @export
 dta_dataset_from_list <- function(x, recursive = TRUE) {
   if(is.null(x$name)) {

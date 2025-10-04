@@ -137,18 +137,18 @@ method(datasets, DTA) <- function(x, name = NULL) {
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
-  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTA}>")
-  cli_alert_info("Metadata: {x@metadata@name} {x@metadata@version}")
-
+  print_short_info(x@metadata)
 
   if (!is.null(x@datasets) && length(x@datasets) > 0) {
-    message <- paste0("Containers ({length(x@datasets)}): ", 
-                  paste(paste0("{.field ", names(x@datasets), "}"), 
-                      collapse = ", "))
-    cli_alert_info(message)
+    
+    cli_alert("Datasets ({length(x@datasets)}):")
+    for (ds in x@datasets) {
+      print_short_info(ds)
+    }       
   } else {
-    cli_alert("Containers: none")
+    cli_alert("Datasets: none")
   }
 
   invisible(x)
@@ -196,7 +196,7 @@ create_example_DTA <- function(index = 1) {
 #' @examples
 #' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-#' dta_obj <- read_dta_from_yaml(file)
+#' dta <- read_dta_from_yaml(file)
 #' @export
 read_dta_from_yaml <- function(file) {
   if (!file.exists(file)) {
@@ -210,7 +210,7 @@ read_dta_from_yaml <- function(file) {
     cli_abort("YAML file must contain 'metadata' section")
   }
   
-  read_dta_from_list(yaml_data)
+  dta_from_list(yaml_data)
 }
 
 
@@ -224,10 +224,10 @@ read_dta_from_yaml <- function(file) {
 #' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' yaml_data <- yaml::read_yaml(file)
-#' dta_obj <- read_dta_from_yaml(yaml_data)
+#' dta <- dta_from_list(yaml_data)
 #' 
 #' @export
-read_dta_from_list <- function(x) {
+dta_from_list <- function(x) {
   if (!is.list(x)) {
     cli_abort("x is not a list")
   }
@@ -255,23 +255,7 @@ read_dta_from_list <- function(x) {
   metadata <- do.call(DTAMetaData, x$metadata)
   
   # Create dataset objects
-  datasets_list <- list()
-  if (length(x$datasets) > 0) {
-    datasets_list <- lapply(x$datasets, function(dataset_spec) {
-      dataset_name <- dataset_spec$name
-      if (is.null(dataset_name)) {
-        cli_abort("Dataset must contain a 'name'.")
-      }
-      
-      # Validate dataset structure
-      if (is.null(dataset_spec$type)) {
-        cli_abort("Dataset '{dataset_name}' must contain a 'type'")
-      }
-
-      # Create dataset object
-      do.call(dataset_spec, DTADataSetFactory)
-    })
-  }
+  datasets_list <- dta_dataset_from_list(x$datasets)
   
   # Create and return DTA object
   DTA(

@@ -48,7 +48,7 @@ DTAColumnSpecCollection <- new_class(
       "All elements in 'columns' must be of class 'DTAColumnSpec'"
     }
 
-    # TODO: DEACTIVATED
+    # TODO: DEACTIVATED 
     # # Validate json_schema #TODO check this
     # if(!is.null(self@json_schema)) {
     #   #TODO error on check
@@ -99,12 +99,49 @@ method(column_preview, DTAColumnSpecCollection) <- function(x) {
   col_preview
 }
 
+
+#' @title Preview Rules in a DTAColumnSpecCollection
+#'
+#' @description
+#' Provides a preview of the rules contained within a \code{DTAColumnSpecCollection} object.
+#' If the collection contains more than 5 rules, it returns the IDs of the first four rules,
+#' an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
+#'
+#' @param x A \code{DTAColumnSpecCollection} object.
+#'
+#' @return A character string representing a preview of the rules
+#'
+#' @seealso \code{\link{DTAColumnSpecCollection}}
+#' @examples
+#' library(DTAtools)
+#' x <- create_example_DTAColumnSpecCollection()
+#' rule_preview(x)
+#' @export
+rule_preview <- new_generic("rule_preview", "x")
+method(rule_preview, DTAColumnSpecCollection) <- function(x) {
+  if (length(x@rules) > 5) {
+    rule_preview <- str_flatten_comma(
+      c(map(x@rules[1:4], function(y) y@id),
+      "...",
+      x@rules[[length(x@rules)]]@id)
+    )
+
+  } else if (length(x@rules) <= 5) {
+    rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
+  }  else {
+    rule_preview <- "not set"
+  }
+
+  rule_preview
+}
+
 #' @title print
 #' @description
 #' Print overview for DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
 #' @importFrom stringr str_c str_flatten_comma
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
+#' @importFrom purrr map
 #' @examples
 #' \dontrun{
 #'  print(columns)
@@ -113,17 +150,7 @@ method(column_preview, DTAColumnSpecCollection) <- function(x) {
 #' @export
 method(print, DTAColumnSpecCollection) <- function(x) {
   col_preview <- column_preview(x)
-
-  if (length(x@rules) > 5) {
-    rule_preview <- str_flatten_comma(
-      map(x@columns[1:4], function(y) y@id),
-      "...",
-      x@rules[length(x@rules)]@id
-    )
-
-  } else if (length(x@rules) <= 5) {
-    rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
-  } 
+  rule_preview <- rule_preview(x)
 
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpecCollection}>")
@@ -269,14 +296,12 @@ import_specs_from_yaml <- function(file) {
 #'
 #' @examples
 #' library(DTAtools)
-#' columns <- list(
-#'   DTAColumnSpec(id = "STUDYID", label = "Study ID", type = "SAS Char",
-#'        nullable = FALSE, values = list("1234-5678")),
-#'   DTAColumnSpec(id = "VISIT", label = "Visit", type = "SAS Char", nullable = TRUE,
-#'        values = list("V01", "EOT"))
-#' )
+#' @examples
+#' # Load example YAML file from package extdata
+#' yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+#' input_list <- yaml::read_yaml(yaml_file)
+#' specs <- specs_from_list(input_list$columns, input_list$rules)
 #' 
-#' dta_spec <- specs_from_list(columns)
 #' 
 specs_from_list <- function(
   columns,

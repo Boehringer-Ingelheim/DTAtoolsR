@@ -93,7 +93,7 @@ method(print, DTAFileDelim) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAFileDelim}>")
 
-  print_file_info(x)
+  print_info(x)
 
   invisible(x)
 }

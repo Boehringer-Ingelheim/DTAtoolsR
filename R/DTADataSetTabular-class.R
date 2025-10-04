@@ -408,14 +408,16 @@ create_example_DTADataSetTabular <- function(index = 1) {
 #' @export
 method(print, DTADataSetTabular) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-
+  cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
   
-  print_dataset_info(x)
+  print_info(x)
   
   if(!is.null(x@specs)) {
-    cli_alert_info("Column specs ({length(x@specs@columns)}): {column_preview(x@specs)}")
+    cli_alert_info("Specs:")
+    cli_alert("columns ({length(x@specs@columns)}): {column_preview(x@specs)}")
+    cli_alert("rules ({length(x@specs@rules)}): {rule_preview(x@specs)}")
   } else {
-    cli_alert_info("Column specs: none")
+    cli_alert_info("specs: none")
   }
 
   n_tables <- length(x@datasets)
@@ -431,12 +433,12 @@ method(print, DTADataSetTabular) <- function(x) {
     
     # Build the message with proper cli markup, need paste and paste0
     # instead of stringr functions to work with cli
-    alert_message <- paste0("Data tables (", n_tables, "): ", 
+    alert_message <- paste0("Tables (", n_tables, "): ", 
                            paste(paste0("{.field ", shown_names, "}"), 
                                 collapse = ", "))
     cli_alert_info(alert_message)
   } else {
-    cli_alert("Data tables: {.emph none}")
+    cli_alert_info("Tables: {.emph none}")
   }
 
   invisible(x)

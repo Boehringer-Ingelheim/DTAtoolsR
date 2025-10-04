@@ -4,12 +4,10 @@
 \alias{DTAFileFactory}
 \title{Create a DTAFile Object}
 \usage{
-DTAFileFactory(type, path, ...)
+DTAFileFactory(type, ...)
 }
 \arguments{
 \item{type}{Character. The type specification, potentially prefixed with a backend identifier.}
-
-\item{path}{Character. The file path for the DTAFile object.}
 
 \item{...}{Additional arguments passed to the specific backend constructor.}
 }

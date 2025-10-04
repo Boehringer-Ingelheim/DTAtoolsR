@@ -44,6 +44,10 @@ DTAFile <- new_class(
     info = NULL
   ) {
 
+    if (is.null(pattern)) {
+      pattern <- FALSE
+    }
+
     if (!pattern && number_of_files != 1) {
       cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
     }
@@ -55,6 +59,18 @@ DTAFile <- new_class(
     if (!is.null(number_of_files) && (!is.null(min_number_of_files) || !is.null(max_number_of_files))) {
       cli_abort("You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach.")
     }
+
+    if(!is.null(number_of_files) && is.numeric(number_of_files) && length(number_of_files) != 1) {
+      cli_abort("'number_of_files' must be a single number or NULL.")
+    }
+
+    if(!is.null(number_of_files)) {
+      if(!is.numeric(number_of_files)) {
+        cli_abort("'number_of_files' must be a non-negative integer or NULL.")
+      }
+      min_number_of_files <- number_of_files
+      max_number_of_files <- number_of_files
+    } 
 
     if(is.null(number_of_files) && is.null(min_number_of_files) && is.null(max_number_of_files)) {
       min_number_of_files <- 1
@@ -85,12 +101,6 @@ DTAFile <- new_class(
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
-    }
-    if (!is.numeric(self@min_number_of_files)) {
-      cli::cli_abort("The 'min_number_of_files' property must be numeric.")
-    }
-    if (!is.numeric(self@max_number_of_files)) {
-      cli::cli_abort("The 'max_number_of_files' property must be numeric.")
     }
   }
 )
@@ -261,7 +271,7 @@ method(print, DTAFile) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAFile}> : {.field {x@name}}")
 
-  print_file_info(x)
+  print_info(x)
 
   invisible(x)
 }
@@ -281,14 +291,16 @@ method(print, DTAFile) <- function(x, ...) {
 #' @examples
 #' \dontrun{
 #' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
-#' print_file_info(dta_file)
+#' print_info(dta_file)
 #' }
 #'
 #' @seealso \code{\link{DTAFile}}
+#' @name print_info
 #' @export
-print_file_info <- new_generic("print_file_info", "x")
-
-method(print_file_info, DTAFile) <- function(x) {
+if (!exists("print_info", mode = "function")) {
+  print_info <- new_generic("print_info", "x")
+}
+method(print_info, DTAFile) <- function(x) {
   cli_alert_info("Filename: {x@filename}")
   cli_alert("Pattern: {x@pattern}")
   if(x@min_number_of_files == x@max_number_of_files) {
@@ -297,5 +309,39 @@ method(print_file_info, DTAFile) <- function(x) {
     cli_alert("Min number of files: {x@min_number_of_files}")
     cli_alert("Max number of files: {x@max_number_of_files}")
   } 
+  invisible(x)
+}
+
+
+
+#' Print Information About a DTAFile Object
+#'
+#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
+#'
+#' @param x A \code{DTAFile} object whose information is to be printed.
+#'
+#' @return The input object \code{x}, returned invisibly.
+#'
+#' @details
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#'
+#' @examples
+#' \dontrun{
+#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' print_info(dta_file)
+#' }
+#'
+#' @seealso \code{\link{DTAFile}}
+#' @name print_short_info
+#' @export
+print_short_info <- new_generic("print_short_info", "x")
+
+method(print_short_info, DTAFile) <- function(x) {
+  if (!x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)) {
+    cli_alert("{x@filename} ({x@min_number_of_files})")
+  } else {
+    cli_alert("{x@filename} ({x@min_number_of_files}-{x@max_number_of_files})")
+  }
+
   invisible(x)
 }
