@@ -104,17 +104,49 @@ method(print_info, DTAMetaData) <- function(x, ...) {
   if (!is.null(x@date))    cli_alert_info("Date: {x@date}")
   if (!is.null(x@header))  cli_alert_info("Header: {x@header}")
 
+
   if (length(x@receiver) > 0) {
     cli_alert_info("Receiver:")
     for (nm in names(x@receiver)) {
-      cli_alert("  {nm}: {x@receiver[[nm]]}")
+      if(nm == "contacts") { 
+        cli_alert("  {nm}: ")
+        contact <- x@receiver[[nm]]
+        if (!is.null(contact$signature)) {
+          if(contact$signature) {
+            contact$signature <- "signature"
+          } else {
+            contact$signature <- NULL
+          }
+        }
+        # TODO work on proper handling of boolean reviewer and signature field
+        if (!is.null(contact$reviewer)) {
+          if(contact$reviewer) {
+            contact$reviewer <- "reviewer"
+          } else {
+            contact$reviewer <- NULL
+          }
+        }
+
+        for(nc in 1:length(x@receiver[[nm]])) {
+          cli_text(" -    {.field {nc}}: {contact[[nc]]}")
+        }
+      } else {
+        cli_alert("  {nm}: {x@receiver[[nm]]}")
+      }
     }
   }
 
   if (length(x@supplier) > 0) {
     cli_alert_info("Supplier:")
     for (nm in names(x@supplier)) {
-      cli_alert("  {nm}: {x@supplier[[nm]]}")
+      if(nm == "contacts") { 
+        cli_alert("  {nm}:")
+          for(nc in 1:length(x@supplier[[nm]])) {
+             cli_text(" -    {.field {nc}}: {x@supplier[[nm]][[nc]]}")
+          }
+      } else {
+        cli_alert("  {nm}: {x@supplier[[nm]]}")
+      }
     }
   }
 
@@ -172,14 +204,16 @@ method(print_short_info, DTAMetaData) <- function(x, ...) {
 #' example_metadata <- create_example_DTAMetaData()
 #' print(example_metadata)
 #' @export
-create_example_DTAMetaData <- function(index = 1) {
+create_example_DTAMetaData <- function(index = 1) { # nolint
   switch(
     index,
     `1` = DTAMetaData(
       title = "Example DTA",
-      version = "1.0"
+      version = "1.0",
+      date = Sys.Date(),
+      header = "Example Company header"
     ),
-    `2` = DTAMetaData(
+    `2` = DTAMetaData( 
       title = "Example DTA",
       version = "2.0"
     ),
