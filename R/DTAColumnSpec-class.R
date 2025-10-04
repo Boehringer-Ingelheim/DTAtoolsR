@@ -222,10 +222,7 @@ method(print, DTAColumnSpec) <- function(x) {
   if (!is.null(x@label))        cli_alert("id         : {.field {x@id}}")
   if (!is.null(x@label))        cli_alert("label      : {x@label}")
   if (!is.null(x@structure))  {
-    if (!is.null(x@structure@type))    cli_alert("type       : {x@structure@type}")
-    if (!is.null(x@structure@format))  cli_alert("format     : {x@structure@format}")
-    if (!is.null(x@structure@length))  cli_alert("length     : {x@structure@length}")
-    if (!is.null(x@structure@backend)) cli_alert("backend    : {x@structure@backend}")
+    print_info(x@structure)
   }
   if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
   if (!is.null(x@pattern))      cli_alert("pattern    : {x@pattern}")
@@ -259,3 +256,86 @@ as.list.DTAColumnSpec <- function(x, ...) {
 
   c(x, y)
 }
+
+#' @name to_json_schema_type
+#' @rdname to_json_schema_type-DTAColumnSpec
+#' @title to_json_schema_type
+#' @description
+#' Converts a DTAColumnSpec to a JSON Schema type.
+#' @export
+if(!exists("to_json_schema_type", mode="function")) {
+  to_json_schema_type <- new_generic("to_json_schema_type", "x")
+}
+#' @export
+method(to_json_schema_type, DTAColumnSpec) <- function(x) {
+  type <- to_json_schema_type(x@structure)
+
+  if (!is.null(x@nullable) && x@nullable) {
+    type <- c(type, "null")
+  }
+
+  type
+}
+
+#' @name to_json_schema_length
+#' @rdname to_json_schema_length-DTAColumnSpec
+#' @title to_json_schema_length
+#' @description
+#' Converts a DTAColumnSpec to a JSON Schema length.
+#' @export
+if(!exists("to_json_schema_length", mode="function")) {
+  to_json_schema_length <- new_generic("to_json_schema_length", "x")
+}
+#' @export
+method(to_json_schema_length, DTAColumnSpec) <- function(x) {
+  x@structure@length
+}
+
+
+#' @name to_json_schema
+#' @rdname to_json_schema-DTAColumnSpec
+#' @title to_json_schema 
+#' @description
+#' Converts a DTAColumnSpecStructure to a JSON Schema.
+#' @export 
+if(!exists("to_json_schema", mode="function")) {
+  to_json_schema <- new_generic("to_json_schema", "x")
+}
+#' @export
+method(to_json_schema, DTAColumnSpec) <- function(x) {
+  schema <- list()
+  
+  schema$type <- to_json_schema_type(x)
+
+  schema$maxLength <- to_json_schema_length(x)
+
+  if (!is.null(x@values)) {
+    values <- if (is.list(x@values)) unlist(x@values) else x@values
+
+    if (!is.null(x@nullable)) {
+      if (x@nullable) {
+        if (type == "string") {
+          if ("" %in% values) {
+            values <- c(values, NA)
+          } else {
+            values <- c(values, NA, "")
+          }
+        } else if (type == "number") {
+          values <- c(values, NA)
+        }
+      }
+      if (length(values) > 1) {
+        schema$enum <- as.character(values)
+      } else {
+        schema$const <- as.character(values)
+      }
+    }
+  }
+
+  if (!is.null(x@pattern) && !is.na(x@pattern)) {
+    schema$pattern <- x@pattern
+  }
+
+  return(schema)
+}
+

@@ -3,7 +3,7 @@
 \name{labels-DTADataSetTabular}
 \alias{labels-DTADataSetTabular}
 \alias{labels}
-\title{List of datasets labels within DTADataSetTabular Object}
+\title{List of tables labels within DTADataSetTabular Object}
 \usage{
 labels(x, ...)
 }
@@ -16,7 +16,7 @@ labels(x, ...)
 A vector
 }
 \description{
-Method to get a all datasets labels within a DTADataSetTabular Object.
+Method to get a all tables labels within a DTADataSetTabular Object.
 }
 \examples{
 \dontrun{

@@ -7,7 +7,7 @@
 DTADataSetTabular(
   name,
   specs,
-  datasets = list(),
+  tables = list(),
   files = list(),
   description = NULL,
   template_source = NULL,
@@ -20,7 +20,7 @@ DTADataSetTabular(
 
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
-\item{datasets}{List. A list of arrow Table to be validated and included in the DTADataSetTabular object.}
+\item{tables}{List. A list of arrow Table to be validated and included in the DTADataSetTabular object.}
 
 \item{files}{a list of DTAFile objects specifying input file information.}
 }

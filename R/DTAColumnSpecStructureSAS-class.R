@@ -67,6 +67,49 @@ as.list.DTAColumnSpecStructureSAS <- function(x, ...) {
   )
 }
 
+#' @title to_json_schema_type
+#' @description
+#' Converts a DTAColumnSpecStructure to a JSON Schema type.
+#' @name to_json_schema_type
+#' @rdname to_json_schema_type-DTAColumnSpecStructureSAS
+#' @export
+if(!exists("to_json_schema_type", mode="function")) {
+  to_json_schema_type <- new_generic("to_json_schema_type", "x")
+}
+method(to_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
+  switch(
+      x@type,
+      "Char" = "string",
+      "Num" = "number",
+      "Int" = "integer",
+      "Bool" = "boolean",
+      "string"
+    ) # fallback
+}
+
+
+
+#' @title print
+#' @description
+#' prints info of the column spec structure
+#' @name print
+#' @rdname print-DTAColumnSpecStructureSAS
+#' @export 
+if(!exists("print", mode="function")) {
+  print <- new_generic("print_info", "x")
+}
+#' @export
+method(print, DTAColumnSpecStructureSAS) <- function(x) {
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli_text("<{.emph DTAColumnSpecStructureSAS}> : {.field {x@name}}")
+  print_info(x)
+  invisible(x)
+}
+
+
+
+
+
 ## SAS Formats
 # Character formats in SAS always begin with a dollar sign ($) followed by a number indicating the width of the field.
 # For example, $10. indicates a character format with a width of 10 characters.

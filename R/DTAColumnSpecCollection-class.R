@@ -19,27 +19,24 @@ DTAColumnSpecCollection <- new_class(
       columns,
       rules = list()) {
     
+    if (!is.list(columns)) {
+      cli::cli_abort("'columns' must be a list.")
+    }
+
     if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
       cli::cli_abort(
         "All elements in 'columns' must be of class 'DTAColumnSpec'"
       )
     }
 
-    # Transform to column columns schema to jsonschema
-    # TODO: DEACTIVATED
-    # json_schema <- columns_to_jsonschema(columns)
-    json_schema <- "DEACTIVATED"
-
     new_object(
       S7_object(),
       columns = columns,
-      json_schema = json_schema,
       rules = rules
     )
   },
   properties = list(
     columns = class_list,
-    json_schema = class_character,
     rules = class_any
   ),
   validator = function(self) {
@@ -48,17 +45,22 @@ DTAColumnSpecCollection <- new_class(
       "All elements in 'columns' must be of class 'DTAColumnSpec'"
     }
 
-    # TODO: DEACTIVATED 
-    # # Validate json_schema #TODO check this
-    # if(!is.null(self@json_schema)) {
-    #   #TODO error on check
-    #   invisible(jsonvalidate::json_schema$new(self@json_schema))
-    # } 
-  
     if (length(rules) > 0) {
       if (!all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
         "All elements in 'rules' must be of class 'DTARule'"
       }
+    }
+
+    if (is.null(names(self@columns))) {
+      names(self@columns) <- columns_names
+    } 
+    
+    columns_names <- sapply(columns, function(col) col@id)
+
+    if (!all(names(self@columns) == columns_names)) {
+      cli_abort(
+        "Names of 'columns' must match the 'id' of each DTAColumnSpec"
+      )
     }
   }
 )
@@ -179,11 +181,14 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 #' \dontrun{
 #' names <- specids(collection)
 #' }
-#' @name specids-DTAColumnSpecCollection
+#' @name names
+#' @rdname names-DTAColumnSpecCollection
 #' @export
-specids <- new_generic("specids", "x")
-method(specids, DTAColumnSpecCollection) <- function(x) {
-  return(names(x@columns))
+if(!exists("names", mode="function")) {
+  names <- new_generic("names", "x")
+}
+method(names, DTAColumnSpecCollection) <- function(x) {
+  return(sapply(x@columns, function(col)  col@id))
 }
 
 #' @title Get Column by ID Method
@@ -333,58 +338,56 @@ specs_from_list <- function(
 }
 
 
-#' @title Convert YAML Spec File to JSON
-#' @description
-#' Converts a YAML specification file to a JSON file.
-#' @importFrom yaml read_yaml
-#' @importFrom jsonlite write_json
-#' @export
-#' @param yaml_file Character. Path to the YAML file.
-#' @param json_file Character. Path to the output JSON file.
-#' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
-#' @examples
-#' \dontrun{
-#'   convert_yaml_to_json(yaml_file, json_file)
-#' }
-#' @return NULL. Writes JSON to file.
-convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
-  yaml_content <- yaml::read_yaml(yaml_file)
-  jsonlite::write_json(
-    yaml_content,
-    path = json_file,
-    pretty = pretty,
-    auto_unbox = TRUE
-  )
-}
+# #' @title Convert YAML Spec File to JSON
+# #' @description
+# #' Converts a YAML specification file to a JSON file.
+# #' @importFrom yaml read_yaml
+# #' @importFrom jsonlite write_json
+# #' @export
+# #' @param yaml_file Character. Path to the YAML file.
+# #' @param json_file Character. Path to the output JSON file.
+# #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
+# #' @examples
+# #' \dontrun{
+# #'   convert_yaml_to_json(yaml_file, json_file)
+# #' }
+# #' @return NULL. Writes JSON to file.
+# convert_yaml_to_json <- function(yaml_file, json_file, pretty = TRUE) {
+#   yaml_content <- yaml::read_yaml(yaml_file)
+#   jsonlite::write_json(
+#     yaml_content,
+#     path = json_file,
+#     pretty = pretty,
+#     auto_unbox = TRUE
+#   )
+# }
 
-#' @title Create DTAColumnSpecCollection from JSON File
-#' @description
-#' Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
-#' @importFrom jsonlite fromJSON
-#' @importFrom cli cli_abort
-#' @export
-#' @param file Character. Path to the JSON file containing specifications.
-#' @examples
-#' \dontrun{
-#'   import_specs_from_json(file)
-#' }
-#'
-#' @return A DTAColumnSpecCollection object.
-import_specs_from_json <- function(file) {
-  json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
-  columns <- json$columns
-  rules <- json$rules
-
-  if (!is.list(columns)) {
-    cli_abort("`columns` must be a list.")
-  }
-  if (!is.null && !is.list(rules)) {
-    cli_abort("`rules` must be a list or null.")
-  }
-
-  specs_from_list(columns, rules)
-  # TODO check this function, was heavily modified
-}
+# #' @title Create DTAColumnSpecCollection from JSON File
+# #' @description
+# #' Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
+# #' @importFrom jsonlite fromJSON
+# #' @importFrom cli cli_abort
+# #' @export
+# #' @param file Character. Path to the JSON file containing specifications.
+# #' @examples
+# #' \dontrun{
+# #'   import_specs_from_json(file)
+# #' }
+# #'
+# #' @return A DTAColumnSpecCollection object.
+# import_specs_from_json <- function(file) {
+#   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
+#   columns <- json$columns
+#   rules <- json$rules
+#   if (!is.list(columns)) {
+#     cli_abort("`columns` must be a list.")
+#   }
+#   if (!is.null && !is.list(rules)) {
+#     cli_abort("`rules` must be a list or null.")
+#   }
+#   specs_from_list(columns, rules)
+#   # TODO check this function, was heavily modified
+# }
 
 #' @title Create DTAColumnSpecCollection from DTA Word Document
 #' @description
@@ -493,68 +496,28 @@ columns_specs_from_word <- function(
 #' @title Convert DTAColumnSpec s to JSON Schema
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
 #' @param columns Column spec information
+#' @name to_json_schema
+#' @rdname to_json_schema-DTAColumnSpecCollection
 #' @return A list representing the JSON Schema.
-columns_to_jsonschema <- function(columns) {
-  #TODO: this needs to be moved to DTAColumnSpecStructure
+#' @examples
+#' library(DTAtools)
+#' specs <- create_example_DTAColumnSpecCollection()
+#' to_json_schema(specs)
+#' @export
+if(!exists("to_json_schema", mode="function")) {
+  to_json_schema <- new_generic("to_json_schema", "DTAColumnSpecCollection")
+}
+#' @export
+method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
 
-  properties <- lapply(columns, function(spec) {
-    type <- switch(
-      spec@structure@type,
-      "Char" = "string",
-      "Num" = "number",
-      "Int" = "integer",
-      "Bool" = "boolean",
-      "string"
-    ) # fallback
+  properties <- lapply(x@columns, to_json_schema_type)
 
-    schema <- list(type = type)
+  names(properties) <- names(x)
 
-    if (!is.null(spec@nullable)) {
-      if (spec@nullable) {
-        schema$type <- c(type, "null")
-      }
-    }
-
-    if (!is.null(spec@structure@length) && !is.na(spec@structure@length)) {
-      schema$maxLength <- as.integer(spec@structure@length)
-    }
-
-    if (!is.null(spec@values)) {
-      values <- if (is.list(spec@values)) unlist(spec@values) else spec@values
-
-      if (!is.null(spec@nullable)) {
-        if (spec@nullable) {
-          if (type == "string") {
-            if ("" %in% values) {
-              values <- c(values, NA)
-            } else {
-              values <- c(values, NA, "")
-            }
-          } else if (type == "number") {
-            values <- c(values, NA)
-          }
-        }
-        if (length(values) > 1) {
-          schema$enum <- as.character(values)
-        } else {
-          schema$const <- as.character(values)
-        }
-      }
-    }
-
-    if (!is.null(spec@pattern) && !is.na(spec@pattern)) {
-      schema$pattern <- spec@pattern
-    }
-
-    return(schema)
-  })
-
-  names(properties) <- names(columns)
-
-  if (length(names(columns)) == 1) {
-    required <- list(names(columns))
+  if (length(names(x)) == 1) {
+    required <- list(names(x))
   } else {
-    required <- names(columns)
+    required <- names(x)
   }
 
   schema <- list(

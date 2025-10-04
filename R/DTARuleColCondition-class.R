@@ -73,11 +73,7 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
     if (is.null(self@then) || length(self@then) < 1) {
       "'then' must be a non-empty list of conditions."
     }
-    # description can be NULL or a character of length 1
-    if (!is.null(self@description) &&
-        (!is.character(self@description) || length(self@description) != 1)) {
-      "'description' must be NULL or a character of length 1."
-    }
+
   }
 )
 
