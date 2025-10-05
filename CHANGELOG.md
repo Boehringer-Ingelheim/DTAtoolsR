@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - renamed constructor variables
 - DTA-class constructor to handle DTAMetaData  
 - changed `container` to `datasets` in class DTA
+- moved json schema generation to classes
+- removed stored `json_schema` as it can be dynamically generated 
 
 ## [0.9.0] - 2025-09-11
 
