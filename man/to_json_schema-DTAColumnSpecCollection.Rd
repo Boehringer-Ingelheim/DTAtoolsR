@@ -12,3 +12,8 @@ A list representing the JSON Schema.
 \description{
 Converts a DTAColumnSpec s into a JSON Schema.
 }
+\examples{
+library(DTAtools)
+specs <- create_example_DTAColumnSpecCollection()
+to_json_schema(specs)
+}

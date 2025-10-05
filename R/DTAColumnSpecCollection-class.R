@@ -3,7 +3,7 @@
 #' This class represents a collection of DTAColumnSpec objects with optional template.
 #' @import S7
 #' @importFrom cli cli_abort
-#'
+#' @importFrom stringr str_flatten_comma
 #' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
 #' @param template A list of template information.
 #' @param rules A list of DTARule object.
@@ -29,6 +29,11 @@ DTAColumnSpecCollection <- new_class(
       )
     }
 
+
+    if (is.null(names(self@columns))) {
+      names(self@columns) <- sapply(self@columns, function(col) col@id)
+    } 
+    
     new_object(
       S7_object(),
       columns = columns,
@@ -51,15 +56,15 @@ DTAColumnSpecCollection <- new_class(
       }
     }
 
-    if (is.null(names(self@columns))) {
-      names(self@columns) <- columns_names
-    } 
-    
-    columns_names <- sapply(columns, function(col) col@id)
+    columns_ids <- sapply(self@columns, function(col) col@id)
 
-    if (!all(names(self@columns) == columns_names)) {
+    if (is.null(names(self@columns))) {
+      names(self@columns) <- columns_ids
+    } 
+
+    if (!all(names(self@columns) == columns_ids)) {
       cli_abort(
-        "Names of 'columns' must match the 'id' of each DTAColumnSpec"
+        "Names of 'columns' must match the 'id' of each DTAColumnSpec:\n\n ids: {str_flatten_comma(columns_names)} \n\n names: {str_flatten_comma(names(self@columns))}"
       )
     }
   }
@@ -495,6 +500,8 @@ columns_specs_from_word <- function(
 #' @name to_json_schema
 #' @rdname to_json_schema-DTAColumnSpecCollection
 #' @return A list representing the JSON Schema.
+#' @importFrom jsonlite toJSON
+#' @importFrom jsonvalidate json_schema
 #' @examples
 #' library(DTAtools)
 #' specs <- create_example_DTAColumnSpecCollection()
@@ -506,7 +513,7 @@ if(!exists("to_json_schema", mode="function")) {
 #' @export
 method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
 
-  properties <- lapply(x@columns, to_json_schema_type)
+  properties <- lapply(x@columns, to_json_schema)
 
   names(properties) <- names(x)
 
@@ -527,6 +534,9 @@ method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
     na = "null"
   )
 
+  invisible(jsonvalidate::json_schema$new(json_schema))
+  #cli::cli_alert_success("Column spec schema is correctly structured.")
+  
   return(json_schema)
 }
 
@@ -569,11 +579,11 @@ as.list.DTAColumnSpecCollection <- function(x, ...) {
 #' create_example_DTAColumnSpecCollection()
 #' @export
 create_example_DTAColumnSpecCollection <- function(index = 1) {
-  col1 <- DTAtools::create_example_DTAColumnSpec(1)
-  col2 <- DTAtools::create_example_DTAColumnSpec(2)
-  col3 <- DTAtools::create_example_DTAColumnSpec(3)
-  col4 <- DTAtools::create_example_DTAColumnSpec(4)
-  col5 <- DTAtools::create_example_DTAColumnSpec(5)
+  col1 <- create_example_DTAColumnSpec(1)
+  col2 <- create_example_DTAColumnSpec(2)
+  col3 <- create_example_DTAColumnSpec(3)
+  col4 <- create_example_DTAColumnSpec(4)
+  col5 <- create_example_DTAColumnSpec(5)
   
   switch(index,
     `1` = {

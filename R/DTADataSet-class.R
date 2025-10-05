@@ -157,7 +157,7 @@ method(print_info, DTADataSet) <- function(x) {
     cli_text("- Template date: {.emph {x@template_date}}")
   }
   if (is.null(x@files) || length(x@files) == 0) {
-    cli_alert("Files: {.emph none}")
+    cli_alert_info("Files: {.emph none}")
   } else {
     min_number_of_files <- min_number_of_files(x)
     max_number_of_files <- max_number_of_files(x)

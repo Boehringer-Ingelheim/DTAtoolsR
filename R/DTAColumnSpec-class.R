@@ -314,13 +314,13 @@ method(to_json_schema, DTAColumnSpec) <- function(x) {
 
     if (!is.null(x@nullable)) {
       if (x@nullable) {
-        if (type == "string") {
+        if ("string" %in% schema$type) {
           if ("" %in% values) {
             values <- c(values, NA)
           } else {
             values <- c(values, NA, "")
           }
-        } else if (type == "number") {
+        } else if ("number" %in% schema$type) {
           values <- c(values, NA)
         }
       }

@@ -1,13 +1,36 @@
 test_that("DTAColumnSpec constructor works", {
-  spec <- DTAColumnSpec(
-    id = "STUDYID",
-    label = "Study ID",
-    type = "Char",
-    format = "8",
-    nullable = FALSE,
-    description = "Study identifier"
-  )
-  expect_s3_class(spec, "DTAtools::DTAColumnSpec")
-  expect_equal(spec@id, "STUDYID")
-  expect_false(spec@nullable)
+  spec <- list()
+  spec[[1]] <- create_example_DTAColumnSpec(1)
+  spec[[2]] <- create_example_DTAColumnSpec(2)
+  spec[[3]] <- create_example_DTAColumnSpec(3)
+  spec[[4]] <- create_example_DTAColumnSpec(4)
+  spec[[5]] <- create_example_DTAColumnSpec(5)
+
+  purrr::walk(spec, function(s) {
+    expect_s3_class(s, "DTAtools::DTAColumnSpec")
+  })
+
+  expect_equal(spec[[1]]@id, "STUDYID")
+  expect_equal(spec[[1]]@label, "Study Identifier")
+  expect_equal(spec[[1]]@structure@type, "Char")
+  expect_equal(spec[[1]]@structure@backend, "SAS")
+  expect_false(spec[[1]]@nullable)
+  expect_equal(spec[[1]]@description, "Unique study identifier")
+  expect_equal(spec[[1]]@values, list("1234", "5678"))
+
+  expect_equal(spec[[2]]@id, "VISIT")
+  expect_equal(spec[[2]]@label, "Visit")
+  expect_equal(spec[[1]]@structure@type, "Char")
+  expect_equal(spec[[1]]@structure@backend, "SAS")
+  expect_equal(spec[[2]]@description, "Visit code")
+  expect_equal(spec[[2]]@values, list("V01", "EOT"))
+  expect_false(spec[[2]]@nullable)
+
+  expect_equal(spec[[4]]@id, "AGE")
+  expect_equal(spec[[4]]@label, "Age")
+  expect_equal(spec[[4]]@structure@type, "Int")
+  expect_equal(spec[[4]]@structure@backend, "SAS")
+  expect_equal(spec[[4]]@description, "Age in years")
+  expect_equal(spec[[4]]@pattern, "^[0-9]{1,3}$")
+  expect_true(spec[[4]]@nullable)
 })

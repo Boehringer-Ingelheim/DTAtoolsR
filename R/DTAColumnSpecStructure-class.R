@@ -149,7 +149,7 @@ if(!exists("print", mode="function")) {
 #' @export
 method(print, DTAColumnSpecStructure) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAColumnSpecStructure}> : {.field {x@name}}")
+  cli_text("<{.emph DTAColumnSpecStructure}>")
   print_info(x)
   invisible(x)
 }
