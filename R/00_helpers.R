@@ -7,24 +7,24 @@ class_DTAColumnSpecStructure <- S7::new_class(
   "DTAColumnSpecStructure"
 )
 class_DTAColumnSpecStructure_or_null <- class_DTAColumnSpecStructure |
-  S7::class_null
+  class_null
 class_DTADataSet <- S7::new_class("DTADataSet")
 class_DTAMetaData <- S7::new_class("DTAMetaData")
 class_DTARuleCollection <- S7::new_class("DTARuleCollection")
-class_character_or_null <- S7::class_character | S7::class_null
-class_numeric_or_null <- S7::class_numeric | S7::class_null
+class_character_or_null <- S7::class_character | class_null
+class_numeric_or_null <- S7::class_numeric | class_null
 class_character_or_numeric_or_null <- S7::class_character |
   S7::class_numeric |
-  S7::class_null
-class_logical_or_null <- S7::class_logical | S7::class_null
+  class_null
+class_logical_or_null <- S7::class_logical | class_null
 class_character_or_list <- S7::class_character |
   S7::class_list
 class_character_or_list_or_null <- S7::class_character |
   S7::class_list |
-  S7::class_null
+  class_null
 class_character_or_numeric_or_null_or_list <- S7::class_character |
   S7::class_numeric |
-  S7::class_null |
+  class_null |
   S7::class_list
 
 `__extract_prefix_and_rest__` <- function(x) {

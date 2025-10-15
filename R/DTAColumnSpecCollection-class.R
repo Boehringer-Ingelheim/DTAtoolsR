@@ -30,18 +30,12 @@ DTAColumnSpecCollection <- S7::new_class(
   },
   properties = list(
     columns = S7::class_list,
-    rules = S7::class_DTARuleCollection
+    rules = class_DTARuleCollection
   ),
   validator = function(self) {
     # Ensure columns is a list of DTAColumnSpec objects
     if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
       "All elements in 'columns' must be of class 'DTAColumnSpec'"
-    }
-
-    if (length(rules) > 0) {
-      if (!all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
-        "All elements in 'rules' must be of class 'DTARule'"
-      }
     }
 
     columns_ids <- sapply(self@columns, function(col) col@id)
@@ -103,6 +97,8 @@ method(column_preview, DTAColumnSpecCollection) <- function(x) {
 #' If the collection contains more than 5 rules, it returns the IDs of the first four rules,
 #' an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
 #'
+#' @importFrom stringr str_flatten_comma
+#'
 #' @param x A \code{DTAColumnSpecCollection} object.
 #'
 #' @return A character string representing a preview of the rules
@@ -115,16 +111,19 @@ method(column_preview, DTAColumnSpecCollection) <- function(x) {
 #' @export
 rule_preview <- new_generic("rule_preview", "x")
 method(rule_preview, DTAColumnSpecCollection) <- function(x) {
-  if (length(x@rules) > 5) {
-    rule_preview <- str_flatten_comma(
+  rules <- x@rules@rules
+  if (length(rules) > 5) {
+    rule_preview <- stringr::str_flatten_comma(
       c(
-        map(x@rules[1:4], function(y) y@id),
+        map(rules[1:4], function(y) y@id),
         "...",
-        x@rules[[length(x@rules)]]@id
+        rules[[length(rules)]]@id
       )
     )
-  } else if (length(x@rules) <= 5) {
-    rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
+  } else if (length(rules) <= 5) {
+    rule_preview <- stringr::str_flatten_comma(map(rules, function(y) {
+      y@id
+    }))
   } else {
     rule_preview <- "not set"
   }
@@ -136,7 +135,6 @@ method(rule_preview, DTAColumnSpecCollection) <- function(x) {
 #' @description
 #' Print overview for DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
-#' @importFrom stringr str_c str_flatten_comma
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @importFrom purrr map
 #' @examples
@@ -150,14 +148,14 @@ method(print, DTAColumnSpecCollection) <- function(x) {
   rule_preview <- rule_preview(x)
 
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAColumnSpecCollection}>")
+  cli::cli_text("<{.emph DTAColumnSpecCollection}>")
 
-  cli_alert_info("columns ({length(x@columns)}): {col_preview}")
+  cli::cli_alert_info("columns ({length(x@columns)}): {col_preview}")
 
-  if (length(x@rules) > 0) {
-    cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
+  if (length(x@rules@rules) > 0) {
+    cli::cli_alert_info("rules ({length(x@rules@rules)}): {rule_preview}")
   } else {
-    cli_alert("rules: {cli::symbol$cross}")
+    cli::cli_alert("rules: {cli::symbol$cross}")
   }
 }
 
@@ -227,7 +225,7 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' @description
 #' This function parses a YAML file to extract column specifications and create a DTAColumnSpecCollection object.
 #' @importFrom yaml read_yaml
-#' @importFrom cli cli_abort
+#' @importFrom cli cli_abort cli_alert
 #' @export
 #'
 #' @param file Character. Path to the YAML file containing specifications.
@@ -260,17 +258,19 @@ method(rules, DTAColumnSpecCollection) <- function(x) {
 #' DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
 #' }
 import_specs_from_yaml <- function(file) {
-  yaml <- read_yaml(file)
+  yaml <- yaml::read_yaml(file)
 
   if (is.null(yaml$columns)) {
-    cli_abort("YAML file must contain a 'columns' section.")
+    cli::cli_abort("YAML file must contain a 'columns' section.")
   }
 
   columns <- yaml$columns
 
   if (is.null(yaml$rules)) {
     rules <- list()
-    cli_alert("No 'rules' section found in YAML. Proceeding without rules.")
+    cli::cli_alert(
+      "No 'rules' section found in YAML. Proceeding without rules."
+    )
   } else {
     rules <- yaml$rules
   }
@@ -304,10 +304,10 @@ specs_from_list <- function(
   rules = list()
 ) {
   if (!is.list(columns)) {
-    cli_abort("`columns` must be a list.")
+    cli::cli_abort("`columns` must be a list.")
   }
   if (!is.null(rules) && !is.list(rules)) {
-    cli_abort("`rules` must be a list or null.")
+    cli::cli_abort("`rules` must be a list or null.")
   }
 
   if (length(rules) > 0) {
@@ -385,7 +385,7 @@ specs_from_list <- function(
 #' Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
 #' @importFrom docxtractr read_docx docx_extract_all_tbls
 #' @importFrom purrr map set_names
-#' @importFrom dplyr mutate
+#' @importFrom dplyr mutate filter
 #' @export
 #' @examples
 #' \dontrun{
@@ -449,10 +449,10 @@ columns_specs_from_word <- function(
       ))
     ) %>%
     # remove whitespaces in id - not allowed
-    mutate(id = gsub("\\s+", "", id)) %>%
+    dplyr::mutate(id = gsub("\\s+", "", id)) %>%
     # remove empty ids - empty rows
-    filter(!is.na(id)) %>%
-    filter(id != "")
+    dplyr::filter(!is.na(id)) %>%
+    dplyr::filter(id != "")
 
   column_list <- purrr::map(1:nrow(columns), function(i) {
     row <- columns[i, ]
@@ -545,12 +545,16 @@ method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
 #' # Write the DTAColumnSpecCollection object to a YAML file
 #' as.list(x)
 #' }
-as.list.DTAColumnSpecCollection <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTAColumnSpecCollection
+method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
   columns <- lapply(x@columns, function(column) {
     as.list(column)
   })
 
-  rules <- as.list(x@rules)
+  rules <- lapply(x@rules, function(rule) {
+    as.list(rule)
+  })
 
   return(list(columns = columns, rules = rules))
 }

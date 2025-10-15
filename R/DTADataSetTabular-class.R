@@ -6,7 +6,7 @@
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files a list of DTAFile objects specifying input file information.
-#' @param tables List. A list of arrow Table to be validated and included in the DTADataSetTabular object.
+#' @param tables List. A named list of tables to be validated and included in the DTADataSetTabular object.
 #' @return An object of class DTADataSetTabular
 #' @examples
 #' \dontrun{
@@ -38,9 +38,8 @@ DTADataSetTabular <- S7::new_class(
       files = list(files)
     }
 
-    if (inherits(tables, "Table")) {
-      tables = list(tables)
-    }
+    # Transform to arrow tables
+    tables <- lapply(tables, function(x) arrow::as_arrow_table)
 
     new_object(
       .parent = DTADataSet(
@@ -59,13 +58,10 @@ DTADataSetTabular <- S7::new_class(
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = class_list # list of arrow Table
+    tables = class_list # list of tables - can be arrow tables etc
   ),
   validator = function(self) {
     # check if all elements of list self@tables inherit from "Table"
-    if (!all(sapply(self@tables, inherits, "Table"))) {
-      cli_abort("All elements in 'tables' must be of class 'Table'")
-    }
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
     }

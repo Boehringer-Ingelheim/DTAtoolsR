@@ -60,7 +60,9 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 #' @param ... Additional arguments (ignored).
 #' @return A named list with the DTAColumnSpecStructureSAS properties.
 #' @export
-as.list.DTAColumnSpecStructureSAS <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTAColumnSpecStructureSAS
+method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
   list(
     type = paste(x@backend, x@type),
     format = paste(x@backend, x@format),

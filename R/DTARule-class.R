@@ -60,7 +60,7 @@ DTARule <- S7::new_class(
 #' Print overview for DTARule
 #' @param x An object of class DTARule
 #' @importFrom stringr str_glue
-#' @importFrom cli cli_alert cli_text
+#' @importFrom cli cli_alert cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -69,8 +69,8 @@ DTARule <- S7::new_class(
 #' @export
 method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARule}> : {.field {x@id}}")
-  cli_alert("type: {x@type}")
+  cli::cli_text("<{.emph DTARule}> : {.field {x@id}}")
+  cli::cli_alert("type: {x@type}")
 }
 
 
@@ -108,7 +108,7 @@ method(check, DTARule) <- function(x, index = 1) {
 #' @export
 #'
 #' @examples
-#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
+#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) # TODO not working - Replace
 #' DTARuleFactory("rule2", "col_range", column = "score", min = 0, max = 100)
 #' DTARuleFactory("rule3", "col_unique", column = "id")
 DTARuleFactory <- function(id, type, ...) {
@@ -140,7 +140,9 @@ DTARuleFactory <- function(id, type, ...) {
 #' @param ... Additional arguments (not used).
 #' @return A named list containing the properties of the DTARule object.
 #' @export
-as.list.DTARule <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARule
+method(as.list, DTARule) <- function(x, ...) {
   list(
     id = x@id,
     type = x@type

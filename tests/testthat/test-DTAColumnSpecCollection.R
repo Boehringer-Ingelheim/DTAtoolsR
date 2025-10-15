@@ -5,16 +5,25 @@ test_that("Import specs from YAML file", {
   expect_s3_class(collection, "DTAtools::DTAColumnSpecCollection")
   expect_named(collection@columns, c("STUDYID", "VISIT", "AGE", "COUNTRY"))
   expect_equal(collection@columns$STUDYID@id, "STUDYID")
-  expect_equal(collection@columns$VISIT@values, list("V01", "EOT", "V02", "V03"))
-  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
-  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
+  expect_equal(
+    collection@columns$VISIT@values,
+    list("V01", "EOT", "V02", "V03")
+  )
+  expect_equal(
+    class(collection@columns[[1]]),
+    c("DTAtools::DTAColumnSpec", "S7_object")
+  )
+  expect_equal(
+    class(collection@rules[[1]]),
+    c("DTAtools::DTARule", "S7_object")
+  )
 
   # check getMetadata method
   expect_equal(getMetadata(collection), list())
 
   # Test DTAColumnSpecCollectionToList
 
-  list <- as.list.DTAColumnSpecCollection(collection)
+  list <- as.list(collection)
   expect_type(list, "list")
 })
 
@@ -88,14 +97,20 @@ test_that("specs_from_list constructs valid object", {
   expect_named(collection@columns, c("STUDYID", "VISIT"))
   expect_equal(collection@columns$STUDYID@id, "STUDYID")
   expect_equal(collection@columns$VISIT@values, list("V01", "EOT"))
-  expect_equal(class(collection@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
-  expect_equal(class(collection@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
+  expect_equal(
+    class(collection@columns[[1]]),
+    c("DTAtools::DTAColumnSpec", "S7_object")
+  )
+  expect_equal(
+    class(collection@rules[[1]]),
+    c("DTAtools::DTARule", "S7_object")
+  )
 
   # check getMetadata method
   expect_equal(getMetadata(collection), list())
 
   # Test DTAColumnSpecCollectionToList
 
-  list <- as.list.DTAColumnSpecCollection(collection)
+  list <- as.list(collection)
   expect_type(list, "list")
 })

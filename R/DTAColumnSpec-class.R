@@ -268,17 +268,18 @@ method(print, DTAColumnSpec) <- function(x) {
 }
 
 #' @title as.list method for DTAColumnSpec
+#' @name as.list
+#' @rdname as.list-DTAColumnSpec
 #' @description
 #' Converts a DTAColumnSpec object to a named list.
 #' @param x A DTAColumnSpec object.
 #' @param ... Additional arguments (ignored).
 #' @return A named list with the DTAColumnSpec properties.
 #' @export
-as.list.DTAColumnSpec <- function(x, ...) {
+method(as.list, DTAColumnSpec) <- function(x, ...) {
   x <- list(
     id = x@id,
     label = x@label,
-
     nullable = x@nullable,
     description = x@description,
     values = x@values,

@@ -162,6 +162,7 @@ method(check, DTARuleColCondition) <- function(x, tab) {
   # TODO from here
 }
 
+
 #' @title as.list for DTARuleColCondition
 #' @description
 #' Convert a DTARuleColCondition object to a list.
@@ -169,7 +170,9 @@ method(check, DTARuleColCondition) <- function(x, tab) {
 #' @param ... Additional arguments (not used).
 #' @return A named list containing the properties of the DTARuleColCondition object.
 #' @export
-as.list.DTARuleColCondition <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARuleColCondition
+method(as.list, DTARuleColCondition) <- function(x) {
   list(
     id = x@id,
     type = x@type,

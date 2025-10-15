@@ -8,7 +8,7 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param column list of column that will be collectively checked if the
+#' @param column list of columns that will be collectively checked if the
 #' combinations are unique throughout the table
 #' @return An object of class `DTARule`.
 #'
@@ -141,12 +141,13 @@ method(check, DTARuleColUnique) <- function(x, tab) {
 #' @param ... Additional arguments (not used).
 #' @return A named list containing the properties of the DTARuleColCondition object.
 #' @export
-as.list.DTARuleColCondition <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARuleColUnique
+method(as.list, DTARuleColUnique) <- function(x) {
   list(
     id = x@id,
     type = x@type,
-    column = x@column,
-    min_range = x@min_range,
-    max_range = x@max_range
+    description = x@description,
+    column = x@column
   )
 }

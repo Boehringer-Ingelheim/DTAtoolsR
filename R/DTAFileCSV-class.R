@@ -72,7 +72,7 @@ method(read_file_execution, DTAFileCSV) <- function(x, file) {
   return(arrow::read_csv_arrow(
     file,
     quote = x@quote,
-    skip = if (x@has_header) 0 else 1,
+    # skip = if (x@has_header) 0 else 1,
     as_data_frame = FALSE
   ))
 }

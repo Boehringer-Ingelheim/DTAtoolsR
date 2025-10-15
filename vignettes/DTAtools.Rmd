@@ -137,9 +137,9 @@ First, you import the specifications from a YAML file.
 
 ```{r}
 library(DTAtools)
-params_yaml <- system.file("extdata", "params_gf.yaml", package = "DTAtools")
+yaml <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 
-specs <- import_specs_from_yaml(params_yaml)
+specs <- import_specs_from_yaml(yaml)
 ```
 
 > Note: Use the `tag` argument of `import_specs_from_yaml` if `columns`, `rules` and `metadata` are nested in the YAML file, e.g. if they are under `DTA: format:`, then add `tag=c("DTA", "format")`.
@@ -153,7 +153,7 @@ small to medium sized data with `tibble` related functions like `read_csv` or
 `read_tsv` from `tidyverse`.
 
 ```{r load example data}
-example_file <- system.file("extdata", "data_gf_small.tsv", package="DTAtools")
+example_file <- system.file("extdata", "gf_data_small.tsv", package="DTAtools")
 
 example_data <- read.table(example_file, sep = "\t", header = T)
 ```

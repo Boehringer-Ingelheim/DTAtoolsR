@@ -30,6 +30,6 @@ Class to handle data from files
 \examples{
 
 \dontrun{
-# Create sample 
+# Create sample
 }
 }

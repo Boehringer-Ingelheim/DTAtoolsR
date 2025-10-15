@@ -118,16 +118,12 @@ method(print, DTARuleCollection) <- function(x, ...) {
   invisible(x)
 }
 
-
-#' @title as.list for DTARuleCollection
-#' @description
-#' Convert a DTARuleCollection object to a list.
-#' @param x An object of class DTARuleCollection
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleCollection object.
+#' as.list
+#' @title as.list function for DTARuleCollection
+#' @description returns list from DTARuleCollection object
+#' @return list
+#' @name as.list
 #' @export
-as.list.DTARuleCollection <- function(x, ...) {
-  lapply(x@rules, function(y) {
-    as.list(y)
-  })
+method(as.list, DTARuleCollection) <- function(x) {
+  return(x@rules)
 }

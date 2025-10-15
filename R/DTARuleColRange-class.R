@@ -162,17 +162,20 @@ method(check, DTARuleColRange) <- function(x, tab) {
   # TODO from here
 }
 
-#' @title as.list for DTARuleColCondition
+#' @title as.list for DTARuleColRange
 #' @description
-#' Convert a DTARuleColCondition object to a list.
-#' @param x An object of class DTARuleColCondition
+#' Convert a DTARuleColRange object to a list.
+#' @param x An object of class DTARuleColRange
 #' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @return A named list containing the properties of the DTARuleColRange object.
 #' @export
-as.list.DTARuleColCondition <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARuleColRange
+method(as.list, DTARuleColRange) <- function(x) {
   list(
     id = x@id,
     type = x@type,
+    description = x@description,
     column = x@column,
     min_range = x@min_range,
     max_range = x@max_range
