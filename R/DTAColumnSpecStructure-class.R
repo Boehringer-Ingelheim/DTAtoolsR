@@ -1,4 +1,4 @@
-#' @title DTA Column Spec Structure 
+#' @title DTA Column Spec Structure
 #' @description
 #' Class for column types
 #' @import S7
@@ -14,7 +14,7 @@
 #' \dontrun{
 #'  #TODO
 #' }
-DTAColumnSpecStructure <- new_class(
+DTAColumnSpecStructure <- S7::new_class(
   "DTAColumnSpecStructure",
   constructor = function(
     type = NULL,
@@ -22,7 +22,6 @@ DTAColumnSpecStructure <- new_class(
     length = NULL,
     backend = NULL
   ) {
-
     new_object(
       S7_object(),
       type = type,
@@ -66,7 +65,7 @@ as.list.DTAColumnSpecStructure <- function(x, ...) {
 #' @rdname to_json_schema_type-DTAColumnSpecStructure
 #' @param x An object of class DTAColumnSpecStructure.
 #' @export
-if(!exists("to_json_schema_type", mode="function")) {
+if (!exists("to_json_schema_type", mode = "function")) {
   to_json_schema_type <- new_generic("to_json_schema_type", "x")
 }
 method(to_json_schema_type, DTAColumnSpecStructure) <- function(x) {
@@ -77,15 +76,15 @@ method(to_json_schema_type, DTAColumnSpecStructure) <- function(x) {
 #' Converts a DTAColumnSpecStructure to a JSON Schema.
 #' @name to_json_schema
 #' @rdname to_json_schema-DTAColumnSpecStructure
-#' @title to_json_schema 
-#' @export 
-if(!exists("to_json_schema", mode="function")) {
+#' @title to_json_schema
+#' @export
+if (!exists("to_json_schema", mode = "function")) {
   to_json_schema <- new_generic("to_json_schema", "x")
 }
 
 method(to_json_schema, DTAColumnSpecStructure) <- function(x) {
   schema <- list()
-  
+
   if (!is.null(x@type)) {
     schema$type <- to_json_schema_type(x)
   }
@@ -95,18 +94,18 @@ method(to_json_schema, DTAColumnSpecStructure) <- function(x) {
   if (!is.null(x@length)) {
     schema$maxLength <- x@length
   }
-  
+
   return(schema)
 }
 
 
-#' @title names 
+#' @title names
 #' @description
 #' returns list of names of the column specs
 #' @name names
 #' @rdname names-DTAColumnSpecStructure
-#' @export 
-if(!exists("names", mode="function")) {
+#' @export
+if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
 }
 #' @export
@@ -115,26 +114,31 @@ method(names, DTAColumnSpecStructure) <- function(x) {
 }
 
 
-
-
-#' @title print info 
+#' @title print info
 #' @description
 #' prints info of the column spec structure
 #' @name print_info
 #' @rdname print_info-DTAColumnSpecStructure
-#' @export 
-if(!exists("print_info", mode="function")) {
+#' @export
+if (!exists("print_info", mode = "function")) {
   print_info <- new_generic("print_info", "x")
 }
 #' @export
 method(print_info, DTAColumnSpecStructure) <- function(x) {
-  if (!is.null(x@type))    cli_alert("type       : {x@type}")
-  if (!is.null(x@format))  cli_alert("format     : {x@format}")
-  if (!is.null(x@length))  cli_alert("length     : {x@length}")
-  if (!is.null(x@backend)) cli_alert("backend    : {x@backend}")
+  if (!is.null(x@type)) {
+    cli_alert("type       : {x@type}")
+  }
+  if (!is.null(x@format)) {
+    cli_alert("format     : {x@format}")
+  }
+  if (!is.null(x@length)) {
+    cli_alert("length     : {x@length}")
+  }
+  if (!is.null(x@backend)) {
+    cli_alert("backend    : {x@backend}")
+  }
   invisible(x)
 }
-
 
 
 #' @title print
@@ -142,8 +146,8 @@ method(print_info, DTAColumnSpecStructure) <- function(x) {
 #' prints info of the column spec structure
 #' @name print
 #' @rdname print-DTAColumnSpecStructure
-#' @export 
-if(!exists("print", mode="function")) {
+#' @export
+if (!exists("print", mode = "function")) {
   print <- new_generic("print_info", "x")
 }
 #' @export
@@ -153,7 +157,3 @@ method(print, DTAColumnSpecStructure) <- function(x) {
   print_info(x)
   invisible(x)
 }
-
-
-
-

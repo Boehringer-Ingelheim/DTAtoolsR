@@ -36,7 +36,7 @@
 #' # Print the object
 #' # print(rules_obj)
 
-DTARuleCollection <- new_class(
+DTARuleCollection <- S7::new_class(
   "DTARuleCollection",
 
   # Constructor for the DTARuleCollection class
@@ -60,7 +60,6 @@ DTARuleCollection <- new_class(
 )
 
 
-
 #' @title create_example_DTARuleCollection
 #' @description
 #' create example for DTARuleCollection
@@ -70,7 +69,8 @@ DTARuleCollection <- new_class(
 #'  library(DTAtools)
 #'  create_example_DTARuleCollection()
 #' @export
-create_example_DTARuleCollection <- function(index = 1) { # nolint
+create_example_DTARuleCollection <- function(index = 1) {
+  # nolint
   if (index == 1) {
     return(
       DTAtools::DTARuleCollection(
@@ -95,7 +95,7 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return Invisibly returns the input \code{DTARuleCollection} object.
-#' @importFrom cli cli_alert_info cli_alert cli_text
+#' @importFrom cli cli_alert cli_text
 #' @examples
 #' library(DTAtools)
 #' collection <- create_example_DTARuleCollection()
@@ -104,16 +104,16 @@ create_example_DTARuleCollection <- function(index = 1) { # nolint
 #' @export
 method(print, DTARuleCollection) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARuleCollection}> : {length(x@rules)} rules")
+  cli::cli_text("<{.emph DTARuleCollection}> : {length(x@rules)} rules")
 
   rule_ids <- sapply(x@rules, function(rule) rule@id)
   n_rules <- length(rule_ids)
   max_display <- 10
   if (n_rules <= max_display) {
-    cli_alert("{rule_ids}")
+    cli::cli_alert("{rule_ids}")
   } else {
-    cli_alert("{rule_ids[1:9]}")
-    cli_alert("...")
+    cli::cli_alert("{rule_ids[1:9]}")
+    cli::cli_alert("...")
   }
   invisible(x)
 }

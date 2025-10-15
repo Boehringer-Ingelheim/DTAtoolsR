@@ -26,7 +26,8 @@
 #' @seealso \code{\link{DTAFile}}
 #' @include DTAFileTabular-class.R
 #' @export
-DTAFileCSV <- S7::new_class( # nolint
+DTAFileCSV <- S7::new_class(
+  # nolint
   "DTAFileCSV",
   parent = DTAFileTabular,
   constructor = function(
@@ -62,7 +63,7 @@ DTAFileCSV <- S7::new_class( # nolint
 #' Reads a CSV file using the parameters specified in a
 #' \code{DTAFileCSV} object. This method uses \code{arrow::read_csv_arrow}
 #' for efficient CSV parsing.
-#' @importFrom arrow read_delim_arrow
+#' @importFrom arrow read_csv_arrow
 #' @param x A \code{DTAFileCSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
@@ -79,6 +80,7 @@ method(read_file_execution, DTAFileCSV) <- function(x, file) {
 #' @title Create Example DTAFileCSV Object
 #' @description
 #' Creates an example \code{DTAFileCSV} object using example files.
+#' @importFrom cli cli_abort
 #' @param index example selector.
 #' @return An example \code{DTAFileCSV} object.
 #' @examples
@@ -87,12 +89,18 @@ method(read_file_execution, DTAFileCSV) <- function(x, file) {
 #' @export
 create_example_DTAFileCSV <- function(index = 1) {
   if (index == 1) {
-    example_file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+    example_file <- system.file(
+      "extdata",
+      "clinical_data.csv",
+      package = "DTAtools"
+    )
     DTAFileCSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
   } else {
-    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileCSV().")
+    cli::cli_abort(
+      "Only index = 1 is supported for create_example_DTAFileCSV()."
+    )
   }
 }
 
@@ -103,7 +111,7 @@ create_example_DTAFileCSV <- function(index = 1) {
 #' @param x An object of class DTAFileCSV
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_alert cli_text
+#' @importFrom cli cli_div cli_text
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAFileCSV())
@@ -112,11 +120,9 @@ create_example_DTAFileCSV <- function(index = 1) {
 #' @export
 method(print, DTAFileCSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileCSV}>")
+  cli::cli_text("<{.emph DTAFileCSV}>")
 
   print_info(x)
 
   invisible(x)
 }
-
-

@@ -47,7 +47,8 @@ DTAFileTSV <- S7::new_class(
         pattern = pattern,
         has_header = has_header,
         quote = quote,
-        sep = "\t")
+        sep = "\t"
+      )
     )
   }
 )
@@ -58,6 +59,8 @@ DTAFileTSV <- S7::new_class(
 #' Reads a TSV file using the parameters specified in a
 #' \code{DTAFileTSV} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
+#'
+#' @importFrom arrow read_tsv_arrow
 #'
 #' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
@@ -79,6 +82,8 @@ method(read_file_execution, DTAFileTSV) <- function(x, file) {
 #' @title Create Example DTAFileTSV Object
 #' @description
 #' Creates an example \code{DTAFileTSV} object using example files.
+#' @importFrom cli cli_abort
+#'
 #' @param index example selector.
 #' @return An example \code{DTAFileTSV} object.
 #' @examples
@@ -87,12 +92,18 @@ method(read_file_execution, DTAFileTSV) <- function(x, file) {
 #' @export
 create_example_DTAFileTSV <- function(index = 1) {
   if (index == 1) {
-    example_file <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+    example_file <- system.file(
+      "extdata",
+      "gf_data_small.tsv",
+      package = "DTAtools"
+    )
     DTAFileTSV(
       filename = basename(example_file) # makes sure this was derived from existing example
     )
   } else {
-    cli::cli_abort("Only index = 1 is supported for create_example_DTAFileTSV().")
+    cli::cli_abort(
+      "Only index = 1 is supported for create_example_DTAFileTSV()."
+    )
   }
 }
 
@@ -102,7 +113,7 @@ create_example_DTAFileTSV <- function(index = 1) {
 #' @param x An object of class DTAFileTSV
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_alert cli_text
+#' @importFrom cli cli_div cli_text
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAFileTSV())
@@ -111,11 +122,9 @@ create_example_DTAFileTSV <- function(index = 1) {
 #' @export
 method(print, DTAFileTSV) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileTSV}>")
+  cli::cli_text("<{.emph DTAFileTSV}>")
 
   print_info(x)
 
   invisible(x)
 }
-
-

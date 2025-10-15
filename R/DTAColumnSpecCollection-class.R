@@ -13,27 +13,15 @@
 #' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
 #' collection <- DTAColumnSpecCollection(columns = list(STUDIYID = col1, VISIT = col2))
 #' @export
-DTAColumnSpecCollection <- new_class(
+DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection",
   constructor = function(
-      columns,
-      rules = list()) {
-    
+    columns,
+    rules = list()
+  ) {
     if (!is.list(columns)) {
       cli::cli_abort("'columns' must be a list.")
     }
-
-    if (!all(sapply(columns, inherits, "DTAtools::DTAColumnSpec"))) {
-      cli::cli_abort(
-        "All elements in 'columns' must be of class 'DTAColumnSpec'"
-      )
-    }
-
-
-    if (is.null(names(self@columns))) {
-      names(self@columns) <- sapply(self@columns, function(col) col@id)
-    } 
-    
     new_object(
       S7_object(),
       columns = columns,
@@ -41,8 +29,8 @@ DTAColumnSpecCollection <- new_class(
     )
   },
   properties = list(
-    columns = class_list,
-    rules = class_any
+    columns = S7::class_list,
+    rules = S7::class_DTARuleCollection
   ),
   validator = function(self) {
     # Ensure columns is a list of DTAColumnSpec objects
@@ -60,7 +48,7 @@ DTAColumnSpecCollection <- new_class(
 
     if (is.null(names(self@columns))) {
       names(self@columns) <- columns_ids
-    } 
+    }
 
     if (!all(names(self@columns) == columns_ids)) {
       cli_abort(
@@ -92,11 +80,12 @@ column_preview <- new_generic("column_preview", "x")
 method(column_preview, DTAColumnSpecCollection) <- function(x) {
   if (length(x@columns) > 5) {
     col_preview <- str_flatten_comma(
-        c(unlist(map(x@columns[1:4], function(y) y@id)),
+      c(
+        unlist(map(x@columns[1:4], function(y) y@id)),
         "...",
-        x@columns[[length(x@columns)]]@id)
+        x@columns[[length(x@columns)]]@id
+      )
     )
-
   } else if (length(x@columns) <= 5) {
     col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
   } else {
@@ -128,14 +117,15 @@ rule_preview <- new_generic("rule_preview", "x")
 method(rule_preview, DTAColumnSpecCollection) <- function(x) {
   if (length(x@rules) > 5) {
     rule_preview <- str_flatten_comma(
-      c(map(x@rules[1:4], function(y) y@id),
-      "...",
-      x@rules[[length(x@rules)]]@id)
+      c(
+        map(x@rules[1:4], function(y) y@id),
+        "...",
+        x@rules[[length(x@rules)]]@id
+      )
     )
-
   } else if (length(x@rules) <= 5) {
     rule_preview <- str_flatten_comma(map(x@rules, function(y) y@id))
-  }  else {
+  } else {
     rule_preview <- "not set"
   }
 
@@ -185,11 +175,11 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 #' @name names
 #' @rdname names-DTAColumnSpecCollection
 #' @export
-if(!exists("names", mode="function")) {
+if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
 }
 method(names, DTAColumnSpecCollection) <- function(x) {
-  return(sapply(x@columns, function(col)  col@id))
+  return(sapply(x@columns, function(col) col@id))
 }
 
 #' @title Get Column by ID Method
@@ -307,8 +297,8 @@ import_specs_from_yaml <- function(file) {
 #' yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' input_list <- yaml::read_yaml(yaml_file)
 #' specs <- specs_from_list(input_list$columns, input_list$rules)
-#' 
-#' 
+#'
+#'
 specs_from_list <- function(
   columns,
   rules = list()
@@ -334,7 +324,7 @@ specs_from_list <- function(
 
   return(DTAColumnSpecCollection(
     columns = dta_columns,
-    rules = dta_rules
+    rules = DTARuleCollection(dta_rules)
   ))
 }
 
@@ -507,12 +497,11 @@ columns_specs_from_word <- function(
 #' specs <- create_example_DTAColumnSpecCollection()
 #' to_json_schema(specs)
 #' @export
-if(!exists("to_json_schema", mode="function")) {
+if (!exists("to_json_schema", mode = "function")) {
   to_json_schema <- new_generic("to_json_schema", "DTAColumnSpecCollection")
 }
 #' @export
 method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
-
   properties <- lapply(x@columns, to_json_schema)
 
   names(properties) <- names(x)
@@ -536,7 +525,7 @@ method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
 
   invisible(jsonvalidate::json_schema$new(json_schema))
   #cli::cli_alert_success("Column spec schema is correctly structured.")
-  
+
   return(json_schema)
 }
 
@@ -584,27 +573,32 @@ create_example_DTAColumnSpecCollection <- function(index = 1) {
   col3 <- create_example_DTAColumnSpec(3)
   col4 <- create_example_DTAColumnSpec(4)
   col5 <- create_example_DTAColumnSpec(5)
-  
-  switch(index,
+
+  switch(
+    index,
     `1` = {
       example_rules <- list()
       DTAColumnSpecCollection(
-        columns = setNames(list(col1, col2, col3, col4), c(col1@id, col2@id, col3@id, col4@id)),
+        columns = setNames(
+          list(col1, col2, col3, col4),
+          c(col1@id, col2@id, col3@id, col4@id)
+        ),
         rules = example_rules
       )
     },
     `2` = {
       example_rules <- list()
       DTAColumnSpecCollection(
-        columns = setNames(list(col1, col2, col3, col5), c(col1@id, col2@id, col3@id, col5@id)),
+        columns = setNames(
+          list(col1, col2, col3, col5),
+          c(col1@id, col2@id, col3@id, col5@id)
+        ),
         rules = example_rules
       )
     },
     cli::cli_abort("No example available for the provided index.")
   )
-
 }
-
 
 
 #' @title Write DTAColumnSpecCollection to YAML File

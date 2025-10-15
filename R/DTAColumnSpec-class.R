@@ -19,7 +19,7 @@
 #' @return An object of class DTAColumnSpec.
 #' @examples
 #' col_format <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = FALSE, values = "1234-1234")
-DTAColumnSpec <- new_class(
+DTAColumnSpec <- S7::new_class(
   "DTAColumnSpec",
   constructor = function(
     id,
@@ -43,7 +43,7 @@ DTAColumnSpec <- new_class(
         length = length
       )
     }
-    
+
     new_object(
       S7_object(),
       id = id,
@@ -72,17 +72,19 @@ DTAColumnSpec <- new_class(
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
       "@id cannot have whitespaces and needs to be defined."
     }
-    
+
     # if values are provided, there cannot be a pattern or examples
     if (!is.null(self@values)) {
       if (!is.null(self@pattern)) {
         str_glue("{self@id}: 'pattern' cannot be set if 'values' are provided.")
       }
       if (!is.null(self@examples)) {
-        str_glue("{self@id}: 'examples' cannot be set if 'values' are provided.")
+        str_glue(
+          "{self@id}: 'examples' cannot be set if 'values' are provided."
+        )
       }
     }
-    
+
     # if a pattern is provided, there cannot be values and examples must conform with pattern provided
     if (!is.null(self@pattern)) {
       if (!is.null(self@values)) {
@@ -91,19 +93,32 @@ DTAColumnSpec <- new_class(
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
           if (!grepl(ex, pattern = self@pattern)) {
-            str_glue("{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided.")
+            str_glue(
+              "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
+            )
           }
         }
       }
     }
 
     if (!is.null(self@colclass)) {
-      valid_colclasses <- c("patient_info", "measurement_patient", "measurement", "visit_related", "date_related", "study_info", "wide_format", "long_format", "wide_and_long_format")
+      valid_colclasses <- c(
+        "patient_info",
+        "measurement_patient",
+        "measurement",
+        "visit_related",
+        "date_related",
+        "study_info",
+        "wide_format",
+        "long_format",
+        "wide_and_long_format"
+      )
       if (!(self@colclass %in% valid_colclasses)) {
-        str_glue("'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}")
+        str_glue(
+          "'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}"
+        )
       }
     }
-    
   }
 )
 
@@ -219,16 +234,36 @@ create_example_DTAColumnSpec <- function(index = 1) {
 method(print, DTAColumnSpec) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpec}> ")
-  if (!is.null(x@label))        cli_alert("id         : {.field {x@id}}")
-  if (!is.null(x@label))        cli_alert("label      : {x@label}")
-  if (!is.null(x@structure))  {
+  if (!is.null(x@label)) {
+    cli_alert("id         : {.field {x@id}}")
+  }
+  if (!is.null(x@label)) {
+    cli_alert("label      : {x@label}")
+  }
+  if (!is.null(x@structure)) {
     print_info(x@structure)
   }
-  if (!is.null(x@nullable))     cli_alert("nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}")
-  if (!is.null(x@pattern))      cli_alert("pattern    : {x@pattern}")
-  if (!is.null(x@values))       cli_alert("values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}")
-  if (!is.null(x@examples))     cli_alert("examples   : {paste0(capture.output(str(x@examples, give.attr = FALSE)), collapse = ' ')}")
-  if (!is.null(x@description))  cli_alert("description: {x@description}")
+  if (!is.null(x@nullable)) {
+    cli_alert(
+      "nullable   : {ifelse(x@nullable, cli::symbol$tick, cli::symbol$cross)}"
+    )
+  }
+  if (!is.null(x@pattern)) {
+    cli_alert("pattern    : {x@pattern}")
+  }
+  if (!is.null(x@values)) {
+    cli_alert(
+      "values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}"
+    )
+  }
+  if (!is.null(x@examples)) {
+    cli_alert(
+      "examples   : {paste0(capture.output(str(x@examples, give.attr = FALSE)), collapse = ' ')}"
+    )
+  }
+  if (!is.null(x@description)) {
+    cli_alert("description: {x@description}")
+  }
   invisible(x)
 }
 
@@ -243,7 +278,7 @@ as.list.DTAColumnSpec <- function(x, ...) {
   x <- list(
     id = x@id,
     label = x@label,
-    
+
     nullable = x@nullable,
     description = x@description,
     values = x@values,
@@ -263,7 +298,7 @@ as.list.DTAColumnSpec <- function(x, ...) {
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema type.
 #' @export
-if(!exists("to_json_schema_type", mode="function")) {
+if (!exists("to_json_schema_type", mode = "function")) {
   to_json_schema_type <- new_generic("to_json_schema_type", "x")
 }
 #' @export
@@ -283,7 +318,7 @@ method(to_json_schema_type, DTAColumnSpec) <- function(x) {
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema length.
 #' @export
-if(!exists("to_json_schema_length", mode="function")) {
+if (!exists("to_json_schema_length", mode = "function")) {
   to_json_schema_length <- new_generic("to_json_schema_length", "x")
 }
 #' @export
@@ -294,17 +329,17 @@ method(to_json_schema_length, DTAColumnSpec) <- function(x) {
 
 #' @name to_json_schema
 #' @rdname to_json_schema-DTAColumnSpec
-#' @title to_json_schema 
+#' @title to_json_schema
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema.
-#' @export 
-if(!exists("to_json_schema", mode="function")) {
+#' @export
+if (!exists("to_json_schema", mode = "function")) {
   to_json_schema <- new_generic("to_json_schema", "x")
 }
 #' @export
 method(to_json_schema, DTAColumnSpec) <- function(x) {
   schema <- list()
-  
+
   schema$type <- to_json_schema_type(x)
 
   schema$maxLength <- to_json_schema_length(x)
@@ -338,4 +373,3 @@ method(to_json_schema, DTAColumnSpec) <- function(x) {
 
   return(schema)
 }
-

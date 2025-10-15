@@ -19,7 +19,7 @@
 #'   column = "id"
 #' )
 #' @include DTARule-class.R
-DTARuleColUnique <- new_class(
+DTARuleColUnique <- S7::new_class(
   "DTARuleColUnique",
   parent = DTARule,
 
@@ -76,9 +76,10 @@ method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
 
-  message <- paste0("column(s): ", 
-                      paste(paste0("{.field ", x@column, "}"), 
-                          collapse = ", "))
+  message <- paste0(
+    "column(s): ",
+    paste(paste0("{.field ", x@column, "}"), collapse = ", ")
+  )
   cli_text(message)
 }
 
@@ -92,7 +93,8 @@ method(print, DTARule) <- function(x) {
 #'  create_example_DTARuleColUnique()
 #' @name create_example_DTARuleColUnique
 #' @export
-create_example_DTARuleColUnique <- function(index = 1) { # nolint
+create_example_DTARuleColUnique <- function(index = 1) {
+  # nolint
   if (index == 1) {
     return(DTAtools::DTARuleColUnique(
       id = "rule_unique1",
@@ -122,7 +124,8 @@ create_example_DTARuleColUnique <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleColUnique) <- function(x, tab) { # nolint
+method(check, DTARuleColUnique) <- function(x, tab) {
+  # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")

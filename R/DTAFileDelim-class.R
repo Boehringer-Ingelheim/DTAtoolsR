@@ -46,7 +46,8 @@ DTAFileDelim <- S7::new_class(
         pattern = pattern,
         has_header = has_header,
         quote = quote,
-        sep = "\t")
+        sep = "\t"
+      )
     )
   }
 )
@@ -57,6 +58,8 @@ DTAFileDelim <- S7::new_class(
 #' Reads a TSV file using the parameters specified in a
 #' \code{DTAFileDelim} object. This method uses \code{arrow::read_delim_arrow}
 #' for efficient TSV parsing.
+#'
+#' @importFrom arrow read_delim_arrow
 #'
 #' @param x A \code{DTAFileDelim} object containing file reading parameters.
 #' @param file A character string specifying the path to the file to be read.
@@ -81,7 +84,7 @@ method(read_file_execution, DTAFileDelim) <- function(x, file) {
 #' Print method for DTAFileDelim objects.
 #' @param x An object of class DTAFileDelim
 #' @param ... Additional arguments (not used)
-#' @importFrom cli cli_alert_info cli_alert cli_text cli_div
+#' @importFrom cli cli_text cli_div
 #' @return Invisibly returns the input object
 #' @examples
 #' library(DTAtools)
@@ -91,12 +94,9 @@ method(read_file_execution, DTAFileDelim) <- function(x, file) {
 #' @export
 method(print, DTAFileDelim) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFileDelim}>")
+  cli::cli_text("<{.emph DTAFileDelim}>")
 
   print_info(x)
 
   invisible(x)
 }
-
-
-

@@ -26,7 +26,7 @@
 #' DTA(datasets = list(data = data_obj))
 #' }
 #' @export
-DTA <- new_class(
+DTA <- S7::new_class(
   "DTA",
   constructor = function(
     datasets = NULL,
@@ -52,7 +52,7 @@ DTA <- new_class(
   },
   properties = list(
     datasets = class_list,
-    metadata = class_DTAMetadata
+    metadata = class_DTAMetaData
   )
 )
 
@@ -80,7 +80,7 @@ method(metadata, DTA) <- function(x) {
 #' Method to get one or more datasetss from a DTA object.
 #' @importFrom cli cli_alert_info cli_abort
 #' @param x An object of class DTA.
-#' @param name Optional single character or single integer. if NULL, returns a 
+#' @param name Optional single character or single integer. if NULL, returns a
 #' list of all datasetss. If character, returns the datasets with the specified name.
 #' If integer, returns the datasets at the specified index.
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
@@ -98,8 +98,15 @@ if (!exists("datasets", mode = "function")) {
 
 #' @export
 method(datasets, DTA) <- function(x, name = NULL) {
-  if(!is.null(name) && !is.character(name) && !is.numeric(name) && length(name) != 1) {
-    cli_abort("'name' must be a single character vector, single numeric index or NULL.")
+  if (
+    !is.null(name) &&
+      !is.character(name) &&
+      !is.numeric(name) &&
+      length(name) != 1
+  ) {
+    cli_abort(
+      "'name' must be a single character vector, single numeric index or NULL."
+    )
   }
   all_datasetss <- x@datasets
 
@@ -141,21 +148,23 @@ method(print, DTA) <- function(x, ...) {
   cli_text("<{.emph DTA}>")
   print_short_info(x@metadata)
 
-
   n_ds <- length(x@datasets)
 
   if (!is.null(x@datasets) && n_ds > 0) {
     ds_names <- names(x@datasets)
-    
+
     if (n_ds > 10) {
       shown_names <- c(ds_names[1:9], "...", ds_names[n_ds])
     } else {
       shown_names <- ds_names
     }
-    
-    alert_message <- paste0("Datasets (", n_ds, "): ", 
-                           paste(paste0("{.field ", shown_names, "}"), 
-                                collapse = ", "))
+
+    alert_message <- paste0(
+      "Datasets (",
+      n_ds,
+      "): ",
+      paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
+    )
     cli_alert_info(alert_message)
   } else {
     cli_alert_info("Datasets: {.emph none}")
@@ -167,7 +176,7 @@ method(print, DTA) <- function(x, ...) {
 #' @title Create Example DTA Object
 #' @description
 #' Creates an example DTA object for demonstration purposes.
-#' @param index index of the example to create 
+#' @param index index of the example to create
 #' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples
@@ -177,7 +186,8 @@ method(print, DTA) <- function(x, ...) {
 #' }
 #' @export
 create_example_DTA <- function(index = 1) {
-  switch (index,
+  switch(
+    index,
     `1` = {
       DTA(
         datasets = list(
@@ -187,12 +197,9 @@ create_example_DTA <- function(index = 1) {
         metadata = create_example_DTAMetaData()
       )
     },
-    `2` = {
-
-    },
+    `2` = {},
     cli_abort("No example found with index {index}.")
   )
-
 }
 
 
@@ -212,14 +219,14 @@ read_dta_from_yaml <- function(file) {
   if (!file.exists(file)) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
-  
+
   yaml_data <- yaml::read_yaml(file)
-  
+
   # Check required top-level elements
   if (is.null(yaml_data$metadata)) {
     cli_abort("YAML file must contain 'metadata' section")
   }
-  
+
   dta_from_list(yaml_data)
 }
 
@@ -235,44 +242,41 @@ read_dta_from_yaml <- function(file) {
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' yaml_data <- yaml::read_yaml(file)
 #' dta <- dta_from_list(yaml_data)
-#' 
+#'
 #' @export
 dta_from_list <- function(x) {
   if (!is.list(x)) {
     cli_abort("x is not a list")
   }
-  
+
   # Check required top-level elements
   if (is.null(x$metadata)) {
     cli_abort("x contain 'metadata' section")
   }
-  
+
   if (is.null(x$datasets)) {
     cli_alert_warning("No 'datasets' section found in list")
     x$datasets <- list()
   }
-  
+
   # Validate metadata structure
   if (is.null(x$metadata$title)) {
     cli_abort("Metadata section must contain 'title' field")
   }
-  
+
   if (is.null(x$metadata$version)) {
     cli_abort("Metadata section must contain 'version' field")
   }
-  
+
   # Create metadata object
   metadata <- do.call(DTAMetaData, x$metadata)
-  
+
   # Create dataset objects
   datasets_list <- dta_dataset_from_list(x$datasets)
-  
+
   # Create and return DTA object
   DTA(
     datasets = datasets_list,
     metadata = metadata
   )
 }
-
-
-
