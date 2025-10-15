@@ -63,7 +63,7 @@ Specification contain definitions of:
 
 - **columns:** defines column names, format specification and optionally patterns or selection for values in the column. More details in section [YAML Column Format](#yaml-column-format).
 - **rules:** defines rules for columns, e.g. if column A is empty, then columns B must contain a value. More details in section [YAML Schema Rule Specification](#yaml-schema-rule-specification).
-- **metadata:** DTA meta data about version, author etc. More details in section [YAML Metadata].
+- **metadata:** DTA meta data about version, author etc. More details in section [YAML Metadata](#yaml-metadata).
 
 First, you import the specifications from a YAML file.
 
@@ -105,7 +105,7 @@ writeTableToFile(
 
 If you want to export the specifications stored in the YAML as a table to Word file you can use this function:
 
-``` r
+```r
 export_specs_table(specs, "dta_spec_table.docx")
 ```
 
@@ -113,11 +113,11 @@ export_specs_table(specs, "dta_spec_table.docx")
 
 Exporting all defined potential values in a column to a word table.
 
-``` r
+```r
 export_column_value_table(specs, "column_value_table.docx", id = "VISIT")
 ```
 
-## YAML Column Format {#yaml-column-format}
+## YAML Column Format
 
 Columns specifications can contain
 
@@ -158,7 +158,7 @@ columns:
       - "other"
 ```
 
-## YAML Schema Rule Specification {#yaml-schema-rule-specification}
+## YAML Schema Rule Specification
 
 The `DTAtools` package supports schema-based validation of tabular data using declarative rules defined in YAML. These rules are evaluated after column-level validation and allow for complex inter-column logic enforcement.
 
@@ -332,13 +332,13 @@ metadata:
 
 ### Validation Functions
 
--   `validate_table()`: Validates a data frame against a spec specs
+- `validate_table()`: Validates a data frame against a spec specs
 
 ### Export Functions
 
--   `write_table_to_file()`: Write validated tables to disk with optional compression and metadata
--   `export_specs_table()`: Export full spec documentation to Word
--   `export_column_value_table()`: Export allowed values of a column to Word
+- `write_table_to_file()`: Write validated tables to disk with optional compression and metadata
+- `export_specs_table()`: Export full spec documentation to Word
+- `export_column_value_table()`: Export allowed values of a column to Word
 
 #### Rules Engine
 
