@@ -29,11 +29,10 @@ DTAColumnSpecCollection <- new_class(
       )
     }
 
-
-    if (is.null(names(self@columns))) {
-      names(self@columns) <- sapply(self@columns, function(col) col@id)
+    if (is.null(names(columns))) {
+      names(columns) <- sapply(columns, function(col) col@id)
     } 
-    
+
     new_object(
       S7_object(),
       columns = columns,
@@ -89,15 +88,15 @@ DTAColumnSpecCollection <- new_class(
 #' column_preview(x)
 #' @export
 column_preview <- new_generic("column_preview", "x")
-method(column_preview, DTAColumnSpecCollection) <- function(x) {
-  if (length(x@columns) > 5) {
+method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
+  if (length(x@columns) > n) {
     col_preview <- str_flatten_comma(
-        c(unlist(map(x@columns[1:4], function(y) y@id)),
+        c(unlist(map(x@columns[1:(n-1)], function(y) y@id)),
         "...",
         x@columns[[length(x@columns)]]@id)
     )
 
-  } else if (length(x@columns) <= 5) {
+  } else if (length(x@columns) <= n) {
     col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
   } else {
     col_preview <- "not set"
@@ -189,7 +188,7 @@ if(!exists("names", mode="function")) {
   names <- new_generic("names", "x")
 }
 method(names, DTAColumnSpecCollection) <- function(x) {
-  return(sapply(x@columns, function(col)  col@id))
+  return(as.character(sapply(x@columns, function(col)  col@id)))
 }
 
 #' @title Get Column by ID Method

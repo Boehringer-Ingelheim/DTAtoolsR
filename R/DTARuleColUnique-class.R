@@ -8,7 +8,7 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param column list of column that will be collectively checked if the
+#' @param columns columns that will be collectively checked if the
 #' combinations are unique throughout the table
 #' @return An object of class `DTARule`.
 #'
@@ -16,7 +16,7 @@
 #' # Create a check_unique rule
 #' rule2 <- DTAtools::DTARuleColUnique(
 #'   id = "rule2",
-#'   column = "id"
+#'   columns = "id"
 #' )
 #' @include DTARule-class.R
 DTARuleColUnique <- new_class(
@@ -26,16 +26,25 @@ DTARuleColUnique <- new_class(
   constructor = function(
     id,
     type,
-    column = NULL,
+    columns = NULL,
     description = NULL
   ) {
+
+    if(is.list(columns)) {
+      columns <- unlist(columns)
+    }
+    if(!is.character(columns)) {
+      cli_abort("'columns' must be a character vector or list of column names.")
+    }
+    
+    # Create the class object
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
         type = "col_unique",
         description = description
       ),
-      column = column
+      columns = columns
     )
   },
 
@@ -43,7 +52,7 @@ DTARuleColUnique <- new_class(
   properties = list(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
-    column = class_character_or_list
+    columns = class_character
   ),
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
@@ -54,8 +63,8 @@ DTARuleColUnique <- new_class(
       "'type' must be 'check_unique'."
     }
 
-    if (is.null(self@column) || length(self@column) < 1) {
-      "'column' must be a non-empty list of column names."
+    if (is.null(self@columns) || length(self@columns) < 1) {
+      "'columns' must be a non-empty list of column names."
     }
   }
 )
@@ -97,13 +106,13 @@ create_example_DTARuleColUnique <- function(index = 1) { # nolint
     return(DTAtools::DTARuleColUnique(
       id = "rule_unique1",
       type = "check_unique",
-      column = "id"
+      columns = "SUBJID"
     ))
   } else if (index == 2) {
     return(DTAtools::DTARuleColUnique(
       id = "rule_unqiue2",
       type = "check_unique",
-      column = c("id", "visit")
+      columns = c("SUBJID", "VISIT")
     ))
   } else {
     cli::cli_abort("No example found with index {index}.")
@@ -142,7 +151,7 @@ as.list.DTARuleColCondition <- function(x, ...) {
   list(
     id = x@id,
     type = x@type,
-    column = x@column,
+    columns = x@columns,
     min_range = x@min_range,
     max_range = x@max_range
   )

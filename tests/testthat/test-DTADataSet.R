@@ -1,4 +1,7 @@
 test_that("DTADataSet object is created and tables are accessible", {
+  path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+  collection <- import_dta_dataset_from_yaml(path)
+
   specs <- import_specs_from_yaml(system.file("extdata", "gf_dataset.yaml", package = "DTAtools"))
   path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
   file_info <- DTAFileTSV("gf_data_small.tsv")
