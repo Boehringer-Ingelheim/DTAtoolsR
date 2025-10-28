@@ -43,12 +43,14 @@ DTAFileTabular <- S7::new_class(
     encoding = "UTF-8"
   ) {
     new_object(
-      .parent = DTAFile(filename = filename,
-                  number_of_files = number_of_files,
-                  min_number_of_files = min_number_of_files,
-                  max_number_of_files = max_number_of_files,
-                  info = info,
-                  pattern = pattern),
+      .parent = DTAFile(
+        filename = filename,
+        number_of_files = number_of_files,
+        min_number_of_files = min_number_of_files,
+        max_number_of_files = max_number_of_files,
+        info = info,
+        pattern = pattern
+      ),
       sep = sep,
       has_header = has_header,
       quote = quote,
@@ -89,14 +91,18 @@ DTAFileTabular <- S7::new_class(
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 method(read_file_execution, DTAFileTabular) <- function(x, file) {
-  cli::cli_abort("This method is not implemented. You need to
-  use an object of a class which is derived from DTAFileTabular class.")
+  cli::cli_abort(
+    "This method is not implemented. You need to
+  use an object of a class which is derived from DTAFileTabular class."
+  )
 }
 
 
 #' Print Information About a DTAFile Object
 #'
 #' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
+#'
+#' @importFrom cli cli_alert_info cli_alert
 #'
 #' @param x A \code{DTAFile} object whose information is to be printed.
 #'
@@ -121,17 +127,17 @@ method(print_info, DTAFileTabular) <- function(x) {
   # TODO This does not work, currently a workaround
   #super(print_info, x)
   #method(print_info, DTAFile)(x)
-  cli_alert_info("Filename: {x@filename}")
-  cli_alert("Pattern: {x@pattern}")
-  if(x@min_number_of_files == x@max_number_of_files) {
-    cli_alert("Number of files: {x@min_number_of_files}")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  if (x@min_number_of_files == x@max_number_of_files) {
+    cli::cli_alert("Number of files: {x@min_number_of_files}")
   } else {
-    cli_alert("Min number of files: {x@min_number_of_files}")
-    cli_alert("Max number of files: {x@max_number_of_files}")
-  } 
-  cli_alert("Separator: {x@sep}")
-  cli_alert("Has header: {x@has_header}")
-  cli_alert("Quote: {x@quote}")
+    cli::cli_alert("Min number of files: {x@min_number_of_files}")
+    cli::cli_alert("Max number of files: {x@max_number_of_files}")
+  }
+  cli::cli_alert("Separator: {x@sep}")
+  cli::cli_alert("Has header: {x@has_header}")
+  cli::cli_alert("Quote: {x@quote}")
 
   invisible(x)
 }

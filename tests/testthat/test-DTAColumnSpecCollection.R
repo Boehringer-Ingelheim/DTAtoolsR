@@ -1,6 +1,5 @@
 test_that("Import specs from YAML file", {
   specs <- import_specs_from_yaml(system.file("extdata", "gf_dataset.yaml", package = "DTAtools"))
-
   expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
   expect_named(specs,  c("STUDYID", "DOMAIN", "SUBJIDN", "GFGRPID", "GFREFID", "GFTESTCD", "GFTEST", "GFTSTDTL", 
   "GFCAT", "GFORRES", "GFORRESU", "GFORREF", "GFRESCAT", "GFGENREF", "GFSYM", "GFGENLOC", "GFGENSR", "GFSEQID", "GFPVRID", "GFSTAT", "GFREASND",
@@ -49,6 +48,7 @@ test_that("specs_from_list constructs valid object and returns rules", {
 
   print(specs)
   # Assertions
+
   expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
   expect_named(specs@columns, c("STUDYID", "VISIT"))
   expect_equal(specs@columns$STUDYID@id, "STUDYID")
@@ -62,5 +62,6 @@ test_that("specs_from_list constructs valid object and returns rules", {
   # Test DTAColumnSpecCollectionToList
 
   list <- as.list.DTAColumnSpecCollection(specs)
+
   expect_type(list, "list")
 })

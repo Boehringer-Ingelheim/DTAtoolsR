@@ -15,7 +15,7 @@
 #'  # do not manually create DTARule objects, use derived classes instead
 #' }
 #' @export
-DTARule <- new_class(
+DTARule <- S7::new_class(
   "DTARule",
 
   # Constructor for the DTARule class
@@ -45,8 +45,10 @@ DTARule <- new_class(
     }
 
     # description can be NULL or a character of length 1
-    if (!is.null(self@description) &&
-        (!is.character(self@description) || length(self@description) != 1)) {
+    if (
+      !is.null(self@description) &&
+        (!is.character(self@description) || length(self@description) != 1)
+    ) {
       "'description' must be NULL or a character of length 1."
     }
   }
@@ -58,7 +60,7 @@ DTARule <- new_class(
 #' Print overview for DTARule
 #' @param x An object of class DTARule
 #' @importFrom stringr str_glue
-#' @importFrom cli cli_alert cli_text
+#' @importFrom cli cli_alert cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  print(rule)
@@ -67,8 +69,8 @@ DTARule <- new_class(
 #' @export
 method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTARule}> : {.field {x@id}}")
-  cli_alert("type: {x@type}")
+  cli::cli_text("<{.emph DTARule}> : {.field {x@id}}")
+  cli::cli_alert("type: {x@type}")
 }
 
 
@@ -84,9 +86,12 @@ method(print, DTARule) <- function(x) {
 #' @export
 check <- new_generic("check", "x")
 
-method(check, DTARule) <- function(x, index = 1) { #nolint
-  cli::cli_abort(stringr::str_c("Check needs to be run from Class",
-    " derived from DTAtools::DTARule class."))
+method(check, DTARule) <- function(x, index = 1) {
+  #nolint
+  cli::cli_abort(stringr::str_c(
+    "Check needs to be run from Class",
+    " derived from DTAtools::DTARule class."
+  ))
 }
 
 
@@ -95,7 +100,7 @@ method(check, DTARule) <- function(x, index = 1) { #nolint
 #' Factory function to create a DTARule object of a specified type.
 #'
 #' @param id A character string specifying the rule identifier.
-#' @param type A character string specifying the type of rule to create. 
+#' @param type A character string specifying the type of rule to create.
 #'   Supported types are \code{"col_condition"}, \code{"col_range"}, and \code{"col_unique"}.
 #' @param ... Additional arguments passed to the specific DTARule constructor.
 #'
@@ -103,11 +108,12 @@ method(check, DTARule) <- function(x, index = 1) { #nolint
 #' @export
 #'
 #' @examples
-#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
+#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) # TODO not working - Replace
 #' DTARuleFactory("rule2", "col_range", column = "score", min = 0, max = 100)
 #' DTARuleFactory("rule3", "col_unique", column = "id")
 DTARuleFactory <- function(id, type, ...) {
-  switch(type,
+  switch(
+    type,
     col_condition = DTAtools::DTARuleColCondition(
       id = id,
       ...
@@ -134,10 +140,11 @@ DTARuleFactory <- function(id, type, ...) {
 #' @param ... Additional arguments (not used).
 #' @return A named list containing the properties of the DTARule object.
 #' @export
-as.list.DTARule <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARule
+method(as.list, DTARule) <- function(x, ...) {
   list(
     id = x@id,
     type = x@type
   )
 }
-

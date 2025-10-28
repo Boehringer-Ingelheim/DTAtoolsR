@@ -11,10 +11,10 @@
 #' @examples
 #'
 #' \dontrun{
-#' # Create sample 
+#' # Create sample
 #' }
 #' @export
-DTADataSet <- new_class(
+DTADataSet <- S7::new_class(
   "DTADataSet",
   constructor = function(
     name,
@@ -25,7 +25,7 @@ DTADataSet <- new_class(
     template_version = NULL,
     template_date = NULL
   ) {
-    if(inherits(files, "DTAtools::DTAFile")) {
+    if (inherits(files, "DTAtools::DTAFile")) {
       files = list(files)
     }
 
@@ -37,7 +37,7 @@ DTADataSet <- new_class(
     )
   },
   properties = list(
-    name = class_character, 
+    name = class_character,
     type = class_character,
     files = class_list, # list of DTAFile
     template_source = class_character_or_null,
@@ -53,7 +53,9 @@ DTADataSet <- new_class(
       cli_abort("All elements in 'files' must be of class 'DTAFile'")
     }
     if (!self@type %in% `__DTAtools_supported_dataset_types__`) {
-      cli_abort("Property 'type' is '{self@type})', must be one of: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}")
+      cli_abort(
+        "Property 'type' is '{self@type})', must be one of: {str_flatten_comma(`__DTAtools_supported_dataset_types__`)}"
+      )
     }
   }
 )
@@ -110,7 +112,7 @@ method(min_number_of_files, DTADataSet) <- function(x) {
 method(print, DTADataSet) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSet}> : {.field {x@name}}")
-  
+
   print_info(x)
   invisible(x)
 }
@@ -142,11 +144,11 @@ method(print_info, DTADataSet) <- function(x) {
   if (!is.null(x@description)) {
     cli_text("- Description: {x@description}")
   }
-  
+
   if (!is.null(x@template_source)) {
     cli_text("- Template source: {.emph {x@template_source}}")
   }
-  
+
   if (!is.null(x@template_source)) {
     cli_text("- Template source: {.emph {x@template_source}}")
   }
@@ -165,19 +167,21 @@ method(print_info, DTADataSet) <- function(x) {
     file_label_min <- if (min_number_of_files == 1) "file" else "files"
     file_label_max <- if (max_number_of_files == 1) "file" else "files"
     if (min_number_of_files == max_number_of_files) {
-      alert_message <- str_glue("Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} {file_label_min}")
+      alert_message <- str_glue(
+        "Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} {file_label_min}"
+      )
     } else {
-      alert_message <- str_glue("Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} to {max_number_of_files} {file_label_max}")
+      alert_message <- str_glue(
+        "Files: {length(x@files)} {entry_label} with a total of {min_number_of_files} to {max_number_of_files} {file_label_max}"
+      )
     }
-    cli_alert_info(alert_message) 
+    cli_alert_info(alert_message)
     for (f in x@files) {
       print_short_info(f)
     }
   }
 }
 
-
-  
 
 #' @title Print Short Information for DTADataset
 #' @description
@@ -220,17 +224,20 @@ method(print_short_info, DTADataSet) <- function(x) {
     file_info <- str_glue("{min_n} to {max_n} files")
   }
 
-  if(max_n == 0) {
+  if (max_n == 0) {
     message <- str_c('Files: none associated, type: {x@type}')
   } else {
-   message <- paste0("Files: ", str_c('{.field ', names(x@name), '}'), str_glue(" ({file_info}, {x@type})"))
+    message <- paste0(
+      "Files: ",
+      str_c('{.field ', names(x@name), '}'),
+      str_glue(" ({file_info}, {x@type})")
+    )
   }
-   
+
   cli_alert(message)
 
   return(invisible(x))
 }
-
 
 
 #' @title Read DTADataSet from YAML
@@ -249,9 +256,9 @@ read_dta_dataset_from_yaml <- function(file) {
   if (!file.exists(file)) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
-  
+
   yaml_data <- yaml::read_yaml(file)
-  
+
   dta_dataset_from_list(yaml_data)
 }
 
@@ -270,15 +277,15 @@ read_dta_dataset_from_yaml <- function(file) {
 #' dataset <- dta_dataset_from_list(yaml_dataset)
 #' @export
 dta_dataset_from_list <- function(x, recursive = TRUE) {
-  if(is.null(x$name)) {
-    if(!is.null(x[[1]]$name)) {
+  if (is.null(x$name)) {
+    if (!is.null(x[[1]]$name)) {
       # there are multiple datasets which need to be processed separately
       return(lapply(x, dta_dataset_from_list, recursive = FALSE))
     } else {
       cli_abort("List must contain a 'name' field or be a list of datasets.")
     }
   }
-  
+
   if (is.null(x$type)) {
     cli_abort("Dataset '{x$name}' must contain a 'type'")
   }

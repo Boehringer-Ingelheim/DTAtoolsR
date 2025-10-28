@@ -21,7 +21,7 @@ An object of class \code{DTARuleColCondition}, \code{DTARuleColRange}, or \code{
 Factory function to create a DTARule object of a specified type.
 }
 \examples{
-DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) #TODO check
+DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) # TODO not working - Replace
 DTARuleFactory("rule2", "col_range", column = "score", min = 0, max = 100)
 DTARuleFactory("rule3", "col_unique", column = "id")
 }

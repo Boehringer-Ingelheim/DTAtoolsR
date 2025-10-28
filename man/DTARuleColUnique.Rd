@@ -9,7 +9,7 @@ DTARuleColUnique(id, type, column = NULL, description = NULL)
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{column}{list of column that will be collectively checked if the
+\item{column}{list of columns that will be collectively checked if the
 combinations are unique throughout the table}
 }
 \value{

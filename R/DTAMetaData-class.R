@@ -12,7 +12,7 @@
 #' \dontrun{
 #' DTAMetaData(version = "1.0", author = "John Doe")
 #' }
-DTAMetaData <- new_class(
+DTAMetaData <- S7::new_class(
   "DTAMetaData",
   constructor = function(
     title,
@@ -32,7 +32,7 @@ DTAMetaData <- new_class(
       version = version,
       date = date,
       header = header,
-      receiver = receiver, 
+      receiver = receiver,
       supplier = supplier,
       transmission = transmission
     )
@@ -53,10 +53,8 @@ DTAMetaData <- new_class(
     if (is.null(self@title) || self@title == "") {
       "'title' cannot be an empty."
     }
-    
   }
 )
-
 
 
 #' @title Print DTAMetaData Object
@@ -65,7 +63,7 @@ DTAMetaData <- new_class(
 #' @param x An object of class DTAMetadata
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom cli cli_div cli_text
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAMetaData())
@@ -74,9 +72,9 @@ DTAMetaData <- new_class(
 #' @export
 method(print, DTAMetaData) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAMetaData}>")
-  
-  print_info(x) 
+  cli::cli_text("<{.emph DTAMetaData}>")
+
+  print_info(x)
 
   invisible(x)
 }
@@ -84,10 +82,11 @@ method(print, DTAMetaData) <- function(x, ...) {
 #' @title Print Info DTAMetaData Object
 #' @description
 #' Print method for DTAMetadata objects.
+#' @importFrom cli cli_alert_info cli_alert cli_text
+#'
 #' @param x An object of class DTAMetadata
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_alert
 #' @examples
 #' library(DTAtools)
 #' print(create_example_DTAMetaData())
@@ -98,21 +97,27 @@ if (!exists("print_info", mode = "function")) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTAMetaData) <- function(x, ...) {
-
-  if (!is.null(x@title))   cli_alert_info("Title: {x@title}")
-  if (!is.null(x@version)) cli_alert_info("Version: {x@version}")
-  if (!is.null(x@date))    cli_alert_info("Date: {x@date}")
-  if (!is.null(x@header))  cli_alert_info("Header: {x@header}")
-
+  if (!is.null(x@title)) {
+    cli::cli_alert_info("Title: {x@title}")
+  }
+  if (!is.null(x@version)) {
+    cli::cli_alert_info("Version: {x@version}")
+  }
+  if (!is.null(x@date)) {
+    cli::cli_alert_info("Date: {x@date}")
+  }
+  if (!is.null(x@header)) {
+    cli::cli_alert_info("Header: {x@header}")
+  }
 
   if (length(x@receiver) > 0) {
-    cli_alert_info("Receiver:")
+    cli::cli_alert_info("Receiver:")
     for (nm in names(x@receiver)) {
-      if(nm == "contacts") { 
-        cli_alert("  {nm}: ")
+      if (nm == "contacts") {
+        cli::cli_alert("  {nm}: ")
         contact <- x@receiver[[nm]]
         if (!is.null(contact$signature)) {
-          if(contact$signature) {
+          if (contact$signature) {
             contact$signature <- "signature"
           } else {
             contact$signature <- NULL
@@ -120,40 +125,40 @@ method(print_info, DTAMetaData) <- function(x, ...) {
         }
         # TODO work on proper handling of boolean reviewer and signature field
         if (!is.null(contact$reviewer)) {
-          if(contact$reviewer) {
+          if (contact$reviewer) {
             contact$reviewer <- "reviewer"
           } else {
             contact$reviewer <- NULL
           }
         }
 
-        for(nc in 1:length(x@receiver[[nm]])) {
-          cli_text(" -    {.field {nc}}: {contact[[nc]]}")
+        for (nc in 1:length(x@receiver[[nm]])) {
+          cli::cli_text(" -    {.field {nc}}: {contact[[nc]]}")
         }
       } else {
-        cli_alert("  {nm}: {x@receiver[[nm]]}")
+        cli::cli_alert("  {nm}: {x@receiver[[nm]]}")
       }
     }
   }
 
   if (length(x@supplier) > 0) {
-    cli_alert_info("Supplier:")
+    cli::cli_alert_info("Supplier:")
     for (nm in names(x@supplier)) {
-      if(nm == "contacts") { 
-        cli_alert("  {nm}:")
-          for(nc in 1:length(x@supplier[[nm]])) {
-             cli_text(" -    {.field {nc}}: {x@supplier[[nm]][[nc]]}")
-          }
+      if (nm == "contacts") {
+        cli::cli_alert("  {nm}:")
+        for (nc in 1:length(x@supplier[[nm]])) {
+          cli::cli_text(" -    {.field {nc}}: {x@supplier[[nm]][[nc]]}")
+        }
       } else {
-        cli_alert("  {nm}: {x@supplier[[nm]]}")
+        cli::cli_alert("  {nm}: {x@supplier[[nm]]}")
       }
     }
   }
 
   if (length(x@transmission) > 0) {
-    cli_alert_info("Transmission:")
+    cli::cli_alert_info("Transmission:")
     for (nm in names(x@transmission)) {
-      cli_alert("  {nm}: {x@transmission[[nm]]}")
+      cli::cli_alert("  {nm}: {x@transmission[[nm]]}")
     }
   }
 
@@ -167,7 +172,7 @@ method(print_info, DTAMetaData) <- function(x, ...) {
 #' @param x An object of class DTAMetadata
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_alert
+#' @importFrom cli cli_alert_info
 #' @examples
 #' library(DTAtools)
 #' print_short_info(create_example_DTAMetaData())
@@ -179,24 +184,25 @@ if (!exists("print_short_info", mode = "function")) {
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {
   message <- "Metadata: {x@title}"
-  
+
   if (!is.null(x@version)) {
-    message <- paste0(message, " ", x@version)  
+    message <- paste0(message, " ", x@version)
   }
   if (!is.null(x@date)) {
-    message <- paste0(message, " ", format(x@date, "%Y-%m-%d"))  
+    message <- paste0(message, " ", format(x@date, "%Y-%m-%d"))
   }
 
-  cli_alert_info(message)
+  cli::cli_alert_info(message)
 
   invisible(x)
 }
 
 
-
 #' @title Create Example DTAMetaData Object
 #' @description This function creates an example \code{DTAMetaData}
 #' object with default values.
+#'
+#' @importFrom cli cli_abort
 #'
 #' @return An object of class \code{DTAMetaData} with example metadata.
 #' @examples
@@ -204,7 +210,8 @@ method(print_short_info, DTAMetaData) <- function(x, ...) {
 #' example_metadata <- create_example_DTAMetaData()
 #' print(example_metadata)
 #' @export
-create_example_DTAMetaData <- function(index = 1) { # nolint
+create_example_DTAMetaData <- function(index = 1) {
+  # nolint
   switch(
     index,
     `1` = DTAMetaData(
@@ -213,7 +220,7 @@ create_example_DTAMetaData <- function(index = 1) { # nolint
       date = Sys.Date(),
       header = "Example Company header"
     ),
-    `2` = DTAMetaData( 
+    `2` = DTAMetaData(
       title = "Example DTA",
       version = "2.0"
     ),

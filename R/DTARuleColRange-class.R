@@ -22,7 +22,8 @@
 #'   range = c(18, 65)
 #' )
 #' @include DTARule-class.R
-DTARuleColRange <- new_class( # nolint: object_name_linter.
+DTARuleColRange <- S7::new_class(
+  # nolint: object_name_linter.
   "DTARuleColRange",
   parent = DTARule,
   # Constructor for the DTARuleColRange class
@@ -95,7 +96,6 @@ DTARuleColRange <- new_class( # nolint: object_name_linter.
 )
 
 
-
 #' @title print
 #' @description
 #' Print overview for DTARuleColRange
@@ -127,7 +127,8 @@ method(print, DTARuleColRange) <- function(x) {
 #'  create_example_DTARuleColRange()
 #' @name create_example_DTARuleColRange
 #' @export
-create_example_DTARuleColRange <- function(index = 1) { # nolint
+create_example_DTARuleColRange <- function(index = 1) {
+  # nolint
   if (index == 1) {
     return(DTAtools::DTARuleColRange(
       id = "check_age_range",
@@ -150,7 +151,8 @@ create_example_DTARuleColRange <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleColRange) <- function(x, tab) { # nolint
+method(check, DTARuleColRange) <- function(x, tab) {
+  # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")
@@ -159,14 +161,16 @@ method(check, DTARuleColRange) <- function(x, tab) { # nolint
   # TODO from here
 }
 
-#' @title as.list for DTARuleColCondition
+#' @title as.list for DTARuleColRange
 #' @description
-#' Convert a DTARuleColCondition object to a list.
-#' @param x An object of class DTARuleColCondition
+#' Convert a DTARuleColRange object to a list.
+#' @param x An object of class DTARuleColRange
 #' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @return A named list containing the properties of the DTARuleColRange object.
 #' @export
-as.list.DTARuleColCondition <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARuleColRange
+method(as.list, DTARuleColRange) <- function(x) {
   list(
     id = x@id,
     type = x@type,

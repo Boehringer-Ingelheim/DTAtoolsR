@@ -6,8 +6,7 @@
 #' quoting, and column types.
 #'
 #' @import S7
-#' @importFrom cli cli_abort cli_alert_info symbol
-#' @importFrom stringr str_detect str_glue
+#' @importFrom cli cli_abort
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
@@ -32,7 +31,7 @@
 #'   DTAFile("file\\d+\\.txt", pattern = TRUE)
 #' }
 #' @export
-DTAFile <- new_class(
+DTAFile <- S7::new_class(
   "DTAFile",
   constructor = function(
     filename,
@@ -43,40 +42,60 @@ DTAFile <- new_class(
     max_number_of_files = NULL,
     info = NULL
   ) {
-
     if (is.null(pattern)) {
       pattern <- FALSE
     }
 
-    if (is.null(number_of_files) && is.null(min_number_of_files) && is.null(max_number_of_files)) {
+    if (
+      is.null(number_of_files) &&
+        is.null(min_number_of_files) &&
+        is.null(max_number_of_files)
+    ) {
       number_of_files <- 1
     }
 
     if (!pattern && number_of_files != 1) {
-      cli_abort("if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename.")
+      cli::cli_abort(
+        "if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename."
+      )
     }
 
-    if(length(number_of_files) > 1) {
-      cli_abort("'number_of_files' can only be length 1.")
+    if (length(number_of_files) > 1) {
+      cli::cli_abort("'number_of_files' can only be length 1.")
     }
 
-    if (!is.null(number_of_files) && (!is.null(min_number_of_files) || !is.null(max_number_of_files))) {
-      cli_abort("You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach.")
+    if (
+      !is.null(number_of_files) &&
+        (!is.null(min_number_of_files) || !is.null(max_number_of_files))
+    ) {
+      cli::cli_abort(
+        "You must not set both 'number_of_files' and 'min_number_of_files'/'max_number_of_files'. Choose one approach."
+      )
     }
 
-    if(!is.null(number_of_files) && is.numeric(number_of_files) && length(number_of_files) != 1) {
-      cli_abort("'number_of_files' must be a single number or NULL.")
+    if (
+      !is.null(number_of_files) &&
+        is.numeric(number_of_files) &&
+        length(number_of_files) != 1
+    ) {
+      cli::cli_abort("'number_of_files' must be a single number or NULL.")
     }
 
-    if(!is.null(number_of_files)) {
-      if(!is.numeric(number_of_files)) {
-        cli_abort("'number_of_files' must be a non-negative integer or NULL.")
+    if (!is.null(number_of_files)) {
+      if (!is.numeric(number_of_files)) {
+        cli::cli_abort(
+          "'number_of_files' must be a non-negative integer or NULL."
+        )
       }
       min_number_of_files <- number_of_files
       max_number_of_files <- number_of_files
-    } 
+    }
 
-    if(is.null(number_of_files) && is.null(min_number_of_files) && is.null(max_number_of_files)) {
+    if (
+      is.null(number_of_files) &&
+        is.null(min_number_of_files) &&
+        is.null(max_number_of_files)
+    ) {
       min_number_of_files <- 1
       max_number_of_files <- 1
     }
@@ -100,8 +119,14 @@ DTAFile <- new_class(
     info = class_character_or_list_or_null
   ),
   validator = function(self) {
-    if (!is.character(self@filename) || is.null(self@filename) || self@filename == "") {
-      cli::cli_abort("The 'filename' property must be a non-empty character vector.")
+    if (
+      !is.character(self@filename) ||
+        is.null(self@filename) ||
+        self@filename == ""
+    ) {
+      cli::cli_abort(
+        "The 'filename' property must be a non-empty character vector."
+      )
     }
     if (!is.logical(self@pattern) || length(self@pattern) != 1) {
       cli::cli_abort("The 'pattern' property must be a single logical value.")
@@ -216,8 +241,10 @@ if (!exists("read_file_execution", mode = "function")) {
 #' @rdname read_file_execution
 #' @export
 method(read_file_execution, DTAFile) <- function(x, file) {
-  stop("This method is not implemented. You need to
-  use an object of a class which is derived from this class.")
+  stop(
+    "This method is not implemented. You need to
+  use an object of a class which is derived from this class."
+  )
 }
 
 
@@ -246,13 +273,17 @@ if (!exists("read_file", mode = "function")) {
 #' @export
 method(read_file, DTAFile) <- function(x, file) {
   if (DTAtools::matches_filename(x, basename(file))) {
-    if(file.exists(file)) {
+    if (file.exists(file)) {
       read_file_execution(x, file)
     } else {
-      cli_abort(simpleError(str_glue("File '{file}' cannot be found.")))
+      cli::cli_abort(simpleError(stringr::str_glue(
+        "File '{file}' cannot be found."
+      )))
     }
   } else {
-    cli_abort(simpleError("The provided file does not match the filename in the DTAFileTabular object."))
+    cli::cli_abort(simpleError(
+      "The provided file does not match the filename in the DTAFileTabular object."
+    ))
   }
 }
 
@@ -262,7 +293,7 @@ method(read_file, DTAFile) <- function(x, file) {
 #' @param x An object of class DTAFile
 #' @param ... Additional arguments (not used)
 #' @return Invisibly returns the input object
-#' @importFrom cli cli_alert_info cli_text cli_div
+#' @importFrom cli cli_text cli_div
 #' @examples
 #' \dontrun{
 #'  # do not use this, use derived classes instead, e.g.
@@ -273,7 +304,7 @@ method(read_file, DTAFile) <- function(x, file) {
 #' @export
 method(print, DTAFile) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTAFile}> : {.field {x@name}}")
+  cli::cli_text("<{.emph DTAFile}> : {.field {x@name}}")
 
   print_info(x)
 
@@ -285,6 +316,7 @@ method(print, DTAFile) <- function(x, ...) {
 #'
 #' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
 #'
+#' @importFrom cli cli_alert_info cli_alert
 #' @param x A \code{DTAFile} object whose information is to be printed.
 #'
 #' @return The input object \code{x}, returned invisibly.
@@ -305,22 +337,23 @@ method(print, DTAFile) <- function(x, ...) {
 #  print_info <- new_generic("print_info", "x")
 #}
 method(print_info, DTAFile) <- function(x) {
-  cli_alert_info("Filename: {x@filename}")
-  cli_alert("Pattern: {x@pattern}")
-  if(x@min_number_of_files == x@max_number_of_files) {
-    cli_alert("Number of files: {x@min_number_of_files}")
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  if (x@min_number_of_files == x@max_number_of_files) {
+    cli::cli_alert("Number of files: {x@min_number_of_files}")
   } else {
-    cli_alert("Min number of files: {x@min_number_of_files}")
-    cli_alert("Max number of files: {x@max_number_of_files}")
-  } 
+    cli::cli_alert("Min number of files: {x@min_number_of_files}")
+    cli::cli_alert("Max number of files: {x@max_number_of_files}")
+  }
   invisible(x)
 }
-
 
 
 #' Print Information About a DTAFile Object
 #'
 #' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
+#'
+#' @importFrom cli cli_alert
 #'
 #' @param x A \code{DTAFile} object whose information is to be printed.
 #'
@@ -342,10 +375,14 @@ if (!exists("print_short_info", mode = "function")) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAFile) <- function(x) {
-  if (!x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)) {
-    cli_alert("{x@filename} ({x@min_number_of_files})")
+  if (
+    !x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)
+  ) {
+    cli::cli_alert("{x@filename} ({x@min_number_of_files})")
   } else {
-    cli_alert("{x@filename} ({x@min_number_of_files}-{x@max_number_of_files})")
+    cli::cli_alert(
+      "{x@filename} ({x@min_number_of_files}-{x@max_number_of_files})"
+    )
   }
 
   invisible(x)

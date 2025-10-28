@@ -30,7 +30,8 @@
 #'    )
 #'  )
 #' @include DTARule-class.R
-DTARuleColCondition <- new_class( # nolint: object_name_linter.
+DTARuleColCondition <- S7::new_class(
+  # nolint: object_name_linter.
   "DTARuleColCondition",
   parent = DTARule,
   # Constructor for the DTARule class
@@ -47,7 +48,7 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
         type = "col_condition",
         description = description
       ),
-      
+
       condition = condition,
       then = then
     )
@@ -73,7 +74,6 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
     if (is.null(self@then) || length(self@then) < 1) {
       "'then' must be a non-empty list of conditions."
     }
-
   }
 )
 
@@ -89,16 +89,17 @@ DTARuleColCondition <- new_class( # nolint: object_name_linter.
 #' }
 #' @name print
 #' @export
-method(print, DTARuleColCondition) <- function(x) { # nolint
+method(print, DTARuleColCondition) <- function(x) {
+  # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
 
   # TODO: check more complicated scenarios
   if (is.list(x@condition)) {
     for (i in 1:length(x@condition)) {
-        for (nm in names(x@condition[[i]])) { 
-          cli_alert_info("  {.field {nm}}: {format(x@condition[[i]][[nm]])}")
-        }
+      for (nm in names(x@condition[[i]])) {
+        cli_alert_info("  {.field {nm}}: {format(x@condition[[i]][[nm]])}")
+      }
     }
   } else {
     cli_alert_info("  {format(x@condition)}")
@@ -126,7 +127,8 @@ method(print, DTARuleColCondition) <- function(x) { # nolint
 #'  create_example_DTARuleColCondition()
 #' @name create_example_DTARuleColCondition
 #' @export
-create_example_DTARuleColCondition <- function(index = 1) { # nolint
+create_example_DTARuleColCondition <- function(index = 1) {
+  # nolint
   if (index == 1) {
     return(DTAtools::DTARuleColCondition(
       id = "rule3",
@@ -150,7 +152,8 @@ create_example_DTARuleColCondition <- function(index = 1) { # nolint
 #' }
 #' @name check
 #' @export
-method(check, DTARuleColCondition) <- function(x, tab) { # nolint
+method(check, DTARuleColCondition) <- function(x, tab) {
+  # nolint
 
   if (!inherits(tab, "Table")) {
     cli::cli_abort("The 'tab' argument must be an arrow Table.")
@@ -159,6 +162,7 @@ method(check, DTARuleColCondition) <- function(x, tab) { # nolint
   # TODO from here
 }
 
+
 #' @title as.list for DTARuleColCondition
 #' @description
 #' Convert a DTARuleColCondition object to a list.
@@ -166,7 +170,9 @@ method(check, DTARuleColCondition) <- function(x, tab) { # nolint
 #' @param ... Additional arguments (not used).
 #' @return A named list containing the properties of the DTARuleColCondition object.
 #' @export
-as.list.DTARuleColCondition <- function(x, ...) {
+#' @name as.list
+#' @rdname as.list-DTARuleColCondition
+method(as.list, DTARuleColCondition) <- function(x) {
   list(
     id = x@id,
     type = x@type,
@@ -175,5 +181,3 @@ as.list.DTARuleColCondition <- function(x, ...) {
     then = x@then
   )
 }
-
-

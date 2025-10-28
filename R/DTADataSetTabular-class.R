@@ -6,7 +6,7 @@
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files a list of DTAFile objects specifying input file information.
-#' @param tables List. A list of arrow Table to be validated and included in the DTADataSetTabular object.
+#' @param tables List. A named list of tables to be validated and included in the DTADataSetTabular object.
 #' @return An object of class DTADataSetTabular
 #' @examples
 #' \dontrun{
@@ -21,7 +21,7 @@
 #' data_obj <- DTADataSetTabular(DTAColumnSpecCollection, tables)
 #' }
 #' @export
-DTADataSetTabular <- new_class(
+DTADataSetTabular <- S7::new_class(
   "DTADataSetTabular",
   parent = DTADataSet,
   constructor = function(
@@ -34,13 +34,12 @@ DTADataSetTabular <- new_class(
     template_version = NULL,
     template_date = NULL
   ) {
-    if(inherits(files, "DTAtools::DTAFile")) {
+    if (inherits(files, "DTAtools::DTAFile")) {
       files = list(files)
     }
 
-    if(inherits(tables, "Table")) {
-      tables = list(tables)
-    }
+    # Transform to arrow tables
+    tables <- lapply(tables, function(x) arrow::as_arrow_table)
 
     new_object(
       .parent = DTADataSet(
@@ -52,26 +51,22 @@ DTADataSetTabular <- new_class(
         template_date = template_date,
         description = description
       ),
-      
+
       specs = specs,
       tables = tables
     )
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = class_list # list of arrow Table
+    tables = class_list # list of tables - can be arrow tables etc
   ),
   validator = function(self) {
     # check if all elements of list self@tables inherit from "Table"
-    if (!all(sapply(self@tables, inherits, "Table"))) {
-      cli_abort("All elements in 'tables' must be of class 'Table'")
-    }
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
     }
   }
 )
-
 
 
 #' @title Get Column by ID Method
@@ -140,7 +135,7 @@ method(table, DTADataSetTabular) <- function(x, id = 1) {
 
   tables <- x@tables
 
-  if(length(tables) == 0) {
+  if (length(tables) == 0) {
     cli::cli_abort("No tables found in the container.")
   }
 
@@ -210,20 +205,20 @@ method(labels, DTADataSetTabular) <- function(x) {
 #'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
 #' }
 write_table_to_file <- function(
-    DTADataSetTabular,
-    table,
-    filename,
-    arrange_by = "all",
-    arrange_desc = FALSE,
-    sep = "\t",
-    na = "",
-    row.names = FALSE,
-    overwrite = TRUE,
-    quote = FALSE,
-    compression = c("none", "gzip"),
-    get_md5sum = TRUE,
-    write_md5sum_to_file = TRUE,
-    ...
+  DTADataSetTabular,
+  table,
+  filename,
+  arrange_by = "all",
+  arrange_desc = FALSE,
+  sep = "\t",
+  na = "",
+  row.names = FALSE,
+  overwrite = TRUE,
+  quote = FALSE,
+  compression = c("none", "gzip"),
+  get_md5sum = TRUE,
+  write_md5sum_to_file = TRUE,
+  ...
 ) {
   compression <- match.arg(compression)
 
@@ -369,8 +364,9 @@ create_example_DTADataSetTabular <- function(index = 1) {
     PARAM = c("HEIGHT", "WEIGHT", "BMI"),
     AVAL = c(175.2, 68.5, 22.3)
   ))
-  
-  switch(index,
+
+  switch(
+    index,
     `1` = {
       DTADataSetTabular(
         name = "example_container_specs_without_data",
@@ -378,7 +374,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
       )
     },
     `2` = {
-      DTADataSetTabular( 
+      DTADataSetTabular(
         name = "demographics",
         specs = create_example_DTAColumnSpecCollection(1),
         tables = list("tab1" = table1)
@@ -386,14 +382,13 @@ create_example_DTADataSetTabular <- function(index = 1) {
     },
     `3` = {
       DTADataSetTabular(
-        name = "vitals", 
+        name = "vitals",
         specs = create_example_DTAColumnSpecCollection(2),
         tables = list("tab2" = table2)
       )
     },
     cli::cli_abort("No example available for the provided index.")
   )
-
 }
 
 #' @title Print Method for DTADataSetTabular
@@ -409,10 +404,10 @@ create_example_DTADataSetTabular <- function(index = 1) {
 method(print, DTADataSetTabular) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
-  
+
   print_info(x)
-  
-  if(!is.null(x@specs)) {
+
+  if (!is.null(x@specs)) {
     cli_alert_info("Specs:")
     cli_alert("columns ({length(x@specs@columns)}): {column_preview(x@specs)}")
     cli_alert("rules ({length(x@specs@rules)}): {rule_preview(x@specs)}")
@@ -421,21 +416,24 @@ method(print, DTADataSetTabular) <- function(x) {
   }
 
   n_tables <- length(x@tables)
-  
+
   if (n_tables > 0) {
     table_names <- names(x@tables)
-    
+
     if (n_tables > 5) {
       shown_names <- c(table_names[1:4], "...", table_names[n_tables])
     } else {
       shown_names <- table_names
     }
-    
+
     # Build the message with proper cli markup, need paste and paste0
     # instead of stringr functions to work with cli
-    alert_message <- paste0("Tables (", n_tables, "): ", 
-                           paste(paste0("{.field ", shown_names, "}"), 
-                                collapse = ", "))
+    alert_message <- paste0(
+      "Tables (",
+      n_tables,
+      "): ",
+      paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
+    )
     cli_alert_info(alert_message)
   } else {
     cli_alert_info("Tables: {.emph none}")
@@ -443,8 +441,6 @@ method(print, DTADataSetTabular) <- function(x) {
 
   invisible(x)
 }
-
-
 
 
 #' @title Print Short Information for DTADataSetTabular
@@ -473,19 +469,21 @@ method(print, DTADataSetTabular) <- function(x) {
 method(print_short_info, DTADataSetTabular) <- function(x) {
   #super(print_short_info, x)
   method(print_short_info, DTADataSet)(x)
-  if(!is.null(x@specs)) {
-    cli_alert("Specs: {length(x@specs@columns)} columns, {length(x@specs@rules)}, rules")
+  if (!is.null(x@specs)) {
+    cli_alert(
+      "Specs: {length(x@specs@columns)} columns, {length(x@specs@rules)}, rules"
+    )
   } else {
     cli_alert("Specs: none")
   }
 
   n_tables <- length(x@tables)
-  
+
   if (n_tables > 0) {
     cli_alert("Tables: ({n_tables})")
   } else {
     cli_alert("Tables: {.emph none}")
   }
-   
+
   return(invisible(x))
 }
