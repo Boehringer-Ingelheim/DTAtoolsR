@@ -60,35 +60,35 @@ method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
   )
 }
 
-#' @title to_json_schema_type
+#' @title as_json_schema_type
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema type.
-#' @name to_json_schema_type
-#' @rdname to_json_schema_type-DTAColumnSpecStructure
+#' @name as_json_schema_type
+#' @rdname as_json_schema_type-DTAColumnSpecStructure
 #' @param x An object of class DTAColumnSpecStructure.
 #' @export
-if (!exists("to_json_schema_type", mode = "function")) {
-  to_json_schema_type <- new_generic("to_json_schema_type", "x")
+if (!exists("as_json_schema_type", mode = "function")) {
+  as_json_schema_type <- new_generic("as_json_schema_type", "x")
 }
-method(to_json_schema_type, DTAColumnSpecStructure) <- function(x) {
-  cli_abort("to_json_schema_type is not implemented at this level.")
+method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
+  cli_abort("as_json_schema_type is not implemented at this level.")
 }
 
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema.
-#' @name to_json_schema
-#' @rdname to_json_schema-DTAColumnSpecStructure
-#' @title to_json_schema
+#' @name as_json_schema
+#' @rdname as_json_schema-DTAColumnSpecStructure
+#' @title as_json_schema
 #' @export
-if (!exists("to_json_schema", mode = "function")) {
-  to_json_schema <- new_generic("to_json_schema", "x")
+if (!exists("as_json_schema", mode = "function")) {
+  as_json_schema <- new_generic("as_json_schema", "x")
 }
 
-method(to_json_schema, DTAColumnSpecStructure) <- function(x) {
+method(as_json_schema, DTAColumnSpecStructure) <- function(x) {
   schema <- list()
 
   if (!is.null(x@type)) {
-    schema$type <- to_json_schema_type(x)
+    schema$type <- as_json_schema_type(x)
   }
   if (!is.null(x@format)) {
     schema$format <- x@format

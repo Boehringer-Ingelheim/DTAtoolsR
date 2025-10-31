@@ -23,7 +23,7 @@ DTAColumnSpecCollection <- S7::new_class(
     if (is.list(rules) && length(rules) == 0) {
       rules <- NULL
     }
-    
+
     if (!is.list(columns)) {
       cli::cli_abort("'columns' must be a list.")
     }
@@ -505,22 +505,22 @@ columns_specs_from_word <- function(
 #' @title Convert DTAColumnSpec s to JSON Schema
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
 #' @param columns Column spec information
-#' @name to_json_schema
-#' @rdname to_json_schema-DTAColumnSpecCollection
+#' @name as_json_schema
+#' @rdname as_json_schema-DTAColumnSpecCollection
 #' @return A list representing the JSON Schema.
 #' @importFrom jsonlite toJSON
 #' @importFrom jsonvalidate json_schema
 #' @examples
 #' library(DTAtools)
 #' specs <- create_example_DTAColumnSpecCollection()
-#' to_json_schema(specs)
+#' as_json_schema(specs)
 #' @export
-if (!exists("to_json_schema", mode = "function")) {
-  to_json_schema <- new_generic("to_json_schema", "DTAColumnSpecCollection")
+if (!exists("as_json_schema", mode = "function")) {
+  as_json_schema <- new_generic("as_json_schema", "DTAColumnSpecCollection")
 }
 #' @export
-method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
-  properties <- lapply(x@columns, to_json_schema)
+method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
+  properties <- lapply(x@columns, as_json_schema)
 
   names(properties) <- names(x)
 

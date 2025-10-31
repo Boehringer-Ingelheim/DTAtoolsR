@@ -70,16 +70,16 @@ method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
   )
 }
 
-#' @title to_json_schema_type
+#' @title as_json_schema_type
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema type.
-#' @name to_json_schema_type
-#' @rdname to_json_schema_type-DTAColumnSpecStructureSAS
+#' @name as_json_schema_type
+#' @rdname as_json_schema_type-DTAColumnSpecStructureSAS
 #' @export
-if (!exists("to_json_schema_type", mode = "function")) {
-  to_json_schema_type <- new_generic("to_json_schema_type", "x")
+if (!exists("as_json_schema_type", mode = "function")) {
+  as_json_schema_type <- new_generic("as_json_schema_type", "x")
 }
-method(to_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
+method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
   switch(
     x@type,
     "Char" = "string",
