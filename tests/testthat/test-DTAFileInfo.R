@@ -11,14 +11,15 @@ test_that("DTAFileCSV object is created from reading in csv and table is accessi
   x <- read_file(file_info, path)
 
   expect_true(inherits(x, "Table"))
+  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
 })
 
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
 
-  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
-  file_info <- DTAFileTSV("gf_data_small.tsv")
+  file_info <- DTAFileTSV("gf_data_small_smirna.tsv")
 
   expect_s3_class(file_info, "DTAtools::DTAFile")
   expect_s3_class(file_info, "DTAtools::DTAFileTSV")
@@ -27,15 +28,15 @@ test_that("DTAFileTSV object is created from reading in tsv and table is accessi
 
   x <- read_file(file_info, path)
 
-  expect_true(inherits(x, "Table"))
+  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
 })
 
 
 test_that("Testing pattern with DTAFileTSV", {
 
-  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
-  file_info <- DTAFileTSV("data_gf_.*\\.tsv", pattern = TRUE, number_of_files = 1)
+  file_info <- DTAFileTSV("gf_data_.*\\.tsv", pattern = TRUE, number_of_files = 1)
 
   expect_s3_class(file_info, "DTAtools::DTAFile")
   expect_s3_class(file_info, "DTAtools::DTAFileTSV")
@@ -44,12 +45,12 @@ test_that("Testing pattern with DTAFileTSV", {
 
   x <- read_file(file_info, path)
 
-  expect_true(inherits(x, "Table"))
+  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
 })
 
 
 test_that("Testing wrong pattern with DTAFileTSV", {
-  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
   file_info <- DTAFileTSV("data_gf_dfjlkadwefwfew.*\\.tsv", pattern = TRUE, number_of_files = 1)
 
@@ -57,9 +58,9 @@ test_that("Testing wrong pattern with DTAFileTSV", {
 })
 
 test_that("DTAFile Creation", {
-  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
-  file_info <- DTAFile("gf_data_small.tsv")
+  file_info <- DTAFile("gf_data_small_smirna.tsv")
 
   expect_s3_class(file_info, "DTAtools::DTAFile")
 
