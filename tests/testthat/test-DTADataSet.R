@@ -1,36 +1,39 @@
-test_that("DTADataSet object is created and tables are accessible", {
-  path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-  collection <- import_dta_dataset_from_yaml(path)
+test_that("DTADataSet object is created from examples", {
+  ds1 <- create_example_DTADataSetTabular(1)
+  expect_s3_class(ds1, "DTAtools::DTADataSet")
 
-  specs <- import_specs_from_yaml(system.file("extdata", "gf_dataset.yaml", package = "DTAtools"))
-  path <- system.file("extdata", "gf_data_small.tsv", package = "DTAtools")
-  file_info <- DTAFileTSV("gf_data_small.tsv")
-  container <- DTADataSet(specs = specs, files = file_info)
+  ds2 <- create_example_DTADataSetTabular(2)
+  expect_s3_class(ds2, "DTAtools::DTADataSet")
 
-  expect_equal(max_number_of_files(container), 1)
-  expect_equal(min_number_of_files(container), 1)
-
-  expect_s3_class(container, "DTAtools::DTADataSet")
-
-  container2 <- DTADataSet(specs = specs, files =
-                              list(file_info, file_info))
-  expect_equal(max_number_of_files(container2), 2)
-  expect_equal(min_number_of_files(container2), 2)
-
-  expect_equal(specs(container), specs)
-
-
-
-
-  colspec(container, 1)
-
-
-  expect_equal(data(container), df)
-  expect_equal(data(container, 1), df)
-  expect_equal(data(container, "test"), df)
-  expect_equal(data(container, "test")$STUDYID[1], "1234")
-
-  # check metadata method
-  expect_equal(metadata(container), list())
-
+  ds3 <- create_example_DTADataSetTabular(3)
+  expect_s3_class(ds3, "DTAtools::DTADataSet")
 })
+
+test_that("DTADataSet object is loaded from yaml", {
+  path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+  ds <- read_dataset_from_yaml(path)
+  expect_s3_class(ds, "DTAtools::DTADataSet")
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileTSV") 
+})
+
+
+test_that("DTADataSet object is created and table can be loaded", {
+  path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+  ds <- read_dataset_from_yaml(path)
+
+  table_path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
+
+  expect_equal(max_number_of_files(ds), 1)
+  expect_equal(min_number_of_files(ds), 1)
+
+  expect_s3_class(ds, "DTAtools::DTADataSet")
+
+  tab <- read_file(ds@files[[1]], table_path)
+
+  expect_error(read_file(ds@files[[1]], "blala.tsv"),  "file does not match the filename")
+  
+  expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+  expect_equal(nrow(tab), 20940)
+  expect_equal(ncol(tab), 33)
+})
+

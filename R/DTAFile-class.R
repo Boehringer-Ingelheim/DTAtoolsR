@@ -271,19 +271,26 @@ if (!exists("read_file", mode = "function")) {
 #' @name read_file
 #' @rdname read_file
 #' @export
-method(read_file, DTAFile) <- function(x, file) {
-  if (DTAtools::matches_filename(x, basename(file))) {
+method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
+  continue = TRUE
+
+  if (namecheck) {
+    if (!DTAtools::matches_filename(x, basename(file))) {
+      continue <- FALSE
+      cli::cli_abort(
+        "The provided file does not match the filename in the DTAFile object."
+      )
+    }
+  }
+
+  if (continue) {
     if (file.exists(file)) {
       read_file_execution(x, file)
     } else {
-      cli::cli_abort(simpleError(stringr::str_glue(
+      cli::cli_abort(stringr::str_glue(
         "File '{file}' cannot be found."
-      )))
+      ))
     }
-  } else {
-    cli::cli_abort(simpleError(
-      "The provided file does not match the filename in the DTAFileTabular object."
-    ))
   }
 }
 

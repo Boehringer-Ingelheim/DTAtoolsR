@@ -19,6 +19,11 @@ DTAColumnSpecCollection <- S7::new_class(
     columns,
     rules = NULL
   ) {
+
+    if (is.list(rules) && length(rules) == 0) {
+      rules <- NULL
+    }
+    
     if (!is.list(columns)) {
       cli::cli_abort("'columns' must be a list.")
     }

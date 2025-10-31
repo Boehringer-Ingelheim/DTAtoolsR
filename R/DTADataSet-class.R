@@ -250,9 +250,9 @@ method(print_short_info, DTADataSet) <- function(x) {
 #' @examples
 #' require(DTAtools)
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-#' dta <- read_dta_dataset_from_yaml(file)
+#' dta <- read_dataset_from_yaml(file)
 #' @export
-read_dta_dataset_from_yaml <- function(file) {
+read_dataset_from_yaml <- function(file) {
   if (!file.exists(file)) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }

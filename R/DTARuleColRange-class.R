@@ -123,7 +123,8 @@ create_example_DTARuleColRange <- function(index = 1) {
     return(DTAtools::DTARuleColRange(
       id = "check_age_range",
       columns = "AGE",
-      range = list(18, 65)
+      min = 18,
+      max = 65
     ))
   } else {
     cli::cli_abort("No example found with index {index}.")

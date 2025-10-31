@@ -19,8 +19,8 @@
 #'     id = "rule1",
 #'     type = "check_range",
 #'     column = "age",
-#'     min_range = 18
-#'     max_range = 65
+#'     min = 18
+#'     max = 65
 #'   ),
 #'   DTARule(
 #'     id = "rule2",
@@ -88,6 +88,7 @@ create_example_DTARuleCollection <- function(index = 1) {
 }
 
 
+
 #' @title Print Method for DTARuleCollection Objects
 #' @description
 #' Prints a summary of a \code{DTARuleCollection} object, including the number of rules and their IDs.
@@ -128,3 +129,29 @@ method(print, DTARuleCollection) <- function(x, ...) {
 method(as.list, DTARuleCollection) <- function(x) {
   return(x@rules)
 }
+
+#' @title [[ operator for DTARuleCollection
+#' @description Returns the content of the rules list
+#' @param x A DTARuleCollection object
+#' @param i Index or name
+#' @name [[-DTARuleCollection
+#' @return The selected rule(s) from the rules list
+#' @export
+method(`[[`, DTARuleCollection) <- function(x, i) {
+  x@rules[[i]]
+}
+
+#' @title length method for DTARuleCollection
+#' @description Returns the number of rules in the collection
+#' @param x A DTARuleCollection object
+#' @return Integer. The number of rules in the collection
+#' @examples
+#' library(DTAtools)
+#' collection <- create_example_DTARuleCollection()
+#' length(collection)
+#' @name length-DTARuleCollection
+#' @export
+method(length, DTARuleCollection) <- function(x) {
+  length(x@rules)
+}
+

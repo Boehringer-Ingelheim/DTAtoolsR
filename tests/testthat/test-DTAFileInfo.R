@@ -1,5 +1,4 @@
 test_that("DTAFileCSV object is created from reading in csv and table is accessible", {
-
   path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 
   file_info <- DTAFileCSV("clinical_data.csv")
