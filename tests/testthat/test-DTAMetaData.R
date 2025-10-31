@@ -1,5 +1,14 @@
 test_that("DTAMetaData creation", {
-  x <- DTAMetaData(version = "0.01", author = "Bla")
+  md <- create_example_DTAMetaData()
 
-  expect_s3_class(x, class = "DTAtools::DTAMetaData")
+  expect_s3_class(md, class = "DTAtools::DTAMetaData")
 })
+
+
+test_that("DTAMetaData creation", {
+  path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  dta <- read_dta_from_yaml(path)
+  md <- metadata(dta)
+  expect_s3_class(md, class = "DTAtools::DTAMetaData")
+})
+
