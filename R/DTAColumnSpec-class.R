@@ -277,7 +277,7 @@ method(print, DTAColumnSpec) <- function(x) {
 #' @return A named list with the DTAColumnSpec properties.
 #' @export
 method(as.list, DTAColumnSpec) <- function(x, ...) {
-  x <- list(
+  x1 <- list(
     id = x@id,
     label = x@label,
     nullable = x@nullable,
@@ -288,9 +288,9 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
     colclass = x@colclass
   )
 
-  y <- as.list(x@structure)
+  x2 <- as.list(x@structure)
 
-  c(x, y)
+  c(x1, x2)
 }
 
 #' @name to_json_schema_type

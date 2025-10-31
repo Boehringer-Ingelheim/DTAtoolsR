@@ -31,25 +31,15 @@ DTARuleColRange <- S7::new_class(
     id,
     columns = NULL,
     range = NULL,
-    description = NULL
+    description = NULL,
+    min = NULL,
+    max = NULL
   ) {
     type <- "check_range"
-
-    if (is.list(range)) {
-      range <- unlist(range)
-    }
 
     if (is.list(columns)) {
       columns <- unlist(columns)
     }
-
-    if (!is.numeric(range) ||
-        length(range) != 2) {
-      cli::cli_abort("'range' must be a vector of two non-negative numbers (min and max).")
-    }
-
-    min_range <- range[1]
-    max_range <- range[2]
 
     # Create the class object
     new_object(
@@ -59,8 +49,8 @@ DTARuleColRange <- S7::new_class(
         description = description
       ),
       columns = columns,
-      min_range = min_range,
-      max_range = max_range
+      min = min,
+      max = max
     )
   },
 
@@ -69,8 +59,8 @@ DTARuleColRange <- S7::new_class(
     id = class_character, # Unique identifier for the rule
     type = class_character, # Type of the rule
     columns = class_character, # Column(s) the rule applies to
-    min_range = class_numeric, # Minimum value of the range
-    max_range = class_numeric # Maximum value of the range
+    min = class_numeric, # Minimum value of the range
+    max = class_numeric # Maximum value of the range
   ),
   validator = function(self) {
     if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
@@ -85,11 +75,11 @@ DTARuleColRange <- S7::new_class(
       "A 'columns' must be set."
     }
 
-    if (!is.numeric(self@min_range) || !is.numeric(self@max_range)) {
+    if (!is.numeric(self@min) || !is.numeric(self@max)) {
       "Min and max range must be numeric."
     }
 
-    if (self@min_range >= self@max_range) {
+    if (self@min >= self@max) {
       "Min range must be less than max."
     }
   }
@@ -110,10 +100,10 @@ DTARuleColRange <- S7::new_class(
 method(print, DTARuleColRange) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColRange}> : {.field {x@id}}")
-  
+  if(!is.null(x@description)) cli_text("{x@description}")
   cli_alert_info("columns(s): {paste(x@columns, collapse = ', ')}")
-  cli_alert("min: {x@min_range}")
-  cli_alert("max: {x@max_range}")
+  cli_alert("min: {x@min}")
+  cli_alert("max: {x@max}")
 }
 
 
@@ -174,8 +164,9 @@ method(as.list, DTARuleColRange) <- function(x) {
   list(
     id = x@id,
     type = x@type,
+    description = x@description,
     columns = x@columns,
-    min_range = x@min_range,
-    max_range = x@max_range
+    min = x@min,
+    max = x@max
   )
 }

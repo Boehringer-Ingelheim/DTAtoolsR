@@ -198,9 +198,8 @@ datasets:
       - id: rule_range_example
         type: col_range
         column: AGE
-        range:
-          - 18
-          - 65
+        min: 18
+        max: 65
       - id: rule_dependency_example
         type: col_condition
         condition:
@@ -227,8 +226,7 @@ datasets:
               - V03
               - EOT
           AGE:
-            range:
-              - 10
-              - 100
+            min: 10
+            max: 100
           WEIGHT:
             greater_equal: 5

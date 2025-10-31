@@ -17,7 +17,7 @@ DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection",
   constructor = function(
     columns,
-    rules = list()
+    rules = NULL
   ) {
     if (!is.list(columns)) {
       cli::cli_abort("'columns' must be a list.")
@@ -31,7 +31,7 @@ DTAColumnSpecCollection <- S7::new_class(
 
     if (is.null(names(columns))) {
       names(columns) <- sapply(columns, function(col) col@id)
-    } 
+    }
 
     new_object(
       S7_object(),
@@ -41,7 +41,7 @@ DTAColumnSpecCollection <- S7::new_class(
   },
   properties = list(
     columns = S7::class_list,
-    rules = class_DTARuleCollection
+    rules = class_DTARuleCollection_or_null
   ),
   validator = function(self) {
     # Ensure columns is a list of DTAColumnSpec objects
@@ -122,19 +122,21 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #' @export
 rule_preview <- new_generic("rule_preview", "x")
 method(rule_preview, DTAColumnSpecCollection) <- function(x) {
-  rules <- x@rules@rules
-  if (length(rules) > 5) {
-    rule_preview <- stringr::str_flatten_comma(
-      c(
-        map(rules[1:4], function(y) y@id),
-        "...",
-        rules[[length(rules)]]@id
+  if (!is.null(x@rules)) { 
+    rules <- x@rules@rules
+    if (length(rules) > 5) {
+      rule_preview <- stringr::str_flatten_comma(
+        c(
+          map(rules[1:4], function(y) y@id),
+          "...",
+          rules[[length(rules)]]@id
+        )
       )
-    )
-  } else if (length(rules) <= 5) {
-    rule_preview <- stringr::str_flatten_comma(map(rules, function(y) {
-      y@id
-    }))
+    } else if (length(rules) <= 5) {
+      rule_preview <- stringr::str_flatten_comma(map(rules, function(y) {
+        y@id
+      }))
+    } 
   } else {
     rule_preview <- "not set"
   }
@@ -163,7 +165,7 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 
   cli::cli_alert_info("columns ({length(x@columns)}): {col_preview}")
 
-  if (length(x@rules@rules) > 0) {
+  if (!is.null(x@rules) && length(x@rules@rules) > 0) {
     cli::cli_alert_info("rules ({length(x@rules@rules)}): {rule_preview}")
   } else {
     cli::cli_alert("rules: {cli::symbol$cross}")
@@ -559,6 +561,7 @@ method(to_json_schema, DTAColumnSpecCollection) <- function(x) {
 #' @name as.list
 #' @rdname as.list-DTAColumnSpecCollection
 method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
+
   columns <- lapply(x@columns, function(column) {
     as.list(column)
   })
@@ -673,3 +676,4 @@ write_columns_to_json <- function(
     auto_unbox = TRUE
   )
 }
+

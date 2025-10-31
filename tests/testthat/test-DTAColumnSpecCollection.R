@@ -17,7 +17,13 @@ test_that("Specs to list conversion", {
 
   specs_list <- as.list(specs)
   expect_type(specs_list, "list")
-}
+
+  specs_converted <- specs_from_list(specs_list$columns, specs_list$rules)
+  expect_s3_class(specs_converted, "DTAtools::DTAColumnSpecCollection")
+
+  expect_equal(specs_converted, specs)
+})
+
 
 test_that("DTAColumnSpecCollection stores and retrieves specs", {
   col1 <- create_example_DTAColumnSpec(1)
@@ -29,39 +35,8 @@ test_that("DTAColumnSpecCollection stores and retrieves specs", {
 
   expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
   expect_named(specs, c("STUDYID", "VISIT"))
-  expect_equal(colspec(specs, "VISIT")@label, "Visit")
+
+  expect_equal(specs@columns[[1]], col1)
+  expect_equal(specs@columns[[2]], col2)
 })
 
-test_that("specs_from_list constructs valid object and returns rules", {
-  col1 <- create_example_DTAColumnSpec(1) #STUDYID
-  col2 <- create_example_DTAColumnSpec(2)
-
-  rule1 <- create_example_DTARuleColCondition(1)
-
-  rules <- list(rule1)
-
-  # Run function
-  specs <- specs_from_list(
-    specs = columns,
-    rules = rules
-  )
-
-  print(specs)
-  # Assertions
-
-  expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
-  expect_named(specs@columns, c("STUDYID", "VISIT"))
-  expect_equal(specs@columns$STUDYID@id, "STUDYID")
-  expect_equal(specs@columns$VISIT@values, list("V01", "EOT"))
-  expect_equal(class(specs@columns[[1]]), c("DTAtools::DTAColumnSpec", "S7_object"))
-  expect_equal(class(specs@rules[[1]]), c("DTAtools::DTARule", "S7_object"))
-
-  # check getMetadata method
-  expect_equal(getMetadata(specs), list())
-
-  # Test DTAColumnSpecCollectionToList
-
-  list <- as.list.DTAColumnSpecCollection(specs)
-
-  expect_type(list, "list")
-})

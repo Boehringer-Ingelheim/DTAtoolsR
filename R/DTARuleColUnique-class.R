@@ -84,7 +84,8 @@ DTARuleColUnique <- S7::new_class(
 method(print, DTARule) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
-
+  if(!is.null(x@description)) cli_text("{x@description}")
+  
   message <- paste0(
     "column(s): ",
     paste(paste0("{.field ", x@column, "}"), collapse = ", ")
@@ -157,6 +158,6 @@ method(as.list, DTARuleColUnique) <- function(x) {
     id = x@id,
     type = x@type,
     description = x@description,
-    column = x@column
+    columns = x@columns
   )
 }

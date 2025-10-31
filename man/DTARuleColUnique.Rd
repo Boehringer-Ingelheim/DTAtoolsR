@@ -4,12 +4,12 @@
 \alias{DTARuleColUnique}
 \title{DTARuleColUnique Class}
 \usage{
-DTARuleColUnique(id, type, column = NULL, description = NULL)
+DTARuleColUnique(id, type, columns = NULL, description = NULL)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{column}{list of columns that will be collectively checked if the
+\item{columns}{columns that will be collectively checked if the
 combinations are unique throughout the table}
 }
 \value{
@@ -23,6 +23,6 @@ such as \code{check_range}, \code{check_unique}, or \code{check_col_condition}
 # Create a check_unique rule
 rule2 <- DTAtools::DTARuleColUnique(
   id = "rule2",
-  column = "id"
+  columns = "id"
 )
 }

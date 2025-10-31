@@ -289,7 +289,8 @@ rules:
     description: "GFORRES must be between 1 and 10M"
     type: col_range
     column: GFORRES
-    range: [0, 100000000]
+    min: 0
+    max: 100000000
   - id: dependency_check
     description: "If GFREASND is 'DATA ANALYSIS QC FAILED', then GFSTAT must not be null"
     type: col_condition

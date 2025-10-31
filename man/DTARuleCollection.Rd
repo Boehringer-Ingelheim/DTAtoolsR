@@ -25,7 +25,8 @@ example_rules <- list(
     id = "rule1",
     type = "check_range",
     column = "age",
-    range = c(18, 65)
+    min_range = 18
+    max_range = 65
   ),
   DTARule(
     id = "rule2",

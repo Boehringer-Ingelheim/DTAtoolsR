@@ -93,6 +93,7 @@ method(print, DTARuleColCondition) <- function(x) {
   # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
+  if(!is.null(x@description)) cli_text("{x@description}")
 
   # TODO: check more complicated scenarios
   if (is.list(x@condition)) {

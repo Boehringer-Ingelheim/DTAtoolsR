@@ -4,13 +4,19 @@
 \alias{DTARuleColRange}
 \title{DTARuleColRange Class}
 \usage{
-DTARuleColRange(id, column = NULL, range = NULL, description = NULL)
+DTARuleColRange(
+  id,
+  columns = NULL,
+  range = NULL,
+  description = NULL,
+  min = NULL,
+  max = NULL
+)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{column}{List. Used in check_range and check_unique. For check_unique,
-it is a list of columnss checked for unique combinations.}
+\item{columns}{Charaterc. columns checked for unique combinations.}
 
 \item{range}{Vector or List. Used in check_range to check value ranges in a
 columns.}
@@ -21,14 +27,14 @@ columns.}
 An object of class \code{DTARuleColRange}.
 }
 \description{
-Represents a rule for checking the range of values in a specific column of
+Represents a rule for checking the range of values in a specific columns of
 a data table.
 }
 \examples{
 # Create a check_range rule
 rule1 <- DTAtools::DTARuleColRange(
   id = "rule1",
-  column = "age",
+  columns = "age",
   range = c(18, 65)
 )
 }

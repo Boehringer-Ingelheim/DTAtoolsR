@@ -4,7 +4,7 @@
 \alias{DTAColumnSpecCollection}
 \title{DTAColumnSpecCollection Class}
 \usage{
-DTAColumnSpecCollection(columns, rules = list())
+DTAColumnSpecCollection(columns, rules = NULL)
 }
 \arguments{
 \item{columns}{A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns}
