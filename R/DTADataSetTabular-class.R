@@ -81,7 +81,7 @@ DTADataSetTabular <- S7::new_class(
 #' }
 #' @name colspec-DTADataSetTabular
 #' @export
-colspec <- new_generic("colspec", "x")
+# colspec <- new_generic("colspec", "x") # was already initialized
 
 #' @export
 method(colspec, DTADataSetTabular) <- function(x, id) {
@@ -303,20 +303,22 @@ write_table_to_file <- function(
 }
 
 
-#' @title Get Metadata
+#' @title Get column specs from DTADataSetTabular Object
 #' @description
-#' Method to get Metadata from DTADataSet.
+#' Method to get columns specifications from DTADataSetTabular
 #' @param x An object of class DTADataSetTabular
 #' @return A list with metadata information
 #' @examples
-#' \dontrun{
-#' metadata(DTADataSetTabular)
-#' }
-#' @name metadata
-#' @rdname metadata-DTADataSetTabular
+#' library(DTAtools)
+#' ds <- create_example_DTADataSetTabular()
+#' columns(ds)
+#' @name columns
+#' @rdname columns-DTADataSetTabular
 #' @export
-method(metadata, DTADataSetTabular) <- function(x) {
-  return(x@specs@metadata)
+columns <- new_generic("columns", "x")
+#' @export
+method(columns, DTADataSetTabular) <- function(x) {
+  return(x@specs@columns)
 }
 
 #' @title Get Rules

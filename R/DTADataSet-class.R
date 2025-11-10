@@ -292,3 +292,80 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 
   do.call(DTADataSetFactory, x)
 }
+
+
+#' @title Get files from DTADataSet Object
+#' @description
+#' Method to get files from DTADataSet object.
+#' @param x An object of class DTADataSet.
+#' @param name Optional single character or single integer. if NULL, returns a
+#' list of all files. If character, returns the datasets with the specified name.
+#' If integer, returns the datasets at the specified index.
+#' @param ... void
+#' @return A DTAColumnSpecCollection object.
+#' @examples
+#' library(DTAtools)
+#' ds <- create_example_DTADataSetTabular()
+#' files(ds)
+#' @name files-DTADataSet
+#' @export
+files <- new_generic("files", "x")
+
+#' @export
+method(files, DTADataSet) <- function(x, name = NULL) {
+  if (
+    !is.null(name) &&
+      !is.character(name) &&
+      !is.numeric(name) &&
+      length(name) != 1
+  ) {
+    cli_abort(
+      "'name' must be a single character vector, single numeric index or NULL."
+    )
+  }
+  all_files <- x@files
+
+  if (is.null(name)) {
+    return(all_files)
+  }
+
+  if (is.numeric(name)) {
+    if (any(name < 1) || any(name > length(all_files))) {
+      cli_abort("Numeric 'name' index out of bounds.")
+    }
+    return(all_files[[name]])
+  }
+
+  missing <- setdiff(name, names(all_files))
+  if (length(missing) > 0) {
+    cli_abort("The following datasets{?s} not found: {.field {missing}}")
+  }
+
+  return(all_files[[name]])
+}
+
+
+
+
+#' @title Get tables from DTADataSet Object
+#' @description
+#' Method to get tables from DTADataSet object.
+#' @param x An object of class DTADataSet.
+#' @param ... void
+#' @return A DTAColumnSpecCollection object.
+#' @examples
+#' library(DTAtools)
+#' ds <- create_example_DTADataSetTabular()
+#' tables(ds)
+#' @name tables-DTADataSet
+#' @export
+tables <- new_generic("tables", "x")
+
+#' @export
+method(tables, DTADataSet) <- function(x) {
+  return(x@tables)
+}
+
+
+
+

@@ -35,5 +35,15 @@ test_that("DTADataSet object is created and table can be loaded", {
   expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
   expect_equal(nrow(tab), 20940)
   expect_equal(ncol(tab), 33)
+
+  expect_true(is.list(files(ds)))
+  expect_s3_class(files(ds)[[1]], "DTAtools::DTAFileTSV")
+
+  expect_s3_class(specs(ds), "DTAtools::DTAColumnSpecCollection")
+
+  expect_true(is.list(tables(ds)))    
+
+  expect_s3_class(colspec(ds, 1), "DTAtools::DTAColumnSpec")
+  expect_s3_class(colspec(ds, "STUDYID"), "DTAtools::DTAColumnSpec")
 })
 

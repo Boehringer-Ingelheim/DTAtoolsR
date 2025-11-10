@@ -41,5 +41,9 @@ test_that("DTA object is constructed correctly from reading YAML DTA", {
   # Check container retrieval
   expect_type(dta@datasets, "list")
   expect_length(dta@datasets, 1)
+
+  expect_s3_class(datasets(dta, 1), "DTAtools::DTADataSetTabular")
+  expect_true(is.list(datasets(dta)))
+
   expect_named(dta@datasets, c("clinical_data"))
 })

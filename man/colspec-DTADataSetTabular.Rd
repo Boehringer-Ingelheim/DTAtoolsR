@@ -2,11 +2,7 @@
 % Please edit documentation in R/DTADataSetTabular-class.R
 \name{colspec-DTADataSetTabular}
 \alias{colspec-DTADataSetTabular}
-\alias{colspec}
 \title{Get Column by ID Method}
-\usage{
-colspec(x, ...)
-}
 \arguments{
 \item{x}{An object of class DTADataSetTabular}
 

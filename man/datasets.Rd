@@ -7,14 +7,14 @@
 \item{x}{An object of class DTA.}
 
 \item{name}{Optional single character or single integer. if NULL, returns a
-list of all datasetss. If character, returns the datasets with the specified name.
+list of all datasets. If character, returns the datasets with the specified name.
 If integer, returns the datasets at the specified index.}
 }
 \value{
 Either a list of DTADataSet objects or a single DTADataSet.
 }
 \description{
-Method to get one or more datasetss from a DTA object.
+Method to get one or more datasets from a DTA object.
 }
 \examples{
 libary(DTAtools)

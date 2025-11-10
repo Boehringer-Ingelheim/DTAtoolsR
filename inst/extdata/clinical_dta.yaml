@@ -79,7 +79,7 @@ datasets:
     description: Clinical data table
 
     files:
-      filename: "data_spec.csv"
+      filename: "clinical_data.csv"
       type: "csv"
 
     columns:

@@ -77,11 +77,11 @@ method(metadata, DTA) <- function(x) {
 
 #' @title Get datasets
 #' @description
-#' Method to get one or more datasetss from a DTA object.
+#' Method to get one or more datasets from a DTA object.
 #' @importFrom cli cli_alert_info cli_abort
 #' @param x An object of class DTA.
 #' @param name Optional single character or single integer. if NULL, returns a
-#' list of all datasetss. If character, returns the datasets with the specified name.
+#' list of all datasets. If character, returns the datasets with the specified name.
 #' If integer, returns the datasets at the specified index.
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
@@ -108,25 +108,25 @@ method(datasets, DTA) <- function(x, name = NULL) {
       "'name' must be a single character vector, single numeric index or NULL."
     )
   }
-  all_datasetss <- x@datasets
+  all_datasets <- x@datasets
 
   if (is.null(name)) {
-    return(all_datasetss)
+    return(all_datasets)
   }
 
   if (is.numeric(name)) {
-    if (any(name < 1) || any(name > length(all_datasetss))) {
+    if (any(name < 1) || any(name > length(all_datasets))) {
       cli_abort("Numeric 'name' index out of bounds.")
     }
-    return(all_datasetss[[name]])
+    return(all_datasets[[name]])
   }
 
-  missing <- setdiff(name, names(all_datasetss))
+  missing <- setdiff(name, names(all_datasets))
   if (length(missing) > 0) {
     cli_abort("The following datasets{?s} not found: {.field {missing}}")
   }
 
-  return(all_datasetss[[name]])
+  return(all_datasets[[name]])
 }
 
 
