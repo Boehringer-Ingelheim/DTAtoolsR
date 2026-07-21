@@ -11,6 +11,9 @@ tables(x, ...)
 \item{x}{An object of class DTADataSet.}
 
 \item{...}{void}
+
+\item{i}{index: optional single character or integer or vector of characters
+or integers to select specific tables. if NULL (default), returns all tables.}
 }
 \value{
 A DTAColumnSpecCollection object.

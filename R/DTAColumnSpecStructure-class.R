@@ -150,7 +150,7 @@ method(print_info, DTAColumnSpecStructure) <- function(x) {
 #' @rdname print-DTAColumnSpecStructure
 #' @export
 if (!exists("print", mode = "function")) {
-  print <- new_generic("print_info", "x")
+  print <- new_generic("print", "x")
 }
 #' @export
 method(print, DTAColumnSpecStructure) <- function(x) {

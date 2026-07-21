@@ -3,6 +3,10 @@
 \name{max_number_of_files}
 \alias{max_number_of_files}
 \title{Get max number of files}
+\usage{
+## S7 method for class <DTAtools::DTAFile>
+max_number_of_files(x)
+}
 \arguments{
 \item{x}{An object of class \code{DTAFile}.}
 }

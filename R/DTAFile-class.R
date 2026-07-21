@@ -187,9 +187,6 @@ method(max_number_of_files, DTAFile) <- function(x) {
 }
 
 
-if (!exists("matches_filename", mode = "function")) {
-  matches_filename <- new_generic("matches_filename", "x")
-}
 #' @title Matches Filename
 #' @description Checks if a given filename matches the pattern in a `DTAFile` object.
 #'
@@ -211,6 +208,10 @@ if (!exists("matches_filename", mode = "function")) {
 #' @name matches_filename
 #' @rdname matches_filename
 #' @export
+if (!exists("matches_filename", mode = "function")) {
+  matches_filename <- new_generic("matches_filename", "x")
+}
+
 method(matches_filename, DTAFile) <- function(x, file) {
   if (x@pattern) {
     stringr::str_detect(file, x@filename)
@@ -219,9 +220,6 @@ method(matches_filename, DTAFile) <- function(x, file) {
   }
 }
 
-if (!exists("read_file_execution", mode = "function")) {
-  read_file_execution <- new_generic("read_file", "x")
-}
 #' @title Read a file
 #' @description Reads a data file using the parameters specified in a
 #'   \code{DTAFile} object or one of its subclasses.
@@ -240,17 +238,20 @@ if (!exists("read_file_execution", mode = "function")) {
 #' @name read_file_execution
 #' @rdname read_file_execution
 #' @export
-method(read_file_execution, DTAFile) <- function(x, file) {
-  stop(
-    "This method is not implemented. You need to
+if (!exists("read_file_execution", mode = "function")) {
+  read_file_execution <- new_generic("read_file_execution", "x")
+}
+
+if (inherits(try(method(read_file_execution, DTAFile), silent = TRUE), "try-error")) {
+  method(read_file_execution, DTAFile) <- function(x, file) {
+    stop(
+      "This method is not implemented. You need to
   use an object of a class which is derived from this class."
-  )
+    )
+  }
 }
 
 
-if (!exists("read_file", mode = "function")) {
-  read_file <- new_generic("read_file", "x")
-}
 #' @title Read a file based on DTAFile
 #' @description Reads a data file using the parameters specified in a
 #'   \code{DTAFile} object or one of its subclasses.
@@ -271,6 +272,10 @@ if (!exists("read_file", mode = "function")) {
 #' @name read_file
 #' @rdname read_file
 #' @export
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
+
 method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
   continue = TRUE
 
@@ -278,7 +283,7 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
     if (!DTAtools::matches_filename(x, basename(file))) {
       continue <- FALSE
       cli::cli_abort(
-        "The provided file does not match the filename in the DTAFile object."
+        stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
       )
     }
   }
@@ -343,16 +348,18 @@ method(print, DTAFile) <- function(x, ...) {
 #if (!exists("print_info", mode = "function")) {
 #  print_info <- new_generic("print_info", "x")
 #}
-method(print_info, DTAFile) <- function(x) {
-  cli::cli_alert_info("Filename: {x@filename}")
-  cli::cli_alert("Pattern: {x@pattern}")
-  if (x@min_number_of_files == x@max_number_of_files) {
-    cli::cli_alert("Number of files: {x@min_number_of_files}")
-  } else {
-    cli::cli_alert("Min number of files: {x@min_number_of_files}")
-    cli::cli_alert("Max number of files: {x@max_number_of_files}")
+if (inherits(try(method(print_info, DTAFile), silent = TRUE), "try-error")) {
+  method(print_info, DTAFile) <- function(x) {
+    cli::cli_alert_info("Filename: {x@filename}")
+    cli::cli_alert("Pattern: {x@pattern}")
+    if (x@min_number_of_files == x@max_number_of_files) {
+      cli::cli_alert("Number of files: {x@min_number_of_files}")
+    } else {
+      cli::cli_alert("Min number of files: {x@min_number_of_files}")
+      cli::cli_alert("Max number of files: {x@max_number_of_files}")
+    }
+    invisible(x)
   }
-  invisible(x)
 }
 
 

@@ -3,6 +3,10 @@
 \name{as.list}
 \alias{as.list}
 \title{as.list method for as.list.DTAColumnSpecStructure}
+\usage{
+## S7 method for class <DTAtools::DTAColumnSpecStructure>
+as.list(x, ...)
+}
 \arguments{
 \item{x}{A DTAColumnSpecStructure object.}
 

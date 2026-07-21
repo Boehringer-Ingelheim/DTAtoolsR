@@ -129,6 +129,52 @@ method(datasets, DTA) <- function(x, name = NULL) {
   return(all_datasets[[name]])
 }
 
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
+
+
+#' @title Read file into DTA
+#' @description
+#' Reads a file into one dataset contained in a \code{DTA} object by dataset
+#' name or index.
+#' @param x An object of class \code{DTA}.
+#' @param dataset Single character dataset name or numeric dataset index.
+#' @param file Path to the input file to be read.
+#' @param index Single character or numeric index selecting the file handler
+#' within the dataset. Defaults to \code{1}.
+#' @param name Optional name under which the loaded table should be stored.
+#' Defaults to \code{basename(file)}.
+#' @param ... Additional arguments passed through.
+#' @return The updated \code{DTA} object.
+#' @name read_file
+#' @export
+method(read_file, DTA) <- function(
+  x,
+  dataset,
+  file,
+  index = 1,
+  name = basename(file),
+  ...
+) {
+  dataset_object <- datasets(x, dataset)
+  dataset_object <- read_file(
+    dataset_object,
+    index = index,
+    file = file,
+    name = name,
+    ...
+  )
+
+  if (is.numeric(dataset)) {
+    x@datasets[[dataset]] <- dataset_object
+  } else {
+    x@datasets[[dataset_object@name]] <- dataset_object
+  }
+
+  x
+}
+
 
 #' @title Print DTA Object
 #' @description

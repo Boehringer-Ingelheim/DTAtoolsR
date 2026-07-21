@@ -3,6 +3,7 @@
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
+#' @importFrom tools md5sum
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files a list of DTAFile objects specifying input file information.
@@ -39,7 +40,7 @@ DTADataSetTabular <- S7::new_class(
     }
 
     # Transform to arrow tables
-    tables <- lapply(tables, function(x) arrow::as_arrow_table)
+    tables <- lapply(tables, function(x) arrow::as_arrow_table(x))
 
     new_object(
       .parent = DTADataSet(
@@ -53,12 +54,18 @@ DTADataSetTabular <- S7::new_class(
       ),
 
       specs = specs,
-      tables = tables
+      tables = tables,
+      validation_index = list(),
+      validation_store = list(),
+      validation_artifact_dir = NULL
     )
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = class_list # list of tables - can be arrow tables etc
+    tables = class_list, # list of tables - can be arrow tables etc
+    validation_index = S7::new_property(S7::class_list, default = list()),
+    validation_store = S7::new_property(S7::class_list, default = list()),
+    validation_artifact_dir = class_character_or_null
   ),
   validator = function(self) {
     # check if all elements of list self@tables inherit from "Table"
@@ -79,8 +86,7 @@ DTADataSetTabular <- S7::new_class(
 #' \dontrun{
 #' column_format <- column(dtadata, "STUDYID")
 #' }
-#' @name colspec-DTADataSetTabular
-#' @export
+#' @rdname colspec
 # colspec <- new_generic("colspec", "x") # was already initialized
 
 #' @export
@@ -121,14 +127,14 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' tables(container)           # returns first table
 #' tables(container, "lab")   # returns table named "lab"
 #' }
-#' @name table-DTADataSetTabular
+#' @name get_table-DTADataSetTabular
 #' @export
-table <- new_generic("table", "x", function(x, id = 1, ...) {
+get_table <- new_generic("get_table", "x", function(x, id = 1, ...) {
   S7_dispatch()
 })
 
 #' @export
-method(table, DTADataSetTabular) <- function(x, id = 1) {
+method(get_table, DTADataSetTabular) <- function(x, id = 1) {
   if (!inherits(x, "DTAtools::DTADataSetTabular")) {
     cli::cli_abort("Input must be a DTADataSetTabular object.")
   }
@@ -489,3 +495,143 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
 
   return(invisible(x))
 }
+
+
+#' @title loads file
+#' @description
+#' Load the content of the file into dataset
+#' @param x An object of class DTADataSet
+#' @param file file to be loaded
+#' @param index of the filehandler in the files list
+#' @param name file name, base name per default. is used to store the table under this name
+#' @return object of class DTADataSet with loaded data
+#' @examples
+#' \dontrun{
+#' column_format <- min_number_of_files(dtafiles)
+#' }
+#' @rdname load_file
+#' @export
+method(load_file, DTADataSetTabular) <- function(x, file, index, name = basename(file)) {
+  x@tables[[ name ]] <- files(x, index) |> read_file(file)
+  x
+}
+
+#' @title Validation Status for DTADataSetTabular
+#' @description Returns a compact status table for validated tables.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param tables NULL (default), character table names, or numeric table indices.
+#' @return A data.frame with validation status per table.
+#' @name validation_status
+#' @export
+validation_status <- S7::new_generic("validation_status", "x")
+
+#' @export
+S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
+  target_tables <- dta_table_id_to_names(x, tables)
+
+  rows <- lapply(target_tables, function(table_name) {
+    entry <- x@validation_index[[table_name]]
+    if (is.null(entry)) {
+      return(data.frame(
+        table = table_name,
+        status = "not_validated",
+        ok = NA,
+        validated_at = NA_character_,
+        run_id = NA_character_,
+        n_schema_errors = NA_integer_,
+        n_rule_errors = NA_integer_,
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    dta_validation_result_to_row(
+      table_name = table_name,
+      status = "validated",
+      index_entry = entry
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+
+#' @title Retrieve Validation Errors for One Table
+#' @description
+#' Returns detailed validation output for one table, either from in-memory
+#' store or from persisted artifact.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param table Character or numeric table identifier.
+#' @param source Character. One of \'auto\', \'memory\', or \'artifact\'.
+#' @return A list with detailed validation output.
+#' @name validation_errors
+#' @export
+validation_errors <- S7::new_generic("validation_errors", "x")
+
+#' @export
+S7::method(validation_errors, DTADataSetTabular) <- function(
+  x,
+  table,
+  source = c("auto", "memory", "artifact")
+) {
+  source <- match.arg(source)
+  table_name <- dta_table_id_to_names(x, table)
+  table_name <- table_name[[1]]
+
+  if (source %in% c("auto", "memory")) {
+    in_memory <- x@validation_store[[table_name]]
+    if (!is.null(in_memory)) {
+      return(in_memory)
+    }
+  }
+
+  entry <- x@validation_index[[table_name]]
+  if (is.null(entry) || is.null(entry$artifact_path)) {
+    cli::cli_abort(
+      "No validation artifact available for table '{table_name}'. Run validate_dataset() first with persist = TRUE."
+    )
+  }
+
+  if (!file.exists(entry$artifact_path)) {
+    cli::cli_abort(
+      "Validation artifact for table '{table_name}' does not exist at '{entry$artifact_path}'."
+    )
+  }
+
+  readRDS(entry$artifact_path)
+}
+
+
+#' @title Clear Validation State
+#' @description Clears in-memory validation state for one or all tables.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param tables NULL (default), character table names, or numeric table indices.
+#' @param remove_artifacts Logical. If \'TRUE\', delete artifact files for selected tables.
+#' @return Invisibly returns \'x\'.
+#' @name clear_validation
+#' @export
+clear_validation <- S7::new_generic("clear_validation", "x")
+
+#' @export
+S7::method(clear_validation, DTADataSetTabular) <- function(
+  x,
+  tables = NULL,
+  remove_artifacts = FALSE
+) {
+  target_tables <- dta_table_id_to_names(x, tables)
+
+  for (table_name in target_tables) {
+    entry <- x@validation_index[[table_name]]
+
+    if (remove_artifacts && !is.null(entry) && !is.null(entry$artifact_path)) {
+      if (file.exists(entry$artifact_path)) {
+        unlink(entry$artifact_path)
+      }
+    }
+
+    x@validation_index[[table_name]] <- NULL
+    x@validation_store[[table_name]] <- NULL
+  }
+
+  invisible(x)
+}
+

@@ -4,12 +4,14 @@
 \alias{validate_table}
 \title{Validate Table Against JSON Schema}
 \usage{
-validate_table(specs, table)
+validate_table(specs, table, verbose = TRUE)
 }
 \arguments{
 \item{specs}{A specs object.}
 
 \item{table}{A data.frame to validate.}
+
+\item{verbose}{Logical. If TRUE (default), prints validation progress.}
 }
 \value{
 Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.

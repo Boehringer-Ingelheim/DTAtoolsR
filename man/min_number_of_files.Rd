@@ -3,6 +3,10 @@
 \name{min_number_of_files}
 \alias{min_number_of_files}
 \title{Get min number of files}
+\usage{
+## S7 method for class <DTAtools::DTAFile>
+min_number_of_files(x)
+}
 \arguments{
 \item{x}{An object of class \code{DTAFile}.}
 }

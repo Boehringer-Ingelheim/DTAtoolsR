@@ -4,12 +4,14 @@
 \alias{apply_schema_rules}
 \title{Apply Schema Rules}
 \usage{
-apply_schema_rules(rules, df)
+apply_schema_rules(rules, df, verbose = TRUE)
 }
 \arguments{
 \item{rules}{A list of DTARule objects.}
 
 \item{df}{A data.frame to validate.}
+
+\item{verbose}{Logical. If TRUE (default), prints progress messages.}
 }
 \value{
 (Invisibly) a list of rule validation results, each as a list with

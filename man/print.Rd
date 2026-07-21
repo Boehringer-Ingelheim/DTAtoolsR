@@ -3,11 +3,58 @@
 %   R/DTAColumnSpecCollection-class.R, R/DTADataSet-class.R,
 %   R/DTADataSetTabular-class.R, R/DTAFile-class.R, R/DTAFileCSV-class.R,
 %   R/DTAFileDelim-class.R, R/DTAFileTSV-class.R, R/DTAMetaData-class.R,
-%   R/DTARule-class.R, R/DTARuleColCondition-class.R, R/DTARuleColRange-class.R,
-%   R/DTARuleColUnique-class.R, R/DTARuleCollection-class.R
+%   R/DTARule-class.R, R/DTARuleColCondition-class.R,
+%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
+%   R/DTARuleCollection-class.R
 \name{print}
 \alias{print}
 \title{Print DTA Object}
+\usage{
+## S7 method for class <DTAtools::DTA>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAColumnSpec>
+print(x)
+
+## S7 method for class <DTAtools::DTAColumnSpecCollection>
+print(x)
+
+## S7 method for class <DTAtools::DTADataSet>
+print(x)
+
+## S7 method for class <DTAtools::DTADataSetTabular>
+print(x)
+
+## S7 method for class <DTAtools::DTAFile>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAFileCSV>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAFileDelim>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAFileTSV>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAMetaData>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTARule>
+print(x)
+
+## S7 method for class <DTAtools::DTARuleColCondition>
+print(x)
+
+## S7 method for class <DTAtools::DTARuleColRange>
+print(x)
+
+## S7 method for class <DTAtools::DTARule>
+print(x)
+
+## S7 method for class <DTAtools::DTARuleCollection>
+print(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTARuleCollection} object.}
 

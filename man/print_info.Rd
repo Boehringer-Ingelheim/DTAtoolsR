@@ -55,6 +55,4 @@ print(create_example_DTAMetaData())
 \code{\link{DTADataSet}}
 
 \code{\link{DTAFile}}
-
-\code{\link{DTAFile}}
 }

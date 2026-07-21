@@ -3,6 +3,10 @@
 \name{as.list}
 \alias{as.list}
 \title{as.list for DTARule}
+\usage{
+## S7 method for class <DTAtools::DTARule>
+as.list(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTARule.}
 

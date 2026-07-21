@@ -134,7 +134,7 @@ method(as.list, DTARuleCollection) <- function(x) {
 #' @description Returns the content of the rules list
 #' @param x A DTARuleCollection object
 #' @param i Index or name
-#' @name [[-DTARuleCollection
+#' @rdname as.list
 #' @return The selected rule(s) from the rules list
 #' @export
 method(`[[`, DTARuleCollection) <- function(x, i) {
@@ -149,7 +149,7 @@ method(`[[`, DTARuleCollection) <- function(x, i) {
 #' library(DTAtools)
 #' collection <- create_example_DTARuleCollection()
 #' length(collection)
-#' @name length-DTARuleCollection
+#' @rdname as.list
 #' @export
 method(length, DTARuleCollection) <- function(x) {
   length(x@rules)

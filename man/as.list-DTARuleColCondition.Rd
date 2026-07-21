@@ -3,6 +3,10 @@
 \name{as.list}
 \alias{as.list}
 \title{as.list for DTARuleColCondition}
+\usage{
+## S7 method for class <DTAtools::DTARuleColCondition>
+as.list(x)
+}
 \arguments{
 \item{x}{An object of class DTARuleColCondition}
 

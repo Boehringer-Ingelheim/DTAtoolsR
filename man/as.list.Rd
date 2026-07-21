@@ -2,13 +2,43 @@
 % Please edit documentation in R/DTARuleCollection-class.R
 \name{as.list}
 \alias{as.list}
+\alias{[[,DTAtools::DTARuleCollection-method}
+\alias{length,DTAtools::DTARuleCollection-method}
 \title{as.list function for DTARuleCollection}
+\usage{
+## S7 method for class <DTAtools::DTARuleCollection>
+as.list(x)
+
+## S7 method for class <DTAtools::DTARuleCollection>
+x[[i
+
+## S7 method for class <DTAtools::DTARuleCollection>
+length(x)
+}
+\arguments{
+\item{x}{A DTARuleCollection object}
+
+\item{i}{Index or name}
+}
 \value{
 list
+
+The selected rule(s) from the rules list
+
+Integer. The number of rules in the collection
 }
 \description{
 returns list from DTARuleCollection object
+
+Returns the content of the rules list
+
+Returns the number of rules in the collection
 }
 \details{
 as.list
+}
+\examples{
+library(DTAtools)
+collection <- create_example_DTARuleCollection()
+length(collection)
 }

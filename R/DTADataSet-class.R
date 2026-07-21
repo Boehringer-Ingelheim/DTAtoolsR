@@ -351,6 +351,8 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 #' @description
 #' Method to get tables from DTADataSet object.
 #' @param x An object of class DTADataSet.
+#' @param i index: optional single character or integer or vector of characters 
+#' or integers to select specific tables. if NULL (default), returns all tables.
 #' @param ... void
 #' @return A DTAColumnSpecCollection object.
 #' @examples
@@ -362,10 +364,237 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 tables <- new_generic("tables", "x")
 
 #' @export
-method(tables, DTADataSet) <- function(x) {
-  return(x@tables)
+method(tables, DTADataSet) <- function(x, i = NULL) {
+  if(is.null(i)) {
+    return(x@tables)
+  } else if(length(i) == 1) {
+    return(x@tables[[i]])
+  } else {
+    return(x@tables[i])
+  }
 }
 
 
+#' @title loads file
+#' @description
+#' Load the content of the file into dataset
+#' @param x An object of class DTADataSet
+#' @return object of class DTADataSet with loaded data
+#' @examples
+#' \dontrun{
+#' column_format <- min_number_of_files(dtafiles)
+#' }
+#' @name load_file-DTADataSet
+if (!exists("load_file", mode = "function")) {
+  load_file <- new_generic("load_file", "x")
+}
+#' @export
+method(load_file, DTADataSet) <- function(x) {
+  cli_abort("Not yet implemented.")
+}
 
+if (!exists("read_file", mode = "function")) {
+  read_file <- new_generic("read_file", "x")
+}
+
+
+#' @title Read file into DTADataSet
+#' @description
+#' Convenience wrapper that dispatches to \code{load_file()} for a dataset.
+#' @param x An object of class \code{DTADataSet}.
+#' @param index Single character or numeric index selecting the file handler
+#' within the dataset. Defaults to \code{1}.
+#' @param file Path to the input file to be read.
+#' @param name Optional name under which the loaded table should be stored.
+#' Defaults to \code{basename(file)}.
+#' @param ... Additional arguments passed through.
+#' @return The updated dataset object.
+#' @name read_file
+#' @export
+method(read_file, DTADataSet) <- function(
+  x,
+  index = 1,
+  file,
+  name = basename(file),
+  ...
+) {
+  load_file(
+    x,
+    file = file,
+    index = index,
+    name = name,
+    ...
+  )
+}
+
+
+#' @keywords internal
+dta_hash_object <- function(x) {
+  tmp <- tempfile(fileext = ".rds")
+  on.exit(unlink(tmp), add = TRUE)
+  saveRDS(x, tmp)
+  unname(as.character(tools::md5sum(tmp)))
+}
+
+#' @keywords internal
+dta_table_id_to_names <- function(x, tables = NULL) {
+  all_names <- names(x@tables)
+
+  if (length(all_names) == 0) {
+    cli::cli_abort("No tables found in dataset.")
+  }
+
+  if (is.null(tables)) {
+    return(all_names)
+  }
+
+  if (is.numeric(tables)) {
+    if (any(tables < 1) || any(tables > length(all_names))) {
+      cli::cli_abort("Table index out of bounds.")
+    }
+    return(all_names[tables])
+  }
+
+  if (is.character(tables)) {
+    missing <- setdiff(tables, all_names)
+    if (length(missing) > 0) {
+      cli::cli_abort("Unknown table name(s): {missing}")
+    }
+    return(tables)
+  }
+
+  cli::cli_abort("'tables' must be NULL, numeric, or character.")
+}
+
+#' @keywords internal
+dta_default_validation_artifact_dir <- function(x) {
+  safe_name <- gsub("[^A-Za-z0-9_-]", "_", x@name)
+  file.path(tempdir(), "DTAtools_validation", safe_name)
+}
+
+#' @keywords internal
+dta_validation_result_to_row <- function(table_name, status, index_entry) {
+  data.frame(
+    table = table_name,
+    status = status,
+    ok = isTRUE(index_entry$ok),
+    validated_at = as.character(index_entry$validated_at),
+    run_id = index_entry$run_id,
+    n_schema_errors = index_entry$n_schema_errors,
+    n_rule_errors = index_entry$n_rule_errors,
+    stringsAsFactors = FALSE
+  )
+}
+
+
+#' @title Validate DTADataSet Tables
+#' @description
+#' Validates one, many, or all tables in a \code{DTADataSet} subclass against
+#' dataset specs. The method expects subclasses to provide table/spec and
+#' validation state properties.
+#' @param x A \code{DTADataSet} object.
+#' @param tables NULL (default), character table names, or numeric table indices.
+#' @param force Logical. If \code{FALSE}, validation for unchanged table/spec hash is skipped.
+#' @param persist Logical. If \code{TRUE}, full validation result is written as \code{RDS}.
+#' @param artifact_dir Character or NULL. Optional output directory for persisted
+#' validation artifacts.
+#' @return Invisibly returns \code{x} (modified in place).
+#' @name validate_dataset
+#' @export
+if (!exists("validate_dataset", mode = "function")) {
+  validate_dataset <- S7::new_generic("validate_dataset", "x")
+}
+
+#' @export
+S7::method(validate_dataset, DTADataSet) <- function(
+  x,
+  tables = NULL,
+  force = FALSE,
+  persist = TRUE,
+  artifact_dir = NULL
+) {
+  has_specs <- !is.null(tryCatch(x@specs, error = function(e) NULL))
+  has_tables <- !is.null(tryCatch(x@tables, error = function(e) NULL))
+  has_validation_index <- !is.null(tryCatch(x@validation_index, error = function(e) NULL))
+  has_validation_store <- !is.null(tryCatch(x@validation_store, error = function(e) NULL))
+
+  if (!has_specs || !has_tables || !has_validation_index || !has_validation_store) {
+    cli::cli_abort(
+      "validate_dataset() requires a DTADataSet subclass with properties: specs, tables, validation_index, and validation_store."
+    )
+  }
+
+  target_tables <- dta_table_id_to_names(x, tables)
+  specs_hash <- dta_hash_object(as.list(x@specs))
+  output_rows <- list()
+
+  if (persist) {
+    if (is.null(artifact_dir)) {
+      artifact_dir <- if (!is.null(x@validation_artifact_dir)) {
+        x@validation_artifact_dir
+      } else {
+        dta_default_validation_artifact_dir(x)
+      }
+    }
+    dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
+    x@validation_artifact_dir <- artifact_dir
+  }
+
+  for (table_name in target_tables) {
+    current_table <- x@tables[[table_name]]
+    current_df <- as.data.frame(current_table)
+    table_hash <- dta_hash_object(current_df)
+
+    previous <- x@validation_index[[table_name]]
+    unchanged <- !is.null(previous) &&
+      identical(previous$table_hash, table_hash) &&
+      identical(previous$specs_hash, specs_hash)
+
+    if (!force && unchanged) {
+      output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+        table_name = table_name,
+        status = "skipped",
+        index_entry = previous
+      )
+      next
+    }
+
+    details <- validate_table_detailed(x@specs, current_df, verbose = TRUE)
+    run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
+    artifact_path <- NULL
+
+    if (persist) {
+      safe_table <- gsub("[^A-Za-z0-9_-]", "_", table_name)
+      table_dir <- file.path(artifact_dir, safe_table)
+      dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+      artifact_path <- file.path(table_dir, paste0(run_id, ".rds"))
+      saveRDS(details, artifact_path)
+    }
+
+    index_entry <- list(
+      validated_at = Sys.time(),
+      ok = isTRUE(details$ok),
+      table_hash = table_hash,
+      specs_hash = specs_hash,
+      n_schema_errors = details$n_schema_errors,
+      n_rule_errors = details$n_rule_errors,
+      run_id = run_id,
+      artifact_path = artifact_path
+    )
+
+    x@validation_index[[table_name]] <- index_entry
+    x@validation_store[[table_name]] <- details
+
+    output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+      table_name = table_name,
+      status = "validated",
+      index_entry = index_entry
+    )
+  }
+
+  summary_df <- do.call(rbind, output_rows)
+  attr(x, "last_validation_summary") <- summary_df
+
+  invisible(x)
+}
 

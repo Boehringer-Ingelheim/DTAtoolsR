@@ -3,6 +3,10 @@
 \name{read_file_execution-DTAFileDelim}
 \alias{read_file_execution-DTAFileDelim}
 \title{Read File for DTAFileDelim Objects}
+\usage{
+## S7 method for class <DTAtools::DTAFileDelim>
+read_file_execution(x, file)
+}
 \arguments{
 \item{x}{A \code{DTAFileDelim} object containing file reading parameters.}
 

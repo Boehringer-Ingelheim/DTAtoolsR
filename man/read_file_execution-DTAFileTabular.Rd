@@ -3,6 +3,10 @@
 \name{read_file_execution-DTAFileTabular}
 \alias{read_file_execution-DTAFileTabular}
 \title{Read File for DTAFileTabular Objects}
+\usage{
+## S7 method for class <DTAtools::DTAFile>
+read_file_execution(x, file)
+}
 \arguments{
 \item{x}{A \code{DTAFileTabular} object containing file reading parameters.}
 

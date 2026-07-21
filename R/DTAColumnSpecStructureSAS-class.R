@@ -98,7 +98,7 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 #' @rdname print-DTAColumnSpecStructureSAS
 #' @export
 if (!exists("print", mode = "function")) {
-  print <- new_generic("print_info", "x")
+  print <- new_generic("print", "x")
 }
 #' @export
 method(print, DTAColumnSpecStructureSAS) <- function(x) {

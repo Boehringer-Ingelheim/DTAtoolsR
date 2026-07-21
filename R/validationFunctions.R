@@ -8,30 +8,68 @@
 #' @importFrom utils txtProgressBar setTxtProgressBar
 #' @param table A data.frame to validate.
 #' @param specs A specs object.
+#' @param verbose Logical. If TRUE (default), prints validation progress.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
 #' @export
 #TODO: move validate table to DTADataSet-class.R
-validate_table <- function(specs, table) {
+validate_table <- function(specs, table, verbose = TRUE) {
+  details <- validate_table_detailed(specs = specs, table = table, verbose = verbose)
+
+  if (!isTRUE(details$schema_valid)) {
+    return(details$schema_errors)
+  }
+
+  if (!isTRUE(details$rules_valid)) {
+    messages <- vapply(details$rule_errors, function(x) x$message, character(1))
+    cli::cli_abort(c("Schema rule violations:", messages))
+  }
+
+  if (isTRUE(verbose)) {
+    cli::cli_h3("")
+    cli::cli_alert_success("Table is valid.")
+  }
+
+  table
+}
+
+
+#' @keywords internal
+validate_table_detailed <- function(specs, table, verbose = TRUE) {
+  schema_json <- tryCatch(
+    specs@json_schema,
+    error = function(e) NULL
+  )
+
+  if (is.null(schema_json)) {
+    schema_json <- as_json_schema(specs)
+  }
+
   # Confirm JSON schema
-  obj <- jsonvalidate::json_schema$new(specs@json_schema)
+  obj <- jsonvalidate::json_schema$new(schema_json)
 
   # Split the table into smaller chunks
   num_rows <- nrow(table)
   chunk_size <- 5000
   chunks <- split(table, ceiling(seq_len(num_rows) / chunk_size))
+  schema_error_summaries <- list()
+  schema_error_full <- list()
 
   # progress bar settings
   n_chunks <- length(chunks)
-  pb <- txtProgressBar(min = 1, max = max(c(n_chunks, 2)), style = 3)
+  pb <- NULL
+  if (isTRUE(verbose)) {
+    pb <- txtProgressBar(min = 1, max = max(c(n_chunks, 2)), style = 3)
+    cli::cli_alert_info("Validate Table using jsonschema.\n")
+  }
 
-  # Validate each chunk
-  cli::cli_alert_info("Validate Table using jsonschema.\n")
   for (name in names(chunks)) {
     i <- as.numeric(name)
 
     row_addition <- chunk_size * (i - 1)
 
-    setTxtProgressBar(pb, i)
+    if (isTRUE(verbose)) {
+      setTxtProgressBar(pb, i)
+    }
 
     chunk <- chunks[[name]]
 
@@ -46,7 +84,6 @@ validate_table <- function(specs, table) {
     result <- obj$validate(json_data, verbose = TRUE, greedy = TRUE)
 
     if (!result) {
-      # print formatted error when the table is not valid
       error_df <- as.data.frame(attributes(result)$errors)
       params <- as.data.frame(error_df$params)
       colnames(params) <- paste0(c("params."), colnames(params))
@@ -99,33 +136,64 @@ validate_table <- function(specs, table) {
           )
       }
 
-      cli::cli_alert_danger(
-        "A chunk (size = {chunk_size}) of the table does not conform to the schema. Please check the data.frames containing the error messages in @tables of your dtatools object for more details."
-      )
-      return(list(
-        summarised_error = summarised_error,
-        full_error = full_error_df
-      ))
+      schema_error_summaries[[length(schema_error_summaries) + 1]] <- summarised_error
+      schema_error_full[[length(schema_error_full) + 1]] <- full_error_df
     }
   }
-  close(pb)
 
-  cli::cli_alert_success(
-    "Table format, length, pattern, and values are valid."
+  if (isTRUE(verbose) && !is.null(pb)) {
+    close(pb)
+  }
+
+  has_schema_errors <- length(schema_error_full) > 0
+  summarised_error <- if (length(schema_error_summaries) > 0) {
+    do.call(rbind, schema_error_summaries)
+  } else {
+    NULL
+  }
+  full_error <- if (length(schema_error_full) > 0) {
+    do.call(rbind, schema_error_full)
+  } else {
+    NULL
+  }
+
+  if (!has_schema_errors && isTRUE(verbose)) {
+    cli::cli_alert_success(
+      "Table format, length, pattern, and values are valid."
+    )
+  }
+
+  rule_results <- list()
+  rule_errors <- list()
+  rules_valid <- TRUE
+  rules_obj <- tryCatch(specs@rules, error = function(e) NULL)
+  rules_list <- if (!is.null(rules_obj)) {
+    tryCatch(as.list(rules_obj), error = function(e) list())
+  } else {
+    list()
+  }
+
+  if (length(rules_list) > 0) {
+    if (isTRUE(verbose)) {
+      cli::cli_h2("Checking schema rules")
+    }
+
+    rule_results <- apply_schema_rules(rules_list, table, verbose = verbose)
+    rule_errors <- Filter(function(x) !isTRUE(x$valid), rule_results)
+    rules_valid <- length(rule_errors) == 0
+  }
+
+  list(
+    ok = !has_schema_errors && isTRUE(rules_valid),
+    schema_valid = !has_schema_errors,
+    rules_valid = isTRUE(rules_valid),
+    n_schema_errors = if (is.null(full_error)) 0 else nrow(full_error),
+    n_rule_errors = length(rule_errors),
+    schema_errors = list(
+      summarised_error = summarised_error,
+      full_error = full_error
+    ),
+    rule_results = rule_results,
+    rule_errors = rule_errors
   )
-
-  rules <- get_rules(specs)
-  if (length(rules) > 0) {
-    cli::cli_h2("Checking schema rules")
-    results <- apply_schema_rules(rules, table)
-    failed <- Filter(function(x) !x$valid, results)
-    if (length(failed) > 0) {
-      messages <- vapply(failed, function(x) x$message, character(1))
-      cli::cli_abort(c("Schema rule violations:", messages))
-    }
-  }
-  cli::cli_h3("")
-  cli::cli_alert_success("Table is valid.")
-
-  return(table)
 }

@@ -3,6 +3,10 @@
 \name{read_file_execution-DTAFileCSV}
 \alias{read_file_execution-DTAFileCSV}
 \title{Read File for DTAFileCSV Objects}
+\usage{
+## S7 method for class <DTAtools::DTAFileCSV>
+read_file_execution(x, file)
+}
 \arguments{
 \item{x}{A \code{DTAFileCSV} object containing file reading parameters.}
 

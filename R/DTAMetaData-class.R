@@ -180,7 +180,7 @@ method(print_info, DTAMetaData) <- function(x, ...) {
 #' @name print_short_info
 #' @export
 if (!exists("print_short_info", mode = "function")) {
-  print_info <- new_generic("print_short_info", "x")
+  print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {
   message <- "Metadata: {x@title}"

@@ -185,10 +185,11 @@ rule_check_col_condition <- function(rule, df) {
 #' @importFrom cli cli_alert_success cli_alert_danger cli_alert_info
 #' @param rules A list of DTARule objects.
 #' @param df A data.frame to validate.
+#' @param verbose Logical. If TRUE (default), prints progress messages.
 #' @return (Invisibly) a list of rule validation results, each as a list with
 #'   elements `id`, `valid`, and `message`.
 #' @export
-apply_schema_rules <- function(rules, df) {
+apply_schema_rules <- function(rules, df, verbose = TRUE) {
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
@@ -199,7 +200,9 @@ apply_schema_rules <- function(rules, df) {
     rule_type <- rule@type
     if (!rule_type %in% names(rule_functions)) {
       msg <- paste("Unknown rule type:", rule_type)
-      cli::cli_alert_danger(msg)
+      if (isTRUE(verbose)) {
+        cli::cli_alert_danger(msg)
+      }
       return(list(
         id = rule@id,
         valid = FALSE,
@@ -209,10 +212,12 @@ apply_schema_rules <- function(rules, df) {
 
     result <- rule_functions[[rule_type]](rule, df)
 
-    if (isTRUE(result$valid)) {
-      cli::cli_alert_success("Rule '{result$id}' passed.")
-    } else {
-      cli::cli_alert_danger(result$message)
+    if (isTRUE(verbose)) {
+      if (isTRUE(result$valid)) {
+        cli::cli_alert_success("Rule '{result$id}' passed.")
+      } else {
+        cli::cli_alert_danger(result$message)
+      }
     }
 
     result
@@ -220,12 +225,14 @@ apply_schema_rules <- function(rules, df) {
 
   failed <- Filter(function(x) isFALSE(x$valid), results)
 
-  if (length(failed) == 0) {
-    cli::cli_alert_success("All schema rules passed.")
-  } else {
-    cli::cli_alert_info(
-      "{length(failed)} rule{if (length(failed) > 1) 's'} failed."
-    )
+  if (isTRUE(verbose)) {
+    if (length(failed) == 0) {
+      cli::cli_alert_success("All schema rules passed.")
+    } else {
+      cli::cli_alert_info(
+        "{length(failed)} rule{if (length(failed) > 1) 's'} failed."
+      )
+    }
   }
 
   invisible(results)
