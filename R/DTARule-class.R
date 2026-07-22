@@ -84,8 +84,11 @@ method(print, DTARule) <- function(x) {
 #' }
 #' @name check
 #' @export
-check <- new_generic("check", "x")
+if (!exists("check", mode = "function")) {
+  check <- new_generic("check", "x")
+}
 
+#' @export
 method(check, DTARule) <- function(x, index = 1) {
   #nolint
   cli::cli_abort(stringr::str_c(

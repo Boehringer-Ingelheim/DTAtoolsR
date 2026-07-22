@@ -1,17 +1,16 @@
-test_that("Validation.", {
+test_that("Validation of single tabular dataset", {
+  # read in a dta from yaml file
   path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
   dta <- read_dta_from_yaml(path)
 
   # Check class
   expect_equal(class(dta), c("DTAtools::DTA", "S7_object"))
 
-  dta <- read_file(dta, "clinical_data", file = system.file("extdata", "clinical_data.csv", package = "DTAtools"))
-  dta <- read_file(dta, 1, file = system.file("extdata", "clinical_data.csv", package = "DTAtools"))
+  dta <- load_file(dta, "clinical_data", file = system.file("extdata", "clinical_data.csv", package = "DTAtools"))
 
-  
-  datasets(dta, "clinical_data") |> tables() 
-
-
+  dta[[1]]
+  check(dta)
+  #check(dta, quiet = TRUE)
 })
 
 test_that("Examples are loaded and correctly formatted.", {

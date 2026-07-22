@@ -244,13 +244,12 @@ if (!exists("read_file_execution", mode = "function")) {
   read_file_execution <- new_generic("read_file_execution", "x")
 }
 
-if (inherits(try(method(read_file_execution, DTAFile), silent = TRUE), "try-error")) {
-  method(read_file_execution, DTAFile) <- function(x, file) {
-    stop(
-      "This method is not implemented. You need to
+#' @export
+method(read_file_execution, DTAFile) <- function(x, file) {
+  stop(
+    "This method is not implemented. You need to
   use an object of a class which is derived from this class."
-    )
-  }
+  )
 }
 
 
@@ -347,10 +346,10 @@ method(print, DTAFile) <- function(x, ...) {
 #' @seealso \code{\link{DTAFile}}
 #' @name print_info
 #' @export
-#if (!exists("print_info", mode = "function")) {
-#  print_info <- new_generic("print_info", "x")
-#}
-if (inherits(try(method(print_info, DTAFile), silent = TRUE), "try-error")) {
+if (!exists("print_info", mode = "function")) {
+  print_info <- new_generic("print_info", "x")
+  
+  #' @export
   method(print_info, DTAFile) <- function(x) {
     cli::cli_alert_info("Filename: {x@filename}")
     cli::cli_alert("Pattern: {x@pattern}")

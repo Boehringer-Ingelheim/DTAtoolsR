@@ -62,7 +62,7 @@ DTADataSetTabular <- S7::new_class(
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = class_list, # list of tables - can be arrow tables etc
+    tables = S7::new_property(S7::class_list, default = list()), 
     validation_index = S7::new_property(S7::class_list, default = list()),
     validation_store = S7::new_property(S7::class_list, default = list()),
     validation_artifact_dir = class_character_or_null
@@ -71,7 +71,41 @@ DTADataSetTabular <- S7::new_class(
     # check if all elements of list self@tables inherit from "Table"
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
+    } 
+
+    if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "Table")))) {
+      cli_abort("All elements of 'tables' must be of class 'Table'")
     }
+
+    #if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "arrow::ArrowTabular")))) {
+    #  cli_abort("All elements of 'tables' must be of class 'arrow::ArrowTabular'")
+    #}
+
+    # check if list holding the validation index and validation store are of the same length
+    #if(length(self@validation_index) != length(self@validation_store)) {
+    #  cli_abort("Properties 'validation_index' and 'validation_store' must be of the same length")
+    #}
+
+    if(!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
+      cli_abort("Property 'validation_artifact_dir' must be a valid directory path or NULL")
+    }
+
+    # if tables are present, check if the column names of the tables match the column names in the specs if specs are present
+    #if(length(self@tables) > 0 && !is.null(self@specs)) {
+    #  spec_column_names <- sapply(self@specs@columns, function(x) x@name)
+    #  for(table in self@tables) {
+    #    table_column_names <- colnames(table)
+    #    if(!all(spec_column_names %in% table_column_names)) {
+    #      cli_abort("Column names in 'specs' do not match column names in 'tables'")
+    #    }
+    #  }
+    #}
+
+    # if list of tables is present then list of validation index and store cannot be larger than the list of tables
+    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables))) {
+      cli_abort("Properties 'validation_index' and 'validation_store' cannot be larger than the number of tables in 'tables'")
+    }
+
   }
 )
 
@@ -203,6 +237,7 @@ method(labels, DTADataSetTabular) <- function(x) {
 #' @param compression Character. Compression method, either "none" or "gzip". Default is "none".
 #' @param get_md5sum Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
 #' @param write_md5sum_to_file Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param ... Additional arguments passed to write.table.
 #' @return NULL. The function writes the table to a file.
 #' @examples
@@ -224,6 +259,7 @@ write_table_to_file <- function(
   compression = c("none", "gzip"),
   get_md5sum = TRUE,
   write_md5sum_to_file = TRUE,
+  quiet = FALSE,
   ...
 ) {
   compression <- match.arg(compression)
@@ -242,11 +278,15 @@ write_table_to_file <- function(
   # Arrange the table by specified columns
   if (!is.null(arrange_by)) {
     if (arrange_by == "all") {
-      cli::cli_alert_info("Arrange table by all columns.")
+      if (!isTRUE(quiet)) {
+        cli::cli_alert_info("Arrange table by all columns.")
+      }
       table_data <- table_data %>%
         dplyr::arrange(dplyr::across(dplyr::everything()), desc = arrange_desc)
     } else {
-      cli::cli_alert_info("Arrange table by {arrange_by}.")
+      if (!isTRUE(quiet)) {
+        cli::cli_alert_info("Arrange table by {arrange_by}.")
+      }
       table_data <- table_data %>%
         dplyr::arrange(!!!rlang::syms(arrange_by))
     }
@@ -262,7 +302,9 @@ write_table_to_file <- function(
 
   # Write the table to a file
   if (compression == "gzip") {
-    cli::cli_alert_info("Write table in gzip format to {filename}.")
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_info("Write table in gzip format to {filename}.")
+    }
     temp_file <- tempfile()
     write.table(
       table_data,
@@ -275,7 +317,9 @@ write_table_to_file <- function(
     )
     R.utils::gzip(temp_file, destname = filename, overwrite = overwrite)
   } else {
-    cli::cli_alert_info("Write table to {filename}.")
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_info("Write table to {filename}.")
+    }
     write.table(
       table_data,
       file = filename,
@@ -288,7 +332,9 @@ write_table_to_file <- function(
   }
 
   # Print a success message
-  cli::cli_alert_success("File {filename} written successfully.")
+  if (!isTRUE(quiet)) {
+    cli::cli_alert_success("File {filename} written successfully.")
+  }
 
   # Calculate md5sum
   if (get_md5sum) {
@@ -502,17 +548,23 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
 #' Load the content of the file into dataset
 #' @param x An object of class DTADataSet
 #' @param file file to be loaded
-#' @param index of the filehandler in the files list
+#' @param handler_index of the filehandler in the files list
 #' @param name file name, base name per default. is used to store the table under this name
 #' @return object of class DTADataSet with loaded data
 #' @examples
 #' \dontrun{
-#' column_format <- min_number_of_files(dtafiles)
+#'    ...
 #' }
 #' @rdname load_file
 #' @export
-method(load_file, DTADataSetTabular) <- function(x, file, index, name = basename(file)) {
-  x@tables[[ name ]] <- files(x, index) |> read_file(file)
+method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = tools::file_path_sans_ext(basename(file))) {
+
+  # check if handler_index is valid and if the file exists in the files list
+  if (handler_index < 1 || handler_index > length(x@files)) {
+    cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
+  }
+
+  x@tables[[ name ]] <- files(x, handler_index) |> read_file(file)
   x
 }
 
@@ -587,7 +639,7 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
   entry <- x@validation_index[[table_name]]
   if (is.null(entry) || is.null(entry$artifact_path)) {
     cli::cli_abort(
-      "No validation artifact available for table '{table_name}'. Run validate_dataset() first with persist = TRUE."
+      "No validation artifact available for table '{table_name}'. Run check() first with persist = TRUE."
     )
   }
 
@@ -633,5 +685,199 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
   }
 
   invisible(x)
+}
+
+
+#' @title Validate a Single Table in DTADataSetTabular
+#' @description
+#' Validates a single table within a DTADataSetTabular object. Provides detailed
+#' validation results for that specific table. Can force re-validation even if
+#' the table and specs are unchanged.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param table Character table name or numeric table index (required).
+#' @param force Logical. If TRUE, forces re-validation even if table and specs
+#'   are unchanged. Default is FALSE.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @return Invisibly returns the validation details object (a list) containing:
+#'   schema_valid, rules_valid, schema_errors, rule_errors, n_schema_errors, n_rule_errors, ok
+#' @importFrom cli cli_abort cli_h3 cli_alert_success cli_alert_info
+#' @examples
+#' \dontrun{
+#'   # Validate first table
+#'   revalidate_table(dataset, table = 1)
+#'   # Validate by name
+#'   revalidate_table(dataset, table = "demographics")
+#'   # Force re-validation
+#'   revalidate_table(dataset, table = "demographics", force = TRUE)
+#' }
+#' @name revalidate_table
+#' @export
+revalidate_table <- S7::new_generic("revalidate_table", "x")
+
+#' @export
+S7::method(revalidate_table, DTADataSetTabular) <- function(
+  x,
+  table,
+  force = FALSE,
+  quiet = FALSE
+) {
+  # Validate input
+  if (missing(table)) {
+    cli::cli_abort("'table' argument is required. Specify table name or index.")
+  }
+
+  table_name <- dta_table_id_to_names(x, table)
+  table_name <- table_name[[1]]
+
+  # Get the table and check it exists
+  if (!table_name %in% names(x@tables)) {
+    cli::cli_abort(paste0("Table '", table_name, "' not found in tables list."))
+  }
+
+  current_table <- x@tables[[table_name]]
+  current_df <- as.data.frame(current_table)
+  table_hash <- dta_hash_object(current_df)
+  specs_hash <- dta_hash_object(as.list(x@specs))
+
+  # Check if we need to re-validate
+  previous <- x@validation_index[[table_name]]
+  unchanged <- !is.null(previous) &&
+    identical(previous$table_hash, table_hash) &&
+    identical(previous$specs_hash, specs_hash)
+
+  if (!force && unchanged && !is.null(previous)) {
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_info(paste0("Table '", table_name, "' validation is up-to-date (skipped)."))
+    }
+    return(invisible(x@validation_store[[table_name]]))
+  }
+
+  if (!isTRUE(quiet)) {
+    cli::cli_h3(paste0("Validating table: ", table_name))
+  }
+
+  # Perform validation
+  details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
+
+  # Update validation state
+  run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
+  index_entry <- list(
+    validated_at = Sys.time(),
+    ok = isTRUE(details$ok),
+    table_hash = table_hash,
+    specs_hash = specs_hash,
+    n_schema_errors = details$n_schema_errors,
+    n_rule_errors = details$n_rule_errors,
+    run_id = run_id,
+    artifact_path = NULL
+  )
+
+  x@validation_index[[table_name]] <- index_entry
+  x@validation_store[[table_name]] <- details
+
+  # Print summary
+  if (!isTRUE(quiet)) {
+    if (isTRUE(details$ok)) {
+      cli::cli_alert_success(paste0("Table '", table_name, "' is valid."))
+    } else {
+      cli::cli_alert_info(
+        paste0("Table '", table_name, "' validation errors: ", details$n_schema_errors, " schema, ", details$n_rule_errors, " rule violations")
+      )
+    }
+  }
+
+  invisible(details)
+}
+
+
+#' @title Invalidate Validation Due to Spec Changes
+#' @description
+#' Marks validation as outdated for specified tables when specs are changed.
+#' This is a helper function called automatically when specs are updated.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param tables NULL (default) to invalidate all tables, or character/numeric
+#'   table identifiers.
+#' @return Invisibly returns \'x\'.
+#' @keywords internal
+invalidate_by_spec_change <- function(x, tables = NULL) {
+  target_tables <- dta_table_id_to_names(x, tables)
+
+  for (table_name in target_tables) {
+    entry <- x@validation_index[[table_name]]
+    if (!is.null(entry)) {
+      # Mark specs_hash as NULL to force re-validation on next check() call
+      entry$specs_hash <- NULL
+      x@validation_index[[table_name]] <- entry
+    }
+  }
+
+  invisible(x)
+}
+
+
+#' @title Check DTADataSetTabular Tables
+#' @description
+#' Validates all tables within a DTADataSetTabular object and returns a validation summary.
+#' @param x A \'DTADataSetTabular\' object.
+#' @param tables NULL (default), character table names, or numeric table indices.
+#'   If NULL, checks all tables.
+#' @param force Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.
+#' @param persist Logical. If TRUE (default), persists validation artifacts to disk.
+#' @param artifact_dir Character or NULL. Optional output directory for persisted
+#' validation artifacts.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @return Invisibly returns a validation summary data.frame with columns:
+#'   table, status, ok, validated_at, run_id, n_schema_errors, n_rule_errors
+#' @importFrom cli cli_h3 cli_alert_info cli_alert_success cli_alert_danger
+#' @examples
+#' \dontrun{
+#'   ds <- create_example_DTADataSetTabular()
+#'   # Check all tables
+#'   check(ds)
+#'   # Check specific table
+#'   check(ds, tables = "tab1")
+#' }
+#' @name check-DTADataSetTabular
+#' @export
+S7::method(check, DTADataSetTabular) <- function(
+  x,
+  tables = NULL,
+  force = FALSE,
+  persist = TRUE,
+  artifact_dir = NULL,
+  quiet = FALSE
+) {
+  # Call the parent DTADataSet check method
+  x <- S7::method(check, DTADataSet)(
+    x,
+    tables = tables,
+    force = force,
+    persist = persist,
+    artifact_dir = artifact_dir,
+    quiet = quiet
+  )
+
+  # Get and return the validation status summary
+  val_status <- validation_status(x, tables = tables)
+  
+  if (!isTRUE(quiet)) {
+    if (nrow(val_status) > 0) {
+      n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
+      n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
+      n_total <- nrow(val_status)
+      
+      if (n_invalid > 0) {
+        cli::cli_alert_danger(
+          paste0("Checked ", n_total, " table(s): ", n_valid, " valid, ", n_invalid, " INVALID")
+        )
+      } else {
+        cli::cli_alert_success(
+          paste0("Checked ", n_total, " table(s): all valid")
+        )
+      }
+    }
+  }
+
+  invisible(val_status)
 }
 

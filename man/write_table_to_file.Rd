@@ -18,6 +18,7 @@ write_table_to_file(
   compression = c("none", "gzip"),
   get_md5sum = TRUE,
   write_md5sum_to_file = TRUE,
+  quiet = FALSE,
   ...
 )
 }
@@ -47,6 +48,8 @@ write_table_to_file(
 \item{get_md5sum}{Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.}
 
 \item{write_md5sum_to_file}{Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
 \item{...}{Additional arguments passed to write.table.}
 }

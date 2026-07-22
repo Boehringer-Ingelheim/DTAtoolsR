@@ -1,0 +1,11 @@
+{
+    "r.lsp.enabled":  true,
+    "[r]":  {
+                "editor.defaultFormatter":  "REditorSupport.r"
+            },
+    "r.useRenvLibPath":  false,
+    "r.lsp.use_stdio":  true,
+    "r.lsp.multiServer":  false,
+    "r.sessionWatcher":  false,
+    "r.lsp.diagnostics":  true
+}

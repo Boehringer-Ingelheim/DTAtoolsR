@@ -129,38 +129,95 @@ method(datasets, DTA) <- function(x, name = NULL) {
   return(all_datasets[[name]])
 }
 
-if (!exists("read_file", mode = "function")) {
-  read_file <- new_generic("read_file", "x")
+#' @title Extract single dataset with [[
+#' @description
+#' Extract a single \code{DTADataSet} from a \code{DTA} object using
+#' double-bracket notation.
+#' @param x An object of class \code{DTA}.
+#' @param i A single character name or single numeric index.
+#' @return A single \code{DTADataSet} object.
+#' @examples
+#' \dontrun{
+#'   dta <- create_example_DTA()
+#'   dta[[1]]
+#'   dta[["demographics"]]
+#' }
+#' @name double-bracket
+#' @export
+method(`[[`, DTA) <- function(x, i) {
+  if (!is.character(i) && !is.numeric(i)) {
+    cli_abort("'i' must be a character name or numeric index.")
+  }
+  if (length(i) != 1) {
+    cli_abort("'i' must be a single value. Use '[' to extract multiple datasets.")
+  }
+  datasets(x, i)
+}
+
+#' @title Extract multiple datasets with [
+#' @description
+#' Extract one or more \code{DTADataSet} objects from a \code{DTA} object using
+#' single-bracket notation. Always returns a named list.
+#' @param x An object of class \code{DTA}.
+#' @param i A character vector of names or a numeric index vector.
+#' @return A named list of \code{DTADataSet} objects.
+#' @examples
+#' \dontrun{
+#'   dta <- create_example_DTA()
+#'   dta[c(1, 2)]
+#'   dta[c("demographics", "vitals")]
+#' }
+#' @name single-bracket
+#' @export
+method(`[`, DTA) <- function(x, i) {
+  if (!is.character(i) && !is.numeric(i)) {
+    cli_abort("'i' must be a character vector of names or a numeric index vector.")
+  }
+  if (is.numeric(i)) {
+    if (any(i < 1) || any(i > length(x@datasets))) {
+      cli_abort("Numeric index out of bounds.")
+    }
+    return(x@datasets[i])
+  }
+  missing_names <- setdiff(i, names(x@datasets))
+  if (length(missing_names) > 0) {
+    cli_abort("The following dataset{?s} not found: {.field {missing_names}}")
+  }
+  x@datasets[i]
+}
+
+if (!exists("load_file", mode = "function")) {
+  load_file <- new_generic("load_file", "x")
 }
 
 
-#' @title Read file into DTA
+#' @title Load file into DTA object
 #' @description
 #' Reads a file into one dataset contained in a \code{DTA} object by dataset
 #' name or index.
 #' @param x An object of class \code{DTA}.
 #' @param dataset Single character dataset name or numeric dataset index.
 #' @param file Path to the input file to be read.
-#' @param index Single character or numeric index selecting the file handler
+#' @param handler_index Single character or numeric index selecting the file handler
 #' within the dataset. Defaults to \code{1}.
 #' @param name Optional name under which the loaded table should be stored.
 #' Defaults to \code{basename(file)}.
 #' @param ... Additional arguments passed through.
 #' @return The updated \code{DTA} object.
-#' @name read_file
+#' @name load_file
 #' @export
-method(read_file, DTA) <- function(
+method(load_file, DTA) <- function(
   x,
   dataset,
   file,
-  index = 1,
-  name = basename(file),
+  handler_index = 1,
+  name = tools::file_path_sans_ext(basename(file)),
   ...
 ) {
   dataset_object <- datasets(x, dataset)
-  dataset_object <- read_file(
+  dataset_object <- load_file(
     dataset_object,
-    index = index,
+    handler_index = handler_index,
     file = file,
     name = name,
     ...
@@ -173,6 +230,147 @@ method(read_file, DTA) <- function(
   }
 
   x
+}
+
+
+#' @title Check DTA Object
+#' @description
+#' Validates all datasets within a \code{DTA} object, or a specific dataset.
+#' Provides comprehensive validation summary across all datasets.
+#' @param x An object of class \code{DTA}.
+#' @param datasets Optional. A character vector of dataset names or numeric indices
+#'   to validate. If NULL (default), validates all datasets.
+#' @param force Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.
+#' @param persist Logical. If TRUE (default), persists validation artifacts to disk.
+#' @param artifact_dir Character or NULL. Directory for persisted artifacts.
+#'   If NULL, uses default validation artifact directory per dataset.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
+#' @return Invisibly returns a validation summary data.frame with columns:
+#'   dataset, n_tables, n_validated, n_valid, n_invalid, n_skipped
+#' @examples
+#' \dontrun{
+#'   dta <- create_example_DTA()
+#'   # Check all datasets
+#'   check(dta)
+#'   # Check specific dataset by name
+#'   check(dta, datasets = "demographics")
+#'   # Check by index
+#'   check(dta, datasets = 1)
+#' }
+#' @name check-DTA
+#' @export
+method(check, DTA) <- function(
+  x,
+  datasets = NULL,
+  force = FALSE,
+  persist = TRUE,
+  artifact_dir = NULL,
+  quiet = FALSE
+) {
+  if (is.null(x@datasets) || length(x@datasets) == 0) {
+    cli_abort("DTA object has no datasets to check.")
+  }
+
+  # Determine which datasets to validate
+  target_datasets <- if (is.null(datasets)) {
+    names(x@datasets)
+  } else {
+    if (is.numeric(datasets)) {
+      if (any(datasets < 1) || any(datasets > length(x@datasets))) {
+        cli_abort("Dataset index out of bounds.")
+      }
+      names(x@datasets)[datasets]
+    } else if (is.character(datasets)) {
+      missing <- setdiff(datasets, names(x@datasets))
+      if (length(missing) > 0) {
+        cli_abort("The following dataset{?s} not found: {.field {missing}}")
+      }
+      datasets
+    } else {
+      cli_abort("'datasets' must be NULL, a character vector, or a numeric vector.")
+    }
+  }
+
+  n_datasets <- length(target_datasets)
+  dataset_word <- if (n_datasets == 1) "Dataset" else "Datasets"
+  if (!isTRUE(quiet)) {
+    cli_h2(paste0("Checking DTA: ", dataset_word, " validation"))
+  }
+
+  summary_rows <- list()
+
+  for (ds_name in target_datasets) {
+    ds <- x@datasets[[ds_name]]
+
+    if (!inherits(ds, "DTAtools::DTADataSet")) {
+      if (!isTRUE(quiet)) {
+        cli_alert_danger(paste0("Dataset '", ds_name, "' is not a DTADataSet object. Skipping."))
+      }
+      next
+    }
+
+    if (!isTRUE(quiet)) {
+      cli_alert_info(paste0("Checking dataset: ", ds_name))
+    }
+
+    # Check the dataset
+    invisible(check(
+      ds,
+      tables = NULL,
+      force = force,
+      persist = persist,
+      artifact_dir = artifact_dir,
+      quiet = quiet
+    ))
+
+    # Get validation summary for this dataset
+    val_status <- validation_status(ds)
+    n_tables <- nrow(val_status)
+    n_validated <- sum(val_status$status == "validated", na.rm = TRUE)
+    n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
+    n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
+    n_skipped <- sum(val_status$status == "skipped", na.rm = TRUE)
+
+    summary_rows[[length(summary_rows) + 1]] <- data.frame(
+      dataset = ds_name,
+      n_tables = n_tables,
+      n_validated = n_validated,
+      n_valid = n_valid,
+      n_invalid = n_invalid,
+      n_skipped = n_skipped,
+      stringsAsFactors = FALSE
+    )
+
+    # Print summary for this dataset
+    if (!isTRUE(quiet)) {
+      if (n_invalid > 0) {
+        cli_alert_danger(
+          paste0("Dataset '", ds_name, "': ", n_validated, " validated, ", n_valid, " valid, ", n_invalid, " INVALID, ", n_skipped, " skipped")
+        )
+      } else {
+        cli_alert_success(
+          paste0("Dataset '", ds_name, "': ", n_validated, " validated, ", n_valid, " valid, ", n_skipped, " skipped")
+        )
+      }
+    }
+  }
+
+  summary_df <- do.call(rbind, summary_rows)
+  rownames(summary_df) <- NULL
+
+  # Overall summary
+  total_invalid <- sum(summary_df$n_invalid, na.rm = TRUE)
+  if (!isTRUE(quiet)) {
+    if (total_invalid > 0) {
+      invalid_word <- if (total_invalid == 1) "table" else "tables"
+      cli_alert_danger(paste0("Overall: ", total_invalid, " INVALID ", invalid_word, " found across datasets"))
+    } else {
+      cli_alert_success("All datasets checked successfully!")
+    }
+  }
+
+  invisible(summary_df)
 }
 
 

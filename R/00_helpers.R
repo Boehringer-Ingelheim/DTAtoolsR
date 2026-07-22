@@ -45,6 +45,22 @@ class_character_or_numeric_or_null_or_list <- S7::class_character |
 `__DTAtools_supported_dataset_types__` <- c("tabular")
 `__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
 
+#' @title Check Generic
+#' @description
+#' Generic function for validating DTA-related objects (e.g. \code{DTA},
+#' \code{DTADataSet}, \code{DTADataSetTabular}). Defined here (rather than in
+#' individual class files) because R files are loaded alphabetically and
+#' several class files need this generic to already exist when they register
+#' their methods.
+#' @param x An object to check.
+#' @param ... Additional arguments passed to methods.
+#' @return Depends on the method implementation.
+#' @name check
+#' @export
+if (!exists("check", mode = "function")) {
+  check <- S7::new_generic("check", "x")
+}
+
 #' Create a DTAColumnSpecStructure Object
 #'
 #' Constructs a DTAColumnSpecStructure object for a specified backend (e.g., SAS or R),

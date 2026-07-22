@@ -75,3 +75,4 @@ test_that("DTAFile Creation", {
   expect_true(matches_filename(file_info, basename(path)))
 })
 
+

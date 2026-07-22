@@ -375,56 +375,32 @@ method(tables, DTADataSet) <- function(x, i = NULL) {
 }
 
 
-#' @title loads file
-#' @description
-#' Load the content of the file into dataset
-#' @param x An object of class DTADataSet
-#' @return object of class DTADataSet with loaded data
-#' @examples
-#' \dontrun{
-#' column_format <- min_number_of_files(dtafiles)
-#' }
-#' @name load_file-DTADataSet
 if (!exists("load_file", mode = "function")) {
   load_file <- new_generic("load_file", "x")
 }
-#' @export
-method(load_file, DTADataSet) <- function(x) {
-  cli_abort("Not yet implemented.")
-}
-
-if (!exists("read_file", mode = "function")) {
-  read_file <- new_generic("read_file", "x")
-}
 
 
-#' @title Read file into DTADataSet
+#' @title Load file into DTADataSet
 #' @description
 #' Convenience wrapper that dispatches to \code{load_file()} for a dataset.
 #' @param x An object of class \code{DTADataSet}.
-#' @param index Single character or numeric index selecting the file handler
+#' @param handler_index Single character or numeric index selecting the file handler
 #' within the dataset. Defaults to \code{1}.
 #' @param file Path to the input file to be read.
 #' @param name Optional name under which the loaded table should be stored.
 #' Defaults to \code{basename(file)}.
 #' @param ... Additional arguments passed through.
 #' @return The updated dataset object.
-#' @name read_file
+#' @name load_file
 #' @export
-method(read_file, DTADataSet) <- function(
+method(load_file, DTADataSet) <- function(
   x,
-  index = 1,
+  handler_index = 1,
   file,
-  name = basename(file),
+  name = tools::file_path_sans_ext(basename(file)),
   ...
 ) {
-  load_file(
-    x,
-    file = file,
-    index = index,
-    name = name,
-    ...
-  )
+  stop("This method needs to be implemented in derived classes.")
 }
 
 
@@ -487,7 +463,7 @@ dta_validation_result_to_row <- function(table_name, status, index_entry) {
 }
 
 
-#' @title Validate DTADataSet Tables
+#' @title Check DTADataSet Tables
 #' @description
 #' Validates one, many, or all tables in a \code{DTADataSet} subclass against
 #' dataset specs. The method expects subclasses to provide table/spec and
@@ -498,20 +474,17 @@ dta_validation_result_to_row <- function(table_name, status, index_entry) {
 #' @param persist Logical. If \code{TRUE}, full validation result is written as \code{RDS}.
 #' @param artifact_dir Character or NULL. Optional output directory for persisted
 #' validation artifacts.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @return Invisibly returns \code{x} (modified in place).
-#' @name validate_dataset
+#' @name check-DTADataSet
 #' @export
-if (!exists("validate_dataset", mode = "function")) {
-  validate_dataset <- S7::new_generic("validate_dataset", "x")
-}
-
-#' @export
-S7::method(validate_dataset, DTADataSet) <- function(
+S7::method(check, DTADataSet) <- function(
   x,
   tables = NULL,
   force = FALSE,
   persist = TRUE,
-  artifact_dir = NULL
+  artifact_dir = NULL,
+  quiet = FALSE
 ) {
   has_specs <- !is.null(tryCatch(x@specs, error = function(e) NULL))
   has_tables <- !is.null(tryCatch(x@tables, error = function(e) NULL))
@@ -520,7 +493,7 @@ S7::method(validate_dataset, DTADataSet) <- function(
 
   if (!has_specs || !has_tables || !has_validation_index || !has_validation_store) {
     cli::cli_abort(
-      "validate_dataset() requires a DTADataSet subclass with properties: specs, tables, validation_index, and validation_store."
+      "check() requires a DTADataSet subclass with properties: specs, tables, validation_index, and validation_store."
     )
   }
 
@@ -559,7 +532,7 @@ S7::method(validate_dataset, DTADataSet) <- function(
       next
     }
 
-    details <- validate_table_detailed(x@specs, current_df, verbose = TRUE)
+    details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
     run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
     artifact_path <- NULL
 
