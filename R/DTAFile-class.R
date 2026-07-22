@@ -213,10 +213,12 @@ if (!exists("matches_filename", mode = "function")) {
 }
 
 method(matches_filename, DTAFile) <- function(x, file) {
+  file_name <- basename(file)
+
   if (x@pattern) {
-    stringr::str_detect(file, x@filename)
+    stringr::str_detect(file_name, x@filename)
   } else {
-    return(file %in% x@filename)
+    return(file_name %in% x@filename)
   }
 }
 

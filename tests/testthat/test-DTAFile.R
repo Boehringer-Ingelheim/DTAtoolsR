@@ -15,6 +15,14 @@ test_that("DTAFileCSV object is created from reading in csv and table is accessi
 })
 
 
+test_that("matches_filename accepts full file paths", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV("clinical_data.csv")
+
+  expect_true(matches_filename(file_info, path))
+})
+
+
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
 
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
