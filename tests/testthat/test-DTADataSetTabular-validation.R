@@ -26,6 +26,12 @@ test_that("DTADataSetTabular stores validation state per table", {
   expect_true(is.data.frame(result_tbl))
   expect_equal(nrow(result_tbl), 1)
   expect_equal(result_tbl$table, "tab1")
+  expect_equal(result_tbl$dataset, "demographics")
+  expect_equal(result_tbl$n_tables, 1)
+  expect_equal(result_tbl$n_validated, 1)
+  expect_equal(result_tbl$dataset, "demographics")
+  expect_equal(result_tbl$n_tables, 1)
+  expect_equal(result_tbl$n_validated, 1)
 })
 
 

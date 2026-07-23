@@ -13,7 +13,7 @@ test_that("Validation of single tabular dataset", {
 
   dta <- load_file(dta, "clinical_data", file = data_path)
 
-  dta <- check(dta)
+  dta <- check(dta, quiet = T)
   expect_true(inherits(dta, "DTAtools::DTA"))
   expect_false(is.null(dta[[1]]@validation_index))
   expect_gt(length(dta[[1]]@validation_index), 0)
