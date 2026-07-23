@@ -57,7 +57,7 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   n_chunks <- length(chunks)
   pb <- NULL
   if (isTRUE(verbose)) {
-    cli::cli_h2("Validating column specs")
+    cli::cli_h3("validating with column specs")
     if (n_chunks > 1) {
       pb <- txtProgressBar(min = 1, max = max(c(n_chunks, 2)), style = 3)
     }
@@ -176,7 +176,7 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
 
   if (length(rules_list) > 0) {
     if (isTRUE(verbose)) {
-      cli::cli_h2("Checking rules")
+      cli::cli_h3("validating with rules")
     }
 
     rule_results <- apply_schema_rules(rules_list, table, verbose = verbose)

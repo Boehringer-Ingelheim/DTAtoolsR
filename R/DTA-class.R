@@ -296,7 +296,7 @@ method(check, DTA) <- function(
   n_datasets <- length(target_datasets)
   dataset_word <- if (n_datasets == 1) "Dataset" else "Datasets"
   if (!isTRUE(quiet)) {
-    cli_h2(paste0("Checking DTA: ", dataset_word, " validation"))
+    cli::cli_alert_info(paste0("Validating ", n_datasets, " ", dataset_word))
   }
 
   summary_rows <- list()
