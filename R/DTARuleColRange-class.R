@@ -33,6 +33,9 @@ DTARuleColRange <- S7::new_class(
     min = NULL,
     max = NULL
   ) {
+    if (is.null(columns) || length(columns) < 1) {
+      cli_abort("A 'columns' must be set.")
+    }
     if (is.list(columns)) {
       columns <- unlist(columns)
     }
@@ -68,24 +71,24 @@ DTARuleColRange <- S7::new_class(
     max = class_numeric # Maximum value of the range
   ),
   validator = function(self) {
-    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
-      "@id cannot have whitespaces and needs to be defined."
+    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
+      cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
-    if (!self@type == "check_range") {
-      "'type' must be 'check_range'."
+    if (!self@type %in% c("check_range", "col_range")) {
+      cli_abort("'type' must be 'check_range' or 'col_range'.")
     }
 
     if (is.null(self@columns) || length(self@columns) < 1) {
-      "A 'columns' must be set."
+      cli_abort("A 'columns' must be set.")
     }
 
     if (!is.numeric(self@min) || !is.numeric(self@max)) {
-      "Min and max range must be numeric."
+      cli_abort("Min and max range must be numeric.")
     }
 
     if (self@min >= self@max) {
-      "Min range must be less than max."
+      cli_abort("Min range must be less than max.")
     }
   }
 )

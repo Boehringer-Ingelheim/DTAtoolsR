@@ -42,6 +42,13 @@ DTARuleColCondition <- S7::new_class(
     condition = NULL,
     then = NULL
   ) {
+    if (is.null(condition) || length(condition) < 1) {
+      cli_abort("'condition' must be a non-empty list of conditions.")
+    }
+    if (is.null(then) || length(then) < 1) {
+      cli_abort("'then' must be a non-empty list of conditions.")
+    }
+
     # Create the class object
     new_object(
       DTAtools::DTARule(
@@ -63,17 +70,17 @@ DTARuleColCondition <- S7::new_class(
     then = class_character_or_list
   ),
   validator = function(self) {
-    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
-      "@id cannot have whitespaces and needs to be defined."
+    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
+      cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
-    if (!self@type == "check_col_condition") {
-      "'type' must be 'check_col_condition'."
+    if (!self@type %in% c("check_col_condition", "col_condition")) {
+      cli_abort("'type' must be 'check_col_condition' or 'col_condition'.")
     }
     if (is.null(self@condition) || length(self@condition) < 1) {
-      "'condition' must be a non-empty list of conditions."
+      cli_abort("'condition' must be a non-empty list of conditions.")
     }
     if (is.null(self@then) || length(self@then) < 1) {
-      "'then' must be a non-empty list of conditions."
+      cli_abort("'then' must be a non-empty list of conditions.")
     }
   }
 )
@@ -134,8 +141,8 @@ create_example_DTARuleColCondition <- function(index = 1) {
   if (index == 1) {
     return(DTAtools::DTARuleColCondition(
       id = "rule3",
-      condition = list(list("age" = 18)),
-      then = list("status" = list(equal = 'adult'))
+      condition = list(age = list(equals = 18)),
+      then = list(status = list(equals = "adult"))
     ))
   } else {
     cli::cli_abort("Invalid index: {index}. Must be 1.")

@@ -35,7 +35,7 @@ DTAColumnSpec <- S7::new_class(
   ) {
     structure <- NULL
 
-    if (!is.null(type) || !is.null(format || !is.null(length))) {
+    if (!is.null(type) || !is.null(format) || !is.null(length)) {
       structure = DTAColumnSpecStructureFactory(
         type = type,
         format = format,
@@ -68,18 +68,18 @@ DTAColumnSpec <- S7::new_class(
     colclass = class_character_or_null
   ),
   validator = function(self) {
-    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
-      "@id cannot have whitespaces and needs to be defined."
+    if (is.null(self@id) || any(grepl("\\s", self@id))) {
+      cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
     # if values are provided, there cannot be a pattern or examples
     if (!is.null(self@values)) {
       if (!is.null(self@pattern)) {
-        str_glue("{self@id}: 'pattern' cannot be set if 'values' are provided.")
+        cli_abort(glue::glue("{self@id}: 'pattern' cannot be set if 'values' are provided."))
       }
       if (!is.null(self@examples)) {
-        str_glue(
-          "{self@id}: 'examples' cannot be set if 'values' are provided."
+        cli_abort(
+          glue::glue("{self@id}: 'examples' cannot be set if 'values' are provided.")
         )
       }
     }
@@ -87,13 +87,15 @@ DTAColumnSpec <- S7::new_class(
     # if a pattern is provided, there cannot be values and examples must conform with pattern provided
     if (!is.null(self@pattern)) {
       if (!is.null(self@values)) {
-        str_glue("{self@id}: 'values' cannot be set if pattern is provided.")
+        cli_abort(glue::glue("{self@id}: 'values' cannot be set if pattern is provided."))
       }
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
           if (!grepl(ex, pattern = self@pattern)) {
-            str_glue(
-              "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
+            cli_abort(
+              glue::glue(
+                "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
+              )
             )
           }
         }
@@ -113,8 +115,8 @@ DTAColumnSpec <- S7::new_class(
         "wide_and_long_format"
       )
       if (!(self@colclass %in% valid_colclasses)) {
-        str_glue(
-          "'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}"
+        cli_abort(
+          glue::glue("'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}")
         )
       }
     }
@@ -137,9 +139,12 @@ get_arrow_schema_type <- function(x) {
   if (!inherits(x, "DTAtools::DTAColumnSpec")) {
     stop("Input must be a DTAColumnSpec object.")
   }
-  type <- x@type
+  if (is.null(x@structure)) {
+    stop(glue::glue("Structure is not set for {x@id}."))
+  }
+  type <- x@structure@type
   if (is.null(type)) {
-    stop(glue::glue("Type is not set for {x$id}."))
+    stop(glue::glue("Type is not set for {x@id}."))
   }
   switch(
     type,
@@ -164,8 +169,8 @@ get_arrow_schema_type <- function(x) {
 #' @export
 create_example_DTAColumnSpec <- function(index = 1) {
   switch(
-    index,
-    `1` = {
+    as.character(index),
+    "1" = {
       DTAtools::DTAColumnSpec(
         id = "STUDYID",
         label = "Study Identifier",
@@ -175,7 +180,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
         description = "Unique study identifier"
       )
     },
-    `2` = {
+    "2" = {
       DTAtools::DTAColumnSpec(
         id = "VISIT",
         label = "Visit",
@@ -185,7 +190,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
         description = "Visit code"
       )
     },
-    `3` = {
+    "3" = {
       DTAtools::DTAColumnSpec(
         id = "SUBJID",
         label = "Subject Identifier",
@@ -195,7 +200,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
         description = "Unique subject identifier"
       )
     },
-    `4` = {
+    "4" = {
       DTAtools::DTAColumnSpec(
         id = "AGE",
         label = "Age",
@@ -205,7 +210,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
         description = "Age in years"
       )
     },
-    `5` = {
+    "5" = {
       DTAtools::DTAColumnSpec(
         id = "AVAL",
         label = "Analysis Value",
@@ -216,7 +221,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
       )
     },
     {
-      cli_abort("Invalid index value for example DTAColumnSpec.")
+      stop("Invalid index value for example DTAColumnSpec.")
     }
   )
 }

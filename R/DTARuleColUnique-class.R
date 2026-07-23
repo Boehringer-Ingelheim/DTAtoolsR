@@ -31,6 +31,9 @@ DTARuleColUnique <- S7::new_class(
     columns = NULL,
     description = NULL
   ) {
+    if (is.null(columns) || length(columns) < 1) {
+      cli_abort("'columns' must be a non-empty list of column names.")
+    }
 
     if (!is.null(type) && !type %in% c("check_unique", "col_unique")) {
       cli_abort("'type' must be NULL, 'check_unique', or 'col_unique'.")
@@ -61,16 +64,16 @@ DTARuleColUnique <- S7::new_class(
     columns = class_character
   ),
   validator = function(self) {
-    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
-      "@id cannot have whitespaces and needs to be defined."
+    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
+      cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
-    if (!self@type == "check_unique") {
-      "'type' must be 'check_unique'."
+    if (!self@type %in% c("check_unique", "col_unique")) {
+      cli_abort("'type' must be 'check_unique' or 'col_unique'.")
     }
 
     if (is.null(self@columns) || length(self@columns) < 1) {
-      "'columns' must be a non-empty list of column names."
+      cli_abort("'columns' must be a non-empty list of column names.")
     }
   }
 )

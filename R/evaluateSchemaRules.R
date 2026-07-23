@@ -132,10 +132,12 @@ rule_check_unique <- function(rule, df) {
 evaluate_condition <- function(column_name, condition, df) {
   x <- df[[column_name]]
 
-  if (!is.null(condition$equals)) {
-    return(x == condition$equals)
-  } else if (!is.null(condition$not_equals)) {
-    return(x != condition$not_equals)
+  if (!is.null(condition$equals) || !is.null(condition$equal)) {
+    value <- if (!is.null(condition$equals)) condition$equals else condition$equal
+    return(x == value)
+  } else if (!is.null(condition$not_equals) || !is.null(condition$not_equal)) {
+    value <- if (!is.null(condition$not_equals)) condition$not_equals else condition$not_equal
+    return(x != value)
   } else if (!is.null(condition[["in"]])) {
     return(x %in% condition[["in"]])
   } else if (!is.null(condition$not_in)) {

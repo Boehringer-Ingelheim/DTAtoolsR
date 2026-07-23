@@ -40,8 +40,8 @@ DTARule <- S7::new_class(
     description = class_character_or_null
   ),
   validator = function(self) {
-    if (any(grepl(self@id, pattern = "\\s") || is.null(self@id))) {
-      "@id cannot have whitespaces and needs to be defined."
+    if (!is.null(self@id) && (length(self@id) != 1 || !is.character(self@id) || any(grepl("\\s", self@id)))) {
+      cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
     # description can be NULL or a character of length 1
@@ -49,7 +49,7 @@ DTARule <- S7::new_class(
       !is.null(self@description) &&
         (!is.character(self@description) || length(self@description) != 1)
     ) {
-      "'description' must be NULL or a character of length 1."
+      cli_abort("'description' must be NULL or a character of length 1.")
     }
   }
 )
@@ -120,6 +120,12 @@ method(check, DTARule) <- function(x, index = 1) {
 #' DTARuleFactory("rule2", "col_range", columns = "score", min = 0, max = 100)
 #' DTARuleFactory("rule3", "col_unique", columns = "id")
 DTARuleFactory <- function(id, type, ...) {
+  id <- if (!is.null(id)) {
+    gsub("[[:space:]]+", "_", as.character(id))
+  } else {
+    id
+  }
+
   type <- switch(
     as.character(type),
     check_col_condition = "col_condition",
