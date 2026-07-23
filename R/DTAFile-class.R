@@ -21,7 +21,6 @@
 #'   information.
 #' @name DTAFile-class
 #' @details This class is used internally by the DTAtoolsR package to
-#' @details This class is used internally by the DTAtoolsR package to
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples

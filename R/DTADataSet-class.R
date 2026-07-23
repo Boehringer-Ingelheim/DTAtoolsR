@@ -6,7 +6,7 @@
 #' @param name Character. Name of the container.
 #' @param type Character. Dataset type, must be one of `__DTAtools_supported_dataset_types__`.
 #' @param files a list of DTAFile objects specifying input file information.
-#' @return An object of class DTADataSet. If validation fails, returns a list containing summarised and full error data frames.
+#' @return An object of class DTADataSet.
 #'
 #' @examples
 #'
@@ -126,8 +126,8 @@ method(print, DTADataSet) <- function(x) {
 #' @details
 #' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
 #'
-#' @return
-#' No return value. This function is called for its side effects (printing to the console).
+#' @return No return value. This function is called for its side effects
+#'   (printing to the console).
 #'
 #' @seealso
 #' \code{\link{DTADataSet}}
@@ -143,10 +143,6 @@ if (!exists("print_info", mode = "function")) {
 method(print_info, DTADataSet) <- function(x) {
   if (!is.null(x@description)) {
     cli_text("- Description: {x@description}")
-  }
-
-  if (!is.null(x@template_source)) {
-    cli_text("- Template source: {.emph {x@template_source}}")
   }
 
   if (!is.null(x@template_source)) {
@@ -194,8 +190,8 @@ method(print_info, DTADataSet) <- function(x) {
 #'
 #' @importFrom cli cli_alert_info cli_alert
 #' @importFrom stringr str_c str_glue
-#' @return
-#' No return value. This function is called for its side effects (printing to the console).
+#' @return No return value. This function is called for its side effects
+#'   (printing to the console).
 #'
 #' @seealso
 #' \code{\link{DTADataSet}}
@@ -301,8 +297,9 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 #' @param name Optional single character or single integer. if NULL, returns a
 #' list of all files. If character, returns the datasets with the specified name.
 #' If integer, returns the datasets at the specified index.
-#' @param ... void
-#' @return A DTAColumnSpecCollection object.
+#' @param ... Additional arguments (not used).
+#' @return A list of DTAFile objects, or a single DTAFile object when a name
+#'   or index is provided.
 #' @examples
 #' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
@@ -353,8 +350,8 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 #' @param x An object of class DTADataSet.
 #' @param i index: optional single character or integer or vector of characters 
 #' or integers to select specific tables. if NULL (default), returns all tables.
-#' @param ... void
-#' @return A DTAColumnSpecCollection object.
+#' @param ... Additional arguments (not used).
+#' @return A list of tables, or a single table when one index/name is provided.
 #' @examples
 #' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()

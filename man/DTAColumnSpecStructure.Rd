@@ -19,12 +19,12 @@ DTAColumnSpecStructure(
 \item{length}{Numeric or NA. The max character length.}
 }
 \description{
-Class for column types
+Class for column types.
 
 This class defines the structure of a column in a DTA dataset.
 }
 \examples{
 \dontrun{
- #TODO
+ DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")
 }
 }

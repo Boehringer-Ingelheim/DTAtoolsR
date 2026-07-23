@@ -8,9 +8,11 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param columns columns that will be collectively checked if the
-#' combinations are unique throughout the table
-#' @return An object of class `DTARule`.
+#' @param type Optional character value kept for backward compatibility.
+#'   If provided, it must be either "check_unique" or "col_unique".
+#' @param columns Character vector. Columns that will be collectively checked
+#'   for uniqueness throughout the table.
+#' @return An object of class `DTARuleColUnique`.
 #'
 #' @examples
 #' # Create a check_unique rule
@@ -25,10 +27,14 @@ DTARuleColUnique <- S7::new_class(
 
   constructor = function(
     id,
-    type,
+    type = NULL,
     columns = NULL,
     description = NULL
   ) {
+
+    if (!is.null(type) && !type %in% c("check_unique", "col_unique")) {
+      cli_abort("'type' must be NULL, 'check_unique', or 'col_unique'.")
+    }
 
     if(is.list(columns)) {
       columns <- unlist(columns)
@@ -41,7 +47,7 @@ DTARuleColUnique <- S7::new_class(
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "col_unique",
+        type = "check_unique",
         description = description
       ),
       columns = columns
@@ -72,8 +78,8 @@ DTARuleColUnique <- S7::new_class(
 
 #' @title print
 #' @description
-#' Print overview for DTARule
-#' @param x An object of class DTARule
+#' Print overview for DTARuleColUnique
+#' @param x An object of class DTARuleColUnique
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @examples
 #' \dontrun{
@@ -81,7 +87,7 @@ DTARuleColUnique <- S7::new_class(
 #' }
 #' @name print
 #' @export
-method(print, DTARule) <- function(x) {
+method(print, DTARuleColUnique) <- function(x) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
   if(!is.null(x@description)) cli_text("{x@description}")
@@ -108,13 +114,11 @@ create_example_DTARuleColUnique <- function(index = 1) {
   if (index == 1) {
     return(DTAtools::DTARuleColUnique(
       id = "rule_unique1",
-      type = "check_unique",
       columns = "SUBJID"
     ))
   } else if (index == 2) {
     return(DTAtools::DTARuleColUnique(
       id = "rule_unqiue2",
-      type = "check_unique",
       columns = c("SUBJID", "VISIT")
     ))
   } else {
@@ -130,7 +134,8 @@ create_example_DTARuleColUnique <- function(index = 1) {
 #' @importFrom arrow Table
 #' @examples
 #' \dontrun{
-#'  # TODO
+#'  # Example check method call:
+#'  # check(rule, tab)
 #' }
 #' @name check
 #' @export
@@ -144,12 +149,12 @@ method(check, DTARuleColUnique) <- function(x, tab) {
   # TODO from here
 }
 
-#' @title as.list for DTARuleColCondition
+#' @title as.list for DTARuleColUnique
 #' @description
-#' Convert a DTARuleColCondition object to a list.
-#' @param x An object of class DTARuleColCondition
+#' Convert a DTARuleColUnique object to a list.
+#' @param x An object of class DTARuleColUnique
 #' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColCondition object.
+#' @return A named list containing the properties of the DTARuleColUnique object.
 #' @export
 #' @name as.list
 #' @rdname as.list-DTARuleColUnique

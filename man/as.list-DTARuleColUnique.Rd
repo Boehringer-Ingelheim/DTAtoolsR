@@ -2,19 +2,19 @@
 % Please edit documentation in R/DTARuleColUnique-class.R
 \name{as.list}
 \alias{as.list}
-\title{as.list for DTARuleColCondition}
+\title{as.list for DTARuleColUnique}
 \usage{
 ## S7 method for class <DTAtools::DTARuleColUnique>
 as.list(x)
 }
 \arguments{
-\item{x}{An object of class DTARuleColCondition}
+\item{x}{An object of class DTARuleColUnique}
 
 \item{...}{Additional arguments (not used).}
 }
 \value{
-A named list containing the properties of the DTARuleColCondition object.
+A named list containing the properties of the DTARuleColUnique object.
 }
 \description{
-Convert a DTARuleColCondition object to a list.
+Convert a DTARuleColUnique object to a list.
 }

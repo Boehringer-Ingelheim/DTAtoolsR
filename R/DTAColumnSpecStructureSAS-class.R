@@ -1,19 +1,18 @@
 #' @title DTA Column Spec Structure SAS
 #' @description
-#' Class for column types for SAS structures
+#' Class for column types for SAS structures.
+#'
+#' This class defines the structure of a column in a DTA dataset.
 #' @import S7
 #' @importFrom stringr str_glue
 #' @export
-#'
-#' @description
-#' This class defines the structure of a column in a DTA dataset.
 #'
 #' @param type Character or NA. The type of the column.
 #' @param format Character or NA. The format of the column.
 #' @param length Numeric or NA. The max character length.
 #' @examples
 #' \dontrun{
-#'  #TODO
+#'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
 #' }
 DTAColumnSpecStructureSAS <- S7::new_class(
   "DTAColumnSpecStructureSAS",
@@ -55,8 +54,8 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 
 #' @title as.list method for as.list.DTAColumnSpecStructureSAS
 #' @description
-#' Converts a as.list.DTAColumnSpecStructureSAS object to a named list.
-#' @param x A as.list.DTAColumnSpecStructureSAS object.
+#' Converts a DTAColumnSpecStructureSAS object to a named list.
+#' @param x A DTAColumnSpecStructureSAS object.
 #' @param ... Additional arguments (ignored).
 #' @return A named list with the DTAColumnSpecStructureSAS properties.
 #' @export

@@ -6,7 +6,8 @@
 #' @importFrom cli cli_alert_success cli_abort
 #' @importFrom magrittr %>%
 #' @importFrom flextable flextable font bold bg width border_outer border_inner align padding valign save_as_docx
-#' @param DTAColumnSpecCollection DTAColumnSpecCollection object containing column specifications.
+#' @param DTAColumnSpecCollection A DTAColumnSpecCollection object containing
+#'   column specifications.
 #' @param file Character. The name of the output Word file in which the DTA Spec Table shall be written. Default is "dta_spec_table.docx".
 #' @param overwrite Logical. whether to overwrite the file.
 #' @param colnames Vector. Vector containing column names of the DTA table. Default: c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")
@@ -167,7 +168,8 @@ export_specs_table <- function(
 #' @importFrom magrittr %>%
 #' @importFrom cli cli_alert_success
 #' @importFrom flextable flextable font bold bg italic border_outer border_inner align padding valign save_as_docx
-#' @param DTAColumnSpecCollection DTAColumnSpecCollection object containing column specifications.
+#' @param DTAColumnSpecCollection A DTAColumnSpecCollection object containing
+#'   column specifications.
 #' @param file Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".
 #' @param id Character. The id of the column for which a table with all its values shall be generated.
 #' @return None. The function creates a Word document.

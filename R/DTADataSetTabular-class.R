@@ -6,8 +6,9 @@
 #' @importFrom tools md5sum
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
-#' @param files a list of DTAFile objects specifying input file information.
-#' @param tables List. A named list of tables to be validated and included in the DTADataSetTabular object.
+#' @param files A list of DTAFile objects specifying input file information.
+#' @param tables A named list of tabular objects; each table is converted to an
+#'   Arrow Table and stored in the dataset.
 #' @return An object of class DTADataSetTabular
 #' @examples
 #' \dontrun{
@@ -133,7 +134,7 @@ method(colspec, DTADataSetTabular) <- function(x, id) {
 #' @description
 #' Method to extract the full DTAColumnSpecCollection from a DTADataSetTabular object.
 #' @param x An object of class DTADataSet.
-#' @param ... void
+#' @param ... Additional arguments (not used).
 #' @return A DTAColumnSpecCollection object.
 #' @examples
 #' \dontrun{
@@ -154,7 +155,7 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' Extract a table from the tables in a DTADataSetTabular object.
 #' @param x An object of class DTADataSet.
 #' @param id Character or numeric. Name or index of the table to retrieve.
-#' @return A Table object
+#' @return An Arrow Table object.
 #' @importFrom cli cli_abort
 #' @examples
 #' \dontrun{
@@ -201,8 +202,8 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
 #' @description
 #' Method to get a all tables labels within a DTADataSetTabular Object.
 #' @param x An object of class DTADataSetTabular
-#' @param ... void
-#' @return A vector
+#' @param ... Additional arguments (not used).
+#' @return A character vector with table names.
 #' @examples
 #' \dontrun{
 #' labels <- labels(dtadata)
@@ -508,8 +509,8 @@ method(print, DTADataSetTabular) <- function(x) {
 #'
 #' @importFrom cli cli_alert_info cli_alert
 #' @importFrom stringr str_c str_glue
-#' @return
-#' No return value. This function is called for its side effects (printing to the console).
+#' @return No return value. This function is called for its side effects
+#'   (printing to the console).
 #'
 #' @seealso
 #' \code{\link{DTADataSetTabular}}

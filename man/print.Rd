@@ -49,7 +49,7 @@ print(x)
 ## S7 method for class <DTAtools::DTARuleColRange>
 print(x)
 
-## S7 method for class <DTAtools::DTARule>
+## S7 method for class <DTAtools::DTARuleColUnique>
 print(x)
 
 ## S7 method for class <DTAtools::DTARuleCollection>
@@ -102,7 +102,7 @@ Print overview for DTADTARuleColConditionRule
 
 Print overview for DTARuleColRange
 
-Print overview for DTARule
+Print overview for DTARuleColUnique
 
 Prints a summary of a \code{DTARuleCollection} object, including the number of rules and their IDs.
 }

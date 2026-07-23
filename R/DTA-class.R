@@ -5,9 +5,10 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param datasets A names list of DTADataSet objects
-#' @param metadata a DTAMetadata object
-#' @param ... if metadata is not set, ... arguments will be passed to create DTAMetadata(...)
+#' @param datasets A named list of DTADataSet objects.
+#' @param metadata A DTAMetaData object.
+#' @param ... If metadata is not set, additional arguments are passed to
+#'   DTAMetaData(...).
 #' @return An object of class DTA.
 #'
 #' @examples
@@ -85,7 +86,7 @@ method(metadata, DTA) <- function(x) {
 #' If integer, returns the datasets at the specified index.
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
-#' libary(DTAtools)
+#' library(DTAtools)
 #' x <- create_example_DTA()
 #' datasets(x)
 #' datasets(x, "vitals")

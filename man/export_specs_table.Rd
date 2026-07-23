@@ -13,7 +13,8 @@ export_specs_table(
 )
 }
 \arguments{
-\item{DTAColumnSpecCollection}{DTAColumnSpecCollection object containing column specifications.}
+\item{DTAColumnSpecCollection}{A DTAColumnSpecCollection object containing
+column specifications.}
 
 \item{file}{Character. The name of the output Word file in which the DTA Spec Table shall be written. Default is "dta_spec_table.docx".}
 

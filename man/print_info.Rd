@@ -10,7 +10,8 @@
 \item{...}{Additional arguments (not used)}
 }
 \value{
-No return value. This function is called for its side effects (printing to the console).
+No return value. This function is called for its side effects
+(printing to the console).
 
 The input object \code{x}, returned invisibly.
 

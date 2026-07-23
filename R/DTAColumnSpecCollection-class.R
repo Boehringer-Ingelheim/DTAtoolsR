@@ -5,13 +5,12 @@
 #' @importFrom cli cli_abort
 #' @importFrom stringr str_flatten_comma
 #' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
-#' @param template A list of template information.
-#' @param rules A list of DTARule object.
+#' @param rules A DTARuleCollection object or NULL.
 #' @return An object of class DTAColumnSpecCollection.
 #' @examples
 #' col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
 #' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
-#' collection <- DTAColumnSpecCollection(columns = list(STUDIYID = col1, VISIT = col2))
+#' collection <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 #' @export
 DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection",
@@ -182,7 +181,7 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 #' @description
 #' Method to get the names of columns in the collection.
 #' @param x An object of class DTAColumnSpecCollection.
-#' @param ... void
+#' @param ... Additional arguments (not used).
 #' @return A character vector of column names.
 #' @examples
 #' \dontrun{
@@ -226,7 +225,7 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @description
 #' Method to get Rules from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
-#' @return A list with rules defined
+#' @return A DTARuleCollection object, or NULL if no rules are defined.
 #' @examples
 #' \dontrun{
 #'  rules(collection)

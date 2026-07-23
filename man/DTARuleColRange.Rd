@@ -16,12 +16,9 @@ DTARuleColRange(
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{columns}{Charaterc. columns checked for unique combinations.}
+\item{columns}{Character vector. Column name(s) checked by the range rule.}
 
-\item{range}{Vector or List. Used in check_range to check value ranges in a
-columns.}
-
-\item{type}{Character. The rule type (e.g., "check_range", "check_unique").}
+\item{range}{Numeric vector or list. Legacy argument for range checks.}
 }
 \value{
 An object of class \code{DTARuleColRange}.

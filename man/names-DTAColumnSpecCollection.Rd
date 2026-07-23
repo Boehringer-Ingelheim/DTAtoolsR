@@ -6,7 +6,7 @@
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
 
-\item{...}{void}
+\item{...}{Additional arguments (not used).}
 }
 \value{
 A character vector of column names.

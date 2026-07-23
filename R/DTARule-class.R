@@ -111,10 +111,23 @@ method(check, DTARule) <- function(x, index = 1) {
 #' @export
 #'
 #' @examples
-#' DTARuleFactory("rule1", "col_condition", column = "age", condition = "18", then = list("status" = list("equals" = "21"))) # TODO not working - Replace
-#' DTARuleFactory("rule2", "col_range", column = "score", min = 0, max = 100)
-#' DTARuleFactory("rule3", "col_unique", column = "id")
+#' DTARuleFactory(
+#'   "rule1",
+#'   "col_condition",
+#'   condition = list(age = list(equals = 18)),
+#'   then = list(status = list(equals = "adult"))
+#' )
+#' DTARuleFactory("rule2", "col_range", columns = "score", min = 0, max = 100)
+#' DTARuleFactory("rule3", "col_unique", columns = "id")
 DTARuleFactory <- function(id, type, ...) {
+  type <- switch(
+    as.character(type),
+    check_col_condition = "col_condition",
+    check_range = "col_range",
+    check_unique = "col_unique",
+    as.character(type)
+  )
+
   switch(
     type,
     col_condition = DTAtools::DTARuleColCondition(

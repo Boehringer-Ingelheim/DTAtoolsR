@@ -43,12 +43,15 @@ check rule against data
  # do not manually create DTARule objects, use derived classes instead
 }
 \dontrun{
- # TODO
+ # Example check method call:
+ # check(rule, tab)
 }
 \dontrun{
- # TODO
+ # Example check method call:
+ # check(rule, tab)
 }
 \dontrun{
- # TODO
+ # Example check method call:
+ # check(rule, tab)
 }
 }

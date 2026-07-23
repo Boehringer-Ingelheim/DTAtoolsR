@@ -11,7 +11,7 @@
 #' @param verbose Logical. If TRUE (default), prints validation progress.
 #' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
 #' @export
-#TODO: move validate table to DTADataSet-class.R
+# TODO: consider moving `validate_table()` into DTADataSet-class.R.
 validate_table <- function(specs, table, verbose = TRUE) {
   details <- validate_table_detailed(specs = specs, table = table, verbose = verbose)
 

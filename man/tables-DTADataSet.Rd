@@ -10,13 +10,13 @@ tables(x, ...)
 \arguments{
 \item{x}{An object of class DTADataSet.}
 
-\item{...}{void}
+\item{...}{Additional arguments (not used).}
 
 \item{i}{index: optional single character or integer or vector of characters
 or integers to select specific tables. if NULL (default), returns all tables.}
 }
 \value{
-A DTAColumnSpecCollection object.
+A list of tables, or a single table when one index/name is provided.
 }
 \description{
 Method to get tables from DTADataSet object.

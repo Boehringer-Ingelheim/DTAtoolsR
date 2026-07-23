@@ -20,9 +20,10 @@ DTADataSetTabular(
 
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
-\item{tables}{List. A named list of tables to be validated and included in the DTADataSetTabular object.}
+\item{tables}{A named list of tabular objects; each table is converted to an
+Arrow Table and stored in the dataset.}
 
-\item{files}{a list of DTAFile objects specifying input file information.}
+\item{files}{A list of DTAFile objects specifying input file information.}
 }
 \value{
 An object of class DTADataSetTabular

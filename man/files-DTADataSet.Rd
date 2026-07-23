@@ -10,14 +10,15 @@ files(x, ...)
 \arguments{
 \item{x}{An object of class DTADataSet.}
 
-\item{...}{void}
+\item{...}{Additional arguments (not used).}
 
 \item{name}{Optional single character or single integer. if NULL, returns a
 list of all files. If character, returns the datasets with the specified name.
 If integer, returns the datasets at the specified index.}
 }
 \value{
-A DTAColumnSpecCollection object.
+A list of DTAFile objects, or a single DTAFile object when a name
+or index is provided.
 }
 \description{
 Method to get files from DTADataSet object.

@@ -1,18 +1,17 @@
 #' @title DTA Column Spec Structure
 #' @description
-#' Class for column types
+#' Class for column types.
+#'
+#' This class defines the structure of a column in a DTA dataset.
 #' @import S7
 #' @export
-#'
-#' @description
-#' This class defines the structure of a column in a DTA dataset.
 #'
 #' @param type Character or NA. The type of the column.
 #' @param format Character or NA. The format of the column.
 #' @param length Numeric or NA. The max character length.
 #' @examples
 #' \dontrun{
-#'  #TODO
+#'  DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")
 #' }
 DTAColumnSpecStructure <- S7::new_class(
   "DTAColumnSpecStructure",

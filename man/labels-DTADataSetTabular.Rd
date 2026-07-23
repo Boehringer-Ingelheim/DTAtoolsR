@@ -10,10 +10,10 @@ labels(x, ...)
 \arguments{
 \item{x}{An object of class DTADataSetTabular}
 
-\item{...}{void}
+\item{...}{Additional arguments (not used).}
 }
 \value{
-A vector
+A character vector with table names.
 }
 \description{
 Method to get a all tables labels within a DTADataSetTabular Object.

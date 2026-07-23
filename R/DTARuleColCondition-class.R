@@ -14,21 +14,22 @@
 #'
 #' @examples
 #' # Create a check_range rule
-#' DTAtools::DTARule(
+#' DTAtools::DTARuleColCondition(
 #'  id = "check_gfreasnd2",
 #'  condition = list(
 #'    GFREASND = list(
-#'      empty = false
+#'      empty = FALSE
 #'    )
 #'  ),
 #'  then = list(
 #'    GFSTAT = list(
-#'      empty = false
+#'      empty = FALSE
 #'    ),
 #'    GFORRES = list(
-#'      empty = true
+#'      empty = TRUE
 #'    )
 #'  )
+#' )
 #' @include DTARule-class.R
 DTARuleColCondition <- S7::new_class(
   # nolint: object_name_linter.
@@ -45,7 +46,7 @@ DTARuleColCondition <- S7::new_class(
     new_object(
       DTAtools::DTARule(
         id = id,
-        type = "col_condition",
+        type = "check_col_condition",
         description = description
       ),
 
@@ -149,7 +150,8 @@ create_example_DTARuleColCondition <- function(index = 1) {
 #' @importFrom arrow Table
 #' @examples
 #' \dontrun{
-#'  # TODO
+#'  # Example check method call:
+#'  # check(rule, tab)
 #' }
 #' @name check
 #' @export

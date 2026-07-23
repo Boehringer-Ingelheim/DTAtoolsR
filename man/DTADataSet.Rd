@@ -22,7 +22,7 @@ DTADataSet(
 \item{files}{a list of DTAFile objects specifying input file information.}
 }
 \value{
-An object of class DTADataSet. If validation fails, returns a list containing summarised and full error data frames.
+An object of class DTADataSet.
 }
 \description{
 Class to handle data from files

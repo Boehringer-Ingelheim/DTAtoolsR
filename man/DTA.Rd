@@ -7,11 +7,12 @@
 DTA(datasets = NULL, metadata = NULL, ...)
 }
 \arguments{
-\item{datasets}{A names list of DTADataSet objects}
+\item{datasets}{A named list of DTADataSet objects.}
 
-\item{metadata}{a DTAMetadata object}
+\item{metadata}{A DTAMetaData object.}
 
-\item{...}{if metadata is not set, ... arguments will be passed to create DTAMetadata(...)}
+\item{...}{If metadata is not set, additional arguments are passed to
+DTAMetaData(...).}
 }
 \value{
 An object of class DTA.

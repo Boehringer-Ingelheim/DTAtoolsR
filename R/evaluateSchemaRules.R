@@ -1,3 +1,23 @@
+#' @keywords internal
+rule_get_slot <- function(rule, name) {
+  fields <- tryCatch(as.list(rule), error = function(e) NULL)
+  if (is.null(fields) || !name %in% names(fields)) {
+    return(NULL)
+  }
+  fields[[name]]
+}
+
+#' @keywords internal
+normalize_rule_type <- function(type) {
+  switch(
+    as.character(type),
+    col_range = "check_range",
+    col_unique = "check_unique",
+    col_condition = "check_col_condition",
+    as.character(type)
+  )
+}
+
 #' @title Rule: check_range
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
@@ -14,8 +34,31 @@
 #' @export
 rule_check_range <- function(rule, df) {
   check_rule_class(rule)
-  col <- rule@column
-  range <- rule@range
+  col <- rule_get_slot(rule, "column")
+  if (is.null(col)) {
+    col <- rule_get_slot(rule, "columns")
+  }
+
+  if (length(col) != 1) {
+    cli::cli_abort("Range rules require exactly one target column.")
+  }
+
+  range <- rule_get_slot(rule, "range")
+  if (is.null(range)) {
+    min_value <- rule_get_slot(rule, "min")
+    max_value <- rule_get_slot(rule, "max")
+    if (!is.null(min_value) && !is.null(max_value)) {
+      range <- c(min_value, max_value)
+    }
+  }
+
+  if (is.null(range) || length(range) != 2 || !is.numeric(range)) {
+    cli::cli_abort("Range rules require numeric bounds via 'range' or 'min'/'max'.")
+  }
+
+  if (!col %in% names(df)) {
+    cli::cli_abort("Column '{col}' not found in table.")
+  }
 
   x <- as.numeric(df[[col]])
   in_range <- x >= range[1] & x <= range[2]
@@ -54,7 +97,17 @@ rule_check_range <- function(rule, df) {
 #' @export
 rule_check_unique <- function(rule, df) {
   check_rule_class(rule)
-  cols <- rule@column
+  cols <- rule_get_slot(rule, "column")
+  if (is.null(cols)) {
+    cols <- rule_get_slot(rule, "columns")
+  }
+
+  missing_cols <- setdiff(cols, names(df))
+  if (length(missing_cols) > 0) {
+    cli::cli_abort(
+      "Column{?s} not found in table: {paste(missing_cols, collapse = ', ')}"
+    )
+  }
 
   # Check for uniqueness across combined columns
   duplicated_rows <- duplicated(df[, cols, drop = FALSE])
@@ -95,6 +148,10 @@ evaluate_condition <- function(column_name, condition, df) {
     return(x >= condition$greater_equal)
   } else if (!is.null(condition$less_equal)) {
     return(x <= condition$less_equal)
+  } else if (!is.null(condition$min) || !is.null(condition$max)) {
+    lower <- if (!is.null(condition$min)) condition$min else -Inf
+    upper <- if (!is.null(condition$max)) condition$max else Inf
+    return(x >= lower & x <= upper)
   } else if (!is.null(condition$range)) {
     return(x >= condition$range[1] & x <= condition$range[2])
   } else if (!is.null(condition$empty)) {
@@ -190,6 +247,10 @@ rule_check_col_condition <- function(rule, df) {
 #'   elements `id`, `valid`, and `message`.
 #' @export
 apply_schema_rules <- function(rules, df, verbose = TRUE) {
+  if (inherits(rules, "DTAtools::DTARuleCollection")) {
+    rules <- as.list(rules)
+  }
+
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
@@ -197,7 +258,7 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
   )
 
   results <- lapply(rules, function(rule) {
-    rule_type <- rule@type
+    rule_type <- normalize_rule_type(rule@type)
     if (!rule_type %in% names(rule_functions)) {
       msg <- paste("Unknown rule type:", rule_type)
       if (isTRUE(verbose)) {

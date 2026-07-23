@@ -9,9 +9,7 @@ DTAColumnSpecCollection(columns, rules = NULL)
 \arguments{
 \item{columns}{A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns}
 
-\item{rules}{A list of DTARule object.}
-
-\item{template}{A list of template information.}
+\item{rules}{A DTARuleCollection object or NULL.}
 }
 \value{
 An object of class DTAColumnSpecCollection.
@@ -22,5 +20,5 @@ This class represents a collection of DTAColumnSpec objects with optional templa
 \examples{
 col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
 col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
-collection <- DTAColumnSpecCollection(columns = list(STUDIYID = col1, VISIT = col2))
+collection <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 }

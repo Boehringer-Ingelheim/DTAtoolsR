@@ -17,7 +17,7 @@ Either a list of DTADataSet objects or a single DTADataSet.
 Method to get one or more datasets from a DTA object.
 }
 \examples{
-libary(DTAtools)
+library(DTAtools)
 x <- create_example_DTA()
 datasets(x)
 datasets(x, "vitals")

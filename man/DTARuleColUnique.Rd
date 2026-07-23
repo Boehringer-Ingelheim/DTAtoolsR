@@ -4,16 +4,19 @@
 \alias{DTARuleColUnique}
 \title{DTARuleColUnique Class}
 \usage{
-DTARuleColUnique(id, type, columns = NULL, description = NULL)
+DTARuleColUnique(id, type = NULL, columns = NULL, description = NULL)
 }
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{columns}{columns that will be collectively checked if the
-combinations are unique throughout the table}
+\item{type}{Optional character value kept for backward compatibility.
+If provided, it must be either "check_unique" or "col_unique".}
+
+\item{columns}{Character vector. Columns that will be collectively checked
+for uniqueness throughout the table.}
 }
 \value{
-An object of class \code{DTARule}.
+An object of class \code{DTARuleColUnique}.
 }
 \description{
 Represents a single rule for validating data tables. The rule can be of various types,

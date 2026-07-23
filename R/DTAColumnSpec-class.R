@@ -1,11 +1,10 @@
 #' @title DTA Column Format Class
 #' @description
-#' Class for column format
+#' Class for column format.
+#'
+#' This class defines the format of a column in a DTA dataset.
 #' @import S7
 #' @export
-#'
-#' @description
-#' This class defines the format of a column in a DTA dataset.
 #'
 #' @param id Character. The id of the column.
 #' @param label Character or NA. The label of the column.

@@ -11,7 +11,8 @@ export_column_value_table(
 )
 }
 \arguments{
-\item{DTAColumnSpecCollection}{DTAColumnSpecCollection object containing column specifications.}
+\item{DTAColumnSpecCollection}{A DTAColumnSpecCollection object containing
+column specifications.}
 
 \item{file}{Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".}
 

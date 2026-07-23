@@ -8,10 +8,8 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param type Character. The rule type (e.g., "check_range", "check_unique").
-#' @param columns Charaterc. columns checked for unique combinations.
-#' @param range Vector or List. Used in check_range to check value ranges in a
-#'   columns.
+#' @param columns Character vector. Column name(s) checked by the range rule.
+#' @param range Numeric vector or list. Legacy argument for range checks.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
@@ -35,17 +33,24 @@ DTARuleColRange <- S7::new_class(
     min = NULL,
     max = NULL
   ) {
-    type <- "check_range"
-
     if (is.list(columns)) {
       columns <- unlist(columns)
+    }
+
+    if (!is.null(range) && is.null(min) && is.null(max)) {
+      range_vec <- unlist(range)
+      if (!is.numeric(range_vec) || length(range_vec) != 2) {
+        cli_abort("'range' must be a numeric vector of length 2.")
+      }
+      min <- range_vec[[1]]
+      max <- range_vec[[2]]
     }
 
     # Create the class object
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "col_range",
+        type = "check_range",
         description = description
       ),
       columns = columns,
@@ -138,7 +143,8 @@ create_example_DTARuleColRange <- function(index = 1) {
 #' @importFrom arrow Table
 #' @examples
 #' \dontrun{
-#'  # TODO
+#'  # Example check method call:
+#'  # check(rule, tab)
 #' }
 #' @name check
 #' @export

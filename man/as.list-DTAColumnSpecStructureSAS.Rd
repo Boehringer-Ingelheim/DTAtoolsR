@@ -8,7 +8,7 @@
 as.list(x, ...)
 }
 \arguments{
-\item{x}{A as.list.DTAColumnSpecStructureSAS object.}
+\item{x}{A DTAColumnSpecStructureSAS object.}
 
 \item{...}{Additional arguments (ignored).}
 }
@@ -16,5 +16,5 @@ as.list(x, ...)
 A named list with the DTAColumnSpecStructureSAS properties.
 }
 \description{
-Converts a as.list.DTAColumnSpecStructureSAS object to a named list.
+Converts a DTAColumnSpecStructureSAS object to a named list.
 }

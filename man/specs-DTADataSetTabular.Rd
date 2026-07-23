@@ -10,7 +10,7 @@ specs(x, ...)
 \arguments{
 \item{x}{An object of class DTADataSet.}
 
-\item{...}{void}
+\item{...}{Additional arguments (not used).}
 }
 \value{
 A DTAColumnSpecCollection object.

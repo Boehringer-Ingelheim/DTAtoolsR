@@ -13,7 +13,7 @@ get_table(x, id = 1, ...)
 \item{id}{Character or numeric. Name or index of the table to retrieve.}
 }
 \value{
-A Table object
+An Arrow Table object.
 }
 \description{
 Extract a table from the tables in a DTADataSetTabular object.

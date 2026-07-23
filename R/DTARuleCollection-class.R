@@ -15,17 +15,15 @@
 #' @examples
 #' # Define some example rules
 #' example_rules <- list(
-#'   DTARule(
+#'   DTARuleColRange(
 #'     id = "rule1",
-#'     type = "check_range",
-#'     column = "age",
-#'     min = 18
+#'     columns = "age",
+#'     min = 18,
 #'     max = 65
 #'   ),
-#'   DTARule(
+#'   DTARuleColUnique(
 #'     id = "rule2",
-#'     type = "check_unique",
-#'     column = "id"
+#'     columns = "id"
 #'   )
 #' )
 #'

@@ -41,7 +41,7 @@ DTAColumnSpec(
 An object of class DTAColumnSpec.
 }
 \description{
-Class for column format
+Class for column format.
 
 This class defines the format of a column in a DTA dataset.
 }
