@@ -25,8 +25,7 @@ validate_table <- function(specs, table, verbose = TRUE) {
   }
 
   if (isTRUE(verbose)) {
-    cli::cli_h3("")
-    cli::cli_alert_success("Table is valid.")
+    cli::cli_alert_success("Table validation: all checks passed.")
   }
 
   table
@@ -58,8 +57,10 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   n_chunks <- length(chunks)
   pb <- NULL
   if (isTRUE(verbose)) {
-    pb <- txtProgressBar(min = 1, max = max(c(n_chunks, 2)), style = 3)
-    cli::cli_alert_info("Validate Table using jsonschema.\n")
+    cli::cli_h2("Validating column specs")
+    if (n_chunks > 1) {
+      pb <- txtProgressBar(min = 1, max = max(c(n_chunks, 2)), style = 3)
+    }
   }
 
   for (name in names(chunks)) {
@@ -67,7 +68,7 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
 
     row_addition <- chunk_size * (i - 1)
 
-    if (isTRUE(verbose)) {
+    if (isTRUE(verbose) && !is.null(pb)) {
       setTxtProgressBar(pb, i)
     }
 
@@ -175,7 +176,7 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
 
   if (length(rules_list) > 0) {
     if (isTRUE(verbose)) {
-      cli::cli_h2("Checking schema rules")
+      cli::cli_h2("Checking rules")
     }
 
     rule_results <- apply_schema_rules(rules_list, table, verbose = verbose)

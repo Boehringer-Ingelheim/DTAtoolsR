@@ -312,7 +312,7 @@ method(check, DTA) <- function(
     }
 
     if (!isTRUE(quiet)) {
-      cli_alert_info(paste0("Checking dataset: ", ds_name))
+      cli::cli_h1(paste0("Dataset: ", ds_name))
     }
 
     # Check the dataset. `check()` returns a (possibly new) validated copy of
@@ -351,12 +351,14 @@ method(check, DTA) <- function(
     # Print summary for this dataset
     if (!isTRUE(quiet)) {
       if (n_invalid > 0) {
+        table_word <- if (n_validated == 1) "table" else "tables"
         cli_alert_danger(
-          paste0("Dataset '", ds_name, "': ", n_validated, " validated, ", n_valid, " valid, ", n_invalid, " INVALID, ", n_skipped, " skipped")
+          paste0(n_validated, " ", table_word, " validated: ", n_valid, " valid, ", n_invalid, " INVALID")
         )
       } else {
+        table_word <- if (n_validated == 1) "table" else "tables"
         cli_alert_success(
-          paste0("Dataset '", ds_name, "': ", n_validated, " validated, ", n_valid, " valid, ", n_skipped, " skipped")
+          paste0(n_validated, " ", table_word, " validated: all valid")
         )
       }
     }
@@ -368,11 +370,12 @@ method(check, DTA) <- function(
   # Overall summary
   total_invalid <- sum(summary_df$n_invalid, na.rm = TRUE)
   if (!isTRUE(quiet)) {
+    cli::cli_rule("Validation Summary")
     if (total_invalid > 0) {
       invalid_word <- if (total_invalid == 1) "table" else "tables"
-      cli_alert_danger(paste0("Overall: ", total_invalid, " INVALID ", invalid_word, " found across datasets"))
+      cli_alert_danger(paste0("Validation FAILED: ", total_invalid, " ", invalid_word, " with validation errors"))
     } else {
-      cli_alert_success("All datasets checked successfully!")
+      cli_alert_success("Validation PASSED: All datasets are valid")
     }
   }
 

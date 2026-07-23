@@ -17,8 +17,12 @@ are unchanged. Default is FALSE.}
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-Invisibly returns the validation details object (a list) containing:
-schema_valid, rules_valid, schema_errors, rule_errors, n_schema_errors, n_rule_errors, ok
+Invisibly returns the updated \code{DTADataSetTabular} object \code{x},
+with \code{validation_index}/\code{validation_store} updated for \code{table}.
+The validation details list (schema_valid, rules_valid, schema_errors,
+rule_errors, n_schema_errors, n_rule_errors, ok) is attached as the
+\code{"last_validation_details"} attribute and can also be retrieved via
+\code{validation_errors(x, table = table, source = "memory")}.
 }
 \description{
 Validates a single table within a DTADataSetTabular object. Provides detailed
@@ -28,10 +32,10 @@ the table and specs are unchanged.
 \examples{
 \dontrun{
   # Validate first table
-  revalidate_table(dataset, table = 1)
+  dataset <- revalidate_table(dataset, table = 1)
   # Validate by name
-  revalidate_table(dataset, table = "demographics")
+  dataset <- revalidate_table(dataset, table = "demographics")
   # Force re-validation
-  revalidate_table(dataset, table = "demographics", force = TRUE)
+  dataset <- revalidate_table(dataset, table = "demographics", force = TRUE)
 }
 }

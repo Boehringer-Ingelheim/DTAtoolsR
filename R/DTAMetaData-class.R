@@ -40,7 +40,7 @@ DTAMetaData <- S7::new_class(
   properties = list(
     title = class_character,
     version = class_character_or_null,
-    date = class_Date,
+    date = class_Date_or_null,
     header = class_character_or_null,
     receiver = class_list,
     supplier = class_list,

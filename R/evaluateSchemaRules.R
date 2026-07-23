@@ -275,9 +275,9 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
 
     if (isTRUE(verbose)) {
       if (isTRUE(result$valid)) {
-        cli::cli_alert_success("Rule '{result$id}' passed.")
+        cli::cli_alert_success("Rule '{result$id}' passed")
       } else {
-        cli::cli_alert_danger(result$message)
+        cli::cli_alert_danger("{result$message}")
       }
     }
 
@@ -287,12 +287,15 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
   failed <- Filter(function(x) isFALSE(x$valid), results)
 
   if (isTRUE(verbose)) {
-    if (length(failed) == 0) {
-      cli::cli_alert_success("All schema rules passed.")
+    # print a separator
+    cli::cli_text()
+
+    n_failed <- length(failed)
+    if (n_failed == 0) {
+      cli::cli_alert_success("All schema rules validated successfully")
     } else {
-      cli::cli_alert_info(
-        "{length(failed)} rule{if (length(failed) > 1) 's'} failed."
-      )
+      rule_word <- if (n_failed == 1) "rule" else "rules"
+      cli::cli_alert_danger("{n_failed} schema {rule_word} failed validation")
     }
   }
 

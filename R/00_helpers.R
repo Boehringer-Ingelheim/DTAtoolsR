@@ -1,4 +1,5 @@
 class_null <- S7::new_S3_class("NULL")
+class_Date_or_null <- S7::class_Date | class_null
 class_DTAColumnSpec <- S7::new_class("DTAColumnSpec")
 class_DTAColumnSpecCollection <- S7::new_class(
   "DTAColumnSpecCollection"

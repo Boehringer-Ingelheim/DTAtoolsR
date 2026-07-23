@@ -699,17 +699,21 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 #' @param force Logical. If TRUE, forces re-validation even if table and specs
 #'   are unchanged. Default is FALSE.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return Invisibly returns the validation details object (a list) containing:
-#'   schema_valid, rules_valid, schema_errors, rule_errors, n_schema_errors, n_rule_errors, ok
+#' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
+#'   with \code{validation_index}/\code{validation_store} updated for `table`.
+#'   The validation details list (schema_valid, rules_valid, schema_errors,
+#'   rule_errors, n_schema_errors, n_rule_errors, ok) is attached as the
+#'   \code{"last_validation_details"} attribute and can also be retrieved via
+#'   \code{validation_errors(x, table = table, source = "memory")}.
 #' @importFrom cli cli_abort cli_h3 cli_alert_success cli_alert_info
 #' @examples
 #' \dontrun{
 #'   # Validate first table
-#'   revalidate_table(dataset, table = 1)
+#'   dataset <- revalidate_table(dataset, table = 1)
 #'   # Validate by name
-#'   revalidate_table(dataset, table = "demographics")
+#'   dataset <- revalidate_table(dataset, table = "demographics")
 #'   # Force re-validation
-#'   revalidate_table(dataset, table = "demographics", force = TRUE)
+#'   dataset <- revalidate_table(dataset, table = "demographics", force = TRUE)
 #' }
 #' @name revalidate_table
 #' @export
@@ -750,7 +754,8 @@ S7::method(revalidate_table, DTADataSetTabular) <- function(
     if (!isTRUE(quiet)) {
       cli::cli_alert_info(paste0("Table '", table_name, "' validation is up-to-date (skipped)."))
     }
-    return(invisible(x@validation_store[[table_name]]))
+    attr(x, "last_validation_details") <- x@validation_store[[table_name]]
+    return(invisible(x))
   }
 
   if (!isTRUE(quiet)) {
@@ -787,7 +792,8 @@ S7::method(revalidate_table, DTADataSetTabular) <- function(
     }
   }
 
-  invisible(details)
+  attr(x, "last_validation_details") <- details
+  invisible(x)
 }
 
 
@@ -852,20 +858,95 @@ S7::method(check, DTADataSetTabular) <- function(
   artifact_dir = NULL,
   quiet = FALSE
 ) {
-  # Call the parent DTADataSet check method
+  # Validate structure (from parent class)
   x <- S7::method(check, DTADataSet)(
     x,
-    tables = tables,
     force = force,
     persist = persist,
     artifact_dir = artifact_dir,
     quiet = quiet
   )
 
-  # Get validation status summary for console reporting. The updated `x`
-  # (not this summary) is the method's return value, so that validation
-  # state persists for the caller and for `check(dta)`'s aggregation, which
-  # relies on inspecting `validation_status()` of the returned object.
+  # Table-specific validation logic (override parent)
+  target_tables <- dta_table_id_to_names(x, tables)
+  specs_hash <- dta_hash_object(as.list(x@specs))
+  output_rows <- list()
+
+  if (persist) {
+    if (is.null(artifact_dir)) {
+      artifact_dir <- if (!is.null(x@validation_artifact_dir)) {
+        x@validation_artifact_dir
+      } else {
+        dta_default_validation_artifact_dir(x)
+      }
+    }
+    dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
+    x@validation_artifact_dir <- artifact_dir
+  }
+
+  for (idx in seq_along(target_tables)) {
+    table_name <- target_tables[idx]
+    current_table <- x@tables[[table_name]]
+    current_df <- as.data.frame(current_table)
+    table_hash <- dta_hash_object(current_df)
+
+    previous <- x@validation_index[[table_name]]
+    unchanged <- !is.null(previous) &&
+      identical(previous$table_hash, table_hash) &&
+      identical(previous$specs_hash, specs_hash)
+
+    if (!force && unchanged) {
+      output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+        table_name = table_name,
+        status = "skipped",
+        index_entry = previous
+      )
+      next
+    }
+
+    # Output table name/index under investigation
+    if (!isTRUE(quiet)) {
+      cli::cli_text()
+      cli::cli_rule(paste0("Table ", idx, " of ", length(target_tables), ": ", table_name))
+    }
+
+    details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
+    run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
+    artifact_path <- NULL
+
+    if (persist) {
+      safe_table <- gsub("[^A-Za-z0-9_-]", "_", table_name)
+      table_dir <- file.path(artifact_dir, safe_table)
+      dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+      artifact_path <- file.path(table_dir, paste0(run_id, ".rds"))
+      saveRDS(details, artifact_path)
+    }
+
+    index_entry <- list(
+      validated_at = Sys.time(),
+      ok = isTRUE(details$ok),
+      table_hash = table_hash,
+      specs_hash = specs_hash,
+      n_schema_errors = details$n_schema_errors,
+      n_rule_errors = details$n_rule_errors,
+      run_id = run_id,
+      artifact_path = artifact_path
+    )
+
+    x@validation_index[[table_name]] <- index_entry
+    x@validation_store[[table_name]] <- details
+
+    output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+      table_name = table_name,
+      status = "validated",
+      index_entry = index_entry
+    )
+  }
+
+  summary_df <- do.call(rbind, output_rows)
+  attr(x, "last_validation_summary") <- summary_df
+
+  # Summary output
   val_status <- validation_status(x, tables = tables)
 
   if (!isTRUE(quiet)) {
@@ -874,21 +955,101 @@ S7::method(check, DTADataSetTabular) <- function(
       n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
       n_total <- nrow(val_status)
       
+      cli::cli_text()
+      
       if (n_invalid > 0) {
+        table_word <- if (n_total == 1) "table" else "tables"
         cli::cli_alert_danger(
-          paste0("Checked ", n_total, " table(s): ", n_valid, " valid, ", n_invalid, " INVALID")
+          paste0("", n_valid, " of ", n_total, " ", table_word, " valid")
         )
       } else {
+        table_word <- if (n_total == 1) "table" else "tables"
         cli::cli_alert_success(
-          paste0("Checked ", n_total, " table(s): all valid")
+          paste0("", n_total, " ", table_word, " passed validation")
         )
       }
     }
   }
 
-  # Return the updated dataset (mirrors `check, DTADataSet`'s contract) so
-  # that validation state is not lost by callers or by `check(dta)`.
+  # Return the updated dataset so validation state is not lost
   invisible(x)
 }
 
+
+#' @title Extract single table with [[
+#' @description
+#' Extract a single table from a \code{DTADataSetTabular} object using
+#' double-bracket notation.
+#' @param x An object of class \code{DTADataSetTabular}.
+#' @param i A single character name or single numeric index.
+#' @return A single table (Arrow Table).
+#' @examples
+#' \dontrun{
+#'   ds <- create_example_DTADataSetTabular()
+#'   ds[[1]]
+#'   ds[["tab1"]]
+#' }
+#' @name double-bracket-DTADataSetTabular
+#' @export
+S7::method(`[[`, DTADataSetTabular) <- function(x, i) {
+  if (!is.character(i) && !is.numeric(i)) {
+    cli::cli_abort("'i' must be a character name or numeric index.")
+  }
+  if (length(i) != 1) {
+    cli::cli_abort("'i' must be a single value. Use '[' to extract multiple tables.")
+  }
+  
+  all_names <- names(x@tables)
+  
+  if (is.numeric(i)) {
+    if (i < 1 || i > length(all_names)) {
+      cli::cli_abort("Numeric index out of bounds.")
+    }
+    return(x@tables[[i]])
+  }
+  
+  if (!(i %in% all_names)) {
+    cli::cli_abort("Table {.field {i}} not found.")
+  }
+  
+  x@tables[[i]]
+}
+
+
+#' @title Extract multiple tables with [
+#' @description
+#' Extract one or more tables from a \code{DTADataSetTabular} object using
+#' single-bracket notation. Always returns a named list.
+#' @param x An object of class \code{DTADataSetTabular}.
+#' @param i A character vector of names or a numeric index vector.
+#' @return A named list of tables (Arrow Tables).
+#' @examples
+#' \dontrun{
+#'   ds <- create_example_DTADataSetTabular()
+#'   ds[c(1, 2)]
+#'   ds[c("tab1", "tab2")]
+#' }
+#' @name single-bracket-DTADataSetTabular
+#' @export
+S7::method(`[`, DTADataSetTabular) <- function(x, i) {
+  if (!is.character(i) && !is.numeric(i)) {
+    cli::cli_abort("'i' must be a character vector of names or a numeric index vector.")
+  }
+  
+  all_names <- names(x@tables)
+  
+  if (is.numeric(i)) {
+    if (any(i < 1) || any(i > length(all_names))) {
+      cli::cli_abort("Numeric index out of bounds.")
+    }
+    return(x@tables[i])
+  }
+  
+  missing_names <- setdiff(i, all_names)
+  if (length(missing_names) > 0) {
+    cli::cli_abort("The following table{?s} not found: {.field {missing_names}}")
+  }
+  
+  x@tables[i]
+}
 

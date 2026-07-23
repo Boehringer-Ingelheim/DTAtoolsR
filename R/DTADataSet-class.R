@@ -431,7 +431,7 @@ dta_table_id_to_names <- function(x, tables = NULL) {
   if (is.character(tables)) {
     missing <- setdiff(tables, all_names)
     if (length(missing) > 0) {
-      cli::cli_abort("Unknown table name(s): {missing}")
+      cli::cli_abort("Table{?s} not found: {.field {missing}}")
     }
     return(tables)
   }
@@ -460,29 +460,29 @@ dta_validation_result_to_row <- function(table_name, status, index_entry) {
 }
 
 
-#' @title Check DTADataSet Tables
+#' @title Check DTADataSet
 #' @description
-#' Validates one, many, or all tables in a \code{DTADataSet} subclass against
-#' dataset specs. The method expects subclasses to provide table/spec and
-#' validation state properties.
+#' Validates a \code{DTADataSet} object's properties and structure.
+#' This is the base method; subclasses like \code{DTADataSetTabular}
+#' override it to add table-specific validation.
 #' @param x A \code{DTADataSet} object.
-#' @param tables NULL (default), character table names, or numeric table indices.
-#' @param force Logical. If \code{FALSE}, validation for unchanged table/spec hash is skipped.
-#' @param persist Logical. If \code{TRUE}, full validation result is written as \code{RDS}.
-#' @param artifact_dir Character or NULL. Optional output directory for persisted
-#' validation artifacts.
+#' @param force Logical. If \code{FALSE}, validation for unchanged data is skipped.
+#' @param persist Logical. If \code{TRUE}, validation artifacts are persisted.
+#' @param artifact_dir Character or NULL. Optional output directory for artifacts.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return Invisibly returns \code{x} (modified in place).
+#' @return Invisibly returns \code{x}.
 #' @name check-DTADataSet
 #' @export
 S7::method(check, DTADataSet) <- function(
   x,
-  tables = NULL,
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE
 ) {
+  # Base class method: just validate that required properties exist.
+  # Subclasses (e.g., DTADataSetTabular) override this to add table validation.
+  
   has_specs <- !is.null(tryCatch(x@specs, error = function(e) NULL))
   has_tables <- !is.null(tryCatch(x@tables, error = function(e) NULL))
   has_validation_index <- !is.null(tryCatch(x@validation_index, error = function(e) NULL))
@@ -494,77 +494,7 @@ S7::method(check, DTADataSet) <- function(
     )
   }
 
-  target_tables <- dta_table_id_to_names(x, tables)
-  specs_hash <- dta_hash_object(as.list(x@specs))
-  output_rows <- list()
-
-  if (persist) {
-    if (is.null(artifact_dir)) {
-      artifact_dir <- if (!is.null(x@validation_artifact_dir)) {
-        x@validation_artifact_dir
-      } else {
-        dta_default_validation_artifact_dir(x)
-      }
-    }
-    dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
-    x@validation_artifact_dir <- artifact_dir
-  }
-
-  for (table_name in target_tables) {
-    current_table <- x@tables[[table_name]]
-    current_df <- as.data.frame(current_table)
-    table_hash <- dta_hash_object(current_df)
-
-    previous <- x@validation_index[[table_name]]
-    unchanged <- !is.null(previous) &&
-      identical(previous$table_hash, table_hash) &&
-      identical(previous$specs_hash, specs_hash)
-
-    if (!force && unchanged) {
-      output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
-        table_name = table_name,
-        status = "skipped",
-        index_entry = previous
-      )
-      next
-    }
-
-    details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
-    run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
-    artifact_path <- NULL
-
-    if (persist) {
-      safe_table <- gsub("[^A-Za-z0-9_-]", "_", table_name)
-      table_dir <- file.path(artifact_dir, safe_table)
-      dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
-      artifact_path <- file.path(table_dir, paste0(run_id, ".rds"))
-      saveRDS(details, artifact_path)
-    }
-
-    index_entry <- list(
-      validated_at = Sys.time(),
-      ok = isTRUE(details$ok),
-      table_hash = table_hash,
-      specs_hash = specs_hash,
-      n_schema_errors = details$n_schema_errors,
-      n_rule_errors = details$n_rule_errors,
-      run_id = run_id,
-      artifact_path = artifact_path
-    )
-
-    x@validation_index[[table_name]] <- index_entry
-    x@validation_store[[table_name]] <- details
-
-    output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
-      table_name = table_name,
-      status = "validated",
-      index_entry = index_entry
-    )
-  }
-
-  summary_df <- do.call(rbind, output_rows)
-  attr(x, "last_validation_summary") <- summary_df
-
+  # Base class just validates structure; subclasses do table-specific work.
   invisible(x)
 }
 

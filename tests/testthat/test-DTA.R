@@ -189,7 +189,7 @@ test_that("check() method validates by dataset index", {
 })
 
 test_that("check() aborts on empty DTA", {
-  dta <- DTA(datasets = list())
+  dta <- DTA(datasets = list(), metadata = DTAMetaData(title = "Empty DTA"))
   expect_error(check(dta, quiet = TRUE), "no datasets")
 })
 

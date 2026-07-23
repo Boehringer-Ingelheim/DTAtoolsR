@@ -2,37 +2,27 @@
 % Please edit documentation in R/DTADataSet-class.R
 \name{check-DTADataSet}
 \alias{check-DTADataSet}
-\title{Check DTADataSet Tables}
+\title{Check DTADataSet}
 \usage{
 ## S7 method for class <DTAtools::DTADataSet>
-check(
-  x,
-  tables = NULL,
-  force = FALSE,
-  persist = TRUE,
-  artifact_dir = NULL,
-  quiet = FALSE
-)
+check(x, force = FALSE, persist = TRUE, artifact_dir = NULL, quiet = FALSE)
 }
 \arguments{
 \item{x}{A \code{DTADataSet} object.}
 
-\item{tables}{NULL (default), character table names, or numeric table indices.}
+\item{force}{Logical. If \code{FALSE}, validation for unchanged data is skipped.}
 
-\item{force}{Logical. If \code{FALSE}, validation for unchanged table/spec hash is skipped.}
+\item{persist}{Logical. If \code{TRUE}, validation artifacts are persisted.}
 
-\item{persist}{Logical. If \code{TRUE}, full validation result is written as \code{RDS}.}
-
-\item{artifact_dir}{Character or NULL. Optional output directory for persisted
-validation artifacts.}
+\item{artifact_dir}{Character or NULL. Optional output directory for artifacts.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-Invisibly returns \code{x} (modified in place).
+Invisibly returns \code{x}.
 }
 \description{
-Validates one, many, or all tables in a \code{DTADataSet} subclass against
-dataset specs. The method expects subclasses to provide table/spec and
-validation state properties.
+Validates a \code{DTADataSet} object's properties and structure.
+This is the base method; subclasses like \code{DTADataSetTabular}
+override it to add table-specific validation.
 }

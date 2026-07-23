@@ -30,7 +30,7 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   tab <- read_file(ds@files[[1]], table_path)
 
-  expect_error(read_file(ds@files[[1]], "blala.tsv"),  "file does not match the filename")
+  expect_error(read_file(ds@files[[1]], "blala.tsv"),  "does not match the filename")
   
   expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
   expect_equal(nrow(tab), 20940)
