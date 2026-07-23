@@ -315,15 +315,20 @@ method(check, DTA) <- function(
       cli_alert_info(paste0("Checking dataset: ", ds_name))
     }
 
-    # Check the dataset
-    invisible(check(
+    # Check the dataset. `check()` returns a (possibly new) validated copy of
+    # `ds` since S7 objects use copy-on-modify semantics, so the result must
+    # be captured and written back into `x@datasets` - otherwise the
+    # validation state (and any failures) are silently discarded and the
+    # subsequent summary is computed from the stale, unvalidated object.
+    ds <- check(
       ds,
-      tables = ds_name,
+      tables = NULL,
       force = force,
       persist = persist,
       artifact_dir = artifact_dir,
       quiet = quiet
-    ))
+    )
+    x@datasets[[ds_name]] <- ds
 
     # Get validation summary for this dataset
     val_status <- validation_status(ds)

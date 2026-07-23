@@ -818,7 +818,8 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 
 #' @title Check DTADataSetTabular Tables
 #' @description
-#' Validates all tables within a DTADataSetTabular object and returns a validation summary.
+#' Validates all tables within a DTADataSetTabular object, prints a validation
+#' summary to the console, and updates the object's validation state.
 #' @param x A \'DTADataSetTabular\' object.
 #' @param tables NULL (default), character table names, or numeric table indices.
 #'   If NULL, checks all tables.
@@ -827,16 +828,19 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #' @param artifact_dir Character or NULL. Optional output directory for persisted
 #' validation artifacts.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return Invisibly returns a validation summary data.frame with columns:
-#'   table, status, ok, validated_at, run_id, n_schema_errors, n_rule_errors
+#' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
+#'   with \code{validation_index}/\code{validation_store} updated and a
+#'   \code{"last_validation_summary"} attribute set. Use
+#'   \code{validation_status()} on the returned object to obtain the
+#'   validation summary data.frame.
 #' @importFrom cli cli_h3 cli_alert_info cli_alert_success cli_alert_danger
 #' @examples
 #' \dontrun{
 #'   ds <- create_example_DTADataSetTabular()
 #'   # Check all tables
-#'   check(ds)
+#'   ds <- check(ds)
 #'   # Check specific table
-#'   check(ds, tables = "tab1")
+#'   ds <- check(ds, tables = "tab1")
 #' }
 #' @name check-DTADataSetTabular
 #' @export
@@ -858,9 +862,12 @@ S7::method(check, DTADataSetTabular) <- function(
     quiet = quiet
   )
 
-  # Get and return the validation status summary
+  # Get validation status summary for console reporting. The updated `x`
+  # (not this summary) is the method's return value, so that validation
+  # state persists for the caller and for `check(dta)`'s aggregation, which
+  # relies on inspecting `validation_status()` of the returned object.
   val_status <- validation_status(x, tables = tables)
-  
+
   if (!isTRUE(quiet)) {
     if (nrow(val_status) > 0) {
       n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
@@ -879,6 +886,9 @@ S7::method(check, DTADataSetTabular) <- function(
     }
   }
 
-  invisible(val_status)
+  # Return the updated dataset (mirrors `check, DTADataSet`'s contract) so
+  # that validation state is not lost by callers or by `check(dta)`.
+  invisible(x)
 }
+
 

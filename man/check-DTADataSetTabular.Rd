@@ -30,18 +30,22 @@ validation artifacts.}
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-Invisibly returns a validation summary data.frame with columns:
-table, status, ok, validated_at, run_id, n_schema_errors, n_rule_errors
+Invisibly returns the updated \code{DTADataSetTabular} object \code{x},
+with \code{validation_index}/\code{validation_store} updated and a
+\code{"last_validation_summary"} attribute set. Use
+\code{validation_status()} on the returned object to obtain the
+validation summary data.frame.
 }
 \description{
-Validates all tables within a DTADataSetTabular object and returns a validation summary.
+Validates all tables within a DTADataSetTabular object, prints a validation
+summary to the console, and updates the object's validation state.
 }
 \examples{
 \dontrun{
   ds <- create_example_DTADataSetTabular()
   # Check all tables
-  check(ds)
+  ds <- check(ds)
   # Check specific table
-  check(ds, tables = "tab1")
+  ds <- check(ds, tables = "tab1")
 }
 }
