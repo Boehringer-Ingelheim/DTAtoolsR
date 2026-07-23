@@ -8,6 +8,7 @@
 check(
   x,
   tables = NULL,
+  tab = NULL,
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
@@ -18,7 +19,10 @@ check(
 \item{x}{A \'DTADataSetTabular\' object.}
 
 \item{tables}{NULL (default), character table names, or numeric table indices.
-If NULL, checks all tables.}
+If NULL and \code{tab} is also NULL, checks all tables.}
+
+\item{tab}{Character table name or numeric table index (optional). If provided,
+checks only this single table. Cannot be used together with \code{tables}.}
 
 \item{force}{Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.}
 
@@ -37,8 +41,9 @@ with \code{validation_index}/\code{validation_store} updated and a
 validation summary data.frame.
 }
 \description{
-Validates all tables within a DTADataSetTabular object, prints a validation
-summary to the console, and updates the object's validation state.
+Validates all tables or a specific table within a DTADataSetTabular object,
+prints a validation summary to the console, and updates the object's
+validation state. Replaces the separate \code{revalidate_table()} function.
 }
 \examples{
 \dontrun{

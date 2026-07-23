@@ -4,7 +4,7 @@
 \alias{revalidate_table}
 \title{Validate a Single Table in DTADataSetTabular}
 \usage{
-revalidate_table(x, ...)
+revalidate_table(x, table, force = FALSE, quiet = FALSE)
 }
 \arguments{
 \item{x}{A \'DTADataSetTabular\' object.}
@@ -28,6 +28,9 @@ rule_errors, n_schema_errors, n_rule_errors, ok) is attached as the
 Validates a single table within a DTADataSetTabular object. Provides detailed
 validation results for that specific table. Can force re-validation even if
 the table and specs are unchanged.
+
+\strong{Deprecated:} Use \code{check(x, table = ...)} instead. This function is kept for
+backward compatibility but will be removed in future versions.
 }
 \examples{
 \dontrun{
@@ -39,3 +42,4 @@ the table and specs are unchanged.
   dataset <- revalidate_table(dataset, table = "demographics", force = TRUE)
 }
 }
+\keyword{deprecated}

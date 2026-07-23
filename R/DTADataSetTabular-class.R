@@ -717,83 +717,13 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 #' }
 #' @name revalidate_table
 #' @export
-revalidate_table <- S7::new_generic("revalidate_table", "x")
-
-#' @export
-S7::method(revalidate_table, DTADataSetTabular) <- function(
-  x,
-  table,
-  force = FALSE,
-  quiet = FALSE
-) {
-  # Validate input
-  if (missing(table)) {
-    cli::cli_abort("'table' argument is required. Specify table name or index.")
-  }
-
-  table_name <- dta_table_id_to_names(x, table)
-  table_name <- table_name[[1]]
-
-  # Get the table and check it exists
-  if (!table_name %in% names(x@tables)) {
-    cli::cli_abort(paste0("Table '", table_name, "' not found in tables list."))
-  }
-
-  current_table <- x@tables[[table_name]]
-  current_df <- as.data.frame(current_table)
-  table_hash <- dta_hash_object(current_df)
-  specs_hash <- dta_hash_object(as.list(x@specs))
-
-  # Check if we need to re-validate
-  previous <- x@validation_index[[table_name]]
-  unchanged <- !is.null(previous) &&
-    identical(previous$table_hash, table_hash) &&
-    identical(previous$specs_hash, specs_hash)
-
-  if (!force && unchanged && !is.null(previous)) {
-    if (!isTRUE(quiet)) {
-      cli::cli_alert_info(paste0("Table '", table_name, "' validation is up-to-date (skipped)."))
-    }
-    attr(x, "last_validation_details") <- x@validation_store[[table_name]]
-    return(invisible(x))
-  }
-
-  if (!isTRUE(quiet)) {
-    cli::cli_h3(paste0("Validating table: ", table_name))
-  }
-
-  # Perform validation
-  details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
-
-  # Update validation state
-  run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
-  index_entry <- list(
-    validated_at = Sys.time(),
-    ok = isTRUE(details$ok),
-    table_hash = table_hash,
-    specs_hash = specs_hash,
-    n_schema_errors = details$n_schema_errors,
-    n_rule_errors = details$n_rule_errors,
-    run_id = run_id,
-    artifact_path = NULL
-  )
-
-  x@validation_index[[table_name]] <- index_entry
-  x@validation_store[[table_name]] <- details
-
-  # Print summary
-  if (!isTRUE(quiet)) {
-    if (isTRUE(details$ok)) {
-      cli::cli_alert_success(paste0("Table '", table_name, "' is valid."))
-    } else {
-      cli::cli_alert_info(
-        paste0("Table '", table_name, "' validation errors: ", details$n_schema_errors, " schema, ", details$n_rule_errors, " rule violations")
-      )
-    }
-  }
-
-  attr(x, "last_validation_details") <- details
-  invisible(x)
+#' @keywords deprecated
+#' @description 
+#' **Deprecated:** Use `check(x, table = ...)` instead. This function is kept for 
+#' backward compatibility but will be removed in future versions.
+revalidate_table <- function(x, table, force = FALSE, quiet = FALSE) {
+  .Deprecated("check(x, table = ...)", old = "revalidate_table()")
+  check(x, table = table, force = force, quiet = quiet, persist = FALSE)
 }
 
 
@@ -824,11 +754,14 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 
 #' @title Check DTADataSetTabular Tables
 #' @description
-#' Validates all tables within a DTADataSetTabular object, prints a validation
-#' summary to the console, and updates the object's validation state.
+#' Validates all tables or a specific table within a DTADataSetTabular object,
+#' prints a validation summary to the console, and updates the object's
+#' validation state. Replaces the separate `revalidate_table()` function.
 #' @param x A \'DTADataSetTabular\' object.
 #' @param tables NULL (default), character table names, or numeric table indices.
-#'   If NULL, checks all tables.
+#'   If NULL and `tab` is also NULL, checks all tables.
+#' @param tab Character table name or numeric table index (optional). If provided,
+#'   checks only this single table. Cannot be used together with `tables`.
 #' @param force Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.
 #' @param persist Logical. If TRUE (default), persists validation artifacts to disk.
 #' @param artifact_dir Character or NULL. Optional output directory for persisted
@@ -853,11 +786,27 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 S7::method(check, DTADataSetTabular) <- function(
   x,
   tables = NULL,
+  tab = NULL,
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE
 ) {
+  # Handle single table vs multiple tables
+  if (!is.null(tab) && !is.null(tables)) {
+    cli::cli_abort("Cannot specify both 'tab' and 'tables' parameters. Use 'tab' for single table, 'tables' for multiple.")
+  }
+  
+  # If single table is specified, use it; otherwise use tables parameter
+  if (!is.null(tab)) {
+    target_table_indices <- dta_table_id_to_names(x, tab)
+    tables_to_check <- target_table_indices
+    single_table_mode <- TRUE
+  } else {
+    tables_to_check <- tables
+    single_table_mode <- FALSE
+  }
+  
   # Validate structure (from parent class)
   x <- S7::method(check, DTADataSet)(
     x,
@@ -868,7 +817,7 @@ S7::method(check, DTADataSetTabular) <- function(
   )
 
   # Table-specific validation logic (override parent)
-  target_tables <- dta_table_id_to_names(x, tables)
+  target_tables <- dta_table_id_to_names(x, tables_to_check)
   specs_hash <- dta_hash_object(as.list(x@specs))
   output_rows <- list()
 
@@ -907,7 +856,11 @@ S7::method(check, DTADataSetTabular) <- function(
     # Output table name/index under investigation
     if (!isTRUE(quiet)) {
       cli::cli_text()
-      cli::cli_rule(paste0("Table ", idx, " of ", length(target_tables), ": ", table_name))
+      if (single_table_mode) {
+        cli::cli_rule(paste0("Validating table: ", table_name))
+      } else {
+        cli::cli_rule(paste0("Table ", idx, " of ", length(target_tables), ": ", table_name))
+      }
     }
 
     details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
@@ -935,6 +888,11 @@ S7::method(check, DTADataSetTabular) <- function(
 
     x@validation_index[[table_name]] <- index_entry
     x@validation_store[[table_name]] <- details
+    
+    # Attach details for single table mode (replaces revalidate_table behavior)
+    if (single_table_mode) {
+      attr(x, "last_validation_details") <- details
+    }
 
     output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
       table_name = table_name,
@@ -947,7 +905,7 @@ S7::method(check, DTADataSetTabular) <- function(
   attr(x, "last_validation_summary") <- summary_df
 
   # Summary output
-  val_status <- validation_status(x, tables = tables)
+  val_status <- validation_status(x, tables = tables_to_check)
 
   if (!isTRUE(quiet)) {
     if (nrow(val_status) > 0) {
@@ -955,7 +913,9 @@ S7::method(check, DTADataSetTabular) <- function(
       n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
       n_total <- nrow(val_status)
       
-      cli::cli_text()
+      if (!single_table_mode) {
+        cli::cli_text()
+      }
       
       if (n_invalid > 0) {
         table_word <- if (n_total == 1) "table" else "tables"

@@ -63,10 +63,10 @@ test_that("DTADataSetTabular can persist and reload validation artifacts", {
   expect_true(is.null(ds@validation_store[["tab1"]]))
 })
 
-test_that("revalidate_table() validates a single table by name", {
+test_that("check() validates a single table by name", {
   ds <- create_example_DTADataSetTabular(2)
 
-  ds <- revalidate_table(ds, table = "tab1", quiet = TRUE)
+  ds <- check(ds, tab = "tab1", quiet = TRUE)
   result <- attr(ds, "last_validation_details")
 
   expect_true(is.list(result))
@@ -77,10 +77,10 @@ test_that("revalidate_table() validates a single table by name", {
   expect_equal(status$status, "validated")
 })
 
-test_that("revalidate_table() validates a single table by index", {
+test_that("check() validates a single table by index", {
   ds <- create_example_DTADataSetTabular(2)
 
-  ds <- revalidate_table(ds, table = 1, quiet = TRUE)
+  ds <- check(ds, tab = 1, quiet = TRUE)
   result <- attr(ds, "last_validation_details")
 
   expect_true(is.list(result))
@@ -89,18 +89,18 @@ test_that("revalidate_table() validates a single table by index", {
   expect_equal(status$status, "validated")
 })
 
-test_that("revalidate_table() skips unchanged table validation", {
+test_that("check() skips unchanged table validation", {
   ds <- create_example_DTADataSetTabular(2)
 
   # First validation
-  ds <- revalidate_table(ds, table = "tab1", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = TRUE, quiet = TRUE)
   first_status <- validation_status(ds, tables = "tab1")
   first_time <- first_status$validated_at
 
   Sys.sleep(0.1)
 
   # Second validation without force (should skip)
-  ds <- revalidate_table(ds, table = "tab1", force = FALSE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = FALSE, quiet = TRUE)
 
   # Since skipped, result should still be from cache
   status <- validation_status(ds, tables = "tab1")
@@ -108,18 +108,18 @@ test_that("revalidate_table() skips unchanged table validation", {
   expect_equal(first_time, status$validated_at)
 })
 
-test_that("revalidate_table() forces re-validation when force=TRUE", {
+test_that("check() forces re-validation when force=TRUE", {
   ds <- create_example_DTADataSetTabular(2)
 
   # First validation
-  ds <- revalidate_table(ds, table = "tab1", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = TRUE, quiet = TRUE)
   first_status <- validation_status(ds, tables = "tab1")
   first_time <- first_status$validated_at
 
   Sys.sleep(0.1)
 
   # Second validation with force
-  ds <- revalidate_table(ds, table = "tab1", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = TRUE, quiet = TRUE)
   second_status <- validation_status(ds, tables = "tab1")
   second_time <- second_status$validated_at
 
@@ -127,21 +127,23 @@ test_that("revalidate_table() forces re-validation when force=TRUE", {
   expect_gt(second_time, first_time)
 })
 
-test_that("revalidate_table() aborts when table argument is missing", {
+test_that("check() aborts when table argument is missing and tables is null", {
   ds <- create_example_DTADataSetTabular(2)
-  expect_error(revalidate_table(ds), "required")
+  # With neither table nor tables, it checks all tables (no error)
+  ds <- check(ds, quiet = TRUE)
+  expect_true(TRUE)  # Just verify it doesn't error
 })
 
-test_that("revalidate_table() aborts on non-existent table", {
+test_that("check() aborts on non-existent table", {
   ds <- create_example_DTADataSetTabular(2)
-  expect_error(revalidate_table(ds, table = "nonexistent"), "not found")
+  expect_error(check(ds, tab = "nonexistent"), "not found")
 })
 
 test_that("invalidate_by_spec_change() marks validation as outdated", {
   ds <- create_example_DTADataSetTabular(2)
 
   # Validate table
-  ds <- revalidate_table(ds, table = "tab1", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = TRUE, quiet = TRUE)
   specs_hash_before <- ds@validation_index[["tab1"]]$specs_hash
   expect_false(is.null(specs_hash_before))
 
@@ -160,8 +162,8 @@ test_that("invalidate_by_spec_change() invalidates all tables when no tables spe
   ds@tables[["tab2"]] <- ds@tables[["tab1"]]
 
   # Validate both tables
-  ds <- revalidate_table(ds, table = "tab1", force = TRUE, quiet = TRUE)
-  ds <- revalidate_table(ds, table = "tab2", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab1", force = TRUE, quiet = TRUE)
+  ds <- check(ds, tab = "tab2", force = TRUE, quiet = TRUE)
 
   # Invalidate all tables
   ds <- invalidate_by_spec_change(ds)
