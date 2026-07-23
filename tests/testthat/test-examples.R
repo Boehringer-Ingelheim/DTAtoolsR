@@ -10,6 +10,8 @@ test_that("Validation of single tabular dataset", {
 
   dta[[1]]
   check(dta)
+
+  check(dta[[1]])
   #check(dta, quiet = TRUE)
 })
 

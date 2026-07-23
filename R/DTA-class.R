@@ -305,7 +305,7 @@ method(check, DTA) <- function(
 
     if (!inherits(ds, "DTAtools::DTADataSet")) {
       if (!isTRUE(quiet)) {
-        cli_alert_danger(paste0("Dataset '", ds_name, "' is not a DTADataSet object. Skipping."))
+        cli_abort(paste0("Dataset '", ds_name, "' is not a DTADataSet object."))
       }
       next
     }
@@ -317,7 +317,7 @@ method(check, DTA) <- function(
     # Check the dataset
     invisible(check(
       ds,
-      tables = NULL,
+      tables = ds_name,
       force = force,
       persist = persist,
       artifact_dir = artifact_dir,
