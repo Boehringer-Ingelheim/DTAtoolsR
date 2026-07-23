@@ -689,43 +689,6 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 }
 
 
-#' @title Validate a Single Table in DTADataSetTabular
-#' @description
-#' Validates a single table within a DTADataSetTabular object. Provides detailed
-#' validation results for that specific table. Can force re-validation even if
-#' the table and specs are unchanged.
-#' @param x A \'DTADataSetTabular\' object.
-#' @param table Character table name or numeric table index (required).
-#' @param force Logical. If TRUE, forces re-validation even if table and specs
-#'   are unchanged. Default is FALSE.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
-#'   with \code{validation_index}/\code{validation_store} updated for `table`.
-#'   The validation details list (schema_valid, rules_valid, schema_errors,
-#'   rule_errors, n_schema_errors, n_rule_errors, ok) is attached as the
-#'   \code{"last_validation_details"} attribute and can also be retrieved via
-#'   \code{validation_errors(x, table = table, source = "memory")}.
-#' @importFrom cli cli_abort cli_h3 cli_alert_success cli_alert_info
-#' @examples
-#' \dontrun{
-#'   # Validate first table
-#'   dataset <- revalidate_table(dataset, table = 1)
-#'   # Validate by name
-#'   dataset <- revalidate_table(dataset, table = "demographics")
-#'   # Force re-validation
-#'   dataset <- revalidate_table(dataset, table = "demographics", force = TRUE)
-#' }
-#' @name revalidate_table
-#' @export
-#' @keywords deprecated
-#' @description 
-#' **Deprecated:** Use `check(x, table = ...)` instead. This function is kept for 
-#' backward compatibility but will be removed in future versions.
-revalidate_table <- function(x, table, force = FALSE, quiet = FALSE) {
-  .Deprecated("check(x, table = ...)", old = "revalidate_table()")
-  check(x, table = table, force = force, quiet = quiet, persist = FALSE)
-}
-
 
 #' @title Invalidate Validation Due to Spec Changes
 #' @description
@@ -756,7 +719,7 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #' @description
 #' Validates all tables or a specific table within a DTADataSetTabular object,
 #' prints a validation summary to the console, and updates the object's
-#' validation state. Replaces the separate `revalidate_table()` function.
+#' validation state.
 #' @param x A \'DTADataSetTabular\' object.
 #' @param tables NULL (default), character table names, or numeric table indices.
 #'   If NULL and `tab` is also NULL, checks all tables.
@@ -889,7 +852,7 @@ S7::method(check, DTADataSetTabular) <- function(
     x@validation_index[[table_name]] <- index_entry
     x@validation_store[[table_name]] <- details
     
-    # Attach details for single table mode (replaces revalidate_table behavior)
+    # Attach details for single table mode
     if (single_table_mode) {
       attr(x, "last_validation_details") <- details
     }
