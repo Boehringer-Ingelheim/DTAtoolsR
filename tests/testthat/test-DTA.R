@@ -141,11 +141,12 @@ test_that("check() method validates all datasets in DTA", {
   )
 
   # Check all datasets
-  result <- check(dta, persist = FALSE, quiet = TRUE)
+  dta <- check(dta, persist = FALSE, quiet = TRUE)
+  result <- results(dta)
 
-  # Check return value is a data.frame
+  # Check summary return value is a data.frame via results()
   expect_true(is.data.frame(result))
-  expect_named(result, c("dataset", "n_tables", "n_validated", "n_valid", "n_invalid", "n_skipped"))
+  expect_named(result, c("dataset", "n_tables", "n_validated", "n_valid", "n_invalid", "n_skipped", "n_not_validated"))
 
   # Check that clinical_data was validated
   expect_equal(nrow(result), 1)
@@ -164,7 +165,8 @@ test_that("check() method validates specific dataset by name", {
   )
 
   # Check specific dataset
-  result <- check(dta, datasets = "clinical_data", persist = FALSE, quiet = TRUE)
+  dta <- check(dta, datasets = "clinical_data", persist = FALSE, quiet = TRUE)
+  result <- results(dta, datasets = "clinical_data")
 
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
@@ -181,11 +183,40 @@ test_that("check() method validates by dataset index", {
   )
 
   # Check by index
-  result <- check(dta, datasets = 1, persist = FALSE, quiet = TRUE)
-
+  dta <- check(dta, datasets = 1, persist = FALSE, quiet = TRUE)
+  result <- results(dta, datasets = 1)
+  
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_equal(result$dataset, "clinical_data")
+})
+
+test_that("results() returns not_validated state before checks", {
+  dta <- create_example_DTA()
+
+  result <- results(dta)
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 2)
+  expect_true(all(result$n_not_validated >= 1))
+})
+
+test_that("messages() returns human-readable messages for a checked DTA", {
+  dta <- read_dta_from_yaml(
+    system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  )
+  dta <- load_file(
+    dta, 1,
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  )
+
+  dta <- check(dta, persist = FALSE, quiet = TRUE)
+  msgs <- messages(dta, as_tibble = FALSE)
+
+  expect_true(is.data.frame(msgs))
+  expect_named(
+    msgs,
+    c("dataset", "table", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+  )
 })
 
 test_that("check() aborts on empty DTA", {

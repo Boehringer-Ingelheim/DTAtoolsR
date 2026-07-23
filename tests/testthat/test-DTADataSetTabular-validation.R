@@ -21,6 +21,11 @@ test_that("DTADataSetTabular stores validation state per table", {
     "rule_results",
     "rule_errors"
   ) %in% names(details)))
+
+  result_tbl <- results(ds, tables = "tab1")
+  expect_true(is.data.frame(result_tbl))
+  expect_equal(nrow(result_tbl), 1)
+  expect_equal(result_tbl$table, "tab1")
 })
 
 
@@ -171,5 +176,26 @@ test_that("invalidate_by_spec_change() invalidates all tables when no tables spe
   # Both specs_hash should be NULL
   expect_true(is.null(ds@validation_index[["tab1"]]$specs_hash))
   expect_true(is.null(ds@validation_index[["tab2"]]$specs_hash))
+})
+
+test_that("messages() returns flattened rule failures", {
+  ds <- create_example_DTADataSetTabular(2)
+
+  bad_rule <- create_example_DTARuleColUnique()
+  ds@specs@rules <- DTARuleCollection(rules = list(bad_rule))
+
+  # Duplicate SUBJID to violate uniqueness rule.
+  bad_tab <- as.data.frame(ds@tables[["tab1"]])
+  bad_tab$SUBJID[3] <- bad_tab$SUBJID[1]
+  ds@tables[["tab1"]] <- arrow::arrow_table(bad_tab)
+
+  ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
+  msgs <- messages(ds, tables = "tab1", as_tibble = FALSE)
+
+  expect_true(is.data.frame(msgs))
+  expect_true(nrow(msgs) >= 1)
+  expect_true(all(unique(msgs$source) %in% c("schema", "rule")))
+  expect_true(any(msgs$source == "rule"))
+  expect_true(any(grepl("violated", msgs$message, fixed = TRUE)))
 })
 

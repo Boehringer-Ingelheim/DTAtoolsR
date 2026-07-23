@@ -30,8 +30,11 @@ If NULL, uses default validation artifact directory per dataset.}
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-Invisibly returns a validation summary data.frame with columns:
-dataset, n_tables, n_validated, n_valid, n_invalid, n_skipped
+Invisibly returns the updated \code{DTA} object \code{x} with all
+validated datasets having their \code{validation_index} and
+\code{validation_store} populated. A \code{"last_validation_summary"}
+attribute is attached with a data.frame of columns: dataset, n_tables,
+n_validated, n_valid, n_invalid, n_skipped.
 }
 \description{
 Validates all datasets within a \code{DTA} object, or a specific dataset.

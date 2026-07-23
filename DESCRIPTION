@@ -57,6 +57,7 @@ Collate:
 	'DTAColumnSpecStructureSAS-class.R'
 	'DTADataSet-class.R'
 	'DTADataSetTabular-class.R'
+	'validationReporting.R'
 	'DTAFile-class.R'
 	'DTAFileTabular-class.R'
 	'DTAFileCSV-class.R'
