@@ -13,8 +13,12 @@ test_that("Validation of single tabular dataset", {
 
   dta <- load_file(dta, "clinical_data", file = data_path)
 
-  expect_no_error(check(dta))
-  expect_no_error(check(dta[[1]]))
+  dta <- check(dta)
+  expect_true(inherits(dta, "DTAtools::DTA"))
+  expect_false(is.null(dta[[1]]@validation_index))
+  expect_gt(length(dta[[1]]@validation_index), 0)
+  expect_false(is.null(dta[[1]]@validation_store))
+  expect_gt(length(dta[[1]]@validation_store), 0)
 })
 
 test_that("Examples can be built with current constructors", {

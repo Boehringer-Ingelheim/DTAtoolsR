@@ -247,8 +247,11 @@ method(load_file, DTA) <- function(
 #'   If NULL, uses default validation artifact directory per dataset.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
-#' @return Invisibly returns a validation summary data.frame with columns:
-#'   dataset, n_tables, n_validated, n_valid, n_invalid, n_skipped
+#' @return Invisibly returns the updated \code{DTA} object \code{x} with all
+#'   validated datasets having their \code{validation_index} and
+#'   \code{validation_store} populated. A \code{"last_validation_summary"}
+#'   attribute is attached with a data.frame of columns: dataset, n_tables,
+#'   n_validated, n_valid, n_invalid, n_skipped.
 #' @examples
 #' \dontrun{
 #'   dta <- create_example_DTA()
@@ -379,7 +382,8 @@ method(check, DTA) <- function(
     }
   }
 
-  invisible(summary_df)
+  attr(x, "last_validation_summary") <- summary_df
+  invisible(x)
 }
 
 
