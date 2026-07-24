@@ -470,13 +470,13 @@ method(print, DTADataSetTabular) <- function(x) {
     cli_alert_info("Specs: none")
   }
 
-  n_tables <- length(x@tables)
+  n_targets <- length(x@tables)
 
-  if (n_tables > 0) {
+  if (n_targets > 0) {
     table_names <- names(x@tables)
 
-    if (n_tables > 5) {
-      shown_names <- c(table_names[1:4], "...", table_names[n_tables])
+    if (n_targets > 5) {
+      shown_names <- c(table_names[1:4], "...", table_names[n_targets])
     } else {
       shown_names <- table_names
     }
@@ -485,7 +485,7 @@ method(print, DTADataSetTabular) <- function(x) {
     # instead of stringr functions to work with cli
     alert_message <- paste0(
       "Tables (",
-      n_tables,
+      n_targets,
       "): ",
       paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
     )
@@ -532,10 +532,10 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
     cli_alert("Specs: none")
   }
 
-  n_tables <- length(x@tables)
+  n_targets <- length(x@tables)
 
-  if (n_tables > 0) {
-    cli_alert("Tables: ({n_tables})")
+  if (n_targets > 0) {
+    cli_alert("Tables: ({n_targets})")
   } else {
     cli_alert("Tables: {.emph none}")
   }
@@ -587,10 +587,12 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
     if (is.null(entry)) {
       return(data.frame(
         table = table_name,
+        target_type = "table",
         status = "not_validated",
         ok = NA,
         validated_at = NA_character_,
         run_id = NA_character_,
+        validation_run = NA_character_,
         n_schema_errors = NA_integer_,
         n_rule_errors = NA_integer_,
         stringsAsFactors = FALSE
@@ -753,7 +755,8 @@ S7::method(check, DTADataSetTabular) <- function(
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  validation_run = NULL
 ) {
   # Handle single table vs multiple tables
   if (!is.null(tab) && !is.null(tables)) {
@@ -776,8 +779,13 @@ S7::method(check, DTADataSetTabular) <- function(
     force = force,
     persist = persist,
     artifact_dir = artifact_dir,
-    quiet = quiet
+    quiet = quiet,
+    validation_run = validation_run
   )
+
+  if (is.null(validation_run)) {
+    validation_run <- dta_new_validation_run_id()
+  }
 
   # Table-specific validation logic (override parent)
   target_tables <- dta_table_id_to_names(x, tables_to_check)
@@ -808,10 +816,14 @@ S7::method(check, DTADataSetTabular) <- function(
       identical(previous$specs_hash, specs_hash)
 
     if (!force && unchanged) {
+      previous$validation_run <- validation_run
+      x@validation_index[[table_name]] <- previous
+
       output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
         table_name = table_name,
         status = "skipped",
-        index_entry = previous
+        index_entry = previous,
+        target_type = "table"
       )
       next
     }
@@ -827,8 +839,9 @@ S7::method(check, DTADataSetTabular) <- function(
     }
 
     details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
-    run_id <- format(Sys.time(), "%Y%m%dT%H%M%OS3")
     artifact_path <- NULL
+    validated_at <- Sys.time()
+    run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")
 
     if (persist) {
       safe_table <- gsub("[^A-Za-z0-9_-]", "_", table_name)
@@ -839,13 +852,14 @@ S7::method(check, DTADataSetTabular) <- function(
     }
 
     index_entry <- list(
-      validated_at = Sys.time(),
+      validated_at = validated_at,
       ok = isTRUE(details$ok),
       table_hash = table_hash,
       specs_hash = specs_hash,
       n_schema_errors = details$n_schema_errors,
       n_rule_errors = details$n_rule_errors,
       run_id = run_id,
+      validation_run = validation_run,
       artifact_path = artifact_path
     )
 
@@ -860,7 +874,8 @@ S7::method(check, DTADataSetTabular) <- function(
     output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
       table_name = table_name,
       status = "validated",
-      index_entry = index_entry
+      index_entry = index_entry,
+      target_type = "table"
     )
   }
 

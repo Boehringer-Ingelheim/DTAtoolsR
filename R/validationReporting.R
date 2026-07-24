@@ -10,11 +10,11 @@
 #' A data.frame summarizing validation state.
 #'
 #' For `DTADataSetTabular`, columns are:
-#' `table`, `status`, `ok`, `validated_at`, `run_id`,
+#' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
 #' `n_schema_errors`, `n_rule_errors`.
 #'
 #' For `DTA`, the summary is aggregated per dataset and includes:
-#' `dataset`, `n_tables`, `n_validated`, `n_valid`, `n_invalid`,
+#' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
 #' `n_skipped`, `n_not_validated`.
 #' @examples
 #' \dontrun{
@@ -34,14 +34,15 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
   if (is.null(status_df) || nrow(status_df) == 0) {
     return(data.frame(
       dataset = dataset_name,
-      table = character(0),
+      target = character(0),
+      target_type = character(0),
       status = character(0),
-      ok = logical(0),
       validated_at = character(0),
       run_id = character(0),
+      validation_run = character(0),
       n_schema_errors = integer(0),
       n_rule_errors = integer(0),
-      n_tables = integer(0),
+      n_targets = integer(0),
       n_validated = integer(0),
       n_valid = integer(0),
       n_invalid = integer(0),
@@ -51,16 +52,23 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
     ))
   }
 
+  result_status <- ifelse(
+    status_df$status == "validated" & !is.na(status_df$ok) & !status_df$ok,
+    "failed",
+    status_df$status
+  )
+
   data.frame(
     dataset = dataset_name,
-    table = status_df$table,
-    status = status_df$status,
-    ok = status_df$ok,
+    target = status_df$table,
+    target_type = status_df$target_type,
+    status = result_status,
     validated_at = status_df$validated_at,
     run_id = status_df$run_id,
+    validation_run = status_df$validation_run,
     n_schema_errors = status_df$n_schema_errors,
     n_rule_errors = status_df$n_rule_errors,
-    n_tables = nrow(status_df),
+    n_targets = nrow(status_df),
     n_validated = sum(status_df$status == "validated", na.rm = TRUE),
     n_valid = sum(status_df$ok == TRUE, na.rm = TRUE),
     n_invalid = sum(status_df$ok == FALSE, na.rm = TRUE),
@@ -122,14 +130,15 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
     if (!inherits(ds, "DTAtools::DTADataSet")) {
       return(data.frame(
         dataset = ds_name,
-        table = NA_character_,
+        target = NA_character_,
+        target_type = NA_character_,
         status = "not_validated",
-        ok = NA,
         validated_at = NA_character_,
         run_id = NA_character_,
+        validation_run = NA_character_,
         n_schema_errors = NA_integer_,
         n_rule_errors = NA_integer_,
-        n_tables = NA_integer_,
+        n_targets = NA_integer_,
         n_validated = NA_integer_,
         n_valid = NA_integer_,
         n_invalid = NA_integer_,
@@ -159,7 +168,7 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' @return
 #' A data.frame (or tibble when `as_tibble = TRUE` and package `tibble`
 #' is installed) with columns:
-#' `dataset`, `table`, `severity`, `source`, `rule_id`,
+#' `dataset`, `target`, `severity`, `source`, `rule_id`,
 #' `row`, `column`, `keyword`, `message`.
 #' @examples
 #' \dontrun{
@@ -175,7 +184,7 @@ messages <- S7::new_generic("messages", "x")
 dta_empty_messages <- function() {
   data.frame(
     dataset = character(0),
-    table = character(0),
+    target = character(0),
     severity = character(0),
     source = character(0),
     rule_id = character(0),
@@ -215,7 +224,7 @@ dta_schema_messages_to_df <- function(dataset_name, table_name, details) {
 
   data.frame(
     dataset = rep(dataset_name, nrow(full_error)),
-    table = rep(table_name, nrow(full_error)),
+    target = rep(table_name, nrow(full_error)),
     severity = rep("error", nrow(full_error)),
     source = rep("schema", nrow(full_error)),
     rule_id = rep(NA_character_, nrow(full_error)),
@@ -238,7 +247,7 @@ dta_rule_messages_to_df <- function(dataset_name, table_name, details) {
   do.call(rbind, lapply(rule_errors, function(err) {
     data.frame(
       dataset = dataset_name,
-      table = table_name,
+      target = table_name,
       severity = "error",
       source = "rule",
       rule_id = if (!is.null(err$id)) as.character(err$id) else NA_character_,
@@ -282,7 +291,7 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
   }
 
   msgs$row_order <- ifelse(is.na(msgs$row), Inf, msgs$row)
-  msgs <- msgs[order(msgs$dataset, msgs$table, msgs$source, msgs$row_order), ]
+  msgs <- msgs[order(msgs$dataset, msgs$target, msgs$source, msgs$row_order), ]
   msgs$row_order <- NULL
   rownames(msgs) <- NULL
   msgs

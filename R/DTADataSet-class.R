@@ -446,13 +446,20 @@ dta_default_validation_artifact_dir <- function(x) {
 }
 
 #' @keywords internal
-dta_validation_result_to_row <- function(table_name, status, index_entry) {
+dta_new_validation_run_id <- function() {
+  format(Sys.time(), "%Y%m%dT%H%M%OS3")
+}
+
+#' @keywords internal
+dta_validation_result_to_row <- function(table_name, status, index_entry, target_type = "table") {
   data.frame(
     table = table_name,
+    target_type = target_type,
     status = status,
     ok = isTRUE(index_entry$ok),
     validated_at = as.character(index_entry$validated_at),
     run_id = index_entry$run_id,
+    validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,
     n_schema_errors = index_entry$n_schema_errors,
     n_rule_errors = index_entry$n_rule_errors,
     stringsAsFactors = FALSE
@@ -478,7 +485,8 @@ S7::method(check, DTADataSet) <- function(
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  validation_run = NULL
 ) {
   # Base class method: just validate that required properties exist.
   # Subclasses (e.g., DTADataSetTabular) override this to add table validation.

@@ -33,7 +33,7 @@ If NULL, uses default validation artifact directory per dataset.}
 Invisibly returns the updated \code{DTA} object \code{x} with all
 validated datasets having their \code{validation_index} and
 \code{validation_store} populated. A \code{"last_validation_summary"}
-attribute is attached with a data.frame of columns: dataset, n_tables,
+attribute is attached with a data.frame of columns: dataset, n_targets,
 n_validated, n_valid, n_invalid, n_skipped.
 }
 \description{

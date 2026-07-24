@@ -14,3 +14,4 @@ renv
 renv/
 .Renviron
 
+..Rcheck/00check.log

@@ -19,7 +19,7 @@ For \code{DTADataSetTabular}, columns are:
 \code{n_schema_errors}, \code{n_rule_errors}.
 
 For \code{DTA}, the summary is aggregated per dataset and includes:
-\code{dataset}, \code{n_tables}, \code{n_validated}, \code{n_valid}, \code{n_invalid},
+\code{dataset}, \code{n_targets}, \code{n_validated}, \code{n_valid}, \code{n_invalid},
 \code{n_skipped}, \code{n_not_validated}.
 }
 \description{

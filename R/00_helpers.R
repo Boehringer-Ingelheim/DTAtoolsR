@@ -43,7 +43,7 @@ class_character_or_numeric_or_null_or_list <- S7::class_character |
 }
 
 `__DTAtools_supported_backends__` <- c("SAS")
-`__DTAtools_supported_dataset_types__` <- c("tabular")
+`__DTAtools_supported_dataset_types__` <- c("tabular", "file")
 `__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
 
 #' @title Check Generic
@@ -187,6 +187,12 @@ DTADataSetFactory <- function(
     "tabular" = {
       return(DTADataSetTabular(
         specs = specs_from_list(columns = columns, rules = rules),
+        files = do.call(DTAFileFactory, files),
+        ...
+      ))
+    },
+    "file" = {
+      return(DTADataSetFile(
         files = do.call(DTAFileFactory, files),
         ...
       ))

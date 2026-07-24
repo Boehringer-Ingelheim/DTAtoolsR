@@ -148,14 +148,14 @@ test_that("check() method validates all datasets in DTA", {
   expect_true(is.data.frame(result))
   expect_true(all(c(
     "dataset",
-    "table",
+    "target",
     "status",
-    "ok",
     "validated_at",
     "run_id",
+    "validation_run",
     "n_schema_errors",
     "n_rule_errors",
-    "n_tables",
+    "n_targets",
     "n_validated",
     "n_valid",
     "n_invalid",
@@ -166,8 +166,9 @@ test_that("check() method validates all datasets in DTA", {
   # Check that clinical_data was validated
   expect_equal(nrow(result), 1)
   expect_equal(result$dataset, "clinical_data")
-  expect_equal(result$table, "clinical_data")
-  expect_equal(result$n_tables, 1)
+  expect_equal(result$target, "clinical_data")
+  expect_true(result$status %in% c("validated", "failed"))
+  expect_equal(result$n_targets, 1)
   expect_equal(result$n_validated, 1)
 })
 
@@ -187,7 +188,7 @@ test_that("check() method validates specific dataset by name", {
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_equal(result$dataset, "clinical_data")
-  expect_equal(result$table, "clinical_data")
+  expect_equal(result$target, "clinical_data")
 })
 
 test_that("check() method validates by dataset index", {
@@ -206,7 +207,7 @@ test_that("check() method validates by dataset index", {
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_equal(result$dataset, "clinical_data")
-  expect_equal(result$table, "clinical_data")
+  expect_equal(result$target, "clinical_data")
 })
 
 test_that("results() returns not_validated state before checks", {
@@ -233,7 +234,7 @@ test_that("messages() returns human-readable messages for a checked DTA", {
   expect_true(is.data.frame(msgs))
   expect_named(
     msgs,
-    c("dataset", "table", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+    c("dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
   )
 })
 

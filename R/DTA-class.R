@@ -250,7 +250,7 @@ method(load_file, DTA) <- function(
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
 #'   validated datasets having their \code{validation_index} and
 #'   \code{validation_store} populated. A \code{"last_validation_summary"}
-#'   attribute is attached with a data.frame of columns: dataset, n_tables,
+#'   attribute is attached with a data.frame of columns: dataset, n_targets,
 #'   n_validated, n_valid, n_invalid, n_skipped.
 #' @examples
 #' \dontrun{
@@ -270,7 +270,8 @@ method(check, DTA) <- function(
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  validation_run = NULL
 ) {
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
@@ -302,6 +303,10 @@ method(check, DTA) <- function(
     cli::cli_alert_info(paste0("Validating ", n_datasets, " ", dataset_word))
   }
 
+  if (is.null(validation_run)) {
+    validation_run <- dta_new_validation_run_id()
+  }
+
   summary_rows <- list()
 
   for (ds_name in target_datasets) {
@@ -329,13 +334,14 @@ method(check, DTA) <- function(
       force = force,
       persist = persist,
       artifact_dir = artifact_dir,
-      quiet = quiet
+      quiet = quiet,
+      validation_run = validation_run
     )
     x@datasets[[ds_name]] <- ds
 
     # Get validation summary for this dataset
     val_status <- validation_status(ds)
-    n_tables <- nrow(val_status)
+    n_targets <- nrow(val_status)
     n_validated <- sum(val_status$status == "validated", na.rm = TRUE)
     n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
     n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
@@ -343,7 +349,7 @@ method(check, DTA) <- function(
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
-      n_tables = n_tables,
+      n_targets = n_targets,
       n_validated = n_validated,
       n_valid = n_valid,
       n_invalid = n_invalid,
