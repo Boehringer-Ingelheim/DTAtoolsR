@@ -69,14 +69,16 @@ DTAFileDelim <- S7::new_class(
 ##' @seealso \code{\link{arrow::read_tsv_arrow}}
 ##' @name read_file_execution-DTAFileDelim
 method(read_file_execution, DTAFileDelim) <- function(x, file) {
-  return(arrow::read_delim_arrow(
+  table_obj <- arrow::read_delim_arrow(
     file,
     #col_types = x@col_types,
     quote = x@quote,
     skip = if (x@has_header) 0 else 1,
     #col_names = x@has_header,
     as_data_frame = FALSE
-  ))
+  )
+
+  dta_normalize_column_names(table_obj)
 }
 
 #' @title Print DTAFileDelim Object

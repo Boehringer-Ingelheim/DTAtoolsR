@@ -22,6 +22,17 @@ test_that("matches_filename accepts full file paths", {
   expect_true(matches_filename(file_info, path))
 })
 
+test_that("CSV headers are normalized before validation", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV("clinical_data.csv")
+
+  x <- read_file(file_info, path)
+
+  expect_true("AGE" %in% names(x))
+  expect_false("\"AGE\"" %in% names(x))
+  expect_false("AGE " %in% names(x))
+})
+
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
 

@@ -97,6 +97,18 @@ method(read_file_execution, DTAFileTabular) <- function(x, file) {
   )
 }
 
+#' @keywords internal
+dta_normalize_column_names <- function(table_obj) {
+  current_names <- names(table_obj)
+  cleaned_names <- trimws(gsub('^\\s*"|"\\s*$', '', current_names))
+
+  if (!identical(current_names, cleaned_names)) {
+    names(table_obj) <- cleaned_names
+  }
+
+  table_obj
+}
+
 
 #' Print Information About a DTAFile Object
 #'

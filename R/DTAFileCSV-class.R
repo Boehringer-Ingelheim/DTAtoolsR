@@ -69,12 +69,14 @@ DTAFileCSV <- S7::new_class(
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 method(read_file_execution, DTAFileCSV) <- function(x, file) {
-  return(arrow::read_csv_arrow(
+  table_obj <- arrow::read_csv_arrow(
     file,
     quote = x@quote,
     # skip = if (x@has_header) 0 else 1,
     as_data_frame = FALSE
-  ))
+  )
+
+  dta_normalize_column_names(table_obj)
 }
 
 #' @title Create Example DTAFileCSV Object
