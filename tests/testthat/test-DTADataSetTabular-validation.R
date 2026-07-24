@@ -206,3 +206,60 @@ test_that("messages() returns flattened rule failures", {
   expect_true(any(grepl("violated", msgs$message, fixed = TRUE)))
 })
 
+test_that("manually added table can be validated without errors", {
+  ds <- create_example_DTADataSetTabular(2)
+
+  manual_df <- as.data.frame(ds@tables[["tab1"]])
+  manual_df$SUBJID <- paste0(manual_df$SUBJID, "_MANUAL")
+  ds@tables[["manual_tab"]] <- arrow::arrow_table(manual_df)
+
+  expect_no_error({
+    ds <- check(ds, tables = "manual_tab", force = TRUE, persist = FALSE, quiet = TRUE)
+  })
+
+  status <- validation_status(ds, tables = "manual_tab")
+  expect_equal(nrow(status), 1)
+  expect_equal(status$table, "manual_tab")
+  expect_equal(status$status, "validated")
+
+  expect_no_error({
+    msgs <- messages(ds, tables = "manual_tab", as_tibble = FALSE)
+    expect_true(is.data.frame(msgs))
+  })
+
+  expect_no_error({
+    info <- inspect(ds, as_tibble = FALSE)
+    expect_true(is.data.frame(info))
+  })
+})
+
+test_that("multiple manually added tables can be validated without errors", {
+  ds <- create_example_DTADataSetTabular(2)
+
+  base_df <- as.data.frame(ds@tables[["tab1"]])
+  ds@tables[["manual_tab_a"]] <- arrow::arrow_table(base_df)
+
+  base_df_b <- base_df
+  base_df_b$VISIT <- as.character(base_df_b$VISIT)
+  ds@tables[["manual_tab_b"]] <- arrow::arrow_table(base_df_b)
+
+  expect_no_error({
+    ds <- check(
+      ds,
+      tables = c("tab1", "manual_tab_a", "manual_tab_b"),
+      force = TRUE,
+      persist = FALSE,
+      quiet = TRUE
+    )
+  })
+
+  status <- validation_status(ds, tables = c("tab1", "manual_tab_a", "manual_tab_b"))
+  expect_equal(nrow(status), 3)
+  expect_true(all(status$status == "validated"))
+
+  expect_no_error({
+    res <- results(ds, tables = c("tab1", "manual_tab_a", "manual_tab_b"))
+    expect_equal(nrow(res), 3)
+  })
+})
+
