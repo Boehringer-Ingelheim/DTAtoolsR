@@ -377,7 +377,7 @@ method(print_short_info, DTAMetaData) <- function(x, ...) {
 create_example_DTAMetaData <- function(index = 1) {
   # nolint
   switch(
-    index,
+    as.character(index),
     `1` = DTAMetaData(
       title = "Example DTA",
       version = "1.0",
