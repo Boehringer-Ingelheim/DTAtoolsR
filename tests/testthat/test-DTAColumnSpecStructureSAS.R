@@ -83,6 +83,16 @@ test_that("DTAColumnSpec I/O preserves SAS type, format, and length", {
   expect_equal(out$length, 9)
 })
 
+test_that("SAS character shorthand '$w' is normalized to '$w.'", {
+  x <- DTAColumnSpecStructureSAS(type = "Char", format = "$50")
+  expect_equal(x@type, "Char")
+  expect_equal(x@format, "$50.")
+
+  spec <- DTAColumnSpec(id = "TXT", type = "SAS Char", format = "SAS $50")
+  expect_equal(spec@structure@format, "$50.")
+  expect_equal(as.list(spec)$format, "SAS $50.")
+})
+
 test_that("non-documented SAS type aliases are rejected", {
   expect_error(
     DTAColumnSpec(id = "AVAL", type = "SAS Float", format = "SAS 10.4"),

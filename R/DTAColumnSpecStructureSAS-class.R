@@ -67,6 +67,21 @@
   NULL
 }
 
+`__dta_sas_normalize_format__` <- function(format) {
+  if (is.null(format)) {
+    return(NULL)
+  }
+
+  format_trimmed <- trimws(format)
+
+  # Accept common shorthand for SAS character format and normalize to canonical form.
+  if (grepl("^\\$[0-9]+$", format_trimmed)) {
+    return(paste0(format_trimmed, "."))
+  }
+
+  format_trimmed
+}
+
 `__dta_sas_format_is_valid_for_type__` <- function(type, format) {
   if (is.null(type) || is.null(format)) {
     return(TRUE)
@@ -96,7 +111,7 @@ DTAColumnSpecStructureSAS <- S7::new_class(
     length = NULL
   ) {
     type <- `__dta_normalize_sas_type__`(type)
-    format <- if (is.null(format)) NULL else trimws(format)
+    format <- `__dta_sas_normalize_format__`(format)
 
     inferred_type <- `__dta_sas_infer_type_from_format__`(format)
 

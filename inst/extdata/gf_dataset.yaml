@@ -81,7 +81,7 @@ columns:
   - id: GFORRES
     label: Result or Finding in Original Units
     type: SAS Num
-    format: SAS $50
+    format: SAS 50.
     nullable: Yes
     description: "Result of the measurement or finding as originally received or collected. Result to report if sample passed QC, otherwise leave blank for samples that did not pass QC or shall be reported as empty."
     pattern: "^[0-9]*.*[0-9]$"
