@@ -204,6 +204,41 @@ test_that("Conditional rules evaluate equals, not_equals, in, not_in, range and 
   )
 })
 
+test_that("Conditional empty=false handles Date columns", {
+  test_df <- data.frame(
+    CONSENT = c("YES", "YES", "NO", "YES"),
+    stringsAsFactors = FALSE
+  )
+  test_df$CONSENT_DATE <- as.Date(c("2023-01-01", "2023-01-02", NA, NA))
+
+  result <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_empty_false_date",
+      condition = list(CONSENT = list(equals = "YES")),
+      then = list(CONSENT_DATE = list(empty = FALSE))
+    ),
+    test_df
+  )
+
+  expect_false(result$valid)
+  expect_match(result$message, "1 rows failed")
+
+  passing_df <- test_df
+  passing_df$CONSENT_DATE[4] <- as.Date("2023-01-04")
+
+  passing_result <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_empty_false_date_ok",
+      condition = list(CONSENT = list(equals = "YES")),
+      then = list(CONSENT_DATE = list(empty = FALSE))
+    ),
+    passing_df
+  )
+
+  expect_true(passing_result$valid)
+  expect_null(passing_result$message)
+})
+
 test_that("apply_schema_rules handles canonical and legacy rule types", {
   df <- data.frame(AGE = c(20, 30), SUBJECT_ID = c("A", "B"), stringsAsFactors = FALSE)
 

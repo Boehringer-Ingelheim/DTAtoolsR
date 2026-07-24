@@ -19,6 +19,14 @@ test_that("Validation of single tabular dataset", {
   expect_gt(length(dta[[1]]@validation_index), 0)
   expect_false(is.null(dta[[1]]@validation_store))
   expect_gt(length(dta[[1]]@validation_store), 0)
+
+  res <- results(dta)
+  expect_equal(nrow(res), 1)
+  expect_equal(res$target, "clinical_data")
+  expect_equal(res$status, "validated")
+
+  rule_errors <- dta[[1]]@validation_store[[1]]$rule_errors
+  expect_equal(length(rule_errors), res$n_rule_errors)
 })
 
 test_that("Examples can be built with current constructors", {

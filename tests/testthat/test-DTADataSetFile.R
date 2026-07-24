@@ -65,10 +65,11 @@ test_that("DTA results and messages combine tabular and file datasets", {
   expect_true(all(c("clinical_data", "attachment") %in% res$dataset))
   expect_equal(nrow(res), 2)
   expect_equal(length(unique(res$validation_run)), 1)
-  expect_true(all(res$status == "failed"))
+  expect_equal(res$status[res$dataset == "clinical_data"], "validated")
+  expect_equal(res$status[res$dataset == "attachment"], "failed")
   expect_false(any(is.na(res$run_id)))
 
   msgs <- messages(dta, as_tibble = FALSE)
   expect_true(any(msgs$dataset == "attachment"))
-  expect_true(any(msgs$dataset == "clinical_data"))
+  expect_false(any(msgs$dataset == "clinical_data"))
 })

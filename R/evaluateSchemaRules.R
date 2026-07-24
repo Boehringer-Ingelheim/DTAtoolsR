@@ -157,11 +157,19 @@ evaluate_condition <- function(column_name, condition, df) {
   } else if (!is.null(condition$range)) {
     return(x >= condition$range[1] & x <= condition$range[2])
   } else if (!is.null(condition$empty)) {
+    empty_mask <- is.na(x)
+
+    if (is.character(x)) {
+      empty_mask <- empty_mask | trimws(x) == ""
+    } else if (is.factor(x)) {
+      x_chr <- as.character(x)
+      empty_mask <- is.na(x_chr) | trimws(x_chr) == ""
+    }
+
     if (isTRUE(condition$empty)) {
-      return(is.na(x) | is.nan(x) | x == "")
+      return(empty_mask)
     } else {
-      # not empty
-      return(!(is.na(x) | is.nan(x) | x == ""))
+      return(!empty_mask)
     }
   } else {
     stop(sprintf("Unsupported condition type for column '%s'.", column_name))
