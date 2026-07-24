@@ -9,31 +9,46 @@ DTAMetaData(
   version = NULL,
   date = NULL,
   header = NULL,
+  version_history = list(),
   receiver = list(),
   supplier = list(),
-  transmission = list()
+  transmission = list(),
+  error_handling = NULL,
+  authorized_for_corrections = NULL
 )
 }
 \arguments{
-\item{title}{title}
+\item{title}{title (required)}
 
-\item{version}{version}
+\item{version}{current version string}
 
-\item{date}{date}
+\item{date}{current date}
 
-\item{header}{header}
+\item{header}{header/organization name}
 
-\item{receiver}{receiver}
+\item{version_history}{list of version records; each record must be a list with:
+\itemize{
+\item \code{version}: version string (e.g. "1.0")
+\item \code{date}: Date object for this version
+\item \code{changes}: character description of what was changed in this version
+}}
 
-\item{supplier}{supplier}
+\item{receiver}{list with affiliation and contacts (authorized to request corrections)}
 
-\item{transmission}{transmission}
+\item{supplier}{list with affiliation and contacts}
+
+\item{transmission}{list with type, frequency, notification, dates (first/last transfer), and flags}
+
+\item{error_handling}{character description of error handling procedures}
+
+\item{authorized_for_corrections}{character or list indicating BI contact(s) authorized to request corrections}
 }
 \value{
 An object of class DTAMetaData.
 }
 \description{
-This class holds metadata information
+This class holds comprehensive metadata information for Data Transfer Agreements,
+including version history, transmission details, error handling, and contact information.
 }
 \examples{
 

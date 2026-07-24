@@ -397,7 +397,7 @@ specs_from_list <- function(
 #' @title Create DTAColumnSpecCollection from DTA Word Document
 #' @description
 #' Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
-#' @importFrom docxtractr read_docx docx_extract_all_tbls
+#' @importFrom docxtractr docx_extract_all_tbls
 #' @importFrom purrr map set_names
 #' @importFrom dplyr mutate filter
 #' @export

@@ -20,7 +20,6 @@
 #'
 #' @name DTAFileCSV-class
 #' @return An object of class \code{DTAFileCSV}.
-#' @examples
 #' @seealso \code{\link{DTAFile}}
 #' @include DTAFileTabular-class.R
 #' @export

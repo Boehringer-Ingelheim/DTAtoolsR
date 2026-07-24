@@ -24,6 +24,7 @@
 #' ds <- dta[["demographics"]]
 #' results(ds)
 #' @name results
+#' @include DTA-class.R DTADataSet-class.R DTADataSetTabular-class.R
 #' @export
 results <- S7::new_generic("results", "x")
 

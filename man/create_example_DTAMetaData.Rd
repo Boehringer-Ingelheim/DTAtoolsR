@@ -6,12 +6,16 @@
 \usage{
 create_example_DTAMetaData(index = 1)
 }
+\arguments{
+\item{index}{Numeric. 1 = basic example, 2 = full example with history and transmission,
+3 = example with date phrases for transfers}
+}
 \value{
 An object of class \code{DTAMetaData} with example metadata.
 }
 \description{
-This function creates an example \code{DTAMetaData}
-object with default values.
+This function creates example \code{DTAMetaData}
+objects with various levels of completeness and structure.
 }
 \examples{
 library(DTAtools)

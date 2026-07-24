@@ -1,17 +1,4 @@
-﻿#' @title DTA Column Spec Structure SAS
-#' @description
-#' Class for column types for SAS structures.
-#'
-#' This class defines the structure of a column in a DTA dataset.
-#' @import S7
-#' @importFrom stringr str_glue
-#' @export
-#'
-#' @param type Character or NA. The type of the column.
-#' @param format Character or NA. The format of the column.
-#' @param length Numeric or NA. The max character length.
-#' @examples
-#'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
+﻿#' @keywords internal
 
 `__dta_sas_type_aliases__` <- c(
   CHAR = "Char",
@@ -102,6 +89,20 @@
   )
 }
 
+#' @title DTA Column Spec Structure SAS
+#' @description
+#' Class for column types for SAS structures.
+#'
+#' This class defines the structure of a column in a DTA dataset.
+#' @import S7
+#' @importFrom stringr str_glue
+#' @export
+#'
+#' @param type Character or NA. The type of the column.
+#' @param format Character or NA. The format of the column.
+#' @param length Numeric or NA. The max character length.
+#' @examples
+#'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
 DTAColumnSpecStructureSAS <- S7::new_class(
   "DTAColumnSpecStructureSAS",
   parent = DTAColumnSpecStructure,

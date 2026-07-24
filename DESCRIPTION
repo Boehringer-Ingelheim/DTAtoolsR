@@ -37,7 +37,8 @@ Imports:
 	flextable,
 	arrow,
 	stringr,
-	tibble
+	tibble,
+	officer
 Depends:
 	R (>= 4.1.0),
 	S7 (>= 0.2.0)
@@ -57,21 +58,25 @@ Collate:
     'DTAColumnSpecStructureSAS-class.R'
     'DTADataSet-class.R'
     'DTADataSetTabular-class.R'
+    'validationReporting.R'
+    'DTADataSetFile-class.R'
     'DTAFile-class.R'
     'DTAFileTabular-class.R'
     'DTAFileCSV-class.R'
     'DTAFileDelim-class.R'
     'DTAFileTSV-class.R'
     'DTAMetaData-class.R'
+    'DTAMetaData-helpers.R'
     'DTARule-class.R'
     'DTARuleColCondition-class.R'
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
     'DTARuleCollection-class.R'
+    'documentBuilders.R'
     'evaluateSchemaRules.R'
+    'exportDocuments.R'
     'exportFunctions.R'
+    'formattingHelpers.R'
     'validationFunctions.R'
-    'validationReporting.R'
-	'DTADataSetFile-class.R'
     'zzz.R'
 Config/roxygen2/version: 8.0.0

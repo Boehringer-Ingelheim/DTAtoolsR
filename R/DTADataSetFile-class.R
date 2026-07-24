@@ -3,6 +3,7 @@
 #'   or more referenced files exist, are readable, and are not empty.
 #' @import S7
 #' @importFrom cli cli_abort
+#' @include validationReporting.R
 #' @param name Character. Name of the container.
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
@@ -203,153 +204,153 @@ S7::method(messages, DTADataSetFile) <- function(
   } else {
     if (is.numeric(tables)) {
       table_names <- names(x@validation_index)
-      if (any(tables < 1) || any(tables > length(table_names))) {
-        cli::cli_abort("Table index out of bounds.")
-      }
-      table_names[tables]
-    } else if (is.character(tables)) {
-      missing <- setdiff(tables, names(x@validation_index))
-      if (length(missing) > 0) {
-        cli::cli_abort("Table{?s} not found: {.field {missing}}")
-      }
-      tables
-    } else {
-      cli::cli_abort("'tables' must be NULL, numeric, or character.")
-    }
-  }
+       if (any(tables < 1) || any(tables > length(table_names))) {
+         cli::cli_abort("Table index out of bounds.")
+       }
+       table_names[tables]
+     } else if (is.character(tables)) {
+       missing <- setdiff(tables, names(x@validation_index))
+       if (length(missing) > 0) {
+         cli::cli_abort("Table{?s} not found: {.field {missing}}")
+       }
+       tables
+     } else {
+       cli::cli_abort("'tables' must be NULL, numeric, or character.")
+     }
+   }
 
-  out <- lapply(target_tables, function(table_name) {
-    details <- x@validation_store[[table_name]]
-    if (is.null(details)) {
-      return(dta_empty_messages())
-    }
+   out <- lapply(target_tables, function(table_name) {
+     details <- x@validation_store[[table_name]]
+     if (is.null(details)) {
+       return(dta_empty_messages())
+     }
 
-    rule_errors <- details$rule_errors
-    if (is.null(rule_errors) || length(rule_errors) == 0) {
-      return(dta_empty_messages())
-    }
+     rule_errors <- details$rule_errors
+     if (is.null(rule_errors) || length(rule_errors) == 0) {
+       return(dta_empty_messages())
+     }
 
-    do.call(rbind, lapply(rule_errors, function(err) {
-      data.frame(
-        dataset = x@name,
-        target = table_name,
-        severity = "error",
-        source = "rule",
-        rule_id = if (!is.null(err$id)) as.character(err$id) else NA_character_,
-        row = NA_real_,
-        column = NA_character_,
-        keyword = NA_character_,
-        message = if (!is.null(err$message)) as.character(err$message) else "file validation error",
-        stringsAsFactors = FALSE
-      )
-    }))
-  })
+     do.call(rbind, lapply(rule_errors, function(err) {
+       data.frame(
+         dataset = x@name,
+         target = table_name,
+         severity = "error",
+         source = "rule",
+         rule_id = if (!is.null(err$id)) as.character(err$id) else NA_character_,
+         row = NA_real_,
+         column = NA_character_,
+         keyword = NA_character_,
+         message = if (!is.null(err$message)) as.character(err$message) else "file validation error",
+         stringsAsFactors = FALSE
+       )
+     }))
+   })
 
-  if (length(out) == 0) {
-    return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
-  }
+   if (length(out) == 0) {
+     return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
+   }
 
-  msgs <- do.call(rbind, out)
-  if (is.null(msgs) || nrow(msgs) == 0) {
-    return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
-  }
+   msgs <- do.call(rbind, out)
+   if (is.null(msgs) || nrow(msgs) == 0) {
+     return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
+   }
 
-  msgs <- dta_attach_message_ids(msgs)
-  rownames(msgs) <- NULL
-  dta_to_tibble_if_available(msgs, as_tibble = as_tibble)
-}
+   msgs <- dta_attach_message_ids(msgs)
+   rownames(msgs) <- NULL
+   dta_to_tibble_if_available(msgs, as_tibble = as_tibble)
+ }
+ #
+ #' @export
+ S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
+   target_tables <- if (is.null(tables)) {
+     names(x@validation_index)
+   } else {
+     if (is.numeric(tables)) {
+       table_names <- names(x@validation_index)
+       if (any(tables < 1) || any(tables > length(table_names))) {
+         cli::cli_abort("Table index out of bounds.")
+       }
+       table_names[tables]
+     } else if (is.character(tables)) {
+       missing <- setdiff(tables, names(x@validation_index))
+       if (length(missing) > 0) {
+         cli::cli_abort("Table{?s} not found: {.field {missing}}")
+       }
+       tables
+     } else {
+       cli::cli_abort("'tables' must be NULL, numeric, or character.")
+     }
+   }
 
-#' @export
-S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
-  target_tables <- if (is.null(tables)) {
-    names(x@validation_index)
-  } else {
-    if (is.numeric(tables)) {
-      table_names <- names(x@validation_index)
-      if (any(tables < 1) || any(tables > length(table_names))) {
-        cli::cli_abort("Table index out of bounds.")
-      }
-      table_names[tables]
-    } else if (is.character(tables)) {
-      missing <- setdiff(tables, names(x@validation_index))
-      if (length(missing) > 0) {
-        cli::cli_abort("Table{?s} not found: {.field {missing}}")
-      }
-      tables
-    } else {
-      cli::cli_abort("'tables' must be NULL, numeric, or character.")
-    }
-  }
+   rows <- lapply(target_tables, function(table_name) {
+     entry <- x@validation_index[[table_name]]
+     if (is.null(entry)) {
+       return(data.frame(
+         table = table_name,
+         target_type = "file",
+         status = "not_validated",
+         ok = NA,
+         validated_at = NA_character_,
+         run_id = NA_character_,
+         validation_run = NA_character_,
+         n_schema_errors = NA_integer_,
+         n_rule_errors = NA_integer_,
+         stringsAsFactors = FALSE
+       ))
+     }
 
-  rows <- lapply(target_tables, function(table_name) {
-    entry <- x@validation_index[[table_name]]
-    if (is.null(entry)) {
-      return(data.frame(
-        table = table_name,
-        target_type = "file",
-        status = "not_validated",
-        ok = NA,
-        validated_at = NA_character_,
-        run_id = NA_character_,
-        validation_run = NA_character_,
-        n_schema_errors = NA_integer_,
-        n_rule_errors = NA_integer_,
-        stringsAsFactors = FALSE
-      ))
-    }
+     dta_validation_result_to_row(
+       table_name = table_name,
+       status = "validated",
+       index_entry = entry,
+       target_type = "file"
+     )
+   })
 
-    dta_validation_result_to_row(
-      table_name = table_name,
-      status = "validated",
-      index_entry = entry,
-      target_type = "file"
-    )
-  })
+   do.call(rbind, rows)
+ }
+ #
+ #' @export
+ S7::method(inspect, DTADataSetFile) <- function(
+   x,
+   id = NULL,
+   source = c("auto", "memory", "artifact"),
+   as_tibble = TRUE
+ ) {
+   source <- match.arg(source)
+   msgs <- messages(x, source = source, as_tibble = FALSE)
+   msg_rows <- dta_get_message_rows_by_id(msgs, id)
 
-  do.call(rbind, rows)
-}
+   records <- lapply(seq_len(nrow(msg_rows)), function(i) {
+     msg_row <- msg_rows[i, , drop = FALSE]
+     target_name <- as.character(msg_row$target)
+     details <- x@validation_store[[target_name]]
 
-#' @export
-S7::method(inspect, DTADataSetFile) <- function(
-  x,
-  id = NULL,
-  source = c("auto", "memory", "artifact"),
-  as_tibble = TRUE
-) {
-  source <- match.arg(source)
-  msgs <- messages(x, source = source, as_tibble = FALSE)
-  msg_rows <- dta_get_message_rows_by_id(msgs, id)
+     out <- list(
+       id = as.integer(msg_row$id),
+       dataset = as.character(msg_row$dataset),
+       target = target_name,
+       source = as.character(msg_row$source),
+       severity = as.character(msg_row$severity),
+       type = "rule",
+       headline = sprintf("[%s/%s] %s", msg_row$dataset, target_name, msg_row$message),
+       why = "File-level rule checks file presence/readability/non-empty constraints.",
+       message = as.character(msg_row$message),
+       rule_id = as.character(msg_row$rule_id),
+       file_path = NA_character_,
+       details = details
+     )
 
-  records <- lapply(seq_len(nrow(msg_rows)), function(i) {
-    msg_row <- msg_rows[i, , drop = FALSE]
-    target_name <- as.character(msg_row$target)
-    details <- x@validation_store[[target_name]]
+     if (length(x@file_paths) > 0) {
+       match_idx <- which(basename(x@file_paths) == target_name)
+       if (length(match_idx) > 0) {
+         out$file_path <- x@file_paths[[match_idx[[1]]]]
+       }
+     }
 
-    out <- list(
-      id = as.integer(msg_row$id),
-      dataset = as.character(msg_row$dataset),
-      target = target_name,
-      source = as.character(msg_row$source),
-      severity = as.character(msg_row$severity),
-      type = "rule",
-      headline = sprintf("[%s/%s] %s", msg_row$dataset, target_name, msg_row$message),
-      why = "File-level rule checks file presence/readability/non-empty constraints.",
-      message = as.character(msg_row$message),
-      rule_id = as.character(msg_row$rule_id),
-      file_path = NA_character_,
-      details = details
-    )
+     out
+   })
 
-    if (length(x@file_paths) > 0) {
-      match_idx <- which(basename(x@file_paths) == target_name)
-      if (length(match_idx) > 0) {
-        out$file_path <- x@file_paths[[match_idx[[1]]]]
-      }
-    }
-
-    out
-  })
-
-  out_df <- dta_inspect_records_to_df(records)
-  dta_to_tibble_if_available(out_df, as_tibble = as_tibble)
-}
+   out_df <- dta_inspect_records_to_df(records)
+   dta_to_tibble_if_available(out_df, as_tibble = as_tibble)
+ }
