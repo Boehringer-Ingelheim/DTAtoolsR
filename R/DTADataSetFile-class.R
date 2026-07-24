@@ -1,4 +1,4 @@
-#' @title DTADataSetFile Class
+﻿#' @title DTADataSetFile Class
 #' @description Handles file-backed datasets that only need to verify that one
 #'   or more referenced files exist, are readable, and are not empty.
 #' @import S7

@@ -1,4 +1,4 @@
-#' @title DTAFileCSV Class Constructor
+﻿#' @title DTAFileCSV Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{DTAFileCSV}, which extends \code{DTAFile}
@@ -21,8 +21,6 @@
 #' @name DTAFileCSV-class
 #' @return An object of class \code{DTAFileCSV}.
 #' @examples
-#'  \dontrun{
-#' }
 #' @seealso \code{\link{DTAFile}}
 #' @include DTAFileTabular-class.R
 #' @export

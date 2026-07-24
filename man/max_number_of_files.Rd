@@ -24,9 +24,7 @@ Returns the max number of files specified in a \code{DTAFile} object.
 }
 
 \examples{
-\dontrun{
   file_info <- DTAFile("file.txt", number_of_files = 1)
   max_number_of_files(file_info)
-}
 
 }

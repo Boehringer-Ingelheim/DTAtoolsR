@@ -27,7 +27,6 @@ A DTAColumnSpecCollection object.
 Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
 }
 \examples{
-\dontrun{
-  import_columns_from_word(file)
-}
+# No runnable example yet.
+# Word import examples are intentionally skipped until the API is reworked.
 }

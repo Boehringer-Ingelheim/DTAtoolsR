@@ -1,4 +1,4 @@
-#' @title Validate Table Against JSON Schema
+﻿#' @title Validate Table Against JSON Schema
 #' @description Validates a data.frame against a JSON Schema using jsonvalidate. The table is split into smaller chunks for validation to avoid argument limits.
 #' @importFrom jsonlite toJSON
 #' @importFrom jsonvalidate json_schema

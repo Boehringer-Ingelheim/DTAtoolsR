@@ -44,10 +44,7 @@ This class is used internally by the DTAtoolsR package to
 manage metadata and properties of DTA files.
 }
 \examples{
-\dontrun{
-  DTAFile("file.txt")
-  DTAFile(c("file1.txt", "file2.txt"))
-  DTAFile("file\\\\d+\\\\.txt", pattern = TRUE)
-}
+  file_info <- DTAFile("file.txt")
+  file_info_pattern <- DTAFile("file\\\\d+\\\\.txt", pattern = TRUE)
 }
 \keyword{internal}

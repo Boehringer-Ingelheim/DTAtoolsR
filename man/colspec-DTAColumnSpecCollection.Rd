@@ -18,7 +18,6 @@ A DTAColumnSpec object corresponding to the specified ID.
 Method to get a column format by its ID from the collection.
 }
 \examples{
-\dontrun{
- column_format <- colspec(collection, "STUDYID")
-}
+collection <- create_example_DTAColumnSpecCollection()
+colspec(collection, "STUDYID")
 }

@@ -19,7 +19,6 @@ A DTAColumnSpecCollection object.
 Method to extract the full DTAColumnSpecCollection from a DTADataSetTabular object.
 }
 \examples{
-\dontrun{
-  specs(container)
-}
+ds <- create_example_DTADataSetTabular(2)
+specs(ds)
 }

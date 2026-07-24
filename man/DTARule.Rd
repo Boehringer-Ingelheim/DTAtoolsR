@@ -19,7 +19,6 @@ Represents a single rule for validating data tables. The rule can be of various 
 such as \code{check_range}, \code{check_unique}, or \code{check_col_condition}
 }
 \examples{
-\dontrun{
- # do not manually create DTARule objects, use derived classes instead
-}
+rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
+rule
 }

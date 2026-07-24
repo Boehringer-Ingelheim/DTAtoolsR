@@ -1,4 +1,4 @@
-#' @title DTARuleColCondition Class
+﻿#' @title DTARuleColCondition Class
 #' @description
 #' A rule for validating data tables with conditions
 #'
@@ -92,9 +92,8 @@ DTARuleColCondition <- S7::new_class(
 #' @param x An object of class DTARuleColCondition
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @examples
-#' \dontrun{
-#'  print(rule)
-#' }
+#' rule <- create_example_DTARuleColCondition()
+#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColCondition) <- function(x) {
@@ -156,10 +155,8 @@ create_example_DTARuleColCondition <- function(index = 1) {
 #' @importFrom cli cli_abort
 #' @importFrom arrow Table
 #' @examples
-#' \dontrun{
 #'  # Example check method call:
 #'  # check(rule, tab)
-#' }
 #' @name check
 #' @export
 method(check, DTARuleColCondition) <- function(x, tab) {

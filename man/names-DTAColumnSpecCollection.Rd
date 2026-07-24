@@ -15,7 +15,6 @@ A character vector of column names.
 Method to get the names of columns in the collection.
 }
 \examples{
-\dontrun{
-names <- specids(collection)
-}
+collection <- create_example_DTAColumnSpecCollection()
+names(collection)
 }

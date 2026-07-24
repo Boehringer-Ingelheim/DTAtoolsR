@@ -14,7 +14,10 @@ Returns the sum of min number of files specified all associated DTAFile
 objects.
 }
 \examples{
-\dontrun{
-column_format <- min_number_of_files(dtafiles)
-}
+ds <- DTADataSet(
+  name = "example_dataset",
+  type = "file",
+  files = list(create_example_DTAFileCSV())
+)
+min_number_of_files(ds)
 }

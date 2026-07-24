@@ -1,4 +1,4 @@
-#' @title DTADataSet Class
+﻿#' @title DTADataSet Class
 #' @description Class to handle data from files
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
@@ -9,10 +9,12 @@
 #' @return An object of class DTADataSet.
 #'
 #' @examples
-#'
-#' \dontrun{
-#' # Create sample
-#' }
+#' ds <- DTADataSet(
+#'   name = "example_dataset",
+#'   type = "file",
+#'   files = list(create_example_DTAFileCSV())
+#' )
+#' ds
 #' @export
 DTADataSet <- S7::new_class(
   "DTADataSet",
@@ -67,9 +69,12 @@ DTADataSet <- S7::new_class(
 #' @param x An object of class DTADataSet
 #' @return numeric: number of files
 #' @examples
-#' \dontrun{
-#' column_format <- max_number_of_files(dtafiles)
-#' }
+#' ds <- DTADataSet(
+#'   name = "example_dataset",
+#'   type = "file",
+#'   files = list(create_example_DTAFileCSV())
+#' )
+#' max_number_of_files(ds)
 #' @name max_number_of_files-DTADataSet
 if (!exists("max_number_of_files", mode = "function")) {
   max_number_of_files <- new_generic("max_number_of_files", "x")
@@ -87,9 +92,12 @@ method(max_number_of_files, DTADataSet) <- function(x) {
 #' @param x An object of class DTADataSet
 #' @return numeric: number of files
 #' @examples
-#' \dontrun{
-#' column_format <- min_number_of_files(dtafiles)
-#' }
+#' ds <- DTADataSet(
+#'   name = "example_dataset",
+#'   type = "file",
+#'   files = list(create_example_DTAFileCSV())
+#' )
+#' min_number_of_files(ds)
 #' @name min_number_of_files-DTADataSet
 if (!exists("min_number_of_files", mode = "function")) {
   min_number_of_files <- new_generic("min_number_of_files", "x")

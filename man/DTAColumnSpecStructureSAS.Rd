@@ -19,7 +19,5 @@ Class for column types for SAS structures.
 This class defines the structure of a column in a DTA dataset.
 }
 \examples{
-\dontrun{
  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
-}
 }

@@ -19,8 +19,7 @@ An Arrow Table object.
 Extract a table from the tables in a DTADataSetTabular object.
 }
 \examples{
-\dontrun{
-tables(container)           # returns first table
-tables(container, "lab")   # returns table named "lab"
-}
+ds <- create_example_DTADataSetTabular(2)
+get_table(ds, 1)
+get_table(ds, "tab1")
 }

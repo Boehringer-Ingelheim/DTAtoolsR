@@ -1,4 +1,4 @@
-#' @title DTAFileTSV Class Constructor
+﻿#' @title DTAFileTSV Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{DTAFileTSV}, which extends \code{DTAFile}

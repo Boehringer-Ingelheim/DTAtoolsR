@@ -42,7 +42,6 @@ Validates all datasets within a \code{DTA} object, or a specific dataset.
 Provides comprehensive validation summary across all datasets.
 }
 \examples{
-\dontrun{
   dta <- create_example_DTA()
   # Check all datasets
   check(dta)
@@ -50,5 +49,4 @@ Provides comprehensive validation summary across all datasets.
   check(dta, datasets = "demographics")
   # Check by index
   check(dta, datasets = 1)
-}
 }

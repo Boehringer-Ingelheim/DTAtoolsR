@@ -19,11 +19,6 @@ A list representation of the DTAColumnSpecCollection object.
 This function transforms a DTAColumnSpecCollection object to a list.
 }
 \examples{
-\dontrun{
-# Create a DTAColumnSpecCollection object
-x <- import_columns_from_yaml("path/to/yaml/file.yaml")
-
-# Write the DTAColumnSpecCollection object to a YAML file
+x <- create_example_DTAColumnSpecCollection()
 as.list(x)
-}
 }

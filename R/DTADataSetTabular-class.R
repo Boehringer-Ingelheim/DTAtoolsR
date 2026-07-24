@@ -1,4 +1,4 @@
-#' @title DTADataSetTabular Class
+﻿#' @title DTADataSetTabular Class
 #' @description Handles tabular data with column specifications and rules.
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
@@ -11,7 +11,6 @@
 #'   Arrow Table and stored in the dataset.
 #' @return An object of class DTADataSetTabular
 #' @examples
-#' \dontrun{
 #' # Create sample tables
 #' table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))
 #' table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05", "EOT"))
@@ -20,8 +19,11 @@
 #' tables <- list(table1 = table1, table2 = table2)
 #'
 #' # Create the DTADataSetTabular object
-#' data_obj <- DTADataSetTabular(DTAColumnSpecCollection, tables)
-#' }
+#' data_obj <- DTADataSetTabular(
+#'   name = "example",
+#'   specs = create_example_DTAColumnSpecCollection(1),
+#'   tables = tables
+#' )
 #' @export
 DTADataSetTabular <- S7::new_class(
   "DTADataSetTabular",
@@ -118,9 +120,8 @@ DTADataSetTabular <- S7::new_class(
 #' @param id Character. The ID of the column to retrieve.
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
-#' \dontrun{
-#' column_format <- column(dtadata, "STUDYID")
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' colspec(ds, "STUDYID")
 #' @rdname colspec
 # colspec <- new_generic("colspec", "x") # was already initialized
 
@@ -137,9 +138,8 @@ method(colspec, DTADataSetTabular) <- function(x, id) {
 #' @param ... Additional arguments (not used).
 #' @return A DTAColumnSpecCollection object.
 #' @examples
-#' \dontrun{
-#'   specs(container)
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' specs(ds)
 #' @name specs-DTADataSetTabular
 #' @export
 specs <- new_generic("specs", "x")
@@ -158,10 +158,9 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' @return An Arrow Table object.
 #' @importFrom cli cli_abort
 #' @examples
-#' \dontrun{
-#' tables(container)           # returns first table
-#' tables(container, "lab")   # returns table named "lab"
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' get_table(ds, 1)
+#' get_table(ds, "tab1")
 #' @name get_table-DTADataSetTabular
 #' @export
 get_table <- new_generic("get_table", "x", function(x, id = 1, ...) {
@@ -205,9 +204,8 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
 #' @param ... Additional arguments (not used).
 #' @return A character vector with table names.
 #' @examples
-#' \dontrun{
-#' labels <- labels(dtadata)
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' labels(ds)
 #' @name labels-DTADataSetTabular
 labels <- new_generic("labels", "x")
 #' @export
@@ -242,10 +240,16 @@ method(labels, DTADataSetTabular) <- function(x) {
 #' @param ... Additional arguments passed to write.table.
 #' @return NULL. The function writes the table to a file.
 #' @examples
-#' \dontrun{
-#' write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz",
-#'                  sep = "\t", arrange_by = c("STUDYID", "VISIT"))
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' out_file <- tempfile(fileext = ".tsv")
+#' write_table_to_file(
+#'   ds,
+#'   table = "tab1",
+#'   filename = out_file,
+#'   sep = "\t",
+#'   arrange_by = c("STUDYID", "VISIT")
+#' )
+#' unlink(out_file)
 write_table_to_file <- function(
   DTADataSetTabular,
   table,
@@ -380,9 +384,8 @@ method(columns, DTADataSetTabular) <- function(x) {
 #' @param x An object of class DTADataSetTabular
 #' @return A list with rules information
 #' @examples
-#' \dontrun{
-#' rules(DTADataSetTabular)
-#' }
+#' ds <- create_example_DTADataSetTabular(2)
+#' rules(ds)
 #' @name rules-DTADataSetTabular
 #' @export
 rules <- new_generic("rules", "x")
@@ -553,9 +556,15 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
 #' @param name file name, base name per default. is used to store the table under this name
 #' @return object of class DTADataSet with loaded data
 #' @examples
-#' \dontrun{
-#'    ...
-#' }
+#' file_handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' ds <- DTADataSetTabular(
+#'   name = "demo",
+#'   specs = create_example_DTAColumnSpecCollection(1),
+#'   files = list(file_handler)
+#' )
+#' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#' ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+#' names(tables(ds))
 #' @rdname load_file
 #' @export
 method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = tools::file_path_sans_ext(basename(file))) {
@@ -739,13 +748,11 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'   validation summary data.frame.
 #' @importFrom cli cli_h3 cli_alert_info cli_alert_success cli_alert_danger
 #' @examples
-#' \dontrun{
-#'   ds <- create_example_DTADataSetTabular()
+#'   ds <- create_example_DTADataSetTabular(2)
 #'   # Check all tables
 #'   ds <- check(ds)
 #'   # Check specific table
 #'   ds <- check(ds, tables = "tab1")
-#' }
 #' @name check-DTADataSetTabular
 #' @export
 S7::method(check, DTADataSetTabular) <- function(

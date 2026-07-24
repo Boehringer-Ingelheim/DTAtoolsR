@@ -1,4 +1,4 @@
-class_null <- S7::new_S3_class("NULL")
+﻿class_null <- S7::new_S3_class("NULL")
 class_Date_or_null <- S7::class_Date | class_null
 class_DTAColumnSpec <- S7::new_class("DTAColumnSpec")
 class_DTAColumnSpecCollection <- S7::new_class(
@@ -158,7 +158,11 @@ DTAColumnSpecStructureFactory <- function(
 #'
 #' @examples
 #' library(DTAtools)
-#' DTADataSetFactory(type = "tabular", name = "mydataset")
+#' DTADataSetFactory(
+#'   type = "file",
+#'   name = "mydataset",
+#'   files = list(type = "csv", filename = "clinical_data.csv")
+#' )
 #'
 #' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
 #' @export
@@ -209,7 +213,7 @@ DTADataSetFactory <- function(
 #'
 #' @examples
 #' library(DTAtools)
-#' DTAFileFactory(type = "SAS sas7bdat", path = "data/myfile.sas7bdat")
+#' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
 #' @seealso \code{\link{DTAFile}}
 #' @export

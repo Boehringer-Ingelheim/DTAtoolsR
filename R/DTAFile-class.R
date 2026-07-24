@@ -1,4 +1,4 @@
-#' @title DTAFile Class
+﻿#' @title DTAFile Class
 #' @description
 #' The \code{DTAFile} class stores metadata and parsing instructions for
 #' delimited data files. It specifies file names (or patterns), the expected
@@ -24,11 +24,8 @@
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples
-#' \dontrun{
-#'   DTAFile("file.txt")
-#'   DTAFile(c("file1.txt", "file2.txt"))
-#'   DTAFile("file\\d+\\.txt", pattern = TRUE)
-#' }
+#'   file_info <- DTAFile("file.txt")
+#'   file_info_pattern <- DTAFile("file\\d+\\.txt", pattern = TRUE)
 #' @export
 DTAFile <- S7::new_class(
   "DTAFile",
@@ -144,10 +141,8 @@ if (!exists("min_number_of_files", mode = "function")) {
 #' @return The number of files.
 #'
 #' @examples
-#' \dontrun{
 #'   file_info <- DTAFile("file.txt", number_of_files = 1)
 #'   min_number_of_files(file_info)
-#' }
 #'
 #' @section Methods:
 #' \describe{
@@ -170,10 +165,8 @@ if (!exists("max_number_of_files", mode = "function")) {
 #' @return The number of files.
 #'
 #' @examples
-#' \dontrun{
 #'   file_info <- DTAFile("file.txt", number_of_files = 1)
 #'   max_number_of_files(file_info)
-#' }
 #'
 #' @section Methods:
 #' \describe{
@@ -195,10 +188,8 @@ method(max_number_of_files, DTAFile) <- function(x) {
 #' @return A logical value indicating whether the filename matches.
 #' @importFrom stringr str_detect
 #' @examples
-#' \dontrun{
 #'   file_info <- DTAFile("file.txt")
 #'   matches_filename(file_info, "file.txt")
-#' }
 #'
 #' @section Methods:
 #' \describe{
@@ -307,16 +298,14 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_text cli_div
 #' @examples
-#' \dontrun{
 #'  # do not use this, use derived classes instead, e.g.
 #'  # DTAFileCSV or DTAFileTSV
-#'  DTAFile("example.tsv")
-#' }
+#'  print(DTAFileCSV("example.csv"))
 #' @name print
 #' @export
 method(print, DTAFile) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli::cli_text("<{.emph DTAFile}> : {.field {x@name}}")
+  cli::cli_text("<{.emph DTAFile}> : {.field {paste(x@filename, collapse = ', ')}}")
 
   print_info(x)
 
@@ -337,10 +326,8 @@ method(print, DTAFile) <- function(x, ...) {
 #' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
 #'
 #' @examples
-#' \dontrun{
-#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' dta_file <- DTAFileCSV(filename = "data.csv")
 #' print_info(dta_file)
-#' }
 #'
 #' @seealso \code{\link{DTAFile}}
 #' @name print_info
@@ -377,10 +364,8 @@ if (!exists("print_info", mode = "function")) {
 #' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
 #'
 #' @examples
-#' \dontrun{
-#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' dta_file <- DTAFileCSV(filename = "data.csv")
 #' print_short_info(dta_file)
-#' }
 #'
 #' @seealso \code{\link{DTAFile}}
 #' @name print_short_info

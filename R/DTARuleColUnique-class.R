@@ -1,4 +1,4 @@
-#' @title DTARuleColUnique Class
+﻿#' @title DTARuleColUnique Class
 #' @description
 #' Represents a single rule for validating data tables. The rule can be of various types,
 #' such as `check_range`, `check_unique`, or `check_col_condition`
@@ -85,9 +85,8 @@ DTARuleColUnique <- S7::new_class(
 #' @param x An object of class DTARuleColUnique
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @examples
-#' \dontrun{
-#'  print(rule)
-#' }
+#' rule <- create_example_DTARuleColUnique()
+#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColUnique) <- function(x) {
@@ -136,10 +135,8 @@ create_example_DTARuleColUnique <- function(index = 1) {
 #' @importFrom cli cli_abort
 #' @importFrom arrow Table
 #' @examples
-#' \dontrun{
 #'  # Example check method call:
 #'  # check(rule, tab)
-#' }
 #' @name check
 #' @export
 method(check, DTARuleColUnique) <- function(x, tab) {

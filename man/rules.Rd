@@ -16,7 +16,6 @@ A DTARuleCollection object, or NULL if no rules are defined.
 Method to get Rules from DTAColumnSpecCollection
 }
 \examples{
-\dontrun{
- rules(collection)
-}
+collection <- create_example_DTAColumnSpecCollection()
+rules(collection)
 }

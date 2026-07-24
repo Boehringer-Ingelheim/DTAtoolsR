@@ -19,7 +19,6 @@ A DTAColumnSpec object corresponding to the specified ID.
 Method to get a column format by its ID from the collection.
 }
 \examples{
-\dontrun{
-column_format <- column(dtadata, "STUDYID")
-}
+ds <- create_example_DTADataSetTabular(2)
+colspec(ds, "STUDYID")
 }

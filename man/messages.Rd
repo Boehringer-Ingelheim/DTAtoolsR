@@ -24,9 +24,7 @@ The output combines schema and rule failures into a single flat table.
 Methods are available for \code{DTA}, \code{DTADataSet}, and \code{DTADataSetTabular}.
 }
 \examples{
-\dontrun{
 ds <- create_example_DTADataSetTabular(2)
 ds <- check(ds, quiet = TRUE)
 messages(ds)
-}
 }

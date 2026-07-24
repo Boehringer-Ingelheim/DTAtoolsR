@@ -1,4 +1,4 @@
-#' @title DTARule Class
+﻿#' @title DTARule Class
 #' @description
 #' Represents a single rule for validating data tables. The rule can be of various types,
 #' such as `check_range`, `check_unique`, or `check_col_condition`
@@ -11,9 +11,8 @@
 #' @return An object of class `DTARule`.
 #'
 #' @examples
-#' \dontrun{
-#'  # do not manually create DTARule objects, use derived classes instead
-#' }
+#' rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
+#' rule
 #' @export
 DTARule <- S7::new_class(
   "DTARule",
@@ -62,9 +61,8 @@ DTARule <- S7::new_class(
 #' @importFrom stringr str_glue
 #' @importFrom cli cli_alert cli_text cli_div
 #' @examples
-#' \dontrun{
-#'  print(rule)
-#' }
+#' rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
+#' print(rule)
 #' @name print
 #' @export
 method(print, DTARule) <- function(x) {
@@ -79,9 +77,7 @@ method(print, DTARule) <- function(x) {
 #' check rule against data
 #' @importFrom cli cli_abort
 #' @examples
-#' \dontrun{
 #'  # do not manually create DTARule objects, use derived classes instead
-#' }
 #' @name check
 #' @export
 if (!exists("check", mode = "function")) {

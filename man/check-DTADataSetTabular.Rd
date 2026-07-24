@@ -47,11 +47,9 @@ prints a validation summary to the console, and updates the object's
 validation state.
 }
 \examples{
-\dontrun{
-  ds <- create_example_DTADataSetTabular()
+  ds <- create_example_DTADataSetTabular(2)
   # Check all tables
   ds <- check(ds)
   # Check specific table
   ds <- check(ds, tables = "tab1")
-}
 }

@@ -1,4 +1,4 @@
-#' @keywords internal
+﻿#' @keywords internal
 rule_get_slot <- function(rule, name) {
   fields <- tryCatch(as.list(rule), error = function(e) NULL)
   if (is.null(fields) || !name %in% names(fields)) {

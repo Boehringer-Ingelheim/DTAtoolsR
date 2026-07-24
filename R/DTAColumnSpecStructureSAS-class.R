@@ -1,4 +1,4 @@
-#' @title DTA Column Spec Structure SAS
+﻿#' @title DTA Column Spec Structure SAS
 #' @description
 #' Class for column types for SAS structures.
 #'
@@ -11,9 +11,7 @@
 #' @param format Character or NA. The format of the column.
 #' @param length Numeric or NA. The max character length.
 #' @examples
-#' \dontrun{
 #'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
-#' }
 DTAColumnSpecStructureSAS <- S7::new_class(
   "DTAColumnSpecStructureSAS",
   parent = DTAColumnSpecStructure,
@@ -130,7 +128,7 @@ method(print, DTAColumnSpecStructureSAS) <- function(x) {
 # Example: 8.2 displays 123.456 as   123.46 (8 width, 2 decimals).
 
 # BESTw.
-# Output (default)The BEST format (with width w) is SAS’s default for numeric output.
+# Output (default)The BEST format (with width w) is SASâ€™s default for numeric output.
 # It attempts to choose the most compact representation of the number within w columns,
 # using scientific notation if necessary [SAS Format...n SAS Code]. It prints integers without a decimal
 # and shows as many significant digits as will fit. E.g., BEST12. might display 123456789 as 123456789 but a

@@ -16,7 +16,6 @@ An object of class DTAColumnSpecCollection.
 This function parses a YAML file to extract column specifications and create a DTAColumnSpecCollection object.
 }
 \examples{
-\dontrun{
 # Sample YAML file content
 yaml_content <- "
 columns:
@@ -41,5 +40,4 @@ writeLines(yaml_content, yaml_file)
 
 # Create the DTAColumnSpecCollection object
 DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
-}
 }

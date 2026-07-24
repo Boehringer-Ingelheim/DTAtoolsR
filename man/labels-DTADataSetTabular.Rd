@@ -19,7 +19,6 @@ A character vector with table names.
 Method to get a all tables labels within a DTADataSetTabular Object.
 }
 \examples{
-\dontrun{
-labels <- labels(dtadata)
-}
+ds <- create_example_DTADataSetTabular(2)
+labels(ds)
 }

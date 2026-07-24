@@ -1,4 +1,4 @@
-#' @title DTARuleColRange Class
+﻿#' @title DTARuleColRange Class
 #' @description
 #' Represents a rule for checking the range of values in a specific columns of
 #'  a data table.
@@ -100,9 +100,8 @@ DTARuleColRange <- S7::new_class(
 #' @param x An object of class DTARuleColRange
 #' @importFrom cli cli_alert_info cli_alert
 #' @examples
-#' \dontrun{
-#'  print(rule)
-#' }
+#' rule <- create_example_DTARuleColRange()
+#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColRange) <- function(x) {
@@ -145,10 +144,8 @@ create_example_DTARuleColRange <- function(index = 1) {
 #' @importFrom cli cli_abort
 #' @importFrom arrow Table
 #' @examples
-#' \dontrun{
 #'  # Example check method call:
 #'  # check(rule, tab)
-#' }
 #' @name check
 #' @export
 method(check, DTARuleColRange) <- function(x, tab) {

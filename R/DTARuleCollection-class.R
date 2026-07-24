@@ -1,4 +1,4 @@
-#' @title DTARuleCollection Class
+﻿#' @title DTARuleCollection Class
 #' @description
 #' The `DTARuleCollection` class represents a collection of rules for validating data tables.
 #' It provides functionality to define, store, and validate rules using a structured schema.

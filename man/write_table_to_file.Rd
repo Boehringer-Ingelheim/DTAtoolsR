@@ -60,8 +60,14 @@ NULL. The function writes the table to a file.
 Write a named DTA table saved in a DTADataSetTabular object to a file.
 }
 \examples{
-\dontrun{
-write_table_to_file(dtadata, table = "my_table", filename = "table.tsv.gz",
-                 sep = "\t", arrange_by = c("STUDYID", "VISIT"))
-}
+ds <- create_example_DTADataSetTabular(2)
+out_file <- tempfile(fileext = ".tsv")
+write_table_to_file(
+  ds,
+  table = "tab1",
+  filename = out_file,
+  sep = "\t",
+  arrange_by = c("STUDYID", "VISIT")
+)
+unlink(out_file)
 }

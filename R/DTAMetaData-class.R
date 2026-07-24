@@ -1,17 +1,20 @@
-#' @title DTAMetaData Class
+﻿#' @title DTAMetaData Class
 #' @description This class holds metadata information
 #' @import S7
 #' @export
 #'
+#' @param title title
 #' @param version version
-#' @param author author
+#' @param date date
+#' @param header header
+#' @param receiver receiver
+#' @param supplier supplier
+#' @param transmission transmission
 #' @return An object of class DTAMetaData.
 #'
 #' @examples
 #'
-#' \dontrun{
-#' DTAMetaData(version = "1.0", author = "John Doe")
-#' }
+#' DTAMetaData(title = "Clinical Data Transfer", version = "1.0")
 DTAMetaData <- S7::new_class(
   "DTAMetaData",
   constructor = function(

@@ -14,7 +14,10 @@ Returns the sum of max number of files specified all associated DTAFile
 objects.
 }
 \examples{
-\dontrun{
-column_format <- max_number_of_files(dtafiles)
-}
+ds <- DTADataSet(
+  name = "example_dataset",
+  type = "file",
+  files = list(create_example_DTAFileCSV())
+)
+max_number_of_files(ds)
 }

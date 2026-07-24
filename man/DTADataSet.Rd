@@ -28,8 +28,10 @@ An object of class DTADataSet.
 Class to handle data from files
 }
 \examples{
-
-\dontrun{
-# Create sample
-}
+ds <- DTADataSet(
+  name = "example_dataset",
+  type = "file",
+  files = list(create_example_DTAFileCSV())
+)
+ds
 }

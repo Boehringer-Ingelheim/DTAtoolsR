@@ -25,7 +25,6 @@ None. The function creates a Word document.
 This function takes all values defined in a column and prints a word table containing those values. Can be copied into the DTA
 }
 \examples{
-\dontrun{
-export_column_value_table(DTAColumnSpecCollection, "column_value_table.docx")
-}
+# No runnable example yet.
+# Word export examples are intentionally skipped until the API is reworked.
 }

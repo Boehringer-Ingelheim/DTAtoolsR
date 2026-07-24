@@ -29,8 +29,6 @@ Flextable object that is saved.
 This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.
 }
 \examples{
-\dontrun{
-column_collection <- import_specs_from_yaml("spec.yaml")
-export_specs_table(column_collection, "dta_spec_table.docx")
-}
+# No runnable example yet.
+# Word export examples are intentionally skipped until the API is reworked.
 }

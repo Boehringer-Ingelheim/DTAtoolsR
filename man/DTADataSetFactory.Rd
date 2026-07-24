@@ -27,14 +27,10 @@ based on the provided type.
 }
 \examples{
 library(DTAtools)
-yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-x <- yaml::read_yaml(yaml_file)
 DTADataSetFactory(
-  type = "tabular",
+  type = "file",
   name = "mydataset",
-  columns = x$columns,
-  rules = x$rules,
-  files = x$files
+  files = list(type = "csv", filename = "clinical_data.csv")
 )
 
 }

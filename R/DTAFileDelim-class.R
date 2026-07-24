@@ -1,4 +1,4 @@
-#' @title DTAFileDelim Class Constructor
+﻿#' @title DTAFileDelim Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{DTAFileDelim}, which extends \code{DTAFile}

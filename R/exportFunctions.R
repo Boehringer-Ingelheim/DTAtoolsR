@@ -1,4 +1,4 @@
-#' @title Generate table containing all DTA column specs
+﻿#' @title Generate table containing all DTA column specs
 #' @description
 #' This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.
 #' @importFrom yaml read_yaml
@@ -14,10 +14,8 @@
 #' @return Flextable object that is saved.
 #' @export
 #' @examples
-#' \dontrun{
-#' column_collection <- import_specs_from_yaml("spec.yaml")
-#' export_specs_table(column_collection, "dta_spec_table.docx")
-#' }
+#' # No runnable example yet.
+#' # Word export examples are intentionally skipped until the API is reworked.
 export_specs_table <- function(
   DTAColumnSpecCollection,
   file = "dta_spec_table.docx",
@@ -175,9 +173,8 @@ export_specs_table <- function(
 #' @return None. The function creates a Word document.
 #' @export
 #' @examples
-#' \dontrun{
-#' export_column_value_table(DTAColumnSpecCollection, "column_value_table.docx")
-#' }
+#' # No runnable example yet.
+#' # Word export examples are intentionally skipped until the API is reworked.
 export_column_value_table <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",

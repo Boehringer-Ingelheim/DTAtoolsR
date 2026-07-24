@@ -15,9 +15,19 @@ DTAMetaData(
 )
 }
 \arguments{
+\item{title}{title}
+
 \item{version}{version}
 
-\item{author}{author}
+\item{date}{date}
+
+\item{header}{header}
+
+\item{receiver}{receiver}
+
+\item{supplier}{supplier}
+
+\item{transmission}{transmission}
 }
 \value{
 An object of class DTAMetaData.
@@ -27,7 +37,5 @@ This class holds metadata information
 }
 \examples{
 
-\dontrun{
-DTAMetaData(version = "1.0", author = "John Doe")
-}
+DTAMetaData(title = "Clinical Data Transfer", version = "1.0")
 }

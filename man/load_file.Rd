@@ -62,7 +62,13 @@ Convenience wrapper that dispatches to \code{load_file()} for a dataset.
 Load the content of the file into dataset
 }
 \examples{
-\dontrun{
-   ...
-}
+file_handler <- DTAFileCSV(filename = "clinical_data.csv")
+ds <- DTADataSetTabular(
+  name = "demo",
+  specs = create_example_DTAColumnSpecCollection(1),
+  files = list(file_handler)
+)
+file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+names(tables(ds))
 }

@@ -20,9 +20,7 @@ Extract a single \code{DTADataSet} from a \code{DTA} object using
 double-bracket notation.
 }
 \examples{
-\dontrun{
   dta <- create_example_DTA()
   dta[[1]]
   dta[["demographics"]]
-}
 }

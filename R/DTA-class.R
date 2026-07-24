@@ -1,4 +1,4 @@
-#' @title DTA Class
+﻿#' @title DTA Class
 #' @description This class helps checking validity of data tables against transmission
 #'  specifications in data transfer agreements (DTA). Also it provides a way to
 #'  generate DTA/DTS documents from specifications.
@@ -13,7 +13,6 @@
 #'
 #' @examples
 #'
-#' \dontrun{
 #' # Create sample tables
 #' table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))
 #' table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05", "EOT"))
@@ -22,10 +21,16 @@
 #' tables <- list(table1 = table1, table2 = table2)
 #'
 #' # Create the DTADataSet object
-#' data_obj <- DTADataSet(DTAColumnSpecCollection, tables)
+#' data_obj <- DTADataSetTabular(
+#'   name = "example",
+#'   specs = create_example_DTAColumnSpecCollection(1),
+#'   tables = tables
+#' )
 #'
-#' DTA(datasets = list(data = data_obj))
-#' }
+#' DTA(
+#'   datasets = list(data = data_obj),
+#'   metadata = create_example_DTAMetaData()
+#' )
 #' @export
 DTA <- S7::new_class(
   "DTA",
@@ -139,11 +144,9 @@ method(datasets, DTA) <- function(x, name = NULL) {
 #' @param i A single character name or single numeric index.
 #' @return A single \code{DTADataSet} object.
 #' @examples
-#' \dontrun{
 #'   dta <- create_example_DTA()
 #'   dta[[1]]
 #'   dta[["demographics"]]
-#' }
 #' @name double-bracket
 #' @export
 method(`[[`, DTA) <- function(x, i) {
@@ -164,11 +167,9 @@ method(`[[`, DTA) <- function(x, i) {
 #' @param i A character vector of names or a numeric index vector.
 #' @return A named list of \code{DTADataSet} objects.
 #' @examples
-#' \dontrun{
 #'   dta <- create_example_DTA()
 #'   dta[c(1, 2)]
 #'   dta[c("demographics", "vitals")]
-#' }
 #' @name single-bracket
 #' @export
 method(`[`, DTA) <- function(x, i) {
@@ -255,7 +256,6 @@ method(load_file, DTA) <- function(
 #'   attribute is attached with a data.frame of columns: dataset, n_targets,
 #'   n_validated, n_valid, n_invalid, n_skipped.
 #' @examples
-#' \dontrun{
 #'   dta <- create_example_DTA()
 #'   # Check all datasets
 #'   check(dta)
@@ -263,7 +263,6 @@ method(load_file, DTA) <- function(
 #'   check(dta, datasets = "demographics")
 #'   # Check by index
 #'   check(dta, datasets = 1)
-#' }
 #' @name check-DTA
 #' @export
 method(check, DTA) <- function(
@@ -403,9 +402,8 @@ method(check, DTA) <- function(
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text cli_div
 #' @examples
-#' \dontrun{
+#'   dta_obj <- create_example_DTA()
 #'   print(dta_obj)
-#' }
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
@@ -445,10 +443,8 @@ method(print, DTA) <- function(x, ...) {
 #' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples
-#' \dontrun{
 #'   example_dta <- create_example_DTA()
 #'   print(example_dta)
-#' }
 #' @export
 create_example_DTA <- function(index = 1) {
   switch(

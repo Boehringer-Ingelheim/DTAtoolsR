@@ -32,7 +32,6 @@ An object of class DTADataSetTabular
 Handles tabular data with column specifications and rules.
 }
 \examples{
-\dontrun{
 # Create sample tables
 table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))
 table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05", "EOT"))
@@ -41,6 +40,9 @@ table2 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("EOT", "V05"
 tables <- list(table1 = table1, table2 = table2)
 
 # Create the DTADataSetTabular object
-data_obj <- DTADataSetTabular(DTAColumnSpecCollection, tables)
-}
+data_obj <- DTADataSetTabular(
+  name = "example",
+  specs = create_example_DTAColumnSpecCollection(1),
+  tables = tables
+)
 }

@@ -29,12 +29,10 @@ Unlike \code{check()}, this function is read-only and does not perform validatio
 Methods are available for \code{DTA}, \code{DTADataSet}, and \code{DTADataSetTabular}.
 }
 \examples{
-\dontrun{
 dta <- create_example_DTA()
 dta <- check(dta, quiet = TRUE)
 results(dta)
 
 ds <- dta[["demographics"]]
 results(ds)
-}
 }

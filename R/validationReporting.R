@@ -1,4 +1,4 @@
-#' @title Retrieve Check Results
+﻿#' @title Retrieve Check Results
 #' @description
 #' Returns a programmatic summary of the latest validation/check state.
 #' Unlike `check()`, this function is read-only and does not perform validation.
@@ -17,14 +17,12 @@
 #' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
 #' `n_skipped`, `n_not_validated`.
 #' @examples
-#' \dontrun{
 #' dta <- create_example_DTA()
 #' dta <- check(dta, quiet = TRUE)
 #' results(dta)
 #'
 #' ds <- dta[["demographics"]]
 #' results(ds)
-#' }
 #' @name results
 #' @export
 results <- S7::new_generic("results", "x")
@@ -171,11 +169,9 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' `dataset`, `target`, `severity`, `source`, `rule_id`,
 #' `row`, `column`, `keyword`, `message`.
 #' @examples
-#' \dontrun{
 #' ds <- create_example_DTADataSetTabular(2)
 #' ds <- check(ds, quiet = TRUE)
 #' messages(ds)
-#' }
 #' @name messages
 #' @export
 messages <- S7::new_generic("messages", "x")

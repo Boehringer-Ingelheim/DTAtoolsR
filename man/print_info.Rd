@@ -38,15 +38,11 @@ The function displays the filename and pattern of the \code{DTAFile} object. It 
 \examples{
 ds <- create_example_DTADataSetTabular(2)
 print_info(ds)
-\dontrun{
-dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+dta_file <- DTAFileCSV(filename = "data.csv")
 print_info(dta_file)
-}
 
-\dontrun{
-dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+dta_file <- DTAFileCSV(filename = "data.csv")
 print_info(dta_file)
-}
 
 library(DTAtools)
 print(create_example_DTAMetaData())

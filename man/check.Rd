@@ -39,19 +39,11 @@ check rule against data
 check rule against data
 }
 \examples{
-\dontrun{
  # do not manually create DTARule objects, use derived classes instead
-}
-\dontrun{
  # Example check method call:
  # check(rule, tab)
-}
-\dontrun{
  # Example check method call:
  # check(rule, tab)
-}
-\dontrun{
  # Example check method call:
  # check(rule, tab)
-}
 }

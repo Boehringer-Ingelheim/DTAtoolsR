@@ -107,21 +107,17 @@ Print overview for DTARuleColUnique
 Prints a summary of a \code{DTARuleCollection} object, including the number of rules and their IDs.
 }
 \examples{
-\dontrun{
+  dta_obj <- create_example_DTA()
   print(dta_obj)
-}
-\dontrun{
- print(columns)
-}
+x <- create_example_DTAColumnSpecCollection()
+print(x)
 library(DTAtools)
 print(create_example_DTADataSetTabular())
 library(DTAtools)
 print(create_example_DTADataSetTabular())
-\dontrun{
  # do not use this, use derived classes instead, e.g.
  # DTAFileCSV or DTAFileTSV
- DTAFile("example.tsv")
-}
+ print(DTAFileCSV("example.csv"))
 library(DTAtools)
 print(create_example_DTAFileCSV())
 
@@ -134,18 +130,14 @@ print(create_example_DTAFileTSV())
 library(DTAtools)
 print(create_example_DTAMetaData())
 
-\dontrun{
- print(rule)
-}
-\dontrun{
- print(rule)
-}
-\dontrun{
- print(rule)
-}
-\dontrun{
- print(rule)
-}
+rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
+print(rule)
+rule <- create_example_DTARuleColCondition()
+print(rule)
+rule <- create_example_DTARuleColRange()
+print(rule)
+rule <- create_example_DTARuleColUnique()
+print(rule)
 library(DTAtools)
 collection <- create_example_DTARuleCollection()
 print(collection)

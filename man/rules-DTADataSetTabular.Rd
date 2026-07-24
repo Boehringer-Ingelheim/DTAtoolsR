@@ -17,7 +17,6 @@ A list with rules information
 Method to get Rules from DTADataSet.
 }
 \examples{
-\dontrun{
-rules(DTADataSetTabular)
-}
+ds <- create_example_DTADataSetTabular(2)
+rules(ds)
 }

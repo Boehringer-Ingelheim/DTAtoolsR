@@ -47,10 +47,8 @@ print_short_info(ds)
 library(DTAtools)
 ds <- create_example_DTADataSetTabular()
 print_short_info(ds)
-\dontrun{
-dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+dta_file <- DTAFileCSV(filename = "data.csv")
 print_short_info(dta_file)
-}
 
 library(DTAtools)
 print_short_info(create_example_DTAMetaData())

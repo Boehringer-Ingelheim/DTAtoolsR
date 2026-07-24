@@ -1,4 +1,4 @@
-#' @title DTA Column Format Class
+﻿#' @title DTA Column Format Class
 #' @description
 #' Class for column format.
 #'

@@ -1,4 +1,4 @@
-#' @title DTAFileTabular Class Constructor
+﻿#' @title DTAFileTabular Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{C}, which extends \code{DTAFile}
@@ -124,10 +124,8 @@ dta_normalize_column_names <- function(table_obj) {
 #' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
 #'
 #' @examples
-#' \dontrun{
-#' dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)
+#' dta_file <- DTAFileCSV(filename = "data.csv")
 #' print_info(dta_file)
-#' }
 #'
 #' @name print_info
 #' @seealso \code{\link{DTAFile}}
