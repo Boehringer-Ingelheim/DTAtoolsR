@@ -12,6 +12,81 @@
 #' @param length Numeric or NA. The max character length.
 #' @examples
 #'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
+
+`__dta_sas_type_aliases__` <- c(
+  CHAR = "Char",
+  NUM = "Num",
+  INT = "Int",
+  DATE = "Date",
+  TIME = "Time",
+  DATETIME = "DateTime"
+)
+
+`__dta_normalize_sas_type__` <- function(type) {
+  if (is.null(type)) {
+    return(NULL)
+  }
+
+  type_trimmed <- trimws(type)
+  type_key <- toupper(type_trimmed)
+
+  if (type_key %in% names(`__dta_sas_type_aliases__`)) {
+    return(unname(`__dta_sas_type_aliases__`[[type_key]]))
+  }
+
+  type_trimmed
+}
+
+`__dta_sas_infer_type_from_format__` <- function(format) {
+  if (is.null(format)) {
+    return(NULL)
+  }
+
+  format_trimmed <- trimws(format)
+  format_upper <- toupper(format_trimmed)
+
+  if (grepl("^\\$[0-9]+\\.$", format_trimmed)) {
+    return("Char")
+  }
+  if (grepl("^DATETIME[0-9]+\\.$", format_upper)) {
+    return("DateTime")
+  }
+  if (grepl("^DATE[0-9]+\\.$", format_upper)) {
+    return("Date")
+  }
+  if (grepl("^TIME[0-9]+\\.(?:[0-9]+)?$", format_upper)) {
+    return("Time")
+  }
+  if (grepl("^[0-9]+\\.[0-9]+$", format_trimmed)) {
+    return("Num")
+  }
+  if (grepl("^(?:BEST[0-9]+\\.|[0-9]+\\.)$", format_upper)) {
+    return("Int")
+  }
+
+  NULL
+}
+
+`__dta_sas_format_is_valid_for_type__` <- function(type, format) {
+  if (is.null(type) || is.null(format)) {
+    return(TRUE)
+  }
+
+  format_trimmed <- trimws(format)
+  format_upper <- toupper(format_trimmed)
+
+  switch(
+    type,
+    "Char" = grepl("^\\$[0-9]+\\.$", format_trimmed),
+    "Num" = grepl("^(?:[0-9]+\\.|[0-9]+\\.[0-9]+|BEST[0-9]+\\.)$", format_upper),
+    "Int" = grepl("^(?:[0-9]+\\.|BEST[0-9]+\\.)$", format_upper),
+    "Date" = grepl("^DATE[0-9]+\\.$", format_upper),
+    "Time" = grepl("^TIME[0-9]+\\.(?:[0-9]+)?$", format_upper),
+    "DateTime" = grepl("^DATETIME[0-9]+\\.$", format_upper),
+    FALSE
+  )
+}
+
 DTAColumnSpecStructureSAS <- S7::new_class(
   "DTAColumnSpecStructureSAS",
   parent = DTAColumnSpecStructure,
@@ -20,6 +95,15 @@ DTAColumnSpecStructureSAS <- S7::new_class(
     format = NULL,
     length = NULL
   ) {
+    type <- `__dta_normalize_sas_type__`(type)
+    format <- if (is.null(format)) NULL else trimws(format)
+
+    inferred_type <- `__dta_sas_infer_type_from_format__`(format)
+
+    if (is.null(type) && !is.null(inferred_type)) {
+      type <- inferred_type
+    }
+
     new_object(
       .parent = DTAColumnSpecStructure(
         type = type,
@@ -35,16 +119,24 @@ DTAColumnSpecStructureSAS <- S7::new_class(
       "'backend' must be defined and cannot be an empty character."
     }
 
-    if (!is.null(self@type) && !(self@type %in% c("Char", "Int"))) {
-      "'type' must be either 'Char' or 'Int'."
+    supported_types <- unname(`__dta_sas_type_aliases__`)
+
+    if (!is.null(self@type) && !(self@type %in% supported_types)) {
+      return(str_glue(
+        "'type' must be one of: {paste(supported_types, collapse = ', ')}."
+      ))
     }
 
-    if (!is.null(self@type) && self@type == "Char" && !is.null(self@format)) {
-      if (!grepl("^\\$[0-9]+\\.$", self@format)) {
-        str_glue(
-          "'format' must be of the form '$[number].' when 'type' is 'Char': {self@format}"
-        )
-      }
+    if (!is.null(self@format) && is.null(`__dta_sas_infer_type_from_format__`(self@format))) {
+      return(str_glue(
+        "Unsupported SAS format: '{self@format}'. Supported families are $w., w., w.d, BESTw., DATEw., TIMEw(.d), DATETIMEw."
+      ))
+    }
+
+    if (!`__dta_sas_format_is_valid_for_type__`(self@type, self@format)) {
+      return(str_glue(
+        "'format' '{self@format}' is not compatible with type '{self@type}'."
+      ))
     }
   }
 )
@@ -82,6 +174,9 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
     "Char" = "string",
     "Num" = "number",
     "Int" = "integer",
+    "Date" = "string",
+    "Time" = "string",
+    "DateTime" = "string",
     "Bool" = "boolean",
     "string"
   ) # fallback

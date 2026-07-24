@@ -350,7 +350,30 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
   schema$maxLength <- as_json_schema_length(x)
 
   if (!is.null(x@values)) {
-    values <- if (is.list(x@values)) unlist(x@values) else x@values
+    values_raw <- x@values
+    values_flat <- if (is.list(values_raw)) {
+      unlist(values_raw, recursive = TRUE, use.names = FALSE)
+    } else {
+      values_raw
+    }
+
+    schema_types <- schema$type
+    base_type <- schema_types[schema_types != "null"][1]
+
+    values <- switch(
+      base_type,
+      "integer" = as.integer(values_flat),
+      "number" = as.numeric(values_flat),
+      "boolean" = as.logical(values_flat),
+      "string" = {
+        if (is.list(values_raw)) {
+          unlist(lapply(values_raw, as.character), recursive = TRUE, use.names = FALSE)
+        } else {
+          as.character(values_flat)
+        }
+      },
+      values_flat
+    )
 
     if (!is.null(x@nullable)) {
       if (x@nullable) {
@@ -362,13 +385,16 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
           }
         } else if ("number" %in% schema$type) {
           values <- c(values, NA)
+        } else if ("integer" %in% schema$type) {
+          values <- c(values, NA_integer_)
         }
       }
-      if (length(values) > 1) {
-        schema$enum <- as.character(values)
-      } else {
-        schema$const <- as.character(values)
-      }
+    }
+
+    if (length(values) > 1) {
+      schema$enum <- values
+    } else {
+      schema$const <- values[[1]]
     }
   }
 
