@@ -8,8 +8,8 @@
 #' @param rules A DTARuleCollection object or NULL.
 #' @return An object of class DTAColumnSpecCollection.
 #' @examples
-#' col1 <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = TRUE)
-#' col2 <- DTAColumnSpec(id = "VISIT", type = "Char", nullable = FALSE)
+#' col1 <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = TRUE)
+#' col2 <- DTAColumnSpec(id = "VISIT", type = "SAS Char", nullable = FALSE)
 #' collection <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 #' @export
 DTAColumnSpecCollection <- S7::new_class(

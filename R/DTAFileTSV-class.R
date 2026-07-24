@@ -67,7 +67,7 @@ DTAFileTSV <- S7::new_class(
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-##' @seealso \code{\link{arrow::read_tsv_arrow}}
+##' @seealso Uses \code{arrow::read_tsv_arrow()} for parsing.
 ##' @name read_file_execution-DTAFileTSV
 method(read_file_execution, DTAFileTSV) <- function(x, file) {
   table_obj <- arrow::read_tsv_arrow(
@@ -96,7 +96,7 @@ create_example_DTAFileTSV <- function(index = 1) {
   if (index == 1) {
     example_file <- system.file(
       "extdata",
-      "gf_data_small.tsv",
+      "gf_data_small_smirna.tsv",
       package = "DTAtools"
     )
     DTAFileTSV(

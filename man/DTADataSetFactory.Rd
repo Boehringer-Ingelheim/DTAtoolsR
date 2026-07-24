@@ -27,9 +27,17 @@ based on the provided type.
 }
 \examples{
 library(DTAtools)
-DTAColumnSpecStructureFactory(type = "tabular", name = "mydataset")
+yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+x <- yaml::read_yaml(yaml_file)
+DTADataSetFactory(
+  type = "tabular",
+  name = "mydataset",
+  columns = x$columns,
+  rules = x$rules,
+  files = x$files
+)
 
 }
 \seealso{
-\code{\link{DTAtools::DTADataSet}}, \code{\link{DTAtools::DTADataSetTabular}}
+\code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
 }

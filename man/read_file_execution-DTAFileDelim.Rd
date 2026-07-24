@@ -22,5 +22,5 @@ Reads a TSV file using the parameters specified in a
 for efficient TSV parsing.
 }
 \seealso{
-\code{\link{arrow::read_tsv_arrow}}
+Uses \code{arrow::read_delim_arrow()} for parsing.
 }

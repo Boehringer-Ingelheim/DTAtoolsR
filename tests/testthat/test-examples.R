@@ -35,7 +35,13 @@ test_that("Examples can be built with current constructors", {
     skip_if_not(file.exists(params_filename))
 
     table <- read.table(data_filename, sep = data_sep, header = TRUE)
-    specs <- import_specs_from_yaml(params_filename)
+    yaml_obj <- yaml::read_yaml(params_filename)
+    if (!is.null(yaml_obj$columns)) {
+      specs <- import_specs_from_yaml(params_filename)
+    } else {
+      dta_from_yaml <- read_dta_from_yaml(params_filename)
+      specs <- dta_from_yaml[[1]]@specs
+    }
 
     ds <- DTADataSetTabular(
       name = "example",
@@ -48,7 +54,7 @@ test_that("Examples can be built with current constructors", {
   }
 
   build_dataset_from_example(
-    system.file("extdata", "gf_data_small.tsv", package = "DTAtools"),
+    system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools"),
     "\t",
     system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   )

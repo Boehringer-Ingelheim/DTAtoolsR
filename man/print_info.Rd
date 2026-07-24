@@ -36,7 +36,7 @@ The function displays the filename and pattern of the \code{DTAFile} object. It 
 The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
 }
 \examples{
-# Assuming 'ds' is a DTADataSet object:
+ds <- create_example_DTADataSetTabular(2)
 print_info(ds)
 \dontrun{
 dta_file <- DTAFile(filename = "data.csv", pattern = "*.csv", min_number_of_files = 1, max_number_of_files = 1)

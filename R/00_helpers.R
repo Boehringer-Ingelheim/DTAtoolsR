@@ -73,8 +73,7 @@ if (!exists("check", mode = "function")) {
 #' @param format Character. The format specification, potentially prefixed with a backend identifier.
 #' @param length Integer or NULL. The length specification for the column (optional).
 #'
-#' @return An object of class \code{DTAColumnSpecStructureSAS} or \code{DTAColumnSpecStructureR},
-#' depending on the backend specified.
+#' @return An object of class \code{DTAColumnSpecStructureSAS}.
 #'
 #' @details
 #' The function checks that the prefixes of \code{type} and \code{format} are among the supported
@@ -85,7 +84,7 @@ if (!exists("check", mode = "function")) {
 #' library(DTAtools)
 #' DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
-#' @seealso \code{\link{DTAtools::DTAColumnSpecStructureSAS}}, \code{\link{DTAtools::DTAColumnSpecStructureR}}
+#' @seealso \code{\link{DTAColumnSpecStructureSAS}}
 #' @export
 DTAColumnSpecStructureFactory <- function(
   type = NULL,
@@ -137,11 +136,6 @@ DTAColumnSpecStructureFactory <- function(
       format = format_info[["rest"]],
       length = length
     ),
-    R = DTAtools::DTAColumnSpecStructureR(
-      type = type_info[["rest"]],
-      format = format_info[["rest"]],
-      length = length
-    ),
     cli::cli_abort("Backend '{backend}' not implemented.")
   )
 }
@@ -164,9 +158,9 @@ DTAColumnSpecStructureFactory <- function(
 #'
 #' @examples
 #' library(DTAtools)
-#' DTAColumnSpecStructureFactory(type = "tabular", name = "mydataset")
+#' DTADataSetFactory(type = "tabular", name = "mydataset")
 #'
-#' @seealso \code{\link{DTAtools::DTADataSet}}, \code{\link{DTAtools::DTADataSetTabular}}
+#' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
 #' @export
 DTADataSetFactory <- function(
   type,
@@ -217,7 +211,7 @@ DTADataSetFactory <- function(
 #' library(DTAtools)
 #' DTAFileFactory(type = "SAS sas7bdat", path = "data/myfile.sas7bdat")
 #'
-#' @seealso \code{\link{DTAtools::DTAFile}}
+#' @seealso \code{\link{DTAFile}}
 #' @export
 DTAFileFactory <- function(
   type,

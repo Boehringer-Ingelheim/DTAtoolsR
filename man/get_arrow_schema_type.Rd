@@ -17,6 +17,6 @@ Returns the corresponding Arrow schema type for a given DTAColumnSpec
 object based on its \code{type} property.
 }
 \examples{
-col <- DTAColumnSpec(id = "AGE", type = "Char")
+col <- DTAColumnSpec(id = "AGE", type = "SAS Char")
 get_arrow_schema_type(col)
 }

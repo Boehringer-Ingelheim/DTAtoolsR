@@ -20,9 +20,9 @@ based on the provided type and file path.
 }
 \examples{
 library(DTAtools)
-DTAFileFactory(type = "SAS sas7bdat", path = "data/myfile.sas7bdat")
+DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 
 }
 \seealso{
-\code{\link{DTAtools::DTAFile}}
+\code{\link{DTAFile}}
 }

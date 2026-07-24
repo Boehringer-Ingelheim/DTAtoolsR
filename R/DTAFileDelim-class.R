@@ -32,7 +32,7 @@ DTAFileDelim <- S7::new_class(
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
-    info = info,
+    info = NULL,
     has_header = TRUE,
     quote = '"'
   ) {
@@ -66,7 +66,7 @@ DTAFileDelim <- S7::new_class(
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-##' @seealso \code{\link{arrow::read_tsv_arrow}}
+##' @seealso Uses \code{arrow::read_delim_arrow()} for parsing.
 ##' @name read_file_execution-DTAFileDelim
 method(read_file_execution, DTAFileDelim) <- function(x, file) {
   table_obj <- arrow::read_delim_arrow(

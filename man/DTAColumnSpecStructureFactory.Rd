@@ -14,8 +14,7 @@ DTAColumnSpecStructureFactory(type = NULL, format = NULL, length = NULL)
 \item{length}{Integer or NULL. The length specification for the column (optional).}
 }
 \value{
-An object of class \code{DTAColumnSpecStructureSAS} or \code{DTAColumnSpecStructureR},
-depending on the backend specified.
+An object of class \code{DTAColumnSpecStructureSAS}.
 }
 \description{
 Constructs a DTAColumnSpecStructure object for a specified backend (e.g., SAS or R),
@@ -34,5 +33,5 @@ DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 1
 
 }
 \seealso{
-\code{\link{DTAtools::DTAColumnSpecStructureSAS}}, \code{\link{DTAtools::DTAColumnSpecStructureR}}
+\code{\link{DTAColumnSpecStructureSAS}}
 }

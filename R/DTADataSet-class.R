@@ -133,7 +133,7 @@ method(print, DTADataSet) <- function(x) {
 #' \code{\link{DTADataSet}}
 #'
 #' @examples
-#' # Assuming 'ds' is a DTADataSet object:
+#' ds <- create_example_DTADataSetTabular(2)
 #' print_info(ds)
 #' @name print_info
 #' @export

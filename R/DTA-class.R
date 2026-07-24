@@ -69,6 +69,7 @@ DTA <- S7::new_class(
 #' metadata(dta_obj)
 #' @name metadata
 #' @rdname metadata-DTA
+#' @export
 metadata <- new_generic("metadata", "x")
 #' @export
 method(metadata, DTA) <- function(x) {
@@ -187,6 +188,7 @@ method(`[`, DTA) <- function(x, i) {
   x@datasets[i]
 }
 
+#' @export
 if (!exists("load_file", mode = "function")) {
   load_file <- new_generic("load_file", "x")
 }

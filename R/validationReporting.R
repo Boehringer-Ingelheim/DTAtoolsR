@@ -410,14 +410,14 @@ S7::method(messages, DTA) <- function(
 #' Displays detailed, human-friendly diagnostics for one or more validation
 #' messages identified by numeric \code{id} values from \code{messages()}.
 #'
-#' Methods are available for \\code{DTA}, \\code{DTADataSet},
-#' \\code{DTADataSetTabular}, and \\code{DTADataSetFile}.
-#' @param x A \\code{DTA}, \\code{DTADataSet}, \\code{DTADataSetTabular}, or
-#'   \\code{DTADataSetFile} object.
+#' Methods are available for \code{DTA}, \code{DTADataSet},
+#' \code{DTADataSetTabular}, and \code{DTADataSetFile}.
+#' @param x A \code{DTA}, \code{DTADataSet}, \code{DTADataSetTabular}, or
+#'   \code{DTADataSetFile} object.
 #' @param id Optional integer message id(s) as shown by \code{messages()}.
 #'   When omitted, all messages are inspected.
-#' @param source Character. One of \\code{"auto"}, \\code{"memory"}, or
-#'   \\code{"artifact"}.
+#' @param source Character. One of \code{"auto"}, \code{"memory"}, or
+#'   \code{"artifact"}.
 #' @param as_tibble Logical. When \code{TRUE} and package \code{tibble} is
 #'   installed, returns a tibble. Otherwise returns a base data.frame.
 #' @return A tibble/data.frame with one or more rows per requested id.

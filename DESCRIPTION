@@ -37,7 +37,7 @@ Imports:
 	flextable,
 	arrow,
 	stringr,
-	tzdb
+	tibble
 Depends:
 	R (>= 4.1.0),
 	S7 (>= 0.2.0)
@@ -49,28 +49,29 @@ Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
 Collate:
-	'00_helpers.R'
-	'DTA-class.R'
-	'DTAColumnSpec-class.R'
-	'DTAColumnSpecCollection-class.R'
-	'DTAColumnSpecStructure-class.R'
-	'DTAColumnSpecStructureSAS-class.R'
-	'DTADataSet-class.R'
-	'DTADataSetTabular-class.R'
-	'validationReporting.R'
-	'DTAFile-class.R'
-	'DTAFileTabular-class.R'
-	'DTAFileCSV-class.R'
-	'DTAFileDelim-class.R'
-	'DTAFileTSV-class.R'
-	'DTAMetaData-class.R'
-	'DTARule-class.R'
-	'DTARuleColCondition-class.R'
-	'DTARuleColRange-class.R'
-	'DTARuleColUnique-class.R'
-	'DTARuleCollection-class.R'
-	'evaluateSchemaRules.R'
-	'exportFunctions.R'
-	'validationFunctions.R'
-	'zzz.R'
+    '00_helpers.R'
+    'DTA-class.R'
+    'DTAColumnSpec-class.R'
+    'DTAColumnSpecCollection-class.R'
+    'DTAColumnSpecStructure-class.R'
+    'DTAColumnSpecStructureSAS-class.R'
+    'DTADataSet-class.R'
+    'DTADataSetTabular-class.R'
+    'DTAFile-class.R'
+    'DTAFileTabular-class.R'
+    'DTAFileCSV-class.R'
+    'DTAFileDelim-class.R'
+    'DTAFileTSV-class.R'
+    'DTAMetaData-class.R'
+    'DTARule-class.R'
+    'DTARuleColCondition-class.R'
+    'DTARuleColRange-class.R'
+    'DTARuleColUnique-class.R'
+    'DTARuleCollection-class.R'
+    'evaluateSchemaRules.R'
+    'exportFunctions.R'
+    'validationFunctions.R'
+    'validationReporting.R'
+	'DTADataSetFile-class.R'
+    'zzz.R'
 Config/roxygen2/version: 8.0.0

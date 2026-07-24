@@ -17,7 +17,7 @@
 #' @param description Character or NA. The description of the column.
 #' @return An object of class DTAColumnSpec.
 #' @examples
-#' col_format <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = FALSE, values = "1234-1234")
+#' col_format <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234")
 DTAColumnSpec <- S7::new_class(
   "DTAColumnSpec",
   constructor = function(
@@ -132,7 +132,7 @@ DTAColumnSpec <- S7::new_class(
 #' @param x A DTAColumnSpec object.
 #' @return A character string representing the Arrow schema type.
 #' @examples
-#' col <- DTAColumnSpec(id = "AGE", type = "Char")
+#' col <- DTAColumnSpec(id = "AGE", type = "SAS Char")
 #' get_arrow_schema_type(col)
 #' @export
 get_arrow_schema_type <- function(x) {

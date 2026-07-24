@@ -11,7 +11,7 @@ DTAFileDelim(
   number_of_files = NULL,
   min_number_of_files = NULL,
   max_number_of_files = NULL,
-  info = info,
+  info = NULL,
   has_header = TRUE,
   quote = "\\""
 )

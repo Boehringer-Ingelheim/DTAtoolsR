@@ -7,14 +7,14 @@
 inspect(x, ...)
 }
 \arguments{
-\item{x}{A \\code{DTA}, \\code{DTADataSet}, \\code{DTADataSetTabular}, or
-\\code{DTADataSetFile} object.}
+\item{x}{A \code{DTA}, \code{DTADataSet}, \code{DTADataSetTabular}, or
+\code{DTADataSetFile} object.}
 
 \item{id}{Optional integer message id(s) as shown by \code{messages()}.
 When omitted, all messages are inspected.}
 
-\item{source}{Character. One of \\code{"auto"}, \\code{"memory"}, or
-\\code{"artifact"}.}
+\item{source}{Character. One of \code{"auto"}, \code{"memory"}, or
+\code{"artifact"}.}
 
 \item{as_tibble}{Logical. When \code{TRUE} and package \code{tibble} is
 installed, returns a tibble. Otherwise returns a base data.frame.}
@@ -28,6 +28,6 @@ Detail fields are appended as flat columns prefixed with
 Displays detailed, human-friendly diagnostics for one or more validation
 messages identified by numeric \code{id} values from \code{messages()}.
 
-Methods are available for \\code{DTA}, \\code{DTADataSet},
-\\code{DTADataSetTabular}, and \\code{DTADataSetFile}.
+Methods are available for \code{DTA}, \code{DTADataSet},
+\code{DTADataSetTabular}, and \code{DTADataSetFile}.
 }

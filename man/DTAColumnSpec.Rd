@@ -46,5 +46,5 @@ Class for column format.
 This class defines the format of a column in a DTA dataset.
 }
 \examples{
-col_format <- DTAColumnSpec(id = "STUDYID", type = "Char", nullable = FALSE, values = "1234-1234")
+col_format <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234")
 }
