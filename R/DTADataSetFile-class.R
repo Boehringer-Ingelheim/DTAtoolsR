@@ -312,36 +312,44 @@ S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
 #' @export
 S7::method(inspect, DTADataSetFile) <- function(
   x,
-  id,
-  source = c("auto", "memory", "artifact")
+  id = NULL,
+  source = c("auto", "memory", "artifact"),
+  as_tibble = TRUE
 ) {
   source <- match.arg(source)
   msgs <- messages(x, source = source, as_tibble = FALSE)
-  msg_row <- dta_get_message_row_by_id(msgs, id)
-  target_name <- as.character(msg_row$target)
+  msg_rows <- dta_get_message_rows_by_id(msgs, id)
 
-  details <- x@validation_store[[target_name]]
-  out <- list(
-    id = as.integer(msg_row$id),
-    dataset = as.character(msg_row$dataset),
-    target = target_name,
-    source = as.character(msg_row$source),
-    severity = as.character(msg_row$severity),
-    type = "rule",
-    headline = sprintf("[%s/%s] %s", msg_row$dataset, target_name, msg_row$message),
-    why = "File-level rule checks file presence/readability/non-empty constraints.",
-    message = as.character(msg_row$message),
-    rule_id = as.character(msg_row$rule_id),
-    file_path = NA_character_,
-    details = details
-  )
+  records <- lapply(seq_len(nrow(msg_rows)), function(i) {
+    msg_row <- msg_rows[i, , drop = FALSE]
+    target_name <- as.character(msg_row$target)
+    details <- x@validation_store[[target_name]]
 
-  if (length(x@file_paths) > 0) {
-    match_idx <- which(basename(x@file_paths) == target_name)
-    if (length(match_idx) > 0) {
-      out$file_path <- x@file_paths[[match_idx[[1]]]]
+    out <- list(
+      id = as.integer(msg_row$id),
+      dataset = as.character(msg_row$dataset),
+      target = target_name,
+      source = as.character(msg_row$source),
+      severity = as.character(msg_row$severity),
+      type = "rule",
+      headline = sprintf("[%s/%s] %s", msg_row$dataset, target_name, msg_row$message),
+      why = "File-level rule checks file presence/readability/non-empty constraints.",
+      message = as.character(msg_row$message),
+      rule_id = as.character(msg_row$rule_id),
+      file_path = NA_character_,
+      details = details
+    )
+
+    if (length(x@file_paths) > 0) {
+      match_idx <- which(basename(x@file_paths) == target_name)
+      if (length(match_idx) > 0) {
+        out$file_path <- x@file_paths[[match_idx[[1]]]]
+      }
     }
-  }
 
-  out
+    out
+  })
+
+  out_df <- dta_inspect_records_to_df(records)
+  dta_to_tibble_if_available(out_df, as_tibble = as_tibble)
 }

@@ -405,37 +405,206 @@ S7::method(messages, DTA) <- function(
 }
 
 
-#' @title Inspect One Validation Message
+#' @title Inspect Validation Messages
 #' @description
-#' Displays detailed, human-friendly diagnostics for a single validation message
-#' identified by its numeric \\code{id} from \\code{messages()}.
+#' Displays detailed, human-friendly diagnostics for one or more validation
+#' messages identified by numeric \code{id} values from \code{messages()}.
 #'
 #' Methods are available for \\code{DTA}, \\code{DTADataSet},
 #' \\code{DTADataSetTabular}, and \\code{DTADataSetFile}.
 #' @param x A \\code{DTA}, \\code{DTADataSet}, \\code{DTADataSetTabular}, or
 #'   \\code{DTADataSetFile} object.
-#' @param id Integer message id as shown by \\code{messages()}.
+#' @param id Optional integer message id(s) as shown by \code{messages()}.
+#'   When omitted, all messages are inspected.
 #' @param source Character. One of \\code{"auto"}, \\code{"memory"}, or
 #'   \\code{"artifact"}.
-#' @return A named list with context and debugging details for the selected
-#'   validation message.
+#' @param as_tibble Logical. When \code{TRUE} and package \code{tibble} is
+#'   installed, returns a tibble. Otherwise returns a base data.frame.
+#' @return A tibble/data.frame with one or more rows per requested id.
+#'   Detail fields are appended as flat columns prefixed with
+#'   \code{schema_}, \code{context_}, and \code{failing_}.
 #' @name inspect
 #' @export
 inspect <- S7::new_generic("inspect", "x")
 
 #' @keywords internal
-dta_get_message_row_by_id <- function(msgs, id) {
-  if (!is.numeric(id) || length(id) != 1 || is.na(id) || id < 1) {
-    cli::cli_abort("'id' must be a single positive numeric value.")
+dta_validate_inspect_ids <- function(id) {
+  if (!is.numeric(id) || length(id) < 1 || any(is.na(id)) || any(id < 1)) {
+    cli::cli_abort("'id' must be one or more positive numeric values.")
   }
 
-  id <- as.integer(id)
-  hit <- msgs[msgs$id == id, , drop = FALSE]
-  if (nrow(hit) == 0) {
-    cli::cli_abort("Message id '{id}' not found.")
+  as.integer(id)
+}
+
+#' @keywords internal
+dta_get_message_rows_by_id <- function(msgs, id) {
+  ids <- if (missing(id) || is.null(id) || length(id) == 0) {
+    as.integer(msgs$id)
+  } else {
+    dta_validate_inspect_ids(id)
   }
 
-  hit[1, , drop = FALSE]
+  if (length(ids) == 0) {
+    return(msgs[0, , drop = FALSE])
+  }
+
+  missing_ids <- setdiff(unique(ids), msgs$id)
+  if (length(missing_ids) > 0) {
+    cli::cli_abort("Message id{?s} not found: {.field {missing_ids}}")
+  }
+
+  rows <- lapply(ids, function(one_id) {
+    hit <- msgs[msgs$id == one_id, , drop = FALSE]
+    hit[1, , drop = FALSE]
+  })
+
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+dta_recycle_df_rows <- function(df, n) {
+  if (is.null(df) || nrow(df) == 0) {
+    return(data.frame(row.names = seq_len(n)))
+  }
+
+  idx <- rep(seq_len(nrow(df)), length.out = n)
+  out <- df[idx, , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+dta_rbind_fill <- function(dfs) {
+  if (length(dfs) == 0) {
+    return(data.frame(stringsAsFactors = FALSE))
+  }
+
+  all_names <- unique(unlist(lapply(dfs, names), use.names = FALSE))
+  filled <- lapply(dfs, function(df) {
+    missing <- setdiff(all_names, names(df))
+    for (nm in missing) {
+      df[[nm]] <- NA
+    }
+    df <- df[, all_names, drop = FALSE]
+    rownames(df) <- NULL
+    df
+  })
+
+  out <- do.call(rbind, filled)
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+dta_value_to_text <- function(x) {
+  if (is.null(x)) {
+    return(NA_character_)
+  }
+
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+
+  if (is.atomic(x) && length(x) == 1) {
+    return(as.character(x))
+  }
+
+  if (is.atomic(x)) {
+    return(paste(as.character(x), collapse = ","))
+  }
+
+  if (is.data.frame(x)) {
+    return(paste(capture.output(utils::str(x, give.attr = FALSE)), collapse = " "))
+  }
+
+  paste(capture.output(utils::str(x, give.attr = FALSE)), collapse = " ")
+}
+
+#' @keywords internal
+dta_simplify_df_columns <- function(df) {
+  if (is.null(df) || !is.data.frame(df) || ncol(df) == 0) {
+    return(df)
+  }
+
+  out <- lapply(df, function(col) {
+    is_simple_atomic <- is.atomic(col) && is.null(dim(col))
+    if (is_simple_atomic) {
+      return(col)
+    }
+
+    vapply(as.list(col), dta_value_to_text, character(1))
+  })
+
+  out <- as.data.frame(out, stringsAsFactors = FALSE, optional = TRUE)
+  names(out) <- names(df)
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+dta_flatten_inspect_record <- function(record) {
+  detail_sources <- list(
+    schema = record$schema_matches,
+    context = record$row_context,
+    failing = record$failing_rows_preview
+  )
+
+  detail_rows <- vapply(detail_sources, function(x) {
+    if (is.data.frame(x)) nrow(x) else 0L
+  }, integer(1))
+
+  out_n <- max(1L, detail_rows)
+
+  base_names <- setdiff(names(record), c("schema_matches", "row_context", "failing_rows_preview", "rule_definition", "details"))
+  base <- as.data.frame(lapply(record[base_names], function(x) {
+    if (is.null(x)) NA else x
+  }), stringsAsFactors = FALSE, optional = TRUE)
+  base <- base[rep(1L, out_n), , drop = FALSE]
+  rownames(base) <- NULL
+
+  detail_df <- lapply(names(detail_sources), function(prefix) {
+    df <- detail_sources[[prefix]]
+    if (!is.data.frame(df) || ncol(df) == 0) {
+      return(data.frame(row.names = seq_len(out_n)))
+    }
+
+    df <- dta_simplify_df_columns(df)
+    df <- dta_recycle_df_rows(df, out_n)
+    names(df) <- paste0(prefix, "_", names(df))
+    df
+  })
+
+  extra <- data.frame(row.names = seq_len(out_n))
+  if (!is.null(record$rule_definition)) {
+    extra$rule_definition_class <- paste(class(record$rule_definition), collapse = ",")
+  }
+  if (is.list(record$details)) {
+    details <- record$details
+    if (!is.null(details$ok)) extra$details_ok <- isTRUE(details$ok)
+    if (!is.null(details$schema_valid)) extra$details_schema_valid <- isTRUE(details$schema_valid)
+    if (!is.null(details$rules_valid)) extra$details_rules_valid <- isTRUE(details$rules_valid)
+    if (!is.null(details$n_schema_errors)) extra$details_n_schema_errors <- as.integer(details$n_schema_errors)
+    if (!is.null(details$n_rule_errors)) extra$details_n_rule_errors <- as.integer(details$n_rule_errors)
+  }
+  if (ncol(extra) > 0) {
+    extra <- extra[rep(1L, out_n), , drop = FALSE]
+  }
+
+  out <- cbind(base, do.call(cbind, detail_df), extra)
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+dta_inspect_records_to_df <- function(records) {
+  if (length(records) == 0) {
+    return(data.frame(stringsAsFactors = FALSE))
+  }
+
+  flattened <- lapply(records, dta_flatten_inspect_record)
+  dta_rbind_fill(flattened)
 }
 
 #' @keywords internal
@@ -491,6 +660,75 @@ dta_build_inspect_row_context <- function(table_df, msg_row) {
 }
 
 #' @keywords internal
+dta_filter_schema_matches <- function(schema_full, msg_row) {
+  if (is.null(schema_full) || nrow(schema_full) == 0) {
+    return(schema_full)
+  }
+
+  schema_full <- as.data.frame(schema_full)
+  work <- schema_full
+
+  apply_filter <- function(df, field, value) {
+    if (is.null(df) || nrow(df) == 0 || !field %in% names(df)) {
+      return(df)
+    }
+
+    if (is.numeric(value)) {
+      return(df[!is.na(df[[field]]) & df[[field]] == value, , drop = FALSE])
+    }
+
+    value_chr <- as.character(value)
+    if (length(value_chr) == 0 || is.na(value_chr) || !nzchar(value_chr)) {
+      return(df)
+    }
+
+    field_chr <- as.character(df[[field]])
+    df[!is.na(field_chr) & field_chr == value_chr, , drop = FALSE]
+  }
+
+  candidates <- list(
+    list(field = "row", value = suppressWarnings(as.numeric(msg_row$row))),
+    list(field = "column", value = msg_row$column),
+    list(field = "keyword", value = msg_row$keyword),
+    list(field = "message", value = msg_row$message)
+  )
+
+  for (cand in candidates) {
+    next_work <- apply_filter(work, cand$field, cand$value)
+    if (nrow(next_work) > 0) {
+      work <- next_work
+    }
+  }
+
+  if (nrow(work) > 0) {
+    return(work)
+  }
+
+  key_work <- schema_full
+  key_candidates <- list(
+    list(field = "keyword", value = msg_row$keyword),
+    list(field = "message", value = msg_row$message)
+  )
+  for (cand in key_candidates) {
+    next_work <- apply_filter(key_work, cand$field, cand$value)
+    if (nrow(next_work) > 0) {
+      key_work <- next_work
+    }
+  }
+
+  if (nrow(key_work) > 0) {
+    return(key_work)
+  }
+
+  row_work <- apply_filter(schema_full, "row", suppressWarnings(as.numeric(msg_row$row)))
+  if (nrow(row_work) > 0) {
+    return(row_work)
+  }
+
+  schema_full
+}
+
+#' @keywords internal
 dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory", "artifact")) {
   source <- match.arg(source)
   table_name <- as.character(msg_row$target)
@@ -509,20 +747,7 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
 
   if (identical(as.character(msg_row$source), "schema")) {
     schema_full <- details$schema_errors$full_error
-    schema_match <- NULL
-    if (!is.null(schema_full) && nrow(schema_full) > 0) {
-      schema_full <- as.data.frame(schema_full)
-      schema_match <- schema_full
-      if (!is.na(msg_row$row)) {
-        schema_match <- schema_match[schema_match$row == msg_row$row, , drop = FALSE]
-      }
-      if (!is.na(msg_row$column) && nzchar(msg_row$column)) {
-        schema_match <- schema_match[schema_match$column == msg_row$column, , drop = FALSE]
-      }
-      if (nrow(schema_match) == 0) {
-        schema_match <- schema_full
-      }
-    }
+    schema_match <- dta_filter_schema_matches(schema_full, msg_row)
 
     out$type <- "schema"
     out$why <- "Column values violate JSON schema constraints (type/value/length/required)."
@@ -573,27 +798,35 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
 #' @export
 S7::method(inspect, DTADataSetTabular) <- function(
   x,
-  id,
-  source = c("auto", "memory", "artifact")
+  id = NULL,
+  source = c("auto", "memory", "artifact"),
+  as_tibble = TRUE
 ) {
   source <- match.arg(source)
   msgs <- messages(x, source = source, as_tibble = FALSE)
-  msg_row <- dta_get_message_row_by_id(msgs, id)
-  dta_inspect_tabular_message(x, msg_row, source = source)
+  msg_rows <- dta_get_message_rows_by_id(msgs, id)
+
+  records <- lapply(seq_len(nrow(msg_rows)), function(i) {
+    dta_inspect_tabular_message(x, msg_rows[i, , drop = FALSE], source = source)
+  })
+
+  out <- dta_inspect_records_to_df(records)
+  dta_to_tibble_if_available(out, as_tibble = as_tibble)
 }
 
 #' @export
 S7::method(inspect, DTADataSet) <- function(
   x,
-  id,
-  source = c("auto", "memory", "artifact")
+  id = NULL,
+  source = c("auto", "memory", "artifact"),
+  as_tibble = TRUE
 ) {
   if (inherits(x, "DTAtools::DTADataSetTabular")) {
-    return(S7::method(inspect, DTADataSetTabular)(x, id = id, source = source))
+    return(S7::method(inspect, DTADataSetTabular)(x, id = id, source = source, as_tibble = as_tibble))
   }
 
   if (inherits(x, "DTAtools::DTADataSetFile")) {
-    return(S7::method(inspect, DTADataSetFile)(x, id = id, source = source))
+    return(S7::method(inspect, DTADataSetFile)(x, id = id, source = source, as_tibble = as_tibble))
   }
 
   cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile subclasses.")
@@ -602,41 +835,48 @@ S7::method(inspect, DTADataSet) <- function(
 #' @export
 S7::method(inspect, DTA) <- function(
   x,
-  id,
-  source = c("auto", "memory", "artifact")
+  id = NULL,
+  source = c("auto", "memory", "artifact"),
+  as_tibble = TRUE
 ) {
   source <- match.arg(source)
   msgs <- messages(x, source = source, as_tibble = FALSE)
-  msg_row <- dta_get_message_row_by_id(msgs, id)
+  msg_rows <- dta_get_message_rows_by_id(msgs, id)
 
-  dataset_name <- as.character(msg_row$dataset)
-  ds <- x@datasets[[dataset_name]]
-  if (is.null(ds) || !inherits(ds, "DTAtools::DTADataSet")) {
-    cli::cli_abort("Dataset '{dataset_name}' not found in DTA object.")
-  }
+  records <- lapply(seq_len(nrow(msg_rows)), function(i) {
+    msg_row <- msg_rows[i, , drop = FALSE]
+    dataset_name <- as.character(msg_row$dataset)
+    ds <- x@datasets[[dataset_name]]
+    if (is.null(ds) || !inherits(ds, "DTAtools::DTADataSet")) {
+      cli::cli_abort("Dataset '{dataset_name}' not found in DTA object.")
+    }
 
-  if (inherits(ds, "DTAtools::DTADataSetTabular")) {
-    return(dta_inspect_tabular_message(ds, msg_row, source = source))
-  }
+    if (inherits(ds, "DTAtools::DTADataSetTabular")) {
+      return(dta_inspect_tabular_message(ds, msg_row, source = source))
+    }
 
-  if (inherits(ds, "DTAtools::DTADataSetFile")) {
-    target_name <- as.character(msg_row$target)
-    details <- ds@validation_store[[target_name]]
+    if (inherits(ds, "DTAtools::DTADataSetFile")) {
+      target_name <- as.character(msg_row$target)
+      details <- ds@validation_store[[target_name]]
 
-    return(list(
-      id = as.integer(msg_row$id),
-      dataset = dataset_name,
-      target = target_name,
-      source = as.character(msg_row$source),
-      severity = as.character(msg_row$severity),
-      type = "rule",
-      headline = sprintf("[%s/%s] %s", dataset_name, target_name, msg_row$message),
-      why = "File-level rule checks file presence/readability/non-empty constraints.",
-      message = as.character(msg_row$message),
-      rule_id = as.character(msg_row$rule_id),
-      details = details
-    ))
-  }
+      return(list(
+        id = as.integer(msg_row$id),
+        dataset = dataset_name,
+        target = target_name,
+        source = as.character(msg_row$source),
+        severity = as.character(msg_row$severity),
+        type = "rule",
+        headline = sprintf("[%s/%s] %s", dataset_name, target_name, msg_row$message),
+        why = "File-level rule checks file presence/readability/non-empty constraints.",
+        message = as.character(msg_row$message),
+        rule_id = as.character(msg_row$rule_id),
+        details = details
+      ))
+    }
 
-  cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile datasets.")
+    cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile datasets.")
+  })
+
+  out <- dta_inspect_records_to_df(records)
+  dta_to_tibble_if_available(out, as_tibble = as_tibble)
 }
