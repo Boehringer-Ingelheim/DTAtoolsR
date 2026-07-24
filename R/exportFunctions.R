@@ -30,41 +30,75 @@ export_specs_table <- function(
     "Description"
   )
 ) {
-  # Load YAML content
+  if (!inherits(DTAColumnSpecCollection, "DTAtools::DTAColumnSpecCollection")) {
+    cli::cli_abort("'DTAColumnSpecCollection' must be a DTAColumnSpecCollection object.")
+  }
+
   specs <- DTAColumnSpecCollection@columns
+  if (length(specs) == 0) {
+    cli::cli_abort("'DTAColumnSpecCollection' has no columns to export.")
+  }
+
+  get_spec_type <- function(spec) {
+    structure <- spec@structure
+    if (is.null(structure) || is.null(structure@type)) {
+      return(NA_character_)
+    }
+    if (!is.null(structure@backend) && nzchar(structure@backend)) {
+      return(paste(structure@backend, structure@type))
+    }
+    structure@type
+  }
+
+  get_spec_format <- function(spec) {
+    structure <- spec@structure
+    if (is.null(structure) || is.null(structure@format)) {
+      return(NA_character_)
+    }
+    as.character(structure@format)
+  }
+
+  get_spec_length <- function(spec) {
+    structure <- spec@structure
+    if (is.null(structure) || is.null(structure@length)) {
+      return(NA_real_)
+    }
+    as.numeric(structure@length)
+  }
+
+  get_spec_description <- function(spec) {
+    desc <- if (!is.null(spec@description)) spec@description else ""
+    values <- spec@values
+    pattern <- spec@pattern
+
+    if (!is.null(values)) {
+      value_line <- paste0(
+        "\n#@values: ",
+        paste(as.vector(unlist(values)), collapse = "; ")
+      )
+      desc <- paste(desc, value_line, sep = "\n")
+    }
+
+    if (!is.null(pattern)) {
+      pattern_line <- paste0("\n#@pattern: ", pattern)
+      desc <- paste(desc, pattern_line, sep = "\n")
+    }
+
+    desc
+  }
 
   df <- data.frame(
-    `Variable Name` = sapply(specs, function(x) x@id),
-    `Variable Label` = sapply(specs, function(x) x@label),
-    `Type` = sapply(specs, function(x) x@type),
-    `Format` = sapply(specs, function(x) {
-      ifelse(is.null(x@format), NA, x@format)
+    `Variable Name` = sapply(specs, function(spec) spec@id),
+    `Variable Label` = sapply(specs, function(spec) {
+      if (is.null(spec@label)) NA_character_ else as.character(spec@label)
     }),
-    `Length` = sapply(specs, function(x) {
-      ifelse(is.null(x@length), NA, x@length)
-    }),
+    `Type` = sapply(specs, get_spec_type),
+    `Format` = sapply(specs, get_spec_format),
+    `Length` = sapply(specs, get_spec_length),
     `Nullable` = sapply(specs, function(x) {
       if (is.null(x@nullable)) NA else ifelse(x@nullable, "Yes", "No")
     }),
-    `Description` = sapply(specs, function(x) {
-      desc <- if (!is.null(x@description)) x@description else ""
-      values <- x@values
-      pattern <- x@pattern
-      if (!is.null(values)) {
-        value_line <- paste0(
-          "\n#@values: ",
-          paste(as.vector(values), collapse = "; ")
-        )
-        desc <- paste(desc, value_line, sep = "\n")
-      }
-
-      if (!is.null(pattern)) {
-        pattern_line <- paste0("\n#@pattern: ", pattern)
-        desc <- paste(desc, pattern_line, sep = "\n")
-      }
-
-      return(desc)
-    }),
+    `Description` = sapply(specs, get_spec_description),
     check.names = FALSE
   )
 
@@ -113,7 +147,7 @@ export_specs_table <- function(
     ))
   ) {
     df <- df %>%
-      select(any_of(colnames))
+      dplyr::select(any_of(colnames))
 
     ft <- flextable::flextable(df) %>%
       flextable::font(fontname = "Times New Roman", part = "all") %>%
@@ -143,7 +177,7 @@ export_specs_table <- function(
       "Type", "Format", "Nullable", "Description")'
     ))
   }
-  if (file.exists(file) & !overwrite) {
+  if (file.exists(file) && !overwrite) {
     cli::cli_abort(c(
       "File exists!",
       i = "Specify 'overwrite = TRUE' to overwrite the current file."

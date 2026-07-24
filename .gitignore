@@ -13,6 +13,7 @@ helper.R
 renv
 renv/
 .Renviron
+*docx
 
 ..Rcheck/00check.log
 instructions_shiny.txt
