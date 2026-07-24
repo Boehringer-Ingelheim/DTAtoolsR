@@ -22,10 +22,11 @@ test_that("message helpers produce empty and populated tables consistently", {
   expect_equal(nrow(empty_df), 0)
   expect_named(
     empty_df,
-    c("dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
   )
 
   populated_df <- data.frame(
+    id = 1L,
     dataset = "ds",
     target = "tab",
     severity = "error",
@@ -74,11 +75,17 @@ test_that("message collection handles dataset-level aggregation and ordering", {
   expect_true(is.data.frame(msgs))
   expect_true(nrow(msgs) >= 0)
   expect_true(all(c("dataset", "target", "message") %in% names(msgs)))
+  if (nrow(msgs) > 0) {
+    expect_equal(msgs$id, seq_len(nrow(msgs)))
+  }
 
   dta <- DTA(datasets = list(clinical_data = ds), metadata = DTAMetaData(title = "Test DTA"))
   dta_msgs <- messages(dta, datasets = "clinical_data", as_tibble = FALSE)
   expect_true(is.data.frame(dta_msgs))
   expect_true(all(c("dataset", "target", "message") %in% names(dta_msgs)))
+  if (nrow(dta_msgs) > 0) {
+    expect_equal(dta_msgs$id, seq_len(nrow(dta_msgs)))
+  }
 })
 
 test_that("validation summaries report target type and validation run metadata", {

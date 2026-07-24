@@ -234,7 +234,7 @@ test_that("messages() returns human-readable messages for a checked DTA", {
   expect_true(is.data.frame(msgs))
   expect_named(
     msgs,
-    c("dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
   )
 })
 

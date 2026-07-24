@@ -11,7 +11,8 @@ check(
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  validation_run = NULL
 )
 }
 \arguments{

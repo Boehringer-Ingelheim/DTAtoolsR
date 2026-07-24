@@ -6,9 +6,7 @@ template_version: "3.0"
 template_date: 2024-12-17
 
 files:
-  filename: "^.+smirna.tsv$"
-  pattern: Yes
-  number_of_files: 1
+  filename: "gf_data_small_smirna.tsv"
   type: "tsv"
   info:
     - data: smrnaseq

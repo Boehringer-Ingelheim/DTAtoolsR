@@ -79,7 +79,9 @@ datasets:
     description: Clinical data table
 
     files:
-      filename: "clinical_data.csv"
+      filename: "clinical_data.*.csv$"
+      pattern: Yes
+      number_of_files: 1
       type: "csv"
 
     columns:

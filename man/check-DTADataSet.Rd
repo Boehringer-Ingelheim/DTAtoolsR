@@ -5,7 +5,14 @@
 \title{Check DTADataSet}
 \usage{
 ## S7 method for class <DTAtools::DTADataSet>
-check(x, force = FALSE, persist = TRUE, artifact_dir = NULL, quiet = FALSE)
+check(
+  x,
+  force = FALSE,
+  persist = TRUE,
+  artifact_dir = NULL,
+  quiet = FALSE,
+  validation_run = NULL
+)
 }
 \arguments{
 \item{x}{A \code{DTADataSet} object.}

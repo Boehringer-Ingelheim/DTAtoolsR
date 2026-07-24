@@ -12,7 +12,8 @@ check(
   force = FALSE,
   persist = TRUE,
   artifact_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  validation_run = NULL
 )
 }
 \arguments{
@@ -43,7 +44,7 @@ validation summary data.frame.
 \description{
 Validates all tables or a specific table within a DTADataSetTabular object,
 prints a validation summary to the console, and updates the object's
-validation state. Replaces the separate \code{revalidate_table()} function.
+validation state.
 }
 \examples{
 \dontrun{

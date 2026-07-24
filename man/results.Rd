@@ -15,7 +15,7 @@ results(x, ...)
 A data.frame summarizing validation state.
 
 For \code{DTADataSetTabular}, columns are:
-\code{table}, \code{status}, \code{ok}, \code{validated_at}, \code{run_id},
+\code{target}, \code{status}, \code{validated_at}, \code{run_id}, \code{validation_run},
 \code{n_schema_errors}, \code{n_rule_errors}.
 
 For \code{DTA}, the summary is aggregated per dataset and includes:
