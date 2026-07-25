@@ -5,7 +5,10 @@
 \title{Build a validation rules table (flextable). Shared by write_dataset_metadata()
 and write_dta()'s per-dataset sections.}
 \usage{
-.build_rules_table(rules)
+.build_rules_table(rules_collection)
+}
+\arguments{
+\item{rules_collection}{A \code{DTARuleCollection} object (e.g. \code{specs@rules}) or \code{NULL}.}
 }
 \description{
 Build a validation rules table (flextable). Shared by write_dataset_metadata()

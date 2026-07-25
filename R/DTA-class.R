@@ -189,10 +189,18 @@ method(`[`, DTA) <- function(x, i) {
   x@datasets[i]
 }
 
+#' @title Load a file into a DTA or DTADataSet object
+#' @description
+#' S7 generic. Dispatches to the appropriate method based on the class of \code{x}.
+#' Use the \code{DTA} method to load a file into a named dataset within a full
+#' DTA object; use the \code{DTADataSetTabular} method to load directly into a
+#' standalone dataset.
+#' @param x A \code{DTA} or \code{DTADataSetTabular} object.
+#' @param ... Additional arguments passed to the method.
+#' @return The updated object.
+#' @name load_file
 #' @export
-if (!exists("load_file", mode = "function")) {
-  load_file <- new_generic("load_file", "x")
-}
+load_file <- new_generic("load_file", "x")
 
 
 #' @title Load file into DTA object

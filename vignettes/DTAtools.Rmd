@@ -1,11 +1,11 @@
 ---
-title: "DTAtools: Validating Data Transfer Agreements in R"
+title: "DTAtools: Validating Data Transmission Specifications in R"
 output:
   rmarkdown::html_vignette:
     toc: true
     toc_depth: 3
 vignette: >
-  %\VignetteIndexEntry{DTAtools: Validating Data Transfer Agreements in R}
+  %\VignetteIndexEntry{DTAtools: Validating Data Transmission Specifications in R}
   %\VignetteEncoding{UTF-8}
   %\VignetteEngine{knitr::rmarkdown}
 editor_options:
@@ -23,11 +23,11 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-`DTAtools` automates the validation of tabular data against **Data Transfer
-Agreement (DTA)** or **Data Transfer Specification (DTS)** definitions. In
+`DTAtools` automates the validation of tabular data against **Data Transmission
+Agreement (DTA)** and **Data Transmission Specification (DTS)** definitions. In
 regulated industries — clinical research, biomarker science, genomics — data
 must conform precisely to agreed column types, allowed values, and cross-column
-logic before it is transferred between parties. Catching these errors
+logic before it is transmitted between parties. Catching these errors
 programmatically, before submission, saves costly re-submissions and ensures
 reproducible, auditable data exchange.
 
@@ -36,9 +36,9 @@ an R API to:
 
 1. **Import** column specifications and semantic rules from YAML (or Word documents).
 2. **Validate** tabular data against those specifications — types, nullability, allowed values, regex patterns, and cross-column rules.
-3. **Inspect** validation results programmatically: which tables failed, which rows, which columns, which rules.
+3. **Inspect** validation results programmatically: which tables failed, which rows, which columns, which rules — and drill into individual errors with `inspect()`.
 4. **Export** validated data to files (TSV/CSV, optionally gzip-compressed, with MD5 checksums).
-5. **Generate** Word documentation tables directly from specs — for use inside DTA documents.
+5. **Generate** Word documentation tables directly from specs — for use inside DTA/DTS documents.
 
 `DTAtools` is built on the S7 object system and uses JSON Schema for fast,
 row-level validation.
@@ -61,52 +61,75 @@ library(DTAtools)
 
 ## Package Architecture
 
-`DTAtools` organises objects into a clear hierarchy:
+`DTAtools` organises objects into a layered hierarchy that maps directly to how
+a Data Transmission Specification (DTS) is structured:
 
 ```
-DTA                          ← top-level agreement container
-├── DTAMetaData              ← title, version, contacts, transmission details
-└── datasets
-    └── DTADataSetTabular    ← one dataset (e.g. "clinical_data")
-        ├── DTAColumnSpecCollection   ← all column specs + rules
-        │   ├── DTAColumnSpec × N     ← one spec per column
-        │   └── DTARuleCollection     ← schema rules
-        │       └── DTARule × M       ← col_condition / col_range / col_unique
-        └── tables (Arrow Tables)     ← the actual data
+DTA                              ← top-level agreement container
+├── DTAMetaData                  ← title, version, receiver/supplier contacts,
+│                                     transmission schedule
+└── DTADataSet (named list)      ← one or more datasets per DTS
+    │
+    ├── DTADataSetTabular        ← tabular data: full column-spec + rule validation
+    │   ├── files (list)         ← expected file descriptors
+    │   │   └── DTAFileCSV / DTAFileTSV / DTAFileDelim
+    │   │       └── read_file()  → Arrow Table
+    │   ├── specs                ← column-level schema + cross-column rules
+    │   │   └── DTAColumnSpecCollection
+    │   │       ├── DTAColumnSpec × N   ← one per column: type, nullable,
+    │   │       │                            values/pattern, length, format
+    │   │       └── DTARuleCollection
+    │   │           ├── DTARuleColCondition × N  ← if/then cross-column logic
+    │   │           ├── DTARuleColRange × N      ← numeric range constraint
+    │   │           └── DTARuleColUnique × N     ← uniqueness (single or composite key)
+    │   └── tables (named list)  ← actual data as Arrow Tables
+    │       └── <table_name>     ← populated via load_file() or constructor
+    │
+    └── DTADataSetFile           ← non-tabular: file presence/readability check
+        ├── file_paths           ← character vector of expected file paths
+        └── files (list)         ← DTAFile descriptors (derived from file_paths)
 ```
 
-At every level, objects can be **built manually in R**, or **loaded from YAML**
-(or a Word document). Validation happens via `check()`, which populates an
-in-memory result store you can query with `results()` and `messages()`.
+**Two ways to build any object:**
+
+- **From YAML:** `read_dta_from_yaml()` → full DTA; `import_specs_from_yaml()` → standalone specs  
+- **Programmatically in R:** construct each class directly (e.g. `DTAColumnSpec()`, `DTADataSetTabular()`)
+
+**Validation flow:**
+
+1. `load_file(dta, dataset, file)` — reads a file into the dataset using its file handler
+2. `check(dta)` or `check(ds)` — runs JSON Schema validation + rule checks; returns the updated object
+3. `results(x)` — one-row-per-table summary (pass/fail, error counts)
+4. `messages(x)` — one-row-per-error detail table (column, row, rule, message, `id`)
+5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
 
 ---
 
 ## Quickstart
 
-The canonical workflow: load specs from YAML, load data, validate, inspect.
+The canonical production workflow with a full DTA YAML: load the specification,
+load the data file, validate, inspect.
 
 ```{r quickstart}
 library(DTAtools)
 
-# 1. Load column specifications and rules from a YAML spec file
-spec_yaml <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-specs     <- import_specs_from_yaml(spec_yaml)
-specs
-
-# 2. Load the data
-tsv_path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
-my_data  <- read.table(tsv_path, sep = "\t", header = TRUE, na.strings = "")
-
-# 3. Create a dataset and validate — check() runs schema + rule validation
-ds <- DTADataSetTabular(
-  name   = "gf_data",
-  specs  = specs,
-  tables = list(gf_data = my_data)
+# 1. Load the full DTA definition from YAML
+#    (metadata + dataset specs + file handlers + rules — all in one file)
+dta <- read_dta_from_yaml(
+  system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-ds <- check(ds)
+print(dta)
 
-# 4. Programmatic summary
-results(ds)
+# 2. Load the data file into the DTA object
+#    load_file() uses the file handler already defined in the YAML
+csv_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+dta <- load_file(dta, dataset = "clinical_data", file = csv_path)
+
+# 3. Validate — check() runs schema + rule validation for all datasets
+dta <- check(dta)
+
+# 4. Summarise results (one row per table)
+results(dta)
 ```
 
 ---
@@ -362,6 +385,68 @@ results(ds)
 # Detailed per-error messages (empty for a passing dataset)
 msgs <- messages(ds)
 head(msgs)
+```
+
+### Drilling into Errors with `inspect()`
+
+`messages()` gives you a row per error with an `id` column. When you want the
+full story behind a specific error — the exact cell value, the row in context,
+the JSON Schema constraint that failed, or the rows that violated a rule —
+call `inspect(x, id = N)`.
+
+```
+results(x)     → per-table pass/fail summary
+messages(x)    → per-error table — note the `id` of the error you care about
+inspect(x, id) → deep detail for that error: row context, schema clause, failing rows
+```
+
+`inspect()` returns a flat data frame. Columns differ by error type:
+
+| Source   | Key columns added by `inspect()`                                              |
+|----------|-------------------------------------------------------------------------------|
+| `schema` | `context_*` (the actual row values), `schema_keyword`, `schema_message`       |
+| `rule`   | `rule_id`, `failing_row_count`, `failing_*` (preview of violating rows)       |
+
+```{r inspect_example}
+# Load a dataset that has schema errors
+err_file <- system.file("extdata", "clinical_data_error_schema.csv", package = "DTAtools")
+dta_err  <- read_dta_from_yaml(
+  system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+)
+dta_err  <- load_file(dta_err, "clinical_data", file = err_file)
+dta_err  <- check(dta_err, quiet = TRUE)
+
+# Step 1: see which messages exist and note their ids
+msgs_err <- messages(datasets(dta_err, "clinical_data"))
+head(msgs_err[, c("id", "source", "row", "column", "message")], 8)
+```
+
+```{r inspect_schema}
+# Step 2: inspect a schema error by id — returns the failing row in context
+detail <- inspect(datasets(dta_err, "clinical_data"), id = 1)
+# Key fields for schema errors:
+detail[, c("id", "message", "type", "why",
+           "context_.row", "context_SUBJECT_ID", "context_VISIT",
+           "schema_keyword", "schema_message")]
+```
+
+```{r inspect_rule}
+# Rule errors: inspect shows which rows violated the rule
+rule_file <- system.file("extdata", "clinical_data_error_rules.csv", package = "DTAtools")
+dta_rule  <- read_dta_from_yaml(
+  system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+)
+dta_rule  <- load_file(dta_rule, "clinical_data", file = rule_file)
+dta_rule  <- check(dta_rule, quiet = TRUE)
+
+msgs_rule <- messages(datasets(dta_rule, "clinical_data"))
+msgs_rule[, c("id", "rule_id", "message")]
+
+# Drill into the first rule violation
+detail_rule <- inspect(datasets(dta_rule, "clinical_data"), id = 1)
+detail_rule[, c("id", "rule_id", "type", "why",
+                "failing_row_count", "failing_.row",
+                "failing_SUBJECT_ID", "failing_VISIT")]
 ```
 
 ### Example: Schema Errors
@@ -664,6 +749,87 @@ cat("Rows loaded:", nrow(loaded), "\n")
 
 ---
 
+## `DTADataSetFile`: File Presence and Readability Checks
+
+While `DTADataSetTabular` validates the *content* of a delivered file against a
+column schema and rules, `DTADataSetFile` answers a more basic question:
+**did the expected files actually arrive, and can we open them?**
+
+Use `DTADataSetFile` when a DTS requires that certain non-tabular files (PDFs,
+archives, reports, audit logs, raw instrument output) are present and
+non-empty — without caring about their internal structure.
+
+`check()` for a `DTADataSetFile` verifies each path:
+
+| Check performed       | Failure message                                  |
+|-----------------------|--------------------------------------------------|
+| File exists           | `"File '…' not found."`                         |
+| File is non-empty     | `"File '…' is empty."`                          |
+| File is readable      | `"File '…' is not readable."`                   |
+
+The same `results()`, `messages()`, and `inspect()` API applies, so you can
+report file-level problems alongside tabular schema errors in a unified
+validation summary.
+
+```{r dataset_file}
+# Paths to existing files (pass)
+delivered_csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+delivered_tsv <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
+
+ds_file <- DTADataSetFile(
+  name  = "delivery_check",
+  paths = c(delivered_csv, delivered_tsv)
+)
+ds_file <- check(ds_file)
+results(ds_file)     # both files pass
+```
+
+```{r dataset_file_missing}
+# Introduce a missing file to trigger a failure
+ds_missing <- DTADataSetFile(
+  name  = "delivery_check_fail",
+  paths = c(delivered_csv, "/nonexistent/path/report.pdf")
+)
+ds_missing <- check(ds_missing)
+
+results(ds_missing)          # one row fails
+
+# The message explains exactly why
+messages(ds_missing)[, c("target", "rule_id", "message")]
+```
+
+### Mixing `DTADataSetTabular` and `DTADataSetFile` in one `DTA`
+
+A single `DTA` object can contain datasets of both types, letting you validate
+the full delivery — column-level content *and* file presence — in one `check()`:
+
+```{r dta_mixed_types, eval=FALSE}
+# Tabular dataset (column spec validation)
+ds_tab <- DTADataSetTabular(
+  name   = "clinical_data",
+  specs  = import_specs_from_yaml(
+    system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+  ),
+  tables = list(clinical_data = read.csv(delivered_csv))
+)
+
+# File dataset (presence check)
+ds_fi <- DTADataSetFile(
+  name  = "delivery_manifest",
+  paths = c(delivered_csv, delivered_tsv)
+)
+
+dta_mixed <- DTA(
+  datasets = list(ds_tab, ds_fi),
+  metadata = DTAMetaData(title = "Mixed DTA", version = "1.0")
+)
+
+dta_mixed <- check(dta_mixed)
+results(dta_mixed)   # one row per dataset
+```
+
+---
+
 ## The Full DTA Object
 
 ### `DTAMetaData`
@@ -673,12 +839,12 @@ title, version, contacts (receiver and supplier), and transmission details.
 
 ```{r metadata}
 # Minimal metadata
-meta_simple <- DTAMetaData(title = "My Clinical Data Transfer", version = "1.0")
+meta_simple <- DTAMetaData(title = "My Clinical Data Transmission", version = "1.0")
 print(meta_simple)
 
 # Full metadata with contacts and transmission schedule
 meta_full <- DTAMetaData(
-  title    = "Clinical Genomics Data Transfer",
+  title    = "Clinical Genomics Data Transmission",
   version  = "2.0",
   date     = as.Date("2026-01-15"),
   header   = "Boehringer Ingelheim",
@@ -1014,7 +1180,7 @@ patterns), column specs, and rules in a single document:
 
 ```yaml
 metadata:
-  title: Clinical Data Transfer Agreement
+  title: Clinical Data Transmission Agreement
   version: "1.0"
   date: 2026-01-15
   header: Boehringer Ingelheim
@@ -1117,7 +1283,9 @@ datasets:
 |---------------------------|-------------------------------------------------------------|
 | `DTA`                     | Top-level container: metadata + multiple datasets           |
 | `DTAMetaData`             | Agreement metadata (title, version, contacts, transmission) |
+| `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables           |
+| `DTADataSetFile`          | Dataset that checks file presence and readability only      |
 | `DTAColumnSpecCollection` | Named list of column specs + optional rule collection       |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)  |
 | `DTARuleCollection`       | Container of DTARule objects                                |
@@ -1132,12 +1300,14 @@ datasets:
 | Function                    | Description                                                  |
 |-----------------------------|--------------------------------------------------------------|
 | `read_dta_from_yaml(file)`  | Load a full DTA from YAML                                    |
-| `import_specs_from_yaml(file)` | Load column specs + rules from YAML                      |
+| `import_specs_from_yaml(file)` | Load column specs + rules from a standalone YAML         |
 | `columns_specs_from_word(file)` | Import column specs from a Word table                   |
+| `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
 | `check(x)`                  | Validate all datasets / tables; returns updated object       |
 | `results(x)`                | Summary table: status, error counts per table                |
-| `messages(x)`               | Detailed error table: row, column, rule, message             |
+| `messages(x)`               | Detailed error table: row, column, rule, message, `id`       |
+| `inspect(x, id)`            | Deep detail for error `id`: row context, schema clause, failing rows |
 | `validation_status(x)`      | Compact status data frame                                    |
 | `validation_errors(x, table)` | Full raw error output for one table                       |
 | `datasets(x, name)`         | Extract dataset(s) from a DTA object                        |

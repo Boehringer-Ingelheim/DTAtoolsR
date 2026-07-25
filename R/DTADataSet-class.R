@@ -384,7 +384,6 @@ if (!exists("load_file", mode = "function")) {
   load_file <- new_generic("load_file", "x")
 }
 
-
 #' @title Load file into DTADataSet
 #' @description
 #' Convenience wrapper that dispatches to \code{load_file()} for a dataset.

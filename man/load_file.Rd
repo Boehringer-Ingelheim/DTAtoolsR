@@ -4,8 +4,10 @@
 \name{load_file}
 \alias{load_file}
 \alias{load_file,DTAtools::DTADataSetTabular-method}
-\title{Load file into DTA object}
+\title{Load a file into a DTA or DTADataSet object}
 \usage{
+load_file(x, ...)
+
 ## S7 method for class <DTAtools::DTA>
 load_file(
   x,
@@ -36,6 +38,8 @@ load_file(
 \arguments{
 \item{x}{An object of class DTADataSet}
 
+\item{...}{Additional arguments passed through.}
+
 \item{dataset}{Single character dataset name or numeric dataset index.}
 
 \item{file}{file to be loaded}
@@ -43,10 +47,10 @@ load_file(
 \item{handler_index}{of the filehandler in the files list}
 
 \item{name}{file name, base name per default. is used to store the table under this name}
-
-\item{...}{Additional arguments passed through.}
 }
 \value{
+The updated object.
+
 The updated \code{DTA} object.
 
 The updated dataset object.
@@ -54,6 +58,11 @@ The updated dataset object.
 object of class DTADataSet with loaded data
 }
 \description{
+S7 generic. Dispatches to the appropriate method based on the class of \code{x}.
+Use the \code{DTA} method to load a file into a named dataset within a full
+DTA object; use the \code{DTADataSetTabular} method to load directly into a
+standalone dataset.
+
 Reads a file into one dataset contained in a \code{DTA} object by dataset
 name or index.
 
