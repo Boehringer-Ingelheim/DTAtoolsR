@@ -62,7 +62,18 @@ DTADataSet <- S7::new_class(
   }
 )
 
-#' @title get max number of files
+#' @title Get max number of files
+#' @description
+#' S7 generic. Returns the maximum number of files expected — either a
+#' single \code{DTAFile} handler's own maximum, or the sum across all file
+#' handlers in a \code{DTADataSet}.
+#' @param x An object of class \code{DTAFile} or \code{DTADataSet}.
+#' @return numeric: number of files
+#' @name max_number_of_files
+#' @export
+max_number_of_files <- new_generic("max_number_of_files", "x")
+
+#' @title Get max number of files for a DTADataSet
 #' @description
 #' Returns the sum of max number of files specified all associated DTAFile
 #' objects.
@@ -75,17 +86,25 @@ DTADataSet <- S7::new_class(
 #'   files = list(create_example_DTAFileCSV())
 #' )
 #' max_number_of_files(ds)
-#' @name max_number_of_files-DTADataSet
-if (!exists("max_number_of_files", mode = "function")) {
-  max_number_of_files <- new_generic("max_number_of_files", "x")
-}
+#' @name max_number_of_files
 #' @export
 method(max_number_of_files, DTADataSet) <- function(x) {
   sum(unlist(sapply(x@files, max_number_of_files)))
 }
 
 
-#' @title get min number of files
+#' @title Get min number of files
+#' @description
+#' S7 generic. Returns the minimum number of files expected — either a
+#' single \code{DTAFile} handler's own minimum, or the sum across all file
+#' handlers in a \code{DTADataSet}.
+#' @param x An object of class \code{DTAFile} or \code{DTADataSet}.
+#' @return numeric: number of files
+#' @name min_number_of_files
+#' @export
+min_number_of_files <- new_generic("min_number_of_files", "x")
+
+#' @title Get min number of files for a DTADataSet
 #' @description
 #' Returns the sum of min number of files specified all associated DTAFile
 #' objects.
@@ -98,10 +117,7 @@ method(max_number_of_files, DTADataSet) <- function(x) {
 #'   files = list(create_example_DTAFileCSV())
 #' )
 #' min_number_of_files(ds)
-#' @name min_number_of_files-DTADataSet
-if (!exists("min_number_of_files", mode = "function")) {
-  min_number_of_files <- new_generic("min_number_of_files", "x")
-}
+#' @name min_number_of_files
 #' @export
 method(min_number_of_files, DTADataSet) <- function(x) {
   sum(unlist(sapply(x@files, min_number_of_files)))

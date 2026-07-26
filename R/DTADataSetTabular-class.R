@@ -388,9 +388,6 @@ method(columns, DTADataSetTabular) <- function(x) {
 #' rules(ds)
 #' @name rules-DTADataSetTabular
 #' @export
-rules <- new_generic("rules", "x")
-
-#' @export
 method(rules, DTADataSetTabular) <- function(x) {
   return(x@specs@rules)
 }

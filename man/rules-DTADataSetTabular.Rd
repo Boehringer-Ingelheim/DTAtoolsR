@@ -2,10 +2,10 @@
 % Please edit documentation in R/DTADataSetTabular-class.R
 \name{rules-DTADataSetTabular}
 \alias{rules-DTADataSetTabular}
-\alias{rules}
 \title{Get Rules}
 \usage{
-rules(x, ...)
+## S7 method for class <DTAtools::DTADataSetTabular>
+rules(x)
 }
 \arguments{
 \item{x}{An object of class DTADataSetTabular}
