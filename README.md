@@ -74,13 +74,27 @@ dta <- check(dta)
 results(dta)
 ```
 
+Not every delivery needs a full DTA with metadata. When you only need to
+validate *one* dataset, read the dataset definition directly with
+`read_dataset_from_yaml()` — a standalone dataset YAML has the same shape as
+one entry under a DTA's `datasets:` list (`name`, `type`, `files`, `columns`,
+`rules`), just without the surrounding `metadata:` wrapper:
+
+```r
+# dataset.yaml has: name, type, files, columns, rules — no top-level metadata
+ds <- read_dataset_from_yaml("dataset.yaml")
+
+ds <- load_file(ds, file = csv_path, handler_index = 1)
+ds <- check(ds)
+results(ds)
+```
+
 ## Usage
 
-### Import DTA/DTS specifications
+### Load specifications and datasets from YAML
 
-Specifications are stored in the human- and machine-readable YAML format,
-either as dedicated spec files or nested inside a larger DTA/DTS YAML
-document. A specification contains definitions of:
+Specifications are stored in the human- and machine-readable YAML format. A
+specification contains definitions of:
 
 - **columns:** column names, types, and optionally patterns or allowed
   values. See [YAML Column Format](#yaml-column-format).
@@ -90,15 +104,24 @@ document. A specification contains definitions of:
 - **metadata:** DTA/DTS metadata — title, version, contacts, transmission
   schedule. See [YAML Metadata](#yaml-metadata).
 
-Import a standalone spec file (`columns:` + optional `rules:` at the
-top level) with `import_specs_from_yaml()`:
+There are three ways to bring a specification into R, from most to least
+common:
+
+1. **A full DTA/DTS document** (`metadata:` + one or more `datasets:`) —
+   `read_dta_from_yaml()`. The recommended entry point for production use;
+   see the [Quickstart](#quickstart) above.
+2. **A single, self-contained dataset definition** (`name`, `type`, `files`,
+   `columns`, `rules` — no top-level `metadata:`) — `read_dataset_from_yaml()`.
+   Ideal when you only need to validate one dataset, e.g. while iterating on
+   a spec. Also shown in the [Quickstart](#quickstart) above.
+3. **A bare list of column specs** (just `columns:` plus optional `rules:`,
+   no `name`/`type`/`files`) — `import_specs_from_yaml()`. The most manual
+   option: you build the `DTADataSetTabular` wrapper yourself.
 
 ```r
+# Use case 3: bare specs only — you supply name/type/data yourself
 specs <- import_specs_from_yaml("spec.yaml")
 ```
-
-For a full DTA/DTS document (with `metadata:` and `datasets:` sections), use
-`read_dta_from_yaml()` instead — see the [Quickstart](#quickstart) above.
 
 ### Load and validate tabular data
 
@@ -174,7 +197,7 @@ documenting controlled vocabulary.
 export_column_value_table(specs, "column_value_table.docx", id = "VISIT")
 ```
 
-## YAML Column Format {#yaml-column-format}
+## YAML Column Format
 
 Column specifications can contain:
 
@@ -218,7 +241,7 @@ columns:
       - "Other"
 ```
 
-## YAML Schema Rule Specification {#yaml-schema-rule-specification}
+## YAML Schema Rule Specification
 
 `DTAtools` supports schema-based validation of tabular data using declarative
 rules defined in YAML. Rules are evaluated after column-level validation and
@@ -332,7 +355,7 @@ rules:
       - VISIT
 ```
 
-## YAML Metadata {#yaml-metadata}
+## YAML Metadata
 
 `metadata:` captures the administrative information of a DTA/DTS: title,
 version, receiver/supplier contacts, and the transmission schedule.
@@ -399,8 +422,9 @@ row-level validation.
 
 | Function                       | Description                                              |
 |----------------------------------|--------------------------------------------------------------|
-| `read_dta_from_yaml(file)`     | Load a full DTA/DTS from YAML                             |
-| `import_specs_from_yaml(file)`| Load column specs + rules from a standalone YAML          |
+| `read_dta_from_yaml(file)`     | Load a full DTA/DTS (metadata + datasets) from YAML       |
+| `read_dataset_from_yaml(file)` | Load a single, self-contained dataset definition from YAML |
+| `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
 | `load_file(dta, dataset, file)`| Read a data file into a dataset using its YAML-defined handler |
 | `check(x)`                    | Validate all datasets/tables; returns the updated object   |

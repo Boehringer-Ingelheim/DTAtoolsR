@@ -102,10 +102,17 @@ DTA                              ← top-level agreement container
         └── files (list)         ← DTAFile descriptors (derived from file_paths)
 ```
 
-**Two ways to build any object:**
+**Three ways to build any object, from most to least common:**
 
-- **From YAML:** `read_dta_from_yaml()` → full DTA; `import_specs_from_yaml()` → standalone specs  
-- **Programmatically in R:** construct each class directly (e.g. `DTAColumnSpec()`, `DTADataSetTabular()`)
+1. **`read_dta_from_yaml()`** — a full DTA/DTS (metadata + one or more datasets). The
+   recommended entry point for production use — see the Quickstart below.
+2. **`read_dataset_from_yaml()`** — a single, self-contained dataset definition
+   (name, type, files, columns, rules — no top-level `metadata:`). Ideal when
+   you only need to validate one dataset, e.g. while iterating on a spec.
+3. **`import_specs_from_yaml()`** — a bare list of column specs (just `columns:`
+   plus optional `rules:`, no name/type/files). The most manual option: you
+   build the `DTADataSetTabular` wrapper yourself.
+4. **Programmatically in R** — construct each class directly (e.g. `DTAColumnSpec()`, `DTADataSetTabular()`)
 
 **Validation flow:**
 
@@ -142,6 +149,44 @@ dta <- check(dta)
 
 # 4. Summarise results (one row per table)
 results(dta)
+```
+
+### Quickstart Variant: A Single Dataset with `read_dataset_from_yaml()`
+
+Not every delivery needs a full DTA with metadata. When you only need to
+validate *one* dataset — while iterating on a spec, or when metadata is
+tracked elsewhere — read the dataset definition directly with
+`read_dataset_from_yaml()`. This is the second most common entry point into
+`DTAtools`, right after `read_dta_from_yaml()`.
+
+A standalone dataset YAML has exactly the same shape as one entry under a
+DTA's `datasets:` list — `name`, `type`, `files`, `columns`, `rules` — just
+without the surrounding `metadata:`/`datasets:` wrapper. The package ships a
+real example of this shape at `inst/extdata/gf_dataset.yaml`; here we build an
+equivalent one by extracting the `clinical_data` entry from `clinical_dta.yaml`
+so the example stays self-contained:
+
+```{r quickstart_dataset}
+# Extract one dataset entry so it stands alone (same shape as gf_dataset.yaml)
+full_yaml    <- yaml::read_yaml(
+  system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+)
+dataset_yaml <- tempfile(fileext = ".yaml")
+yaml::write_yaml(full_yaml$datasets[[1]], dataset_yaml)
+
+# 1. Load the single-dataset definition — no metadata needed
+ds <- read_dataset_from_yaml(dataset_yaml)
+ds     # a ready-to-use DTADataSetTabular, specs + file handler already set
+
+# 2. Load the data file — same load_file() call as for a full DTA, just
+#    without the `dataset =` argument since `ds` already is the dataset
+ds <- load_file(ds, file = csv_path, handler_index = 1)
+
+# 3. Validate and summarise — same check()/results() calls as always
+ds <- check(ds)
+results(ds)
+
+unlink(dataset_yaml)
 ```
 
 ---
@@ -243,13 +288,20 @@ names(specs)
 colspec(specs, "VISIT")
 ```
 
-### Importing Specifications from YAML
+### Use Case 3: Bare Specs with `import_specs_from_yaml()`
 
-The most common way to work with specs is to load them from a YAML file. The
-YAML file must contain a `columns` key with a list of column definitions.
+`read_dta_from_yaml()` and `read_dataset_from_yaml()` (both shown in the
+Quickstart above) cover the vast majority of use cases. The third, most manual
+option is `import_specs_from_yaml()`: it reads *only* the `columns` key (plus
+an optional `rules` key) from a YAML file — ignoring any `name`, `type`, or
+`files` keys — and returns a bare `DTAColumnSpecCollection` with no dataset
+wrapper. Use it when you already manage the data table and dataset naming
+yourself and just need the column/rule definitions, e.g. to build a
+`DTADataSetTabular` by hand as shown further below.
 
 ```{r import_yaml}
-# The package ships with example YAML specs
+# The package ships with a real standalone dataset YAML — import_specs_from_yaml()
+# reads only its `columns`/`rules` keys, ignoring name/type/files
 yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 gf_specs <- import_specs_from_yaml(yaml_file)
 print(gf_specs)
@@ -1311,8 +1363,9 @@ datasets:
 
 | Function                    | Description                                                  |
 |-----------------------------|--------------------------------------------------------------|
-| `read_dta_from_yaml(file)`  | Load a full DTA from YAML                                    |
-| `import_specs_from_yaml(file)` | Load column specs + rules from a standalone YAML         |
+| `read_dta_from_yaml(file)`  | Load a full DTA (metadata + datasets) from YAML              |
+| `read_dataset_from_yaml(file)` | Load a single, self-contained dataset definition from YAML |
+| `import_specs_from_yaml(file)` | Load bare column specs + rules from a standalone YAML     |
 | `columns_specs_from_word(file)` | Import column specs from a Word table                   |
 | `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
