@@ -7,7 +7,7 @@
 apply_schema_rules(rules, df, verbose = TRUE)
 }
 \arguments{
-\item{rules}{A list of DTARule objects.}
+\item{rules}{A list of DTARule objects, or NULL.}
 
 \item{df}{A data.frame to validate.}
 

@@ -11,7 +11,7 @@ rules(x)
 \item{x}{An object of class DTADataSetTabular}
 }
 \value{
-A list with rules information
+A list of DTARule objects, or NULL if no rules are defined.
 }
 \description{
 Method to get Rules from DTADataSet.

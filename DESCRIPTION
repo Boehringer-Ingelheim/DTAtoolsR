@@ -71,7 +71,6 @@ Collate:
     'DTARuleColCondition-class.R'
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
-    'DTARuleCollection-class.R'
     'documentBuilders.R'
     'evaluateSchemaRules.R'
     'exportDocuments.R'

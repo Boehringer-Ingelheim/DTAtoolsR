@@ -382,7 +382,7 @@ method(columns, DTADataSetTabular) <- function(x) {
 #' @description
 #' Method to get Rules from DTADataSet.
 #' @param x An object of class DTADataSetTabular
-#' @return A list with rules information
+#' @return A list of DTARule objects, or NULL if no rules are defined.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' rules(ds)

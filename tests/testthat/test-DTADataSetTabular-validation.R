@@ -189,7 +189,7 @@ test_that("messages() returns flattened rule failures", {
   ds <- create_example_DTADataSetTabular(2)
 
   bad_rule <- create_example_DTARuleColUnique()
-  ds@specs@rules <- DTARuleCollection(rules = list(bad_rule))
+  ds@specs@rules <- list(bad_rule)
 
   # Duplicate SUBJID to violate uniqueness rule.
   bad_tab <- as.data.frame(ds@tables[["tab1"]])

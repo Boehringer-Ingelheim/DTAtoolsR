@@ -67,10 +67,9 @@ a Data Transmission Specification (DTS) is structured:
 ```
 DTA                              ← top-level agreement container
 ├── metadata                     ← title, version, receiver/supplier
-|   DTAMetaData                      contacts, transmission schedule, ..
+|   (DTAMetaData)                     contacts, transmission schedule, ..
 │                                     
-└── datasets (named list)        ← one or more datasets per DTS
-    DTADataSet       
+└── datasets (named list of DTADataSet)  ← one or more datasets per DTS
     │
     ├── DTADataSetTabular        ← tabular data: for tables with
     |   |                            full column-spec + rule validation
@@ -81,17 +80,16 @@ DTA                              ← top-level agreement container
     |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
     |   |
-    │   ├── specs                ← column-level schema + cross-column rules
-    │   │   DTAColumnSpecCollection
-    │   │   ├── columns (named list)
-    |   |   |   DTAColumnSpec × N   ← one per column: type, nullable,
+    │   ├── specs (DTAColumnSpecCollection)  ← column-level schema +
+    |   |   |                                   cross-column rules
+    │   │   |
+    │   │   ├── columns (named list of DTAColumnSpec)
+    |   |   |   └── DTAColumnSpec × N   ← one per column: type, nullable,
     │   │   │                            values/pattern, length, format
-    |   |   └── rules 
-    │   │       DTARuleCollection
-    |   |       └─ rules (named list)
-    │   │          ├── DTARuleColCondition × N  ← if/then cross-column logic
-    │   │          ├── DTARuleColRange × N      ← numeric range constraint
-    │   │          └── DTARuleColUnique × N     ← uniqueness (single or 
+    |   |   └── rules (list of DTARule)
+    │   │       ├── DTARuleColCondition × N  ← if/then cross-column logic
+    │   │       ├── DTARuleColRange × N      ← numeric range constraint
+    │   │       └── DTARuleColUnique × N     ← uniqueness (single or 
     |   |                                              composite key)
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
@@ -703,11 +701,8 @@ condition_rule <- DTARuleColCondition(
   then      = list(CONSENT_DATE = list(empty = FALSE))
 )
 
-# Collect rules
-rule_collection <- DTARuleCollection(
-  rules = list(range_rule, unique_rule, condition_rule)
-)
-print(rule_collection)
+# Collect rules in a plain list
+rule_collection <- list(range_rule, unique_rule, condition_rule)
 ```
 
 ```{r specs_with_rules}
@@ -1350,9 +1345,8 @@ datasets:
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables           |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only      |
-| `DTAColumnSpecCollection` | Named list of column specs + optional rule collection       |
+| `DTAColumnSpecCollection` | Named list of column specs + optional list of rules          |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)  |
-| `DTARuleCollection`       | Container of DTARule objects                                |
 | `DTARuleColCondition`     | If/then cross-column rule                                   |
 | `DTARuleColRange`         | Numeric range constraint for a column                       |
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)             |
@@ -1381,7 +1375,7 @@ datasets:
 | `labels(x)`                 | Names of all tables in a DTADataSetTabular                   |
 | `specs(x)`                  | DTAColumnSpecCollection from a DTADataSetTabular             |
 | `colspec(x, id)`            | Single DTAColumnSpec by column ID                           |
-| `rules(x)`                  | DTARuleCollection from a collection or dataset              |
+| `rules(x)`                  | List of DTARule objects from a collection or dataset         |
 | `metadata(x)`               | DTAMetaData from a DTA object                               |
 | `write_table_to_file(…)`    | Write a validated table to disk (TSV/CSV, gzip, MD5)        |
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                               |

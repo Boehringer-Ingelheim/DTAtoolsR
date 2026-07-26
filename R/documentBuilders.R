@@ -345,10 +345,10 @@ NULL
 
 #' Build a validation rules table (flextable). Shared by write_dataset_metadata()
 #' and write_dta()'s per-dataset sections.
-#' @param rules_collection A `DTARuleCollection` object (e.g. `specs@rules`) or `NULL`.
+#' @param rules_collection A list of DTARule objects (e.g. `specs@rules`) or `NULL`.
 #' @keywords internal
 .build_rules_table <- function(rules_collection) {
-  rules <- if (!is.null(rules_collection)) as.list(rules_collection) else list()
+  rules <- if (!is.null(rules_collection)) rules_collection else list()
   if (length(rules) == 0) {
     return(NULL)
   }
@@ -508,12 +508,12 @@ NULL
 #' Format validation rules as a professional list
 #' @keywords internal
 .build_validation_rules_section <- function(doc, rules_collection) {
-  if (is.null(rules_collection) || length(rules_collection@rules) == 0) {
+  if (is.null(rules_collection) || length(rules_collection) == 0) {
     doc <- officer::body_add_par(doc, "No validation rules specified.", style = "Normal")
     return(doc)
   }
   
-  rules <- rules_collection@rules
+  rules <- rules_collection
   
   # Create a list of rules
   for (rule in rules) {

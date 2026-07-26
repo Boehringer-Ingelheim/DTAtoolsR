@@ -167,11 +167,9 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   rule_results <- list()
   rule_errors <- list()
   rules_valid <- TRUE
-  rules_obj <- tryCatch(specs@rules, error = function(e) NULL)
-  rules_list <- if (!is.null(rules_obj)) {
-    tryCatch(as.list(rules_obj), error = function(e) list())
-  } else {
-    list()
+  rules_list <- tryCatch(specs@rules, error = function(e) NULL)
+  if (is.null(rules_list)) {
+    rules_list <- list()
   }
 
   if (length(rules_list) > 0) {

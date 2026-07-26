@@ -4,8 +4,7 @@
 %   R/DTADataSetTabular-class.R, R/DTAFile-class.R, R/DTAFileCSV-class.R,
 %   R/DTAFileDelim-class.R, R/DTAFileTSV-class.R, R/DTAMetaData-class.R,
 %   R/DTARule-class.R, R/DTARuleColCondition-class.R,
-%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
-%   R/DTARuleCollection-class.R
+%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R
 \name{print}
 \alias{print}
 \title{Print DTA Object}
@@ -51,14 +50,11 @@ print(x)
 
 ## S7 method for class <DTAtools::DTARuleColUnique>
 print(x)
-
-## S7 method for class <DTAtools::DTARuleCollection>
-print(x, ...)
 }
 \arguments{
-\item{x}{A \code{DTARuleCollection} object.}
+\item{x}{An object of class DTARuleColUnique}
 
-\item{...}{Additional arguments (currently unused).}
+\item{...}{Additional arguments (not used)}
 }
 \value{
 Invisibly returns the input object
@@ -72,8 +68,6 @@ Invisibly returns the input object
 Invisibly returns the input object
 
 Invisibly returns the input object
-
-Invisibly returns the input \code{DTARuleCollection} object.
 }
 \description{
 Print method for DTA objects.
@@ -103,8 +97,6 @@ Print overview for DTADTARuleColConditionRule
 Print overview for DTARuleColRange
 
 Print overview for DTARuleColUnique
-
-Prints a summary of a \code{DTARuleCollection} object, including the number of rules and their IDs.
 }
 \examples{
   dta_obj <- create_example_DTA()
@@ -138,7 +130,4 @@ rule <- create_example_DTARuleColRange()
 print(rule)
 rule <- create_example_DTARuleColUnique()
 print(rule)
-library(DTAtools)
-collection <- create_example_DTARuleCollection()
-print(collection)
 }

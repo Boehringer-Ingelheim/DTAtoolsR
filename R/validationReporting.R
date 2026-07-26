@@ -754,8 +754,10 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   }
 
   rule_id <- as.character(msg_row$rule_id)
-  rules_obj <- tryCatch(x@specs@rules, error = function(e) NULL)
-  rules_list <- if (!is.null(rules_obj)) tryCatch(as.list(rules_obj), error = function(e) list()) else list()
+  rules_list <- tryCatch(x@specs@rules, error = function(e) NULL)
+  if (is.null(rules_list)) {
+    rules_list <- list()
+  }
   rule_idx <- which(vapply(rules_list, function(r) identical(r@id, rule_id), logical(1)))
   rule_def <- if (length(rule_idx) > 0) rules_list[[rule_idx[[1]]]] else NULL
   failing_rows <- if (!is.null(rule_def)) dta_rule_failure_row_indices(rule_def, table_df) else integer(0)

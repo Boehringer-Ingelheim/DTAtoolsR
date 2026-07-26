@@ -10,7 +10,7 @@ rules(x, ...)
 \item{x}{An object of class DTAColumnSpecCollection.}
 }
 \value{
-A DTARuleCollection object, or NULL if no rules are defined.
+A list of DTARule objects, or NULL if no rules are defined.
 }
 \description{
 Method to get Rules from DTAColumnSpecCollection

@@ -8,7 +8,7 @@ and write_dta()'s per-dataset sections.}
 .build_rules_table(rules_collection)
 }
 \arguments{
-\item{rules_collection}{A \code{DTARuleCollection} object (e.g. \code{specs@rules}) or \code{NULL}.}
+\item{rules_collection}{A list of DTARule objects (e.g. \code{specs@rules}) or \code{NULL}.}
 }
 \description{
 Build a validation rules table (flextable). Shared by write_dataset_metadata()

@@ -5,7 +5,7 @@
 #' @importFrom cli cli_abort
 #' @importFrom stringr str_flatten_comma
 #' @param columns A named list of DTAColumnSpec objects. The names should correspond to the ids of the columns
-#' @param rules A DTARuleCollection object or NULL.
+#' @param rules A list of DTARule objects, or NULL.
 #' @return An object of class DTAColumnSpecCollection.
 #' @examples
 #' col1 <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = TRUE)
@@ -33,6 +33,12 @@ DTAColumnSpecCollection <- S7::new_class(
       )
     }
 
+    if (!is.null(rules) && !all(sapply(rules, inherits, "DTAtools::DTARule"))) {
+      cli::cli_abort(
+        "All elements in 'rules' must be of class 'DTARule'"
+      )
+    }
+
     if (is.null(names(columns))) {
       names(columns) <- sapply(columns, function(col) col@id)
     }
@@ -45,7 +51,7 @@ DTAColumnSpecCollection <- S7::new_class(
   },
   properties = list(
     columns = S7::class_list,
-    rules = class_DTARuleCollection_or_null
+    rules = class_list_or_null
   ),
   validator = function(self) {
     # Ensure columns is a list of DTAColumnSpec objects
@@ -63,6 +69,10 @@ DTAColumnSpecCollection <- S7::new_class(
       cli_abort(
         "Names of 'columns' must match the 'id' of each DTAColumnSpec:\n\n ids: {str_flatten_comma(columns_names)} \n\n names: {str_flatten_comma(names(self@columns))}"
       )
+    }
+
+    if (!is.null(self@rules) && !all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
+      "All elements in 'rules' must be of class 'DTARule'"
     }
   }
 )
@@ -127,7 +137,7 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 rule_preview <- new_generic("rule_preview", "x")
 method(rule_preview, DTAColumnSpecCollection) <- function(x) {
   if (!is.null(x@rules)) { 
-    rules <- x@rules@rules
+    rules <- x@rules
     if (length(rules) > 5) {
       rule_preview <- stringr::str_flatten_comma(
         c(
@@ -168,8 +178,8 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 
   cli::cli_alert_info("columns ({length(x@columns)}): {col_preview}")
 
-  if (!is.null(x@rules) && length(x@rules@rules) > 0) {
-    cli::cli_alert_info("rules ({length(x@rules@rules)}): {rule_preview}")
+  if (!is.null(x@rules) && length(x@rules) > 0) {
+    cli::cli_alert_info("rules ({length(x@rules)}): {rule_preview}")
   } else {
     cli::cli_alert("rules: {cli::symbol$cross}")
   }
@@ -222,7 +232,7 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @description
 #' Method to get Rules from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
-#' @return A DTARuleCollection object, or NULL if no rules are defined.
+#' @return A list of DTARule objects, or NULL if no rules are defined.
 #' @examples
 #' collection <- create_example_DTAColumnSpecCollection()
 #' rules(collection)
@@ -338,7 +348,7 @@ specs_from_list <- function(
 
   return(DTAColumnSpecCollection(
     columns = dta_columns,
-    rules = DTARuleCollection(dta_rules)
+    rules = dta_rules
   ))
 }
 

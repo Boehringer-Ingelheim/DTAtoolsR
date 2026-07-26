@@ -410,9 +410,8 @@ row-level validation.
 | `DTADataSet`              | Abstract base class for all dataset types                   |
 | `DTADataSetTabular`       | Dataset with column specs, rules, and data tables            |
 | `DTADataSetFile`          | Dataset that checks file presence and readability only       |
-| `DTAColumnSpecCollection` | Named list of column specs + optional rule collection         |
+| `DTAColumnSpecCollection` | Named list of column specs + optional list of rules           |
 | `DTAColumnSpec`           | Single column definition (type, nullable, values, pattern)   |
-| `DTARuleCollection`       | Container of rule objects                                    |
 | `DTARuleColCondition`     | If/then cross-column rule                                     |
 | `DTARuleColRange`         | Numeric range constraint for a column                        |
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)               |

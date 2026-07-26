@@ -250,15 +250,15 @@ rule_check_col_condition <- function(rule, df) {
 #' @title Apply Schema Rules
 #' @description Applies all schema rules to a data frame with CLI feedback.
 #' @importFrom cli cli_alert_success cli_alert_danger cli_alert_info
-#' @param rules A list of DTARule objects.
+#' @param rules A list of DTARule objects, or NULL.
 #' @param df A data.frame to validate.
 #' @param verbose Logical. If TRUE (default), prints progress messages.
 #' @return (Invisibly) a list of rule validation results, each as a list with
 #'   elements `id`, `valid`, and `message`.
 #' @export
 apply_schema_rules <- function(rules, df, verbose = TRUE) {
-  if (inherits(rules, "DTAtools::DTARuleCollection")) {
-    rules <- as.list(rules)
+  if (is.null(rules)) {
+    rules <- list()
   }
 
   rule_functions <- list(

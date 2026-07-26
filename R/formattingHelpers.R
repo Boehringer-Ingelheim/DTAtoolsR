@@ -631,7 +631,7 @@ translate_rule_to_human <- function(rule) {
   if (include_rules) {
     lines <- c(lines, paste(h, "Validation Rules"), "")
     
-    rules <- if (!is.null(dataset@specs@rules)) as.list(dataset@specs@rules) else list()
+    rules <- if (!is.null(dataset@specs@rules)) dataset@specs@rules else list()
     if (length(rules) > 0) {
       rule_data <- data.frame(
         `Rule ID` = character(),
