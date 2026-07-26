@@ -66,22 +66,34 @@ a Data Transmission Specification (DTS) is structured:
 
 ```
 DTA                              ← top-level agreement container
-├── DTAMetaData                  ← title, version, receiver/supplier contacts,
-│                                     transmission schedule
-└── DTADataSet (named list)      ← one or more datasets per DTS
+├── metadata                     ← title, version, receiver/supplier
+|   DTAMetaData                      contacts, transmission schedule, ..
+│                                     
+└── datasets (named list)        ← one or more datasets per DTS
+    DTADataSet       
     │
-    ├── DTADataSetTabular        ← tabular data: full column-spec + rule validation
-    │   ├── files (list)         ← expected file descriptors
-    │   │   └── DTAFileCSV / DTAFileTSV / DTAFileDelim
+    ├── DTADataSetTabular        ← tabular data: for tables with
+    |   |                            full column-spec + rule validation
+    │   ├── files (list)         ← expected file handlers for various  
+    |   |   |                        input types, manage file names, 
+    │   │   ├── DTAFileCSV           which can have patterns, 
+    |   |   ├── DTAFileTSV           number of files, etc ..
+    |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
+    |   |
     │   ├── specs                ← column-level schema + cross-column rules
-    │   │   └── DTAColumnSpecCollection
-    │   │       ├── DTAColumnSpec × N   ← one per column: type, nullable,
-    │   │       │                            values/pattern, length, format
-    │   │       └── DTARuleCollection
-    │   │           ├── DTARuleColCondition × N  ← if/then cross-column logic
-    │   │           ├── DTARuleColRange × N      ← numeric range constraint
-    │   │           └── DTARuleColUnique × N     ← uniqueness (single or composite key)
+    │   │   DTAColumnSpecCollection
+    │   │   ├── columns (named list)
+    |   |   |   DTAColumnSpec × N   ← one per column: type, nullable,
+    │   │   │                            values/pattern, length, format
+    |   |   └── rules 
+    │   │       DTARuleCollection
+    |   |       └─ rules (named list)
+    │   │          ├── DTARuleColCondition × N  ← if/then cross-column logic
+    │   │          ├── DTARuleColRange × N      ← numeric range constraint
+    │   │          └── DTARuleColUnique × N     ← uniqueness (single or 
+    |   |                                              composite key)
+    |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
     │       └── <table_name>     ← populated via load_file() or constructor
     │
