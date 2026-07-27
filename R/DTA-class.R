@@ -1,4 +1,4 @@
-﻿#' @title DTA Class
+#' @title DTA Class
 #' @description This class helps checking validity of data tables against transmission
 #'  specifications in data transfer agreements (DTA). Also it provides a way to
 #'  generate DTA/DTS documents from specifications.
@@ -67,13 +67,13 @@ DTA <- S7::new_class(
 #' @description
 #' Method to get Metadata from a DTA object.
 #' @param x An object of class DTA
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return A list with metadata information
 #' @examples
 #' library(DTAtools)
 #' dta_obj <- create_example_DTA()
 #' metadata(dta_obj)
 #' @name metadata
-#' @rdname metadata-DTA
 #' @export
 metadata <- new_generic("metadata", "x")
 #' @export
@@ -147,7 +147,9 @@ method(datasets, DTA) <- function(x, name = NULL) {
 #'   dta <- create_example_DTA()
 #'   dta[[1]]
 #'   dta[["demographics"]]
+#' @usage x[[i]]
 #' @name double-bracket
+#' @aliases [[
 #' @export
 method(`[[`, DTA) <- function(x, i) {
   if (!is.character(i) && !is.numeric(i)) {
@@ -170,7 +172,9 @@ method(`[[`, DTA) <- function(x, i) {
 #'   dta <- create_example_DTA()
 #'   dta[c(1, 2)]
 #'   dta[c("demographics", "vitals")]
+#' @usage x[i]
 #' @name single-bracket
+#' @aliases [
 #' @export
 method(`[`, DTA) <- function(x, i) {
   if (!is.character(i) && !is.numeric(i)) {
@@ -208,14 +212,17 @@ load_file <- new_generic("load_file", "x")
 #' Reads a file into one dataset contained in a \code{DTA} object by dataset
 #' name or index.
 #' @param x An object of class \code{DTA}.
-#' @param dataset Single character dataset name or numeric dataset index.
-#' @param file Path to the input file to be read.
-#' @param handler_index Single character or numeric index selecting the file handler
-#' within the dataset. Defaults to \code{1}.
-#' @param name Optional name under which the loaded table should be stored.
-#' Defaults to \code{basename(file)}.
-#' @param ... Additional arguments passed through.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{dataset}{Single character dataset name or numeric dataset index.}
+#'     \item{file}{Path to the input file to be read.}
+#'     \item{handler_index}{Single character or numeric index selecting the file
+#'       handler within the dataset. Defaults to \code{1}.}
+#'     \item{name}{Optional name under which the loaded table should be stored.
+#'       Defaults to \code{basename(file)}.}
+#'   }
 #' @return The updated \code{DTA} object.
+#' @usage load_file(x, ...)
 #' @name load_file
 #' @export
 method(load_file, DTA) <- function(
@@ -250,13 +257,18 @@ method(load_file, DTA) <- function(
 #' Validates all datasets within a \code{DTA} object, or a specific dataset.
 #' Provides comprehensive validation summary across all datasets.
 #' @param x An object of class \code{DTA}.
-#' @param datasets Optional. A character vector of dataset names or numeric indices
-#'   to validate. If NULL (default), validates all datasets.
-#' @param force Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.
-#' @param persist Logical. If TRUE (default), persists validation artifacts to disk.
-#' @param artifact_dir Character or NULL. Directory for persisted artifacts.
-#'   If NULL, uses default validation artifact directory per dataset.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{datasets}{Optional. A character vector of dataset names or numeric
+#'       indices to validate. If NULL (default), validates all datasets.}
+#'     \item{force}{Logical. If TRUE, forces re-validation even if unchanged.
+#'       Default is FALSE.}
+#'     \item{persist}{Logical. If TRUE (default), persists validation artifacts
+#'       to disk.}
+#'     \item{artifact_dir}{Character or NULL. Directory for persisted artifacts.
+#'       If NULL, uses default validation artifact directory per dataset.}
+#'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'   }
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
 #'   validated datasets having their \code{validation_index} and
@@ -271,7 +283,8 @@ method(load_file, DTA) <- function(
 #'   check(dta, datasets = "demographics")
 #'   # Check by index
 #'   check(dta, datasets = 1)
-#' @name check-DTA
+#' @usage check(x, ...)
+#' @name check
 #' @export
 method(check, DTA) <- function(
   x,

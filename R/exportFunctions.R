@@ -1,4 +1,4 @@
-﻿#' @title Generate table containing all DTA column specs
+#' @title Generate table containing all DTA column specs
 #' @description
 #' This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.
 #' @importFrom yaml read_yaml
@@ -238,5 +238,52 @@ export_column_value_table <- function(
     "Table has been written to {.file {file}} successfully."
   )
   invisible(df)
+}
+
+#' Write Metadata to File
+#' @description Writes metadata (MD5 checksum, number of rows and columns) to a separate `.md5` sidecar file.
+#' @param file Path to the input data file.
+#' @param table A data.frame that was written to the file.
+#' @param write_to_file Logical. Whether to write information to an additional file.
+#' @return Invisibly returns a list with `md5sum`, `n_rows`, and `n_cols`.
+#' @importFrom cli cli_alert_info cli_abort
+#' @importFrom tools md5sum
+#' @keywords internal
+write_metadata <- function(file, table, write_to_file) {
+  if (!file.exists(file)) {
+    cli::cli_abort("File does not exist: {file}")
+  }
+
+  # Calculate metadata
+  checksum <- unname(tools::md5sum(file))
+  n_rows <- nrow(table)
+  n_cols <- ncol(table)
+
+  cli::cli_alert_info("md5sum: {checksum}")
+  cli::cli_alert_info("Number of Columns: {n_cols}")
+  cli::cli_alert_info("Number of Rows: {n_rows}")
+
+  if (write_to_file) {
+    # Format metadata lines
+    metadata_lines <- c(
+      paste0("md5sum: ", checksum),
+      paste0("Number of Columns: ", n_cols),
+      paste0("Number of Rows: ", n_rows)
+    )
+
+    # Define metadata file path
+    metadata_file <- paste0(file, ".md5")
+
+    # Write metadata to separate file
+    writeLines(metadata_lines, metadata_file, useBytes = TRUE)
+
+    cli::cli_alert_info("Metadata written to {.file {metadata_file}}")
+  }
+
+  invisible(list(
+    md5sum = checksum,
+    n_rows = n_rows,
+    n_cols = n_cols
+  ))
 }
 

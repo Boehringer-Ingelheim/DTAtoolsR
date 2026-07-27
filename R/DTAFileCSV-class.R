@@ -1,4 +1,4 @@
-﻿#' @title DTAFileCSV Class Constructor
+#' @title DTAFileCSV Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{DTAFileCSV}, which extends \code{DTAFile}
@@ -11,8 +11,11 @@
 #'   pattern. Default is \code{FALSE}.
 #' @param number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected. Default is \code{1}.
-#' @param sep Character. Field separator used in the TSV file.
-#'  Defaults to tab ("\\t").
+#' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
+#'   expected.
+#' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
+#'   expected.
+#' @param info Character or \code{NULL}; free-text description of the file.
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
@@ -55,17 +58,20 @@ DTAFileCSV <- S7::new_class(
 
 
 #' @title Read File for DTAFileCSV Objects
-##' @name read_file_execution-DTAFileCSV
+##' @name read_file_execution
 #' @description
 #' Reads a CSV file using the parameters specified in a
 #' \code{DTAFileCSV} object. This method uses \code{arrow::read_csv_arrow}
 #' for efficient CSV parsing.
 #' @importFrom arrow read_csv_arrow
 #' @param x A \code{DTAFileCSV} object containing file reading parameters.
-#' @param file A character string specifying the path to the file to be read.
+#' @param ... A single `file` argument: character string specifying the path
+#'   to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-method(read_file_execution, DTAFileCSV) <- function(x, file) {
+#' @usage read_file_execution(x, ...)
+method(read_file_execution, DTAFileCSV) <- function(x, ...) {
+  file <- list(...)[[1]]
   table_obj <- arrow::read_csv_arrow(
     file,
     quote = x@quote,

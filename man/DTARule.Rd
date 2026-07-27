@@ -10,6 +10,8 @@ DTARule(id, type, description)
 \item{id}{Character. A unique identifier for the rule.}
 
 \item{type}{Character. The type of the rule (e.g., "check_range", "check_unique").}
+
+\item{description}{Character or NULL. Free-text description of the rule.}
 }
 \value{
 An object of class \code{DTARule}.

@@ -1,4 +1,4 @@
-﻿#' @title DTAColumnSpecCollection Class
+#' @title DTAColumnSpecCollection Class
 #' @description
 #' This class represents a collection of DTAColumnSpec objects with optional template.
 #' @import S7
@@ -86,6 +86,7 @@ DTAColumnSpecCollection <- S7::new_class(
 #' an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
 #'
 #' @param x A \code{DTAColumnSpecCollection} object.
+#' @param ... Not used by current methods; reserved for future extensions.
 #'
 #' @return A character string representing a preview of the column IDs.
 #'
@@ -125,6 +126,7 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #' @importFrom stringr str_flatten_comma
 #'
 #' @param x A \code{DTAColumnSpecCollection} object.
+#' @param ... Not used by current methods; reserved for future extensions.
 #'
 #' @return A character string representing a preview of the rules
 #'
@@ -169,7 +171,7 @@ method(rule_preview, DTAColumnSpecCollection) <- function(x) {
 #' print(x)
 #' @name print
 #' @export
-method(print, DTAColumnSpecCollection) <- function(x) {
+method(print, DTAColumnSpecCollection) <- function(x, ...) {
   col_preview <- column_preview(x)
   rule_preview <- rule_preview(x)
 
@@ -196,7 +198,6 @@ method(print, DTAColumnSpecCollection) <- function(x) {
 #' collection <- create_example_DTAColumnSpecCollection()
 #' names(collection)
 #' @name names
-#' @rdname names-DTAColumnSpecCollection
 #' @export
 if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
@@ -209,13 +210,16 @@ method(names, DTAColumnSpecCollection) <- function(x) {
 #' @description
 #' Method to get a column format by its ID from the collection.
 #' @param x An object of class DTAColumnSpecCollection.
-#' @param id Character. The ID of the column to retrieve.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{id}{Character. The ID of the column to retrieve.}
+#'   }
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' collection <- create_example_DTAColumnSpecCollection()
 #' colspec(collection, "STUDYID")
+#' @usage colspec(x, ...)
 #' @name colspec
-#' @rdname colspec-DTAColumnSpecCollection
 #' @export
 # colspec <- new_generic("colspec", "x", function(x, ...) {
 #   S7_dispatch()
@@ -232,6 +236,7 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @description
 #' Method to get Rules from DTAColumnSpecCollection
 #' @param x An object of class DTAColumnSpecCollection.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return A list of DTARule objects, or NULL if no rules are defined.
 #' @examples
 #' collection <- create_example_DTAColumnSpecCollection()
@@ -240,7 +245,7 @@ method(colspec, DTAColumnSpecCollection) <- function(x, id) {
 #' @export
 rules <- new_generic("rules", "x")
 
-method(rules, DTAColumnSpecCollection) <- function(x) {
+method(rules, DTAColumnSpecCollection) <- function(x, ...) {
   return(x@rules)
 }
 
@@ -511,7 +516,6 @@ columns_specs_from_word <- function(
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
 #' @param columns Column spec information
 #' @name as_json_schema
-#' @rdname as_json_schema-DTAColumnSpecCollection
 #' @return A list representing the JSON Schema.
 #' @importFrom jsonlite toJSON
 #' @importFrom jsonvalidate json_schema
@@ -564,7 +568,6 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
 #' x <- create_example_DTAColumnSpecCollection()
 #' as.list(x)
 #' @name as.list
-#' @rdname as.list-DTAColumnSpecCollection
 method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
 
   columns <- lapply(x@columns, function(column) {

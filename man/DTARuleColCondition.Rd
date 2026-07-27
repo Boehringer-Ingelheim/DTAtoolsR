@@ -9,6 +9,8 @@ DTARuleColCondition(id, description = NULL, condition = NULL, then = NULL)
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
+\item{description}{Character or NULL. Free-text description of the rule.}
+
 \item{condition}{List. A list of conditions to check}
 
 \item{then}{List. A list of conditions that must be true if the

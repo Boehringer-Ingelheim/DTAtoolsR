@@ -6,6 +6,18 @@
 \usage{
 write_file_specification(x, file, ...)
 }
+\arguments{
+\item{x}{A DTADataSet, DTADataSetTabular, or DTADataSetFile object}
+
+\item{file}{Character. Output file path}
+
+\item{...}{Additional arguments passed on to \code{write_dataset_metadata()}
+(\code{format}, \code{overwrite}, \code{include_signatures},
+\code{include_file_specs}, \code{include_rules}, \code{signature_list}).}
+}
+\value{
+Invisibly returns the document object
+}
 \description{
 Convenience alias for write_dataset_metadata()
 }

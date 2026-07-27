@@ -1,4 +1,4 @@
-﻿#' @title DTA Column Format Class
+#' @title DTA Column Format Class
 #' @description
 #' Class for column format.
 #'
@@ -14,10 +14,14 @@
 #' @param nullable Logical or NA. Whether the column can be null.
 #' @param pattern Character or NA. The pattern of the column.
 #' @param values Any or NA. The values of the column.
+#' @param examples Character, numeric, or NA. Example value(s) for the column.
 #' @param description Character or NA. The description of the column.
+#' @param colclass Character or NA. The R/SAS storage class of the column.
 #' @return An object of class DTAColumnSpec.
 #' @examples
-#' col_format <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234")
+#' col_format <- DTAColumnSpec(
+#'   id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234"
+#' )
 DTAColumnSpec <- S7::new_class(
   "DTAColumnSpec",
   constructor = function(
@@ -235,7 +239,7 @@ create_example_DTAColumnSpec <- function(index = 1) {
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @name print
 #' @export
-method(print, DTAColumnSpec) <- function(x) {
+method(print, DTAColumnSpec) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpec}> ")
   if (!is.null(x@label)) {
@@ -257,12 +261,12 @@ method(print, DTAColumnSpec) <- function(x) {
   }
   if (!is.null(x@values)) {
     cli_alert(
-      "values     : {paste0(capture.output(str(x@values, give.attr = FALSE)), collapse = ' ')}"
+      "values     : {paste0(utils::capture.output(utils::str(x@values, give.attr = FALSE)), collapse = ' ')}"
     )
   }
   if (!is.null(x@examples)) {
     cli_alert(
-      "examples   : {paste0(capture.output(str(x@examples, give.attr = FALSE)), collapse = ' ')}"
+      "examples   : {paste0(utils::capture.output(utils::str(x@examples, give.attr = FALSE)), collapse = ' ')}"
     )
   }
   if (!is.null(x@description)) {
@@ -273,7 +277,6 @@ method(print, DTAColumnSpec) <- function(x) {
 
 #' @title as.list method for DTAColumnSpec
 #' @name as.list
-#' @rdname as.list-DTAColumnSpec
 #' @description
 #' Converts a DTAColumnSpec object to a named list.
 #' @param x A DTAColumnSpec object.
@@ -298,7 +301,6 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
 }
 
 #' @name as_json_schema_type
-#' @rdname as_json_schema_type-DTAColumnSpec
 #' @title as_json_schema_type
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema type.
@@ -333,7 +335,6 @@ method(as_json_schema_length, DTAColumnSpec) <- function(x) {
 
 
 #' @name as_json_schema
-#' @rdname as_json_schema-DTAColumnSpec
 #' @title as_json_schema
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema.

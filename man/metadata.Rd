@@ -8,6 +8,8 @@ metadata(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTA}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 A list with metadata information

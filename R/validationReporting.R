@@ -1,4 +1,4 @@
-﻿#' @title Retrieve Check Results
+#' @title Retrieve Check Results
 #' @description
 #' Returns a programmatic summary of the latest validation/check state.
 #' Unlike `check()`, this function is read-only and does not perform validation.
@@ -411,15 +411,19 @@ S7::method(messages, DTA) <- function(
 #' \code{DTADataSetTabular}, and \code{DTADataSetFile}.
 #' @param x A \code{DTA}, \code{DTADataSet}, \code{DTADataSetTabular}, or
 #'   \code{DTADataSetFile} object.
-#' @param id Optional integer message id(s) as shown by \code{messages()}.
-#'   When omitted, all messages are inspected.
-#' @param source Character. One of \code{"auto"}, \code{"memory"}, or
-#'   \code{"artifact"}.
-#' @param as_tibble Logical. When \code{TRUE} and package \code{tibble} is
-#'   installed, returns a tibble. Otherwise returns a base data.frame.
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{id}{Optional integer message id(s) as shown by \code{messages()}.
+#'       When omitted, all messages are inspected.}
+#'     \item{source}{Character. One of \code{"auto"}, \code{"memory"}, or
+#'       \code{"artifact"}.}
+#'     \item{as_tibble}{Logical. When \code{TRUE} and package \code{tibble} is
+#'       installed, returns a tibble. Otherwise returns a base data.frame.}
+#'   }
 #' @return A tibble/data.frame with one or more rows per requested id.
 #'   Detail fields are appended as flat columns prefixed with
 #'   \code{schema_}, \code{context_}, and \code{failing_}.
+#' @usage inspect(x, ...)
 #' @name inspect
 #' @export
 inspect <- S7::new_generic("inspect", "x")
@@ -513,10 +517,10 @@ dta_value_to_text <- function(x) {
   }
 
   if (is.data.frame(x)) {
-    return(paste(capture.output(utils::str(x, give.attr = FALSE)), collapse = " "))
+    return(paste(utils::capture.output(utils::str(x, give.attr = FALSE)), collapse = " "))
   }
 
-  paste(capture.output(utils::str(x, give.attr = FALSE)), collapse = " ")
+  paste(utils::capture.output(utils::str(x, give.attr = FALSE)), collapse = " ")
 }
 
 #' @keywords internal

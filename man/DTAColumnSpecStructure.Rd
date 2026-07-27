@@ -17,6 +17,8 @@ DTAColumnSpecStructure(
 \item{format}{Character or NA. The format of the column.}
 
 \item{length}{Numeric or NA. The max character length.}
+
+\item{backend}{Character. The backend system defining the type/format (e.g. \code{"SAS"}).}
 }
 \description{
 Class for column types.

@@ -1,4 +1,7 @@
-﻿utils::globalVariables(c("Format", "nullable", "description", "id"))
+utils::globalVariables(c(
+  "Format", "nullable", "description", "id",
+  "instancePath", "keyword", "schema", "data", "."
+))
 
 .onLoad <- function(...) {
   S7::methods_register()

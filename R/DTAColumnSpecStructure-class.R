@@ -1,4 +1,4 @@
-﻿#' @title DTA Column Spec Structure
+#' @title DTA Column Spec Structure
 #' @description
 #' Class for column types.
 #'
@@ -9,6 +9,7 @@
 #' @param type Character or NA. The type of the column.
 #' @param format Character or NA. The format of the column.
 #' @param length Numeric or NA. The max character length.
+#' @param backend Character. The backend system defining the type/format (e.g. \code{"SAS"}).
 #' @examples
 #'  DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")
 DTAColumnSpecStructure <- S7::new_class(
@@ -48,7 +49,6 @@ DTAColumnSpecStructure <- S7::new_class(
 #' @return A named list with the DTAColumnSpecStructure properties.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTAColumnSpecStructure
 method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
   list(
     type = paste(x@backend, x@type),
@@ -61,7 +61,6 @@ method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema type.
 #' @name as_json_schema_type
-#' @rdname as_json_schema_type-DTAColumnSpecStructure
 #' @param x An object of class DTAColumnSpecStructure.
 #' @export
 if (!exists("as_json_schema_type", mode = "function")) {
@@ -74,7 +73,6 @@ method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema.
 #' @name as_json_schema
-#' @rdname as_json_schema-DTAColumnSpecStructure
 #' @title as_json_schema
 #' @export
 if (!exists("as_json_schema", mode = "function")) {
@@ -102,7 +100,6 @@ method(as_json_schema, DTAColumnSpecStructure) <- function(x) {
 #' @description
 #' returns list of names of the column specs
 #' @name names
-#' @rdname names-DTAColumnSpecStructure
 #' @export
 if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
@@ -117,7 +114,6 @@ method(names, DTAColumnSpecStructure) <- function(x) {
 #' @description
 #' prints info of the column spec structure
 #' @name print_info
-#' @rdname print_info-DTAColumnSpecStructure
 #' @export
 if (!exists("print_info", mode = "function")) {
   print_info <- new_generic("print_info", "x")
@@ -144,13 +140,12 @@ method(print_info, DTAColumnSpecStructure) <- function(x) {
 #' @description
 #' prints info of the column spec structure
 #' @name print
-#' @rdname print-DTAColumnSpecStructure
 #' @export
 if (!exists("print", mode = "function")) {
   print <- new_generic("print", "x")
 }
 #' @export
-method(print, DTAColumnSpecStructure) <- function(x) {
+method(print, DTAColumnSpecStructure) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpecStructure}>")
   print_info(x)

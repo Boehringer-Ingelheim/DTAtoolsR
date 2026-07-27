@@ -14,6 +14,8 @@ If provided, it must be either "check_unique" or "col_unique".}
 
 \item{columns}{Character vector. Columns that will be collectively checked
 for uniqueness throughout the table.}
+
+\item{description}{Character or NULL. Free-text description of the rule.}
 }
 \value{
 An object of class \code{DTARuleColUnique}.

@@ -1,4 +1,4 @@
-﻿#' @title DTAMetaData Class
+#' @title DTAMetaData Class
 #' @description This class holds comprehensive metadata information for Data Transfer Agreements,
 #' including version history, transmission details, error handling, and contact information.
 #' @import S7

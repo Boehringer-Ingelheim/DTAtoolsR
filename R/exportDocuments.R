@@ -301,12 +301,9 @@ write_dta <- function(
 #' Convert DOCX to PDF using pandoc or similar
 #' @keywords internal
 .convert_docx_to_pdf <- function(docx_file, pdf_file) {
-  # Try using rmarkdown/pandoc
+  # Try using rmarkdown, which wraps the pandoc binary bundled with R/RStudio
   tryCatch({
-    if (requireNamespace("pandoc", quietly = TRUE)) {
-      pandoc_convert(input = docx_file, to = "pdf", output = pdf_file)
-    } else if (requireNamespace("rmarkdown", quietly = TRUE)) {
-      # This is a simplified attempt - in practice, may need different approach
+    if (requireNamespace("rmarkdown", quietly = TRUE) && rmarkdown::pandoc_available()) {
       rmarkdown::pandoc_convert(input = docx_file, to = "pdf", output = pdf_file)
     } else {
       # Fallback: just copy DOCX as is and warn user
@@ -486,6 +483,12 @@ write_dataset_metadata <- function(
 
 #' @title Alias: Export File Dataset Specifications
 #' @description Convenience alias for write_dataset_metadata()
+#' @param x A DTADataSet, DTADataSetTabular, or DTADataSetFile object
+#' @param file Character. Output file path
+#' @param ... Additional arguments passed on to \code{write_dataset_metadata()}
+#'   (\code{format}, \code{overwrite}, \code{include_signatures},
+#'   \code{include_file_specs}, \code{include_rules}, \code{signature_list}).
+#' @return Invisibly returns the document object
 #' @export
 write_file_specification <- function(x, file, ...) {
   write_dataset_metadata(x, file, ...)

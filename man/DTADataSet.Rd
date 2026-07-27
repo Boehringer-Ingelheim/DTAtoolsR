@@ -20,6 +20,15 @@ DTADataSet(
 \item{type}{Character. Dataset type, must be one of \verb{__DTAtools_supported_dataset_types__}.}
 
 \item{files}{a list of DTAFile objects specifying input file information.}
+
+\item{description}{Character or NA. Free-text description of the dataset.}
+
+\item{template_source}{Character or NA. Source of the template used to
+generate the dataset specification.}
+
+\item{template_version}{Character or NA. Version of the template used.}
+
+\item{template_date}{Character or NA. Date of the template used.}
 }
 \value{
 An object of class DTADataSet.

@@ -1,4 +1,4 @@
-﻿#' @title DTADataSetTabular Class
+#' @title DTADataSetTabular Class
 #' @description Handles tabular data with column specifications and rules.
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
@@ -9,6 +9,11 @@
 #' @param files A list of DTAFile objects specifying input file information.
 #' @param tables A named list of tabular objects; each table is converted to an
 #'   Arrow Table and stored in the dataset.
+#' @param description Character or NA. Free-text description of the dataset.
+#' @param template_source Character or NA. Source of the template used to
+#'   generate the dataset specification.
+#' @param template_version Character or NA. Version of the template used.
+#' @param template_date Character or NA. Date of the template used.
 #' @return An object of class DTADataSetTabular
 #' @examples
 #' # Create sample tables
@@ -117,12 +122,16 @@ DTADataSetTabular <- S7::new_class(
 #' @description
 #' Method to get a column format by its ID from the collection.
 #' @param x An object of class DTADataSetTabular
-#' @param id Character. The ID of the column to retrieve.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{id}{Character. The ID of the column to retrieve.}
+#'   }
 #' @return A DTAColumnSpec object corresponding to the specified ID.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' colspec(ds, "STUDYID")
-#' @rdname colspec
+#' @usage colspec(x, ...)
+#' @name colspec
 # colspec <- new_generic("colspec", "x") # was already initialized
 
 #' @export
@@ -155,6 +164,7 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' Extract a table from the tables in a DTADataSetTabular object.
 #' @param x An object of class DTADataSet.
 #' @param id Character or numeric. Name or index of the table to retrieve.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return An Arrow Table object.
 #' @importFrom cli cli_abort
 #' @examples
@@ -282,18 +292,28 @@ write_table_to_file <- function(
 
   # Arrange the table by specified columns
   if (!is.null(arrange_by)) {
-    if (arrange_by == "all") {
+    if (length(arrange_by) == 1 && identical(arrange_by, "all")) {
       if (!isTRUE(quiet)) {
         cli::cli_alert_info("Arrange table by all columns.")
       }
-      table_data <- table_data %>%
-        dplyr::arrange(dplyr::across(dplyr::everything()), desc = arrange_desc)
+      if (isTRUE(arrange_desc)) {
+        table_data <- table_data %>%
+          dplyr::arrange(dplyr::across(dplyr::everything(), dplyr::desc))
+      } else {
+        table_data <- table_data %>%
+          dplyr::arrange(dplyr::across(dplyr::everything()))
+      }
     } else {
       if (!isTRUE(quiet)) {
         cli::cli_alert_info("Arrange table by {arrange_by}.")
       }
-      table_data <- table_data %>%
-        dplyr::arrange(!!!rlang::syms(arrange_by))
+      if (isTRUE(arrange_desc)) {
+        table_data <- table_data %>%
+          dplyr::arrange(dplyr::across(dplyr::all_of(arrange_by), dplyr::desc))
+      } else {
+        table_data <- table_data %>%
+          dplyr::arrange(!!!rlang::syms(arrange_by))
+      }
     }
   }
 
@@ -364,13 +384,13 @@ write_table_to_file <- function(
 #' @description
 #' Method to get columns specifications from DTADataSetTabular
 #' @param x An object of class DTADataSetTabular
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return A list with metadata information
 #' @examples
 #' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' columns(ds)
 #' @name columns
-#' @rdname columns-DTADataSetTabular
 #' @export
 columns <- new_generic("columns", "x")
 #' @export
@@ -386,9 +406,9 @@ method(columns, DTADataSetTabular) <- function(x) {
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' rules(ds)
-#' @name rules-DTADataSetTabular
+#' @name rules
 #' @export
-method(rules, DTADataSetTabular) <- function(x) {
+method(rules, DTADataSetTabular) <- function(x, ...) {
   return(x@specs@rules)
 }
 
@@ -456,7 +476,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
 #' print(create_example_DTADataSetTabular())
 #' @name print
 #' @export
-method(print, DTADataSetTabular) <- function(x) {
+method(print, DTADataSetTabular) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
 
@@ -521,7 +541,7 @@ method(print, DTADataSetTabular) <- function(x) {
 #' print_short_info(ds)
 #' @name print_short_info
 #' @export
-method(print_short_info, DTADataSetTabular) <- function(x) {
+method(print_short_info, DTADataSetTabular) <- function(x, ...) {
   #super(print_short_info, x)
   method(print_short_info, DTADataSet)(x)
   if (!is.null(x@specs)) {
@@ -548,9 +568,13 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
 #' @description
 #' Load the content of the file into dataset
 #' @param x An object of class DTADataSet
-#' @param file file to be loaded
-#' @param handler_index of the filehandler in the files list
-#' @param name file name, base name per default. is used to store the table under this name
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{file}{file to be loaded}
+#'     \item{handler_index}{of the filehandler in the files list}
+#'     \item{name}{file name, base name per default. is used to store the
+#'       table under this name}
+#'   }
 #' @return object of class DTADataSet with loaded data
 #' @examples
 #' file_handler <- DTAFileCSV(filename = "clinical_data.csv")
@@ -562,6 +586,7 @@ method(print_short_info, DTADataSetTabular) <- function(x) {
 #' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 #' ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
 #' names(tables(ds))
+#' @usage load_file(x, ...)
 #' @rdname load_file
 #' @export
 method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = tools::file_path_sans_ext(basename(file))) {
@@ -578,8 +603,12 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
 #' @title Validation Status for DTADataSetTabular
 #' @description Returns a compact status table for validated tables.
 #' @param x A \'DTADataSetTabular\' object.
-#' @param tables NULL (default), character table names, or numeric table indices.
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{tables}{NULL (default), character table names, or numeric table indices.}
+#'   }
 #' @return A data.frame with validation status per table.
+#' @usage validation_status(x, ...)
 #' @name validation_status
 #' @export
 validation_status <- S7::new_generic("validation_status", "x")
@@ -621,9 +650,13 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #' Returns detailed validation output for one table, either from in-memory
 #' store or from persisted artifact.
 #' @param x A \'DTADataSetTabular\' object.
-#' @param table Character or numeric table identifier.
-#' @param source Character. One of \'auto\', \'memory\', or \'artifact\'.
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{table}{Character or numeric table identifier.}
+#'     \item{source}{Character. One of \'auto\', \'memory\', or \'artifact\'.}
+#'   }
 #' @return A list with detailed validation output.
+#' @usage validation_errors(x, ...)
 #' @name validation_errors
 #' @export
 validation_errors <- S7::new_generic("validation_errors", "x")
@@ -665,9 +698,13 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
 #' @title Clear Validation State
 #' @description Clears in-memory validation state for one or all tables.
 #' @param x A \'DTADataSetTabular\' object.
-#' @param tables NULL (default), character table names, or numeric table indices.
-#' @param remove_artifacts Logical. If \'TRUE\', delete artifact files for selected tables.
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{tables}{NULL (default), character table names, or numeric table indices.}
+#'     \item{remove_artifacts}{Logical. If \'TRUE\', delete artifact files for selected tables.}
+#'   }
 #' @return Invisibly returns \'x\'.
+#' @usage clear_validation(x, ...)
 #' @name clear_validation
 #' @export
 clear_validation <- S7::new_generic("clear_validation", "x")
@@ -728,16 +765,22 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #' Validates all tables or a specific table within a DTADataSetTabular object,
 #' prints a validation summary to the console, and updates the object's
 #' validation state.
-#' @param x A \'DTADataSetTabular\' object.
-#' @param tables NULL (default), character table names, or numeric table indices.
-#'   If NULL and `tab` is also NULL, checks all tables.
-#' @param tab Character table name or numeric table index (optional). If provided,
-#'   checks only this single table. Cannot be used together with `tables`.
-#' @param force Logical. If TRUE, forces re-validation even if unchanged. Default is FALSE.
-#' @param persist Logical. If TRUE (default), persists validation artifacts to disk.
-#' @param artifact_dir Character or NULL. Optional output directory for persisted
-#' validation artifacts.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param x A \code{DTADataSetTabular} object.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{tables}{NULL (default), character table names, or numeric table
+#'       indices. If NULL and `tab` is also NULL, checks all tables.}
+#'     \item{tab}{Character table name or numeric table index (optional). If
+#'       provided, checks only this single table. Cannot be used together
+#'       with `tables`.}
+#'     \item{force}{Logical. If TRUE, forces re-validation even if unchanged.
+#'       Default is FALSE.}
+#'     \item{persist}{Logical. If TRUE (default), persists validation
+#'       artifacts to disk.}
+#'     \item{artifact_dir}{Character or NULL. Optional output directory for
+#'       persisted validation artifacts.}
+#'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'   }
 #' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
 #'   with \code{validation_index}/\code{validation_store} updated and a
 #'   \code{"last_validation_summary"} attribute set. Use
@@ -750,7 +793,8 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'   ds <- check(ds)
 #'   # Check specific table
 #'   ds <- check(ds, tables = "tab1")
-#' @name check-DTADataSetTabular
+#' @usage check(x, ...)
+#' @name check
 #' @export
 S7::method(check, DTADataSetTabular) <- function(
   x,

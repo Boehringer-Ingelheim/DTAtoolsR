@@ -1,4 +1,4 @@
-﻿#' @title DTAFile Class
+#' @title DTAFile Class
 #' @description
 #' The \code{DTAFile} class stores metadata and parsing instructions for
 #' delimited data files. It specifies file names (or patterns), the expected
@@ -14,8 +14,13 @@
 #' @param number_of_files Numeric or \code{NULL}; number of files
 #'   expected. Default is \code{1}. If two numbers are provided,
 #'   they represent min and maximum of files expected.
-#' @param sep Character; field separator used in the file (e.g., \code{","},
-#'   \code{"\\t"}).
+#' @param pattern_description Character or \code{NULL}; human-readable
+#'   description of the \code{filename} pattern.
+#' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
+#'   expected.
+#' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
+#'   expected.
+#' @param info Character or \code{NULL}; free-text description of the file.
 #'
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
@@ -138,6 +143,7 @@ if (!exists("min_number_of_files", mode = "function")) {
 #' @description Returns the min number of files specified in a `DTAFile` object.
 #'
 #' @param x An object of class `DTAFile`.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return The number of files.
 #'
 #' @examples
@@ -150,7 +156,7 @@ if (!exists("min_number_of_files", mode = "function")) {
 #' }
 #' @name min_number_of_files
 #' @export
-method(min_number_of_files, DTAFile) <- function(x) {
+method(min_number_of_files, DTAFile) <- function(x, ...) {
   x@min_number_of_files[1]
 }
 
@@ -162,6 +168,7 @@ if (!exists("max_number_of_files", mode = "function")) {
 #' @description Returns the max number of files specified in a `DTAFile` object.
 #'
 #' @param x An object of class `DTAFile`.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return The number of files.
 #'
 #' @examples
@@ -174,7 +181,7 @@ if (!exists("max_number_of_files", mode = "function")) {
 #' }
 #' @name max_number_of_files
 #' @export
-method(max_number_of_files, DTAFile) <- function(x) {
+method(max_number_of_files, DTAFile) <- function(x, ...) {
   x@max_number_of_files
 }
 
@@ -218,7 +225,8 @@ method(matches_filename, DTAFile) <- function(x, file) {
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
-#' @param file A character string specifying the path to the file to be read.
+#' @param ... Additional arguments; the concrete methods expect a single
+#'   unnamed/named `file` argument giving the path to the file to be read.
 #'
 #' @return An Arrow Table containing the file's contents.
 #'
@@ -235,7 +243,7 @@ if (!exists("read_file_execution", mode = "function")) {
 }
 
 #' @export
-method(read_file_execution, DTAFile) <- function(x, file) {
+method(read_file_execution, DTAFile) <- function(x, ...) {
   stop(
     "This method is not implemented. You need to
   use an object of a class which is derived from this class."
@@ -373,7 +381,7 @@ if (!exists("print_info", mode = "function")) {
 if (!exists("print_short_info", mode = "function")) {
   print_short_info <- new_generic("print_short_info", "x")
 }
-method(print_short_info, DTAFile) <- function(x) {
+method(print_short_info, DTAFile) <- function(x, ...) {
   if (
     !x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)
   ) {

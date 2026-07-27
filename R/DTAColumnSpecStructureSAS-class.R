@@ -1,4 +1,4 @@
-﻿#' @keywords internal
+#' @keywords internal
 
 `__dta_sas_type_aliases__` <- c(
   CHAR = "Char",
@@ -166,7 +166,6 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 #' @return A named list with the DTAColumnSpecStructureSAS properties.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTAColumnSpecStructureSAS
 method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
   list(
     type = paste(x@backend, x@type),
@@ -179,7 +178,6 @@ method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema type.
 #' @name as_json_schema_type
-#' @rdname as_json_schema_type-DTAColumnSpecStructureSAS
 #' @export
 if (!exists("as_json_schema_type", mode = "function")) {
   as_json_schema_type <- new_generic("as_json_schema_type", "x")
@@ -203,13 +201,12 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 #' @description
 #' prints info of the column spec structure
 #' @name print
-#' @rdname print-DTAColumnSpecStructureSAS
 #' @export
 if (!exists("print", mode = "function")) {
   print <- new_generic("print", "x")
 }
 #' @export
-method(print, DTAColumnSpecStructureSAS) <- function(x) {
+method(print, DTAColumnSpecStructureSAS) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTAColumnSpecStructureSAS}>")
   print_info(x)

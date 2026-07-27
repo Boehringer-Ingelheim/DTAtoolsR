@@ -1,4 +1,4 @@
-﻿#' @title DTADataSetFile Class
+#' @title DTADataSetFile Class
 #' @description Handles file-backed datasets that only need to verify that one
 #'   or more referenced files exist, are readable, and are not empty.
 #' @import S7
@@ -8,6 +8,10 @@
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
 #' @param description Character or NULL. Optional description.
+#' @param template_source Character or NA. Source of the template used to
+#'   generate the dataset specification.
+#' @param template_version Character or NA. Version of the template used.
+#' @param template_date Character or NA. Date of the template used.
 #' @return An object of class DTADataSetFile.
 #' @export
 DTADataSetFile <- S7::new_class(
@@ -100,6 +104,24 @@ validate_file_dataset_entry <- function(path) {
 }
 
 #' @title Check DTADataSetFile
+#' @description
+#' Validates a \code{DTADataSetFile} object's underlying file(s) and structure.
+#' @param x A \code{DTADataSetFile} object.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{tables}{Optional. Character table names or numeric table indices
+#'       to validate. If NULL (default), validates all tables.}
+#'     \item{force}{Logical. If TRUE, forces re-validation even if unchanged.
+#'       Default is FALSE.}
+#'     \item{persist}{Logical. If TRUE (default), persists validation
+#'       artifacts to disk.}
+#'     \item{artifact_dir}{Character or NULL. Optional output directory for
+#'       persisted validation artifacts.}
+#'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'   }
+#' @return Invisibly returns the updated \code{DTADataSetFile} object \code{x}.
+#' @usage check(x, ...)
+#' @name check
 #' @export
 S7::method(check, DTADataSetFile) <- function(
   x,

@@ -7,13 +7,15 @@
 min_number_of_files(x, ...)
 
 ## S7 method for class <DTAtools::DTADataSet>
-min_number_of_files(x)
+min_number_of_files(x, ...)
 
 ## S7 method for class <DTAtools::DTAFile>
-min_number_of_files(x)
+min_number_of_files(x, ...)
 }
 \arguments{
 \item{x}{An object of class \code{DTAFile}.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 numeric: number of files

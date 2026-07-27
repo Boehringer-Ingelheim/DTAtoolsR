@@ -15,8 +15,7 @@ DTAFileTabular(
   missing_values = "",
   sep = "\\t",
   has_header = TRUE,
-  quote = "\\"",
-  encoding = "UTF-8"
+  quote = "\\""
 )
 }
 \arguments{
@@ -29,6 +28,17 @@ pattern. Default is \code{FALSE}.}
 \item{number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected. Default is \code{1}.}
 
+\item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
+expected.}
+
+\item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
+expected.}
+
+\item{info}{Character or \code{NULL}; free-text description of the file.}
+
+\item{missing_values}{Character. String representing missing values in the
+file. Default is \code{""}.}
+
 \item{sep}{Character. Field separator used in the TSV file.
 Defaults to tab ("\\t").}
 
@@ -37,9 +47,6 @@ is \code{TRUE}.}
 
 \item{quote}{Character or \code{NULL}; quoting character for fields. Default
 is \code{'"'}.}
-
-\item{col_types}{Character string specifying the type of each column (e.g.,
-\code{"cccidcl"}). Default is \code{NULL}.}
 }
 \value{
 An object of class \code{DTAFileTabular}.

@@ -35,7 +35,11 @@ DTAColumnSpec(
 
 \item{values}{Any or NA. The values of the column.}
 
+\item{examples}{Character, numeric, or NA. Example value(s) for the column.}
+
 \item{description}{Character or NA. The description of the column.}
+
+\item{colclass}{Character or NA. The R/SAS storage class of the column.}
 }
 \value{
 An object of class DTAColumnSpec.
@@ -46,5 +50,7 @@ Class for column format.
 This class defines the format of a column in a DTA dataset.
 }
 \examples{
-col_format <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234")
+col_format <- DTAColumnSpec(
+  id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234"
+)
 }

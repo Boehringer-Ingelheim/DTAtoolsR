@@ -22,12 +22,20 @@ to match files.}
 \item{pattern}{Logical; if \code{TRUE}, \code{filename} is treated as a regex
 pattern. Default is \code{FALSE}.}
 
+\item{pattern_description}{Character or \code{NULL}; human-readable
+description of the \code{filename} pattern.}
+
 \item{number_of_files}{Numeric or \code{NULL}; number of files
 expected. Default is \code{1}. If two numbers are provided,
 they represent min and maximum of files expected.}
 
-\item{sep}{Character; field separator used in the file (e.g., \code{","},
-\code{"\\t"}).}
+\item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
+expected.}
+
+\item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
+expected.}
+
+\item{info}{Character or \code{NULL}; free-text description of the file.}
 }
 \value{
 An object of class \code{DTAFile} containing file parsing

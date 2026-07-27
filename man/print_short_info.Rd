@@ -6,7 +6,7 @@
 \title{Print Short Information for DTADataset}
 \usage{
 ## S7 method for class <DTAtools::DTADataSetTabular>
-print_short_info(x)
+print_short_info(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTAMetadata}

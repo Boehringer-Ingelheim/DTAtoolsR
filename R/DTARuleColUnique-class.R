@@ -1,4 +1,4 @@
-﻿#' @title DTARuleColUnique Class
+#' @title DTARuleColUnique Class
 #' @description
 #' Represents a single rule for validating data tables. The rule can be of various types,
 #' such as `check_range`, `check_unique`, or `check_col_condition`
@@ -12,6 +12,7 @@
 #'   If provided, it must be either "check_unique" or "col_unique".
 #' @param columns Character vector. Columns that will be collectively checked
 #'   for uniqueness throughout the table.
+#' @param description Character or NULL. Free-text description of the rule.
 #' @return An object of class `DTARuleColUnique`.
 #'
 #' @examples
@@ -89,7 +90,7 @@ DTARuleColUnique <- S7::new_class(
 #' print(rule)
 #' @name print
 #' @export
-method(print, DTARuleColUnique) <- function(x) {
+method(print, DTARuleColUnique) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
   if(!is.null(x@description)) cli_text("{x@description}")
@@ -129,16 +130,7 @@ create_example_DTARuleColUnique <- function(index = 1) {
 }
 
 
-#' @title check
-#' @description
-#' check rule against data
-#' @importFrom cli cli_abort
-#' @importFrom arrow Table
-#' @examples
-#'  # Example check method call:
-#'  # check(rule, tab)
-#' @name check
-#' @export
+# check() method for DTARuleColUnique; documented at ?check (generic).
 method(check, DTARuleColUnique) <- function(x, tab) {
   # nolint
 
@@ -157,8 +149,7 @@ method(check, DTARuleColUnique) <- function(x, tab) {
 #' @return A named list containing the properties of the DTARuleColUnique object.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTARuleColUnique
-method(as.list, DTARuleColUnique) <- function(x) {
+method(as.list, DTARuleColUnique) <- function(x, ...) {
   list(
     id = x@id,
     type = x@type,

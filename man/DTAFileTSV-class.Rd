@@ -26,6 +26,12 @@ pattern. Default is \code{FALSE}.}
 \item{number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected. Default is \code{1}.}
 
+\item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
+expected.}
+
+\item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
+expected.}
+
 \item{info}{Character or list or \code{NULL}; additional information about the file.}
 
 \item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
@@ -33,9 +39,6 @@ is \code{TRUE}.}
 
 \item{quote}{Character or \code{NULL}; quoting character for fields. Default
 is \code{'"'}.}
-
-\item{sep}{Character. Field separator used in the TSV file.
-Defaults to tab ("\\t").}
 }
 \value{
 An object of class \code{DTAFileTSV}.

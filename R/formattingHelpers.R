@@ -143,7 +143,7 @@ FONT_SIZES <- list(
   )
   
   if (!is.null(rule@description) && nzchar(rule@description)) {
-    desc <- paste0(desc, " — ", rule@description)
+    desc <- paste0(desc, " \u2014 ", rule@description)
   }
   
   desc
@@ -212,7 +212,7 @@ FONT_SIZES <- list(
   if (!is.null(rule@description) && nzchar(rule@description)) {
     rule@description
   } else {
-    paste0("Rule type '", rule@type, "' (id: ", rule@id, ") — no description available")
+    paste0("Rule type '", rule@type, "' (id: ", rule@id, ") \u2014 no description available")
   }
 }
 

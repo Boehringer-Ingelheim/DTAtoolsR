@@ -8,45 +8,22 @@
 \usage{
 load_file(x, ...)
 
-## S7 method for class <DTAtools::DTA>
-load_file(
-  x,
-  dataset,
-  file,
-  handler_index = 1,
-  name = tools::file_path_sans_ext(basename(file)),
-  ...
-)
+load_file(x, ...)
 
-## S7 method for class <DTAtools::DTADataSet>
-load_file(
-  x,
-  handler_index = 1,
-  file,
-  name = tools::file_path_sans_ext(basename(file)),
-  ...
-)
+load_file(x, ...)
 
-## S7 method for class <DTAtools::DTADataSetTabular>
-load_file(
-  x,
-  file,
-  handler_index,
-  name = tools::file_path_sans_ext(basename(file))
-)
+load_file(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTADataSet}
 
-\item{...}{Additional arguments passed through.}
-
-\item{dataset}{Single character dataset name or numeric dataset index.}
-
+\item{...}{Additional named arguments:
+\describe{
 \item{file}{file to be loaded}
-
 \item{handler_index}{of the filehandler in the files list}
-
-\item{name}{file name, base name per default. is used to store the table under this name}
+\item{name}{file name, base name per default. is used to store the
+table under this name}
+}}
 }
 \value{
 The updated object.

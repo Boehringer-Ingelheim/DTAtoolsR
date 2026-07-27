@@ -1,4 +1,4 @@
-﻿#' @title DTARuleColRange Class
+#' @title DTARuleColRange Class
 #' @description
 #' Represents a rule for checking the range of values in a specific columns of
 #'  a data table.
@@ -10,6 +10,9 @@
 #' @param id Character. A unique identifier for the rule.
 #' @param columns Character vector. Column name(s) checked by the range rule.
 #' @param range Numeric vector or list. Legacy argument for range checks.
+#' @param description Character or NULL. Free-text description of the rule.
+#' @param min Numeric or NULL. Lower bound of the allowed range.
+#' @param max Numeric or NULL. Upper bound of the allowed range.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
@@ -104,7 +107,7 @@ DTARuleColRange <- S7::new_class(
 #' print(rule)
 #' @name print
 #' @export
-method(print, DTARuleColRange) <- function(x) {
+method(print, DTARuleColRange) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColRange}> : {.field {x@id}}")
   if(!is.null(x@description)) cli_text("{x@description}")
@@ -138,16 +141,7 @@ create_example_DTARuleColRange <- function(index = 1) {
   }
 }
 
-#' @title check
-#' @description
-#' check rule against data
-#' @importFrom cli cli_abort
-#' @importFrom arrow Table
-#' @examples
-#'  # Example check method call:
-#'  # check(rule, tab)
-#' @name check
-#' @export
+# check() method for DTARuleColRange; documented at ?check (generic).
 method(check, DTARuleColRange) <- function(x, tab) {
   # nolint
 
@@ -166,8 +160,7 @@ method(check, DTARuleColRange) <- function(x, tab) {
 #' @return A named list containing the properties of the DTARuleColRange object.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTARuleColRange
-method(as.list, DTARuleColRange) <- function(x) {
+method(as.list, DTARuleColRange) <- function(x, ...) {
   list(
     id = x@id,
     type = x@type,

@@ -19,6 +19,12 @@ DTARuleColRange(
 \item{columns}{Character vector. Column name(s) checked by the range rule.}
 
 \item{range}{Numeric vector or list. Legacy argument for range checks.}
+
+\item{description}{Character or NULL. Free-text description of the rule.}
+
+\item{min}{Numeric or NULL. Lower bound of the allowed range.}
+
+\item{max}{Numeric or NULL. Upper bound of the allowed range.}
 }
 \value{
 An object of class \code{DTARuleColRange}.

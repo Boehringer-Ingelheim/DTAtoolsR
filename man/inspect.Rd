@@ -10,14 +10,15 @@ inspect(x, ...)
 \item{x}{A \code{DTA}, \code{DTADataSet}, \code{DTADataSetTabular}, or
 \code{DTADataSetFile} object.}
 
+\item{...}{Additional arguments:
+\describe{
 \item{id}{Optional integer message id(s) as shown by \code{messages()}.
 When omitted, all messages are inspected.}
-
 \item{source}{Character. One of \code{"auto"}, \code{"memory"}, or
 \code{"artifact"}.}
-
 \item{as_tibble}{Logical. When \code{TRUE} and package \code{tibble} is
 installed, returns a tibble. Otherwise returns a base data.frame.}
+}}
 }
 \value{
 A tibble/data.frame with one or more rows per requested id.

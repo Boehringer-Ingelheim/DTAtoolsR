@@ -8,6 +8,8 @@ columns(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTADataSetTabular}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 A list with metadata information

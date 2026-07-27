@@ -24,6 +24,15 @@ DTADataSetTabular(
 Arrow Table and stored in the dataset.}
 
 \item{files}{A list of DTAFile objects specifying input file information.}
+
+\item{description}{Character or NA. Free-text description of the dataset.}
+
+\item{template_source}{Character or NA. Source of the template used to
+generate the dataset specification.}
+
+\item{template_version}{Character or NA. Version of the template used.}
+
+\item{template_date}{Character or NA. Date of the template used.}
 }
 \value{
 An object of class DTADataSetTabular

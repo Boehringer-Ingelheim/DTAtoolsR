@@ -2,10 +2,10 @@
 % Please edit documentation in R/DTA-class.R
 \name{double-bracket}
 \alias{double-bracket}
+\alias{[[}
 \title{Extract single dataset with [[}
 \usage{
-## S7 method for class <DTAtools::DTA>
-x[[i
+x[[i]]
 }
 \arguments{
 \item{x}{An object of class \code{DTA}.}

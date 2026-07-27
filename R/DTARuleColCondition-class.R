@@ -1,4 +1,4 @@
-﻿#' @title DTARuleColCondition Class
+#' @title DTARuleColCondition Class
 #' @description
 #' A rule for validating data tables with conditions
 #'
@@ -7,6 +7,7 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
+#' @param description Character or NULL. Free-text description of the rule.
 #' @param condition List. A list of conditions to check
 #' @param then List. A list of conditions that must be true if the
 #'   conditions are met
@@ -96,7 +97,7 @@ DTARuleColCondition <- S7::new_class(
 #' print(rule)
 #' @name print
 #' @export
-method(print, DTARuleColCondition) <- function(x) {
+method(print, DTARuleColCondition) <- function(x, ...) {
   # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
@@ -149,16 +150,7 @@ create_example_DTARuleColCondition <- function(index = 1) {
 }
 
 
-#' @title check
-#' @description
-#' check rule against data
-#' @importFrom cli cli_abort
-#' @importFrom arrow Table
-#' @examples
-#'  # Example check method call:
-#'  # check(rule, tab)
-#' @name check
-#' @export
+# check() method for DTARuleColCondition; documented at ?check (generic).
 method(check, DTARuleColCondition) <- function(x, tab) {
   # nolint
 
@@ -178,8 +170,7 @@ method(check, DTARuleColCondition) <- function(x, tab) {
 #' @return A named list containing the properties of the DTARuleColCondition object.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTARuleColCondition
-method(as.list, DTARuleColCondition) <- function(x) {
+method(as.list, DTARuleColCondition) <- function(x, ...) {
   list(
     id = x@id,
     type = x@type,

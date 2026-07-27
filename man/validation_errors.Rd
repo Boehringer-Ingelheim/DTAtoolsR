@@ -9,9 +9,11 @@ validation_errors(x, ...)
 \arguments{
 \item{x}{A \'DTADataSetTabular\' object.}
 
+\item{...}{Additional arguments:
+\describe{
 \item{table}{Character or numeric table identifier.}
-
 \item{source}{Character. One of \'auto\', \'memory\', or \'artifact\'.}
+}}
 }
 \value{
 A list with detailed validation output.

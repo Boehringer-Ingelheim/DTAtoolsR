@@ -11,6 +11,8 @@ get_table(x, id = 1, ...)
 \item{x}{An object of class DTADataSet.}
 
 \item{id}{Character or numeric. Name or index of the table to retrieve.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 An Arrow Table object.

@@ -1,4 +1,4 @@
-﻿#' @title DTADataSet Class
+#' @title DTADataSet Class
 #' @description Class to handle data from files
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
@@ -6,6 +6,11 @@
 #' @param name Character. Name of the container.
 #' @param type Character. Dataset type, must be one of `__DTAtools_supported_dataset_types__`.
 #' @param files a list of DTAFile objects specifying input file information.
+#' @param description Character or NA. Free-text description of the dataset.
+#' @param template_source Character or NA. Source of the template used to
+#'   generate the dataset specification.
+#' @param template_version Character or NA. Version of the template used.
+#' @param template_date Character or NA. Date of the template used.
 #' @return An object of class DTADataSet.
 #'
 #' @examples
@@ -68,6 +73,7 @@ DTADataSet <- S7::new_class(
 #' single \code{DTAFile} handler's own maximum, or the sum across all file
 #' handlers in a \code{DTADataSet}.
 #' @param x An object of class \code{DTAFile} or \code{DTADataSet}.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return numeric: number of files
 #' @name max_number_of_files
 #' @export
@@ -88,7 +94,7 @@ max_number_of_files <- new_generic("max_number_of_files", "x")
 #' max_number_of_files(ds)
 #' @name max_number_of_files
 #' @export
-method(max_number_of_files, DTADataSet) <- function(x) {
+method(max_number_of_files, DTADataSet) <- function(x, ...) {
   sum(unlist(sapply(x@files, max_number_of_files)))
 }
 
@@ -99,6 +105,7 @@ method(max_number_of_files, DTADataSet) <- function(x) {
 #' single \code{DTAFile} handler's own minimum, or the sum across all file
 #' handlers in a \code{DTADataSet}.
 #' @param x An object of class \code{DTAFile} or \code{DTADataSet}.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @return numeric: number of files
 #' @name min_number_of_files
 #' @export
@@ -119,7 +126,7 @@ min_number_of_files <- new_generic("min_number_of_files", "x")
 #' min_number_of_files(ds)
 #' @name min_number_of_files
 #' @export
-method(min_number_of_files, DTADataSet) <- function(x) {
+method(min_number_of_files, DTADataSet) <- function(x, ...) {
   sum(unlist(sapply(x@files, min_number_of_files)))
 }
 
@@ -133,7 +140,7 @@ method(min_number_of_files, DTADataSet) <- function(x) {
 #' print(create_example_DTADataSetTabular())
 #' @name print
 #' @export
-method(print, DTADataSet) <- function(x) {
+method(print, DTADataSet) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTADataSet}> : {.field {x@name}}")
 
@@ -229,7 +236,7 @@ method(print_info, DTADataSet) <- function(x) {
 if (!exists("print_short_info", mode = "function")) {
   print_short_info <- new_generic("print_short_info", "x")
 }
-method(print_short_info, DTADataSet) <- function(x) {
+method(print_short_info, DTADataSet) <- function(x, ...) {
   min_n <- min_number_of_files(x)
   max_n <- max_number_of_files(x)
   if (max_n == 0) {
@@ -318,17 +325,19 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 #' @description
 #' Method to get files from DTADataSet object.
 #' @param x An object of class DTADataSet.
-#' @param name Optional single character or single integer. if NULL, returns a
-#' list of all files. If character, returns the datasets with the specified name.
-#' If integer, returns the datasets at the specified index.
-#' @param ... Additional arguments (not used).
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{name}{Optional single character or single integer. if NULL, returns a
+#'       list of all files. If character, returns the datasets with the specified name.
+#'       If integer, returns the datasets at the specified index.}
+#'   }
 #' @return A list of DTAFile objects, or a single DTAFile object when a name
 #'   or index is provided.
 #' @examples
 #' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' files(ds)
-#' @name files-DTADataSet
+#' @name files
 #' @export
 files <- new_generic("files", "x")
 
@@ -372,15 +381,17 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 #' @description
 #' Method to get tables from DTADataSet object.
 #' @param x An object of class DTADataSet.
-#' @param i index: optional single character or integer or vector of characters 
-#' or integers to select specific tables. if NULL (default), returns all tables.
-#' @param ... Additional arguments (not used).
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{i}{index: optional single character or integer or vector of characters
+#'       or integers to select specific tables. if NULL (default), returns all tables.}
+#'   }
 #' @return A list of tables, or a single table when one index/name is provided.
 #' @examples
 #' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' tables(ds)
-#' @name tables-DTADataSet
+#' @name tables
 #' @export
 tables <- new_generic("tables", "x")
 
@@ -404,13 +415,16 @@ if (!exists("load_file", mode = "function")) {
 #' @description
 #' Convenience wrapper that dispatches to \code{load_file()} for a dataset.
 #' @param x An object of class \code{DTADataSet}.
-#' @param handler_index Single character or numeric index selecting the file handler
-#' within the dataset. Defaults to \code{1}.
-#' @param file Path to the input file to be read.
-#' @param name Optional name under which the loaded table should be stored.
-#' Defaults to \code{basename(file)}.
-#' @param ... Additional arguments passed through.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{handler_index}{Single character or numeric index selecting the
+#'       file handler within the dataset. Defaults to \code{1}.}
+#'     \item{file}{Path to the input file to be read.}
+#'     \item{name}{Optional name under which the loaded table should be stored.
+#'       Defaults to \code{basename(file)}.}
+#'   }
 #' @return The updated dataset object.
+#' @usage load_file(x, ...)
 #' @name load_file
 #' @export
 method(load_file, DTADataSet) <- function(
@@ -496,12 +510,16 @@ dta_validation_result_to_row <- function(table_name, status, index_entry, target
 #' This is the base method; subclasses like \code{DTADataSetTabular}
 #' override it to add table-specific validation.
 #' @param x A \code{DTADataSet} object.
-#' @param force Logical. If \code{FALSE}, validation for unchanged data is skipped.
-#' @param persist Logical. If \code{TRUE}, validation artifacts are persisted.
-#' @param artifact_dir Character or NULL. Optional output directory for artifacts.
-#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{force}{Logical. If \code{FALSE}, validation for unchanged data is skipped.}
+#'     \item{persist}{Logical. If \code{TRUE}, validation artifacts are persisted.}
+#'     \item{artifact_dir}{Character or NULL. Optional output directory for artifacts.}
+#'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'   }
 #' @return Invisibly returns \code{x}.
-#' @name check-DTADataSet
+#' @usage check(x, ...)
+#' @name check
 #' @export
 S7::method(check, DTADataSet) <- function(
   x,

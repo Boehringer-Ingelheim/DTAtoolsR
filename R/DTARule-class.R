@@ -1,4 +1,4 @@
-﻿#' @title DTARule Class
+#' @title DTARule Class
 #' @description
 #' Represents a single rule for validating data tables. The rule can be of various types,
 #' such as `check_range`, `check_unique`, or `check_col_condition`
@@ -8,6 +8,7 @@
 #'
 #' @param id Character. A unique identifier for the rule.
 #' @param type Character. The type of the rule (e.g., "check_range", "check_unique").
+#' @param description Character or NULL. Free-text description of the rule.
 #' @return An object of class `DTARule`.
 #'
 #' @examples
@@ -65,7 +66,7 @@ DTARule <- S7::new_class(
 #' print(rule)
 #' @name print
 #' @export
-method(print, DTARule) <- function(x) {
+method(print, DTARule) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli::cli_text("<{.emph DTARule}> : {.field {x@id}}")
   cli::cli_alert("type: {x@type}")
@@ -159,7 +160,6 @@ DTARuleFactory <- function(id, type, ...) {
 #' @return A named list containing the properties of the DTARule object.
 #' @export
 #' @name as.list
-#' @rdname as.list-DTARule
 method(as.list, DTARule) <- function(x, ...) {
   list(
     id = x@id,

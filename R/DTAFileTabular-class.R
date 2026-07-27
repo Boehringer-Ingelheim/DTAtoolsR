@@ -1,4 +1,4 @@
-﻿#' @title DTAFileTabular Class Constructor
+#' @title DTAFileTabular Class Constructor
 #'
 #' @description
 #' Defines the S7 class \code{C}, which extends \code{DTAFile}
@@ -11,14 +11,19 @@
 #'   pattern. Default is \code{FALSE}.
 #' @param number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected. Default is \code{1}.
+#' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
+#'   expected.
+#' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
+#'   expected.
+#' @param info Character or \code{NULL}; free-text description of the file.
+#' @param missing_values Character. String representing missing values in the
+#'   file. Default is \code{""}.
 #' @param sep Character. Field separator used in the TSV file.
 #'  Defaults to tab ("\\t").
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
-#' @param col_types Character string specifying the type of each column (e.g.,
-#'   \code{"cccidcl"}). Default is \code{NULL}.
 #'
 #' @name DTAFileTabular-class
 #' @return An object of class \code{DTAFileTabular}.
@@ -39,8 +44,7 @@ DTAFileTabular <- S7::new_class(
     missing_values = "",
     sep = "\t",
     has_header = TRUE,
-    quote = '"',
-    encoding = "UTF-8"
+    quote = '"'
   ) {
     new_object(
       .parent = DTAFile(
@@ -80,17 +84,19 @@ DTAFileTabular <- S7::new_class(
 
 
 #' @title Read File for DTAFileTabular Objects
-#' @name read_file_execution-DTAFileTabular
+#' @name read_file_execution
 #' @description
 #' \code{DTAFileTabular} is a virtual class. This method needs to be
 #' implemented in derived classes like \code{DTAFileTSV},
 #' \code{DTAFileCSV} or \code{DTAFileDelim}.
 #' @importFrom cli cli_abort
 #' @param x A \code{DTAFileTabular} object containing file reading parameters.
-#' @param file A character string specifying the path to the file to be read.
+#' @param ... A single `file` argument: character string specifying the path
+#'   to the file to be read.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-method(read_file_execution, DTAFileTabular) <- function(x, file) {
+#' @usage read_file_execution(x, ...)
+method(read_file_execution, DTAFileTabular) <- function(x, ...) {
   cli::cli_abort(
     "This method is not implemented. You need to
   use an object of a class which is derived from DTAFileTabular class."

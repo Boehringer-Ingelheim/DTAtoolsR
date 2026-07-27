@@ -9,7 +9,10 @@ validation_status(x, ...)
 \arguments{
 \item{x}{A \'DTADataSetTabular\' object.}
 
+\item{...}{Additional arguments:
+\describe{
 \item{tables}{NULL (default), character table names, or numeric table indices.}
+}}
 }
 \value{
 A data.frame with validation status per table.

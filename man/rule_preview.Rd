@@ -8,6 +8,8 @@ rule_preview(x, ...)
 }
 \arguments{
 \item{x}{A \code{DTAColumnSpecCollection} object.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 A character string representing a preview of the rules

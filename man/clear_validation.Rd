@@ -9,9 +9,11 @@ clear_validation(x, ...)
 \arguments{
 \item{x}{A \'DTADataSetTabular\' object.}
 
+\item{...}{Additional arguments:
+\describe{
 \item{tables}{NULL (default), character table names, or numeric table indices.}
-
 \item{remove_artifacts}{Logical. If \'TRUE\', delete artifact files for selected tables.}
+}}
 }
 \value{
 Invisibly returns \'x\'.
