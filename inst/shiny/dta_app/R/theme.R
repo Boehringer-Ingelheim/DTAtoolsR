@@ -50,21 +50,28 @@ bi_theme <- function() {
 
 # Extra CSS ----------------------------------------------------------------
 bi_css <- function() {
-  shiny::HTML(sprintf(
-    "
-    :root {
+  root <- sprintf(
+    ":root {
       --bi-green: %s; --bi-green-dark: %s; --bi-green-light: %s;
       --bi-accent: %s; --bi-ink: %s; --bi-grey: %s; --bi-grey-light: %s;
       --bi-pass: %s; --bi-pass-bg: %s; --bi-pass-border: %s;
       --bi-fail: %s; --bi-fail-bg: %s; --bi-fail-border: %s;
       --bi-pending: %s; --bi-pending-bg: %s; --bi-pending-border: %s;
-    }
+    }",
+    BI$green, BI$green_dark, BI$green_light,
+    BI$accent, BI$ink, BI$grey, BI$grey_light,
+    BI$pass, BI$pass_bg, BI$pass_border,
+    BI$fail, BI$fail_bg, BI$fail_border,
+    BI$pending, BI$pending_bg, BI$pending_border
+  )
+  shiny::HTML(paste0(root, "
     body { background: var(--bi-grey-light); }
     .app-brandbar {
       background: linear-gradient(90deg, var(--bi-green-dark), var(--bi-green));
       color: #fff; padding: 14px 20px; display: flex; align-items: center;
       gap: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
     }
+    .app-brandbar .brand-logo { height: 34px; width: auto; display: block; flex: none; }
     .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
     .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
     .app-actions { margin-left: auto; display: flex; gap: 8px; }
@@ -79,7 +86,7 @@ bi_css <- function() {
     .status-fail    { color: var(--bi-fail); background: var(--bi-fail-bg); border-color: var(--bi-fail-border); }
     .status-pending { color: var(--bi-pending); background: var(--bi-pending-bg); border-color: var(--bi-pending-border); }
     .status-nodata  { color: #8A6D3B; background: #FCF4E6; border-color: #EBD9B6; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%%; background: currentColor; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 
     /* Dataset tiles get a colored left edge by status */
     .tile-pass    { border-left: 5px solid var(--bi-pass) !important; }
@@ -98,7 +105,7 @@ bi_css <- function() {
 
     /* Make Shiny fileInput look like a drop zone */
     .dropzone .form-group { margin-bottom: 0; }
-    .dropzone .input-group, .dropzone .custom-file, .dropzone input[type=file] { width: 100%%; }
+    .dropzone .input-group, .dropzone .custom-file, .dropzone input[type=file] { width: 100%; }
     .dropzone .btn-file, .dropzone .form-control {
       border-style: dashed !important; border-width: 2px !important;
       border-color: var(--bi-pass-border) !important;
@@ -148,13 +155,73 @@ bi_css <- function() {
     .yaml-view .yml-comment { color: #8b949e; font-style: italic; }
     .yaml-view .yml-punct   { color: #c9d1d9; }
     .yaml-view .yml-dash    { color: #ff7b72; }
-    ",
-    BI$green, BI$green_dark, BI$green_light,
-    BI$accent, BI$ink, BI$grey, BI$grey_light,
-    BI$pass, BI$pass_bg, BI$pass_border,
-    BI$fail, BI$fail_bg, BI$fail_border,
-    BI$pending, BI$pending_bg, BI$pending_border
-  ))
+
+    /* Loaded-files list: one row per bound file (name + table + status + trash) */
+    .loaded-slot { margin-bottom: 12px; }
+    .loaded-slot-head { margin-bottom: 5px; }
+    .loaded-file-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 10px; margin-bottom: 6px;
+      border: 1px solid var(--bi-pending-border); border-radius: 8px; background: #fff;
+    }
+    .loaded-file-row .file-name { font-weight: 600; color: var(--bi-ink); word-break: break-all; }
+    .loaded-file-row .file-table {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+      color: var(--bi-green-dark); background: var(--bi-green-light);
+      padding: 1px 7px; border-radius: 6px; white-space: nowrap;
+    }
+    .loaded-file-row .file-status { font-weight: 700; width: 1.2em; text-align: center; flex: none; }
+    .loaded-file-row .file-ok      { color: var(--bi-pass); }
+    .loaded-file-row .file-fail    { color: var(--bi-fail); }
+    .loaded-file-row .file-pending { color: var(--bi-grey); }
+    .loaded-file-row .file-remove {
+      margin-left: auto; flex: none; color: var(--bi-fail);
+      border: none; background: transparent; padding: 2px 7px; line-height: 1; font-size: 1rem;
+    }
+    .loaded-file-row .file-remove:hover { background: var(--bi-fail-bg); border-radius: 6px; }
+
+    /* Validation messages: compact table + download buttons + top filters */
+    .msgs-dl .btn { margin-left: 6px; }
+    .msgs-table table.dataTable { font-size: .8rem; }
+    .msgs-table table.dataTable td, .msgs-table table.dataTable th { padding: 5px 8px; }
+    .msgs-table .dataTables_wrapper { font-size: .82rem; }
+    .msgs-table .dataTables_filter input, .msgs-table .dataTables_length select { font-size: .82rem; }
+    .msgs-table table.dataTable thead .form-control,
+    .msgs-table table.dataTable thead .form-select,
+    .msgs-table table.dataTable thead input,
+    .msgs-table table.dataTable thead select { font-size: .78rem; padding: 2px 6px; }
+
+    /* Sidebar dataset navigation: name (select) + per-dataset check icon */
+    .dataset-nav .list-group { margin-bottom: 4px; }
+    .dataset-nav-row {
+      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    }
+    .dataset-nav-row .nav-select {
+      flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
+      text-decoration: none; color: var(--bi-ink); font-weight: 600; overflow: hidden;
+    }
+    .dataset-nav-row .nav-select:hover { text-decoration: none; }
+    .dataset-nav-row .nav-name { word-break: break-word; }
+    .dataset-nav-row.active { background: var(--bi-green); border-color: var(--bi-green); }
+    .dataset-nav-row.active .nav-select,
+    .dataset-nav-row.active .nav-name { color: #fff; }
+    .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 700; font-size: .95rem; }
+    .nav-ic-pass { color: var(--bi-pass); }
+    .nav-ic-fail { color: var(--bi-fail); }
+    .nav-ic-pending { color: var(--bi-pending); }
+    .dataset-nav-row.active .nav-ic-pass { color: #CFF3E0; }
+    .dataset-nav-row.active .nav-ic-fail { color: #FFD5CE; }
+    .dataset-nav-row.active .nav-ic-pending { color: rgba(255,255,255,.75); }
+    .dataset-nav-row .nav-check {
+      flex: none; color: var(--bi-pass); border: 1px solid var(--bi-pass-border);
+      background: #fff; padding: 1px 8px; line-height: 1.3; border-radius: 6px; font-size: .85rem;
+    }
+    .dataset-nav-row .nav-check:hover { background: var(--bi-pass-bg); }
+    .dataset-nav-row.active .nav-check {
+      color: #fff; border-color: rgba(255,255,255,.55); background: transparent;
+    }
+    .dataset-nav-row.active .nav-check:hover { background: rgba(255,255,255,.15); }
+    "))
 }
 
 # Status chip HTML ---------------------------------------------------------

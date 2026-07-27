@@ -16,9 +16,40 @@ dta_try <- function(expr) {
 
 # ---- Loading -------------------------------------------------------------
 
-# Read a DTA YAML file into a DTA object.
+# Read a YAML file into a DTA object, detecting its shape first.
+# A DTA YAML has a top-level `metadata:` and/or `datasets:` key. A standalone
+# DATASET YAML (e.g. gf_dataset.yaml) has the dataset fields at the top level
+# (`name`, `type`, `files`, `columns`) and NO `datasets`/`metadata` key -- it is
+# read via read_dataset_from_yaml() and wrapped in a DTA so the rest of the app
+# (which operates on a DTA) works unchanged.
+# Returns the usual dta_try() list plus two flags:
+#   dataset_only : TRUE when the source was a standalone dataset YAML.
+#   has_metadata : TRUE when the source YAML carried a `metadata:` section.
 dta_read_yaml <- function(path) {
-  dta_try(DTAtools::read_dta_from_yaml(path))
+  raw <- dta_try(yaml::read_yaml(path))
+  if (!raw$ok) {
+    return(list(ok = FALSE, value = NULL, error = raw$error,
+                dataset_only = FALSE, has_metadata = FALSE))
+  }
+  y <- raw$value
+  has_metadata <- is.list(y) && !is.null(y$metadata)
+  is_dta <- is.list(y) && (has_metadata || !is.null(y$datasets))
+
+  if (is_dta) {
+    res <- dta_try(DTAtools::read_dta_from_yaml(path))
+    res$dataset_only <- FALSE
+    res$has_metadata <- has_metadata
+    return(res)
+  }
+
+  # Standalone dataset YAML -> read it and wrap in a metadata-less DTA.
+  res <- dta_try({
+    ds <- DTAtools::read_dataset_from_yaml(path)
+    DTAtools::DTA(datasets = ds)
+  })
+  res$dataset_only <- TRUE
+  res$has_metadata <- FALSE
+  res
 }
 
 # ---- Introspection -------------------------------------------------------
@@ -300,6 +331,100 @@ dta_status_map <- function(dta) {
     }
   }
   out
+}
+
+# ---- Loaded-file management ----------------------------------------------
+# A dataset binds data as named items: tabular datasets keep an @tables list
+# (name -> Arrow table), file datasets keep @file_paths. load_file() names each
+# table after the file (file_path_sans_ext), so a file <-> table is 1:1. These
+# helpers expose that mapping to the app: detect overwrite conflicts, show a
+# per-file validation state, and remove individual / all bound files.
+
+# Names of the data items currently bound to a dataset (dataset-wide truth):
+# table names for tabular datasets, file basenames for file datasets.
+dta_dataset_table_names <- function(ds) {
+  if (is.null(ds)) return(character(0))
+  ty <- tryCatch(ds@type, error = function(e) NA_character_)
+  if (identical(ty, "file")) {
+    fp <- tryCatch(ds@file_paths, error = function(e) character(0)) %||% character(0)
+    basename(fp)
+  } else {
+    names(tryCatch(ds@tables, error = function(e) list())) %||% character(0)
+  }
+}
+
+# Per-table validation status: named vector table -> "pass" | "fail" | "pending".
+# "pending" = not validated yet (no tick); "pass" = validated, zero errors;
+# "fail" = validated with schema/rule errors. Drives the per-file tick color.
+dta_table_status_map <- function(dta, dataset) {
+  empty <- stats::setNames(character(0), character(0))
+  ds <- dta_get_dataset(dta, dataset)
+  if (is.null(ds)) return(empty)
+  vs <- tryCatch(as.data.frame(DTAtools::validation_status(ds)),
+                 error = function(e) NULL)
+  if (is.null(vs) || nrow(vs) == 0) return(empty)
+  tcol <- if ("table" %in% names(vs)) "table" else if ("target" %in% names(vs)) "target" else names(vs)[1]
+  ok  <- if ("ok" %in% names(vs)) vs$ok else rep(NA, nrow(vs))
+  nse <- if ("n_schema_errors" %in% names(vs)) suppressWarnings(as.numeric(vs$n_schema_errors)) else rep(NA_real_, nrow(vs))
+  nre <- if ("n_rule_errors" %in% names(vs)) suppressWarnings(as.numeric(vs$n_rule_errors)) else rep(NA_real_, nrow(vs))
+  has_err <- (!is.na(nse) & nse > 0) | (!is.na(nre) & nre > 0) | (!is.na(ok) & !ok)
+  st <- rep("pending", nrow(vs))
+  st[!is.na(ok) & ok] <- "pass"
+  st[has_err] <- "fail"
+  stats::setNames(st, as.character(vs[[tcol]]))
+}
+
+# Reset ("not validated") the validation status of one/all tables of a dataset,
+# used after an overwrite so a stale pass/fail is never shown for changed data.
+# Returns dta_try() result (value = updated DTA).
+dta_clear_validation <- function(dta, dataset, tables = NULL) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    ds <- DTAtools::clear_validation(ds, tables = tables, remove_artifacts = FALSE)
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+}
+
+# Remove ONE bound file/table (and its validation state) from a dataset.
+dta_unload_table <- function(dta, dataset, table) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    ty <- tryCatch(ds@type, error = function(e) NA_character_)
+    if (identical(ty, "file")) {
+      fp <- tryCatch(ds@file_paths, error = function(e) character(0)) %||% character(0)
+      ds@file_paths <- fp[basename(fp) != table]
+    } else {
+      tabs <- tryCatch(ds@tables, error = function(e) list()) %||% list()
+      tabs[[table]] <- NULL
+      ds@tables <- tabs
+    }
+    vi <- tryCatch(ds@validation_index, error = function(e) list()) %||% list()
+    vi[[table]] <- NULL
+    ds@validation_index <- vi
+    vsr <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
+    vsr[[table]] <- NULL
+    ds@validation_store <- vsr
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+}
+
+# Remove ALL bound files/tables (and all validation state) from a dataset.
+dta_unload_all <- function(dta, dataset) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    ty <- tryCatch(ds@type, error = function(e) NA_character_)
+    if (identical(ty, "file")) {
+      ds@file_paths <- character(0)
+    } else {
+      ds@tables <- list()
+    }
+    ds@validation_index <- list()
+    ds@validation_store <- list()
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
 }
 
 # Per-error messages for a single dataset (data.frame). Empty df if none.

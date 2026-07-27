@@ -504,11 +504,8 @@ read_dta_from_yaml <- function(file) {
 
   yaml_data <- yaml::read_yaml(file)
 
-  # Check required top-level elements
-  if (is.null(yaml_data$metadata)) {
-    cli_abort("YAML file must contain 'metadata' section")
-  }
-
+  # Metadata is optional: a DTA may carry datasets without a metadata section
+  # (see dta_from_list()). Do not abort here on a missing 'metadata' element.
   dta_from_list(yaml_data)
 }
 
@@ -531,27 +528,29 @@ dta_from_list <- function(x) {
     cli_abort("x is not a list")
   }
 
-  # Check required top-level elements
-  if (is.null(x$metadata)) {
-    cli_abort("x contain 'metadata' section")
-  }
-
   if (is.null(x$datasets)) {
     cli_alert_warning("No 'datasets' section found in list")
     x$datasets <- list()
   }
 
-  # Validate metadata structure
-  if (is.null(x$metadata$title)) {
-    cli_abort("Metadata section must contain 'title' field")
-  }
+  # Metadata is OPTIONAL: a DTA may carry datasets without any metadata. When the
+  # 'metadata' section is absent, build an empty DTAMetaData rather than aborting.
+  if (is.null(x$metadata)) {
+    cli_alert_warning("No 'metadata' section found; creating a DTA without metadata")
+    metadata <- DTAMetaData()
+  } else {
+    # Validate metadata structure
+    if (is.null(x$metadata$title)) {
+      cli_abort("Metadata section must contain 'title' field")
+    }
 
-  if (is.null(x$metadata$version)) {
-    cli_abort("Metadata section must contain 'version' field")
-  }
+    if (is.null(x$metadata$version)) {
+      cli_abort("Metadata section must contain 'version' field")
+    }
 
-  # Create metadata object
-  metadata <- do.call(DTAMetaData, x$metadata)
+    # Create metadata object
+    metadata <- do.call(DTAMetaData, x$metadata)
+  }
 
   # Create dataset objects
   datasets_list <- dta_dataset_from_list(x$datasets)

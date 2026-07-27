@@ -4,7 +4,7 @@
 #' @import S7
 #' @export
 #'
-#' @param title title (required)
+#' @param title title (optional; a DTA may carry datasets without metadata)
 #' @param version current version string
 #' @param date current date
 #' @param header header/organization name
@@ -27,7 +27,7 @@
 DTAMetaData <- S7::new_class(
   "DTAMetaData",
   constructor = function(
-    title,
+    title = NULL,
     version = NULL,
     date = NULL,
     header = NULL,
@@ -62,7 +62,7 @@ DTAMetaData <- S7::new_class(
     )
   },
   properties = list(
-    title = class_character,
+    title = class_character_or_null,
     version = class_character_or_null,
     date = class_Date_or_null,
     header = class_character_or_null,
@@ -79,8 +79,8 @@ DTAMetaData <- S7::new_class(
     if (!is.null(self@version) && self@version == "") {
       errors <- c(errors, "'version' cannot be an empty string.")
     }
-    if (is.null(self@title) || self@title == "") {
-      errors <- c(errors, "'title' cannot be empty.")
+    if (!is.null(self@title) && self@title == "") {
+      errors <- c(errors, "'title' cannot be an empty string.")
     }
     
     # Validate version_history structure

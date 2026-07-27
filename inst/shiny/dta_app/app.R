@@ -15,9 +15,10 @@ options(shiny.maxRequestSize = 1024 * 1024^2) # 1 GB
 # ---------------------------------------------------------------------------
 brandbar <- div(
   class = "app-brandbar",
+  tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
   div(
     div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Data Transmission Agreement \u2014 validation & authoring")
+    div(class = "brand-sub", "Data Tranfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
   )
 )
 
@@ -39,14 +40,33 @@ server <- function(input, output, session) {
     yaml_text = NULL,    # original uploaded YAML text (for raw view)
     structure = NULL,    # stable per-dataset handler metadata (for slots)
     active = NULL,       # currently selected dataset name
-    uploads = list(),    # key "dataset||handlerIdx" -> character vector of file names
-    status = list(),     # dataset name -> "pass" | "fail" | "pending"
+    uploads = list(),    # key "dataset||handlerIdx" -> list of {file, table} records
+    status = list(),     # dataset name -> "pass" | "fail" | "pending" | "nodata"
+    pending_upload = NULL, # deferred upload awaiting an overwrite confirmation
+    dataset_only = FALSE, # TRUE when a standalone dataset YAML was loaded (no metadata)
     md_token = 0,        # bump to re-render metadata editor
     contacts_token = 0   # bump to re-render contacts list
   )
 
   upload_registry <- new.env(parent = emptyenv())
   session_file <- file.path(tempdir(), "dtatools_app_session.rds")
+
+  # Stable id per bound file so its trash button keeps working across renders.
+  file_id_env      <- new.env(parent = emptyenv())  # "ds\u0001hi\u0001table" -> integer id
+  file_id_meta     <- new.env(parent = emptyenv())  # id (as chr) -> list(dataset, hi, table)
+  file_rm_registry <- new.env(parent = emptyenv())  # button id -> TRUE once observed
+  file_id_counter  <- 0L
+  get_file_id <- function(dsname, hi, table) {
+    key <- paste(dsname, hi, table, sep = "\u0001")
+    id <- file_id_env[[key]]
+    if (is.null(id)) {
+      file_id_counter <<- file_id_counter + 1L
+      id <- file_id_counter
+      file_id_env[[key]] <- id
+      file_id_meta[[as.character(id)]] <- list(dataset = dsname, hi = hi, table = table)
+    }
+    id
+  }
 
   # --- helpers ------------------------------------------------------------
   build_structure <- function(dta) {
@@ -79,13 +99,14 @@ server <- function(input, output, session) {
         structure = isolate(rv$structure),
         active = isolate(rv$active),
         uploads = isolate(rv$uploads),
-        status = isolate(rv$status)
+        status = isolate(rv$status),
+        dataset_only = isolate(rv$dataset_only)
       ),
       session_file
     ), silent = TRUE)
   }
 
-  apply_loaded <- function(dta, yaml_text) {
+  apply_loaded <- function(dta, yaml_text, dataset_only = FALSE) {
     names_ds <- dta_dataset_names(dta)
     rv$dta <- dta
     rv$yaml_text <- yaml_text
@@ -93,6 +114,7 @@ server <- function(input, output, session) {
     rv$uploads <- list()
     rv$status <- stats::setNames(rep("pending", length(names_ds)), names_ds)
     rv$active <- if (length(names_ds) > 0) names_ds[1] else NULL
+    rv$dataset_only <- isTRUE(dataset_only)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     autosave()
@@ -112,8 +134,11 @@ server <- function(input, output, session) {
       )
       return()
     }
-    apply_loaded(res$value, txt)
-    showNotification("DTA loaded.", type = "message")
+    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only))
+    showNotification(
+      if (isTRUE(res$dataset_only)) "Dataset loaded (no metadata)." else "DTA loaded.",
+      type = "message"
+    )
   })
 
   observeEvent(input$load_example, {
@@ -129,17 +154,82 @@ server <- function(input, output, session) {
       showNotification(paste("Could not load example:", res$error), type = "error")
       return()
     }
-    apply_loaded(res$value, txt)
+    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only))
     showNotification("Example DTA loaded.", type = "message")
   })
 
-  # --- dataset navigation -------------------------------------------------
-  observeEvent(input$dataset_nav, {
-    rv$active <- input$dataset_nav
+  # --- dataset navigation (custom list: select + per-dataset check icon) --
+  output$dataset_nav_ui <- renderUI({
+    req(rv$structure)
+    names_ds <- names(rv$structure)
+    active <- rv$active
+    st_map <- rv$status
+    div(
+      class = "dataset-nav",
+      div(class = "section-label", "Datasets"),
+      div(
+        class = "list-group",
+        lapply(seq_along(names_ds), function(i) {
+          nm <- names_ds[i]
+          st <- st_map[[nm]] %||% "pending"
+          # Status icon: green check = passed all tests; red cross = failed OR
+          # missing data; grey dash = not validated yet.
+          ic_ch <- switch(st,
+            pass = "\u2714", fail = "\u2716", nodata = "\u2716", "\u2013")
+          ic_cls <- switch(st,
+            pass = "nav-ic-pass", fail = "nav-ic-fail",
+            nodata = "nav-ic-fail", "nav-ic-pending")
+          ic_ttl <- switch(st,
+            pass = "Passed all checks", fail = "Validation failed",
+            nodata = "No data loaded", "Not validated yet")
+          row_cls <- paste0("list-group-item dataset-nav-row",
+                            if (identical(nm, active)) " active" else "")
+          div(
+            class = row_cls,
+            actionLink(
+              paste0("selds_", i), class = "nav-select",
+              label = tagList(
+                span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
+                span(class = "nav-name", nm)
+              )
+            ),
+            actionButton(
+              paste0("checkds_", i), label = HTML("&#x25B6;"),
+              class = "btn btn-sm nav-check",
+              title = sprintf("Check '%s'", nm)
+            )
+          )
+        })
+      )
+    )
+  })
+
+  # Register one select + one check observer per dataset slot (index-stable;
+  # resolves the dataset name at click time so it tracks the loaded DTA).
+  nav_registry <- new.env(parent = emptyenv())
+  observe({
+    req(rv$structure)
+    for (i in seq_along(names(rv$structure))) {
+      sel_id <- paste0("selds_", i)
+      if (is.null(nav_registry[[sel_id]])) {
+        nav_registry[[sel_id]] <- TRUE
+        local({
+          IDX <- i
+          observeEvent(input[[paste0("selds_", IDX)]], {
+            nms <- names(rv$structure)
+            if (IDX <= length(nms)) rv$active <- nms[IDX]
+          }, ignoreInit = TRUE)
+          observeEvent(input[[paste0("checkds_", IDX)]], {
+            nms <- names(rv$structure)
+            if (IDX <= length(nms)) run_check(nms[IDX])
+          }, ignoreInit = TRUE)
+        })
+      }
+    }
   })
 
   # --- upload observers (registered once per handler) ---------------------
-  handle_upload <- function(ds_idx, hi, fileinfo) {
+  handle_upload <- function(ds_idx, hi, fileinfo, overwrite = FALSE) {
     if (is.null(fileinfo)) return()
     names_ds <- dta_dataset_names(rv$dta)
     if (ds_idx < 1 || ds_idx > length(names_ds)) return()
@@ -148,15 +238,45 @@ server <- function(input, output, session) {
     handlers <- dta_handlers(ds)
     if (hi < 1 || hi > length(handlers)) return()
     h <- handlers[[hi]]
-
-    # G2 -- count gate: never let a slot exceed its max (across repeated drops).
-    mx <- handler_max(h)
     key <- paste0(dsname, "||", hi)
-    already <- length(rv$uploads[[key]] %||% character(0))
-    if (!is.na(mx) && (already + nrow(fileinfo)) > mx) {
+
+    # A dropped file will occupy a table named after it (load_file uses
+    # file_path_sans_ext). This mapping drives overwrite detection and binds.
+    tbl_of <- function(nm) tools::file_path_sans_ext(basename(nm))
+    existing <- dta_dataset_table_names(ds)  # dataset-wide bound items
+
+    # Overwrite gate: if a dropped file targets an already-bound table and the
+    # user has not confirmed, ask first -- never silently replace bound data.
+    if (!isTRUE(overwrite)) {
+      dropped_tbls <- vapply(as.character(fileinfo$name), tbl_of, character(1))
+      conflicts <- unique(dropped_tbls[dropped_tbls %in% existing])
+      if (length(conflicts) > 0) {
+        rv$pending_upload <- list(ds_idx = ds_idx, hi = hi, fileinfo = fileinfo)
+        showModal(modalDialog(
+          title = "Overwrite existing file(s)?",
+          tags$p(sprintf("These file(s) are already loaded in '%s':", dsname)),
+          tags$ul(lapply(conflicts, function(t) tags$li(tags$code(t)))),
+          tags$p("Overwrite them with the new upload? The affected table(s) will be marked as not validated."),
+          footer = tagList(
+            actionButton("cancel_overwrite", "Cancel"),
+            actionButton("confirm_overwrite", "Overwrite", class = "btn btn-warning")
+          ),
+          easyClose = TRUE
+        ))
+        return()
+      }
+    }
+
+    # G2 -- count gate: only NEW (non-replacing) files add to the slot's count.
+    mx <- handler_max(h)
+    slot_recs <- rv$uploads[[key]] %||% list()
+    slot_tbls <- vapply(slot_recs, function(r) r$table %||% "", character(1))
+    dropped_tbls <- vapply(as.character(fileinfo$name), tbl_of, character(1))
+    kept_after <- length(setdiff(slot_tbls, dropped_tbls))
+    if (!is.na(mx) && (kept_after + nrow(fileinfo)) > mx) {
       showNotification(
-        sprintf("This slot accepts at most %d file(s); you already have %d and dropped %d.",
-                as.integer(mx), already, nrow(fileinfo)),
+        sprintf("This slot accepts at most %d file(s); remove one before adding more.",
+                as.integer(mx)),
         type = "error"
       )
       return()
@@ -164,10 +284,14 @@ server <- function(input, output, session) {
 
     loaded <- character(0)
     rejected <- character(0)
+    overwritten <- character(0)
+    loaded_recs <- list()
     for (r in seq_len(nrow(fileinfo))) {
       nm <- fileinfo$name[r]
       dp <- fileinfo$datapath[r]
       sz <- suppressWarnings(as.numeric(fileinfo$size[r]))
+      tbl <- tbl_of(nm)
+      was_existing <- tbl %in% existing
 
       # G1 -- transfer complete & non-empty (guards truncated/partial uploads).
       if (is.na(sz) || sz <= 0) {
@@ -187,27 +311,38 @@ server <- function(input, output, session) {
       staged <- dta_stage_upload(dp, nm)
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
-        rv$dta, dataset = dsname, file = staged, handler_index = hi,
-        name = tools::file_path_sans_ext(nm)
+        rv$dta, dataset = dsname, file = staged, handler_index = hi, name = tbl
       )
       if (!res$ok) {
         rejected <- c(rejected, sprintf("'%s' (%s)", nm, res$error))
         next
       }
-      # G5 -- VERIFY the file actually landed before claiming success (C2).
+      # G5 -- VERIFY the file landed. A new file increases the count; an
+      # overwrite replaces in place (count unchanged) and is still valid.
       after <- dta_dataset_content_count(dta_get_dataset(res$value, dsname))
-      if (after <= before) {
+      if (after <= before && !was_existing) {
         rejected <- c(rejected, sprintf("'%s' (could not be bound)", nm))
         next
       }
       rv$dta <- res$value
+      # Overwrite -> clear the stale validation status of the replaced table.
+      if (was_existing) {
+        cv <- dta_clear_validation(rv$dta, dsname, tables = tbl)
+        if (cv$ok) rv$dta <- cv$value
+        overwritten <- c(overwritten, tbl)
+      }
       loaded <- c(loaded, nm)
+      loaded_recs[[length(loaded_recs) + 1L]] <- list(file = nm, table = tbl)
+      existing <- unique(c(existing, tbl))
     }
 
     # Record only VERIFIED binds; changed data must be re-validated.
     if (length(loaded) > 0) {
       up <- rv$uploads
-      up[[key]] <- unique(c(up[[key]], loaded))
+      cur <- up[[key]] %||% list()
+      new_tbls <- vapply(loaded_recs, function(x) x$table, character(1))
+      cur <- Filter(function(x) !((x$table %||% "") %in% new_tbls), cur)
+      up[[key]] <- c(cur, loaded_recs)
       rv$uploads <- up
       st <- rv$status
       st[[dsname]] <- "pending"
@@ -217,16 +352,18 @@ server <- function(input, output, session) {
 
     # ONE reconciled outcome (Contract C1) with honest counts (C8): never a
     # success message when nothing was actually bound.
+    ow <- if (length(overwritten) > 0)
+      sprintf(" (%d overwritten)", length(overwritten)) else ""
     if (length(loaded) > 0 && length(rejected) == 0) {
       showNotification(
-        sprintf("Loaded %d file(s) into '%s'. Run Check to validate.",
-                length(loaded), dsname),
+        sprintf("Loaded %d file(s) into '%s'%s. Run Check to validate.",
+                length(loaded), dsname, ow),
         type = "message"
       )
     } else if (length(loaded) > 0) {
       showNotification(
-        sprintf("Loaded %d file(s) into '%s'; rejected %d: %s",
-                length(loaded), dsname, length(rejected),
+        sprintf("Loaded %d file(s) into '%s'%s; rejected %d: %s",
+                length(loaded), dsname, ow, length(rejected),
                 paste(rejected, collapse = "; ")),
         type = "warning", duration = 10
       )
@@ -256,6 +393,96 @@ server <- function(input, output, session) {
         }
       }
     }
+  })
+
+  # --- overwrite confirmation (deferred upload) --------------------------
+  observeEvent(input$confirm_overwrite, {
+    pu <- rv$pending_upload
+    rv$pending_upload <- NULL
+    removeModal()
+    if (!is.null(pu)) handle_upload(pu$ds_idx, pu$hi, pu$fileinfo, overwrite = TRUE)
+  })
+  observeEvent(input$cancel_overwrite, {
+    rv$pending_upload <- NULL
+    removeModal()
+  })
+
+  # --- remove one loaded file / discard all ------------------------------
+  do_remove_file <- function(dsname, hi, table) {
+    req(rv$dta)
+    r <- dta_unload_table(rv$dta, dsname, table)
+    if (!r$ok) {
+      showNotification(paste("Could not remove file:", r$error), type = "error")
+      return()
+    }
+    rv$dta <- r$value
+    key <- paste0(dsname, "||", hi)
+    up <- rv$uploads
+    up[[key]] <- Filter(function(x) !identical(x$table, table), up[[key]] %||% list())
+    rv$uploads <- up
+    cnt <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
+    st <- rv$status
+    st[[dsname]] <- if (cnt == 0) "nodata" else "pending"
+    rv$status <- st
+    autosave()
+    showNotification(sprintf("Removed '%s' from '%s'.", table, dsname), type = "message")
+  }
+
+  # Register one remove-observer per bound file (stable id per ds|slot|table).
+  observe({
+    up <- rv$uploads
+    req(rv$dta)
+    for (key in names(up)) {
+      parts <- strsplit(key, "||", fixed = TRUE)[[1]]
+      if (length(parts) < 2) next
+      dsname <- parts[1]
+      hi <- suppressWarnings(as.integer(parts[2]))
+      for (rec in (up[[key]] %||% list())) {
+        fid <- get_file_id(dsname, hi, rec$table)
+        bid <- paste0("rmfile_", fid)
+        if (is.null(file_rm_registry[[bid]])) {
+          file_rm_registry[[bid]] <- TRUE
+          local({
+            BID <- bid
+            META <- file_id_meta[[as.character(fid)]]
+            observeEvent(input[[BID]], {
+              do_remove_file(META$dataset, META$hi, META$table)
+            }, ignoreInit = TRUE)
+          })
+        }
+      }
+    }
+  })
+
+  observeEvent(input$discard_all, {
+    req(rv$active)
+    showModal(modalDialog(
+      title = "Discard all loaded files?",
+      sprintf("Remove all loaded files from '%s'? You will need to upload them again.",
+              rv$active),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_discard_all", "Discard all", class = "btn btn-danger")
+      ),
+      easyClose = TRUE
+    ))
+  })
+  observeEvent(input$confirm_discard_all, {
+    req(rv$active)
+    r <- dta_unload_all(rv$dta, rv$active)
+    if (r$ok) {
+      rv$dta <- r$value
+      up <- rv$uploads
+      pref <- paste0(rv$active, "||")
+      for (k in names(up)) if (startsWith(k, pref)) up[[k]] <- list()
+      rv$uploads <- up
+      st <- rv$status; st[[rv$active]] <- "nodata"; rv$status <- st
+      autosave()
+      showNotification(sprintf("Discarded all files from '%s'.", rv$active), type = "message")
+    } else {
+      showNotification(r$error, type = "error")
+    }
+    removeModal()
   })
 
   # --- validation ---------------------------------------------------------
@@ -337,20 +564,79 @@ server <- function(input, output, session) {
   })
 
   output$msgs <- DT::renderDataTable({
-    m <- msgs_r()
-    if (is.null(m) || nrow(m) == 0) {
+    disp <- messages_display(msgs_r())
+    if (is.null(disp) || nrow(disp) == 0) {
       return(DT::datatable(
         data.frame(Message = "No validation messages. Run Check to validate this dataset."),
         rownames = FALSE, options = list(dom = "t"), selection = "none"
       ))
     }
-    cols <- intersect(c("id", "source", "row", "column", "rule_id", "message"), names(m))
+    # Dropdown (select) filters for categorical columns; search boxes for the
+    # rest -- lets the user pick a Dataset/Table or type a free-text search.
+    for (fc in intersect(c("Dataset", "Table", "Source"), names(disp))) {
+      disp[[fc]] <- as.factor(disp[[fc]])
+    }
     DT::datatable(
-      m[, cols, drop = FALSE],
-      rownames = FALSE, selection = "single",
+      disp,
+      rownames = FALSE, selection = "single", filter = "top",
+      class = "display compact",
       options = list(pageLength = 8, dom = "tp", scrollX = TRUE)
     )
   })
+
+  # Shared display shape (column selection + pretty names) for the messages
+  # table AND the CSV/TSV/XLSX downloads, so the two never diverge.
+  messages_display <- function(m) {
+    disp <- as.data.frame(m)
+    if (is.null(disp) || nrow(disp) == 0) return(disp)
+    # Surface WHERE each message comes from: dataset + table (source table).
+    if ("target" %in% names(disp)) names(disp)[names(disp) == "target"] <- "table"
+    cols <- intersect(c("id", "dataset", "table", "source", "row", "column", "rule_id", "message"),
+                      names(disp))
+    disp <- disp[, cols, drop = FALSE]
+    pretty <- c(id = "ID", dataset = "Dataset", table = "Table", source = "Source",
+                row = "Row", column = "Column", rule_id = "Rule", message = "Message")
+    hit <- names(disp) %in% names(pretty)
+    names(disp)[hit] <- unname(pretty[names(disp)[hit]])
+    disp
+  }
+
+  # Downloadable messages (CSV / TSV / XLSX). Same display shape as the table;
+  # falls back to a one-row note when the dataset has no messages.
+  msgs_dl_df <- reactive({
+    disp <- messages_display(msgs_r())
+    if (is.null(disp) || nrow(disp) == 0) {
+      disp <- data.frame(Message = "No validation messages for this dataset.")
+    }
+    disp
+  })
+  msgs_dl_base <- function() {
+    nm <- rv$active %||% "dataset"
+    paste0(gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_messages")
+  }
+  output$dl_msgs_csv <- downloadHandler(
+    filename = function() paste0(msgs_dl_base(), ".csv"),
+    content = function(file) utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+  )
+  output$dl_msgs_tsv <- downloadHandler(
+    filename = function() paste0(msgs_dl_base(), ".tsv"),
+    content = function(file) utils::write.table(
+      msgs_dl_df(), file, sep = "\t", row.names = FALSE, na = "", qmethod = "double"
+    )
+  )
+  output$dl_msgs_xlsx <- downloadHandler(
+    filename = function() paste0(msgs_dl_base(), ".xlsx"),
+    content = function(file) {
+      if (!requireNamespace("writexl", quietly = TRUE)) {
+        showNotification(
+          "XLSX export needs the 'writexl' package. Install it, or use CSV / TSV.",
+          type = "error", duration = 10
+        )
+        stop("writexl not available")
+      }
+      writexl::write_xlsx(msgs_dl_df(), file)
+    }
+  )
 
   df_to_kv <- function(d) {
     # single-row -> transposed Field/Value (drop NA/empty)
@@ -692,22 +978,44 @@ server <- function(input, output, session) {
 
   output$loaded_files <- renderUI({
     req(rv$active, rv$structure)
-    s <- rv$structure[[rv$active]]
-    tagList(lapply(seq_along(s$handlers), function(hi) {
+    rv$uploads; rv$status  # re-render when files or validation state change
+    dsname <- rv$active
+    s <- rv$structure[[dsname]]
+    tstatus <- dta_table_status_map(rv$dta, dsname)
+    any_files <- FALSE
+    blocks <- lapply(seq_along(s$handlers), function(hi) {
       h <- s$handlers[[hi]]
-      key <- paste0(rv$active, "||", hi)
-      files <- rv$uploads[[key]] %||% character(0)
-      n <- length(files)
-      mn <- h$min
-      state <- if (n == 0) "empty" else if (!is.na(mn) && n < mn) "warn" else "ok"
-      detail <- if (n == 0) "no files yet" else paste0("bound: ", paste(files, collapse = ", "))
+      key <- paste0(dsname, "||", hi)
+      recs <- rv$uploads[[key]] %||% list()
+      if (length(recs) == 0) return(NULL)
+      any_files <<- TRUE
+      rows <- lapply(recs, function(rec) {
+        fid <- get_file_id(dsname, hi, rec$table)
+        st <- tstatus[[rec$table]] %||% "pending"
+        icon_ch <- switch(st, pass = "\u2714", fail = "\u2716", "\u2014")
+        icls <- switch(st, pass = "file-ok", fail = "file-fail", "file-pending")
+        ttl <- switch(st,
+          pass = "Validated \u2014 no errors",
+          fail = "Validation errors \u2014 see messages below",
+          "Not validated yet")
+        div(
+          class = "loaded-file-row",
+          tags$span(class = paste("file-status", icls), title = ttl, icon_ch),
+          tags$span(class = "file-name", rec$file),
+          tags$span(class = "file-table", title = "Table name",
+                    paste0("\u2192 ", rec$table)),
+          actionButton(paste0("rmfile_", fid), label = HTML("&#x1F5D1;&#xFE0F;"),
+                       class = "btn btn-sm file-remove", title = "Remove this file")
+        )
+      })
       div(
-        style = "margin-bottom:6px;",
-        tags$span(class = "slot-expected", h$expected),
-        tags$span(class = "slot-meta", paste0("  (", h$count, ")  ")),
-        slot_state_label(state, detail)
+        class = "loaded-slot",
+        div(class = "loaded-slot-head", tags$span(class = "slot-expected", h$expected)),
+        tagList(rows)
       )
-    }))
+    })
+    if (!any_files) return(div(class = "msg-hint", "No files loaded yet."))
+    tagList(blocks)
   })
 
   output$workspace_header <- renderUI({
@@ -717,14 +1025,21 @@ server <- function(input, output, session) {
       v <- tryCatch(S7::prop(md, field), error = function(e) NULL)
       if (is.null(v) || length(v) == 0) "" else as.character(v)[1]
     }
-    title <- getf("title"); if (!nzchar(title)) title <- "Untitled DTA"
+    dataset_only <- isTRUE(rv$dataset_only)
+    title <- getf("title")
+    if (!nzchar(title)) {
+      title <- if (dataset_only) {
+        dta_dataset_names(rv$dta)[1] %||% "Dataset"
+      } else "Untitled DTA"
+    }
     version <- getf("version")
     date <- getf("date")
     div(
       class = "workspace-header",
       div(class = "ws-title", title),
-      if (nzchar(version) || nzchar(date)) div(
+      if (dataset_only || nzchar(version) || nzchar(date)) div(
         class = "ws-meta",
+        if (dataset_only) tags$span(class = "ws-pill", "Dataset \u2014 no metadata"),
         if (nzchar(version)) tags$span(class = "ws-pill", paste0("v", version)),
         if (nzchar(date)) tags$span(class = "ws-pill", date)
       )
@@ -789,16 +1104,36 @@ server <- function(input, output, session) {
         tags$span(class = "msg-hint", style = "margin-left:10px;",
                   "Uploads are validated against the file handler as you add them.")
       ),
+      tags$h5("Expected files"),
+      div(class = "msg-hint", style = "margin:-4px 0 10px;",
+          "Drop each required file below. Loaded files appear underneath."),
+      slots,
       card(
-        card_header("Loaded files"),
+        card_header(
+          div(
+            style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+            tags$span("Loaded files"),
+            actionButton("discard_all", label = HTML("&#x1F5D1;&#xFE0F; Discard all"),
+                         class = "btn btn-sm btn-outline-danger",
+                         title = "Remove all loaded files from this dataset")
+          )
+        ),
         card_body(uiOutput("loaded_files"))
       ),
-      slots,
       tags$hr(),
-      tags$h5("Validation messages"),
-      DT::dataTableOutput("msgs"),
+      div(
+        style = "display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;",
+        tags$h5("Validation messages", style = "margin:0;"),
+        div(
+          class = "msgs-dl",
+          downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
+          downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
+          downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary")
+        )
+      ),
+      div(class = "msgs-table", DT::dataTableOutput("msgs")),
       div(class = "msg-hint",
-          "Click a message row to open the detailed inspect report.")
+          "Use the filters at the top of each column to search or pick a Dataset / Table. Click a message row to open the detailed inspect report.")
     )
   })
 
@@ -816,6 +1151,9 @@ server <- function(input, output, session) {
         card_body(
           p("Drag and drop a DTA ", tags$code(".yaml"),
             " file to begin, or load the bundled example."),
+          div(class = "msg-hint", style = "margin:-6px 0 8px;",
+              "A full DTA (with metadata) or a standalone dataset spec is accepted; ",
+              "a dataset-only file is loaded without a Metadata section."),
           div(class = "dropzone",
               fileInput("dta_file", "Drop or choose a .yaml / .yml file",
                         accept = c(".yaml", ".yml"), width = "100%")),
@@ -836,9 +1174,7 @@ server <- function(input, output, session) {
           width = 320,
           uiOutput("workspace_header"),
           uiOutput("summary_metrics"),
-          radioButtons("dataset_nav", "Datasets",
-                       choices = names_ds,
-                       selected = isolate(rv$active) %||% names_ds[1]),
+          uiOutput("dataset_nav_ui"),
           tags$hr(),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           div(style = "height:8px;"),
@@ -848,51 +1184,55 @@ server <- function(input, output, session) {
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
         ),
-        navset_card_tab(
-          nav_panel("Datasets", uiOutput("dataset_detail")),
-          nav_panel(
+        {
+          # A standalone dataset YAML has no metadata -> hide the Metadata tab.
+          dataset_only <- isolate(rv$dataset_only)
+          metadata_panel <- nav_panel(
             "Metadata",
             uiOutput("metadata_editor"),
             tags$hr(),
             layout_columns(
               col_widths = c(6, 6),
               card(
-                card_header(
-                  div(style = "display:flex; justify-content:space-between; align-items:center;",
-                      "Receiver",
-                      actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary"))
-                ),
+                card_header("Receiver"),
                 card_body(
                   div(class = "section-label", "Affiliation"),
                   uiOutput("receiver_affiliation"),
                   tags$hr(),
-                  div(class = "section-label", "Contacts"),
+                  div(class = "section-label",
+                      style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+                      tags$span("Contacts"),
+                      actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")),
                   uiOutput("receiver_contacts")
                 )
               ),
               card(
-                card_header(
-                  div(style = "display:flex; justify-content:space-between; align-items:center;",
-                      "Supplier",
-                      actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary"))
-                ),
+                card_header("Supplier"),
                 card_body(
                   div(class = "section-label", "Affiliation"),
                   uiOutput("supplier_affiliation"),
                   tags$hr(),
-                  div(class = "section-label", "Contacts"),
+                  div(class = "section-label",
+                      style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+                      tags$span("Contacts"),
+                      actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")),
                   uiOutput("supplier_contacts")
                 )
               )
             )
-          ),
-          nav_panel(
-            "Raw YAML",
-            div(class = "msg-hint", style = "margin-bottom:6px;",
-                "Original uploaded YAML (read-only, syntax-highlighted). Edits made in the app update the DTA object used for validation and export."),
-            uiOutput("raw_yaml")
           )
-        )
+          panels <- list(
+            nav_panel("Datasets", uiOutput("dataset_detail")),
+            if (!isTRUE(dataset_only)) metadata_panel,
+            nav_panel(
+              "Raw YAML",
+              div(class = "msg-hint", style = "margin-bottom:6px;",
+                  "Original uploaded YAML (read-only, syntax-highlighted). Edits made in the app update the DTA object used for validation and export."),
+              uiOutput("raw_yaml")
+            )
+          )
+          do.call(navset_card_tab, Filter(Negate(is.null), panels))
+        }
       )
     }
   })
@@ -908,12 +1248,19 @@ server <- function(input, output, session) {
     rv$dta <- saved$dta
     rv$yaml_text <- saved$yaml_text
     rv$structure <- saved$structure %||% build_structure(saved$dta)
-    rv$uploads <- saved$uploads %||% list()
+    ups <- saved$uploads %||% list()
+    rv$uploads <- lapply(ups, function(recs) {
+      if (length(recs) == 0) return(list())
+      if (is.character(recs)) {
+        lapply(recs, function(f) list(file = f, table = tools::file_path_sans_ext(basename(f))))
+      } else recs
+    })
     rv$status <- saved$status %||% stats::setNames(
       rep("pending", length(dta_dataset_names(saved$dta))),
       dta_dataset_names(saved$dta)
     )
     rv$active <- saved$active %||% (dta_dataset_names(saved$dta)[1] %||% NULL)
+    rv$dataset_only <- isTRUE(saved$dataset_only)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     showNotification("Previous session restored.", type = "message")
