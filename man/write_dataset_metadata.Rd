@@ -12,7 +12,8 @@ write_dataset_metadata(
   include_signatures = TRUE,
   include_file_specs = TRUE,
   include_rules = TRUE,
-  signature_list = NULL
+  signature_list = NULL,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -31,6 +32,8 @@ write_dataset_metadata(
 \item{include_rules}{Logical. Whether to include validation rules (DTADataSetTabular only). Default: TRUE.}
 
 \item{signature_list}{List of signatories}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
 Invisibly returns the document object

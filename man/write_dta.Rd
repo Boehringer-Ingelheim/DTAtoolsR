@@ -10,7 +10,8 @@ write_dta(
   format = NULL,
   overwrite = FALSE,
   include_signatures = TRUE,
-  signature_list = NULL
+  signature_list = NULL,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -26,6 +27,8 @@ If NULL, inferred from file extension.}
 \item{include_signatures}{Logical. Whether to include signature approval section. Default: TRUE.}
 
 \item{signature_list}{List of signatories with name and role fields.}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
 Invisibly returns the document object (for chaining).

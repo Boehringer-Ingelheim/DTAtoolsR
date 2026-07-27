@@ -16,6 +16,7 @@
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
 #' @param include_signatures Logical. Whether to include signature approval section. Default: TRUE.
 #' @param signature_list List of signatories with name and role fields.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #'
 #' @return Invisibly returns the document object (for chaining).
 #'
@@ -35,7 +36,8 @@ write_dta <- function(
   format = NULL,
   overwrite = FALSE,
   include_signatures = TRUE,
-  signature_list = NULL
+  signature_list = NULL,
+  quiet = FALSE
 ) {
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("'x' must be a DTA object.")
@@ -72,7 +74,9 @@ write_dta <- function(
     .write_dta_markdown(x, file, include_signatures, signature_list)
   }
   
-  cli::cli_alert_success("Document saved to {file}")
+  if (!isTRUE(quiet)) {
+    cli::cli_alert_success("Document saved to {file}")
+  }
   invisible(doc)
 }
 
@@ -334,6 +338,7 @@ write_dta <- function(
 #' @param include_file_specs Logical. Whether to include file specifications. Default: TRUE.
 #' @param include_rules Logical. Whether to include validation rules (DTADataSetTabular only). Default: TRUE.
 #' @param signature_list List of signatories
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #'
 #' @return Invisibly returns the document object
 #'
@@ -354,7 +359,8 @@ write_dataset_metadata <- function(
   include_signatures = TRUE,
   include_file_specs = TRUE,
   include_rules = TRUE,
-  signature_list = NULL
+  signature_list = NULL,
+  quiet = FALSE
 ) {
   if (!inherits(x, c("DTAtools::DTADataSet", "DTAtools::DTADataSetTabular", "DTAtools::DTADataSetFile"))) {
     cli::cli_abort("'x' must be a DTADataSet, DTADataSetTabular, or DTADataSetFile object.")
@@ -388,7 +394,9 @@ write_dataset_metadata <- function(
     .write_dataset_markdown(x, file, include_signatures, signature_list)
   }
   
-  cli::cli_alert_success("Document saved to {file}")
+  if (!isTRUE(quiet)) {
+    cli::cli_alert_success("Document saved to {file}")
+  }
   invisible(NULL)
 }
 

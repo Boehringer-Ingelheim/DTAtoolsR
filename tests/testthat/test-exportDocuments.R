@@ -11,7 +11,7 @@ test_that("write_dta validates inputs and exports markdown/docx", {
 
   out_md <- tempfile(fileext = ".md")
   on.exit(unlink(out_md, force = TRUE), add = TRUE)
-  write_dta(dta, file = out_md, format = "md", overwrite = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
   expect_true(any(grepl("^# Data Transfer Agreement Metadata", md_lines)))
@@ -19,7 +19,7 @@ test_that("write_dta validates inputs and exports markdown/docx", {
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
-  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_docx))
 })
 
@@ -45,7 +45,7 @@ test_that("write_dataset_metadata and alias export metadata documents", {
 
   out_md <- tempfile(fileext = ".md")
   on.exit(unlink(out_md, force = TRUE), add = TRUE)
-  write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE)
+  write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
   expect_true(any(grepl("^# Dataset Specification", md_lines)))
@@ -53,11 +53,11 @@ test_that("write_dataset_metadata and alias export metadata documents", {
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
-  write_dataset_metadata(ds, file = out_docx, format = "docx", overwrite = TRUE)
+  write_dataset_metadata(ds, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_docx))
 
   alias_out <- tempfile(fileext = ".md")
   on.exit(unlink(alias_out, force = TRUE), add = TRUE)
-  write_file_specification(ds, file = alias_out, format = "md", overwrite = TRUE)
+  write_file_specification(ds, file = alias_out, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(alias_out))
 })
