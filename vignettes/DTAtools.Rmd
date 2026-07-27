@@ -21,6 +21,10 @@ knitr::opts_chunk$set(
 )
 ```
 
+<p align="center">
+  <img src="dtatools_logo.png" alt="DTAtools Logo" width="400"/>
+</p>
+
 ## Introduction
 
 `DTAtools` automates the validation of tabular data against **Data Transmission
@@ -63,6 +67,12 @@ library(DTAtools)
 
 `DTAtools` organises objects into a layered hierarchy that maps directly to how
 a Data Transmission Specification (DTS) is structured:
+
+<p align="center">
+  <img src="DTAtools_architecture.svg" alt="DTAtools package architecture diagram" width="100%"/>
+</p>
+
+The same hierarchy, as plain text:
 
 ```
 DTA                              ← top-level agreement container
@@ -1352,6 +1362,7 @@ datasets:
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)             |
 | `DTAFileCSV`              | CSV file handler for `read_file()`                          |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                          |
+| `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`        |
 
 ### Key Functions
 
