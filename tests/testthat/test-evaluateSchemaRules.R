@@ -263,3 +263,126 @@ test_that("apply_schema_rules handles canonical and legacy rule types", {
   result <- apply_schema_rules(list(legacy_rule), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
 })
+
+test_that("Range rules support min/max slots and reject multi-column usage", {
+  df <- data.frame(AGE = c(20, 40, NA), stringsAsFactors = FALSE)
+
+  ok <- rule_check_range(
+    DTARuleColRange(id = "range_ok", columns = "AGE", min = 18, max = 65),
+    df
+  )
+  expect_true(ok$valid)
+  expect_null(ok$message)
+
+  all_na <- rule_check_range(
+    DTARuleColRange(id = "range_na", columns = "AGE", min = 18, max = 65),
+    data.frame(AGE = c(NA, NA), stringsAsFactors = FALSE)
+  )
+  expect_true(all_na$valid)
+
+  expect_error(
+    rule_check_range(
+      DTARuleColRange(id = "range_multi", columns = c("AGE", "WEIGHT"), min = 0, max = 100),
+      data.frame(AGE = 1, WEIGHT = 2)
+    ),
+    "exactly one"
+  )
+})
+
+test_that("Conditional rules support comparison operators and combined IF predicates", {
+  df <- data.frame(
+    VISIT = c("V03", "V03", "EOT"),
+    STATUS = c("COMPLETED", "IN_PROGRESS", "DROPPED"),
+    AGE = c(25, 30, 80),
+    WEIGHT = c(80, 55, 40),
+    stringsAsFactors = FALSE
+  )
+
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_greater",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(WEIGHT = list(greater = 50))
+      ),
+      df
+    )$valid
+  )
+
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_less",
+        condition = list(VISIT = list(equals = "EOT")),
+        then = list(AGE = list(less = 100))
+      ),
+      df
+    )$valid
+  )
+
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_less_equal",
+        condition = list(VISIT = list(equals = "V03"), STATUS = list(not_equals = "DROPPED")),
+        then = list(AGE = list(less_equal = 30))
+      ),
+      df
+    )$valid
+  )
+
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_not_in_vector",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(STATUS = list(not_in = c("DROPPED", "FAILED")))
+      ),
+      df
+    )$valid
+  )
+})
+
+test_that("Conditional rules error for missing columns", {
+  df <- data.frame(AGE = c(20, 30), stringsAsFactors = FALSE)
+
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "missing_if_col",
+        condition = list(MISSING = list(equals = "X")),
+        then = list(AGE = list(greater_equal = 18))
+      ),
+      df
+    )
+  )
+
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "missing_then_col",
+        condition = list(AGE = list(greater_equal = 18)),
+        then = list(MISSING = list(not_equals = "X"))
+      ),
+      df
+    )
+  )
+})
+
+test_that("Unique rules treat repeated NA combinations as duplicates", {
+  df <- data.frame(ID = c("A", "B", "C"), VISIT = c(NA, NA, "V03"), stringsAsFactors = FALSE)
+
+  result <- rule_check_unique(
+    DTARuleColUnique(id = "na_dupes", columns = c("VISIT")),
+    df
+  )
+
+  expect_false(result$valid)
+  expect_match(result$message, "duplicate row")
+})
+
+test_that("apply_schema_rules returns empty list for empty rule set", {
+  result <- apply_schema_rules(list(), data.frame(A = 1), verbose = FALSE)
+  expect_type(result, "list")
+  expect_length(result, 0)
+})

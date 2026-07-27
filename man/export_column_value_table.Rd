@@ -7,7 +7,8 @@
 export_column_value_table(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
-  id
+  id,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -17,6 +18,8 @@ column specifications.}
 \item{file}{Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".}
 
 \item{id}{Character. The id of the column for which a table with all its values shall be generated.}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
 None. The function creates a Word document.

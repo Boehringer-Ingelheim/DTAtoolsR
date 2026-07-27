@@ -130,33 +130,37 @@ rule_check_unique <- function(rule, df) {
 
 #' @keywords internal
 evaluate_condition <- function(column_name, condition, df) {
+  if (!column_name %in% names(df)) {
+    cli::cli_abort("Column not found in table: {column_name}")
+  }
+
   x <- df[[column_name]]
 
-  if (!is.null(condition$equals) || !is.null(condition$equal)) {
-    value <- if (!is.null(condition$equals)) condition$equals else condition$equal
+  if ("equals" %in% names(condition) || "equal" %in% names(condition)) {
+    value <- if ("equals" %in% names(condition)) condition[["equals"]] else condition[["equal"]]
     return(x == value)
-  } else if (!is.null(condition$not_equals) || !is.null(condition$not_equal)) {
-    value <- if (!is.null(condition$not_equals)) condition$not_equals else condition$not_equal
+  } else if ("not_equals" %in% names(condition) || "not_equal" %in% names(condition)) {
+    value <- if ("not_equals" %in% names(condition)) condition[["not_equals"]] else condition[["not_equal"]]
     return(x != value)
-  } else if (!is.null(condition[["in"]])) {
+  } else if ("in" %in% names(condition)) {
     return(x %in% condition[["in"]])
-  } else if (!is.null(condition$not_in)) {
-    return(!(x %in% condition$not_in))
-  } else if (!is.null(condition$greater)) {
-    return(x > condition$greater)
-  } else if (!is.null(condition$less)) {
-    return(x < condition$less)
-  } else if (!is.null(condition$greater_equal)) {
-    return(x >= condition$greater_equal)
-  } else if (!is.null(condition$less_equal)) {
-    return(x <= condition$less_equal)
-  } else if (!is.null(condition$min) || !is.null(condition$max)) {
-    lower <- if (!is.null(condition$min)) condition$min else -Inf
-    upper <- if (!is.null(condition$max)) condition$max else Inf
+  } else if ("not_in" %in% names(condition)) {
+    return(!(x %in% condition[["not_in"]]))
+  } else if ("greater" %in% names(condition)) {
+    return(x > condition[["greater"]])
+  } else if ("less" %in% names(condition)) {
+    return(x < condition[["less"]])
+  } else if ("greater_equal" %in% names(condition)) {
+    return(x >= condition[["greater_equal"]])
+  } else if ("less_equal" %in% names(condition)) {
+    return(x <= condition[["less_equal"]])
+  } else if ("min" %in% names(condition) || "max" %in% names(condition)) {
+    lower <- if ("min" %in% names(condition)) condition[["min"]] else -Inf
+    upper <- if ("max" %in% names(condition)) condition[["max"]] else Inf
     return(x >= lower & x <= upper)
-  } else if (!is.null(condition$range)) {
-    return(x >= condition$range[1] & x <= condition$range[2])
-  } else if (!is.null(condition$empty)) {
+  } else if ("range" %in% names(condition)) {
+    return(x >= condition[["range"]][1] & x <= condition[["range"]][2])
+  } else if ("empty" %in% names(condition)) {
     empty_mask <- is.na(x)
 
     if (is.character(x)) {
@@ -166,7 +170,7 @@ evaluate_condition <- function(column_name, condition, df) {
       empty_mask <- is.na(x_chr) | trimws(x_chr) == ""
     }
 
-    if (isTRUE(condition$empty)) {
+    if (isTRUE(condition[["empty"]])) {
       return(empty_mask)
     } else {
       return(!empty_mask)

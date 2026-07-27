@@ -86,4 +86,16 @@ test_that("DTAFile Creation", {
   expect_true(matches_filename(file_info, basename(path)))
 })
 
+test_that("DTAFileDelim reads tab-delimited files", {
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
+
+  file_info <- DTAFileDelim("gf_data_small_smirna.tsv")
+
+  expect_s3_class(file_info, "DTAtools::DTAFile")
+  expect_s3_class(file_info, "DTAtools::DTAFileDelim")
+  expect_true(matches_filename(file_info, basename(path)))
+
+  x <- read_file(file_info, path)
+  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+})
 

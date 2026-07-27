@@ -11,6 +11,7 @@
 #' @param file Character. The name of the output Word file in which the DTA Spec Table shall be written. Default is "dta_spec_table.docx".
 #' @param overwrite Logical. whether to overwrite the file.
 #' @param colnames Vector. Vector containing column names of the DTA table. Default: c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @return Flextable object that is saved.
 #' @export
 #' @examples
@@ -28,7 +29,8 @@ export_specs_table <- function(
     "Format",
     "Nullable",
     "Description"
-  )
+  ),
+  quiet = FALSE
 ) {
   if (!inherits(DTAColumnSpecCollection, "DTAtools::DTAColumnSpecCollection")) {
     cli::cli_abort("'DTAColumnSpecCollection' must be a DTAColumnSpecCollection object.")
@@ -185,9 +187,11 @@ export_specs_table <- function(
   } else {
     ft %>%
       flextable::save_as_docx(path = file)
-    cli::cli_alert_success(
-      "Table has been written to {file} successfully."
-    )
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_success(
+        "Table has been written to {file} successfully."
+      )
+    }
   }
 
   invisible(ft)
@@ -204,6 +208,7 @@ export_specs_table <- function(
 #'   column specifications.
 #' @param file Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".
 #' @param id Character. The id of the column for which a table with all its values shall be generated.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @return None. The function creates a Word document.
 #' @export
 #' @examples
@@ -212,7 +217,8 @@ export_specs_table <- function(
 export_column_value_table <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
-  id
+  id,
+  quiet = FALSE
 ) {
   # get values from column within DTAColumnSpecCollection
   specs <- DTAColumnSpecCollection@columns[[id]]
@@ -234,9 +240,11 @@ export_column_value_table <- function(
     flextable::valign(part = "body", valign = "top") %>%
     flextable::save_as_docx(path = file)
 
-  cli::cli_alert_success(
-    "Table has been written to {.file {file}} successfully."
-  )
+  if (!isTRUE(quiet)) {
+    cli::cli_alert_success(
+      "Table has been written to {.file {file}} successfully."
+    )
+  }
   invisible(df)
 }
 
@@ -245,11 +253,12 @@ export_column_value_table <- function(
 #' @param file Path to the input data file.
 #' @param table A data.frame that was written to the file.
 #' @param write_to_file Logical. Whether to write information to an additional file.
+#' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @return Invisibly returns a list with `md5sum`, `n_rows`, and `n_cols`.
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom tools md5sum
 #' @keywords internal
-write_metadata <- function(file, table, write_to_file) {
+write_metadata <- function(file, table, write_to_file, quiet = FALSE) {
   if (!file.exists(file)) {
     cli::cli_abort("File does not exist: {file}")
   }
@@ -259,9 +268,11 @@ write_metadata <- function(file, table, write_to_file) {
   n_rows <- nrow(table)
   n_cols <- ncol(table)
 
-  cli::cli_alert_info("md5sum: {checksum}")
-  cli::cli_alert_info("Number of Columns: {n_cols}")
-  cli::cli_alert_info("Number of Rows: {n_rows}")
+  if (!isTRUE(quiet)) {
+    cli::cli_alert_info("md5sum: {checksum}")
+    cli::cli_alert_info("Number of Columns: {n_cols}")
+    cli::cli_alert_info("Number of Rows: {n_rows}")
+  }
 
   if (write_to_file) {
     # Format metadata lines
@@ -277,7 +288,9 @@ write_metadata <- function(file, table, write_to_file) {
     # Write metadata to separate file
     writeLines(metadata_lines, metadata_file, useBytes = TRUE)
 
-    cli::cli_alert_info("Metadata written to {.file {metadata_file}}")
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_info("Metadata written to {.file {metadata_file}}")
+    }
   }
 
   invisible(list(

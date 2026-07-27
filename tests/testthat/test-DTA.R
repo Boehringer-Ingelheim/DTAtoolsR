@@ -252,3 +252,25 @@ test_that("check() aborts on missing dataset name", {
   dta <- create_example_DTA()
   expect_error(check(dta, datasets = "nonexistent", quiet = TRUE), "not found")
 })
+
+test_that("read_dta_from_yaml aborts for non-existent yaml file", {
+  expect_error(
+    read_dta_from_yaml(file.path(tempdir(), "does-not-exist-dta.yaml")),
+    "does not exist"
+  )
+})
+
+test_that("load_file() aborts for missing dataset name", {
+  dta <- read_dta_from_yaml(
+    system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  )
+
+  expect_error(
+    load_file(
+      dta,
+      "missing_dataset",
+      file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
+    ),
+    "not found"
+  )
+})

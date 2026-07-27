@@ -9,7 +9,8 @@ export_specs_table(
   file = "dta_spec_table.docx",
   overwrite = FALSE,
   colnames = c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable",
-    "Description")
+    "Description"),
+  quiet = FALSE
 )
 }
 \arguments{
@@ -21,6 +22,8 @@ column specifications.}
 \item{overwrite}{Logical. whether to overwrite the file.}
 
 \item{colnames}{Vector. Vector containing column names of the DTA table. Default: c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
 Flextable object that is saved.

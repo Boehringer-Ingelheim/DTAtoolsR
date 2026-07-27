@@ -4,7 +4,7 @@
 \alias{write_metadata}
 \title{Write Metadata to File}
 \usage{
-write_metadata(file, table, write_to_file)
+write_metadata(file, table, write_to_file, quiet = FALSE)
 }
 \arguments{
 \item{file}{Path to the input data file.}
@@ -12,6 +12,8 @@ write_metadata(file, table, write_to_file)
 \item{table}{A data.frame that was written to the file.}
 
 \item{write_to_file}{Logical. Whether to write information to an additional file.}
+
+\item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
 Invisibly returns a list with \code{md5sum}, \code{n_rows}, and \code{n_cols}.

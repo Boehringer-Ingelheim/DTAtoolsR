@@ -13,7 +13,9 @@ test_that("DTADataSet object is loaded from yaml", {
   path <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   ds <- read_dataset_from_yaml(path)
   expect_s3_class(ds, "DTAtools::DTADataSet")
-  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileTSV") 
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileTSV")
+  expect_true(is.list(tables(ds)))
+  expect_length(tables(ds), 0)
 })
 
 
@@ -47,3 +49,26 @@ test_that("DTADataSet object is created and table can be loaded", {
   expect_s3_class(colspec(ds, "STUDYID"), "DTAtools::DTAColumnSpec")
 })
 
+test_that("read_dataset_from_yaml aborts for non-existent yaml file", {
+  expect_error(
+    read_dataset_from_yaml(file.path(tempdir(), "does-not-exist-dataset.yaml")),
+    "does not exist"
+  )
+})
+
+test_that("DTADataSetTabular can be created with empty tables", {
+  ds <- DTADataSetTabular(
+    name = "empty_tables",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list()
+  )
+
+  expect_s3_class(ds, "DTAtools::DTADataSetTabular")
+  expect_true(is.list(tables(ds)))
+  expect_length(tables(ds), 0)
+})
+
+test_that("colspec() errors for out-of-bounds numeric index", {
+  ds <- create_example_DTADataSetTabular(2)
+  expect_error(colspec(ds, 999))
+})

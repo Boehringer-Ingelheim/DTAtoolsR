@@ -366,7 +366,8 @@ write_table_to_file <- function(
     md5sum <- write_metadata(
       filename,
       table_data,
-      write_to_file = write_md5sum_to_file
+      write_to_file = write_md5sum_to_file,
+      quiet = quiet
     )
   } else {
     md5sum <- NA

@@ -78,3 +78,17 @@ test_that("create_example_DTAColumnSpec covers the supported indices", {
   expect_s3_class(create_example_DTAColumnSpec(5), "DTAtools::DTAColumnSpec")
   expect_error(create_example_DTAColumnSpec(99), "Invalid index")
 })
+
+test_that("DTAColumnSpecStructureFactory validates backend prefixes", {
+  expect_error(
+    DTAColumnSpecStructureFactory(type = "R Char", format = "R $10."),
+    "supported backends"
+  )
+
+  expect_error(
+    DTAColumnSpecStructureFactory(type = "SAS Char", format = "R $10."),
+    "supported backends"
+  )
+
+  expect_error(DTAColumnSpecStructureFactory(type = NULL, format = NULL, length = NULL))
+})
