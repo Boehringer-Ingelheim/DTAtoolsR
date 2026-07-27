@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-### Changed
+### Added
+
+- `max_number_of_files()` and `min_number_of_files()` generics on `DTADataSet`, aggregating counts across all files in the dataset
+
+### Removed
 
 - removed the `DTARuleCollection` class; `DTAColumnSpecCollection@rules` (and `rules(x)`) is now a plain list of `DTARule` objects (or `NULL`) instead of a `DTARuleCollection` wrapper object
 
@@ -15,11 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - print method to all instantiable classes
-- added `examples` to `DTAColumnSpecs`, which need to be following a pattern if provided and are mutatially exclusive from `values`
-- introducted `colclass`, which is a placeholder for further addition for automatic preprocessing efforts
-- file handling with classes: `DTAFileInfo`, `DTAFileInfoTabular`, `DTAFileInfoCSV`, `DTAFileInfoTSV`, `DTAFileInfoDelim`
+- added `examples` to `DTAColumnSpecs`, which need to be following a pattern if provided and are mutually exclusive from `values`
+- introduced `colclass`, which is a placeholder for further addition for automatic preprocessing efforts
+- file handling with classes: `DTAFile`, `DTAFileTabular`, `DTAFileCSV`, `DTAFileTSV`, `DTAFileDelim`
 - introduced classes `DTARule`, `DTARuleCollection`, `DTARuleColCondition`, `DTARuleColRange`, `DTARuleColUnique` for rules
-- introducted classes `DTADataSetTabular` handling tabular data, deriving from `DTADataSet`
+- introduced classes `DTADataSetTabular` handling tabular data, deriving from `DTADataSet`
 - introduced class `DTADataSetFile` for validating file presence, non-emptiness, and readability of non-tabular deliverables, with its own `check()`, `results()`, `messages()`, and `inspect()` methods
 - introduced `inspect()` generic for `DTADataSetTabular` and `DTADataSetFile` to drill into a specific validation error by `id`, returning row context, the failing JSON Schema clause, or the rows that violated a rule
 - functions to access slots
@@ -27,9 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - introduced `DTAColumnSpecStructure` and `DTAColumnSpecStructureSAS` for handling `type`, `format`, `length` of a column spec
 - info variables to `DTADataSet` and `DTADataSetTabular` 
 - example factory functions: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTADataSetTabular()`, `create_example_DTAFileCSV()`, `create_example_DTAFileTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
-- `as.list` functions to `DTAColumnSpecCollection`, `DTAColumnSpecCollection` and `DTARules` derivates 
+- `as.list` methods for `DTAColumnSpecCollection`, `DTAColumnSpec`, and `DTARule` derivatives
 
-### Changes
+### Changed
 
 - renamed functions to snake_case
 - renamed DTAFileInfo to DTAFile
@@ -43,7 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - fixed `load_file()` so it is properly exported from the package namespace (previously only accessible via `DTAtools:::load_file`)
 - improved testthat tests
 - improved CLI messages
-- moved rules to `DTARule` and derivate classes
+- moved rules to `DTARule` and derivative classes
 - renamed getter functions to shorter names
 - renamed constructor variables
 - DTA-class constructor to handle DTAMetaData  
@@ -58,7 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added GitHub Action workflows
 - Added Metadata to DTAData
 
-### Changes
+### Changed
 
 - Moved project to GitHub.com
 - Modified documentation and examples to adhere to R CMD checks for CRAN
@@ -105,19 +109,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - `specs_from_list`: Simple import from lists. Can be used in combination with `params.yaml` files managed by dso
 
-### Updates
+### Changed
 
 - allowing numeric values
 - pattern information - no quoted strings allowed
 - required statement is now in the correct location in the jsonschema
 
-### Fixes
+### Fixed
 
 - include dplyr functions
 
 ## [0.7.4] - 2025-06-26
 
-### Updates
+### Changed
 
 - jsonschema is now part of the `DTAColumnSpecCollection`
 - implemented progress bar to signal status of table validation
@@ -125,25 +129,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.7.3] - 2025-06-26
 
-### Fix
+### Fixed
 
 - export functions are now exported into the NAMESPACE
 
 ## [0.7.2] - 2025-06-26
 
-### Fix
+### Fixed
 
 - `DTAColumnSpecCollection_to_jsonschema` - fix values when values: ""
 
 ## [0.7.1] - 2025-06-26
 
-### Fix
+### Fixed
 
 - `validate_table_with_jsonschema` fix
 
 ## [0.7.0] - 2025-06-25
 
-### Updates
+### Changed
 
 - Switch to using `jsonschema` for validating the correctness of the table
 - Improving error messages when using `jsonschema`
@@ -151,7 +155,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.6.0] - 2025-06-13
 
-### Updates
+### Changed
 
 - `import_specs_from_word` has been updated to new value and pattern format, making it easier to read and extract
 - `export_specs_table`, similarly to above. Values and pattern will now be printed in a new format
@@ -241,3 +245,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - added methods to extract tables, columns and columncollections
 
 ## [0.1.0]
+
+- Initial internal release
+
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.5...v0.8.0
+[0.7.5]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.4...v0.7.5
+[0.7.4]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.3...v0.7.4
+[0.7.3]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.1.0...v0.2.0
