@@ -10,8 +10,9 @@ testdata
 example/
 *Rproj
 helper.R
-renv
-renv/
+renv/library
+renv/staging
+renv/settings.json
 .Renviron
 *docx
 
