@@ -100,7 +100,7 @@ server <- function(input, output, session) {
     status = list(),     # dataset name -> "pass" | "fail" | "pending" | "nodata"
     pending_upload = NULL, # deferred upload awaiting an overwrite confirmation
     example_target = NULL, # list(ds_idx, hi) the example-file modal loads into
-    dataset_only = FALSE, # TRUE when a standalone dataset YAML was loaded (no metadata)
+    dataset_only = FALSE, # legacy flag; a loaded dataset YAML is now wrapped into a full DTA (never set TRUE)
     is_example = FALSE,  # TRUE when the bundled example DTA is loaded (enables example-file pickers)
     md_token = 0,        # bump to re-render metadata editor
     contacts_token = 0,  # bump to re-render contacts list
@@ -180,8 +180,15 @@ server <- function(input, output, session) {
     ), silent = TRUE)
   }
 
-  apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE) {
+  apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE,
+                           wrapped_dataset = FALSE) {
     names_ds <- dta_dataset_names(dta)
+    # A standalone dataset wrapped into a new empty DTA: show the full DTA YAML
+    # (empty metadata + the dataset) in the Raw view so the state is coherent.
+    if (isTRUE(wrapped_dataset)) {
+      ser <- dta_to_yaml_text(dta)
+      if (isTRUE(ser$ok)) yaml_text <- ser$value
+    }
     rv$dta <- dta
     rv$yaml_text <- yaml_text
     rv$structure <- build_structure(dta)
@@ -209,9 +216,12 @@ server <- function(input, output, session) {
       )
       return()
     }
-    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only))
+    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only),
+                 wrapped_dataset = isTRUE(res$wrapped_dataset))
     showNotification(
-      if (isTRUE(res$dataset_only)) "Dataset loaded (no metadata)." else "DTA loaded.",
+      if (isTRUE(res$wrapped_dataset)) {
+        "Dataset loaded into a new DTA \u2014 add metadata to complete it."
+      } else "DTA loaded.",
       type = "message"
     )
   })
@@ -254,7 +264,8 @@ server <- function(input, output, session) {
       return()
     }
     removeModal()
-    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only), is_example = TRUE)
+    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only), is_example = TRUE,
+                 wrapped_dataset = isTRUE(res$wrapped_dataset))
     showNotification(sprintf("Example \u201c%s\u201d loaded.", sel), type = "message")
   })
 
@@ -2309,8 +2320,8 @@ server <- function(input, output, session) {
     autosave()
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
-      if (isTRUE(res$dataset_only)) {
-        "Dataset YAML applied (uploads kept where handlers are unchanged)."
+      if (isTRUE(res$wrapped_dataset)) {
+        "Dataset YAML wrapped into a new DTA (uploads kept where handlers are unchanged)."
       } else {
         "DTA YAML applied (uploads kept where handlers are unchanged)."
       },
@@ -2681,23 +2692,19 @@ server <- function(input, output, session) {
           #div(style = "height:8px;"),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
           #div(style = "height:6px;"),
-          downloadButton("dl_docx", "Export Word", class = "btn btn-outline-primary w-100"),
+          downloadButton("dl_docx", "Export DTA Word", class = "btn btn-outline-primary w-100"),
           #div(style = "height:6px;"),
-          downloadButton("dl_pdf", "Export PDF", class = "btn btn-outline-primary w-100"),
+          downloadButton("dl_pdf", "Export DTA PDF", class = "btn btn-outline-primary w-100"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
         ),
         {
-          # A standalone dataset YAML has no metadata -> hide the Metadata tab.
-          dataset_only <- isolate(rv$dataset_only)
-          metadata_panel <- nav_panel(
-            "Metadata",
-            uiOutput("metadata_editor")
-          )
+          # The Metadata tab is always available: a loaded dataset YAML is wrapped
+          # into a full (empty-metadata) DTA that the user can complete.
           panels <- list(
             nav_panel("Datasets", uiOutput("dataset_detail")),
-            if (!isTRUE(dataset_only)) metadata_panel,
+            nav_panel("Metadata", uiOutput("metadata_editor")),
             nav_panel(
               "Raw YAML",
               div(

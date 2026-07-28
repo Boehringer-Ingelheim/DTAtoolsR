@@ -20,16 +20,21 @@ dta_try <- function(expr) {
 # A DTA YAML has a top-level `metadata:` and/or `datasets:` key. A standalone
 # DATASET YAML (e.g. gf_dataset.yaml) has the dataset fields at the top level
 # (`name`, `type`, `files`, `columns`) and NO `datasets`/`metadata` key -- it is
-# read via read_dataset_from_yaml() and wrapped in a DTA so the rest of the app
-# (which operates on a DTA) works unchanged.
-# Returns the usual dta_try() list plus two flags:
-#   dataset_only : TRUE when the source was a standalone dataset YAML.
-#   has_metadata : TRUE when the source YAML carried a `metadata:` section.
+# read via read_dataset_from_yaml() and dropped into a NEW, EMPTY DTA (default
+# metadata) so the user continues in the full DTA workspace: they can fill in the
+# metadata, add more datasets and export a complete DTA (rather than being stuck
+# in a restricted dataset-only view).
+# Returns the usual dta_try() list plus three flags:
+#   dataset_only    : always FALSE now (a dataset YAML is wrapped into a full
+#                     DTA); retained for back-compat with callers/old sessions.
+#   has_metadata    : TRUE when the source YAML carried a `metadata:` section.
+#   wrapped_dataset : TRUE when a standalone dataset YAML was wrapped into a new
+#                     empty DTA (used only for an informative load message).
 dta_read_yaml <- function(path) {
   raw <- dta_try(yaml::read_yaml(path))
   if (!raw$ok) {
     return(list(ok = FALSE, value = NULL, error = raw$error,
-                dataset_only = FALSE, has_metadata = FALSE))
+                dataset_only = FALSE, has_metadata = FALSE, wrapped_dataset = FALSE))
   }
   y <- raw$value
   has_metadata <- is.list(y) && !is.null(y$metadata)
@@ -39,25 +44,30 @@ dta_read_yaml <- function(path) {
     res <- dta_try(DTAtools::read_dta_from_yaml(path))
     res$dataset_only <- FALSE
     res$has_metadata <- has_metadata
+    res$wrapped_dataset <- FALSE
     return(res)
   }
 
-  # Standalone dataset YAML -> read it and wrap in a metadata-less DTA.
+  # Standalone dataset YAML -> create a NEW, EMPTY DTA (metadata defaults to an
+  # empty DTAMetaData()) and put the dataset into it, so the user continues in
+  # the full DTA workspace instead of a restricted dataset-only view.
   res <- dta_try({
     ds <- DTAtools::read_dataset_from_yaml(path)
     DTAtools::DTA(datasets = ds)
   })
-  res$dataset_only <- TRUE
+  res$dataset_only <- FALSE
   res$has_metadata <- FALSE
+  res$wrapped_dataset <- isTRUE(res$ok)
   res
 }
 
 # Validate a raw YAML STRING as a DTA/DTADataSet by staging it to a temp file
 # and reusing dta_read_yaml() (which checks YAML syntax FIRST, then DTA/dataset
 # structure). Returns the same list shape as dta_read_yaml() -- so callers get
-# ok/value/error plus dataset_only/has_metadata. Used by the editable Raw YAML
-# tab so a save only replaces the loaded document when the text is BOTH valid
-# YAML AND a valid DTA / DTADataSet.
+# ok/value/error plus dataset_only/has_metadata/wrapped_dataset. Used by the
+# editable Raw YAML tab so a save only replaces the loaded document when the text
+# is BOTH valid YAML AND a valid DTA / DTADataSet (a bare dataset YAML is wrapped
+# into a new empty DTA, exactly like loading one on the landing page).
 dta_read_yaml_text <- function(text) {
   tmp <- tempfile(fileext = ".yaml")
   on.exit(unlink(tmp), add = TRUE)
@@ -70,7 +80,7 @@ dta_read_yaml_text <- function(text) {
   if (!isTRUE(written)) {
     return(list(ok = FALSE, value = NULL,
                 error = "Could not stage the YAML text for validation.",
-                dataset_only = FALSE, has_metadata = FALSE))
+                dataset_only = FALSE, has_metadata = FALSE, wrapped_dataset = FALSE))
   }
   dta_read_yaml(tmp)
 }
@@ -462,9 +472,24 @@ dta_clear_validation <- function(dta, dataset, tables = NULL) {
 }
 
 # Remove ONE bound file/table (and its validation state) from a dataset.
+# ORDER MATTERS: the table's validation entries (validation_index AND
+# validation_store) are cleared BEFORE the table/file itself is dropped. The
+# DTADataSetTabular validator forbids validation_index/store being LONGER than
+# `tables`, so dropping a VALIDATED table first would transiently leave more
+# validation entries than tables (vindex > tables) and abort the whole removal
+# (F20). Clearing the validation state first keeps every intermediate object
+# valid, so removing a table that was already validated always succeeds.
 dta_unload_table <- function(dta, dataset, table) {
   dta_try({
     ds <- DTAtools::datasets(dta, dataset)
+    # 1) Drop this table's validation state FIRST (index + store together).
+    vi <- tryCatch(ds@validation_index, error = function(e) list()) %||% list()
+    vi[[table]] <- NULL
+    ds@validation_index <- vi
+    vsr <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
+    vsr[[table]] <- NULL
+    ds@validation_store <- vsr
+    # 2) Then remove the table/file itself.
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       fp <- tryCatch(ds@file_paths, error = function(e) character(0)) %||% character(0)
@@ -474,12 +499,6 @@ dta_unload_table <- function(dta, dataset, table) {
       tabs[[table]] <- NULL
       ds@tables <- tabs
     }
-    vi <- tryCatch(ds@validation_index, error = function(e) list()) %||% list()
-    vi[[table]] <- NULL
-    ds@validation_index <- vi
-    vsr <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
-    vsr[[table]] <- NULL
-    ds@validation_store <- vsr
     dta@datasets[[dataset]] <- ds
     dta
   })
