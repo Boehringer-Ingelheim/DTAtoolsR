@@ -2377,8 +2377,7 @@ server <- function(input, output, session) {
       res <- dta_export(rv$dta, file, "pdf")
       if (!res$ok) {
         showNotification(
-          paste("PDF export failed (a DOCX converter such as LibreOffice may be required):",
-                res$error),
+          paste("PDF export failed:", res$error),
           type = "error", duration = 12
         )
         stop(res$error)

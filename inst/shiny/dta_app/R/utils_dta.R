@@ -521,6 +521,12 @@ dta_inspect <- function(dta, dataset, id) {
 # ---- Export --------------------------------------------------------------
 
 dta_export <- function(dta, file, format, signature_list = NULL) {
+  format <- tolower(format %||% "")
+  # PDF gets a dedicated, robust path (see dta_export_pdf); other formats go
+  # straight to the package writer.
+  if (identical(format, "pdf")) {
+    return(dta_try(dta_export_pdf(dta, file, signature_list)))
+  }
   dta_try(DTAtools::write_dta(
     dta,
     file = file,
@@ -530,6 +536,380 @@ dta_export <- function(dta, file, format, signature_list = NULL) {
     signature_list = signature_list,
     quiet = TRUE
   ))
+}
+
+# Does `file` exist and begin with the %PDF- magic bytes? Used to VERIFY a
+# converter actually produced a genuine PDF (rather than a mislabelled DOCX or
+# an empty file, which is what made the Export PDF button appear to do nothing).
+dta_is_pdf <- function(file) {
+  if (is.null(file) || !file.exists(file)) return(FALSE)
+  if (isTRUE(file.info(file)$size < 5)) return(FALSE)
+  sig <- tryCatch({
+    con <- file(file, "rb")
+    on.exit(close(con), add = TRUE)
+    readChar(con, 5L, useBytes = TRUE)
+  }, error = function(e) "")
+  isTRUE(grepl("^%PDF-", sig %||% ""))
+}
+
+# Locate a LibreOffice/soffice binary (PATH first, then common install dirs).
+dta_find_soffice <- function() {
+  cand <- Sys.which(c("soffice", "libreoffice"))
+  cand <- cand[nzchar(cand)]
+  if (length(cand)) return(unname(cand[[1]]))
+  guesses <- c(
+    "C:/Program Files/LibreOffice/program/soffice.exe",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    "/usr/bin/soffice", "/usr/bin/libreoffice", "/usr/local/bin/soffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+  )
+  hit <- guesses[file.exists(guesses)]
+  if (length(hit)) hit[[1]] else ""
+}
+
+# Convert docx -> pdf with a headless LibreOffice call. Returns TRUE only when a
+# real PDF lands at `file`.
+dta_soffice_to_pdf <- function(soffice, docx, file) {
+  outdir <- tempfile("pdfout")
+  dir.create(outdir)
+  on.exit(unlink(outdir, recursive = TRUE), add = TRUE)
+  ok <- tryCatch({
+    system2(
+      soffice,
+      c("--headless", "--norestore", "--convert-to", "pdf",
+        "--outdir", shQuote(outdir), shQuote(docx)),
+      stdout = TRUE, stderr = TRUE, timeout = 120
+    )
+    TRUE
+  }, error = function(e) FALSE, warning = function(w) TRUE)
+  produced <- file.path(outdir, paste0(tools::file_path_sans_ext(basename(docx)), ".pdf"))
+  if (isTRUE(ok) && file.exists(produced)) file.copy(produced, file, overwrite = TRUE)
+  dta_is_pdf(file)
+}
+
+# First pandoc-usable PDF engine found on the system, or "" when none exists.
+# pandoc CANNOT make a PDF without one, so we probe before attempting (otherwise
+# it errors with "pdflatex not found").
+dta_pandoc_pdf_engine <- function() {
+  engines <- c("pdflatex", "xelatex", "lualatex", "tectonic",
+               "wkhtmltopdf", "weasyprint", "typst", "context", "pdfroff")
+  for (eng in engines) if (nzchar(Sys.which(eng))) return(eng)
+  if (requireNamespace("tinytex", quietly = TRUE) &&
+      isTRUE(tryCatch(tinytex::is_tinytex(), error = function(e) FALSE))) {
+    return("pdflatex")
+  }
+  ""
+}
+
+# Convert docx -> pdf via pandoc, but only when a PDF engine is actually present.
+dta_pandoc_to_pdf <- function(docx, file) {
+  if (!requireNamespace("rmarkdown", quietly = TRUE)) return(FALSE)
+  if (!isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE))) return(FALSE)
+  engine <- dta_pandoc_pdf_engine()
+  if (!nzchar(engine)) return(FALSE)
+  ok <- tryCatch({
+    rmarkdown::pandoc_convert(
+      input = normalizePath(docx, winslash = "/", mustWork = TRUE),
+      to = "pdf",
+      output = normalizePath(file, winslash = "/", mustWork = FALSE),
+      options = c("--pdf-engine", engine)
+    )
+    TRUE
+  }, error = function(e) FALSE)
+  isTRUE(ok) && dta_is_pdf(file)
+}
+
+# Render Markdown lines to a valid, self-contained, FORMATTED multi-page PDF
+# using R's built-in graphics devices -- NO external tools (LaTeX / LibreOffice /
+# Chrome) required, so a PDF can ALWAYS be produced. The Markdown is actually
+# "compiled": headings, inline **bold** labels, bullet lists, `| pipe |` tables
+# and `---` rules are drawn as formatted content (not dumped as raw source).
+# cairo_pdf (full Unicode) is preferred; base pdf() with a Latin1 transliteration
+# is the ultimate fallback.
+dta_markdown_to_pdf <- function(lines, file) {
+  cairo_ok <- tryCatch(as.logical(capabilities("cairo"))[1], error = function(e) FALSE)
+  if (is.na(cairo_ok)) cairo_ok <- FALSE
+
+  ascii <- function(x) x
+  opened <- FALSE
+  if (isTRUE(cairo_ok)) {
+    opened <- tryCatch({
+      grDevices::cairo_pdf(file, width = 8.27, height = 11.69, onefile = TRUE, pointsize = 10)
+      TRUE
+    }, error = function(e) FALSE)
+  }
+  if (!isTRUE(opened)) {
+    # Base pdf() renders only Latin1 with the built-in fonts: transliterate.
+    ascii <- function(x) {
+      x <- enc2utf8(as.character(x) %||% "")
+      x <- gsub("[\u2012-\u2015]", "-", x)  # figure/en/em dashes
+      x <- gsub("[\u2018\u2019]", "'", x)   # curly single quotes
+      x <- gsub("[\u201C\u201D]", '"', x)   # curly double quotes
+      x <- gsub("\u2022", "*", x)            # bullet
+      out <- iconv(x, from = "UTF-8", to = "latin1", sub = "?")
+      ifelse(is.na(out), gsub("[^ -~]", "?", x), out)
+    }
+    grDevices::pdf(file, width = 8.27, height = 11.69, onefile = TRUE, pointsize = 10)
+  }
+  on.exit(grDevices::dev.off(), add = TRUE)
+  dta_render_markdown(lines, ascii = ascii)
+  invisible(file)
+}
+
+# Draw "compiled" Markdown onto the CURRENT graphics device, managing its own
+# A4 pages via plot.new(). Headings, inline **bold** labels, bullet lists,
+# `| pipe |` tables and `---` rules are rendered as formatted content -- never
+# dumped as raw source. `ascii` transliterates glyphs for devices whose fonts
+# lack full Unicode (identity for cairo). Kept separate from the device set-up
+# so it can also target other devices (e.g. PNG previews).
+dta_render_markdown <- function(lines, ascii = function(x) x) {
+  lines <- as.character(lines)
+  if (length(lines) == 0) lines <- ""
+  op <- graphics::par(mar = c(0, 0, 0, 0), family = "sans")
+  on.exit(graphics::par(op), add = TRUE)
+
+  pageW <- 8.27; pageH <- 11.69
+  mL <- 0.85; mR <- 0.85; mT <- 0.9; mB <- 0.85
+  contentW <- pageW - mL - mR
+  y <- NA_real_
+
+  new_page <- function() {
+    graphics::plot.new()
+    graphics::plot.window(xlim = c(0, pageW), ylim = c(0, pageH),
+                          xaxs = "i", yaxs = "i", asp = NA)
+    y <<- pageH - mT
+  }
+  new_page()
+
+  lh   <- function(cex) graphics::strheight("Ag", cex = cex, font = 1) * 1.35
+  sw   <- function(s, cex, font) graphics::strwidth(s, cex = cex, font = font)
+  ensure <- function(space) if (y - space < mB) new_page()
+
+  break_token <- function(tok, cex, font, maxw) {
+    if (sw(tok, cex, font) <= maxw || !nzchar(tok)) return(tok)
+    out <- character(0); cur <- ""
+    for (ch in strsplit(tok, "")[[1]]) {
+      if (nzchar(cur) && sw(paste0(cur, ch), cex, font) > maxw) {
+        out <- c(out, cur); cur <- ch
+      } else cur <- paste0(cur, ch)
+    }
+    if (nzchar(cur)) out <- c(out, cur)
+    out
+  }
+
+  # Draw a list of words (each list(text=, bold=)) with word-wrapping and proper
+  # per-word bold/italic; advances the y cursor.
+  draw_words <- function(words, cex = 1, indent = 0, italic = FALSE, color = "black") {
+    startX <- mL + indent
+    maxX <- mL + contentW
+    spaceW <- sw(" ", cex, 1)
+    step <- lh(cex)
+    ensure(step)
+    x <- startX; started <- FALSE
+    for (w in words) {
+      font <- if (italic) 3 else if (isTRUE(w$bold)) 2 else 1
+      pieces <- break_token(ascii(w$text), cex, font, maxX - startX)
+      for (pi in seq_along(pieces)) {
+        piece <- pieces[[pi]]
+        ww <- sw(piece, cex, font)
+        if (started && x + ww > maxX + 1e-9) { y <<- y - step; ensure(step); x <- startX }
+        graphics::text(x, y, piece, adj = c(0, 1), cex = cex, font = font, col = color)
+        x <- x + ww + spaceW; started <- TRUE
+        if (pi < length(pieces)) { y <<- y - step; ensure(step); x <- startX }
+      }
+    }
+    y <<- y - step
+  }
+
+  # Split a line into **bold** / normal word tokens.
+  parse_rich <- function(text) {
+    segs <- list(); rest <- text
+    while (nzchar(rest)) {
+      m <- regexpr("\\*\\*(.+?)\\*\\*", rest, perl = TRUE)
+      if (m[1] == -1L) { segs[[length(segs) + 1L]] <- list(text = rest, bold = FALSE); break }
+      before <- substr(rest, 1L, m[1] - 1L)
+      if (nzchar(before)) segs[[length(segs) + 1L]] <- list(text = before, bold = FALSE)
+      chunk <- substr(rest, m[1], m[1] + attr(m, "match.length") - 1L)
+      segs[[length(segs) + 1L]] <- list(text = gsub("^\\*\\*|\\*\\*$", "", chunk), bold = TRUE)
+      rest <- substr(rest, m[1] + attr(m, "match.length"), nchar(rest))
+    }
+    words <- list()
+    for (s in segs) {
+      toks <- strsplit(s$text, "[ \t]+")[[1]]; toks <- toks[nzchar(toks)]
+      for (t in toks) words[[length(words) + 1L]] <- list(text = t, bold = s$bold)
+    }
+    words
+  }
+
+  wrap_text <- function(text, maxw, cex, font) {
+    text <- ascii(text)
+    if (!nzchar(text)) return("")
+    toks <- strsplit(text, "[ \t]+")[[1]]; toks <- toks[nzchar(toks)]
+    if (length(toks) == 0) return("")
+    out <- character(0); cur <- ""
+    for (t in toks) for (p in break_token(t, cex, font, maxw)) {
+      cand <- if (nzchar(cur)) paste(cur, p) else p
+      if (nzchar(cur) && sw(cand, cex, font) > maxw) { out <- c(out, cur); cur <- p }
+      else cur <- cand
+    }
+    if (nzchar(cur)) out <- c(out, cur)
+    out
+  }
+
+  draw_heading <- function(level, text) {
+    cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[min(level, 6)]
+    y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[min(level, 6)]
+    text <- gsub("\\*\\*", "", text)
+    words <- lapply(strsplit(text, "[ \t]+")[[1]], function(t) list(text = t, bold = TRUE))
+    draw_words(words, cex = cex, color = "#1b3a5b")
+    if (level <= 2) {
+      graphics::segments(mL, y + lh(cex) * 0.08, mL + contentW, y + lh(cex) * 0.08,
+                         col = "#9bb3c9", lwd = if (level == 1) 1.2 else 0.7)
+      y <<- y - lh(cex) * 0.28
+    }
+  }
+
+  draw_hr <- function() {
+    y <<- y - lh(1) * 0.35; ensure(lh(1) * 0.2)
+    graphics::segments(mL, y, mL + contentW, y, col = "#9bb3c9", lwd = 0.7)
+    y <<- y - lh(1) * 0.45
+  }
+
+  draw_bullet <- function(text) {
+    ensure(lh(1))
+    graphics::text(mL + 0.08, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+    draw_words(parse_rich(text), cex = 1, indent = 0.26)
+  }
+
+  parse_cells <- function(s) {
+    s <- trimws(s); s <- sub("^\\|", "", s); s <- sub("\\|$", "", s)
+    trimws(strsplit(s, "\\|")[[1]])
+  }
+
+  draw_table <- function(header, rows) {
+    cex <- 0.9; pad <- 0.06
+    ncol <- length(header)
+    if (ncol == 0) return(invisible())
+    fit <- function(v, k) if (length(v) >= k) v[[k]] else ""
+    natural <- numeric(ncol)
+    for (r in c(list(header), rows)) for (j in seq_len(ncol)) {
+      natural[j] <- max(natural[j], sw(ascii(fit(r, j)), cex, 2))
+    }
+    natural <- natural + 2 * pad
+    if (sum(natural) > contentW) natural <- natural * (contentW / sum(natural))
+    colw <- natural
+    xl <- mL + c(0, cumsum(colw)[-ncol])
+    draw_row <- function(cells, header = FALSE) {
+      font <- if (header) 2L else 1L
+      wr <- lapply(seq_len(ncol), function(j) wrap_text(fit(cells, j), colw[j] - 2 * pad, cex, font))
+      nlin <- max(1L, vapply(wr, length, 1L))
+      rowH <- nlin * lh(cex) + pad
+      ensure(rowH)
+      top <- y
+      if (header) graphics::rect(mL, top - rowH, mL + sum(colw), top, col = "#e8eef4", border = NA)
+      for (j in seq_len(ncol)) {
+        ty <- top - pad
+        for (ln in wr[[j]]) { graphics::text(xl[j] + pad, ty, ln, adj = c(0, 1), cex = cex, font = font); ty <- ty - lh(cex) }
+      }
+      graphics::rect(mL, top - rowH, mL + sum(colw), top, border = "#b9c7d6", lwd = 0.6)
+      for (j in seq_len(ncol)[-1]) graphics::segments(xl[j], top, xl[j], top - rowH, col = "#b9c7d6", lwd = 0.6)
+      y <<- top - rowH
+    }
+    y <<- y - lh(cex) * 0.2
+    draw_row(header, header = TRUE)
+    for (r in rows) draw_row(r, header = FALSE)
+    y <<- y - lh(cex) * 0.35
+  }
+
+  is_sep <- function(s) grepl("^[[:space:]|:\\-]+$", s) && grepl("-", s)
+
+  n <- length(lines); i <- 1L
+  while (i <= n) {
+    ln <- lines[[i]]
+    if (grepl("^\\s*$", ln)) { y <- y - lh(1) * 0.5; i <- i + 1L; next }
+    if (grepl("^\\s*\\|", ln) && i < n && is_sep(lines[[i + 1L]])) {
+      header <- parse_cells(ln); j <- i + 2L; rows <- list()
+      while (j <= n && grepl("^\\s*\\|", lines[[j]])) { rows[[length(rows) + 1L]] <- parse_cells(lines[[j]]); j <- j + 1L }
+      draw_table(header, rows); i <- j; next
+    }
+    if (grepl("^#{1,6}\\s", ln)) {
+      lvl <- nchar(sub("^(#+)\\s.*$", "\\1", ln))
+      draw_heading(lvl, sub("^#{1,6}\\s+", "", ln)); i <- i + 1L; next
+    }
+    if (grepl("^-{3,}\\s*$", ln)) { draw_hr(); i <- i + 1L; next }
+    if (grepl("^\\s*[-*]\\s+\\S", ln)) { draw_bullet(sub("^\\s*[-*]\\s+", "", ln)); i <- i + 1L; next }
+    if (grepl("^\\*[^*].*\\*$", ln) && !grepl("\\*\\*", ln)) {
+      txt <- sub("^\\*(.*)\\*$", "\\1", ln)
+      words <- lapply(strsplit(trimws(txt), "[ \t]+")[[1]], function(t) list(text = t, bold = FALSE))
+      draw_words(words, cex = 0.9, italic = TRUE, color = "#555555"); i <- i + 1L; next
+    }
+    draw_words(parse_rich(ln), cex = 1); i <- i + 1L
+  }
+  invisible()
+}
+
+# Robust "Export PDF": build the DOCX first (always works via officer), then
+# convert with the best engine available and VERIFY a real PDF resulted. When no
+# external converter exists we still produce a valid PDF from the Markdown export
+# via R's own device -- so the button ALWAYS yields an openable PDF.
+dta_export_pdf <- function(dta, file, signature_list = NULL) {
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx), add = TRUE)
+  DTAtools::write_dta(
+    dta, file = docx, format = "docx", overwrite = TRUE,
+    include_signatures = !is.null(signature_list),
+    signature_list = signature_list, quiet = TRUE
+  )
+
+  # 1) LibreOffice / soffice (best fidelity to the DOCX layout).
+  soffice <- dta_find_soffice()
+  if (nzchar(soffice) && dta_soffice_to_pdf(soffice, docx, file)) return(invisible(file))
+  # 2) doconv (also LibreOffice-based) when installed.
+  if (requireNamespace("doconv", quietly = TRUE)) {
+    if (isTRUE(tryCatch({ doconv::to_pdf(docx, output = file); dta_is_pdf(file) },
+                        error = function(e) FALSE))) {
+      return(invisible(file))
+    }
+  }
+  # 3) pandoc, but only when a PDF engine (LaTeX/typst/wkhtmltopdf) is present.
+  if (dta_pandoc_to_pdf(docx, file)) return(invisible(file))
+
+  # 4) Self-contained fallback: render the Markdown export to a real PDF with
+  #    R's built-in device (no external tools). Guarantees a working download.
+  md <- tempfile(fileext = ".md")
+  on.exit(unlink(md), add = TRUE)
+  ok_md <- tryCatch({
+    DTAtools::write_dta(
+      dta, file = md, format = "md", overwrite = TRUE,
+      include_signatures = !is.null(signature_list),
+      signature_list = signature_list, quiet = TRUE
+    )
+    TRUE
+  }, error = function(e) FALSE)
+  lines <- if (isTRUE(ok_md)) {
+    tryCatch(readLines(md, warn = FALSE), error = function(e) character(0))
+  } else {
+    character(0)
+  }
+  if (length(lines) == 0) {
+    ttl <- tryCatch(as.character(S7::prop(DTAtools::metadata(dta), "title"))[1],
+                    error = function(e) NULL)
+    lines <- c(
+      "# Data Transfer Agreement",
+      if (!is.null(ttl) && nzchar(ttl)) paste0("**Title:** ", ttl) else NULL,
+      paste0("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+      "",
+      "(The full document layout could not be generated on this system.)"
+    )
+  }
+  dta_markdown_to_pdf(lines, file)
+  if (!dta_is_pdf(file)) {
+    stop(paste0(
+      "Could not produce a PDF on this system (no LibreOffice, LaTeX or ",
+      "PDF-capable pandoc engine, and the built-in PDF device failed)."
+    ))
+  }
+  invisible(file)
 }
 
 # Build a self-contained HTML validation report for a validated DTA. Summarises
