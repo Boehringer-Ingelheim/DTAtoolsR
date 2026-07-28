@@ -45,6 +45,7 @@ jobs:
         with:
           extra-packages: any::rcmdcheck
           needs: check
+          use-public-rspm: true
 
       - name: Install S7 from GitHub
         run: |

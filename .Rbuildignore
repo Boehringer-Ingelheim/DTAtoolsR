@@ -1,5 +1,6 @@
-^renv$
-^renv\.lock$
+^renv/library$
+^renv/staging$
+^renv/settings\.json$
 ^DTAtoolsR\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
@@ -12,8 +13,6 @@ img
 ^\.github$
 CHANGELOG.md
 .lock
-renv/
-^renv\.lock$
 ^\.Rprofile$
 ^DTATOOLSR_METADATA_IMPLEMENTATION\.md$
 ^bla\.md$
