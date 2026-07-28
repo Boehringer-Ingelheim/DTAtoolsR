@@ -247,11 +247,27 @@ dta_check <- function(dta, dataset = NULL) {
 }
 
 # Update a single metadata scalar field, returning an updated dta object.
+# For the OPTIONAL nullable fields (date, error_handling,
+# authorized_for_corrections) a blank/empty value UNSETS the property (NULL)
+# instead of storing "" -- so an empty field is "not set at all" in the object
+# (and is omitted from the serialized YAML).
 dta_set_metadata_field <- function(dta, field, value) {
   dta_try({
     md <- DTAtools::metadata(dta)
+    unset_when_blank <- c("date", "error_handling", "authorized_for_corrections")
+    is_blank <- is.null(value) ||
+      length(value) == 0 ||
+      (is.character(value) && !any(nzchar(trimws(value)))) ||
+      (length(value) == 1 && is.na(value))
     if (identical(field, "date")) {
-      value <- tryCatch(as.Date(value), error = function(e) value)
+      if (is_blank) {
+        value <- NULL
+      } else {
+        value <- tryCatch(as.Date(value), error = function(e) value)
+        if (inherits(value, "Date") && all(is.na(value))) value <- NULL
+      }
+    } else if (field %in% unset_when_blank && is_blank) {
+      value <- NULL
     }
     S7::prop(md, field) <- value
     dta@metadata <- md
@@ -1535,6 +1551,24 @@ dta_set_transmission_field <- function(dta, field, value) {
     dta@metadata <- md
     dta
   })
+}
+
+# Map a stored transmission FLAG (logical / character / NULL) to the tri-state
+# dropdown choice shown in the metadata editor ("undefined" / "yes" / "no").
+# An unset flag (NULL / NA / absent) is "undefined".
+dta_flag_to_choice <- function(v) {
+  if (is.null(v) || length(v) == 0 || (length(v) == 1 && is.na(v))) return("undefined")
+  if (is.logical(v)) return(if (isTRUE(v[1])) "yes" else "no")
+  vs <- tolower(trimws(as.character(v)[1]))
+  if (vs %in% c("true", "yes", "1")) "yes"
+  else if (vs %in% c("false", "no", "0")) "no"
+  else "undefined"
+}
+
+# Inverse of dta_flag_to_choice: dropdown choice -> stored flag.
+# "yes" -> TRUE, "no" -> FALSE, "undefined" -> NULL (field is left UNSET).
+dta_choice_to_flag <- function(x) {
+  if (identical(x, "yes")) TRUE else if (identical(x, "no")) FALSE else NULL
 }
 
 # ---- Contacts: read one + update in place --------------------------------

@@ -1868,9 +1868,13 @@ server <- function(input, output, session) {
       ),
       layout_columns(
         col_widths = c(6, 6),
-        dateInput("md_date", "Date",
-                  value = if (inherits(date_val, "Date")) date_val else NULL,
-                  width = "100%"),
+        # Optional date: a native dateInput shows TODAY when value = NULL, so to
+        # render an EMPTY picker for an unset date we pass NA (-> empty
+        # data-initial-date). suppressWarnings() hides the NA->date coercion note.
+        suppressWarnings(dateInput(
+          "md_date", "Date",
+          value = if (inherits(date_val, "Date") && !is.na(date_val)) date_val else NA,
+          width = "100%")),
         textInput("md_header", "Header / organization", value = getf("header"), width = "100%")
       ),
       tags$hr(),
@@ -1922,10 +1926,14 @@ server <- function(input, output, session) {
         textInput("tr_date_last", "Date of last transfer", value = trf("date_last_transfer"),
                   width = "100%", placeholder = "YYYY-MM-DD or phrase")
       ),
-      div(
-        style = "display:flex; gap:24px; margin-top:2px;",
-        checkboxInput("tr_test_upload", "Test upload", value = isTRUE(tr$test_upload)),
-        checkboxInput("tr_blinded", "Blinded transfer", value = isTRUE(tr$blinded_transfer))
+      layout_columns(
+        col_widths = c(6, 6),
+        selectInput("tr_test_upload", "Test upload",
+                    choices = c("undefined", "yes", "no"),
+                    selected = dta_flag_to_choice(tr$test_upload), width = "100%"),
+        selectInput("tr_blinded", "Blinded transfer",
+                    choices = c("undefined", "yes", "no"),
+                    selected = dta_flag_to_choice(tr$blinded_transfer), width = "100%")
       ),
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
@@ -1976,9 +1984,12 @@ server <- function(input, output, session) {
   observeEvent(errh_d(),    save_md("error_handling", errh_d()), ignoreInit = TRUE)
   observeEvent(auth_d(),    save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
   observeEvent(input$md_date, {
-    req(input$md_date)
-    save_md("date", input$md_date)
-  }, ignoreInit = TRUE)
+    v <- input$md_date
+    is_empty <- is.null(v) || length(v) == 0 ||
+      (length(v) == 1 && is.na(v)) ||
+      !nzchar(trimws(as.character(v)[1]))
+    save_md("date", if (is_empty) NULL else v)
+  }, ignoreInit = TRUE, ignoreNULL = FALSE)
   # transmission fields (debounced text + immediate flags)
   tr_type_d   <- debounce(reactive(input$tr_type), 700)
   tr_freq_d   <- debounce(reactive(input$tr_frequency), 700)
@@ -1990,8 +2001,8 @@ server <- function(input, output, session) {
   observeEvent(tr_notif_d(), save_tr("notification", tr_notif_d()),      ignoreInit = TRUE)
   observeEvent(tr_first_d(), save_tr("date_first_transfer", tr_first_d()), ignoreInit = TRUE)
   observeEvent(tr_last_d(),  save_tr("date_last_transfer", tr_last_d()),  ignoreInit = TRUE)
-  observeEvent(input$tr_test_upload, save_tr("test_upload", isTRUE(input$tr_test_upload)), ignoreInit = TRUE)
-  observeEvent(input$tr_blinded, save_tr("blinded_transfer", isTRUE(input$tr_blinded)), ignoreInit = TRUE)
+  observeEvent(input$tr_test_upload, save_tr("test_upload", dta_choice_to_flag(input$tr_test_upload)), ignoreInit = TRUE)
+  observeEvent(input$tr_blinded, save_tr("blinded_transfer", dta_choice_to_flag(input$tr_blinded)), ignoreInit = TRUE)
 
   # --- people / contacts --------------------------------------------------
   # Shared field set so the Add and Edit person modals capture the SAME details
