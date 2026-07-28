@@ -34,6 +34,25 @@ validate_table <- function(specs, table, verbose = TRUE) {
 
 #' @keywords internal
 validate_table_detailed <- function(specs, table, verbose = TRUE) {
+  # Arrow reads all-empty columns as its `null` type, which converts to a
+  # `vctrs_unspecified` vector in R. jsonlite::toJSON() has no asJSON method for
+  # that class, so serialising such a column would abort validation with
+  # "No method asJSON S3 class: vctrs_unspecified". These columns hold only
+  # missing values, so coerce them to an all-NA character vector (emitted as
+  # JSON `null` via `na = "null"`). The schema still validates them correctly:
+  # nullable columns pass, non-nullable columns are flagged as missing.
+  unspecified_cols <- vapply(
+    table,
+    function(col) inherits(col, "vctrs_unspecified"),
+    logical(1)
+  )
+  if (any(unspecified_cols)) {
+    table[unspecified_cols] <- lapply(
+      table[unspecified_cols],
+      function(col) rep(NA_character_, length(col))
+    )
+  }
+
   schema_json <- tryCatch(
     specs@json_schema,
     error = function(e) NULL

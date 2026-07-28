@@ -1978,8 +1978,17 @@ server <- function(input, output, session) {
   header_d  <- debounce(reactive(input$md_header), 700)
   errh_d    <- debounce(reactive(input$md_error_handling), 700)
   auth_d    <- debounce(reactive(input$md_authorized), 700)
-  observeEvent(title_d(),   save_md("title", title_d()),     ignoreInit = TRUE)
-  observeEvent(version_d(), save_md("version", version_d()), ignoreInit = TRUE)
+  # title and version are REQUIRED (non-nullable); block saves of empty/blank values
+  observeEvent(title_d(), {
+    v <- title_d()
+    is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
+    if (!is_blank) save_md("title", v)
+  }, ignoreInit = TRUE)
+  observeEvent(version_d(), {
+    v <- version_d()
+    is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
+    if (!is_blank) save_md("version", v)
+  }, ignoreInit = TRUE)
   observeEvent(header_d(),  save_md("header", header_d()),   ignoreInit = TRUE)
   observeEvent(errh_d(),    save_md("error_handling", errh_d()), ignoreInit = TRUE)
   observeEvent(auth_d(),    save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)

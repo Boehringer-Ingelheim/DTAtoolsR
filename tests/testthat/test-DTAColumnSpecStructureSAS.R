@@ -197,6 +197,30 @@ test_that("validate_table preserves mixed typed values during conversion", {
   expect_identical(table, original)
 })
 
+test_that("validate_table handles all-empty (vctrs_unspecified) columns as JSON null", {
+  # Arrow types a fully-empty column as its `null` type, which becomes a
+  # vctrs_unspecified vector in R. jsonlite::toJSON() has no asJSON method for
+  # that class, so validation previously aborted with
+  # "No method asJSON S3 class: vctrs_unspecified". Such columns must instead be
+  # serialised as JSON null (valid for a nullable column).
+  tmp <- tempfile(fileext = ".tsv")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(c("KEEP\tEMPTY", "a\t", "b\t"), tmp)
+  df <- as.data.frame(arrow::read_delim_arrow(tmp, delim = "\t"))
+  expect_true(inherits(df$EMPTY, "vctrs_unspecified")) # precondition
+
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      KEEP = DTAColumnSpec(id = "KEEP", type = "SAS Char", format = "SAS $10.", length = 10, nullable = FALSE),
+      EMPTY = DTAColumnSpec(id = "EMPTY", type = "SAS Char", format = "SAS $10.", length = 10, nullable = TRUE)
+    )
+  )
+
+  expect_no_error(validated <- validate_table(specs = specs, table = df, verbose = FALSE))
+  expect_s3_class(validated, "data.frame")
+  expect_identical(nrow(validated), 2L)
+})
+
 test_that("only documented SAS format families are accepted", {
   expect_no_error(DTAColumnSpecStructureSAS(type = "Char", format = "$10."))
   expect_no_error(DTAColumnSpecStructureSAS(type = "Int", format = "8."))
