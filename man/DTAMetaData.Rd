@@ -5,7 +5,7 @@
 \title{DTAMetaData Class}
 \usage{
 DTAMetaData(
-  title,
+  title = NULL,
   version = NULL,
   date = NULL,
   header = NULL,
@@ -18,7 +18,7 @@ DTAMetaData(
 )
 }
 \arguments{
-\item{title}{title (required)}
+\item{title}{title (optional; a DTA may carry datasets without metadata)}
 
 \item{version}{current version string}
 

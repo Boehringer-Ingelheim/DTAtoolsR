@@ -616,8 +616,8 @@ dta_rule_failure_row_indices <- function(rule, df) {
       return(integer(0))
     }
 
-    lower <- if (!is.null(rule@range)) rule@range[1] else if (!is.null(rule@min)) rule@min else -Inf
-    upper <- if (!is.null(rule@range)) rule@range[2] else if (!is.null(rule@max)) rule@max else Inf
+    lower <- if (length(rule@min) > 0) rule@min[1] else -Inf
+    upper <- if (length(rule@max) > 0) rule@max[1] else Inf
     values <- suppressWarnings(as.numeric(df[[col]]))
     mask <- !is.na(values) & (values < lower | values > upper)
     return(which(mask))

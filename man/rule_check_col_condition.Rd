@@ -13,7 +13,8 @@ rule_check_col_condition(rule, df)
 \item \verb{@type} = "check_col_condition"
 \item \verb{@condition} list: named by column, each with one of:
 \code{equals}, \code{not_equals}, \verb{in}, \code{not_in},
-\code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{range}, \code{empty}
+\code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{min}, \code{max},
+\code{range}, \code{pattern}, \code{empty}
 \item \verb{@then} list: same structure as \verb{@condition}
 }}
 
@@ -29,11 +30,14 @@ predicates must also be TRUE. For rows where the IF holds, \code{NA} in THEN
 is considered a \strong{violation}.
 }
 \details{
-Supported operators per column (single operator per column):
+Supported operators per column (single operator per column, except that
+\code{min} and \code{max} may be combined to express an inclusive band):
 \itemize{
 \item Equality: \code{equals}, \code{not_equals}
 \item Set: \verb{in}, \code{not_in}
-\item Numeric comparisons: \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{range}
+\item Numeric comparisons: \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal},
+\code{min}, \code{max}, \code{range}
+\item Text: \code{pattern} (a regular expression; row passes when the value matches)
 \item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, or \code{""}; FALSE means not empty)
 }
 

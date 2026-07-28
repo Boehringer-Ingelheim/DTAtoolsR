@@ -22,11 +22,44 @@ brandbar <- div(
   )
 )
 
+# Non-floating footer: DTAtools version + author + link to the GitHub repo.
+dta_pkg_version <- tryCatch(as.character(utils::packageVersion("DTAtools")),
+                            error = function(e) "")
+app_footer <- tags$footer(
+  class = "app-footer",
+  tags$span(class = "foot-name", "DTAtools"),
+  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", paste0("v", dta_pkg_version)),
+  tags$span(class = "foot-sep", "\u2022"),
+  tags$span("Boehringer Ingelheim"),
+  tags$span(class = "foot-sep", "\u2022"),
+  tags$a(href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
+         target = "_blank", rel = "noopener noreferrer", "GitHub repository")
+)
+
+# Clear a fileInput's text field after an upload is processed (so the control
+# reads empty and is ready for the next drop). Triggered from the server via
+# session$sendCustomMessage("dta_reset_fileinput", <input id>).
+reset_fileinput_js <- "
+Shiny.addCustomMessageHandler('dta_reset_fileinput', function(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  try { el.value = ''; } catch (e) {}
+  var box = el.closest('.shiny-input-container') || el.closest('.form-group');
+  if (box) {
+    var txt = box.querySelector('input[type=text].form-control');
+    if (txt) { txt.value = ''; }
+    var bar = box.querySelector('.progress-bar');
+    if (bar) { bar.style.width = '0%'; bar.textContent = ''; }
+  }
+});
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
-  tags$head(tags$style(bi_css())),
+  tags$head(tags$style(bi_css()), tags$script(shiny::HTML(reset_fileinput_js))),
   brandbar,
-  div(style = "padding: 18px;", uiOutput("main"))
+  div(style = "padding: 18px;", uiOutput("main")),
+  app_footer
 )
 
 # ---------------------------------------------------------------------------
@@ -46,7 +79,21 @@ server <- function(input, output, session) {
     dataset_only = FALSE, # TRUE when a standalone dataset YAML was loaded (no metadata)
     md_token = 0,        # bump to re-render metadata editor
     contacts_token = 0,  # bump to re-render contacts list
-    yaml_msg = NULL      # raw-YAML apply result: NULL | list(ok, error)
+    yaml_msg = NULL,     # raw-YAML apply result: NULL | list(ok, error)
+    editing_contact = NULL, # list(side, index) while a contact edit modal is open
+    editor_dataset = NULL,  # dataset name the column/rule editor modal targets
+    col_view = "list",   # column editor view: "list" | "form"
+    col_token = 0,       # bump to re-render the column editor body
+    col_edit_id = NULL,  # id of the column being edited (NULL = adding new)
+    col_prefill = NULL,  # list() of the column fields loaded in the form
+    rule_view = "list",  # rule editor view: "list" | "form"
+    rule_token = 0,      # bump to re-render the rule editor body
+    rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
+    rule_prefill = NULL, # list() of the rule fields currently loaded in the form
+    col_msg = NULL,      # inline column-editor result: NULL | list(ok, error)
+    rule_msg = NULL,     # inline rule-editor result: NULL | list(ok, error)
+    cond_n = 1L,         # condition-builder row count (IF ...)
+    then_n = 1L          # condition-builder row count (THEN ...)
   )
 
   upload_registry <- new.env(parent = emptyenv())
@@ -95,7 +142,7 @@ server <- function(input, output, session) {
   autosave <- function() {
     try(saveRDS(
       list(
-        dta = isolate(rv$dta),
+        dump = dta_dump_session(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
         active = isolate(rv$active),
@@ -376,6 +423,10 @@ server <- function(input, output, session) {
         type = "warning", duration = 10
       )
     }
+
+    # Clear the fileInput's text field so the control reads empty and is ready
+    # for the next drop (runs whether files were accepted or rejected).
+    session$sendCustomMessage("dta_reset_fileinput", sprintf("up_%d_%d", ds_idx, hi))
   }
 
   observeEvent(rv$structure, {
@@ -558,6 +609,631 @@ server <- function(input, output, session) {
     run_check(rv$active)
   })
 
+  # After a spec edit, refresh the in-memory YAML text + editor and persist.
+  sync_yaml_text <- function() {
+    res <- if (isolate(rv$dataset_only)) {
+      dta_dataset_to_yaml_text(isolate(rv$dta), isolate(rv$active))
+    } else {
+      dta_to_yaml_text(isolate(rv$dta))
+    }
+    if (isTRUE(res$ok)) {
+      rv$yaml_text <- res$value
+      set_yaml_editor(res$value)
+    }
+    autosave()
+  }
+  # A spec change invalidates only THIS dataset's validation.
+  invalidate_dataset <- function(ed) {
+    cv <- dta_clear_validation(rv$dta, ed)
+    if (isTRUE(cv$ok)) rv$dta <- cv$value
+    st <- rv$status
+    st[[ed]] <- if (dta_dataset_content_count(dta_get_dataset(rv$dta, ed)) == 0) {
+      "nodata"
+    } else {
+      "pending"
+    }
+    rv$status <- st
+  }
+
+  # Per-row edit (pencil) + delete (bin) buttons for the editor DT tables.
+  # Clicking sets a Shiny input to the 1-based data-row index (priority=event
+  # so re-clicking the same row still fires). Render the column with escape=FALSE.
+  row_action_buttons <- function(edit_input, del_input, n) {
+    vapply(seq_len(n), function(i) {
+      paste0(
+        sprintf(
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Edit\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x270E;</button> ",
+          edit_input, i),
+        sprintf(
+          "<button class=\"btn btn-sm btn-outline-danger dta-row-btn\" title=\"Remove\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x1F5D1;</button>",
+          del_input, i)
+      )
+    }, character(1))
+  }
+
+  # ============================ Edit columns ==============================
+  # A single modal with two swappable views (list <-> form) so only ONE popup
+  # is ever open. rv$col_view drives which view renders; rv$col_token forces a
+  # re-render. The form pre-fills from rv$col_prefill (never stale inputs).
+  observeEvent(input$edit_cols, {
+    req(rv$active)
+    rv$editor_dataset <- rv$active
+    rv$col_view <- "list"
+    rv$col_edit_id <- NULL
+    rv$col_prefill <- list()
+    rv$col_msg <- NULL
+    rv$col_token <- rv$col_token + 1
+    showModal(modalDialog(
+      title = paste("Edit columns \u2014", rv$active),
+      size = "xl", easyClose = FALSE,
+      uiOutput("col_modal_body"),
+      footer = NULL
+    ))
+  })
+
+  output$col_modal_body <- renderUI({
+    rv$col_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (identical(isolate(rv$col_view), "list")) {
+      tagList(
+        div(
+          class = "spec-toolbar",
+          actionButton("col_add", HTML("&#x2795; Add column"),
+                       class = "btn btn-sm btn-outline-primary"),
+          span(class = "spec-hint",
+               "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation.")
+        ),
+        DT::dataTableOutput("col_tbl"),
+        tags$hr(),
+        div(style = "text-align:right;", modalButton("Close"))
+      )
+    } else {
+      pf <- isolate(rv$col_prefill) %||% list()
+      g <- function(k, d = "") pf[[k]] %||% d
+      tagList(
+        div(
+          class = "spec-form",
+          layout_columns(
+            col_widths = c(4, 8),
+            textInput("col_id", "Column ID", value = g("id"), width = "100%"),
+            textInput("col_label", "Label", value = g("label"), width = "100%")
+          ),
+          layout_columns(
+            col_widths = c(3, 3, 3, 3),
+            selectInput("col_backend", "Backend", choices = dta_supported_backends(),
+                        selected = g("backend", dta_supported_backends()[1]), width = "100%"),
+            selectInput("col_type", "Type", choices = dta_sas_types(),
+                        selected = g("type", "Char"), width = "100%"),
+            textInput("col_format", "Format", value = g("format"), width = "100%",
+                      placeholder = "e.g. $9. / 8.2"),
+            textInput("col_length", "Length", value = g("length"), width = "100%",
+                      placeholder = "e.g. 8")
+          ),
+          checkboxInput("col_nullable", "Nullable (missing values allowed)",
+                        value = if (is.null(pf$nullable)) TRUE else isTRUE(pf$nullable)),
+          layout_columns(
+            col_widths = c(6, 6),
+            textAreaInput("col_values", "Allowed values (one per line)",
+                          value = g("values"), width = "100%", rows = 3),
+            textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
+          ),
+          textAreaInput("col_desc", "Description", value = g("description"), width = "100%", rows = 2)
+        ),
+        uiOutput("col_editor_msg"),
+        div(
+          style = "display:flex; justify-content:space-between; margin-top:8px;",
+          actionButton("col_back", HTML("&#x2190; Back to list"),
+                       class = "btn btn-outline-secondary"),
+          actionButton("col_save", "Save column", class = "btn btn-primary")
+        )
+      )
+    }
+  })
+
+  output$col_tbl <- DT::renderDataTable({
+    rv$col_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ov <- dta_columns_overview(isolate(rv$dta), ed)
+    if (is.null(ov) || nrow(ov) == 0) {
+      ov <- data.frame(id = character(0), label = character(0), type = character(0),
+                       length = character(0), nullable = character(0),
+                       constraint = character(0), description = character(0),
+                       stringsAsFactors = FALSE)
+    }
+    ov$Actions <- if (nrow(ov) > 0) {
+      row_action_buttons("col_edit_click", "col_del_click", nrow(ov))
+    } else character(0)
+    DT::datatable(
+      ov, rownames = FALSE, selection = "none", escape = FALSE,
+      class = "display compact", width = "100%",
+      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
+                     columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L)))
+    )
+  })
+
+  output$col_editor_msg <- renderUI({
+    m <- rv$col_msg
+    if (is.null(m)) return(NULL)
+    if (isTRUE(m$ok)) {
+      div(class = "yaml-valid ok", HTML("&#x2714;"), " Column saved.")
+    } else {
+      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+    }
+  })
+
+  observeEvent(input$col_add, {
+    rv$col_edit_id <- NULL
+    rv$col_prefill <- list()
+    rv$col_msg <- NULL
+    rv$col_view <- "form"
+    rv$col_token <- rv$col_token + 1
+  })
+
+  observeEvent(input$col_back, {
+    rv$col_view <- "list"
+    rv$col_msg <- NULL
+    rv$col_token <- rv$col_token + 1
+  })
+
+  observeEvent(input$col_edit_click, {
+    idx <- as.integer(input$col_edit_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ids <- dta_column_ids(isolate(rv$dta), ed)
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) return()
+    f <- dta_column_fields(isolate(rv$dta), ed, ids[[idx]])
+    if (is.null(f)) return()
+    rv$col_edit_id <- ids[[idx]]
+    rv$col_prefill <- f
+    rv$col_msg <- NULL
+    rv$col_view <- "form"
+    rv$col_token <- rv$col_token + 1
+  })
+
+  observeEvent(input$col_del_click, {
+    idx <- as.integer(input$col_del_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ids <- dta_column_ids(isolate(rv$dta), ed)
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) return()
+    r <- dta_remove_column(isolate(rv$dta), ed, ids[[idx]])
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return()
+    }
+    rv$dta <- r$value
+    invalidate_dataset(ed)
+    rv$col_token <- rv$col_token + 1
+    sync_yaml_text()
+    showNotification(sprintf("Removed column \u201c%s\u201d.", ids[[idx]]), type = "message")
+  })
+
+  observeEvent(input$col_save, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    id <- trimws(input$col_id %||% "")
+    if (!nzchar(id)) {
+      rv$col_msg <- list(ok = FALSE, error = "A column ID is required.")
+      return()
+    }
+    vals <- trimws(strsplit(input$col_values %||% "", "\n")[[1]])
+    vals <- vals[nzchar(vals)]
+    r <- dta_set_column(
+      isolate(rv$dta), ed, id = id, label = input$col_label,
+      backend = input$col_backend, type = input$col_type,
+      format = input$col_format, length = input$col_length,
+      nullable = isTRUE(input$col_nullable),
+      values = if (length(vals)) vals else NULL,
+      pattern = input$col_pattern, description = input$col_desc,
+      old_id = isolate(rv$col_edit_id)
+    )
+    if (!isTRUE(r$ok)) {
+      rv$col_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    rv$dta <- r$value
+    invalidate_dataset(ed)
+    rv$col_msg <- NULL
+    rv$col_view <- "list"
+    rv$col_token <- rv$col_token + 1
+    sync_yaml_text()
+    showNotification("Column saved.", type = "message")
+  })
+
+  # ============================= Edit rules ===============================
+  # One editable condition row (Column / Operator / Value). The value field is
+  # a single text box whose meaning depends on the operator (see the hint under
+  # the builder). Values come from the prefill only (fresh renders happen on
+  # token bumps where prefill is authoritative; insertUI rows keep DOM state).
+  one_cond_row <- function(prefix, i, cols, pf = list(col = "", op = "equals", val = "")) {
+    cid <- paste0(prefix, "_col_", i)
+    oid <- paste0(prefix, "_op_", i)
+    vid <- paste0(prefix, "_val_", i)
+    div(
+      class = "cond-row",
+      selectInput(cid, if (i == 1) "Column" else NULL,
+                  choices = c("(select)" = "", cols),
+                  selected = pf$col %||% "", width = "100%"),
+      selectInput(oid, if (i == 1) "Operator" else NULL,
+                  choices = dta_condition_operators(),
+                  selected = pf$op %||% "equals", width = "100%"),
+      textInput(vid, if (i == 1) "Value" else NULL,
+                value = pf$val %||% "", width = "100%",
+                placeholder = "5 | a, b | 0, 99 | true")
+    )
+  }
+  build_cond_rows <- function(prefix, n, cols, prefill) {
+    lapply(seq_len(max(1L, n)), function(i) {
+      pf <- if (i <= length(prefill)) prefill[[i]] else list(col = "", op = "equals", val = "")
+      one_cond_row(prefix, i, cols, pf)
+    })
+  }
+  # named-list {COL:{op:val}} -> list of editable rows. "min"/"max" keys (single
+  # or combined) map to the UI "min_max" operator with a "min, max" value.
+  cond_to_rows <- function(cond) {
+    if (is.null(cond) || length(cond) == 0) return(list())
+    lapply(names(cond), function(col) {
+      spec <- cond[[col]]
+      if (is.list(spec) && length(spec) > 0) {
+        keys <- names(spec)
+        if ("min" %in% keys || "max" %in% keys) {
+          op <- "min_max"
+          mn <- if ("min" %in% keys) as.character(spec[["min"]]) else ""
+          mx <- if ("max" %in% keys) as.character(spec[["max"]]) else ""
+          val <- sub(",\\s*$", "", paste0(mn, ", ", mx))
+        } else {
+          op <- keys[1]
+          raw <- spec[[1]]
+          val <- if (identical(op, "empty")) {
+            if (isTRUE(raw)) "true" else "false"
+          } else {
+            paste(as.character(unlist(raw)), collapse = ", ")
+          }
+        }
+      } else {
+        op <- "equals"
+        val <- as.character(spec)
+      }
+      list(col = col, op = op, val = val)
+    })
+  }
+  parse_cond_value <- function(op, txt) {
+    txt <- txt %||% ""
+    if (identical(op, "empty")) {
+      v <- tolower(trimws(txt))
+      return(!(v %in% c("false", "no", "0", "f", "n")))  # default TRUE
+    }
+    if (identical(op, "pattern")) return(as.character(txt))
+    if (op %in% c("in", "not_in")) {
+      parts <- trimws(strsplit(txt, ",")[[1]])
+      parts <- parts[nzchar(parts)]
+      if (length(parts) == 0) return(character(0))
+      nums <- suppressWarnings(as.numeric(parts))
+      if (all(!is.na(nums))) return(nums)
+      return(parts)
+    }
+    if (!nzchar(trimws(txt))) return("")
+    num <- suppressWarnings(as.numeric(txt))
+    if (!is.na(num)) return(num)
+    txt
+  }
+  collect_cond <- function(prefix, n) {
+    out <- list()
+    for (i in seq_len(max(1L, n))) {
+      col <- trimws(input[[paste0(prefix, "_col_", i)]] %||% "")
+      if (!nzchar(col)) next
+      op <- input[[paste0(prefix, "_op_", i)]] %||% "equals"
+      txt <- input[[paste0(prefix, "_val_", i)]]
+      inner <- list()
+      if (identical(op, "min_max")) {
+        # Positional "min, max" parse (no nzchar filter so ", 9" means max-only).
+        parts <- trimws(strsplit(txt %||% "", ",", fixed = TRUE)[[1]])
+        mn <- if (length(parts) >= 1 && nzchar(parts[1])) suppressWarnings(as.numeric(parts[1])) else NA_real_
+        mx <- if (length(parts) >= 2 && nzchar(parts[2])) suppressWarnings(as.numeric(parts[2])) else NA_real_
+        if (!is.na(mn)) inner$min <- mn
+        if (!is.na(mx)) inner$max <- mx
+        if (length(inner) == 0) next
+      } else {
+        inner[[op]] <- parse_cond_value(op, txt)
+      }
+      out[[col]] <- inner
+    }
+    out
+  }
+
+  # A single modal with two swappable views (list <-> form) so only ONE popup is
+  # ever open. rv$rule_view drives the view; rv$rule_token forces re-renders.
+  observeEvent(input$edit_rules, {
+    req(rv$active)
+    rv$editor_dataset <- rv$active
+    rv$rule_view <- "list"
+    rv$rule_edit_index <- NULL
+    rv$rule_prefill <- list()
+    rv$rule_msg <- NULL
+    rv$cond_n <- 1L
+    rv$then_n <- 1L
+    rv$rule_token <- rv$rule_token + 1
+    showModal(modalDialog(
+      title = paste("Edit rules \u2014", rv$active),
+      size = "xl", easyClose = FALSE,
+      uiOutput("rule_modal_body"),
+      footer = NULL
+    ))
+  })
+
+  output$rule_modal_body <- renderUI({
+    rv$rule_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (identical(isolate(rv$rule_view), "list")) {
+      return(tagList(
+        div(
+          class = "spec-toolbar",
+          actionButton("rule_add", HTML("&#x2795; Add rule"),
+                       class = "btn btn-sm btn-outline-primary"),
+          span(class = "spec-hint",
+               "Use the pencil to edit a rule or the bin to remove it. Any change resets this dataset's validation.")
+        ),
+        DT::dataTableOutput("rule_tbl"),
+        tags$hr(),
+        div(style = "text-align:right;", modalButton("Close"))
+      ))
+    }
+    pf <- isolate(rv$rule_prefill) %||% list()
+    rt <- pf$type %||% "col_condition"
+    cols <- dta_column_ids(isolate(rv$dta), ed)
+    type_ui <- if (identical(rt, "col_condition")) {
+      tagList(
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "IF (all of these hold):"),
+          div(id = "cond_rows",
+              build_cond_rows("cond", isolate(rv$cond_n), cols, cond_to_rows(pf$condition))),
+          actionButton("cond_add", HTML("&#x2795; Add condition"),
+                       class = "btn btn-sm btn-outline-secondary")
+        ),
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "THEN (all of these must hold):"),
+          div(id = "then_rows",
+              build_cond_rows("then", isolate(rv$then_n), cols, cond_to_rows(pf$then))),
+          actionButton("then_add", HTML("&#x2795; Add THEN condition"),
+                       class = "btn btn-sm btn-outline-secondary")
+        ),
+        div(class = "cond-hint", HTML(paste0(
+          "Value formats &mdash; single: <code>5</code> &middot; ",
+          "list (in / not in): <code>a, b, c</code> &middot; ",
+          "between (min/max): <code>0, 99</code> &middot; ",
+          "empty: <code>true</code> / <code>false</code> &middot; ",
+          "pattern: a regular expression."
+        )))
+      )
+    } else if (identical(rt, "col_range")) {
+      tagList(
+        selectInput("rule_col_single", "Column",
+                    choices = c("(select)" = "", cols),
+                    selected = (pf$columns %||% "")[1], width = "100%"),
+        layout_columns(
+          col_widths = c(6, 6),
+          textInput("rule_min", "Minimum", value = pf$min %||% "", width = "100%"),
+          textInput("rule_max", "Maximum", value = pf$max %||% "", width = "100%")
+        ),
+        div(class = "cond-hint",
+            "A range rule checks ONE column against a minimum and/or maximum.")
+      )
+    } else {
+      tagList(
+        selectizeInput("rule_cols", "Column(s) that are unique together",
+                       choices = cols, selected = pf$columns, multiple = TRUE, width = "100%"),
+        div(class = "cond-hint",
+            "Rows must be unique across the selected column(s) taken together.")
+      )
+    }
+    tagList(
+      div(
+        class = "spec-form",
+        layout_columns(
+          col_widths = c(4, 4, 4),
+          textInput("rule_id", "Rule ID", value = pf$id %||% "", width = "100%"),
+          selectInput("rule_type", "Type",
+                      choices = c("Conditional (IF/THEN)" = "col_condition",
+                                  "Range" = "col_range",
+                                  "Unique" = "col_unique"),
+                      selected = rt, width = "100%"),
+          textInput("rule_desc", "Description", value = pf$description %||% "", width = "100%")
+        ),
+        type_ui
+      ),
+      uiOutput("rule_editor_msg"),
+      div(
+        style = "display:flex; justify-content:space-between; margin-top:8px;",
+        actionButton("rule_back", HTML("&#x2190; Back to list"),
+                     class = "btn btn-outline-secondary"),
+        actionButton("rule_save", "Save rule", class = "btn btn-primary")
+      )
+    )
+  })
+
+  output$rule_tbl <- DT::renderDataTable({
+    rv$rule_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ov <- dta_rules_overview(isolate(rv$dta), ed)
+    if (is.null(ov) || nrow(ov) == 0) {
+      ov <- data.frame(index = integer(0), id = character(0), type = character(0),
+                       detail = character(0), description = character(0),
+                       stringsAsFactors = FALSE)
+    }
+    ov$Actions <- if (nrow(ov) > 0) {
+      row_action_buttons("rule_edit_click", "rule_del_click", nrow(ov))
+    } else character(0)
+    DT::datatable(
+      ov, rownames = FALSE, selection = "none", escape = FALSE,
+      class = "display compact", width = "100%",
+      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
+                     columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L)))
+    )
+  })
+
+  output$rule_editor_msg <- renderUI({
+    m <- rv$rule_msg
+    if (is.null(m)) return(NULL)
+    if (isTRUE(m$ok)) {
+      div(class = "yaml-valid ok", HTML("&#x2714;"), " Rule saved.")
+    } else {
+      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+    }
+  })
+
+  observeEvent(input$rule_add, {
+    rv$rule_edit_index <- NULL
+    rv$rule_prefill <- list(type = "col_condition")
+    rv$rule_msg <- NULL
+    rv$cond_n <- 1L
+    rv$then_n <- 1L
+    rv$rule_view <- "form"
+    rv$rule_token <- rv$rule_token + 1
+  })
+
+  observeEvent(input$rule_back, {
+    rv$rule_view <- "list"
+    rv$rule_msg <- NULL
+    rv$rule_token <- rv$rule_token + 1
+  })
+
+  observeEvent(input$rule_edit_click, {
+    idx <- as.integer(input$rule_edit_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (length(idx) != 1 || is.na(idx)) return()
+    f <- dta_rule_fields(isolate(rv$dta), ed, idx)
+    if (is.null(f)) return()
+    rv$rule_edit_index <- idx
+    rv$rule_prefill <- f
+    rv$rule_msg <- NULL
+    rv$cond_n <- max(1L, length(cond_to_rows(f$condition)))
+    rv$then_n <- max(1L, length(cond_to_rows(f$then)))
+    rv$rule_view <- "form"
+    rv$rule_token <- rv$rule_token + 1
+  })
+
+  observeEvent(input$rule_del_click, {
+    idx <- as.integer(input$rule_del_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (length(idx) != 1 || is.na(idx)) return()
+    r <- dta_remove_rule(isolate(rv$dta), ed, idx)
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return()
+    }
+    rv$dta <- r$value
+    invalidate_dataset(ed)
+    rv$rule_token <- rv$rule_token + 1
+    sync_yaml_text()
+    showNotification("Rule removed.", type = "message")
+  })
+
+  observeEvent(input$cond_add, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    cols <- dta_column_ids(isolate(rv$dta), ed)
+    rv$cond_n <- isolate(rv$cond_n) + 1L
+    insertUI("#cond_rows", where = "beforeEnd",
+             ui = one_cond_row("cond", isolate(rv$cond_n), cols))
+  })
+  observeEvent(input$then_add, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    cols <- dta_column_ids(isolate(rv$dta), ed)
+    rv$then_n <- isolate(rv$then_n) + 1L
+    insertUI("#then_rows", where = "beforeEnd",
+             ui = one_cond_row("then", isolate(rv$then_n), cols))
+  })
+
+  # When the user switches the rule type, reset the type-specific part but keep
+  # the id/description they typed. A programmatic sync (the select rendering with
+  # its prefilled value) is ignored by comparing against the prefill's type.
+  observeEvent(input$rule_type, {
+    if (!identical(isolate(rv$rule_view), "form")) return()
+    newt <- input$rule_type %||% "col_condition"
+    pf <- isolate(rv$rule_prefill) %||% list()
+    if (identical(newt, pf$type %||% "col_condition")) return()
+    pf$id <- input$rule_id %||% pf$id
+    pf$description <- input$rule_desc %||% pf$description
+    pf$type <- newt
+    pf$condition <- NULL
+    pf$then <- NULL
+    pf$columns <- NULL
+    pf$min <- NULL
+    pf$max <- NULL
+    rv$rule_prefill <- pf
+    rv$cond_n <- 1L
+    rv$then_n <- 1L
+    rv$rule_msg <- NULL
+    rv$rule_token <- rv$rule_token + 1
+  }, ignoreInit = TRUE)
+
+  observeEvent(input$rule_save, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    id <- trimws(input$rule_id %||% "")
+    if (!nzchar(id)) {
+      rv$rule_msg <- list(ok = FALSE, error = "A rule ID is required.")
+      return()
+    }
+    rt <- input$rule_type %||% "col_condition"
+    args <- list(dta = isolate(rv$dta), dataset = ed, index = isolate(rv$rule_edit_index),
+                 id = id, type = rt, description = input$rule_desc)
+    if (identical(rt, "col_condition")) {
+      cond <- collect_cond("cond", isolate(rv$cond_n))
+      then <- collect_cond("then", isolate(rv$then_n))
+      if (length(cond) == 0 || length(then) == 0) {
+        rv$rule_msg <- list(ok = FALSE,
+                            error = "A conditional rule needs at least one IF and one THEN condition.")
+        return()
+      }
+      args$condition <- cond
+      args$then <- then
+    } else if (identical(rt, "col_range")) {
+      col1 <- trimws(input$rule_col_single %||% "")
+      if (!nzchar(col1)) {
+        rv$rule_msg <- list(ok = FALSE, error = "Select the column to range-check.")
+        return()
+      }
+      args$columns <- col1
+      mn <- suppressWarnings(as.numeric(input$rule_min))
+      mx <- suppressWarnings(as.numeric(input$rule_max))
+      args$min <- if (!is.na(mn)) mn else NULL
+      args$max <- if (!is.na(mx)) mx else NULL
+      if (is.null(args$min) && is.null(args$max)) {
+        rv$rule_msg <- list(ok = FALSE, error = "A range rule needs a minimum and/or maximum.")
+        return()
+      }
+    } else {
+      cols <- input$rule_cols
+      if (length(cols) == 0) {
+        rv$rule_msg <- list(ok = FALSE, error = "Select at least one column.")
+        return()
+      }
+      args$columns <- cols
+    }
+    r <- do.call(dta_set_rule, args)
+    if (!isTRUE(r$ok)) {
+      rv$rule_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    rv$dta <- r$value
+    invalidate_dataset(ed)
+    rv$rule_msg <- NULL
+    rv$rule_view <- "list"
+    rv$rule_token <- rv$rule_token + 1
+    sync_yaml_text()
+    showNotification("Rule saved.", type = "message")
+  })
+
   # --- messages + inspect -------------------------------------------------
   msgs_r <- reactive({
     req(rv$active)
@@ -578,11 +1254,24 @@ server <- function(input, output, session) {
     for (fc in intersect(c("Dataset", "Table", "Source"), names(disp))) {
       disp[[fc]] <- as.factor(disp[[fc]])
     }
+    # Dynamic column widths: DataTables auto-sizes every column to its content
+    # (autoWidth); the Message column is allowed to wrap while the short
+    # ID/Dataset/Table/Source/Row/Column/Rule columns stay on a single line.
+    msg_idx <- which(names(disp) == "Message") - 1L
+    other_idx <- setdiff(seq_along(names(disp)) - 1L, msg_idx)
+    coldefs <- list()
+    if (length(other_idx) > 0) {
+      coldefs <- c(coldefs, list(list(targets = other_idx, className = "dt-nowrap")))
+    }
+    if (length(msg_idx) > 0) {
+      coldefs <- c(coldefs, list(list(targets = msg_idx, className = "msg-cell")))
+    }
     DT::datatable(
       disp,
       rownames = FALSE, selection = "single", filter = "top",
-      class = "display compact",
-      options = list(pageLength = 8, dom = "tp", scrollX = TRUE)
+      class = "display compact", width = "100%",
+      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
+                     autoWidth = TRUE, columnDefs = coldefs)
     )
   })
 
@@ -694,8 +1383,8 @@ server <- function(input, output, session) {
     body <- if (nrow(d) == 1) df_to_kv(d) else df_to_html_table(d)
     showModal(modalDialog(
       title = paste("Inspect \u2014 message", id),
-      size = "l", easyClose = TRUE, footer = modalButton("Close"),
-      body
+      size = "xl", easyClose = TRUE, footer = modalButton("Close"),
+      div(class = "dta-inspect-wrap", body)
     ))
   }
 
@@ -715,10 +1404,16 @@ server <- function(input, output, session) {
     md <- DTAtools::metadata(dta)
     getf <- function(field) {
       v <- tryCatch(S7::prop(md, field), error = function(e) NULL)
-      if (is.null(v)) "" else as.character(v)[1]
+      if (is.null(v) || length(v) == 0) "" else as.character(v)[1]
     }
     date_val <- tryCatch(S7::prop(md, "date"), error = function(e) NULL)
+    tr <- dta_transmission(dta)
+    trf <- function(k) {
+      v <- tr[[k]]
+      if (is.null(v)) "" else if (inherits(v, "Date")) format(v, "%Y-%m-%d") else as.character(v)[1]
+    }
     tagList(
+      div(class = "md-section-title", "Document"),
       layout_columns(
         col_widths = c(6, 6),
         textInput("md_title", "Title", value = getf("title"), width = "100%"),
@@ -731,6 +1426,68 @@ server <- function(input, output, session) {
                   width = "100%"),
         textInput("md_header", "Header / organization", value = getf("header"), width = "100%")
       ),
+      tags$hr(),
+      div(class = "md-section-title", "Parties"),
+      layout_columns(
+        col_widths = c(6, 6),
+        card(
+          card_header("Receiver"),
+          card_body(
+            div(class = "section-label", "Affiliation"),
+            uiOutput("receiver_affiliation"),
+            tags$hr(),
+            div(class = "section-label",
+                style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+                tags$span("Contacts"),
+                actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")),
+            uiOutput("receiver_contacts")
+          )
+        ),
+        card(
+          card_header("Supplier"),
+          card_body(
+            div(class = "section-label", "Affiliation"),
+            uiOutput("supplier_affiliation"),
+            tags$hr(),
+            div(class = "section-label",
+                style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+                tags$span("Contacts"),
+                actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")),
+            uiOutput("supplier_contacts")
+          )
+        )
+      ),
+      tags$hr(),
+      div(class = "md-section-title", "Transmission"),
+      layout_columns(
+        col_widths = c(4, 4, 4),
+        textInput("tr_type", "Type", value = trf("type"), width = "100%",
+                  placeholder = "e.g. secure S3 bucket"),
+        textInput("tr_frequency", "Frequency", value = trf("frequency"), width = "100%",
+                  placeholder = "e.g. one-time, weekly"),
+        textInput("tr_notification", "Notification", value = trf("notification"), width = "100%",
+                  placeholder = "e.g. email")
+      ),
+      layout_columns(
+        col_widths = c(6, 6),
+        textInput("tr_date_first", "Date of first transfer", value = trf("date_first_transfer"),
+                  width = "100%", placeholder = "YYYY-MM-DD or phrase"),
+        textInput("tr_date_last", "Date of last transfer", value = trf("date_last_transfer"),
+                  width = "100%", placeholder = "YYYY-MM-DD or phrase")
+      ),
+      div(
+        style = "display:flex; gap:24px; margin-top:2px;",
+        checkboxInput("tr_test_upload", "Test upload", value = isTRUE(tr$test_upload)),
+        checkboxInput("tr_blinded", "Blinded transfer", value = isTRUE(tr$blinded_transfer))
+      ),
+      tags$hr(),
+      div(class = "md-section-title", "Error handling & corrections"),
+      textAreaInput("md_error_handling", "Error handling",
+                    value = getf("error_handling"), width = "100%", rows = 2,
+                    placeholder = "How data/format errors are handled and communicated."),
+      textInput("md_authorized", "Authorized for corrections",
+                value = getf("authorized_for_corrections"), width = "100%",
+                placeholder = "Contact(s) authorized to request corrections"),
       div(class = "msg-hint",
           "Changes are saved automatically to the current session as you type.")
     )
@@ -748,29 +1505,84 @@ server <- function(input, output, session) {
                        type = "error")
     }
   }
+  save_tr <- function(field, value) {
+    req(rv$dta)
+    r <- dta_set_transmission_field(rv$dta, field, value)
+    if (r$ok) {
+      rv$dta <- r$value
+      autosave()
+    } else {
+      showNotification(paste("Could not update transmission", field, "\u2014", r$error),
+                       type = "error")
+    }
+  }
   title_d   <- debounce(reactive(input$md_title), 700)
   version_d <- debounce(reactive(input$md_version), 700)
   header_d  <- debounce(reactive(input$md_header), 700)
+  errh_d    <- debounce(reactive(input$md_error_handling), 700)
+  auth_d    <- debounce(reactive(input$md_authorized), 700)
   observeEvent(title_d(),   save_md("title", title_d()),     ignoreInit = TRUE)
   observeEvent(version_d(), save_md("version", version_d()), ignoreInit = TRUE)
   observeEvent(header_d(),  save_md("header", header_d()),   ignoreInit = TRUE)
+  observeEvent(errh_d(),    save_md("error_handling", errh_d()), ignoreInit = TRUE)
+  observeEvent(auth_d(),    save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
   observeEvent(input$md_date, {
     req(input$md_date)
     save_md("date", input$md_date)
   }, ignoreInit = TRUE)
+  # transmission fields (debounced text + immediate flags)
+  tr_type_d   <- debounce(reactive(input$tr_type), 700)
+  tr_freq_d   <- debounce(reactive(input$tr_frequency), 700)
+  tr_notif_d  <- debounce(reactive(input$tr_notification), 700)
+  tr_first_d  <- debounce(reactive(input$tr_date_first), 700)
+  tr_last_d   <- debounce(reactive(input$tr_date_last), 700)
+  observeEvent(tr_type_d(),  save_tr("type", tr_type_d()),               ignoreInit = TRUE)
+  observeEvent(tr_freq_d(),  save_tr("frequency", tr_freq_d()),          ignoreInit = TRUE)
+  observeEvent(tr_notif_d(), save_tr("notification", tr_notif_d()),      ignoreInit = TRUE)
+  observeEvent(tr_first_d(), save_tr("date_first_transfer", tr_first_d()), ignoreInit = TRUE)
+  observeEvent(tr_last_d(),  save_tr("date_last_transfer", tr_last_d()),  ignoreInit = TRUE)
+  observeEvent(input$tr_test_upload, save_tr("test_upload", isTRUE(input$tr_test_upload)), ignoreInit = TRUE)
+  observeEvent(input$tr_blinded, save_tr("blinded_transfer", isTRUE(input$tr_blinded)), ignoreInit = TRUE)
 
   # --- people / contacts --------------------------------------------------
+  # Shared field set so the Add and Edit person modals capture the SAME details
+  # (name, roles, email, department, phone, address). `prefix` namespaces the
+  # input ids ("new_contact" for add, "edit_contact" for edit); `p` pre-fills.
+  contact_modal_inputs <- function(prefix, p = list()) {
+    g <- function(k) p[[k]] %||% ""
+    tagList(
+      textInput(paste0(prefix, "_name"), "Name", value = g("name")),
+      textInput(paste0(prefix, "_roles"), "Role(s)", value = g("role"),
+                placeholder = "e.g. Data Manager, Reviewer"),
+      textInput(paste0(prefix, "_email"), "Email", value = g("email")),
+      layout_columns(
+        col_widths = c(6, 6),
+        textInput(paste0(prefix, "_department"), "Department", value = g("department")),
+        textInput(paste0(prefix, "_phone"), "Phone", value = g("phone"))
+      ),
+      textInput(paste0(prefix, "_address"), "Address", value = g("address"))
+    )
+  }
+
   render_contacts <- function(side) {
     cs <- dta_contacts(isolate(rv$dta), side)
     if (length(cs) == 0) {
-      return(div(class = "msg-hint", "No contacts yet."))
+      return(div(class = "msg-hint", "No contacts yet. Click \u201cAdd person\u201d to create one."))
     }
     tags$ul(
       class = "list-group",
       lapply(seq_along(cs), function(i) {
         tags$li(
-          class = "list-group-item d-flex justify-content-between align-items-center",
-          span(contact_display(cs[[i]])),
+          class = "list-group-item contact-item d-flex justify-content-between align-items-center",
+          actionLink(
+            paste0("editc_", side, "_", i),
+            class = "flex-grow-1 text-decoration-none",
+            title = "Click to edit this person",
+            label = tagList(
+              span(contact_display(cs[[i]])),
+              span(class = "contact-edit-ic", "\u270E edit")
+            )
+          ),
           actionButton(
             paste0("rm_", side, "_", i), "Remove",
             class = "btn btn-sm btn-outline-danger"
@@ -779,6 +1591,53 @@ server <- function(input, output, session) {
       })
     )
   }
+
+  # Open a pre-filled modal to edit one contact's details.
+  edit_contact_flow <- function(side, index) {
+    p <- dta_contact_at(isolate(rv$dta), side, index)
+    if (is.null(p)) return()
+    rv$editing_contact <- list(side = side, index = index)
+    showModal(modalDialog(
+      title = paste("Edit", side, "contact"),
+      contact_modal_inputs("edit_contact", p),
+      div(class = "msg-hint",
+          "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
+      ),
+      easyClose = TRUE
+    ))
+  }
+
+  observeEvent(input$confirm_edit_contact, {
+    ec <- rv$editing_contact
+    req(ec)
+    nm <- trimws(input$edit_contact_name %||% "")
+    if (!nzchar(nm)) {
+      showNotification("A name is required.", type = "warning")
+      return()
+    }
+    roles <- paste(trimws(strsplit(input$edit_contact_roles %||% "", ",")[[1]]), collapse = ", ")
+    fields <- list(
+      name = nm,
+      role = roles,
+      email = input$edit_contact_email %||% "",
+      department = input$edit_contact_department %||% "",
+      phone = input$edit_contact_phone %||% "",
+      address = input$edit_contact_address %||% ""
+    )
+    r <- dta_update_contact(rv$dta, ec$side, ec$index, fields)
+    if (r$ok) {
+      rv$dta <- r$value
+      rv$editing_contact <- NULL
+      rv$contacts_token <- rv$contacts_token + 1
+      autosave()
+      removeModal()
+    } else {
+      showNotification(r$error, type = "error")
+    }
+  })
 
   output$receiver_contacts <- renderUI({ rv$contacts_token; req(isolate(rv$dta)); render_contacts("receiver") })
   output$supplier_contacts <- renderUI({ rv$contacts_token; req(isolate(rv$dta)); render_contacts("supplier") })
@@ -833,6 +1692,14 @@ server <- function(input, output, session) {
     for (side in c("receiver", "supplier")) {
       cs <- dta_contacts(isolate(rv$dta), side)
       for (i in seq_along(cs)) {
+        edid <- paste0("editc_", side, "_", i)
+        if (is.null(contact_rm_registry[[edid]])) {
+          contact_rm_registry[[edid]] <- TRUE
+          local({
+            SIDE <- side; IDX <- i; EID <- edid
+            observeEvent(input[[EID]], edit_contact_flow(SIDE, IDX), ignoreInit = TRUE)
+          })
+        }
         rmid <- paste0("rm_", side, "_", i)
         if (is.null(contact_rm_registry[[rmid]])) {
           contact_rm_registry[[rmid]] <- TRUE
@@ -869,9 +1736,7 @@ server <- function(input, output, session) {
   add_contact_flow <- function(side) {
     showModal(modalDialog(
       title = paste("Add", side, "contact"),
-      textInput("new_contact_name", "Name"),
-      textInput("new_contact_roles", "Role(s)", placeholder = "e.g. Data Manager, Reviewer"),
-      textInput("new_contact_email", "Email (optional)"),
+      contact_modal_inputs("new_contact"),
       div(class = "msg-hint",
           "Separate multiple roles with commas. Affiliation is set once per side (above), not per person."),
       footer = tagList(
@@ -885,7 +1750,7 @@ server <- function(input, output, session) {
   observeEvent(input$add_supplier, add_contact_flow("supplier"))
 
   confirm_add <- function(side) {
-    nm <- input$new_contact_name %||% ""
+    nm <- trimws(input$new_contact_name %||% "")
     if (!nzchar(nm)) {
       showNotification("A name is required.", type = "warning")
       return()
@@ -893,7 +1758,10 @@ server <- function(input, output, session) {
     roles <- trimws(strsplit(input$new_contact_roles %||% "", ",")[[1]])
     r <- dta_add_contact(
       rv$dta, side, name = nm, roles = roles,
-      email = input$new_contact_email %||% ""
+      email = input$new_contact_email %||% "",
+      department = input$new_contact_department %||% "",
+      phone = input$new_contact_phone %||% "",
+      address = input$new_contact_address %||% ""
     )
     if (r$ok) {
       rv$dta <- r$value
@@ -919,8 +1787,17 @@ server <- function(input, output, session) {
     }
   })
 
+  # Push text into the Raw YAML editor (Ace when available, else textarea).
+  set_yaml_editor <- function(text) {
+    if (requireNamespace("shinyAce", quietly = TRUE)) {
+      shinyAce::updateAceEditor(session, "raw_yaml_editor", value = text %||% "")
+    } else {
+      updateTextAreaInput(session, "raw_yaml_editor", value = text %||% "")
+    }
+  }
+
   observeEvent(input$revert_yaml, {
-    updateTextAreaInput(session, "raw_yaml_editor", value = rv$yaml_text %||% "")
+    set_yaml_editor(rv$yaml_text %||% "")
     rv$yaml_msg <- NULL
   })
 
@@ -936,18 +1813,114 @@ server <- function(input, output, session) {
       showNotification(paste("YAML not applied:", res$error), type = "error", duration = 10)
       return()
     }
+    # Smart reconcile: keep uploads for datasets whose file handlers are
+    # unchanged, keep validation only when columns/rules are also unchanged,
+    # and drop uploads for datasets that were removed from the document.
+    new_dta     <- res$value
+    old_dta     <- isolate(rv$dta)
+    old_uploads <- isolate(rv$uploads)
+    old_status  <- isolate(rv$status)
     prev_active <- isolate(rv$active)
-    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only))
-    nms <- dta_dataset_names(res$value)
-    if (!is.null(prev_active) && prev_active %in% nms) rv$active <- prev_active
+    new_names   <- dta_dataset_names(new_dta)
+    old_names   <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
+
+    new_uploads <- list()
+    new_status  <- stats::setNames(rep("pending", length(new_names)), new_names)
+    for (nm in new_names) {
+      if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
+      old_ds <- dta_get_dataset(old_dta, nm)
+      new_ds <- dta_get_dataset(new_dta, nm)
+      handlers_same <- identical(dta_handlers_signature(old_ds),
+                                 dta_handlers_signature(new_ds))
+      specs_same <- identical(dta_specs_signature(old_ds),
+                              dta_specs_signature(new_ds))
+      if (handlers_same && dta_dataset_content_count(old_ds) > 0) {
+        tr <- dta_transfer_bound_data(new_dta, nm, old_ds, keep_validation = specs_same)
+        if (isTRUE(tr$ok)) {
+          new_dta <- tr$value
+          for (k in names(old_uploads)) {
+            if (startsWith(k, paste0(nm, "||"))) new_uploads[[k]] <- old_uploads[[k]]
+          }
+          new_status[[nm]] <- if (specs_same) (old_status[[nm]] %||% "pending") else "pending"
+        }
+      }
+      # handlers changed OR no bound data -> fresh (uploads dropped, pending)
+    }
+
+    rv$dta <- new_dta
+    rv$yaml_text <- txt
+    rv$structure <- build_structure(new_dta)
+    rv$uploads <- new_uploads
+    for (nm in new_names) {
+      if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
+          identical(new_status[[nm]], "pending")) {
+        new_status[[nm]] <- "nodata"
+      }
+    }
+    rv$status <- new_status
+    rv$dataset_only <- isTRUE(res$dataset_only)
+    rv$active <- if (!is.null(prev_active) && prev_active %in% new_names) {
+      prev_active
+    } else if (length(new_names) > 0) {
+      new_names[1]
+    } else {
+      NULL
+    }
+    rv$md_token <- rv$md_token + 1
+    rv$contacts_token <- rv$contacts_token + 1
+    autosave()
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
-      if (isTRUE(res$dataset_only)) "Dataset YAML applied (no metadata)." else "DTA YAML applied and validated.",
+      if (isTRUE(res$dataset_only)) {
+        "Dataset YAML applied (uploads kept where handlers are unchanged)."
+      } else {
+        "DTA YAML applied (uploads kept where handlers are unchanged)."
+      },
       type = "message"
     )
   })
 
   # --- export -------------------------------------------------------------
+  # helper: write a UTF-8 YAML string to a download file (binary-safe)
+  write_yaml_download <- function(text, file) {
+    con <- file(file, "wb")
+    on.exit(close(con))
+    writeLines(enc2utf8(text), con, useBytes = TRUE)
+  }
+  yaml_export_stub <- function() {
+    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
+    ttl <- tryCatch(as.character(S7::prop(md, "title"))[1], error = function(e) NULL)
+    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+    base
+  }
+  output$dl_yaml <- downloadHandler(
+    filename = function() paste0(yaml_export_stub(), "_", Sys.Date(), ".yaml"),
+    content = function(file) {
+      req(rv$dta)
+      res <- dta_to_yaml_text(rv$dta)
+      if (!res$ok) {
+        showNotification(paste("YAML export failed:", res$error), type = "error", duration = 10)
+        stop(res$error)
+      }
+      write_yaml_download(res$value, file)
+    }
+  )
+  output$dl_ds_yaml <- downloadHandler(
+    filename = function() {
+      nm <- rv$active %||% "dataset"
+      paste0(gsub("[^A-Za-z0-9]+", "_", nm), "_", Sys.Date(), ".yaml")
+    },
+    content = function(file) {
+      req(rv$dta, rv$active)
+      res <- dta_dataset_to_yaml_text(rv$dta, rv$active)
+      if (!res$ok) {
+        showNotification(paste("Dataset YAML export failed:", res$error),
+                         type = "error", duration = 10)
+        stop(res$error)
+      }
+      write_yaml_download(res$value, file)
+    }
+  )
   output$dl_docx <- downloadHandler(
     filename = function() paste0("DTA_", Sys.Date(), ".docx"),
     content = function(file) {
@@ -1000,11 +1973,22 @@ server <- function(input, output, session) {
     st <- rv$status[[rv$active]] %||% "pending"
     s <- rv$structure[[rv$active]]
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
+    ds <- dta_get_dataset(rv$dta, rv$active)
+    desc <- tryCatch(ds@description, error = function(e) NULL) %||% ""
+    heading <- if (nzchar(desc)) desc else rv$active
     div(
-      style = "display:flex; align-items:center; gap:12px; margin-bottom:10px;",
-      tags$h4(rv$active, style = "margin:0;"),
-      if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
-      status_chip(st)
+      div(
+        class = "ds-head",
+        tags$h4(class = "ds-desc", heading)
+      ),
+      div(
+        style = "display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;",
+        # When the description is the heading, show the table name as a tag too;
+        # otherwise the name IS the heading and we only show type/status tags.
+        if (nzchar(desc)) tags$span(class = "dta-name-chip", rv$active),
+        if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
+        status_chip(st)
+      )
     )
   })
 
@@ -1130,13 +2114,25 @@ server <- function(input, output, session) {
     tagList(
       uiOutput("dataset_status_line"),
       div(
+        class = "ds-actions",
         style = "margin-bottom:12px;",
         actionButton("check_one", "Check this dataset",
                      class = "btn btn-primary"),
-        tags$span(class = "msg-hint", style = "margin-left:10px;",
-                  "Uploads are validated against the file handler as you add them.")
+        actionButton("edit_cols", label = HTML("&#x1F4D0; Edit columns"),
+                     class = "btn btn-outline-secondary",
+                     title = "Add, remove or edit column specifications"),
+        actionButton("edit_rules", label = HTML("&#x2696;&#xFE0F; Edit rules"),
+                     class = "btn btn-outline-secondary",
+                     title = "Add, remove or edit validation rules"),
+        downloadButton("dl_ds_yaml", "Export DataSet YAML",
+                       class = "btn btn-outline-primary",
+                       title = "Download this dataset's specification as YAML")
       ),
-      tags$h5("Expected files"),
+      #div(
+      #  class = "msg-hint", style = "margin:-6px 0 12px;",
+      #  "Uploads are validated against the file handler as you add them."
+      #),
+      #tags$h5("Expected files"),
       div(class = "msg-hint", style = "margin:-4px 0 10px;",
           "Drop each required file below. Loaded files appear underneath."),
       slots,
@@ -1207,11 +2203,13 @@ server <- function(input, output, session) {
           uiOutput("workspace_header"),
           uiOutput("summary_metrics"),
           uiOutput("dataset_nav_ui"),
-          tags$hr(),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
-          div(style = "height:8px;"),
+          tags$hr(),
+          #div(style = "height:8px;"),
+          downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
+          #div(style = "height:6px;"),
           downloadButton("dl_docx", "Export Word", class = "btn btn-outline-primary w-100"),
-          div(style = "height:6px;"),
+          #div(style = "height:6px;"),
           downloadButton("dl_pdf", "Export PDF", class = "btn btn-outline-primary w-100"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
@@ -1221,37 +2219,7 @@ server <- function(input, output, session) {
           dataset_only <- isolate(rv$dataset_only)
           metadata_panel <- nav_panel(
             "Metadata",
-            uiOutput("metadata_editor"),
-            tags$hr(),
-            layout_columns(
-              col_widths = c(6, 6),
-              card(
-                card_header("Receiver"),
-                card_body(
-                  div(class = "section-label", "Affiliation"),
-                  uiOutput("receiver_affiliation"),
-                  tags$hr(),
-                  div(class = "section-label",
-                      style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
-                      tags$span("Contacts"),
-                      actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")),
-                  uiOutput("receiver_contacts")
-                )
-              ),
-              card(
-                card_header("Supplier"),
-                card_body(
-                  div(class = "section-label", "Affiliation"),
-                  uiOutput("supplier_affiliation"),
-                  tags$hr(),
-                  div(class = "section-label",
-                      style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
-                      tags$span("Contacts"),
-                      actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")),
-                  uiOutput("supplier_contacts")
-                )
-              )
-            )
+            uiOutput("metadata_editor")
           )
           panels <- list(
             nav_panel("Datasets", uiOutput("dataset_detail")),
@@ -1261,7 +2229,7 @@ server <- function(input, output, session) {
               div(
                 class = "yaml-edit-bar",
                 div(class = "msg-hint",
-                    HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Applying replaces the entire document and clears uploaded data files and validation status.")),
+                    HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Uploaded files are kept for datasets whose file handlers are unchanged; a dataset's validation is cleared only if its columns or rules changed, and deleted datasets drop their uploads.")),
                 div(
                   class = "yaml-edit-actions",
                   actionButton("apply_yaml", "Apply changes", class = "btn btn-sm btn-primary"),
@@ -1269,8 +2237,22 @@ server <- function(input, output, session) {
                 )
               ),
               uiOutput("yaml_validation_msg"),
-              textAreaInput("raw_yaml_editor", label = NULL,
-                            value = isolate(rv$yaml_text), width = "100%", rows = 22)
+              if (requireNamespace("shinyAce", quietly = TRUE)) {
+                div(
+                  class = "yaml-ace-wrap",
+                  shinyAce::aceEditor(
+                    "raw_yaml_editor",
+                    value = isolate(rv$yaml_text) %||% "",
+                    mode = "yaml", theme = "tomorrow_night",
+                    height = "55vh", fontSize = 13,
+                    showLineNumbers = TRUE, wordWrap = FALSE,
+                    debounce = 100, autoComplete = "disabled"
+                  )
+                )
+              } else {
+                textAreaInput("raw_yaml_editor", label = NULL,
+                              value = isolate(rv$yaml_text), width = "100%", rows = 22)
+              }
             )
           )
           do.call(navset_card_tab, Filter(Negate(is.null), panels))
@@ -1283,13 +2265,20 @@ server <- function(input, output, session) {
   observeEvent(input$restore_session, {
     if (!file.exists(session_file)) return()
     saved <- tryCatch(readRDS(session_file), error = function(e) NULL)
-    if (is.null(saved) || is.null(saved$dta)) {
+    # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
+    # fall back to a legacy `dta` field for older session files.
+    restored <- if (!is.null(saved$dump)) {
+      tryCatch(dta_restore_session(saved$dump), error = function(e) NULL)
+    } else {
+      saved$dta
+    }
+    if (is.null(saved) || is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }
-    rv$dta <- saved$dta
+    rv$dta <- restored
     rv$yaml_text <- saved$yaml_text
-    rv$structure <- saved$structure %||% build_structure(saved$dta)
+    rv$structure <- saved$structure %||% build_structure(restored)
     ups <- saved$uploads %||% list()
     rv$uploads <- lapply(ups, function(recs) {
       if (length(recs) == 0) return(list())
@@ -1298,10 +2287,10 @@ server <- function(input, output, session) {
       } else recs
     })
     rv$status <- saved$status %||% stats::setNames(
-      rep("pending", length(dta_dataset_names(saved$dta))),
-      dta_dataset_names(saved$dta)
+      rep("pending", length(dta_dataset_names(restored))),
+      dta_dataset_names(restored)
     )
-    rv$active <- saved$active %||% (dta_dataset_names(saved$dta)[1] %||% NULL)
+    rv$active <- saved$active %||% (dta_dataset_names(restored)[1] %||% NULL)
     rv$dataset_only <- isTRUE(saved$dataset_only)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1

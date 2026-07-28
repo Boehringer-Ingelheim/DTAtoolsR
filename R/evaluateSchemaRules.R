@@ -160,6 +160,8 @@ evaluate_condition <- function(column_name, condition, df) {
     return(x >= lower & x <= upper)
   } else if ("range" %in% names(condition)) {
     return(x >= condition[["range"]][1] & x <= condition[["range"]][2])
+  } else if ("pattern" %in% names(condition)) {
+    return(grepl(condition[["pattern"]], as.character(x), perl = TRUE))
   } else if ("empty" %in% names(condition)) {
     empty_mask <- is.na(x)
 
@@ -203,7 +205,8 @@ evaluate_conditions <- function(conditions, df) {
 #'   - `@type` = "check_col_condition"
 #'   - `@condition` list: named by column, each with one of:
 #'       `equals`, `not_equals`, `in`, `not_in`,
-#'       `greater`, `less`, `greater_equal`, `less_equal`, `range`, `empty`
+#'       `greater`, `less`, `greater_equal`, `less_equal`, `min`, `max`,
+#'       `range`, `pattern`, `empty`
 #'   - `@then` list: same structure as `@condition`
 #' @param df A data.frame to validate.
 #' @description Evaluates an **IF/THEN** rule across rows:
@@ -211,10 +214,13 @@ evaluate_conditions <- function(conditions, df) {
 #'   predicates must also be TRUE. For rows where the IF holds, `NA` in THEN
 #'   is considered a **violation**.
 #' @details
-#' Supported operators per column (single operator per column):
+#' Supported operators per column (single operator per column, except that
+#' `min` and `max` may be combined to express an inclusive band):
 #' - Equality: `equals`, `not_equals`
 #' - Set: `in`, `not_in`
-#' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`, `range`
+#' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`,
+#'   `min`, `max`, `range`
+#' - Text: `pattern` (a regular expression; row passes when the value matches)
 #' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
 #'
 #' If `@condition` is empty, the `@then` part applies to **all rows**.

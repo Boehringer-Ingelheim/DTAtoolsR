@@ -126,3 +126,18 @@ test_that("validation_run groups items checked together", {
   expect_equal(length(unique(second_status$validation_run)), 1)
   expect_false(identical(unique(second_status$validation_run), first_run))
 })
+
+test_that("dta_rule_failure_row_indices reports failing rows for a check_range rule", {
+  df <- data.frame(age = c(10, 20, 70, 50, NA), stringsAsFactors = FALSE)
+
+  # min/max constructor
+  rule_min_max <- DTARuleColRange(id = "r_range", columns = "age", min = 18, max = 65)
+  expect_identical(dta_rule_failure_row_indices(rule_min_max, df), c(1L, 3L))
+
+  # legacy range= constructor (stored internally as min/max)
+  rule_range <- DTARuleColRange(id = "r_range2", columns = "age", range = c(18, 65))
+  expect_identical(dta_rule_failure_row_indices(rule_range, df), c(1L, 3L))
+
+  # missing column yields no failing rows rather than an error
+  expect_identical(dta_rule_failure_row_indices(rule_min_max, data.frame(x = 1:3)), integer(0))
+})

@@ -236,6 +236,77 @@ bi_css <- function() {
       background: #fff; padding: 1px 8px; line-height: 1.3; border-radius: 6px; font-size: .85rem;
     }
     .dataset-nav-row .nav-check:hover { background: var(--bi-pass-bg); }
+
+    /* Non-floating footer: DTAtools version + author + GitHub link. Sits in the
+       normal document flow at the bottom of the page (never fixed/floating). */
+    .app-footer {
+      margin-top: 26px; padding: 14px 20px; border-top: 1px solid var(--bi-pending-border);
+      background: #fff; color: var(--bi-grey); font-size: .82rem;
+      display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+    }
+    .app-footer .foot-name { font-weight: 700; color: var(--bi-green-dark); }
+    .app-footer .foot-ver {
+      background: var(--bi-green-light); color: var(--bi-green-dark);
+      border-radius: 999px; padding: 1px 9px; font-weight: 600;
+    }
+    .app-footer .foot-sep { opacity: .5; }
+    .app-footer a { color: var(--bi-green); text-decoration: none; font-weight: 600; }
+    .app-footer a:hover { text-decoration: underline; }
+
+    /* Dataset detail header: dataset DESCRIPTION as the heading, name smaller. */
+    .ds-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
+    .ds-head .ds-desc { margin: 0; font-weight: 700; color: var(--bi-green-dark); line-height: 1.2; }
+    .ds-head .ds-name {
+      font-size: .82rem; color: var(--bi-grey);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .ds-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+
+    /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
+    .modal-xl { max-width: 92vw; }
+    .dta-inspect-wrap { overflow-x: auto; max-height: 68vh; }
+    .dta-inspect-wrap table { width: 100%; }
+    .dta-inspect-wrap td, .dta-inspect-wrap th {
+      white-space: normal; word-break: break-word; vertical-align: top;
+    }
+
+    /* Validation messages: table fills the card width; only the Message column
+       wraps (others stay on one line) so the layout is dynamic but full-width. */
+    .msgs-table { width: 100%; }
+    .msgs-table .dataTables_wrapper { width: 100%; }
+    .msgs-table table.dataTable { width: 100% !important; }
+    .msgs-table table.dataTable td.dt-nowrap { white-space: nowrap; }
+    .msgs-table table.dataTable td.msg-cell { white-space: normal; min-width: 320px; }
+
+    /* Compact edit / delete buttons inside the column & rule editor tables. */
+    .dta-row-btn { padding: 1px 7px; margin: 0 2px; line-height: 1.3; }
+    .dta-name-chip {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .78rem; background: var(--bi-grey-light);
+      color: var(--bi-green-dark); border: 1px solid var(--bi-pending-border);
+    }
+    .cond-hint { font-size: .78rem; color: var(--bi-grey); margin: 2px 0 8px; }
+
+    /* Editable YAML via the Ace editor: rounded dark frame to match the app. */
+    .yaml-ace-wrap { border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+    .yaml-ace-wrap .ace_editor { min-height: 55vh; font-size: 13px; }
+
+    /* Column / rule spec editors (inside the Edit modals). */
+    .spec-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .spec-hint { font-size: .82rem; color: var(--bi-grey); }
+    .spec-form { border: 1px solid var(--bi-pending-border); border-radius: 8px; padding: 12px; background: #fff; margin-top: 10px; }
+    .spec-form .form-group { margin-bottom: 8px; }
+    .cond-builder { border: 1px solid var(--bi-pending-border); border-radius: 8px; padding: 10px; margin-bottom: 10px; background: var(--bi-grey-light); }
+    .cond-builder .cond-title { font-weight: 700; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--bi-grey); margin-bottom: 6px; }
+    .cond-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 4px; }
+    .cond-row .form-group { margin-bottom: 0; flex: 1 1 auto; }
+
+    /* Metadata: section titles + clickable (editable) contact rows. */
+    .md-section-title { font-weight: 700; color: var(--bi-green-dark); margin: 6px 0 8px; }
+    .contact-item { cursor: pointer; }
+    .contact-item:hover { background: var(--bi-green-light); }
+    .contact-item .contact-edit-ic { color: var(--bi-grey); font-size: .78rem; margin-left: 8px; white-space: nowrap; }
     "))
 }
 

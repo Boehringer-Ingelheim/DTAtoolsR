@@ -202,6 +202,28 @@ test_that("Conditional rules evaluate equals, not_equals, in, not_in, range and 
       test_df
     )$valid
   )
+
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_pattern_pass_example",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(STUDYID = list(pattern = "^[0-9]{4}-[0-9]{4}$"))
+      ),
+      test_df
+    )$valid
+  )
+
+  expect_false(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "rule_pattern_fail_example",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(STUDYID = list(pattern = "^ZZZ"))
+      ),
+      test_df
+    )$valid
+  )
 })
 
 test_that("Conditional empty=false handles Date columns", {
