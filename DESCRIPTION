@@ -50,7 +50,8 @@ Suggests:
 	bslib,
 	DT,
 	writexl,
-	shinyAce
+	shinyAce,
+	remotes
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
