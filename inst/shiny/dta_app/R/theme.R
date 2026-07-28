@@ -116,9 +116,6 @@ bi_css <- function() {
     .dropzone .progress, .dropzone .shiny-file-input-progress { display: none !important; }
 
     .msg-hint { font-size: .82rem; color: var(--bi-grey); }
-    .dataset-nav .list-group-item.active {
-      background: var(--bi-green); border-color: var(--bi-green);
-    }
     .metric { font-size: 1.4rem; font-weight: 700; color: var(--bi-green-dark); }
 
     /* Sidebar workspace header -- DTA identity (title / version / date) */
@@ -156,6 +153,21 @@ bi_css <- function() {
     .yaml-view .yml-punct   { color: #c9d1d9; }
     .yaml-view .yml-dash    { color: #ff7b72; }
 
+    /* Editable raw YAML: dark editor textarea + Apply/Revert bar + result banner */
+    .yaml-edit-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+    .yaml-edit-bar .msg-hint { flex: 1 1 auto; }
+    .yaml-edit-actions { flex: none; display: flex; gap: 6px; }
+    textarea#raw_yaml_editor {
+      background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .84rem; line-height: 1.55; tab-size: 2; white-space: pre;
+      min-height: 55vh; overflow: auto;
+    }
+    textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px rgba(0,168,134,.25); }
+    .yaml-valid { font-size: .82rem; padding: 7px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid transparent; }
+    .yaml-valid.ok  { color: var(--bi-pass); background: var(--bi-pass-bg); border-color: var(--bi-pass-border); }
+    .yaml-valid.err { color: var(--bi-fail); background: var(--bi-fail-bg); border-color: var(--bi-fail-border); white-space: pre-wrap; }
+
     /* Loaded-files list: one row per bound file (name + table + status + trash) */
     .loaded-slot { margin-bottom: 12px; }
     .loaded-slot-head { margin-bottom: 5px; }
@@ -191,36 +203,39 @@ bi_css <- function() {
     .msgs-table table.dataTable thead input,
     .msgs-table table.dataTable thead select { font-size: .78rem; padding: 2px 6px; }
 
-    /* Sidebar dataset navigation: name (select) + per-dataset check icon */
-    .dataset-nav .list-group { margin-bottom: 4px; }
+    /* Sidebar dataset navigation: status-tinted rows + name (select) + check icon.
+       The row BACKGROUND encodes status: not-checked (neutral grey), passed
+       (green), failed (red), missing/no-data (orange). Selection is a brand-teal
+       ring so it never collides with the status color. */
+    .dataset-nav-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
     .dataset-nav-row {
       display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border: 1px solid var(--bi-pending-border); border-left: 5px solid var(--bi-pending-border);
+      border-radius: 8px; background: #fff;
+      transition: background .12s ease, box-shadow .12s ease, border-color .12s ease;
     }
+    .dataset-nav-row.nav-st-pending { background: var(--bi-pending-bg); border-color: var(--bi-pending-border); border-left-color: var(--bi-pending-border); }
+    .dataset-nav-row.nav-st-pass    { background: var(--bi-pass-bg);    border-color: var(--bi-pass-border);    border-left-color: var(--bi-pass); }
+    .dataset-nav-row.nav-st-fail    { background: var(--bi-fail-bg);    border-color: var(--bi-fail-border);    border-left-color: var(--bi-fail); }
+    .dataset-nav-row.nav-st-nodata  { background: #FCF4E6;              border-color: #EBD9B6;                  border-left-color: #C77700; }
     .dataset-nav-row .nav-select {
       flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
       text-decoration: none; color: var(--bi-ink); font-weight: 600; overflow: hidden;
     }
     .dataset-nav-row .nav-select:hover { text-decoration: none; }
-    .dataset-nav-row .nav-name { word-break: break-word; }
-    .dataset-nav-row.active { background: var(--bi-green); border-color: var(--bi-green); }
-    .dataset-nav-row.active .nav-select,
-    .dataset-nav-row.active .nav-name { color: #fff; }
+    .dataset-nav-row .nav-name { word-break: break-word; color: var(--bi-ink); }
+    .dataset-nav-row.active { box-shadow: 0 0 0 2px var(--bi-green); }
+    .dataset-nav-row.active .nav-name { color: var(--bi-green-dark); font-weight: 700; }
     .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 700; font-size: .95rem; }
-    .nav-ic-pass { color: var(--bi-pass); }
-    .nav-ic-fail { color: var(--bi-fail); }
+    .nav-ic-pass    { color: var(--bi-pass); }
+    .nav-ic-fail    { color: var(--bi-fail); }
+    .nav-ic-nodata  { color: #C77700; }
     .nav-ic-pending { color: var(--bi-pending); }
-    .dataset-nav-row.active .nav-ic-pass { color: #CFF3E0; }
-    .dataset-nav-row.active .nav-ic-fail { color: #FFD5CE; }
-    .dataset-nav-row.active .nav-ic-pending { color: rgba(255,255,255,.75); }
     .dataset-nav-row .nav-check {
       flex: none; color: var(--bi-pass); border: 1px solid var(--bi-pass-border);
       background: #fff; padding: 1px 8px; line-height: 1.3; border-radius: 6px; font-size: .85rem;
     }
     .dataset-nav-row .nav-check:hover { background: var(--bi-pass-bg); }
-    .dataset-nav-row.active .nav-check {
-      color: #fff; border-color: rgba(255,255,255,.55); background: transparent;
-    }
-    .dataset-nav-row.active .nav-check:hover { background: rgba(255,255,255,.15); }
     "))
 }
 

@@ -52,6 +52,29 @@ dta_read_yaml <- function(path) {
   res
 }
 
+# Validate a raw YAML STRING as a DTA/DTADataSet by staging it to a temp file
+# and reusing dta_read_yaml() (which checks YAML syntax FIRST, then DTA/dataset
+# structure). Returns the same list shape as dta_read_yaml() -- so callers get
+# ok/value/error plus dataset_only/has_metadata. Used by the editable Raw YAML
+# tab so a save only replaces the loaded document when the text is BOTH valid
+# YAML AND a valid DTA / DTADataSet.
+dta_read_yaml_text <- function(text) {
+  tmp <- tempfile(fileext = ".yaml")
+  on.exit(unlink(tmp), add = TRUE)
+  written <- tryCatch({
+    con <- file(tmp, open = "wb")
+    writeLines(enc2utf8(as.character(text)), con, useBytes = TRUE)
+    close(con)
+    TRUE
+  }, error = function(e) FALSE)
+  if (!isTRUE(written)) {
+    return(list(ok = FALSE, value = NULL,
+                error = "Could not stage the YAML text for validation.",
+                dataset_only = FALSE, has_metadata = FALSE))
+  }
+  dta_read_yaml(tmp)
+}
+
 # ---- Introspection -------------------------------------------------------
 
 dta_dataset_names <- function(dta) {

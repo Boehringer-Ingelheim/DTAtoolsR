@@ -45,7 +45,8 @@ server <- function(input, output, session) {
     pending_upload = NULL, # deferred upload awaiting an overwrite confirmation
     dataset_only = FALSE, # TRUE when a standalone dataset YAML was loaded (no metadata)
     md_token = 0,        # bump to re-render metadata editor
-    contacts_token = 0   # bump to re-render contacts list
+    contacts_token = 0,  # bump to re-render contacts list
+    yaml_msg = NULL      # raw-YAML apply result: NULL | list(ok, error)
   )
 
   upload_registry <- new.env(parent = emptyenv())
@@ -168,21 +169,22 @@ server <- function(input, output, session) {
       class = "dataset-nav",
       div(class = "section-label", "Datasets"),
       div(
-        class = "list-group",
+        class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
           st <- st_map[[nm]] %||% "pending"
-          # Status icon: green check = passed all tests; red cross = failed OR
-          # missing data; grey dash = not validated yet.
+          # Row background + icon encode status: passed (green), failed (red),
+          # missing/no-data (orange), not-checked-yet (neutral grey).
+          st2 <- switch(st, pass = "pass", fail = "fail", nodata = "nodata", "pending")
           ic_ch <- switch(st,
             pass = "\u2714", fail = "\u2716", nodata = "\u2716", "\u2013")
           ic_cls <- switch(st,
             pass = "nav-ic-pass", fail = "nav-ic-fail",
-            nodata = "nav-ic-fail", "nav-ic-pending")
+            nodata = "nav-ic-nodata", "nav-ic-pending")
           ic_ttl <- switch(st,
             pass = "Passed all checks", fail = "Validation failed",
-            nodata = "No data loaded", "Not validated yet")
-          row_cls <- paste0("list-group-item dataset-nav-row",
+            nodata = "No data loaded (missing data)", "Not validated yet")
+          row_cls <- paste0("dataset-nav-row nav-st-", st2,
                             if (identical(nm, active)) " active" else "")
           div(
             class = row_cls,
@@ -905,14 +907,44 @@ server <- function(input, output, session) {
   observeEvent(input$confirm_add_receiver, confirm_add("receiver"))
   observeEvent(input$confirm_add_supplier, confirm_add("supplier"))
 
-  # --- raw YAML (syntax-highlighted, read-only) ---------------------------
-  output$raw_yaml <- renderUI({
-    req(rv$yaml_text)
-    HTML(paste0(
-      "<pre class=\"yaml-view\"><code>",
-      yaml_highlight_html(rv$yaml_text),
-      "</code></pre>"
-    ))
+  # --- raw YAML: editable, validated as YAML AND as a DTA/DTADataSet ------
+  output$yaml_validation_msg <- renderUI({
+    m <- rv$yaml_msg
+    if (is.null(m)) return(NULL)
+    if (isTRUE(m$ok)) {
+      div(class = "yaml-valid ok", HTML("&#x2714;"),
+          " Valid — document applied.")
+    } else {
+      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+    }
+  })
+
+  observeEvent(input$revert_yaml, {
+    updateTextAreaInput(session, "raw_yaml_editor", value = rv$yaml_text %||% "")
+    rv$yaml_msg <- NULL
+  })
+
+  observeEvent(input$apply_yaml, {
+    txt <- input$raw_yaml_editor %||% ""
+    if (!nzchar(trimws(txt))) {
+      rv$yaml_msg <- list(ok = FALSE, error = "The editor is empty — nothing to apply.")
+      return()
+    }
+    res <- dta_read_yaml_text(txt)
+    if (!isTRUE(res$ok)) {
+      rv$yaml_msg <- list(ok = FALSE, error = res$error %||% "Invalid YAML or DTA.")
+      showNotification(paste("YAML not applied:", res$error), type = "error", duration = 10)
+      return()
+    }
+    prev_active <- isolate(rv$active)
+    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only))
+    nms <- dta_dataset_names(res$value)
+    if (!is.null(prev_active) && prev_active %in% nms) rv$active <- prev_active
+    rv$yaml_msg <- list(ok = TRUE, error = NULL)
+    showNotification(
+      if (isTRUE(res$dataset_only)) "Dataset YAML applied (no metadata)." else "DTA YAML applied and validated.",
+      type = "message"
+    )
   })
 
   # --- export -------------------------------------------------------------
@@ -1226,9 +1258,19 @@ server <- function(input, output, session) {
             if (!isTRUE(dataset_only)) metadata_panel,
             nav_panel(
               "Raw YAML",
-              div(class = "msg-hint", style = "margin-bottom:6px;",
-                  "Original uploaded YAML (read-only, syntax-highlighted). Edits made in the app update the DTA object used for validation and export."),
-              uiOutput("raw_yaml")
+              div(
+                class = "yaml-edit-bar",
+                div(class = "msg-hint",
+                    HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Applying replaces the entire document and clears uploaded data files and validation status.")),
+                div(
+                  class = "yaml-edit-actions",
+                  actionButton("apply_yaml", "Apply changes", class = "btn btn-sm btn-primary"),
+                  actionButton("revert_yaml", "Revert", class = "btn btn-sm btn-outline-secondary")
+                )
+              ),
+              uiOutput("yaml_validation_msg"),
+              textAreaInput("raw_yaml_editor", label = NULL,
+                            value = isolate(rv$yaml_text), width = "100%", rows = 22)
             )
           )
           do.call(navset_card_tab, Filter(Negate(is.null), panels))
