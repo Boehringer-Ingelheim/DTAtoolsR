@@ -41,7 +41,7 @@ Imports:
 	officer
 Depends:
 	R (>= 4.1.0),
-	S7 (>= 0.2.0)
+	S7 (>= 0.2.2)
 Suggests:
 	knitr,
 	rmarkdown,
