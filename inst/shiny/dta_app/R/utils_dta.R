@@ -166,6 +166,51 @@ dta_stage_upload <- function(datapath, filename) {
   }, error = function(e) datapath)
 }
 
+# List the data files bundled in inst/extdata that can populate an upload slot,
+# i.e. everything EXCEPT the YAML specification documents. Returns basenames.
+dta_example_data_files <- function() {
+  dir <- system.file("extdata", package = "DTAtools")
+  if (!nzchar(dir) || !dir.exists(dir)) return(character(0))
+  files <- list.files(dir, full.names = FALSE, recursive = FALSE)
+  if (length(files) == 0) return(character(0))
+  files <- files[!dir.exists(file.path(dir, files))]  # drop any subdirectories
+  ext <- tolower(tools::file_ext(files))
+  files <- files[!ext %in% c("yaml", "yml")]          # drop YAML specification docs
+  sort(files)
+}
+
+# Absolute path to a bundled example data file (given its basename). Returns ""
+# when the name is empty or is not one of the bundled example files -- the
+# whitelist check keeps a crafted input value from reading an arbitrary path.
+dta_example_data_path <- function(filename) {
+  if (is.null(filename) || !nzchar(filename)) return("")
+  if (!basename(filename) %in% dta_example_data_files()) return("")
+  system.file("extdata", basename(filename), package = "DTAtools")
+}
+
+# List the YAML specification documents bundled in inst/extdata (basenames),
+# i.e. the counterpart of dta_example_data_files() that keeps ONLY .yaml/.yml.
+# Used by the landing page to offer every bundled example DTA to load.
+dta_example_yaml_files <- function() {
+  dir <- system.file("extdata", package = "DTAtools")
+  if (!nzchar(dir) || !dir.exists(dir)) return(character(0))
+  files <- list.files(dir, full.names = FALSE, recursive = FALSE)
+  if (length(files) == 0) return(character(0))
+  files <- files[!dir.exists(file.path(dir, files))]  # drop any subdirectories
+  ext <- tolower(tools::file_ext(files))
+  files <- files[ext %in% c("yaml", "yml")]            # keep YAML specs only
+  sort(files)
+}
+
+# Absolute path to a bundled example YAML (given its basename). Returns "" when
+# the name is empty or not one of the bundled YAML specs -- the whitelist check
+# keeps a crafted input value from reading an arbitrary path.
+dta_example_yaml_path <- function(filename) {
+  if (is.null(filename) || !nzchar(filename)) return("")
+  if (!basename(filename) %in% dta_example_yaml_files()) return("")
+  system.file("extdata", basename(filename), package = "DTAtools")
+}
+
 # Load a file into a dataset via the package. Returns dta_try() result whose
 # value (on success) is the UPDATED dta object.
 dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
@@ -487,6 +532,93 @@ dta_export <- function(dta, file, format, signature_list = NULL) {
   ))
 }
 
+# Build a self-contained HTML validation report for a validated DTA. Summarises
+# per-dataset status (from the app's status map) and, when available, the
+# per-target detail from results(). Returns a single HTML string.
+dta_build_validation_report <- function(dta, status = NULL) {
+  esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
+  ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+  title <- tryCatch({
+    md <- dta@metadata
+    t <- tryCatch(md@title, error = function(e) NULL)
+    if (!is.null(t) && length(t) && nzchar(t)) t else NULL
+  }, error = function(e) NULL)
+
+  st <- unlist(status %||% list())
+  status_label <- function(s) switch(s %||% "",
+    pass = "Passed", fail = "Failed", nodata = "No data",
+    pending = "Not validated", s %||% "Unknown")
+  ds_names <- names(st)
+  validated <- ds_names[st %in% c("pass", "fail")]
+  n_pass <- sum(st[validated] == "pass")
+  n_fail <- sum(st[validated] == "fail")
+  n_nodata <- sum(st == "nodata")
+  overall_ok <- length(validated) > 0 && n_fail == 0
+
+  res <- dta_try(as.data.frame(DTAtools::results(dta)))
+  rdf <- if (isTRUE(res$ok)) res$value else NULL
+
+  ds_rows <- paste0(vapply(ds_names, function(nm) {
+    s <- st[[nm]]
+    cls <- if (identical(s, "pass")) "ok" else if (identical(s, "fail")) "bad" else "muted"
+    paste0("<tr><td>", esc(nm), "</td><td class='", cls, "'>",
+           esc(status_label(s)), "</td></tr>")
+  }, character(1)), collapse = "")
+
+  detail_html <- ""
+  if (!is.null(rdf) && nrow(rdf) > 0) {
+    want <- intersect(c("dataset", "target", "status", "n_schema_errors",
+                        "n_rule_errors", "validated_at"), names(rdf))
+    if (length(want) > 0) {
+      head_cells <- paste0(vapply(want, function(h) paste0("<th>", esc(h), "</th>"),
+                                  character(1)), collapse = "")
+      body_rows <- paste0(vapply(seq_len(nrow(rdf)), function(i) {
+        cells <- paste0(vapply(want, function(h) paste0("<td>", esc(rdf[[h]][i]), "</td>"),
+                               character(1)), collapse = "")
+        paste0("<tr>", cells, "</tr>")
+      }, character(1)), collapse = "")
+      detail_html <- paste0(
+        "<h2>Per-target detail</h2><table><thead><tr>", head_cells,
+        "</tr></thead><tbody>", body_rows, "</tbody></table>")
+    }
+  }
+
+  banner_cls <- if (overall_ok) "pass" else "warn"
+  banner_txt <- if (overall_ok) "VALIDATION PASSED" else "VALIDATION INCOMPLETE"
+  summary_line <- paste0(n_pass, " passed, ", n_fail, " failed, ",
+                         n_nodata, " without data.")
+  subtitle <- if (!is.null(title)) {
+    paste0("<div class='subtitle'>", esc(title), "</div>")
+  } else ""
+
+  css <- paste0(
+    "body{font-family:Segoe UI,Arial,sans-serif;color:#222;margin:32px}",
+    "h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:22px 0 8px}",
+    ".subtitle{font-size:15px;color:#444;margin-bottom:8px}",
+    ".meta{color:#666;font-size:13px;margin-bottom:16px}",
+    ".banner{display:inline-block;padding:10px 18px;border-radius:8px;",
+    "font-weight:700;letter-spacing:.04em}",
+    ".banner.pass{background:#e6f4ea;color:#1e7e34;border:1px solid #2e7d32}",
+    ".banner.warn{background:#fdecea;color:#b71c1c;border:1px solid #c62828}",
+    ".summary{margin:10px 0 4px;font-size:14px}",
+    "table{border-collapse:collapse;font-size:13px;margin-top:6px}",
+    "th,td{border:1px solid #ccc;padding:5px 10px;text-align:left}",
+    "th{background:#f4f4f4}td.ok{color:#1e7e34;font-weight:600}",
+    "td.bad{color:#b71c1c;font-weight:600}td.muted{color:#888}")
+
+  paste0(
+    "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
+    "<title>DTA Validation Report</title><style>", css, "</style></head><body>",
+    "<h1>DTA Validation Report</h1>", subtitle,
+    "<div class='meta'>Generated ", esc(ts), "</div>",
+    "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
+    "<div class='summary'>", esc(summary_line), "</div>",
+    "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Status</th></tr>",
+    "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
+    "</body></html>")
+}
+
 # Supported dataset types (fallback to known set if internal symbol absent).
 dta_supported_types <- function() {
   types <- tryCatch(
@@ -633,6 +765,17 @@ dta_rule_to_list <- function(rule) {
     out$columns <- raw$columns
   }
   out
+}
+
+# Human-friendly label for a short rule-type token (used by the rule editor and
+# the inspect popup).
+dta_rule_type_label <- function(type) {
+  t <- type %||% ""
+  switch(t,
+    col_condition = "Conditional (IF/THEN)",
+    col_range = "Range",
+    col_unique = "Unique",
+    if (nzchar(t)) t else "\u2014")
 }
 
 # One DTADataSet -> plain list (standalone-dataset shape).
@@ -819,6 +962,29 @@ dta_remove_column <- function(dta, dataset, id) {
   })
 }
 
+# Move a column one position up or down in the spec order. A move past either
+# end is a no-op (the object is returned unchanged). Returns dta_try().
+dta_move_column <- function(dta, dataset, id, direction) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    specs <- ds@specs
+    cols <- specs@columns %||% list()
+    ids <- names(cols)
+    pos <- match(id, ids)
+    if (is.na(pos)) stop("Column not found.")
+    n <- length(cols)
+    target <- if (identical(direction, "up")) pos - 1L else pos + 1L
+    if (target >= 1L && target <= n) {
+      ord <- seq_len(n)
+      ord[c(pos, target)] <- ord[c(target, pos)]
+      specs@columns <- cols[ord]
+      ds@specs <- specs
+      dta@datasets[[dataset]] <- ds
+    }
+    dta
+  })
+}
+
 # ---- Rule editing --------------------------------------------------------
 
 # Render a nested condition/then list to a short, human-readable string.
@@ -923,6 +1089,27 @@ dta_remove_rule <- function(dta, dataset, index) {
     specs@rules <- if (length(rl) == 0) NULL else rl
     ds@specs <- specs
     dta@datasets[[dataset]] <- ds
+    dta
+  })
+}
+
+# Move a rule one position up or down. A move past either end is a no-op.
+# @rules is a plain list (class_list_or_null), so we rebuild it via [[ to keep
+# the reorder independent of any list-like wrapper. Returns dta_try().
+dta_move_rule <- function(dta, dataset, index, direction) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    specs <- ds@specs
+    rl <- specs@rules %||% list()
+    n <- length(rl)
+    target <- if (identical(direction, "up")) index - 1L else index + 1L
+    if (index >= 1L && index <= n && target >= 1L && target <= n) {
+      items <- lapply(seq_len(n), function(i) rl[[i]])
+      items[c(index, target)] <- items[c(target, index)]
+      specs@rules <- if (length(items) == 0) NULL else items
+      ds@specs <- specs
+      dta@datasets[[dataset]] <- ds
+    }
     dta
   })
 }

@@ -71,7 +71,7 @@ bi_css <- function() {
       color: #fff; padding: 14px 20px; display: flex; align-items: center;
       gap: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
     }
-    .app-brandbar .brand-logo { height: 34px; width: auto; display: block; flex: none; }
+    .app-brandbar .brand-logo { height: 40px; width: auto; display: block; flex: none; }
     .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
     .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
     .app-actions { margin-left: auto; display: flex; gap: 8px; }
@@ -102,6 +102,7 @@ bi_css <- function() {
       padding: 1px 6px; border-radius: 6px; }
     .slot-ok    { color: var(--bi-pass); font-weight: 600; }
     .slot-warn  { color: #B26A00; font-weight: 600; }
+    .slot-example .control-label { font-size: .82rem; color: var(--bi-grey); font-weight: 500; }
 
     /* Make Shiny fileInput look like a drop zone */
     .dropzone .form-group { margin-bottom: 0; }
@@ -307,6 +308,110 @@ bi_css <- function() {
     .contact-item { cursor: pointer; }
     .contact-item:hover { background: var(--bi-green-light); }
     .contact-item .contact-edit-ic { color: var(--bi-grey); font-size: .78rem; margin-left: 8px; white-space: nowrap; }
+
+    /* Example-file picker: the drop zone with a dashed 'Load an example file'
+       button to its RIGHT, styled to match the dashed filedrop tile. */
+    .slot-example { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .slot-example .dropzone { flex: 0 0 auto; width: 400px; max-width: 100%; }
+    .slot-example-or { display: flex; align-items: center; gap: 10px; }
+    .slot-example-or > span { font-size: .82rem; color: var(--bi-grey); }
+    .slot-example-btn {
+      white-space: nowrap;
+      border-style: dashed !important; border-width: 2px !important;
+      border-color: var(--bi-pass-border) !important;
+      background: #fff !important; color: var(--bi-green-dark) !important;
+      border-radius: 6px; padding: 8px 16px; font-weight: 500;
+    }
+    .slot-example-btn:hover {
+      background: var(--bi-green-light) !important;
+      border-color: var(--bi-pass) !important;
+    }
+
+    /* Floating, foldable validation-messages dock pinned to the viewport bottom.
+       Collapsed shows only the bar; expanded reveals the messages table. */
+    .msgs-dock {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030;
+      background: #fff; border-top: 2px solid var(--bi-green);
+      box-shadow: 0 -6px 20px rgba(0,0,0,.14);
+      display: flex; flex-direction: column; max-height: 62vh;
+    }
+    .msgs-dock-bar {
+      display: flex; align-items: center; gap: 12px; cursor: pointer;
+      padding: 8px 18px; background: var(--bi-green-light);
+      border-bottom: 1px solid var(--bi-pending-border); user-select: none;
+    }
+    .msgs-dock-title { font-weight: 700; color: var(--bi-green-dark); white-space: nowrap; }
+    .msgs-dock-count {
+      background: var(--bi-green); color: #fff; border-radius: 999px;
+      padding: 1px 9px; font-size: .74rem; font-weight: 700;
+    }
+    .msgs-dock-count.zero { background: var(--bi-pending-border); color: var(--bi-grey); }
+    .msgs-dock-ds {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .78rem; color: var(--bi-green-dark);
+      background: var(--bi-grey-light); border: 1px solid var(--bi-pending-border);
+      border-radius: 999px; padding: 1px 9px;
+    }
+    .msgs-dock-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .msgs-dock-dl { display: flex; gap: 6px; }
+    .msgs-dock-chevron { color: var(--bi-green-dark); font-size: .8rem; transition: transform .18s ease; }
+    .msgs-dock-body { overflow: auto; padding: 12px 18px 16px; }
+    .msgs-dock.collapsed .msgs-dock-body { display: none; }
+    .msgs-dock.collapsed .msgs-dock-chevron { transform: rotate(180deg); }
+    /* Keep the static footer / page content clear of the collapsed dock bar. */
+    body { padding-bottom: 56px; }
+
+    /* Rule editor: the type is locked (read-only) when editing an existing
+       rule -- it is only chosen when the rule is first created. */
+    .rule-type-fixed {
+      display: block; padding: 6px 10px; border: 1px solid var(--bi-pending-border);
+      border-radius: 6px; background: var(--bi-grey-light); color: var(--bi-grey);
+      font-weight: 500;
+    }
+
+    /* Inspect popup: a summary card that names the failing rule/constraint,
+       plus a highlighted 'should be' (green) vs 'actual' (red) comparison. */
+    .inspect-modal-body { max-height: 72vh; overflow-y: auto; }
+    .inspect-summary {
+      border: 1px solid var(--bi-pending-border); border-radius: 8px;
+      padding: 12px 14px; margin-bottom: 12px; background: #fafafa;
+    }
+    .inspect-summary-head { margin-bottom: 6px; }
+    .inspect-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-size: .72rem; font-weight: 600; color: #fff; letter-spacing: .02em;
+    }
+    .inspect-badge.rule { background: var(--bi-fail); }
+    .inspect-badge.schema { background: #b8860b; }
+    .inspect-msg { font-size: 1.02rem; font-weight: 600; margin: 6px 0; }
+    .inspect-desc-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .inspect-desc-type {
+      font-size: .72rem; background: var(--bi-grey-light); color: var(--bi-grey);
+      border-radius: 999px; padding: 1px 8px;
+    }
+    .inspect-desc-detail {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .82rem; color: #333; margin-top: 4px; word-break: break-word;
+    }
+    .inspect-desc-note { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }
+    .inspect-cmp { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .inspect-box { flex: 1 1 240px; border-radius: 8px; padding: 10px 12px; border: 1px solid; }
+    .inspect-expected { background: var(--bi-pass-bg); border-color: var(--bi-pass-border); }
+    .inspect-actual { background: var(--bi-fail-bg); border-color: var(--bi-fail); }
+    .inspect-box-title { font-weight: 600; margin-bottom: 6px; font-size: .86rem; }
+    .inspect-expected .inspect-box-title { color: var(--bi-green-dark); }
+    .inspect-actual .inspect-box-title { color: var(--bi-fail); }
+    .inspect-should { font-weight: 600; color: var(--bi-green-dark); word-break: break-word; }
+    .inspect-actual-val { font-weight: 700; font-size: 1.04rem; color: var(--bi-fail); word-break: break-word; }
+    .inspect-actual-loc { font-size: .78rem; color: var(--bi-grey); margin-top: 3px; }
+    .inspect-none { color: var(--bi-grey); }
+    .inspect-hl-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    .inspect-hl-table th, .inspect-hl-table td { border: 1px solid var(--bi-pending-border); padding: 3px 7px; text-align: left; }
+    .inspect-hl-table th { background: #fff; color: var(--bi-grey); font-weight: 600; }
+    .inspect-hl-table td.inspect-hl-val { background: #fff; font-weight: 600; color: var(--bi-fail); }
+    .inspect-hl-table td.inspect-hl-row { background: #fff; color: var(--bi-grey); white-space: nowrap; }
+    .inspect-details { margin-top: 4px; }
+    .inspect-details > summary { cursor: pointer; color: var(--bi-grey); font-size: .82rem; margin-bottom: 6px; }
     "))
 }
 
