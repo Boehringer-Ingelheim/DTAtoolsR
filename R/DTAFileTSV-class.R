@@ -40,7 +40,7 @@ DTAFileTSV <- S7::new_class(
     quote = '"'
   ) {
     new_object(
-      .parent = DTAFileTabular(
+      DTAFileTabular(
         filename = filename,
         number_of_files = number_of_files,
         min_number_of_files = min_number_of_files,
