@@ -49,7 +49,6 @@ jobs:
 
       - name: Install S7 from GitHub
         run: |
-          install.packages("remotes")
           remotes::install_github("RConsortium/S7")
         shell: Rscript {0}
 
