@@ -92,3 +92,60 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   write_file_specification(ds, file = alias_out, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(alias_out))
 })
+
+# Read a .docx file's word/document.xml as a single string (test helper).
+.read_docx_body_xml <- function(path) {
+  ex <- file.path(tempdir(), paste0("docxbody_", as.integer(Sys.time()), "_", sample.int(1e6, 1)))
+  dir.create(ex, showWarnings = FALSE)
+  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(path, files = "word/document.xml", exdir = ex)
+  paste(readLines(file.path(ex, "word", "document.xml"), warn = FALSE), collapse = "")
+}
+
+test_that("bundled numbered template ships a 'heading 4' style", {
+  tp <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  expect_true(nzchar(tp) && file.exists(tp))
+
+  si <- officer::styles_info(officer::read_docx(path = tp))
+  expect_true("heading 4" %in% si$style_name)
+})
+
+test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
+  dta <- create_example_DTA()
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  body <- .read_docx_body_xml(out_docx)
+  # Titre1..Titre4 are the styleIds for "heading 1".."heading 4"; their presence
+  # proves the Datasets -> dataset -> Files / Dataset Specifications hierarchy is
+  # rendered with the multilevel-numbered heading styles (not bold subheadings).
+  for (sid in c("Titre1", "Titre2", "Titre3", "Titre4")) {
+    expect_true(grepl(paste0('w:pStyle w:val="', sid, '"'), body, fixed = TRUE))
+  }
+  expect_true(grepl("Data Transfer Agreement", body, fixed = TRUE))
+  expect_true(grepl("Dataset Specifications", body, fixed = TRUE))
+})
+
+test_that("write_dta docx embeds a small-font YAML section only when requested", {
+  dta <- create_example_DTA()
+  yaml_text <- "datasets:\n  clinical_data:\n    columns:\n      SUBJID:\n        type: string"
+
+  with_yaml <- tempfile(fileext = ".docx")
+  on.exit(unlink(with_yaml, force = TRUE), add = TRUE)
+  write_dta(dta,
+    file = with_yaml, format = "docx", overwrite = TRUE, quiet = TRUE,
+    include_yaml = TRUE, yaml_text = yaml_text
+  )
+  body_yes <- .read_docx_body_xml(with_yaml)
+  expect_true(grepl("Embedded Specification (YAML)", body_yes, fixed = TRUE))
+  expect_true(grepl("SUBJID", body_yes, fixed = TRUE))
+  # 6pt font is stored as half-points (w:sz w:val="12").
+  expect_true(grepl('w:sz w:val="12"', body_yes, fixed = TRUE))
+
+  without_yaml <- tempfile(fileext = ".docx")
+  on.exit(unlink(without_yaml, force = TRUE), add = TRUE)
+  write_dta(dta, file = without_yaml, format = "docx", overwrite = TRUE, quiet = TRUE)
+  body_no <- .read_docx_body_xml(without_yaml)
+  expect_false(grepl("Embedded Specification (YAML)", body_no, fixed = TRUE))
+})

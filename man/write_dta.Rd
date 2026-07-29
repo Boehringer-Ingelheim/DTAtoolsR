@@ -12,6 +12,8 @@ write_dta(
   include_signatures = TRUE,
   signature_list = NULL,
   quiet = FALSE,
+  include_yaml = FALSE,
+  yaml_text = NULL,
   template = NULL,
   template_variables = NULL
 )
@@ -31,6 +33,14 @@ If NULL, inferred from file extension.}
 \item{signature_list}{List of signatories with name and role fields.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+
+\item{include_yaml}{Logical. If \code{TRUE}, append the machine-readable YAML
+specification as a final, small-font section of the built-in DOCX/PDF
+layout. Requires \code{yaml_text}. Ignored for \code{format = "md"} and when a
+\code{template} is supplied. Default: \code{FALSE}.}
+
+\item{yaml_text}{Optional character scalar holding the YAML specification to
+embed when \code{include_yaml = TRUE}. Default: \code{NULL}.}
 
 \item{template}{Optional character path to a Word (\code{.docx}) template
 containing placeholder markers such as \code{{DTA_TITLE}}. When supplied, the

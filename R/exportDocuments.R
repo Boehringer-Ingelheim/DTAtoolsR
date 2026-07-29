@@ -17,6 +17,12 @@
 #' @param include_signatures Logical. Whether to include signature approval section. Default: TRUE.
 #' @param signature_list List of signatories with name and role fields.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param include_yaml Logical. If `TRUE`, append the machine-readable YAML
+#'   specification as a final, small-font section of the built-in DOCX/PDF
+#'   layout. Requires `yaml_text`. Ignored for `format = "md"` and when a
+#'   `template` is supplied. Default: `FALSE`.
+#' @param yaml_text Optional character scalar holding the YAML specification to
+#'   embed when `include_yaml = TRUE`. Default: `NULL`.
 #' @param template Optional character path to a Word (`.docx`) template
 #'   containing placeholder markers such as `{DTA_TITLE}`. When supplied, the
 #'   document is produced by filling the template via [export_with_template()]
@@ -52,6 +58,8 @@ write_dta <- function(
   include_signatures = TRUE,
   signature_list = NULL,
   quiet = FALSE,
+  include_yaml = FALSE,
+  yaml_text = NULL,
   template = NULL,
   template_variables = NULL
 ) {
@@ -104,12 +112,12 @@ write_dta <- function(
   # Create document
   doc <- NULL
   if (format == "docx") {
-    doc <- .write_dta_docx(x, include_signatures, signature_list)
+    doc <- .write_dta_docx(x, include_signatures, signature_list, include_yaml, yaml_text)
     print(doc, target = file)
   } else if (format == "pdf") {
     # First create DOCX, then convert to PDF
     temp_docx <- tempfile(fileext = ".docx")
-    doc <- .write_dta_docx(x, include_signatures, signature_list)
+    doc <- .write_dta_docx(x, include_signatures, signature_list, include_yaml, yaml_text)
     print(doc, target = temp_docx)
     .convert_docx_to_pdf(temp_docx, file)
     unlink(temp_docx)
@@ -124,8 +132,11 @@ write_dta <- function(
 }
 
 #' @keywords internal
-.write_dta_docx <- function(dta, include_signatures, signature_list) {
-  doc <- officer::read_docx()
+.write_dta_docx <- function(dta, include_signatures, signature_list,
+                            include_yaml = FALSE, yaml_text = NULL) {
+  # Open the bundled reference template so headings 1-4 auto-number as
+  # 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word fields that renumber if edited).
+  doc <- .new_numbered_docx()
 
   # Extract metadata - note that DTA object stores metadata, not direct properties
   meta <- dta@metadata
@@ -138,6 +149,10 @@ write_dta <- function(
     date = if (!is.null(meta@date)) meta@date else Sys.Date(),
     version = meta@version
   )
+
+  # Single top-level chapter that anchors the multilevel heading numbering, so
+  # every section below renders as 1.x (and datasets as 1.x.y.z).
+  doc <- .add_heading(doc, "Data Transfer Agreement", level = 1)
 
   # Metadata overview
   metadata <- list()
@@ -217,12 +232,19 @@ write_dta <- function(
         doc <- officer::body_add_par(doc, "", style = "Normal")
       }
 
-      if (length(dataset@files) > 0) {
-        doc <- .add_file_specifications(doc, dataset@files, heading_level = NULL)
-      }
+      # <chapter>.<section>.<dataset>.1 Files
+      doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 4)
 
+      # <chapter>.<section>.<dataset>.2 Dataset Specifications
+      # (Column Specifications + Validation Rules nested as bold subheadings).
+      doc <- .add_heading(doc, "Dataset Specifications", level = 4)
       doc <- .add_dataset_specs_section(doc, dataset, include_rules = TRUE, heading_level = NULL)
     }
+  }
+
+  # Embedded machine-readable YAML, appended as a final small-font section.
+  if (isTRUE(include_yaml) && !is.null(yaml_text) && nzchar(yaml_text)) {
+    doc <- .add_embedded_yaml_section(doc, yaml_text)
   }
 
   # Footer

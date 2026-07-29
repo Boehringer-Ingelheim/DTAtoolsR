@@ -3033,7 +3033,7 @@ server <- function(input, output, session) {
             p("No custom templates available.", class = "text-muted")
           }
         ),
-        checkboxInput("export_include_yaml_word", "Include YAML in template (if template supports it)", value = FALSE)
+        checkboxInput("export_include_yaml_word", "Embed YAML specification at end of document", value = FALSE)
       ),
       hr(),
       h5("Output filename", class = "text-muted"),
@@ -3203,7 +3203,18 @@ server <- function(input, output, session) {
             )
           } else {
             # Built-in template. write_dta() throws on error; no $ok returned.
-            DTAtools::write_dta(rv$dta, output_file, format = "docx", overwrite = TRUE, quiet = TRUE)
+            # Optionally append the machine-readable YAML as a small-font
+            # section at the end of the document.
+            yaml_text <- NULL
+            if (isTRUE(input$export_include_yaml_word)) {
+              res_yaml <- dta_to_yaml_text(rv$dta)
+              if (isTRUE(res_yaml$ok)) yaml_text <- res_yaml$value
+            }
+            DTAtools::write_dta(
+              rv$dta, output_file,
+              format = "docx", overwrite = TRUE, quiet = TRUE,
+              include_yaml = !is.null(yaml_text), yaml_text = yaml_text
+            )
           }
 
           export_state$file_path <- output_file

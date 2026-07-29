@@ -63,6 +63,51 @@ NULL
   officer::body_add_par(doc, text, style = style)
 }
 
+#' Open the bundled numbered reference template so document headings 1-4
+#' auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
+#' when the document is edited). Falls back to officer's default template if the
+#' bundled asset cannot be located, in which case level-4 headings render without
+#' a computed number.
+#' @keywords internal
+.new_numbered_docx <- function() {
+  path <- system.file(
+    "extdata", "templates", "dta_numbered_template.docx",
+    package = "DTAtools"
+  )
+  if (nzchar(path) && file.exists(path)) {
+    return(officer::read_docx(path = path))
+  }
+  officer::read_docx()
+}
+
+#' Append the machine-readable YAML specification as a final, very small-font
+#' monospace section. Leading spaces are converted to non-breaking spaces so the
+#' YAML indentation survives Word's whitespace collapsing.
+#' @keywords internal
+.add_embedded_yaml_section <- function(doc, yaml_text) {
+  doc <- .add_heading(doc, "Embedded Specification (YAML)", level = 2)
+  doc <- officer::body_add_par(
+    doc,
+    "The machine-readable YAML specification is embedded below for reference.",
+    style = "Normal"
+  )
+  doc <- officer::body_add_par(doc, "", style = "Normal")
+
+  fp <- officer::fp_text(font.size = 6, font.family = "Consolas")
+  lines <- strsplit(gsub("\r\n", "\n", yaml_text, fixed = TRUE), "\n", fixed = TRUE)[[1]]
+  if (length(lines) == 0) lines <- ""
+  for (ln in lines) {
+    # Preserve indentation: replace each leading space with a non-breaking space.
+    lead <- attr(regexpr("^ *", ln), "match.length")
+    if (is.null(lead) || is.na(lead)) lead <- 0L
+    disp <- paste0(strrep("\u00a0", lead), substring(ln, lead + 1))
+    if (!nzchar(disp)) disp <- "\u00a0"
+    doc <- officer::body_add_fpar(doc, officer::fpar(officer::ftext(disp, fp)))
+  }
+  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc
+}
+
 #' Add metadata section with key-value pairs
 #' @keywords internal
 .add_metadata_section <- function(doc, title, metadata_list) {
@@ -289,7 +334,6 @@ NULL
     doc <- officer::body_add_par(doc, "No files specified.", style = "Normal")
     return(doc)
   }
-
   total_min <- sum(sapply(files, function(f) {
     tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
   }))
@@ -298,15 +342,28 @@ NULL
     tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
   }))
 
+  file_word <- if (total_min == 1 && total_max == 1) "file" else "files"
+  count_txt <- if (total_min != total_max) {
+    paste0(total_min, " to ", total_max)
+  } else {
+    as.character(total_min)
+  }
   doc <- officer::body_add_par(
     doc,
-    paste0("Expected number of files: ", total_min, " to ", total_max),
+    paste0(
+      "The following ", file_word, " are expected for this dataset (",
+      count_txt, " in total). Each file name is given either as an exact ",
+      "name or as a regular-expression pattern that a delivered file must ",
+      "match; the expected count states how many files may match it."
+    ),
     style = "Normal"
   )
 
   # Create file listing table
   file_data <- data.frame(
-    `File Name Pattern` = character(),
+    `File Name / Pattern` = character(),
+    `Match Type` = character(),
+    `Format` = character(),
     `Expected Count` = character(),
     `Description` = character(),
     stringsAsFactors = FALSE,
@@ -317,24 +374,40 @@ NULL
     f <- files[[i]]
     min_n <- f@min_number_of_files %||% 0
     max_n <- f@max_number_of_files %||% 0
+    match_type <- if (isTRUE(f@pattern)) "Regex pattern" else "Exact name"
+
+    desc <- if (!is.null(f@pattern_description)) f@pattern_description else ""
+    info_txt <- tryCatch(f@info, error = function(e) NULL)
+    if (!is.null(info_txt) && length(info_txt) > 0) {
+      info_flat <- paste(unlist(info_txt), collapse = "; ")
+      if (nzchar(info_flat)) {
+        desc <- if (nzchar(desc)) paste0(desc, " (", info_flat, ")") else info_flat
+      }
+    }
+
     file_data <- rbind(file_data, data.frame(
-      `File Name Pattern` = if (!is.null(f@filename)) f@filename else "pattern_not_specified",
+      `File Name / Pattern` = if (!is.null(f@filename)) paste(f@filename, collapse = ", ") else "pattern_not_specified",
+      `Match Type` = match_type,
+      `Format` = .file_format_label(f),
       `Expected Count` = paste0(
         min_n,
         if (min_n != max_n) paste0(" to ", max_n) else ""
       ),
-      `Description` = if (!is.null(f@pattern_description)) f@pattern_description else "",
+      `Description` = desc,
       stringsAsFactors = FALSE,
       check.names = FALSE
     ))
   }
 
   ft <- flextable::flextable(file_data)
-  ft <- flextable::width(ft, j = 1, width = 2.0)
-  ft <- flextable::width(ft, j = 2, width = 1.2)
-  ft <- flextable::width(ft, j = 3, width = 3.0)
-  ft <- flextable::align(ft, j = 2, align = "center", part = "all")
-  ft <- flextable::align(ft, j = c(1, 3), align = "left", part = "all")
+  ft <- flextable::width(ft, j = 1, width = 1.8)
+  ft <- flextable::width(ft, j = 2, width = 1.0)
+  ft <- flextable::width(ft, j = 3, width = 0.9)
+  ft <- flextable::width(ft, j = 4, width = 1.0)
+  ft <- flextable::width(ft, j = 5, width = 2.5)
+  ft <- flextable::align(ft, j = c(2, 3, 4), align = "center", part = "all")
+  ft <- flextable::align(ft, j = c(1, 5), align = "left", part = "all")
+  ft <- flextable::valign(ft, valign = "top", part = "all")
   ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
   ft <- flextable::bold(ft, part = "header")
 
@@ -342,6 +415,23 @@ NULL
   doc <- officer::body_add_par(doc, "", style = "Normal")
 
   doc
+}
+
+#' Friendly, human-readable format label for a DTAFile object, used in the
+#' "Files" section table (e.g. CSV / TSV / Delimited).
+#' @keywords internal
+.file_format_label <- function(f) {
+  if (inherits(f, "DTAtools::DTAFileCSV")) {
+    "CSV"
+  } else if (inherits(f, "DTAtools::DTAFileTSV")) {
+    "TSV"
+  } else if (inherits(f, "DTAtools::DTAFileDelim")) {
+    "Delimited"
+  } else if (inherits(f, "DTAtools::DTAFileTabular")) {
+    "Tabular"
+  } else {
+    "File"
+  }
 }
 
 #' Add a bold subheading paragraph — used for nesting deeper than officer's default

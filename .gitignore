@@ -15,6 +15,9 @@ renv/staging
 renv/settings.json
 .Renviron
 *docx
+# Keep the bundled numbered Word reference template used by the built-in
+# write_dta() DOCX/PDF writer (a required package asset, not a scratch export).
+!inst/extdata/templates/dta_numbered_template.docx
 .tmp*
 ..Rcheck/00check.log
 instructions_shiny.txt
