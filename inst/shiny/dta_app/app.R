@@ -150,7 +150,9 @@ server <- function(input, output, session) {
     col_msg = NULL, # inline column-editor result: NULL | list(ok, error)
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
-    then_n = 1L # condition-builder row count (THEN ...)
+    then_n = 1L, # condition-builder row count (THEN ...)
+    template_def = NULL, # active creation-template definition (modal flow)
+    template_path = NULL # source path of active creation-template
   )
 
   upload_registry <- new.env(parent = emptyenv())
@@ -238,6 +240,144 @@ server <- function(input, output, session) {
     autosave()
   }
 
+  # Build one input control for a creation-template option.
+  #
+  # Every non-boolean dropdown offers its suggested `choices` plus a
+  # "(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals
+  # a companion text field next to the dropdown for a free-typed value, so any
+  # option can be a suggestion, blank, or custom text.
+  render_template_option_input <- function(opt) {
+    oid <- as.character(opt$id %||% "")
+    if (!nzchar(oid)) return(NULL)
+    iid <- paste0("tmpl_opt_", oid)
+    label <- as.character(opt$label %||% oid)
+    typ <- tolower(as.character(opt$type %||% "text"))
+    def <- dta_template_default(opt)
+    help <- as.character(opt$help %||% "")
+
+    # Sentinel values for the extra dropdown entries.
+    blank_val <- "__blank__"
+    custom_val <- "__custom__"
+
+    # Dropdown with suggestions + "(leave blank)" + "Custom..." and a companion
+    # text field revealed only when "Custom..." is selected.
+    dropdown_with_custom <- function(ch) {
+      def_chr <- if (is.null(def)) "" else as.character(def)[[1]]
+      choices <- c(
+        ch,
+        stats::setNames(blank_val, "(leave blank)"),
+        stats::setNames(custom_val, "Custom...")
+      )
+      in_choices <- nzchar(def_chr) && def_chr %in% unname(ch)
+      selected <- if (in_choices) {
+        def_chr
+      } else if (nzchar(def_chr)) {
+        custom_val
+      } else {
+        blank_val
+      }
+      prefill <- if (!in_choices && nzchar(def_chr)) def_chr else ""
+      cid <- paste0(iid, "_custom")
+      div(
+        class = "tmpl-opt-row",
+        style = "display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;",
+        div(
+          style = "flex:1 1 240px; min-width:200px;",
+          selectInput(iid, label, choices = choices, selected = selected)
+        ),
+        conditionalPanel(
+          condition = sprintf("input['%s'] == '%s'", iid, custom_val),
+          style = "flex:1 1 240px; min-width:200px;",
+          textInput(cid, "Custom value",
+            value = prefill, placeholder = "Type a custom value"
+          )
+        )
+      )
+    }
+
+    ctl <- switch(typ,
+      select = dropdown_with_custom(dta_template_choices(opt)),
+      boolean = {
+        ch <- c("Yes" = "yes", "No" = "no")
+        selectInput(iid, label, choices = ch,
+          selected = if (identical(def, TRUE) || identical(def, "yes")) "yes" else "no"
+        )
+      },
+      textarea = {
+        textAreaInput(iid, label, value = as.character(def %||% ""), rows = 3)
+      },
+      number = {
+        numericInput(iid, label, value = suppressWarnings(as.numeric(def %||% 0)))
+      },
+      # Default: free text. With suggested `choices` it becomes a dropdown with
+      # blank + Custom...; otherwise a plain (already fully custom) text field.
+      {
+        ch <- dta_template_choices(opt)
+        if (length(ch) > 0) {
+          dropdown_with_custom(ch)
+        } else {
+          textInput(iid, label,
+            value = as.character(def %||% ""),
+            placeholder = "Type a value"
+          )
+        }
+      }
+    )
+
+    if (nzchar(help)) {
+      tagList(ctl, div(class = "msg-hint", style = "margin:-8px 0 8px;", help))
+    } else {
+      ctl
+    }
+  }
+
+  # Collect option values from the currently-open template modal.
+  collect_template_selections <- function(def) {
+    out <- list()
+    opts <- def$options %||% list()
+    for (opt in opts) {
+      oid <- as.character(opt$id %||% "")
+      if (!nzchar(oid)) next
+      iid <- paste0("tmpl_opt_", oid)
+      val <- input[[iid]]
+      typ <- tolower(as.character(opt$type %||% "text"))
+      if (identical(typ, "boolean")) {
+        val <- identical(as.character(val %||% ""), "yes")
+      } else {
+        vchr <- as.character(val %||% "")
+        if (identical(vchr, "__custom__")) {
+          # Read the free-typed value from the companion field next to the dropdown.
+          val <- as.character(input[[paste0(iid, "_custom")]] %||% "")
+        } else if (identical(vchr, "__blank__")) {
+          val <- ""
+        }
+      }
+      out[[oid]] <- val
+    }
+    out
+  }
+
+  show_template_options_modal <- function(def) {
+    opts <- def$options %||% list()
+    showModal(modalDialog(
+      title = paste0("Create from template: ", as.character(def$label %||% def$id %||% "template")),
+      if (nzchar(as.character(def$description %||% ""))) {
+        p(as.character(def$description), class = "msg-hint")
+      },
+      if (length(opts) == 0) {
+        p("This template has no configurable options. Click 'Create DTA' to continue.")
+      } else {
+        tagList(lapply(opts, render_template_option_input))
+      },
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
+      ),
+      size = "l",
+      easyClose = FALSE
+    ))
+  }
+
   # --- landing: load a DTA YAML ------------------------------------------
   observeEvent(input$dta_file, {
     f <- input$dta_file
@@ -312,6 +452,74 @@ server <- function(input, output, session) {
       wrapped_dataset = isTRUE(res$wrapped_dataset)
     )
     showNotification(sprintf("Example \u201c%s\u201d loaded.", sel), type = "message")
+  })
+
+  # --- landing: create new DTA from a template ----------------------------
+  observeEvent(input$create_from_template, {
+    files <- list_dta_creation_templates()
+    if (length(files) == 0) {
+      showNotification(
+        "No creation templates found. Add *.dta-template.yaml files to inst/extdata/templates.",
+        type = "warning", duration = 8
+      )
+      return()
+    }
+
+    showModal(modalDialog(
+      title = "Create new from template",
+      p("Select a template, then configure options in the next step."),
+      selectInput(
+        "template_select_name",
+        "Available templates:",
+        choices = stats::setNames(files, files),
+        selected = files[[1]]
+      ),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("template_select_next", "Next", class = "btn btn-primary")
+      ),
+      easyClose = TRUE
+    ))
+  })
+
+  observeEvent(input$template_select_next, {
+    nm <- input$template_select_name
+    path <- get_dta_creation_template_path(nm)
+    if (is.null(path)) {
+      showNotification("Selected template file was not found.", type = "error")
+      return()
+    }
+    res <- read_dta_creation_template(path)
+    if (!res$ok) {
+      showNotification(paste("Template is invalid:", res$error), type = "error", duration = 10)
+      return()
+    }
+    rv$template_def <- res$value
+    rv$template_path <- path
+    removeModal()
+    show_template_options_modal(rv$template_def)
+  })
+
+  observeEvent(input$template_create_confirm, {
+    req(rv$template_def)
+    sels <- collect_template_selections(rv$template_def)
+    created <- create_dta_from_template(rv$template_def, rv$template_path, sels)
+    if (!created$ok) {
+      showNotification(paste("Could not create DTA from template:", created$error),
+                       type = "error", duration = 10)
+      return()
+    }
+
+    yres <- dta_to_yaml_text(created$value)
+    yaml_text <- if (isTRUE(yres$ok)) yres$value else ""
+    removeModal()
+    apply_loaded(created$value, yaml_text,
+      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE
+    )
+    showNotification(
+      paste0("New DTA created from template \"", as.character(rv$template_def$label %||% rv$template_def$id %||% ""), "\"."),
+      type = "message"
+    )
   })
 
   # --- dataset navigation (custom list: select + per-dataset check icon) --
@@ -3357,6 +3565,7 @@ server <- function(input, output, session) {
           ),
           div(
             style = "display:flex; gap:10px; margin-top:8px;",
+            actionButton("create_from_template", "Create new from template", class = "btn btn-primary"),
             actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
             if (restore_available) {
               actionButton("restore_session", "Restore previous session",

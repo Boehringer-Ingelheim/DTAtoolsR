@@ -3306,7 +3306,7 @@ server <- function(input, output, session) {
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export PDF", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
+          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
