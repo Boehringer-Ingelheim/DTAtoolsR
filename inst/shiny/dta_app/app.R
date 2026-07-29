@@ -6,6 +6,7 @@
 
 library(shiny)
 library(bslib)
+library(shinyjs)
 
 # Allow large uploads (clinical data files can be big).
 options(shiny.maxRequestSize = 1024 * 1024^2) # 1 GB
@@ -24,7 +25,8 @@ brandbar <- div(
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
 dta_pkg_version <- tryCatch(as.character(utils::packageVersion("DTAtools")),
-                            error = function(e) "")
+  error = function(e) ""
+)
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
@@ -32,8 +34,10 @@ app_footer <- tags$footer(
   tags$span(class = "foot-sep", "\u2022"),
   tags$span("Boehringer Ingelheim"),
   tags$span(class = "foot-sep", "\u2022"),
-  tags$a(href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-         target = "_blank", rel = "noopener noreferrer", "GitHub repository")
+  tags$a(
+    href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
+    target = "_blank", rel = "noopener noreferrer", "GitHub repository"
+  )
 )
 
 # Clear a fileInput's text field after an upload is processed (so the control
@@ -74,61 +78,89 @@ Shiny.addCustomMessageHandler('dta_msgs_dock', function(action){
 });
 "
 
+# Programmatic trigger for the hidden export download button. shinyjs::click()
+# dispatches a jQuery-style event that does NOT invoke an anchor's native
+# download navigation, so a Shiny downloadButton never actually downloads from
+# it. Calling the element's NATIVE .click() (which works even on a display:none
+# link) does start the browser download. The server fires this via
+# session$sendCustomMessage("dta_trigger_download", <download output id>).
+download_trigger_js <- "
+Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  setTimeout(function(){ el.click(); }, 50);
+});
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
-  tags$head(tags$style(bi_css()),
-            tags$script(shiny::HTML(reset_fileinput_js)),
-            tags$script(shiny::HTML(msgs_dock_js))),
+  shinyjs::useShinyjs(),
+  tags$head(
+    tags$style(bi_css()),
+    tags$script(shiny::HTML(reset_fileinput_js)),
+    tags$script(shiny::HTML(msgs_dock_js)),
+    tags$script(shiny::HTML(download_trigger_js))
+  ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),
   app_footer,
-  uiOutput("floating_msgs")
+  uiOutput("floating_msgs"),
+  # Off-screen (but still RENDERED) download button for the export modal. It is
+  # triggered programmatically via download_trigger_js. A display:none element
+  # cannot be reliably .click()ed to start a browser download in every browser,
+  # so it is moved off-screen instead of being hidden with display:none.
+  div(
+    style = paste(
+      "position: absolute; left: -9999px; top: -9999px;",
+      "width: 1px; height: 1px; overflow: hidden;"
+    ),
+    downloadButton("export_trigger_download", "")
+  )
 )
 
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 server <- function(input, output, session) {
-
   # --- reactive state (single source of truth) ---------------------------
   rv <- reactiveValues(
-    dta = NULL,          # the DTA S7 object
-    yaml_text = NULL,    # original uploaded YAML text (for raw view)
-    structure = NULL,    # stable per-dataset handler metadata (for slots)
-    active = NULL,       # currently selected dataset name
-    uploads = list(),    # key "dataset||handlerIdx" -> list of {file, table} records
-    status = list(),     # dataset name -> "pass" | "fail" | "pending" | "nodata"
+    dta = NULL, # the DTA S7 object
+    yaml_text = NULL, # original uploaded YAML text (for raw view)
+    structure = NULL, # stable per-dataset handler metadata (for slots)
+    active = NULL, # currently selected dataset name
+    uploads = list(), # key "dataset||handlerIdx" -> list of {file, table} records
+    status = list(), # dataset name -> "pass" | "fail" | "pending" | "nodata"
     pending_upload = NULL, # deferred upload awaiting an overwrite confirmation
     example_target = NULL, # list(ds_idx, hi) the example-file modal loads into
     dataset_only = FALSE, # legacy flag; a loaded dataset YAML is now wrapped into a full DTA (never set TRUE)
-    is_example = FALSE,  # TRUE when the bundled example DTA is loaded (enables example-file pickers)
-    md_token = 0,        # bump to re-render metadata editor
-    contacts_token = 0,  # bump to re-render contacts list
-    yaml_msg = NULL,     # raw-YAML apply result: NULL | list(ok, error)
+    is_example = FALSE, # TRUE when the bundled example DTA is loaded (enables example-file pickers)
+    md_token = 0, # bump to re-render metadata editor
+    contacts_token = 0, # bump to re-render contacts list
+    yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
-    editor_dataset = NULL,  # dataset name the column/rule editor modal targets
-    col_view = "list",   # column editor view: "list" | "form"
-    col_token = 0,       # bump to re-render the column editor body
-    col_edit_id = NULL,  # id of the column being edited (NULL = adding new)
-    col_prefill = NULL,  # list() of the column fields loaded in the form
-    rule_view = "list",  # rule editor view: "list" | "form"
-    rule_token = 0,      # bump to re-render the rule editor body
+    editor_dataset = NULL, # dataset name the column/rule editor modal targets
+    col_view = "list", # column editor view: "list" | "form"
+    col_token = 0, # bump to re-render the column editor body
+    col_edit_id = NULL, # id of the column being edited (NULL = adding new)
+    col_prefill = NULL, # list() of the column fields loaded in the form
+    rule_view = "list", # rule editor view: "list" | "form"
+    rule_token = 0, # bump to re-render the rule editor body
     rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
     rule_prefill = NULL, # list() of the rule fields currently loaded in the form
-    col_msg = NULL,      # inline column-editor result: NULL | list(ok, error)
-    rule_msg = NULL,     # inline rule-editor result: NULL | list(ok, error)
-    cond_n = 1L,         # condition-builder row count (IF ...)
-    then_n = 1L          # condition-builder row count (THEN ...)
+    col_msg = NULL, # inline column-editor result: NULL | list(ok, error)
+    rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
+    cond_n = 1L, # condition-builder row count (IF ...)
+    then_n = 1L # condition-builder row count (THEN ...)
   )
 
   upload_registry <- new.env(parent = emptyenv())
   session_file <- file.path(tempdir(), "dtatools_app_session.rds")
 
   # Stable id per bound file so its trash button keeps working across renders.
-  file_id_env      <- new.env(parent = emptyenv())  # "ds\u0001hi\u0001table" -> integer id
-  file_id_meta     <- new.env(parent = emptyenv())  # id (as chr) -> list(dataset, hi, table)
-  file_rm_registry <- new.env(parent = emptyenv())  # button id -> TRUE once observed
-  file_id_counter  <- 0L
+  file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
+  file_id_meta <- new.env(parent = emptyenv()) # id (as chr) -> list(dataset, hi, table)
+  file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
+  file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
     id <- file_id_env[[key]]
@@ -144,17 +176,21 @@ server <- function(input, output, session) {
   # --- helpers ------------------------------------------------------------
   build_structure <- function(dta) {
     names_ds <- dta_dataset_names(dta)
-    if (length(names_ds) == 0) return(list())
+    if (length(names_ds) == 0) {
+      return(list())
+    }
     stats::setNames(lapply(seq_along(names_ds), function(i) {
       ds <- dta_get_dataset(dta, names_ds[i])
-      handlers <- lapply(dta_handlers(ds), function(h) list(
-        expected = handler_expected(h),
-        hint     = handler_hint(h),
-        count    = handler_count_label(h),
-        min      = handler_min(h),
-        max      = handler_max(h),
-        pattern  = handler_is_pattern(h)
-      ))
+      handlers <- lapply(dta_handlers(ds), function(h) {
+        list(
+          expected = handler_expected(h),
+          hint     = handler_hint(h),
+          count    = handler_count_label(h),
+          min      = handler_min(h),
+          max      = handler_max(h),
+          pattern  = handler_is_pattern(h)
+        )
+      })
       list(
         index = i,
         name = names_ds[i],
@@ -207,7 +243,8 @@ server <- function(input, output, session) {
     f <- input$dta_file
     req(f)
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
-                    error = function(e) NULL)
+      error = function(e) NULL
+    )
     res <- dta_read_yaml(f$datapath)
     if (!res$ok) {
       showNotification(
@@ -216,12 +253,16 @@ server <- function(input, output, session) {
       )
       return()
     }
-    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only),
-                 wrapped_dataset = isTRUE(res$wrapped_dataset))
+    apply_loaded(res$value, txt,
+      dataset_only = isTRUE(res$dataset_only),
+      wrapped_dataset = isTRUE(res$wrapped_dataset)
+    )
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
         "Dataset loaded into a new DTA \u2014 add metadata to complete it."
-      } else "DTA loaded.",
+      } else {
+        "DTA loaded."
+      },
       type = "message"
     )
   })
@@ -235,8 +276,9 @@ server <- function(input, output, session) {
     showModal(modalDialog(
       title = "Load example DTA",
       radioButtons("example_dta_choice",
-                   "Choose a bundled example specification:",
-                   choices = files, selected = files[[1]]),
+        "Choose a bundled example specification:",
+        choices = files, selected = files[[1]]
+      ),
       footer = tagList(
         modalButton("Cancel"),
         actionButton("example_dta_load", "Load", class = "btn btn-primary")
@@ -257,15 +299,18 @@ server <- function(input, output, session) {
       return()
     }
     txt <- tryCatch(paste(readLines(path, warn = FALSE), collapse = "\n"),
-                    error = function(e) NULL)
+      error = function(e) NULL
+    )
     res <- dta_read_yaml(path)
     if (!res$ok) {
       showNotification(paste("Could not load example:", res$error), type = "error")
       return()
     }
     removeModal()
-    apply_loaded(res$value, txt, dataset_only = isTRUE(res$dataset_only), is_example = TRUE,
-                 wrapped_dataset = isTRUE(res$wrapped_dataset))
+    apply_loaded(res$value, txt,
+      dataset_only = isTRUE(res$dataset_only), is_example = TRUE,
+      wrapped_dataset = isTRUE(res$wrapped_dataset)
+    )
     showNotification(sprintf("Example \u201c%s\u201d loaded.", sel), type = "message")
   })
 
@@ -285,28 +330,47 @@ server <- function(input, output, session) {
           st <- st_map[[nm]] %||% "pending"
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
-          st2 <- switch(st, pass = "pass", fail = "fail", nodata = "nodata", "pending")
+          st2 <- switch(st,
+            pass = "pass",
+            fail = "fail",
+            nodata = "nodata",
+            "pending"
+          )
           ic_ch <- switch(st,
-            pass = "\u2714", fail = "\u2716", nodata = "\u2716", "\u2013")
+            pass = "\u2714",
+            fail = "\u2716",
+            nodata = "\u2716",
+            "\u2013"
+          )
           ic_cls <- switch(st,
-            pass = "nav-ic-pass", fail = "nav-ic-fail",
-            nodata = "nav-ic-nodata", "nav-ic-pending")
+            pass = "nav-ic-pass",
+            fail = "nav-ic-fail",
+            nodata = "nav-ic-nodata",
+            "nav-ic-pending"
+          )
           ic_ttl <- switch(st,
-            pass = "Passed all checks", fail = "Validation failed",
-            nodata = "No data loaded (missing data)", "Not validated yet")
-          row_cls <- paste0("dataset-nav-row nav-st-", st2,
-                            if (identical(nm, active)) " active" else "")
+            pass = "Passed all checks",
+            fail = "Validation failed",
+            nodata = "No data loaded (missing data)",
+            "Not validated yet"
+          )
+          row_cls <- paste0(
+            "dataset-nav-row nav-st-", st2,
+            if (identical(nm, active)) " active" else ""
+          )
           div(
             class = row_cls,
             actionLink(
-              paste0("selds_", i), class = "nav-select",
+              paste0("selds_", i),
+              class = "nav-select",
               label = tagList(
                 span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
                 span(class = "nav-name", nm)
               )
             ),
             actionButton(
-              paste0("checkds_", i), label = HTML("&#x25B6;"),
+              paste0("checkds_", i),
+              label = HTML("&#x25B6;"),
               class = "btn btn-sm nav-check",
               title = sprintf("Check '%s'", nm)
             )
@@ -327,14 +391,20 @@ server <- function(input, output, session) {
         nav_registry[[sel_id]] <- TRUE
         local({
           IDX <- i
-          observeEvent(input[[paste0("selds_", IDX)]], {
-            nms <- names(rv$structure)
-            if (IDX <= length(nms)) rv$active <- nms[IDX]
-          }, ignoreInit = TRUE)
-          observeEvent(input[[paste0("checkds_", IDX)]], {
-            nms <- names(rv$structure)
-            if (IDX <= length(nms)) run_check(nms[IDX])
-          }, ignoreInit = TRUE)
+          observeEvent(input[[paste0("selds_", IDX)]],
+            {
+              nms <- names(rv$structure)
+              if (IDX <= length(nms)) rv$active <- nms[IDX]
+            },
+            ignoreInit = TRUE
+          )
+          observeEvent(input[[paste0("checkds_", IDX)]],
+            {
+              nms <- names(rv$structure)
+              if (IDX <= length(nms)) run_check(nms[IDX])
+            },
+            ignoreInit = TRUE
+          )
         })
       }
     }
@@ -342,20 +412,26 @@ server <- function(input, output, session) {
 
   # --- upload observers (registered once per handler) ---------------------
   handle_upload <- function(ds_idx, hi, fileinfo, overwrite = FALSE) {
-    if (is.null(fileinfo)) return()
+    if (is.null(fileinfo)) {
+      return()
+    }
     names_ds <- dta_dataset_names(rv$dta)
-    if (ds_idx < 1 || ds_idx > length(names_ds)) return()
+    if (ds_idx < 1 || ds_idx > length(names_ds)) {
+      return()
+    }
     dsname <- names_ds[ds_idx]
     ds <- dta_get_dataset(rv$dta, dsname)
     handlers <- dta_handlers(ds)
-    if (hi < 1 || hi > length(handlers)) return()
+    if (hi < 1 || hi > length(handlers)) {
+      return()
+    }
     h <- handlers[[hi]]
     key <- paste0(dsname, "||", hi)
 
     # A dropped file will occupy a table named after it (load_file uses
     # file_path_sans_ext). This mapping drives overwrite detection and binds.
     tbl_of <- function(nm) tools::file_path_sans_ext(basename(nm))
-    existing <- dta_dataset_table_names(ds)  # dataset-wide bound items
+    existing <- dta_dataset_table_names(ds) # dataset-wide bound items
 
     # Overwrite gate: if a dropped file targets an already-bound table and the
     # user has not confirmed, ask first -- never silently replace bound data.
@@ -387,8 +463,10 @@ server <- function(input, output, session) {
     kept_after <- length(setdiff(slot_tbls, dropped_tbls))
     if (!is.na(mx) && (kept_after + nrow(fileinfo)) > mx) {
       showNotification(
-        sprintf("This slot accepts at most %d file(s); remove one before adding more.",
-                as.integer(mx)),
+        sprintf(
+          "This slot accepts at most %d file(s); remove one before adding more.",
+          as.integer(mx)
+        ),
         type = "error"
       )
       return()
@@ -412,8 +490,10 @@ server <- function(input, output, session) {
       }
       # G3 -- filename must match the handler (mirrors matches_filename()).
       if (!handler_matches(h, nm)) {
-        rejected <- c(rejected,
-                      sprintf("'%s' (name does not match %s)", nm, handler_expected(h)))
+        rejected <- c(
+          rejected,
+          sprintf("'%s' (name does not match %s)", nm, handler_expected(h))
+        )
         next
       }
       # G4 -- bind via load_file(). Shiny stores the upload under a temp name
@@ -423,7 +503,8 @@ server <- function(input, output, session) {
       staged <- dta_stage_upload(dp, nm)
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
-        rv$dta, dataset = dsname, file = staged, handler_index = hi, name = tbl
+        rv$dta,
+        dataset = dsname, file = staged, handler_index = hi, name = tbl
       )
       if (!res$ok) {
         rejected <- c(rejected, sprintf("'%s' (%s)", nm, res$error))
@@ -464,25 +545,34 @@ server <- function(input, output, session) {
 
     # ONE reconciled outcome (Contract C1) with honest counts (C8): never a
     # success message when nothing was actually bound.
-    ow <- if (length(overwritten) > 0)
-      sprintf(" (%d overwritten)", length(overwritten)) else ""
+    ow <- if (length(overwritten) > 0) {
+      sprintf(" (%d overwritten)", length(overwritten))
+    } else {
+      ""
+    }
     if (length(loaded) > 0 && length(rejected) == 0) {
       showNotification(
-        sprintf("Loaded %d file(s) into '%s'%s. Run Check to validate.",
-                length(loaded), dsname, ow),
+        sprintf(
+          "Loaded %d file(s) into '%s'%s. Run Check to validate.",
+          length(loaded), dsname, ow
+        ),
         type = "message"
       )
     } else if (length(loaded) > 0) {
       showNotification(
-        sprintf("Loaded %d file(s) into '%s'%s; rejected %d: %s",
-                length(loaded), dsname, ow, length(rejected),
-                paste(rejected, collapse = "; ")),
+        sprintf(
+          "Loaded %d file(s) into '%s'%s; rejected %d: %s",
+          length(loaded), dsname, ow, length(rejected),
+          paste(rejected, collapse = "; ")
+        ),
         type = "warning", duration = 10
       )
     } else {
       showNotification(
-        sprintf("No files added to '%s'. Rejected %d: %s",
-                dsname, length(rejected), paste(rejected, collapse = "; ")),
+        sprintf(
+          "No files added to '%s'. Rejected %d: %s",
+          dsname, length(rejected), paste(rejected, collapse = "; ")
+        ),
         type = "warning", duration = 10
       )
     }
@@ -503,11 +593,15 @@ server <- function(input, output, session) {
     }
     showModal(modalDialog(
       title = "Load a bundled example file",
-      div(class = "msg-hint", style = "margin-bottom:10px;",
-          "Pick one of the bundled example files. It is validated against the ",
-          "expected file name exactly as if you had uploaded it yourself."),
-      radioButtons("example_pick_choice", label = NULL,
-                   choices = files, selected = character(0), width = "100%"),
+      div(
+        class = "msg-hint", style = "margin-bottom:10px;",
+        "Pick one of the bundled example files. It is validated against the ",
+        "expected file name exactly as if you had uploaded it yourself."
+      ),
+      radioButtons("example_pick_choice",
+        label = NULL,
+        choices = files, selected = character(0), width = "100%"
+      ),
       easyClose = TRUE,
       footer = tagList(
         modalButton("Cancel"),
@@ -520,7 +614,9 @@ server <- function(input, output, session) {
   # upload. Builds the same fileinfo shape Shiny's fileInput produces and reuses
   # the exact upload pipeline (handler match, count/overwrite gates, binding).
   handle_example_pick <- function(ds_idx, hi, sel) {
-    if (is.null(sel) || length(sel) == 0 || !nzchar(sel)) return()
+    if (is.null(sel) || length(sel) == 0 || !nzchar(sel)) {
+      return()
+    }
     path <- dta_example_data_path(sel)
     if (!nzchar(path) || !file.exists(path)) {
       showNotification(sprintf("Example file '%s' is not available.", sel), type = "error")
@@ -545,21 +641,31 @@ server <- function(input, output, session) {
         if (is.null(upload_registry[[upid]])) {
           upload_registry[[upid]] <- TRUE
           local({
-            UP <- upid; DSIDX <- s$index; HI <- hi
-            observeEvent(input[[UP]], {
-              handle_upload(DSIDX, HI, input[[UP]])
-            }, ignoreInit = TRUE)
+            UP <- upid
+            DSIDX <- s$index
+            HI <- hi
+            observeEvent(input[[UP]],
+              {
+                handle_upload(DSIDX, HI, input[[UP]])
+              },
+              ignoreInit = TRUE
+            )
           })
         }
         exid <- sprintf("expick_%d_%d", s$index, hi)
         if (is.null(upload_registry[[exid]])) {
           upload_registry[[exid]] <- TRUE
           local({
-            EX <- exid; DSIDX <- s$index; HI <- hi
-            observeEvent(input[[EX]], {
-              rv$example_target <- list(ds_idx = DSIDX, hi = HI)
-              show_example_modal()
-            }, ignoreInit = TRUE)
+            EX <- exid
+            DSIDX <- s$index
+            HI <- hi
+            observeEvent(input[[EX]],
+              {
+                rv$example_target <- list(ds_idx = DSIDX, hi = HI)
+                show_example_modal()
+              },
+              ignoreInit = TRUE
+            )
           })
         }
       }
@@ -584,7 +690,9 @@ server <- function(input, output, session) {
     sel <- input$example_pick_choice
     removeModal()
     rv$example_target <- NULL
-    if (is.null(tgt) || is.null(sel) || length(sel) == 0 || !nzchar(sel)) return()
+    if (is.null(tgt) || is.null(sel) || length(sel) == 0 || !nzchar(sel)) {
+      return()
+    }
     handle_example_pick(tgt$ds_idx, tgt$hi, sel)
   })
 
@@ -626,9 +734,12 @@ server <- function(input, output, session) {
           local({
             BID <- bid
             META <- file_id_meta[[as.character(fid)]]
-            observeEvent(input[[BID]], {
-              do_remove_file(META$dataset, META$hi, META$table)
-            }, ignoreInit = TRUE)
+            observeEvent(input[[BID]],
+              {
+                do_remove_file(META$dataset, META$hi, META$table)
+              },
+              ignoreInit = TRUE
+            )
           })
         }
       }
@@ -639,8 +750,10 @@ server <- function(input, output, session) {
     req(rv$active)
     showModal(modalDialog(
       title = "Discard all loaded files?",
-      sprintf("Remove all loaded files from '%s'? You will need to upload them again.",
-              rv$active),
+      sprintf(
+        "Remove all loaded files from '%s'? You will need to upload them again.",
+        rv$active
+      ),
       footer = tagList(
         modalButton("Cancel"),
         actionButton("confirm_discard_all", "Discard all", class = "btn btn-danger")
@@ -657,7 +770,9 @@ server <- function(input, output, session) {
       pref <- paste0(rv$active, "||")
       for (k in names(up)) if (startsWith(k, pref)) up[[k]] <- list()
       rv$uploads <- up
-      st <- rv$status; st[[rv$active]] <- "nodata"; rv$status <- st
+      st <- rv$status
+      st[[rv$active]] <- "nodata"
+      rv$status <- st
       autosave()
       showNotification(sprintf("Discarded all files from '%s'.", rv$active), type = "message")
     } else {
@@ -671,7 +786,9 @@ server <- function(input, output, session) {
     req(rv$dta)
     names_ds <- dta_dataset_names(rv$dta)
     targets <- if (is.null(dataset)) names_ds else intersect(dataset, names_ds)
-    if (length(targets) == 0) return()
+    if (length(targets) == 0) {
+      return()
+    }
 
     # C7 -- pre-flight: only validate datasets that actually have data bound.
     ready <- Filter(function(nm) dta_dataset_readiness(rv$dta, nm)$has_data, targets)
@@ -686,8 +803,10 @@ server <- function(input, output, session) {
 
     if (length(ready) == 0) {
       msg <- if (length(targets) == 1) {
-        sprintf("'%s' has no data loaded \u2014 upload the required file(s) before validating.",
-                targets[1])
+        sprintf(
+          "'%s' has no data loaded \u2014 upload the required file(s) before validating.",
+          targets[1]
+        )
       } else {
         "No selected dataset has data loaded yet \u2014 upload files before validating."
       }
@@ -732,10 +851,13 @@ server <- function(input, output, session) {
 
     # Reveal the floating messages dock when the active dataset now has any
     # validation messages to show.
-    active_has_msgs <- tryCatch({
-      m <- dta_dataset_messages(rv$dta, rv$active)
-      !is.null(m) && nrow(m) > 0
-    }, error = function(e) FALSE)
+    active_has_msgs <- tryCatch(
+      {
+        m <- dta_dataset_messages(rv$dta, rv$active)
+        !is.null(m) && nrow(m) > 0
+      },
+      error = function(e) FALSE
+    )
     if (isTRUE(active_has_msgs)) {
       session$sendCustomMessage("dta_msgs_dock", "open")
     }
@@ -779,17 +901,23 @@ server <- function(input, output, session) {
   row_action_buttons <- function(edit_input, del_input, n,
                                  up_input = NULL, down_input = NULL) {
     vapply(seq_len(n), function(i) {
-      up_btn <- if (is.null(up_input)) "" else if (i > 1L) {
+      up_btn <- if (is.null(up_input)) {
+        ""
+      } else if (i > 1L) {
         sprintf(
           "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25B2;</button> ",
-          up_input, i)
+          up_input, i
+        )
       } else {
         "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" disabled>&#x25B2;</button> "
       }
-      down_btn <- if (is.null(down_input)) "" else if (i < n) {
+      down_btn <- if (is.null(down_input)) {
+        ""
+      } else if (i < n) {
         sprintf(
           "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25BC;</button> ",
-          down_input, i)
+          down_input, i
+        )
       } else {
         "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" disabled>&#x25BC;</button> "
       }
@@ -797,10 +925,12 @@ server <- function(input, output, session) {
         up_btn, down_btn,
         sprintf(
           "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Edit\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x270E;</button> ",
-          edit_input, i),
+          edit_input, i
+        ),
         sprintf(
           "<button class=\"btn btn-sm btn-outline-danger dta-row-btn\" title=\"Remove\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x1F5D1;</button>",
-          del_input, i)
+          del_input, i
+        )
       )
     }, character(1))
   }
@@ -834,9 +964,12 @@ server <- function(input, output, session) {
         div(
           class = "spec-toolbar",
           actionButton("col_add", HTML("&#x2795; Add column"),
-                       class = "btn btn-sm btn-outline-primary"),
-          span(class = "spec-hint",
-               "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation.")
+            class = "btn btn-sm btn-outline-primary"
+          ),
+          span(
+            class = "spec-hint",
+            "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
+          )
         ),
         DT::dataTableOutput("col_tbl"),
         tags$hr(),
@@ -855,21 +988,31 @@ server <- function(input, output, session) {
           ),
           layout_columns(
             col_widths = c(3, 3, 3, 3),
-            selectInput("col_backend", "Backend", choices = dta_supported_backends(),
-                        selected = g("backend", dta_supported_backends()[1]), width = "100%"),
-            selectInput("col_type", "Type", choices = dta_sas_types(),
-                        selected = g("type", "Char"), width = "100%"),
-            textInput("col_format", "Format", value = g("format"), width = "100%",
-                      placeholder = "e.g. $9. / 8.2"),
-            textInput("col_length", "Length", value = g("length"), width = "100%",
-                      placeholder = "e.g. 8")
+            selectInput("col_backend", "Backend",
+              choices = dta_supported_backends(),
+              selected = g("backend", dta_supported_backends()[1]), width = "100%"
+            ),
+            selectInput("col_type", "Type",
+              choices = dta_sas_types(),
+              selected = g("type", "Char"), width = "100%"
+            ),
+            textInput("col_format", "Format",
+              value = g("format"), width = "100%",
+              placeholder = "e.g. $9. / 8.2"
+            ),
+            textInput("col_length", "Length",
+              value = g("length"), width = "100%",
+              placeholder = "e.g. 8"
+            )
           ),
           checkboxInput("col_nullable", "Nullable (missing values allowed)",
-                        value = if (is.null(pf$nullable)) TRUE else isTRUE(pf$nullable)),
+            value = if (is.null(pf$nullable)) TRUE else isTRUE(pf$nullable)
+          ),
           layout_columns(
             col_widths = c(6, 6),
             textAreaInput("col_values", "Allowed values (one per line)",
-                          value = g("values"), width = "100%", rows = 3),
+              value = g("values"), width = "100%", rows = 3
+            ),
             textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
           ),
           textAreaInput("col_desc", "Description", value = g("description"), width = "100%", rows = 2)
@@ -878,7 +1021,8 @@ server <- function(input, output, session) {
         div(
           style = "display:flex; justify-content:space-between; margin-top:8px;",
           actionButton("col_back", HTML("&#x2190; Back to list"),
-                       class = "btn btn-outline-secondary"),
+            class = "btn btn-outline-secondary"
+          ),
           actionButton("col_save", "Save column", class = "btn btn-primary")
         )
       )
@@ -891,26 +1035,37 @@ server <- function(input, output, session) {
     req(ed)
     ov <- dta_columns_overview(isolate(rv$dta), ed)
     if (is.null(ov) || nrow(ov) == 0) {
-      ov <- data.frame(id = character(0), label = character(0), type = character(0),
-                       length = character(0), nullable = character(0),
-                       constraint = character(0), description = character(0),
-                       stringsAsFactors = FALSE)
+      ov <- data.frame(
+        id = character(0), label = character(0), type = character(0),
+        length = character(0), nullable = character(0),
+        constraint = character(0), description = character(0),
+        stringsAsFactors = FALSE
+      )
     }
     ov$Actions <- if (nrow(ov) > 0) {
-      row_action_buttons("col_edit_click", "col_del_click", nrow(ov),
-                         "col_up_click", "col_down_click")
-    } else character(0)
+      row_action_buttons(
+        "col_edit_click", "col_del_click", nrow(ov),
+        "col_up_click", "col_down_click"
+      )
+    } else {
+      character(0)
+    }
     DT::datatable(
-      ov, rownames = FALSE, selection = "none", escape = FALSE,
+      ov,
+      rownames = FALSE, selection = "none", escape = FALSE,
       class = "display compact", width = "100%",
-      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
-                     columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L)))
+      options = list(
+        pageLength = 8, dom = "tp", scrollX = TRUE,
+        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+      )
     )
   })
 
   output$col_editor_msg <- renderUI({
     m <- rv$col_msg
-    if (is.null(m)) return(NULL)
+    if (is.null(m)) {
+      return(NULL)
+    }
     if (isTRUE(m$ok)) {
       div(class = "yaml-valid ok", HTML("&#x2714;"), " Column saved.")
     } else {
@@ -937,9 +1092,13 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     ids <- dta_column_ids(isolate(rv$dta), ed)
-    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) return()
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) {
+      return()
+    }
     f <- dta_column_fields(isolate(rv$dta), ed, ids[[idx]])
-    if (is.null(f)) return()
+    if (is.null(f)) {
+      return()
+    }
     rv$col_edit_id <- ids[[idx]]
     rv$col_prefill <- f
     rv$col_msg <- NULL
@@ -952,7 +1111,9 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     ids <- dta_column_ids(isolate(rv$dta), ed)
-    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) return()
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > length(ids)) {
+      return()
+    }
     r <- dta_remove_column(isolate(rv$dta), ed, ids[[idx]])
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -970,7 +1131,9 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     ids <- dta_column_ids(isolate(rv$dta), ed)
-    if (length(idx) != 1 || is.na(idx) || idx <= 1 || idx > length(ids)) return()
+    if (length(idx) != 1 || is.na(idx) || idx <= 1 || idx > length(ids)) {
+      return()
+    }
     r <- dta_move_column(isolate(rv$dta), ed, ids[[idx]], "up")
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -987,7 +1150,9 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     ids <- dta_column_ids(isolate(rv$dta), ed)
-    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx >= length(ids)) return()
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx >= length(ids)) {
+      return()
+    }
     r <- dta_move_column(isolate(rv$dta), ed, ids[[idx]], "down")
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -1010,7 +1175,8 @@ server <- function(input, output, session) {
     vals <- trimws(strsplit(input$col_values %||% "", "\n")[[1]])
     vals <- vals[nzchar(vals)]
     r <- dta_set_column(
-      isolate(rv$dta), ed, id = id, label = input$col_label,
+      isolate(rv$dta), ed,
+      id = id, label = input$col_label,
       backend = input$col_backend, type = input$col_type,
       format = input$col_format, length = input$col_length,
       nullable = isTRUE(input$col_nullable),
@@ -1043,14 +1209,17 @@ server <- function(input, output, session) {
     div(
       class = "cond-row",
       selectInput(cid, if (i == 1) "Column" else NULL,
-                  choices = c("(select)" = "", cols),
-                  selected = pf$col %||% "", width = "100%"),
+        choices = c("(select)" = "", cols),
+        selected = pf$col %||% "", width = "100%"
+      ),
       selectInput(oid, if (i == 1) "Operator" else NULL,
-                  choices = dta_condition_operators(),
-                  selected = pf$op %||% "equals", width = "100%"),
+        choices = dta_condition_operators(),
+        selected = pf$op %||% "equals", width = "100%"
+      ),
       textInput(vid, if (i == 1) "Value" else NULL,
-                value = pf$val %||% "", width = "100%",
-                placeholder = "5 | a, b | 0, 99 | true")
+        value = pf$val %||% "", width = "100%",
+        placeholder = "5 | a, b | 0, 99 | true"
+      )
     )
   }
   build_cond_rows <- function(prefix, n, cols, prefill) {
@@ -1062,7 +1231,9 @@ server <- function(input, output, session) {
   # named-list {COL:{op:val}} -> list of editable rows. "min"/"max" keys (single
   # or combined) map to the UI "min_max" operator with a "min, max" value.
   cond_to_rows <- function(cond) {
-    if (is.null(cond) || length(cond) == 0) return(list())
+    if (is.null(cond) || length(cond) == 0) {
+      return(list())
+    }
     lapply(names(cond), function(col) {
       spec <- cond[[col]]
       if (is.list(spec) && length(spec) > 0) {
@@ -1092,20 +1263,30 @@ server <- function(input, output, session) {
     txt <- txt %||% ""
     if (identical(op, "empty")) {
       v <- tolower(trimws(txt))
-      return(!(v %in% c("false", "no", "0", "f", "n")))  # default TRUE
+      return(!(v %in% c("false", "no", "0", "f", "n"))) # default TRUE
     }
-    if (identical(op, "pattern")) return(as.character(txt))
+    if (identical(op, "pattern")) {
+      return(as.character(txt))
+    }
     if (op %in% c("in", "not_in")) {
       parts <- trimws(strsplit(txt, ",")[[1]])
       parts <- parts[nzchar(parts)]
-      if (length(parts) == 0) return(character(0))
+      if (length(parts) == 0) {
+        return(character(0))
+      }
       nums <- suppressWarnings(as.numeric(parts))
-      if (all(!is.na(nums))) return(nums)
+      if (all(!is.na(nums))) {
+        return(nums)
+      }
       return(parts)
     }
-    if (!nzchar(trimws(txt))) return("")
+    if (!nzchar(trimws(txt))) {
+      return("")
+    }
     num <- suppressWarnings(as.numeric(txt))
-    if (!is.na(num)) return(num)
+    if (!is.na(num)) {
+      return(num)
+    }
     txt
   }
   collect_cond <- function(prefix, n) {
@@ -1161,9 +1342,12 @@ server <- function(input, output, session) {
         div(
           class = "spec-toolbar",
           actionButton("rule_add", HTML("&#x2795; Add rule"),
-                       class = "btn btn-sm btn-outline-primary"),
-          span(class = "spec-hint",
-               "Use the pencil to edit a rule or the bin to remove it. Any change resets this dataset's validation.")
+            class = "btn btn-sm btn-outline-primary"
+          ),
+          span(
+            class = "spec-hint",
+            "Use the pencil to edit a rule or the bin to remove it. Any change resets this dataset's validation."
+          )
         ),
         DT::dataTableOutput("rule_tbl"),
         tags$hr(),
@@ -1179,18 +1363,24 @@ server <- function(input, output, session) {
         div(
           class = "cond-builder",
           div(class = "cond-title", "IF (all of these hold):"),
-          div(id = "cond_rows",
-              build_cond_rows("cond", isolate(rv$cond_n), cols, cond_to_rows(pf$condition))),
+          div(
+            id = "cond_rows",
+            build_cond_rows("cond", isolate(rv$cond_n), cols, cond_to_rows(pf$condition))
+          ),
           actionButton("cond_add", HTML("&#x2795; Add condition"),
-                       class = "btn btn-sm btn-outline-secondary")
+            class = "btn btn-sm btn-outline-secondary"
+          )
         ),
         div(
           class = "cond-builder",
           div(class = "cond-title", "THEN (all of these must hold):"),
-          div(id = "then_rows",
-              build_cond_rows("then", isolate(rv$then_n), cols, cond_to_rows(pf$then))),
+          div(
+            id = "then_rows",
+            build_cond_rows("then", isolate(rv$then_n), cols, cond_to_rows(pf$then))
+          ),
           actionButton("then_add", HTML("&#x2795; Add THEN condition"),
-                       class = "btn btn-sm btn-outline-secondary")
+            class = "btn btn-sm btn-outline-secondary"
+          )
         ),
         div(class = "cond-hint", HTML(paste0(
           "Value formats &mdash; single: <code>5</code> &middot; ",
@@ -1203,26 +1393,34 @@ server <- function(input, output, session) {
     } else if (identical(rt, "col_range")) {
       tagList(
         selectInput("rule_col_single", "Column",
-                    choices = c("(select)" = "", cols),
-                    selected = (pf$columns %||% "")[1], width = "100%"),
+          choices = c("(select)" = "", cols),
+          selected = (pf$columns %||% "")[1], width = "100%"
+        ),
         layout_columns(
           col_widths = c(6, 6),
           textInput("rule_min", "Minimum", value = pf$min %||% "", width = "100%"),
           textInput("rule_max", "Maximum", value = pf$max %||% "", width = "100%")
         ),
-        div(class = "cond-hint",
-            "A range rule checks ONE column against a minimum and/or maximum.")
+        div(
+          class = "cond-hint",
+          "A range rule checks ONE column against a minimum and/or maximum."
+        )
       )
     } else if (identical(rt, "col_unique")) {
       tagList(
         selectizeInput("rule_cols", "Column(s) that are unique together",
-                       choices = cols, selected = pf$columns, multiple = TRUE, width = "100%"),
-        div(class = "cond-hint",
-            "Rows must be unique across the selected column(s) taken together.")
+          choices = cols, selected = pf$columns, multiple = TRUE, width = "100%"
+        ),
+        div(
+          class = "cond-hint",
+          "Rows must be unique across the selected column(s) taken together."
+        )
       )
     } else {
-      div(class = "cond-hint",
-          "Choose a rule type above to configure it.")
+      div(
+        class = "cond-hint",
+        "Choose a rule type above to configure it."
+      )
     }
     # The rule type is chosen only when the rule is created. When editing an
     # existing rule the type is locked (shown read-only) so it cannot change.
@@ -1234,11 +1432,14 @@ server <- function(input, output, session) {
       )
     } else {
       selectInput("rule_type", "Type",
-                  choices = c("\u2014 select a rule type \u2014" = "",
-                              "Conditional (IF/THEN)" = "col_condition",
-                              "Range" = "col_range",
-                              "Unique" = "col_unique"),
-                  selected = rt, width = "100%")
+        choices = c(
+          "\u2014 select a rule type \u2014" = "",
+          "Conditional (IF/THEN)" = "col_condition",
+          "Range" = "col_range",
+          "Unique" = "col_unique"
+        ),
+        selected = rt, width = "100%"
+      )
     }
     tagList(
       div(
@@ -1255,7 +1456,8 @@ server <- function(input, output, session) {
       div(
         style = "display:flex; justify-content:space-between; margin-top:8px;",
         actionButton("rule_back", HTML("&#x2190; Back to list"),
-                     class = "btn btn-outline-secondary"),
+          class = "btn btn-outline-secondary"
+        ),
         actionButton("rule_save", "Save rule", class = "btn btn-primary")
       )
     )
@@ -1267,25 +1469,36 @@ server <- function(input, output, session) {
     req(ed)
     ov <- dta_rules_overview(isolate(rv$dta), ed)
     if (is.null(ov) || nrow(ov) == 0) {
-      ov <- data.frame(index = integer(0), id = character(0), type = character(0),
-                       detail = character(0), description = character(0),
-                       stringsAsFactors = FALSE)
+      ov <- data.frame(
+        index = integer(0), id = character(0), type = character(0),
+        detail = character(0), description = character(0),
+        stringsAsFactors = FALSE
+      )
     }
     ov$Actions <- if (nrow(ov) > 0) {
-      row_action_buttons("rule_edit_click", "rule_del_click", nrow(ov),
-                         "rule_up_click", "rule_down_click")
-    } else character(0)
+      row_action_buttons(
+        "rule_edit_click", "rule_del_click", nrow(ov),
+        "rule_up_click", "rule_down_click"
+      )
+    } else {
+      character(0)
+    }
     DT::datatable(
-      ov, rownames = FALSE, selection = "none", escape = FALSE,
+      ov,
+      rownames = FALSE, selection = "none", escape = FALSE,
       class = "display compact", width = "100%",
-      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
-                     columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L)))
+      options = list(
+        pageLength = 8, dom = "tp", scrollX = TRUE,
+        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+      )
     )
   })
 
   output$rule_editor_msg <- renderUI({
     m <- rv$rule_msg
-    if (is.null(m)) return(NULL)
+    if (is.null(m)) {
+      return(NULL)
+    }
     if (isTRUE(m$ok)) {
       div(class = "yaml-valid ok", HTML("&#x2714;"), " Rule saved.")
     } else {
@@ -1315,9 +1528,13 @@ server <- function(input, output, session) {
     idx <- as.integer(input$rule_edit_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
-    if (length(idx) != 1 || is.na(idx)) return()
+    if (length(idx) != 1 || is.na(idx)) {
+      return()
+    }
     f <- dta_rule_fields(isolate(rv$dta), ed, idx)
-    if (is.null(f)) return()
+    if (is.null(f)) {
+      return()
+    }
     rv$rule_edit_index <- idx
     rv$rule_prefill <- f
     rv$rule_msg <- NULL
@@ -1331,7 +1548,9 @@ server <- function(input, output, session) {
     idx <- as.integer(input$rule_del_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
-    if (length(idx) != 1 || is.na(idx)) return()
+    if (length(idx) != 1 || is.na(idx)) {
+      return()
+    }
     r <- dta_remove_rule(isolate(rv$dta), ed, idx)
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -1348,7 +1567,9 @@ server <- function(input, output, session) {
     idx <- as.integer(input$rule_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
-    if (length(idx) != 1 || is.na(idx) || idx <= 1) return()
+    if (length(idx) != 1 || is.na(idx) || idx <= 1) {
+      return()
+    }
     r <- dta_move_rule(isolate(rv$dta), ed, idx, "up")
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -1365,7 +1586,9 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     n <- nrow(dta_rules_overview(isolate(rv$dta), ed))
-    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx >= n) return()
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx >= n) {
+      return()
+    }
     r <- dta_move_rule(isolate(rv$dta), ed, idx, "down")
     if (!isTRUE(r$ok)) {
       showNotification(r$error, type = "error")
@@ -1382,41 +1605,54 @@ server <- function(input, output, session) {
     req(ed)
     cols <- dta_column_ids(isolate(rv$dta), ed)
     rv$cond_n <- isolate(rv$cond_n) + 1L
-    insertUI("#cond_rows", where = "beforeEnd",
-             ui = one_cond_row("cond", isolate(rv$cond_n), cols))
+    insertUI("#cond_rows",
+      where = "beforeEnd",
+      ui = one_cond_row("cond", isolate(rv$cond_n), cols)
+    )
   })
   observeEvent(input$then_add, {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     cols <- dta_column_ids(isolate(rv$dta), ed)
     rv$then_n <- isolate(rv$then_n) + 1L
-    insertUI("#then_rows", where = "beforeEnd",
-             ui = one_cond_row("then", isolate(rv$then_n), cols))
+    insertUI("#then_rows",
+      where = "beforeEnd",
+      ui = one_cond_row("then", isolate(rv$then_n), cols)
+    )
   })
 
   # When the user switches the rule type, reset the type-specific part but keep
   # the id/description they typed. A programmatic sync (the select rendering with
   # its prefilled value) is ignored by comparing against the prefill's type.
-  observeEvent(input$rule_type, {
-    if (!identical(isolate(rv$rule_view), "form")) return()
-    newt <- input$rule_type %||% ""
-    pf <- isolate(rv$rule_prefill) %||% list()
-    if (!nzchar(newt)) return()                    # ignore the "(select)" placeholder
-    if (identical(newt, pf$type %||% "")) return()  # no real change
-    pf$id <- input$rule_id %||% pf$id
-    pf$description <- input$rule_desc %||% pf$description
-    pf$type <- newt
-    pf$condition <- NULL
-    pf$then <- NULL
-    pf$columns <- NULL
-    pf$min <- NULL
-    pf$max <- NULL
-    rv$rule_prefill <- pf
-    rv$cond_n <- 1L
-    rv$then_n <- 1L
-    rv$rule_msg <- NULL
-    rv$rule_token <- rv$rule_token + 1
-  }, ignoreInit = TRUE)
+  observeEvent(input$rule_type,
+    {
+      if (!identical(isolate(rv$rule_view), "form")) {
+        return()
+      }
+      newt <- input$rule_type %||% ""
+      pf <- isolate(rv$rule_prefill) %||% list()
+      if (!nzchar(newt)) {
+        return()
+      } # ignore the "(select)" placeholder
+      if (identical(newt, pf$type %||% "")) {
+        return()
+      } # no real change
+      pf$id <- input$rule_id %||% pf$id
+      pf$description <- input$rule_desc %||% pf$description
+      pf$type <- newt
+      pf$condition <- NULL
+      pf$then <- NULL
+      pf$columns <- NULL
+      pf$min <- NULL
+      pf$max <- NULL
+      rv$rule_prefill <- pf
+      rv$cond_n <- 1L
+      rv$then_n <- 1L
+      rv$rule_msg <- NULL
+      rv$rule_token <- rv$rule_token + 1
+    },
+    ignoreInit = TRUE
+  )
 
   observeEvent(input$rule_save, {
     ed <- isolate(rv$editor_dataset)
@@ -1437,14 +1673,18 @@ server <- function(input, output, session) {
       rv$rule_msg <- list(ok = FALSE, error = "Please choose a rule type.")
       return()
     }
-    args <- list(dta = isolate(rv$dta), dataset = ed, index = isolate(rv$rule_edit_index),
-                 id = id, type = rt, description = input$rule_desc)
+    args <- list(
+      dta = isolate(rv$dta), dataset = ed, index = isolate(rv$rule_edit_index),
+      id = id, type = rt, description = input$rule_desc
+    )
     if (identical(rt, "col_condition")) {
       cond <- collect_cond("cond", isolate(rv$cond_n))
       then <- collect_cond("then", isolate(rv$then_n))
       if (length(cond) == 0 || length(then) == 0) {
-        rv$rule_msg <- list(ok = FALSE,
-                            error = "A conditional rule needs at least one IF and one THEN condition.")
+        rv$rule_msg <- list(
+          ok = FALSE,
+          error = "A conditional rule needs at least one IF and one THEN condition."
+        )
         return()
       }
       args$condition <- cond
@@ -1498,7 +1738,9 @@ server <- function(input, output, session) {
   # the table + count badge update reactively via their own outputs. The server
   # sends 'dta_msgs_dock' -> 'open' after a check that produced messages.
   output$floating_msgs <- renderUI({
-    if (is.null(rv$structure)) return(NULL)
+    if (is.null(rv$structure)) {
+      return(NULL)
+    }
     div(
       id = "dta-msgs-dock", class = "msgs-dock collapsed",
       div(
@@ -1520,8 +1762,10 @@ server <- function(input, output, session) {
       div(
         class = "msgs-dock-body",
         div(class = "msgs-table", DT::dataTableOutput("msgs")),
-        div(class = "msg-hint",
-            "Use the filters at the top of each column to search or pick a Dataset / Table. Click a message row to open the detailed inspect report.")
+        div(
+          class = "msg-hint",
+          "Use the filters at the top of each column to search or pick a Dataset / Table. Click a message row to open the detailed inspect report."
+        )
       )
     )
   })
@@ -1532,8 +1776,10 @@ server <- function(input, output, session) {
     m <- msgs_r()
     n <- if (is.null(m)) 0L else nrow(m)
     tagList(
-      tags$span(class = paste0("msgs-dock-count", if (n == 0) " zero" else ""),
-                sprintf("%d", n)),
+      tags$span(
+        class = paste0("msgs-dock-count", if (n == 0) " zero" else ""),
+        sprintf("%d", n)
+      ),
       tags$span(class = "msgs-dock-ds", rv$active)
     )
   })
@@ -1554,8 +1800,10 @@ server <- function(input, output, session) {
     # Keep the table full-width but bias the available space toward the
     # Message column: the short metadata columns get small explicit widths so
     # the (usually long) Message text gets the lion's share of the row.
-    col_w <- c(ID = "46px", Dataset = "110px", Table = "120px", Source = "82px",
-               Row = "54px", Column = "96px", Rule = "130px", Message = "50%")
+    col_w <- c(
+      ID = "46px", Dataset = "110px", Table = "120px", Source = "82px",
+      Row = "54px", Column = "96px", Rule = "130px", Message = "50%"
+    )
     nm <- names(disp)
     coldefs <- lapply(seq_along(nm), function(i) {
       cls <- if (identical(nm[i], "Message")) "msg-cell" else "dt-nowrap"
@@ -1567,8 +1815,10 @@ server <- function(input, output, session) {
       disp,
       rownames = FALSE, selection = "single", filter = "top",
       class = "display compact", width = "100%",
-      options = list(pageLength = 8, dom = "tp", scrollX = TRUE,
-                     autoWidth = TRUE, columnDefs = coldefs)
+      options = list(
+        pageLength = 8, dom = "tp", scrollX = TRUE,
+        autoWidth = TRUE, columnDefs = coldefs
+      )
     )
   })
 
@@ -1576,14 +1826,20 @@ server <- function(input, output, session) {
   # table AND the CSV/TSV/XLSX downloads, so the two never diverge.
   messages_display <- function(m) {
     disp <- as.data.frame(m)
-    if (is.null(disp) || nrow(disp) == 0) return(disp)
+    if (is.null(disp) || nrow(disp) == 0) {
+      return(disp)
+    }
     # Surface WHERE each message comes from: dataset + table (source table).
     if ("target" %in% names(disp)) names(disp)[names(disp) == "target"] <- "table"
-    cols <- intersect(c("id", "dataset", "table", "source", "row", "column", "rule_id", "message"),
-                      names(disp))
+    cols <- intersect(
+      c("id", "dataset", "table", "source", "row", "column", "rule_id", "message"),
+      names(disp)
+    )
     disp <- disp[, cols, drop = FALSE]
-    pretty <- c(id = "ID", dataset = "Dataset", table = "Table", source = "Source",
-                row = "Row", column = "Column", rule_id = "Rule", message = "Message")
+    pretty <- c(
+      id = "ID", dataset = "Dataset", table = "Table", source = "Source",
+      row = "Row", column = "Column", rule_id = "Rule", message = "Message"
+    )
     hit <- names(disp) %in% names(pretty)
     names(disp)[hit] <- unname(pretty[names(disp)[hit]])
     disp
@@ -1608,9 +1864,12 @@ server <- function(input, output, session) {
   )
   output$dl_msgs_tsv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".tsv"),
-    content = function(file) utils::write.table(
-      msgs_dl_df(), file, sep = "\t", row.names = FALSE, na = "", qmethod = "double"
-    )
+    content = function(file) {
+      utils::write.table(
+        msgs_dl_df(), file,
+        sep = "\t", row.names = FALSE, na = "", qmethod = "double"
+      )
+    }
   )
   output$dl_msgs_xlsx <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".xlsx"),
@@ -1680,24 +1939,39 @@ server <- function(input, output, session) {
   schema_expected_text <- function(r) {
     kw <- as.character(r[["schema_keyword"]] %||% "")
     switch(kw,
-      enum = paste0("one of: ", .first_nonempty(r[["schema_params.allowedValues"]],
-                                                r[["schema_parentSchema.enum"]],
-                                                r[["schema_schema"]])),
-      const = paste0("exactly: ", .first_nonempty(r[["schema_parentSchema.const"]],
-                                                  r[["schema_schema"]])),
-      maxLength = paste0("at most ", .first_nonempty(r[["schema_params.limit"]],
-                                                     r[["schema_parentSchema.maxLength"]]),
-                         " character(s)"),
-      minLength = paste0("at least ", .first_nonempty(r[["schema_params.limit"]],
-                                                      r[["schema_parentSchema.minLength"]]),
-                         " character(s)"),
+      enum = paste0("one of: ", .first_nonempty(
+        r[["schema_params.allowedValues"]],
+        r[["schema_parentSchema.enum"]],
+        r[["schema_schema"]]
+      )),
+      const = paste0("exactly: ", .first_nonempty(
+        r[["schema_parentSchema.const"]],
+        r[["schema_schema"]]
+      )),
+      maxLength = paste0(
+        "at most ", .first_nonempty(
+          r[["schema_params.limit"]],
+          r[["schema_parentSchema.maxLength"]]
+        ),
+        " character(s)"
+      ),
+      minLength = paste0(
+        "at least ", .first_nonempty(
+          r[["schema_params.limit"]],
+          r[["schema_parentSchema.minLength"]]
+        ),
+        " character(s)"
+      ),
       maximum = paste0("at most ", .first_nonempty(r[["schema_params.limit"]])),
       minimum = paste0("at least ", .first_nonempty(r[["schema_params.limit"]])),
       type = paste0("type: ", .first_nonempty(r[["schema_parentSchema.type"]])),
-      pattern = paste0("match pattern ", .first_nonempty(r[["schema_params.pattern"]],
-                                                         r[["schema_schema"]])),
+      pattern = paste0("match pattern ", .first_nonempty(
+        r[["schema_params.pattern"]],
+        r[["schema_schema"]]
+      )),
       required = "the value must be present (not missing)",
-      .first_nonempty(r[["schema_message"]], r[["message"]], "(see message)"))
+      .first_nonempty(r[["schema_message"]], r[["message"]], "(see message)")
+    )
   }
 
   # Highlighted table of the failing rows captured for a rule violation.
@@ -1720,8 +1994,10 @@ server <- function(input, output, session) {
         lapply(seq_len(nrow(sub)), function(i) {
           tags$tr(lapply(names(sub), function(k) {
             is_row <- identical(k, "Row")
-            tags$td(class = if (is_row) "inspect-hl-row" else "inspect-hl-val",
-                    as.character(sub[[k]][i]))
+            tags$td(
+              class = if (is_row) "inspect-hl-row" else "inspect-hl-val",
+              as.character(sub[[k]][i])
+            )
           }))
         })
       )
@@ -1741,7 +2017,9 @@ server <- function(input, output, session) {
       ov <- tryCatch(dta_rules_overview(rv$dta, dataset), error = function(e) NULL)
       rrow <- if (!is.null(ov) && nrow(ov) > 0 && nzchar(rid)) {
         ov[ov$id == rid, , drop = FALSE]
-      } else NULL
+      } else {
+        NULL
+      }
       have <- !is.null(rrow) && nrow(rrow) > 0
       rtype <- if (have) rrow$type[1] else ""
       rdetail <- if (have) rrow$detail[1] else ""
@@ -1749,32 +2027,44 @@ server <- function(input, output, session) {
       badge <- tags$span(class = "inspect-badge rule", "Rule failure")
       desc <- div(
         class = "inspect-desc",
-        div(class = "inspect-desc-main",
-            tags$strong(if (nzchar(rid)) rid else "(rule)"),
-            if (nzchar(rtype)) tags$span(class = "inspect-desc-type",
-                                         dta_rule_type_label(rtype))),
+        div(
+          class = "inspect-desc-main",
+          tags$strong(if (nzchar(rid)) rid else "(rule)"),
+          if (nzchar(rtype)) {
+            tags$span(
+              class = "inspect-desc-type",
+              dta_rule_type_label(rtype)
+            )
+          }
+        ),
         if (nzchar(rdetail)) div(class = "inspect-desc-detail", rdetail),
         if (nzchar(rdesc)) div(class = "inspect-desc-note", rdesc)
       )
-      expected_ui <- div(class = "inspect-should",
-                         if (nzchar(rdetail)) rdetail else msg)
+      expected_ui <- div(
+        class = "inspect-should",
+        if (nzchar(rdetail)) rdetail else msg
+      )
       actual_ui <- inspect_failing_rows_ui(d)
       actual_title <- "Offending row(s) \u2014 actual values"
     } else {
       col <- .first_nonempty(r[["schema_column"]], r[["column"]])
-      kw  <- .first_nonempty(r[["schema_keyword"]], r[["keyword"]])
+      kw <- .first_nonempty(r[["schema_keyword"]], r[["keyword"]])
       smsg <- .first_nonempty(r[["schema_message"]], msg)
       badge <- tags$span(class = "inspect-badge schema", "Schema violation")
       desc <- div(
         class = "inspect-desc",
-        div(class = "inspect-desc-main",
-            tags$strong(if (nzchar(col)) col else "(column)"),
-            if (nzchar(kw)) tags$span(class = "inspect-desc-type", kw)),
+        div(
+          class = "inspect-desc-main",
+          tags$strong(if (nzchar(col)) col else "(column)"),
+          if (nzchar(kw)) tags$span(class = "inspect-desc-type", kw)
+        ),
         if (nzchar(smsg)) div(class = "inspect-desc-detail", smsg)
       )
       expected_ui <- div(class = "inspect-should", schema_expected_text(r))
-      aval <- .first_nonempty(r[["schema_data"]],
-                              if (nzchar(col)) r[[paste0("context_", col)]] else NULL)
+      aval <- .first_nonempty(
+        r[["schema_data"]],
+        if (nzchar(col)) r[[paste0("context_", col)]] else NULL
+      )
       arow <- .first_nonempty(r[["schema_row"]], r[["context_.row"]])
       loc <- paste0(
         if (nzchar(col)) paste0("column ", col) else "",
@@ -1838,7 +2128,9 @@ server <- function(input, output, session) {
   observeEvent(input$msgs_rows_selected, {
     sel <- input$msgs_rows_selected
     m <- msgs_r()
-    if (is.null(sel) || is.null(m) || nrow(m) == 0) return()
+    if (is.null(sel) || is.null(m) || nrow(m) == 0) {
+      return()
+    }
     id <- if ("id" %in% names(m)) m$id[sel] else sel
     show_inspect_modal(rv$active, id)
   })
@@ -1874,7 +2166,8 @@ server <- function(input, output, session) {
         suppressWarnings(dateInput(
           "md_date", "Date",
           value = if (inherits(date_val, "Date") && !is.na(date_val)) date_val else NA,
-          width = "100%")),
+          width = "100%"
+        )),
         textInput("md_header", "Header / organization", value = getf("header"), width = "100%")
       ),
       tags$hr(),
@@ -1887,10 +2180,12 @@ server <- function(input, output, session) {
             div(class = "section-label", "Affiliation"),
             uiOutput("receiver_affiliation"),
             tags$hr(),
-            div(class = "section-label",
-                style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
-                tags$span("Contacts"),
-                actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")),
+            div(
+              class = "section-label",
+              style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+              tags$span("Contacts"),
+              actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")
+            ),
             uiOutput("receiver_contacts")
           )
         ),
@@ -1900,10 +2195,12 @@ server <- function(input, output, session) {
             div(class = "section-label", "Affiliation"),
             uiOutput("supplier_affiliation"),
             tags$hr(),
-            div(class = "section-label",
-                style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
-                tags$span("Contacts"),
-                actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")),
+            div(
+              class = "section-label",
+              style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
+              tags$span("Contacts"),
+              actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")
+            ),
             uiOutput("supplier_contacts")
           )
         )
@@ -1912,39 +2209,55 @@ server <- function(input, output, session) {
       div(class = "md-section-title", "Transmission"),
       layout_columns(
         col_widths = c(4, 4, 4),
-        textInput("tr_type", "Type", value = trf("type"), width = "100%",
-                  placeholder = "e.g. secure S3 bucket"),
-        textInput("tr_frequency", "Frequency", value = trf("frequency"), width = "100%",
-                  placeholder = "e.g. one-time, weekly"),
-        textInput("tr_notification", "Notification", value = trf("notification"), width = "100%",
-                  placeholder = "e.g. email")
+        textInput("tr_type", "Type",
+          value = trf("type"), width = "100%",
+          placeholder = "e.g. secure S3 bucket"
+        ),
+        textInput("tr_frequency", "Frequency",
+          value = trf("frequency"), width = "100%",
+          placeholder = "e.g. one-time, weekly"
+        ),
+        textInput("tr_notification", "Notification",
+          value = trf("notification"), width = "100%",
+          placeholder = "e.g. email"
+        )
       ),
       layout_columns(
         col_widths = c(6, 6),
-        textInput("tr_date_first", "Date of first transfer", value = trf("date_first_transfer"),
-                  width = "100%", placeholder = "YYYY-MM-DD or phrase"),
-        textInput("tr_date_last", "Date of last transfer", value = trf("date_last_transfer"),
-                  width = "100%", placeholder = "YYYY-MM-DD or phrase")
+        textInput("tr_date_first", "Date of first transfer",
+          value = trf("date_first_transfer"),
+          width = "100%", placeholder = "YYYY-MM-DD or phrase"
+        ),
+        textInput("tr_date_last", "Date of last transfer",
+          value = trf("date_last_transfer"),
+          width = "100%", placeholder = "YYYY-MM-DD or phrase"
+        )
       ),
       layout_columns(
         col_widths = c(6, 6),
         selectInput("tr_test_upload", "Test upload",
-                    choices = c("undefined", "yes", "no"),
-                    selected = dta_flag_to_choice(tr$test_upload), width = "100%"),
+          choices = c("undefined", "yes", "no"),
+          selected = dta_flag_to_choice(tr$test_upload), width = "100%"
+        ),
         selectInput("tr_blinded", "Blinded transfer",
-                    choices = c("undefined", "yes", "no"),
-                    selected = dta_flag_to_choice(tr$blinded_transfer), width = "100%")
+          choices = c("undefined", "yes", "no"),
+          selected = dta_flag_to_choice(tr$blinded_transfer), width = "100%"
+        )
       ),
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
       textAreaInput("md_error_handling", "Error handling",
-                    value = getf("error_handling"), width = "100%", rows = 2,
-                    placeholder = "How data/format errors are handled and communicated."),
+        value = getf("error_handling"), width = "100%", rows = 2,
+        placeholder = "How data/format errors are handled and communicated."
+      ),
       textInput("md_authorized", "Authorized for corrections",
-                value = getf("authorized_for_corrections"), width = "100%",
-                placeholder = "Contact(s) authorized to request corrections"),
-      div(class = "msg-hint",
-          "Changes are saved automatically to the current session as you type.")
+        value = getf("authorized_for_corrections"), width = "100%",
+        placeholder = "Contact(s) authorized to request corrections"
+      ),
+      div(
+        class = "msg-hint",
+        "Changes are saved automatically to the current session as you type."
+      )
     )
   })
 
@@ -1959,7 +2272,8 @@ server <- function(input, output, session) {
       sync_yaml_text()
     } else {
       showNotification(paste("Could not update", field, "\u2014", r$error),
-                       type = "error")
+        type = "error"
+      )
     }
   }
   save_tr <- function(field, value) {
@@ -1970,46 +2284,57 @@ server <- function(input, output, session) {
       sync_yaml_text()
     } else {
       showNotification(paste("Could not update transmission", field, "\u2014", r$error),
-                       type = "error")
+        type = "error"
+      )
     }
   }
-  title_d   <- debounce(reactive(input$md_title), 700)
+  title_d <- debounce(reactive(input$md_title), 700)
   version_d <- debounce(reactive(input$md_version), 700)
-  header_d  <- debounce(reactive(input$md_header), 700)
-  errh_d    <- debounce(reactive(input$md_error_handling), 700)
-  auth_d    <- debounce(reactive(input$md_authorized), 700)
+  header_d <- debounce(reactive(input$md_header), 700)
+  errh_d <- debounce(reactive(input$md_error_handling), 700)
+  auth_d <- debounce(reactive(input$md_authorized), 700)
   # title and version are REQUIRED (non-nullable); block saves of empty/blank values
-  observeEvent(title_d(), {
-    v <- title_d()
-    is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
-    if (!is_blank) save_md("title", v)
-  }, ignoreInit = TRUE)
-  observeEvent(version_d(), {
-    v <- version_d()
-    is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
-    if (!is_blank) save_md("version", v)
-  }, ignoreInit = TRUE)
-  observeEvent(header_d(),  save_md("header", header_d()),   ignoreInit = TRUE)
-  observeEvent(errh_d(),    save_md("error_handling", errh_d()), ignoreInit = TRUE)
-  observeEvent(auth_d(),    save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
-  observeEvent(input$md_date, {
-    v <- input$md_date
-    is_empty <- is.null(v) || length(v) == 0 ||
-      (length(v) == 1 && is.na(v)) ||
-      !nzchar(trimws(as.character(v)[1]))
-    save_md("date", if (is_empty) NULL else v)
-  }, ignoreInit = TRUE, ignoreNULL = FALSE)
+  observeEvent(title_d(),
+    {
+      v <- title_d()
+      is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
+      if (!is_blank) save_md("title", v)
+    },
+    ignoreInit = TRUE
+  )
+  observeEvent(version_d(),
+    {
+      v <- version_d()
+      is_blank <- is.null(v) || length(v) == 0 || !nzchar(trimws(as.character(v)[1]))
+      if (!is_blank) save_md("version", v)
+    },
+    ignoreInit = TRUE
+  )
+  observeEvent(header_d(), save_md("header", header_d()), ignoreInit = TRUE)
+  observeEvent(errh_d(), save_md("error_handling", errh_d()), ignoreInit = TRUE)
+  observeEvent(auth_d(), save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
+  observeEvent(input$md_date,
+    {
+      v <- input$md_date
+      is_empty <- is.null(v) || length(v) == 0 ||
+        (length(v) == 1 && is.na(v)) ||
+        !nzchar(trimws(as.character(v)[1]))
+      save_md("date", if (is_empty) NULL else v)
+    },
+    ignoreInit = TRUE,
+    ignoreNULL = FALSE
+  )
   # transmission fields (debounced text + immediate flags)
-  tr_type_d   <- debounce(reactive(input$tr_type), 700)
-  tr_freq_d   <- debounce(reactive(input$tr_frequency), 700)
-  tr_notif_d  <- debounce(reactive(input$tr_notification), 700)
-  tr_first_d  <- debounce(reactive(input$tr_date_first), 700)
-  tr_last_d   <- debounce(reactive(input$tr_date_last), 700)
-  observeEvent(tr_type_d(),  save_tr("type", tr_type_d()),               ignoreInit = TRUE)
-  observeEvent(tr_freq_d(),  save_tr("frequency", tr_freq_d()),          ignoreInit = TRUE)
-  observeEvent(tr_notif_d(), save_tr("notification", tr_notif_d()),      ignoreInit = TRUE)
+  tr_type_d <- debounce(reactive(input$tr_type), 700)
+  tr_freq_d <- debounce(reactive(input$tr_frequency), 700)
+  tr_notif_d <- debounce(reactive(input$tr_notification), 700)
+  tr_first_d <- debounce(reactive(input$tr_date_first), 700)
+  tr_last_d <- debounce(reactive(input$tr_date_last), 700)
+  observeEvent(tr_type_d(), save_tr("type", tr_type_d()), ignoreInit = TRUE)
+  observeEvent(tr_freq_d(), save_tr("frequency", tr_freq_d()), ignoreInit = TRUE)
+  observeEvent(tr_notif_d(), save_tr("notification", tr_notif_d()), ignoreInit = TRUE)
   observeEvent(tr_first_d(), save_tr("date_first_transfer", tr_first_d()), ignoreInit = TRUE)
-  observeEvent(tr_last_d(),  save_tr("date_last_transfer", tr_last_d()),  ignoreInit = TRUE)
+  observeEvent(tr_last_d(), save_tr("date_last_transfer", tr_last_d()), ignoreInit = TRUE)
   observeEvent(input$tr_test_upload, save_tr("test_upload", dta_choice_to_flag(input$tr_test_upload)), ignoreInit = TRUE)
   observeEvent(input$tr_blinded, save_tr("blinded_transfer", dta_choice_to_flag(input$tr_blinded)), ignoreInit = TRUE)
 
@@ -2021,8 +2346,10 @@ server <- function(input, output, session) {
     g <- function(k) p[[k]] %||% ""
     tagList(
       textInput(paste0(prefix, "_name"), "Name", value = g("name")),
-      textInput(paste0(prefix, "_roles"), "Role(s)", value = g("role"),
-                placeholder = "e.g. Data Manager, Reviewer"),
+      textInput(paste0(prefix, "_roles"), "Role(s)",
+        value = g("role"),
+        placeholder = "e.g. Data Manager, Reviewer"
+      ),
       textInput(paste0(prefix, "_email"), "Email", value = g("email")),
       layout_columns(
         col_widths = c(6, 6),
@@ -2064,13 +2391,17 @@ server <- function(input, output, session) {
   # Open a pre-filled modal to edit one contact's details.
   edit_contact_flow <- function(side, index) {
     p <- dta_contact_at(isolate(rv$dta), side, index)
-    if (is.null(p)) return()
+    if (is.null(p)) {
+      return()
+    }
     rv$editing_contact <- list(side = side, index = index)
     showModal(modalDialog(
       title = paste("Edit", side, "contact"),
       contact_modal_inputs("edit_contact", p),
-      div(class = "msg-hint",
-          "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."),
+      div(
+        class = "msg-hint",
+        "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."
+      ),
       footer = tagList(
         modalButton("Cancel"),
         actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
@@ -2108,8 +2439,16 @@ server <- function(input, output, session) {
     }
   })
 
-  output$receiver_contacts <- renderUI({ rv$contacts_token; req(isolate(rv$dta)); render_contacts("receiver") })
-  output$supplier_contacts <- renderUI({ rv$contacts_token; req(isolate(rv$dta)); render_contacts("supplier") })
+  output$receiver_contacts <- renderUI({
+    rv$contacts_token
+    req(isolate(rv$dta))
+    render_contacts("receiver")
+  })
+  output$supplier_contacts <- renderUI({
+    rv$contacts_token
+    req(isolate(rv$dta))
+    render_contacts("supplier")
+  })
 
   # --- affiliation (side-level: receiver / supplier) ----------------------
   render_affiliation <- function(side) {
@@ -2117,23 +2456,35 @@ server <- function(input, output, session) {
     g <- function(k) aff[[k]] %||% ""
     tagList(
       textInput(paste0(side, "_aff_name"), "Organization",
-                value = g("name"), width = "100%",
-                placeholder = "e.g. Test Company"),
+        value = g("name"), width = "100%",
+        placeholder = "e.g. Test Company"
+      ),
       layout_columns(
         col_widths = c(6, 6),
         textInput(paste0(side, "_aff_country"), "Country",
-                  value = g("country"), width = "100%"),
+          value = g("country"), width = "100%"
+        ),
         textInput(paste0(side, "_aff_address"), "Address",
-                  value = g("address"), width = "100%")
+          value = g("address"), width = "100%"
+        )
       )
     )
   }
-  output$receiver_affiliation <- renderUI({ rv$md_token; req(isolate(rv$dta)); render_affiliation("receiver") })
-  output$supplier_affiliation <- renderUI({ rv$md_token; req(isolate(rv$dta)); render_affiliation("supplier") })
+  output$receiver_affiliation <- renderUI({
+    rv$md_token
+    req(isolate(rv$dta))
+    render_affiliation("receiver")
+  })
+  output$supplier_affiliation <- renderUI({
+    rv$md_token
+    req(isolate(rv$dta))
+    render_affiliation("supplier")
+  })
 
   save_affiliation <- function(side, field, value) {
     req(rv$dta)
-    kv <- list(); kv[[field]] <- value %||% ""
+    kv <- list()
+    kv[[field]] <- value %||% ""
     r <- do.call(dta_set_affiliation, c(list(rv$dta, side), kv))
     if (r$ok) {
       rv$dta <- r$value
@@ -2145,7 +2496,8 @@ server <- function(input, output, session) {
   for (.side in c("receiver", "supplier")) {
     for (.field in c("name", "country", "address")) {
       local({
-        SIDE <- .side; FIELD <- .field
+        SIDE <- .side
+        FIELD <- .field
         inid <- paste0(SIDE, "_aff_", FIELD)
         d <- debounce(reactive(input[[inid]]), 700)
         observeEvent(d(), save_affiliation(SIDE, FIELD, d()), ignoreInit = TRUE)
@@ -2165,7 +2517,9 @@ server <- function(input, output, session) {
         if (is.null(contact_rm_registry[[edid]])) {
           contact_rm_registry[[edid]] <- TRUE
           local({
-            SIDE <- side; IDX <- i; EID <- edid
+            SIDE <- side
+            IDX <- i
+            EID <- edid
             observeEvent(input[[EID]], edit_contact_flow(SIDE, IDX), ignoreInit = TRUE)
           })
         }
@@ -2173,29 +2527,37 @@ server <- function(input, output, session) {
         if (is.null(contact_rm_registry[[rmid]])) {
           contact_rm_registry[[rmid]] <- TRUE
           local({
-            SIDE <- side; IDX <- i; ID <- rmid
-            observeEvent(input[[ID]], {
-              showModal(modalDialog(
-                title = "Remove contact?",
-                sprintf("Remove this %s contact?", SIDE),
-                footer = tagList(
-                  modalButton("Cancel"),
-                  actionButton(paste0("confirm_", ID), "Remove", class = "btn btn-danger")
-                ),
-                easyClose = TRUE
-              ))
-            }, ignoreInit = TRUE)
-            observeEvent(input[[paste0("confirm_", ID)]], {
-              r <- dta_remove_contact(rv$dta, SIDE, IDX)
-              if (r$ok) {
-                rv$dta <- r$value
-                rv$contacts_token <- rv$contacts_token + 1
-                sync_yaml_text()
-              } else {
-                showNotification(r$error, type = "error")
-              }
-              removeModal()
-            }, ignoreInit = TRUE)
+            SIDE <- side
+            IDX <- i
+            ID <- rmid
+            observeEvent(input[[ID]],
+              {
+                showModal(modalDialog(
+                  title = "Remove contact?",
+                  sprintf("Remove this %s contact?", SIDE),
+                  footer = tagList(
+                    modalButton("Cancel"),
+                    actionButton(paste0("confirm_", ID), "Remove", class = "btn btn-danger")
+                  ),
+                  easyClose = TRUE
+                ))
+              },
+              ignoreInit = TRUE
+            )
+            observeEvent(input[[paste0("confirm_", ID)]],
+              {
+                r <- dta_remove_contact(rv$dta, SIDE, IDX)
+                if (r$ok) {
+                  rv$dta <- r$value
+                  rv$contacts_token <- rv$contacts_token + 1
+                  sync_yaml_text()
+                } else {
+                  showNotification(r$error, type = "error")
+                }
+                removeModal()
+              },
+              ignoreInit = TRUE
+            )
           })
         }
       }
@@ -2206,8 +2568,10 @@ server <- function(input, output, session) {
     showModal(modalDialog(
       title = paste("Add", side, "contact"),
       contact_modal_inputs("new_contact"),
-      div(class = "msg-hint",
-          "Separate multiple roles with commas. Affiliation is set once per side (above), not per person."),
+      div(
+        class = "msg-hint",
+        "Separate multiple roles with commas. Affiliation is set once per side (above), not per person."
+      ),
       footer = tagList(
         modalButton("Cancel"),
         actionButton(paste0("confirm_add_", side), "Add", class = "btn btn-primary")
@@ -2226,7 +2590,8 @@ server <- function(input, output, session) {
     }
     roles <- trimws(strsplit(input$new_contact_roles %||% "", ",")[[1]])
     r <- dta_add_contact(
-      rv$dta, side, name = nm, roles = roles,
+      rv$dta, side,
+      name = nm, roles = roles,
       email = input$new_contact_email %||% "",
       department = input$new_contact_department %||% "",
       phone = input$new_contact_phone %||% "",
@@ -2247,10 +2612,14 @@ server <- function(input, output, session) {
   # --- raw YAML: editable, validated as YAML AND as a DTA/DTADataSet ------
   output$yaml_validation_msg <- renderUI({
     m <- rv$yaml_msg
-    if (is.null(m)) return(NULL)
+    if (is.null(m)) {
+      return(NULL)
+    }
     if (isTRUE(m$ok)) {
-      div(class = "yaml-valid ok", HTML("&#x2714;"),
-          " Valid — document applied.")
+      div(
+        class = "yaml-valid ok", HTML("&#x2714;"),
+        " Valid — document applied."
+      )
     } else {
       div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
     }
@@ -2285,24 +2654,28 @@ server <- function(input, output, session) {
     # Smart reconcile: keep uploads for datasets whose file handlers are
     # unchanged, keep validation only when columns/rules are also unchanged,
     # and drop uploads for datasets that were removed from the document.
-    new_dta     <- res$value
-    old_dta     <- isolate(rv$dta)
+    new_dta <- res$value
+    old_dta <- isolate(rv$dta)
     old_uploads <- isolate(rv$uploads)
-    old_status  <- isolate(rv$status)
+    old_status <- isolate(rv$status)
     prev_active <- isolate(rv$active)
-    new_names   <- dta_dataset_names(new_dta)
-    old_names   <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
+    new_names <- dta_dataset_names(new_dta)
+    old_names <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
 
     new_uploads <- list()
-    new_status  <- stats::setNames(rep("pending", length(new_names)), new_names)
+    new_status <- stats::setNames(rep("pending", length(new_names)), new_names)
     for (nm in new_names) {
       if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
       old_ds <- dta_get_dataset(old_dta, nm)
       new_ds <- dta_get_dataset(new_dta, nm)
-      handlers_same <- identical(dta_handlers_signature(old_ds),
-                                 dta_handlers_signature(new_ds))
-      specs_same <- identical(dta_specs_signature(old_ds),
-                              dta_specs_signature(new_ds))
+      handlers_same <- identical(
+        dta_handlers_signature(old_ds),
+        dta_handlers_signature(new_ds)
+      )
+      specs_same <- identical(
+        dta_specs_signature(old_ds),
+        dta_specs_signature(new_ds)
+      )
       if (handlers_same && dta_dataset_content_count(old_ds) > 0) {
         tr <- dta_transfer_bound_data(new_dta, nm, old_ds, keep_validation = specs_same)
         if (isTRUE(tr$ok)) {
@@ -2322,7 +2695,7 @@ server <- function(input, output, session) {
     rv$uploads <- new_uploads
     for (nm in new_names) {
       if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
-          identical(new_status[[nm]], "pending")) {
+        identical(new_status[[nm]], "pending")) {
         new_status[[nm]] <- "nodata"
       }
     }
@@ -2384,7 +2757,8 @@ server <- function(input, output, session) {
       res <- dta_dataset_to_yaml_text(rv$dta, rv$active)
       if (!res$ok) {
         showNotification(paste("Dataset YAML export failed:", res$error),
-                         type = "error", duration = 10)
+          type = "error", duration = 10
+        )
         stop(res$error)
       }
       write_yaml_download(res$value, file)
@@ -2401,17 +2775,258 @@ server <- function(input, output, session) {
       }
     }
   )
-  output$dl_pdf <- downloadHandler(
-    filename = function() paste0("DTA_", Sys.Date(), ".pdf"),
-    content = function(file) {
-      req(rv$dta)
-      res <- dta_export(rv$dta, file, "pdf")
-      if (!res$ok) {
+
+  # --- export modal --------------------------------------------------------
+  # Reactive values to store export options and file path
+  export_state <- reactiveValues(
+    file_path = NULL,
+    file_name = NULL
+  )
+
+  # Open export modal
+  observeEvent(input$export_modal_open, {
+    req(rv$dta)
+    templates <- list_available_templates()
+
+    modal_content <- div(
+      h4("Export Document"),
+      p("Choose the format and options for your DTA export."),
+      h5("Format", class = "text-muted"),
+      radioButtons("export_format", NULL,
+        choices = c("Markdown" = "markdown", "Word Document" = "word"),
+        selected = "markdown"
+      ),
+      # Markdown options
+      conditionalPanel(
+        condition = "input.export_format == 'markdown'",
+        hr(),
+        h5("Markdown Options", class = "text-muted"),
+        checkboxInput("export_as_pdf", "Export as PDF (via Pandoc)", value = FALSE),
+        checkboxInput("export_include_yaml_md", "Include YAML in document (hidden at end)", value = FALSE)
+      ),
+      # Word options
+      conditionalPanel(
+        condition = "input.export_format == 'word'",
+        hr(),
+        h5("Word Document Options", class = "text-muted"),
+        radioButtons("export_word_mode", NULL,
+          choices = c("Use built-in template" = "builtin", "Use custom template" = "custom"),
+          selected = "builtin"
+        ),
+        conditionalPanel(
+          condition = "input.export_word_mode == 'custom'",
+          if (length(templates) > 0) {
+            selectInput("export_template_select",
+              "Available templates:",
+              choices = stats::setNames(templates, templates),
+              selected = templates[1]
+            )
+          } else {
+            p("No custom templates available.", class = "text-muted")
+          }
+        ),
+        checkboxInput("export_include_yaml_word", "Include YAML in template (if template supports it)", value = FALSE)
+      ),
+      hr(),
+      h5("Output filename", class = "text-muted"),
+      textOutput("export_filename_preview")
+    )
+
+    showModal(modalDialog(
+      modal_content,
+      title = "Export Document",
+      footer = tagList(
+        actionButton("export_cancel", "Cancel", class = "btn btn-outline-secondary"),
+        actionButton("export_do", "Export", class = "btn btn-primary")
+      ),
+      size = "m"
+    ))
+  })
+
+  # Export filename preview
+  output$export_filename_preview <- renderText({
+    req(rv$dta)
+    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
+    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
+    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+
+    ext <- if (input$export_format == "markdown") {
+      if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
+    } else {
+      ".docx"
+    }
+    paste0(base, "_", Sys.Date(), ext)
+  })
+
+  # Cancel export
+  observeEvent(input$export_cancel, {
+    removeModal()
+  })
+
+  # Execute export
+  observeEvent(input$export_do, {
+    req(rv$dta)
+
+    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
+    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
+    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+
+    tryCatch(
+      {
+        if (input$export_format == "markdown") {
+          # Markdown export
+          ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
+          filename <- paste0(base, "_", Sys.Date(), ext)
+          output_file <- file.path(tempdir(), filename)
+
+          # write_dta() throws on error (caught below); it does not return $ok.
+          DTAtools::write_dta(rv$dta, output_file, format = "md", overwrite = TRUE, quiet = TRUE)
+
+          # Optionally embed YAML
+          if (isTRUE(input$export_include_yaml_md)) {
+            md_text <- readLines(output_file, warn = FALSE)
+            md_text <- paste(md_text, collapse = "\n")
+            md_text <- embed_yaml_markdown(md_text, rv$dta)
+            writeLines(enc2utf8(md_text), output_file, useBytes = TRUE)
+          }
+
+          # Convert to PDF if requested, trying two routes so it works with or
+          # without a LaTeX install:
+          #   1. pandoc + a real PDF engine (LaTeX/TinyTeX/wkhtmltopdf) - best
+          #      typography when it is available.
+          #   2. headless Chrome/Edge printing the rendered HTML - needs no
+          #      LaTeX and no extra R packages, just an installed browser.
+          # If neither route yields a PDF, fall back to delivering the Markdown
+          # file so the export still succeeds (and still downloads).
+          if (isTRUE(input$export_as_pdf)) {
+            pdf_file <- sub("\\.md$", ".pdf", output_file)
+            pdf_ok <- FALSE
+            has_pandoc <- requireNamespace("rmarkdown", quietly = TRUE) &&
+              rmarkdown::pandoc_available()
+
+            # Route 1: pandoc + LaTeX/wkhtmltopdf engine.
+            if (has_pandoc && has_pdf_engine()) {
+              pdf_ok <- tryCatch(
+                {
+                  rmarkdown::pandoc_convert(
+                    input = normalizePath(output_file),
+                    to = "pdf",
+                    output = pdf_file
+                  )
+                  file.exists(pdf_file)
+                },
+                error = function(e) FALSE
+              )
+            }
+
+            # Route 2: headless browser (no LaTeX required).
+            chrome <- if (!isTRUE(pdf_ok)) find_chrome_binary() else ""
+            if (!isTRUE(pdf_ok) && has_pandoc && nzchar(chrome)) {
+              pdf_ok <- tryCatch(
+                {
+                  markdown_to_pdf_via_chrome(output_file, pdf_file, chrome = chrome)
+                  file.exists(pdf_file) && file.info(pdf_file)$size > 0
+                },
+                error = function(e) {
+                  showNotification(
+                    paste0("Browser-based PDF failed (", conditionMessage(e), ")."),
+                    type = "warning",
+                    duration = 8
+                  )
+                  FALSE
+                }
+              )
+            }
+
+            if (isTRUE(pdf_ok) && file.exists(pdf_file)) {
+              output_file <- pdf_file
+              filename <- sub("\\.md$", ".pdf", filename)
+            } else {
+              showNotification(
+                paste0(
+                  "PDF export needs a LaTeX engine or a Chrome/Edge browser, ",
+                  "and neither produced a PDF. Exporting Markdown instead."
+                ),
+                type = "warning",
+                duration = 10
+              )
+            }
+          }
+
+          export_state$file_path <- output_file
+          export_state$file_name <- filename
+        } else {
+          # Word export
+          filename <- paste0(base, "_", Sys.Date(), ".docx")
+          output_file <- file.path(tempdir(), filename)
+
+          if (input$export_word_mode == "custom") {
+            template_name <- input$export_template_select
+            template_path <- get_template_path(template_name)
+            if (is.null(template_path)) {
+              stop("Template file not found. It may have been deleted.")
+            }
+
+            # Prepare template variables (dataset/specs content). Always supply
+            # {YAML_EMBEDDED} so the placeholder is cleanly filled (or blanked)
+            # rather than left as literal text in the document.
+            variables <- list(
+              "{DATASETS_SUMMARY}" = format_datasets_summary(rv$dta),
+              "{DATASETS_DETAIL}" = format_datasets_detail(rv$dta),
+              "{YAML_EMBEDDED}" = ""
+            )
+
+            # Add YAML if requested
+            if (isTRUE(input$export_include_yaml_word)) {
+              res_yaml <- dta_to_yaml_text(rv$dta)
+              if (isTRUE(res_yaml$ok)) {
+                variables[["{YAML_EMBEDDED}"]] <- res_yaml$value
+              }
+            }
+
+            # export_with_template() throws on error (caught below); no $ok.
+            DTAtools::export_with_template(
+              rv$dta,
+              template = template_path,
+              output = output_file,
+              variables = variables,
+              quiet = TRUE,
+              fallback = FALSE
+            )
+          } else {
+            # Built-in template. write_dta() throws on error; no $ok returned.
+            DTAtools::write_dta(rv$dta, output_file, format = "docx", overwrite = TRUE, quiet = TRUE)
+          }
+
+          export_state$file_path <- output_file
+          export_state$file_name <- filename
+        }
+
+        removeModal()
+        # Trigger the hidden download button via a NATIVE click (see
+        # download_trigger_js). shinyjs::click() does not reliably start a
+        # downloadButton's browser download.
+        session$sendCustomMessage("dta_trigger_download", "export_trigger_download")
+        showNotification("Document exported successfully", type = "message", duration = 5)
+      },
+      error = function(e) {
         showNotification(
-          paste("PDF export failed:", res$error),
-          type = "error", duration = 12
+          paste("Export failed:", as.character(e)),
+          type = "error",
+          duration = 12
         )
-        stop(res$error)
+      }
+    )
+  })
+
+  # Hidden download handler
+  output$export_trigger_download <- downloadHandler(
+    filename = function() {
+      export_state$file_name %||% "export.txt"
+    },
+    content = function(file) {
+      if (!is.null(export_state$file_path) && file.exists(export_state$file_path)) {
+        file.copy(export_state$file_path, file, overwrite = TRUE)
       }
     }
   )
@@ -2422,12 +3037,15 @@ server <- function(input, output, session) {
     st <- unlist(rv$status)
     validated <- names(st)[st %in% c("pass", "fail")]
     ok <- length(validated) > 0 && all(st[validated] == "pass")
-    if (!isTRUE(ok)) return(NULL)
+    if (!isTRUE(ok)) {
+      return(NULL)
+    }
     tagList(
       tags$hr(),
       downloadButton("dl_validation_report", "Validation report",
-                     class = "btn btn-success w-100",
-                     title = "Download a report certifying this successful validation")
+        class = "btn btn-success w-100",
+        title = "Download a report certifying this successful validation"
+      )
     )
   })
 
@@ -2455,8 +3073,12 @@ server <- function(input, output, session) {
     ))
   })
   observeEvent(input$confirm_reset, {
-    rv$dta <- NULL; rv$yaml_text <- NULL; rv$structure <- NULL
-    rv$active <- NULL; rv$uploads <- list(); rv$status <- list()
+    rv$dta <- NULL
+    rv$yaml_text <- NULL
+    rv$structure <- NULL
+    rv$active <- NULL
+    rv$uploads <- list()
+    rv$status <- list()
     rv$is_example <- FALSE
     rv$example_target <- NULL
     try(unlink(session_file), silent = TRUE)
@@ -2490,7 +3112,8 @@ server <- function(input, output, session) {
 
   output$loaded_files <- renderUI({
     req(rv$active, rv$structure)
-    rv$uploads; rv$status  # re-render when files or validation state change
+    rv$uploads
+    rv$status # re-render when files or validation state change
     dsname <- rv$active
     s <- rv$structure[[dsname]]
     tstatus <- dta_table_status_map(rv$dta, dsname)
@@ -2499,25 +3122,40 @@ server <- function(input, output, session) {
       h <- s$handlers[[hi]]
       key <- paste0(dsname, "||", hi)
       recs <- rv$uploads[[key]] %||% list()
-      if (length(recs) == 0) return(NULL)
+      if (length(recs) == 0) {
+        return(NULL)
+      }
       any_files <<- TRUE
       rows <- lapply(recs, function(rec) {
         fid <- get_file_id(dsname, hi, rec$table)
         st <- tstatus[[rec$table]] %||% "pending"
-        icon_ch <- switch(st, pass = "\u2714", fail = "\u2716", "\u2014")
-        icls <- switch(st, pass = "file-ok", fail = "file-fail", "file-pending")
+        icon_ch <- switch(st,
+          pass = "\u2714",
+          fail = "\u2716",
+          "\u2014"
+        )
+        icls <- switch(st,
+          pass = "file-ok",
+          fail = "file-fail",
+          "file-pending"
+        )
         ttl <- switch(st,
           pass = "Validated \u2014 no errors",
           fail = "Validation errors \u2014 see messages below",
-          "Not validated yet")
+          "Not validated yet"
+        )
         div(
           class = "loaded-file-row",
           tags$span(class = paste("file-status", icls), title = ttl, icon_ch),
           tags$span(class = "file-name", rec$file),
-          tags$span(class = "file-table", title = "Table name",
-                    paste0("\u2192 ", rec$table)),
-          actionButton(paste0("rmfile_", fid), label = HTML("&#x1F5D1;&#xFE0F;"),
-                       class = "btn btn-sm file-remove", title = "Remove this file")
+          tags$span(
+            class = "file-table", title = "Table name",
+            paste0("\u2192 ", rec$table)
+          ),
+          actionButton(paste0("rmfile_", fid),
+            label = HTML("&#x1F5D1;&#xFE0F;"),
+            class = "btn btn-sm file-remove", title = "Remove this file"
+          )
         )
       })
       div(
@@ -2526,7 +3164,9 @@ server <- function(input, output, session) {
         tagList(rows)
       )
     })
-    if (!any_files) return(div(class = "msg-hint", "No files loaded yet."))
+    if (!any_files) {
+      return(div(class = "msg-hint", "No files loaded yet."))
+    }
     tagList(blocks)
   })
 
@@ -2542,19 +3182,23 @@ server <- function(input, output, session) {
     if (!nzchar(title)) {
       title <- if (dataset_only) {
         dta_dataset_names(rv$dta)[1] %||% "Dataset"
-      } else "Untitled DTA"
+      } else {
+        "Untitled DTA"
+      }
     }
     version <- getf("version")
     date <- getf("date")
     div(
       class = "workspace-header",
       div(class = "ws-title", title),
-      if (dataset_only || nzchar(version) || nzchar(date)) div(
-        class = "ws-meta",
-        if (dataset_only) tags$span(class = "ws-pill", "Dataset \u2014 no metadata"),
-        if (nzchar(version)) tags$span(class = "ws-pill", paste0("v", version)),
-        if (nzchar(date)) tags$span(class = "ws-pill", date)
-      )
+      if (dataset_only || nzchar(version) || nzchar(date)) {
+        div(
+          class = "ws-meta",
+          if (dataset_only) tags$span(class = "ws-pill", "Dataset \u2014 no metadata"),
+          if (nzchar(version)) tags$span(class = "ws-pill", paste0("v", version)),
+          if (nzchar(date)) tags$span(class = "ws-pill", date)
+        )
+      }
     )
   })
 
@@ -2562,7 +3206,9 @@ server <- function(input, output, session) {
     req(rv$dta)
     st <- unlist(rv$status)
     n <- length(dta_dataset_names(rv$dta))
-    np <- sum(st == "pass"); nf <- sum(st == "fail"); nd <- sum(st == "nodata")
+    np <- sum(st == "pass")
+    nf <- sum(st == "fail")
+    nd <- sum(st == "nodata")
     div(
       style = "display:flex; gap:18px; margin-bottom:8px; flex-wrap:wrap;",
       div(div(class = "metric", n), div(class = "slot-meta", "datasets")),
@@ -2588,10 +3234,13 @@ server <- function(input, output, session) {
         upid <- sprintf("up_%d_%d", ds_idx, hi)
         exid <- sprintf("expick_%d_%d", ds_idx, hi)
         multiple <- isTRUE(!is.na(h$max) && h$max > 1)
-        up_ctrl <- div(class = "dropzone",
-                       fileInput(upid,
-                                 label = if (multiple) "Drop or choose file(s)" else "Drop or choose a file",
-                                 multiple = multiple))
+        up_ctrl <- div(
+          class = "dropzone",
+          fileInput(upid,
+            label = if (multiple) "Drop or choose file(s)" else "Drop or choose a file",
+            multiple = multiple
+          )
+        )
         card(
           class = "slot-card",
           card_header(
@@ -2633,33 +3282,43 @@ server <- function(input, output, session) {
         class = "ds-actions",
         style = "margin-bottom:12px;",
         actionButton("check_one", "Check this dataset",
-                     class = "btn btn-primary"),
-        actionButton("edit_cols", label = HTML("&#x1F4D0; Edit columns"),
-                     class = "btn btn-outline-secondary",
-                     title = "Add, remove or edit column specifications"),
-        actionButton("edit_rules", label = HTML("&#x2696;&#xFE0F; Edit rules"),
-                     class = "btn btn-outline-secondary",
-                     title = "Add, remove or edit validation rules"),
+          class = "btn btn-primary"
+        ),
+        actionButton("edit_cols",
+          label = HTML("&#x1F4D0; Edit columns"),
+          class = "btn btn-outline-secondary",
+          title = "Add, remove or edit column specifications"
+        ),
+        actionButton("edit_rules",
+          label = HTML("&#x2696;&#xFE0F; Edit rules"),
+          class = "btn btn-outline-secondary",
+          title = "Add, remove or edit validation rules"
+        ),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
-                       class = "btn btn-outline-primary",
-                       title = "Download this dataset's specification as YAML")
+          class = "btn btn-outline-primary",
+          title = "Download this dataset's specification as YAML"
+        )
       ),
-      #div(
+      # div(
       #  class = "msg-hint", style = "margin:-6px 0 12px;",
       #  "Uploads are validated against the file handler as you add them."
-      #),
-      #tags$h5("Expected files"),
-      div(class = "msg-hint", style = "margin:-4px 0 10px;",
-          "Drop each required file below. Loaded files appear underneath."),
+      # ),
+      # tags$h5("Expected files"),
+      div(
+        class = "msg-hint", style = "margin:-4px 0 10px;",
+        "Drop each required file below. Loaded files appear underneath."
+      ),
       slots,
       card(
         card_header(
           div(
             style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
             tags$span("Loaded files"),
-            actionButton("discard_all", label = HTML("&#x1F5D1;&#xFE0F; Discard all"),
-                         class = "btn btn-sm btn-outline-danger",
-                         title = "Remove all loaded files from this dataset")
+            actionButton("discard_all",
+              label = HTML("&#x1F5D1;&#xFE0F; Discard all"),
+              class = "btn btn-sm btn-outline-danger",
+              title = "Remove all loaded files from this dataset"
+            )
           )
         ),
         card_body(uiOutput("loaded_files"))
@@ -2681,20 +3340,29 @@ server <- function(input, output, session) {
         max_height = "620px",
         card_header(tags$h3("Load a DTA specification", style = "margin:0;")),
         card_body(
-          p("Drag and drop a DTA ", tags$code(".yaml"),
-            " file to begin, or load the bundled example."),
-          div(class = "msg-hint", style = "margin:-6px 0 8px;",
-              "A full DTA (with metadata) or a standalone dataset spec is accepted; ",
-              "a dataset-only file is loaded without a Metadata section."),
-          div(class = "dropzone",
-              fileInput("dta_file", "Drop or choose a .yaml / .yml file",
-                        accept = c(".yaml", ".yml"), width = "100%")),
+          p(
+            "Drag and drop a DTA ", tags$code(".yaml"),
+            " file to begin, or load the bundled example."
+          ),
+          div(
+            class = "msg-hint", style = "margin:-6px 0 8px;",
+            "A full DTA (with metadata) or a standalone dataset spec is accepted; ",
+            "a dataset-only file is loaded without a Metadata section."
+          ),
+          div(
+            class = "dropzone",
+            fileInput("dta_file", "Drop or choose a .yaml / .yml file",
+              accept = c(".yaml", ".yml"), width = "100%"
+            )
+          ),
           div(
             style = "display:flex; gap:10px; margin-top:8px;",
             actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
-            if (restore_available)
+            if (restore_available) {
               actionButton("restore_session", "Restore previous session",
-                           class = "btn btn-outline-secondary")
+                class = "btn btn-outline-secondary"
+              )
+            }
           )
         )
       )
@@ -2709,12 +3377,8 @@ server <- function(input, output, session) {
           uiOutput("dataset_nav_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
-          #div(style = "height:8px;"),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          #div(style = "height:6px;"),
-          downloadButton("dl_docx", "Export DTA Word", class = "btn btn-outline-primary w-100"),
-          #div(style = "height:6px;"),
-          downloadButton("dl_pdf", "Export DTA PDF", class = "btn btn-outline-primary w-100"),
+          actionButton("export_modal_open", "Export PDF", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
@@ -2729,8 +3393,10 @@ server <- function(input, output, session) {
               "Raw YAML",
               div(
                 class = "yaml-edit-bar",
-                div(class = "msg-hint",
-                    HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Uploaded files are kept for datasets whose file handlers are unchanged; a dataset's validation is cleared only if its columns or rules changed, and deleted datasets drop their uploads.")),
+                div(
+                  class = "msg-hint",
+                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Uploaded files are kept for datasets whose file handlers are unchanged; a dataset's validation is cleared only if its columns or rules changed, and deleted datasets drop their uploads.")
+                ),
                 div(
                   class = "yaml-edit-actions",
                   actionButton("apply_yaml", "Apply changes", class = "btn btn-sm btn-primary"),
@@ -2751,8 +3417,10 @@ server <- function(input, output, session) {
                   )
                 )
               } else {
-                textAreaInput("raw_yaml_editor", label = NULL,
-                              value = isolate(rv$yaml_text), width = "100%", rows = 22)
+                textAreaInput("raw_yaml_editor",
+                  label = NULL,
+                  value = isolate(rv$yaml_text), width = "100%", rows = 22
+                )
               }
             )
           )
@@ -2764,7 +3432,9 @@ server <- function(input, output, session) {
 
   # --- restore previous session ------------------------------------------
   observeEvent(input$restore_session, {
-    if (!file.exists(session_file)) return()
+    if (!file.exists(session_file)) {
+      return()
+    }
     saved <- tryCatch(readRDS(session_file), error = function(e) NULL)
     # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
     # fall back to a legacy `dta` field for older session files.
@@ -2782,10 +3452,14 @@ server <- function(input, output, session) {
     rv$structure <- saved$structure %||% build_structure(restored)
     ups <- saved$uploads %||% list()
     rv$uploads <- lapply(ups, function(recs) {
-      if (length(recs) == 0) return(list())
+      if (length(recs) == 0) {
+        return(list())
+      }
       if (is.character(recs)) {
         lapply(recs, function(f) list(file = f, table = tools::file_path_sans_ext(basename(f))))
-      } else recs
+      } else {
+        recs
+      }
     })
     rv$status <- saved$status %||% stats::setNames(
       rep("pending", length(dta_dataset_names(restored))),

@@ -26,4 +26,5 @@ CHANGELOG.md
 ^test_comprehensive\.md$
 ^test_comprehensive\.docx$
 ^test_output\.md$
+^\.tmp
 

@@ -15,7 +15,7 @@ renv/staging
 renv/settings.json
 .Renviron
 *docx
-
+.tmp*
 ..Rcheck/00check.log
 instructions_shiny.txt
 DTATOOLSR_METADATA_IMPLEMENTATION.md
@@ -23,3 +23,4 @@ bla.md
 test_comprehensive.md
 test_output.md
 Rplots.pdf
+IMPLEMENTATION_TECHNICAL_DETAILS.md

@@ -1,0 +1,50 @@
+Package: DTAtools
+Title: Tools for Handling Data from Data Transfer Agreements (DTAs) /
+        Data Transfer Specifications (DTS)
+Version: 0.12.0
+Authors@R: c(
+	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
+		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
+	person("Daniel", "Schreyer",
+		email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
+Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
+Description: Provides a comprehensive set of tools for importing, validating,
+	transforming, and exporting data governed by data transfer agreements (DTAs)
+	or data transfer specifications (DTS). The package supports workflows for
+	handling structured data, ensuring compliance with agreement requirements,
+	and facilitating reproducible data processing. Key features include flexible
+	data import/export, schema validation, metadata management, and integration
+	with common R data analysis pipelines.
+License: LGPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports: yaml, dplyr, cli, utils, tools, tidyr, glue, methods, R.utils,
+        rlang, docxtractr, purrr, magrittr, jsonlite, jsonvalidate,
+        flextable, arrow, stringr, tibble, officer, xml2, zip
+Depends: R (>= 4.1.0), S7 (>= 0.2.2)
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0), shiny, bslib, shinyjs,
+        DT, writexl, shinyAce, remotes
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
+Collate: '00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'
+        'DTAColumnSpecCollection-class.R'
+        'DTAColumnSpecStructure-class.R'
+        'DTAColumnSpecStructureSAS-class.R' 'DTADataSet-class.R'
+        'DTADataSetTabular-class.R' 'validationReporting.R'
+        'DTADataSetFile-class.R' 'DTAFile-class.R'
+        'DTAFileTabular-class.R' 'DTAFileCSV-class.R'
+        'DTAFileDelim-class.R' 'DTAFileTSV-class.R'
+        'DTAMetaData-class.R' 'DTAMetaData-helpers.R' 'DTARule-class.R'
+        'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'
+        'DTARuleColUnique-class.R' 'documentBuilders.R'
+        'evaluateSchemaRules.R' 'exportDocuments.R' 'exportFunctions.R'
+        'exportTemplateDocx.R' 'formattingHelpers.R' 'run_dta_app.R'
+        'validationFunctions.R' 'zzz.R'
+Config/roxygen2/version: 8.0.0
+NeedsCompilation: no
+Packaged: 2026-07-29 07:13:31 UTC; schwarz8
+Author: Thomas Schwarzl [aut, cre] (ORCID:
+    <https://orcid.org/0000-0001-7697-7000>),
+  Daniel Schreyer [aut, ctb]

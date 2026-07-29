@@ -38,7 +38,9 @@ Imports:
 	arrow,
 	stringr,
 	tibble,
-	officer
+	officer,
+	xml2,
+	zip
 Depends:
 	R (>= 4.1.0),
 	S7 (>= 0.2.2)
@@ -48,6 +50,7 @@ Suggests:
 	testthat (>= 3.0.0),
 	shiny,
 	bslib,
+	shinyjs,
 	DT,
 	writexl,
 	shinyAce,
@@ -81,6 +84,7 @@ Collate:
     'evaluateSchemaRules.R'
     'exportDocuments.R'
     'exportFunctions.R'
+    'exportTemplateDocx.R'
     'formattingHelpers.R'
     'run_dta_app.R'
     'validationFunctions.R'
