@@ -4,14 +4,21 @@ on:
   release:
     types: [created]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the tarball to'
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - uses: r-lib/actions/setup-pandoc@v2
 
@@ -36,7 +43,7 @@ jobs:
       - name: Check version
         run: |
           VERSION=$(echo $FILENAME | sed 's/.*_\(.*\).tar.gz/\1/')
-          if [ "v${VERSION}" != "${GITHUB_REF#refs/tags/}" ]; then
+          if [ "v${VERSION}" != "${TAG}" ]; then
             echo "Version mismatch. Tag version and package version should be the same."
             exit 1
           fi
@@ -45,5 +52,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
           gh release upload "${TAG}" "./${FILENAME}" --clobber --repo "${{ github.repository }}"
