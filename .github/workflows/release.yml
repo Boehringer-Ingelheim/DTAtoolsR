@@ -12,17 +12,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: r-lib/actions/setup-pandoc@v2
+
       - uses: r-lib/actions/setup-r@v2
         with:
           r-version: release
           http-user-agent: release
           use-public-rspm: true
 
-      - name: Install S7 from GitHub
-        run: |
-          install.packages("remotes")
-          remotes::install_github("RConsortium/S7")
-        shell: Rscript {0}
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::remotes
+          needs: build
+          use-public-rspm: true
 
       - name: Build package
         run: |
