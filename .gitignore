@@ -9,3 +9,21 @@ testdata
 /Meta/
 example/
 *Rproj
+helper.R
+renv/library
+renv/staging
+renv/settings.json
+.Renviron
+*docx
+# Keep the bundled numbered Word reference template used by the built-in
+# write_dta() DOCX/PDF writer (a required package asset, not a scratch export).
+!inst/extdata/templates/dta_numbered_template.docx
+.tmp*
+..Rcheck/00check.log
+instructions_shiny.txt
+DTATOOLSR_METADATA_IMPLEMENTATION.md
+bla.md
+test_comprehensive.md
+test_output.md
+Rplots.pdf
+IMPLEMENTATION_TECHNICAL_DETAILS.md

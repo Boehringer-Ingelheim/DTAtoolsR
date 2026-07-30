@@ -1,3 +1,8 @@
+^renv$
+^renv\.lock$
+^renv/library$
+^renv/staging$
+^renv/settings\.json$
 ^DTAtoolsR\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
@@ -9,3 +14,17 @@ img
 .pre-commit-config.yaml
 ^\.github$
 CHANGELOG.md
+.lock
+^\.Rprofile$
+^DTATOOLSR_METADATA_IMPLEMENTATION\.md$
+^bla\.md$
+^bla\.docx$
+^column_value_table\.docx$
+^dta_spec_table\.docx$
+^helper\.R$
+^instructions_shiny\.txt$
+^test_comprehensive\.md$
+^test_comprehensive\.docx$
+^test_output\.md$
+^\.tmp
+

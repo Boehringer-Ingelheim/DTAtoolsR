@@ -1,0 +1,130 @@
+DTA                     DTA Class
+DTAColumnSpec           DTA Column Format Class
+DTAColumnSpecCollection
+                        DTAColumnSpecCollection Class
+DTAColumnSpecStructure
+                        DTA Column Spec Structure
+DTAColumnSpecStructureFactory
+                        Create a DTAColumnSpecStructure Object
+DTAColumnSpecStructureSAS
+                        DTA Column Spec Structure SAS
+DTADataSet              DTADataSet Class
+DTADataSetFactory       Create a DTADataSetFactory Object
+DTADataSetFile          DTADataSetFile Class
+DTADataSetTabular       DTADataSetTabular Class
+DTAFileCSV-class        DTAFileCSV Class Constructor
+DTAFileDelim-class      DTAFileDelim Class Constructor
+DTAFileFactory          Create a DTAFile Object
+DTAFileTSV-class        DTAFileTSV Class Constructor
+DTAFileTabular-class    DTAFileTabular Class Constructor
+DTAMetaData             DTAMetaData Class
+DTARule                 DTARule Class
+DTARuleColCondition     DTARuleColCondition Class
+DTARuleColRange         DTARuleColRange Class
+DTARuleColUnique        DTARuleColUnique Class
+DTARuleFactory          Create a DTARule Object
+apply_schema_rules      Apply Schema Rules
+as.list                 as.list method for DTAColumnSpec
+as_json_schema          as_json_schema
+as_json_schema_length   as_json_schema_length
+as_json_schema_type     as_json_schema_type
+check                   Check Generic
+clear_validation        Clear Validation State
+colspec                 Get Column by ID Method
+column_preview          Preview Column IDs in a DTAColumnSpecCollection
+columns                 Get column specs from DTADataSetTabular Object
+columns_specs_from_word
+                        Create DTAColumnSpecCollection from DTA Word
+                        Document
+create_example_DTA      Create Example DTA Object
+create_example_DTAColumnSpec
+                        Create Example DTAColumnSpec
+create_example_DTAColumnSpecCollection
+                        Create Example DTAColumnSpecCollection
+create_example_DTADataSetTabular
+                        Create Example DTADataSetTabular
+create_example_DTAFileCSV
+                        Create Example DTAFileCSV Object
+create_example_DTAFileTSV
+                        Create Example DTAFileTSV Object
+create_example_DTAMetaData
+                        Create Example DTAMetaData Object
+create_example_DTARuleColCondition
+                        create_example_DTARuleColCondition
+create_example_DTARuleColRange
+                        create_example_DTARuleColRange
+create_example_DTARuleColUnique
+                        create_example_DTARuleColUnique
+datasets                Get datasets
+double-bracket          Extract single dataset with [[
+dta_dataset_from_list   DTADataSet from list
+dta_from_list           Read DTA from List
+export_column_value_table
+                        Generate table containing all potential values
+                        of a column
+export_specs_table      Generate table containing all DTA column specs
+export_with_template    Export a DTA Using a User-Provided Word
+                        Template
+files                   Get files from DTADataSet Object
+get_arrow_schema_type   Get Arrow Schema Type
+get_authorized_for_corrections
+                        Get Authorized Contacts for Corrections
+get_receiver_reviewers
+                        Get Receiver Contacts with Reviewer Role
+get_table-DTADataSetTabular
+                        Get table from DTADataSetTabular Object
+get_transmission_dates
+                        Get Transmission Start and End Dates
+get_version_history_df
+                        Get Version History as Data Frame
+import_specs_from_yaml
+                        Create DTAColumnSpecCollection from YAML File
+inspect                 Inspect Validation Messages
+labels-DTADataSetTabular
+                        List of tables labels within DTADataSetTabular
+                        Object
+load_file               Load a file into a DTA or DTADataSet object
+matches_filename        Matches Filename
+max_number_of_files     Get max number of files
+messages                Retrieve Check Messages
+metadata                Get Metadata
+min_number_of_files     Get min number of files
+names                   Get Names Method
+print                   Print DTA Object
+print_info              print info
+print_short_info        Print Short Information for DTADataset
+read_dataset_from_yaml
+                        Read DTADataSet from YAML
+read_dta_from_yaml      Read DTA from YAML
+read_file               Read a file based on DTAFile
+read_file_execution     Read a file
+results                 Retrieve Check Results
+rule_check_col_condition
+                        Rule: check_col_condition
+rule_check_range        Rule: check_range
+rule_check_unique       Rule: check_unique
+rule_preview            Preview Rules in a DTAColumnSpecCollection
+rules                   Get Rules
+run_dta_app             Launch the DTAtools Shiny Application
+single-bracket          Extract multiple datasets with [
+specs-DTADataSetTabular
+                        Get DTAColumnSpecCollection (specs) from
+                        DTADataSetTabular Object
+specs_from_list         Create DTAColumnSpecCollection from Components
+tables                  Get tables from DTADataSet Object
+validate_rules          Validate Rules defined in
+                        DTAColumnSpecCollection and a Table
+validate_table          Validate Table Against JSON Schema
+validate_transmission_dates
+                        Validate Transmission Dates
+validation_errors       Retrieve Validation Errors for One Table
+validation_status       Validation Status for DTADataSetTabular
+write_columns_to_json   Write DTAColumnSpecCollection to JSON File
+write_columns_to_yaml   Write DTAColumnSpecCollection to YAML File
+write_dataset_metadata
+                        Export Dataset Metadata as Professional
+                        Document
+write_dta               Export DTA Metadata as Professional Document
+write_file_specification
+                        Alias: Export File Dataset Specifications
+write_table_to_file     Write DTA Table to File
