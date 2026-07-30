@@ -3,6 +3,7 @@ name: Build and Attach R Package
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -41,11 +42,8 @@ jobs:
           fi
 
       - name: Attach tarball to release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./${{ env.FILENAME }}
-          asset_name: ${{ env.FILENAME }}
-          asset_content_type: application/gzip
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release upload "${TAG}" "./${FILENAME}" --clobber --repo "${{ github.repository }}"
