@@ -3578,10 +3578,10 @@ server <- function(input, output, session) {
       restore_available <- file.exists(session_file)
       card(
         max_height = "620px",
-        card_header(tags$h3("Load a DTA specification", style = "margin:0;")),
+        card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
         card_body(
           p(
-            "Drag and drop a DTA ", tags$code(".yaml"),
+            "Drag and drop a DTA / DTS settings ", tags$code(".yaml"),
             " file to begin, or load the bundled example."
           ),
           div(
