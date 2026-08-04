@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.12.1
+Version: 0.12.2
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -55,7 +55,8 @@ Suggests:
 	writexl,
 	shinyAce,
 	doconv,
-	remotes
+	remotes,
+	pkgload
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR

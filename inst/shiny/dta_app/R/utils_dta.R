@@ -899,17 +899,10 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   # 1) LibreOffice / soffice (best fidelity to the DOCX layout).
   soffice <- dta_find_soffice()
   if (nzchar(soffice) && dta_soffice_to_pdf(soffice, docx, file)) return(invisible(file))
-  # 2) doconv (also LibreOffice-based) when installed.
-  if (requireNamespace("doconv", quietly = TRUE)) {
-    if (isTRUE(tryCatch({ doconv::to_pdf(docx, output = file); dta_is_pdf(file) },
-                        error = function(e) FALSE))) {
-      return(invisible(file))
-    }
-  }
-  # 3) pandoc, but only when a PDF engine (LaTeX/typst/wkhtmltopdf) is present.
+  # 2) pandoc, but only when a PDF engine (LaTeX/typst/wkhtmltopdf) is present.
   if (dta_pandoc_to_pdf(docx, file)) return(invisible(file))
 
-  # 4) Self-contained fallback: render the Markdown export to a real PDF with
+  # 3) Self-contained fallback: render the Markdown export to a real PDF with
   #    R's built-in device (no external tools). Guarantees a working download.
   md <- tempfile(fileext = ".md")
   on.exit(unlink(md), add = TRUE)

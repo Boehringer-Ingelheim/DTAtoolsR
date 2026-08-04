@@ -19,14 +19,71 @@ brandbar <- div(
   tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
   div(
     div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Data Tranfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
+    div(class = "brand-sub", "Data Transfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
+  ),
+  div(
+    class = "app-actions",
+    tags$a(
+      class = "brand-link",
+      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues",
+      target = "_blank", rel = "noopener noreferrer",
+      "Report issues"
+    ),
+    tags$a(
+      class = "brand-link",
+      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
+      target = "_blank", rel = "noopener noreferrer",
+      "About"
+    )#,
+    #tags$a(
+    #  class = "brand-link",
+    #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
+    #  target = "_blank", rel = "noopener noreferrer",
+    #  "Documentation"
+    #)
   )
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-dta_pkg_version <- tryCatch(as.character(utils::packageVersion("DTAtools")),
-  error = function(e) ""
-)
+# Prefer the installed package version; fall back to a nearby DESCRIPTION when
+# the app is launched from source during development.
+dta_package_version <- function() {
+  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
+    error = function(e) ""
+  )
+  if (nzchar(v)) {
+    return(v)
+  }
+
+  roots <- unique(normalizePath(c(
+    getwd(),
+    file.path(getwd(), ".."),
+    file.path(getwd(), "..", ".."),
+    file.path(getwd(), "..", "..", ".."),
+    file.path(getwd(), "..", "..", "..", "..")
+  ), winslash = "/", mustWork = FALSE))
+
+  for (root in roots) {
+    desc <- file.path(root, "DESCRIPTION")
+    if (!file.exists(desc)) {
+      next
+    }
+    lines <- tryCatch(readLines(desc, warn = FALSE, encoding = "UTF-8"),
+      error = function(e) character(0)
+    )
+    hit <- grep("^Version:\\s*", lines, value = TRUE)
+    if (length(hit) > 0) {
+      vv <- trimws(sub("^Version:\\s*", "", hit[[1]]))
+      if (nzchar(vv)) {
+        return(vv)
+      }
+    }
+  }
+
+  ""
+}
+
+dta_pkg_version <- dta_package_version()
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
@@ -3557,10 +3614,10 @@ server <- function(input, output, session) {
       restore_available <- file.exists(session_file)
       card(
         max_height = "620px",
-        card_header(tags$h3("Load a DTA specification", style = "margin:0;")),
+        card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
         card_body(
           p(
-            "Drag and drop a DTA ", tags$code(".yaml"),
+            "Drag and drop a DTA / DTS settings ", tags$code(".yaml"),
             " file to begin, or load the bundled example."
           ),
           div(

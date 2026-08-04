@@ -28,3 +28,17 @@ CHANGELOG.md
 ^test_output\.md$
 ^\.tmp
 
+# Exclude temporary templates, renv staging, and user/editor files
+^\.tmp_dts_templates
+^renv/staging
+^renv/staging/.*
+^\.Rhistory$
+^\.Renviron$
+^\.Rprofile$
+^\.vscode$
+^\.git$
+^\.pre-commit-config\.yaml$
+^\.github
+^\.Rcheck
+^check_out
+
