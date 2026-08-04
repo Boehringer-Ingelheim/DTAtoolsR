@@ -840,33 +840,6 @@
         "RemoteSha": "0.6.39"
       }
     },
-    "doconv": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Type": "Package",
-        "Package": "doconv",
-        "Title": "Document Conversion to 'PDF', Thumbnails and Visual Testing",
-        "Version": "0.4.0",
-        "Authors@R": "c(\n    person(\"David\", \"Gohel\", , \"david.gohel@ardata.fr\", role = c(\"aut\", \"cre\")),\n    person(\"ArData\", role = \"cph\"),\n    person(\"David\", \"Hajage\", role = \"ctb\",\n           comment = \"initial powershell code\")\n  )",
-        "Description": "Provides the ability to generate images from documents of\n    different types. Three main features are provided: generating document\n    thumbnails, performing visual tests of documents, and updating fields\n    and tables of contents of a 'Microsoft Word' or 'RTF' document.\n    'Microsoft Word' and/or 'LibreOffice' must be installed on the\n    machine. If 'Microsoft Word' is available, it can produce PDF\n    documents or images identical to the originals; otherwise\n    'LibreOffice' is used and the rendering may sometimes differ from the\n    original documents.",
-        "License": "MIT + file LICENSE",
-        "BugReports": "https://github.com/ardata-fr/doconv/issues",
-        "Depends": "R (>= 4.0.0)",
-        "Imports": "gdtools, locatexec, magick, pdftools, processx, tools",
-        "Suggests": "curl, flextable, ragg, testthat, tinytest, webshot2",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "SystemRequirements": "LibreOffice, Microsoft Word",
-        "NeedsCompilation": "no",
-        "Packaged": "2026-02-14 17:54:41 UTC; davidgohel",
-        "Author": "David Gohel [aut, cre],\n  ArData [cph],\n  David Hajage [ctb] (initial powershell code)",
-        "Maintainer": "David Gohel <david.gohel@ardata.fr>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-02-14 18:10:03 UTC",
-        "Built": "R 4.5.3; ; 2026-07-28 15:15:21 UTC; windows"
-      }
-    },
     "docxtractr": {
       "Source": "CRAN",
       "Repository": "https://cloud.r-project.org",
@@ -1744,65 +1717,6 @@
         "RemoteSha": "1.0.5"
       }
     },
-    "locatexec": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Type": "Package",
-        "Package": "locatexec",
-        "Title": "Detection and Localization of Executable Files",
-        "Version": "0.2.0",
-        "Authors@R": "c(\n    person(\"David\", \"Gohel\", , \"david.gohel@ardata.fr\", role = c(\"aut\", \"cre\")),\n    person(\"ArData\", role = \"cph\")\n  )",
-        "Description": "A set of functions to locate some programs available on the\n    user machine. It can locate 'Node.js', 'npm', 'LibreOffice',\n    'Microsoft Word', 'Microsoft PowerPoint', 'Microsoft Excel', 'Python',\n    'pip', 'Mozilla Firefox', 'Google Chrome', 'Air' and 'Pandoc'. The\n    user can test the availability of a program, optionally with a\n    required version, and call it with the functions system2() or\n    system(). This allows the use of a single function to retrieve the\n    path to a program regardless of the operating system and its\n    configuration.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://ardata-fr.github.io/locatexec/",
-        "BugReports": "https://github.com/ardata-fr/locatexec/issues",
-        "Imports": "utils",
-        "Suggests": "testthat (>= 3.0.0)",
-        "Config/roxygen2/version": "8.0.0",
-        "Config/testthat/edition": "3",
-        "Encoding": "UTF-8",
-        "NeedsCompilation": "no",
-        "Packaged": "2026-05-25 15:46:17 UTC; davidgohel",
-        "Author": "David Gohel [aut, cre],\n  ArData [cph]",
-        "Maintainer": "David Gohel <david.gohel@ardata.fr>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-05-25 17:00:02 UTC",
-        "Built": "R 4.5.3; ; 2026-07-28 13:58:42 UTC; windows"
-      }
-    },
-    "magick": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Package": "magick",
-        "Type": "Package",
-        "Title": "Advanced Graphics and Image-Processing in R",
-        "Version": "2.9.1",
-        "Authors@R": "person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), email = \"jeroenooms@gmail.com\",\n    comment = c(ORCID = \"0000-0002-4035-0289\"))",
-        "Description": "Bindings to 'ImageMagick': the most comprehensive open-source image\n    processing library available. Supports many common formats (png, jpeg, tiff,\n    pdf, etc) and manipulations (rotate, scale, crop, trim, flip, blur, etc).\n    All operations are vectorized via the Magick++ STL meaning they operate either\n    on a single frame or a series of frames for working with layers, collages,\n    or animation. In RStudio images are automatically previewed when printed to\n    the console, resulting in an interactive editing environment. Also includes\n    a graphics device for creating drawing onto images using pixel coordinates.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://docs.ropensci.org/magick/\nhttps://ropensci.r-universe.dev/magick",
-        "BugReports": "https://github.com/ropensci/magick/issues",
-        "SystemRequirements": "ImageMagick++: ImageMagick-c++-devel (rpm) or\nlibmagick++-dev (deb)",
-        "VignetteBuilder": "knitr",
-        "Depends": "R (>= 4.1.0)",
-        "Imports": "Rcpp (>= 0.12.12), magrittr, curl",
-        "LinkingTo": "Rcpp",
-        "Suggests": "av, spelling, jsonlite, methods, knitr, rmarkdown, rsvg,\nwebp, pdftools, ggplot2, gapminder, IRdisplay, tesseract,\ngifski",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "Language": "en-US",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-02-28 14:23:36 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (ORCID: <https://orcid.org/0000-0002-4035-0289>)",
-        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-02-28 15:40:02 UTC",
-        "Built": "R 4.5.3; x86_64-w64-mingw32; 2026-07-28 13:40:32 UTC; windows",
-        "Archs": "x64"
-      }
-    },
     "magrittr": {
       "Source": "CRAN",
       "Repository": "https://cloud.r-project.org",
@@ -2010,35 +1924,6 @@
         "RemoteSha": "0.2.0"
       }
     },
-    "pdftools": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Package": "pdftools",
-        "Type": "Package",
-        "Title": "Text Extraction, Rendering and Converting of PDF Documents",
-        "Version": "3.9.0",
-        "Authors@R": "person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), email = \"jeroenooms@gmail.com\",\n      comment = c(ORCID = \"0000-0002-4035-0289\"))",
-        "Description": "Utilities based on 'libpoppler' <https://poppler.freedesktop.org> for extracting\n    text, fonts, attachments and metadata from a PDF file. Also supports high quality rendering\n    of PDF documents into PNG, JPEG, TIFF format, or into raw bitmap vectors for further \n    processing in R.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://ropensci.r-universe.dev/pdftools,\nhttps://docs.ropensci.org/pdftools/",
-        "BugReports": "https://github.com/ropensci/pdftools/issues",
-        "SystemRequirements": "Poppler C++ API: libpoppler-cpp-dev (deb) or\npoppler-cpp-devel (rpm), and poppler-data (rpm/deb) package.",
-        "Encoding": "UTF-8",
-        "Imports": "Rcpp (>= 0.12.12), qpdf",
-        "LinkingTo": "Rcpp",
-        "Suggests": "png, webp, tesseract, testthat",
-        "RoxygenNote": "7.3.2",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-05-14 12:38:00 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (ORCID: <https://orcid.org/0000-0002-4035-0289>)",
-        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-05-14 13:30:03 UTC",
-        "Built": "R 4.5.3; x86_64-w64-mingw32; 2026-07-28 14:58:58 UTC; windows",
-        "Archs": "x64"
-      }
-    },
     "pillar": {
       "Source": "CRAN",
       "Repository": "https://cloud.r-project.org",
@@ -2110,43 +1995,6 @@
         "RemoteSha": "2.0.3"
       }
     },
-    "processx": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Package": "processx",
-        "Title": "Execute and Control System Processes",
-        "Version": "3.9.0",
-        "Authors@R": "c(\n    person(\"Gábor\", \"Csárdi\", , \"csardi.gabor@gmail.com\", role = c(\"aut\", \"cre\", \"cph\"),\n           comment = c(ORCID = \"0000-0001-7098-9676\")),\n    person(\"Winston\", \"Chang\", role = \"aut\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"03wc8by49\")),\n    person(\"Ascent Digital Services\", role = c(\"cph\", \"fnd\"))\n  )",
-        "Description": "Tools to run system processes in the background.  It can\n    check if a background process is running; wait on a background process\n    to finish; get the exit status of finished processes; kill background\n    processes. It can read the standard output and error of the processes,\n    using non-blocking connections. 'processx' can poll a process for\n    standard output or error, with a timeout. It can also poll several\n    processes at once.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://processx.r-lib.org, https://github.com/r-lib/processx",
-        "BugReports": "https://github.com/r-lib/processx/issues",
-        "Depends": "R (>= 3.4.0)",
-        "Imports": "ps (>= 1.9.3), R6, utils",
-        "Suggests": "callr (>= 3.7.3), cli (>= 3.3.0), codetools, covr, curl,\ndebugme, parallel, rlang (>= 1.0.2), testthat (>= 3.0.0),\nwebfakes, withr",
-        "Config/Needs/website": "tidyverse/tidytemplate",
-        "Config/testthat/edition": "3",
-        "Config/usethis/last-upkeep": "2025-04-25",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-04-22 10:56:15 UTC; gaborcsardi",
-        "Author": "Gábor Csárdi [aut, cre, cph] (ORCID:\n    <https://orcid.org/0000-0001-7098-9676>),\n  Winston Chang [aut],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>),\n  Ascent Digital Services [cph, fnd]",
-        "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-04-22 12:00:02 UTC",
-        "Built": "R 4.5.3; x86_64-w64-mingw32; 2026-07-11 02:52:07 UTC; windows",
-        "Archs": "x64",
-        "RemoteType": "standard",
-        "RemoteRef": "processx",
-        "RemotePkgRef": "processx",
-        "RemoteRepos": "https://ftp.fau.de/cran",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "x86_64-w64-mingw32",
-        "RemoteSha": "3.9.0"
-      }
-    },
     "promises": {
       "Source": "CRAN",
       "Repository": "https://cloud.r-project.org",
@@ -2184,44 +2032,6 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "x86_64-w64-mingw32",
         "RemoteSha": "1.5.0"
-      }
-    },
-    "ps": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Package": "ps",
-        "Title": "List, Query, Manipulate System Processes",
-        "Version": "1.9.3",
-        "Authors@R": "c(\n    person(\"Jay\", \"Loden\", role = \"aut\"),\n    person(\"Dave\", \"Daeschler\", role = \"aut\"),\n    person(\"Giampaolo\", \"Rodola'\", role = \"aut\"),\n    person(\"Gábor\", \"Csárdi\", , \"csardi.gabor@gmail.com\", role = c(\"aut\", \"cre\")),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"),\n           comment = c(ROR = \"03wc8by49\"))\n  )",
-        "Description": "List, query and manipulate all system processes, on\n    'Windows', 'Linux' and 'macOS'.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://github.com/r-lib/ps, https://ps.r-lib.org/",
-        "BugReports": "https://github.com/r-lib/ps/issues",
-        "Depends": "R (>= 3.4)",
-        "Imports": "utils",
-        "Suggests": "callr, covr, curl, pillar, pingr, processx (>= 3.1.0), R6,\nrlang, testthat (>= 3.0.0), webfakes, withr",
-        "Biarch": "true",
-        "Config/Needs/website": "tidyverse/tidytemplate",
-        "Config/testthat/edition": "3",
-        "Config/usethis/last-upkeep": "2025-04-28",
-        "Encoding": "UTF-8",
-        "RoxygenNote": "7.3.3",
-        "NeedsCompilation": "yes",
-        "Packaged": "2026-04-20 12:53:07 UTC; gaborcsardi",
-        "Author": "Jay Loden [aut],\n  Dave Daeschler [aut],\n  Giampaolo Rodola' [aut],\n  Gábor Csárdi [aut, cre],\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
-        "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2026-04-20 13:40:03 UTC",
-        "Built": "R 4.5.3; x86_64-w64-mingw32; 2026-07-11 01:59:39 UTC; windows",
-        "Archs": "x64",
-        "RemoteType": "standard",
-        "RemoteRef": "ps",
-        "RemotePkgRef": "ps",
-        "RemoteRepos": "https://ftp.fau.de/cran",
-        "RemoteReposName": "CRAN",
-        "RemotePkgPlatform": "x86_64-w64-mingw32",
-        "RemoteSha": "1.9.3"
       }
     },
     "purrr": {
@@ -2263,35 +2073,6 @@
         "RemoteReposName": "CRAN",
         "RemotePkgPlatform": "x86_64-w64-mingw32",
         "RemoteSha": "1.2.2"
-      }
-    },
-    "qpdf": {
-      "Source": "CRAN",
-      "Repository": "https://cloud.r-project.org",
-      "description": {
-        "Package": "qpdf",
-        "Type": "Package",
-        "Title": "Split, Combine and Compress PDF Files",
-        "Version": "1.4.1",
-        "Authors@R": "c(person(\"Jeroen\", \"Ooms\", role = c(\"aut\", \"cre\"), \n    email = \"jeroenooms@gmail.com\", comment = c(ORCID = \"0000-0002-4035-0289\")),\n        person(\"Ben\", \"Raymond\", role = \"ctb\"),\n        person(\"Jay Berkenbilt\", role = \"cph\", comment = \"Author of libqpdf\"))",
-        "Description": "Content-preserving transformations transformations of PDF files such \n    as split, combine, and compress. This package interfaces directly to the 'qpdf' \n    C++ library <https://qpdf.sourceforge.io/> and does not require any command \n    line utilities. Note that 'qpdf' does not read actual content from PDF files: \n    to extract text and data you need the 'pdftools' package.",
-        "License": "Apache License 2.0",
-        "URL": "https://docs.ropensci.org/qpdf/\nhttps://ropensci.r-universe.dev/qpdf",
-        "BugReports": "https://github.com/ropensci/qpdf/issues",
-        "Encoding": "UTF-8",
-        "Imports": "Rcpp, askpass, curl",
-        "LinkingTo": "Rcpp",
-        "RoxygenNote": "7.2.1",
-        "Suggests": "testthat",
-        "SystemRequirements": "libjpeg",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-06-30 11:12:14 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (ORCID: <https://orcid.org/0000-0002-4035-0289>),\n  Ben Raymond [ctb],\n  Jay Berkenbilt [cph] (Author of libqpdf)",
-        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-07-02 09:40:02 UTC",
-        "Built": "R 4.5.3; x86_64-w64-mingw32; 2026-07-28 14:30:56 UTC; windows",
-        "Archs": "x64"
       }
     },
     "ragg": {
@@ -3342,7 +3123,7 @@
       "checksum": "53cad38311478db800db5b49a952b7c9"
     },
     "R/utils_dta.R": {
-      "checksum": "ec5862ae23ce3a8f0c65de59251973f6"
+      "checksum": "3e62c47d5d0372f45e3cdd57bd74a134"
     },
     "R/utils_export.R": {
       "checksum": "499b14632d243e934887112dce691920"

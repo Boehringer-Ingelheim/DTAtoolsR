@@ -1,0 +1,27 @@
+load                    Load package code
+load_options            Load roxygen2 options
+namespace_roclet        Roclet: make 'NAMESPACE'
+needs_roxygenize        Check if documentation needs to be updated
+parse_package           Parse a package, file, or inline code
+rd_roclet               Roclet: make Rd files
+rd_section              Construct an 'rd_section' object
+roc_proc_text           Process roclet on string and capture results
+roclet_find             Create a roclet from a string
+roxy_block              Blocks
+roxy_tag                'roxy_tag' S3 constructor
+roxy_tag_rd             Generate Rd output from a tag
+roxygenize              Document a package with roxygen2
+tag_parsers             Parse tags
+tags-index-crossref     Tags for indexing and cross-references
+tags-namespace          Tags for managing the 'NAMESPACE'
+tags-rd-R6              Tags for documenting R6
+tags-rd-S3              Tags for documenting S3
+tags-rd-S4              Tags for documenting S4
+tags-rd-S7              Tags for documenting S7
+tags-rd-datasets        Tags for documenting datasets
+tags-rd-formatting      Tags related to markdown support
+tags-rd-functions       Tags for documenting functions
+tags-reuse              Tags that help you reuse documentation
+tags_list               Access metadata about built-in or available
+                        tags
+update_collate          Update Collate field in DESCRIPTION

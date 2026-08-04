@@ -7,6 +7,7 @@ Authors@R: c(
 	person("Daniel", "Schreyer",
 		email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
 Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
+Author: Thomas Schwarzl [aut, cre], Daniel Schreyer [aut, ctb]
 Description: Provides a comprehensive set of tools for importing, validating,
 	transforming, and exporting data governed by data transfer agreements (DTAs)
 	or data transfer specifications (DTS). The package supports workflows for
@@ -55,7 +56,8 @@ Suggests:
 	writexl,
 	shinyAce,
 	doconv,
-	remotes
+	remotes,
+	pkgload
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
