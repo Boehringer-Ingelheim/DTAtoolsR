@@ -45,9 +45,45 @@ brandbar <- div(
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-dta_pkg_version <- tryCatch(as.character(utils::packageVersion("DTAtools")),
-  error = function(e) ""
-)
+# Prefer the installed package version; fall back to a nearby DESCRIPTION when
+# the app is launched from source during development.
+dta_package_version <- function() {
+  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
+    error = function(e) ""
+  )
+  if (nzchar(v)) {
+    return(v)
+  }
+
+  roots <- unique(normalizePath(c(
+    getwd(),
+    file.path(getwd(), ".."),
+    file.path(getwd(), "..", ".."),
+    file.path(getwd(), "..", "..", ".."),
+    file.path(getwd(), "..", "..", "..", "..")
+  ), winslash = "/", mustWork = FALSE))
+
+  for (root in roots) {
+    desc <- file.path(root, "DESCRIPTION")
+    if (!file.exists(desc)) {
+      next
+    }
+    lines <- tryCatch(readLines(desc, warn = FALSE, encoding = "UTF-8"),
+      error = function(e) character(0)
+    )
+    hit <- grep("^Version:\\s*", lines, value = TRUE)
+    if (length(hit) > 0) {
+      vv <- trimws(sub("^Version:\\s*", "", hit[[1]]))
+      if (nzchar(vv)) {
+        return(vv)
+      }
+    }
+  }
+
+  ""
+}
+
+dta_pkg_version <- dta_package_version()
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),

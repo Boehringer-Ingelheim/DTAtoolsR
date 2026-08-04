@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Shiny app header now includes quick links for `Report issues`, `About`, and `Documentation`, so users can directly open the GitHub issue tracker, repository overview, and package documentation from the top bar.
+- Shiny app header now includes quick links for `Report issues` and `About`, so users can directly open the GitHub issue tracker, repository overview, and package documentation from the top bar.
 
 ### Changed
 
