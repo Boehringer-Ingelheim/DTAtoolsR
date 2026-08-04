@@ -12,6 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+## [0.12.2] - 2026-08-04
+
+### Added
+
+- Shiny app header now includes quick links for `Report issues`, `About`, and `Documentation`, so users can directly open the GitHub issue tracker, repository overview, and package documentation from the top bar.
+
+### Changed
+
+- Refined Shiny app brand-bar action styling for better visibility and responsive wrapping on smaller screens.
+
 ## [0.12.1] - 2026-07-30
 
 ### Added

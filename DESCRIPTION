@@ -1,13 +1,12 @@
 Package: DTAtools
 Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.12.1
+Version: 0.12.2
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
 	person("Daniel", "Schreyer",
 		email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
 Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
-Author: Thomas Schwarzl [aut, cre], Daniel Schreyer [aut, ctb]
 Description: Provides a comprehensive set of tools for importing, validating,
 	transforming, and exporting data governed by data transfer agreements (DTAs)
 	or data transfer specifications (DTS). The package supports workflows for
