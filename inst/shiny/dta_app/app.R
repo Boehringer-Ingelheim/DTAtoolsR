@@ -19,7 +19,28 @@ brandbar <- div(
   tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
   div(
     div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Data Tranfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
+    div(class = "brand-sub", "Data Transfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
+  ),
+  div(
+    class = "app-actions",
+    tags$a(
+      class = "brand-link",
+      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues",
+      target = "_blank", rel = "noopener noreferrer",
+      "Report issues"
+    ),
+    tags$a(
+      class = "brand-link",
+      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
+      target = "_blank", rel = "noopener noreferrer",
+      "About"
+    )#,
+    #tags$a(
+    #  class = "brand-link",
+    #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
+    #  target = "_blank", rel = "noopener noreferrer",
+    #  "Documentation"
+    #)
   )
 )
 

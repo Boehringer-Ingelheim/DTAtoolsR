@@ -75,6 +75,33 @@ bi_css <- function() {
     .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
     .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
     .app-actions { margin-left: auto; display: flex; gap: 8px; }
+    .app-actions .brand-link {
+      color: #fff; text-decoration: none; font-weight: 600;
+      border: 1px solid rgba(255,255,255,.45);
+      background: rgba(255,255,255,.08);
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: .82rem;
+      line-height: 1.2;
+      white-space: nowrap;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .app-actions .brand-link:hover,
+    .app-actions .brand-link:focus {
+      color: #fff;
+      background: rgba(255,255,255,.18);
+      border-color: rgba(255,255,255,.7);
+      text-decoration: none;
+    }
+    @media (max-width: 900px) {
+      .app-brandbar { flex-wrap: wrap; }
+      .app-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+    }
 
     /* Status chips */
     .status-chip {
