@@ -71,12 +71,21 @@ test_that("DTADataSetTabular can persist and reload validation artifacts", {
   index_entry <- ds@validation_index[["tab1"]]
   expect_true(file.exists(index_entry$artifact_path))
 
-  details <- validation_errors(ds, table = "tab1", source = "artifact")
-  expect_true(is.list(details))
+  # `readRDS` of a list is trivially a list, so is.list() proved nothing about
+  # the artifact. Compare the round-tripped artifact against memory instead --
+  # that is what catches a stale or corrupt file.
+  expect_identical(
+    validation_errors(ds, table = "tab1", source = "artifact"),
+    validation_errors(ds, table = "tab1", source = "memory")
+  )
 
+  artifact_path <- index_entry$artifact_path
   ds <- clear_validation(ds, tables = "tab1", remove_artifacts = TRUE)
   expect_true(is.null(ds@validation_index[["tab1"]]))
   expect_true(is.null(ds@validation_store[["tab1"]]))
+  # remove_artifacts = TRUE must also delete the file it wrote; without this
+  # the branch could be deleted and the suite would stay green.
+  expect_false(file.exists(artifact_path))
 })
 
 test_that("check() validates a single table by name", {
@@ -224,11 +233,14 @@ test_that("messages() returns flattened rule failures", {
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   msgs <- messages(ds, tables = "tab1", as_tibble = FALSE)
 
-  expect_true(is.data.frame(msgs))
-  expect_true(nrow(msgs) >= 1)
+  # A duplicated SUBJID was injected at row 3, so the unique rule must fire
+  # exactly once. `nrow(msgs) >= 1` would also pass if the rule never ran and
+  # only pre-existing schema errors were reported.
+  expect_s3_class(msgs, "data.frame")
+  rule_msgs <- msgs[msgs$source == "rule", ]
+  expect_equal(nrow(rule_msgs), 1)
+  expect_match(rule_msgs$message, "violated")
   expect_true(all(unique(msgs$source) %in% c("schema", "rule")))
-  expect_true(any(msgs$source == "rule"))
-  expect_true(any(grepl("violated", msgs$message, fixed = TRUE)))
 })
 
 test_that("manually added table can be validated without errors", {
@@ -238,24 +250,28 @@ test_that("manually added table can be validated without errors", {
   manual_df$SUBJID <- paste0(manual_df$SUBJID, "_MANUAL")
   ds@tables[["manual_tab"]] <- arrow::arrow_table(manual_df)
 
-  expect_no_error({
-    ds <- check(ds, tables = "manual_tab", force = TRUE, persist = FALSE, quiet = TRUE)
-  })
+  ds <- check(ds, tables = "manual_tab", force = TRUE, persist = FALSE, quiet = TRUE)
 
   status <- validation_status(ds, tables = "manual_tab")
   expect_equal(nrow(status), 1)
   expect_equal(status$table, "manual_tab")
   expect_equal(status$status, "validated")
 
-  expect_no_error({
-    msgs <- messages(ds, tables = "manual_tab", as_tibble = FALSE)
-    expect_true(is.data.frame(msgs))
-  })
+  # The old test was named "without errors" and used expect_no_error() as its
+  # only assertion, which said nothing about what validation actually found.
+  # The manual table copies tab1 (7 schema errors) and suffixes SUBJID with
+  # "_MANUAL", which adds 2 more SUBJID violations -- 9 in total.
+  expect_false(status$ok)
+  expect_equal(status$n_schema_errors, 9)
+  expect_equal(status$n_rule_errors, 0)
 
-  expect_no_error({
-    info <- inspect(ds, as_tibble = FALSE)
-    expect_true(is.data.frame(info))
-  })
+  msgs <- messages(ds, tables = "manual_tab", as_tibble = FALSE)
+  expect_s3_class(msgs, "data.frame")
+  expect_equal(nrow(msgs), 9)
+
+  info <- inspect(ds, as_tibble = FALSE)
+  expect_s3_class(info, "data.frame")
+  expect_equal(nrow(info), nrow(messages(ds, as_tibble = FALSE)))
 })
 
 test_that("multiple manually added tables can be validated without errors", {
