@@ -1,8 +1,9 @@
 load_clinical_fixture_dta <- function(filename) {
   spec_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-  skip_if_not(nzchar(spec_path))
   fixture_path <- system.file("extdata", filename, package = "DTAtools")
-  skip_if_not(nzchar(fixture_path))
+  # Guaranteed package assets — a missing fixture is a failure, not a skip.
+  expect_true(nzchar(spec_path), info = "clinical_dta.yaml missing from extdata")
+  expect_true(nzchar(fixture_path), info = paste(filename, "missing from extdata"))
 
   dta <- read_dta_from_yaml(spec_path)
   dta <- load_file(dta, 1, file = fixture_path)

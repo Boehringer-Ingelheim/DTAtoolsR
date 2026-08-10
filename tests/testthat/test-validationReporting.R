@@ -27,20 +27,13 @@ test_that("message helpers produce empty and populated tables consistently", {
 
   populated_df <- data.frame(
     id = 1L,
-    dataset = "ds",
-    target = "tab",
-    severity = "error",
-    source = "rule",
-    rule_id = "r1",
-    row = NA_real_,
-    column = NA_character_,
-    keyword = NA_character_,
     message = "rule failure",
     stringsAsFactors = FALSE
   )
 
-  tibble_out <- dta_to_tibble_if_available(populated_df, as_tibble = TRUE)
-  expect_true(inherits(tibble_out, "tbl_df") || is.data.frame(tibble_out))
+  # as_tibble = TRUE must actually convert; as_tibble = FALSE must be a no-op.
+  expect_s3_class(dta_to_tibble_if_available(populated_df, TRUE), "tbl_df")
+  expect_identical(dta_to_tibble_if_available(populated_df, FALSE), populated_df)
 })
 
 test_that("schema and rule message converters preserve expected columns", {
@@ -60,8 +53,18 @@ test_that("schema and rule message converters preserve expected columns", {
   schema_msgs <- dta_schema_messages_to_df("ds", "tab", details)
   rule_msgs <- dta_rule_messages_to_df("ds", "tab", details)
 
-  expect_true(nrow(schema_msgs) >= 1)
+  expect_equal(nrow(schema_msgs), 2)
   expect_true(all(c("dataset", "target", "message") %in% names(schema_msgs)))
+  expect_equal(schema_msgs$row, c(0, 1))
+  expect_equal(schema_msgs$column, c("AGE", "WEIGHT"))
+  expect_equal(schema_msgs$keyword, c("maximum", "required"))
+  expect_equal(schema_msgs$message, c("too large", "missing"))
+  expect_equal(unique(schema_msgs$source), "schema")
+  expect_equal(unique(schema_msgs$severity), "error")
+  expect_equal(unique(schema_msgs$dataset), "ds")
+  expect_equal(unique(schema_msgs$target), "tab")
+  expect_true(all(is.na(schema_msgs$rule_id)))
+
   expect_true(nrow(rule_msgs) == 1)
   expect_equal(rule_msgs$rule_id, "r1")
   expect_equal(rule_msgs$message, "rule violated")
@@ -73,19 +76,23 @@ test_that("message collection handles dataset-level aggregation and ordering", {
 
   msgs <- dta_collect_messages_for_dataset(ds, tables = "tab1", source = "memory")
   expect_true(is.data.frame(msgs))
-  expect_true(nrow(msgs) >= 0)
+  expect_equal(nrow(msgs), 7)
   expect_true(all(c("dataset", "target", "message") %in% names(msgs)))
-  if (nrow(msgs) > 0) {
-    expect_equal(msgs$id, seq_len(nrow(msgs)))
-  }
+  expect_equal(msgs$id, seq_len(nrow(msgs)))
+  expect_equal(unique(msgs$source), "schema")
+  expect_equal(msgs$row, c(1, 1, 2, 2, 3, 3, 3))
+  expect_equal(
+    msgs$column,
+    c("STUDYID", "VISIT", "STUDYID", "VISIT", "STUDYID", "VISIT", "SUBJID")
+  )
 
   dta <- DTA(datasets = list(clinical_data = ds), metadata = DTAMetaData(title = "Test DTA"))
   dta_msgs <- messages(dta, datasets = "clinical_data", as_tibble = FALSE)
   expect_true(is.data.frame(dta_msgs))
+  expect_equal(nrow(dta_msgs), 7)
   expect_true(all(c("dataset", "target", "message") %in% names(dta_msgs)))
-  if (nrow(dta_msgs) > 0) {
-    expect_equal(dta_msgs$id, seq_len(nrow(dta_msgs)))
-  }
+  expect_equal(dta_msgs$id, seq_len(nrow(dta_msgs)))
+  expect_equal(unique(dta_msgs$dataset), "clinical_data")
 })
 
 test_that("validation summaries report target type and validation run metadata", {
@@ -96,7 +103,10 @@ test_that("validation summaries report target type and validation run metadata",
   expect_equal(status$target_type, "table")
   expect_equal(status$status, "validated")
   expect_false(is.na(status$validation_run))
-  expect_true(status$ok %in% c(TRUE, FALSE))
+  # The example dataset carries 7 schema errors and no rule errors.
+  expect_false(status$ok)
+  expect_equal(status$n_schema_errors, 7)
+  expect_equal(status$n_rule_errors, 0)
 
   path <- tempfile(fileext = ".txt")
   writeLines("hello world", path)
@@ -140,4 +150,57 @@ test_that("dta_rule_failure_row_indices reports failing rows for a check_range r
 
   # missing column yields no failing rows rather than an error
   expect_identical(dta_rule_failure_row_indices(rule_min_max, data.frame(x = 1:3)), integer(0))
+
+  # bounds are inclusive: only the value below the minimum is reported
+  expect_identical(
+    dta_rule_failure_row_indices(rule_min_max, data.frame(age = c(18, 65, 17.999))),
+    3L
+  )
+})
+
+test_that("dta_rule_failure_row_indices reports failing rows for a unique rule", {
+  rule <- DTARuleColUnique(id = "r_unique", columns = "ID")
+  df <- data.frame(ID = c("A", "A", "A", "B"), stringsAsFactors = FALSE)
+
+  # Unlike the violation count, the row indices cover every row in the
+  # duplicated group, including the first occurrence.
+  expect_identical(dta_rule_failure_row_indices(rule, df), c(1L, 2L, 3L))
+
+  unique_df <- data.frame(ID = c("A", "B", "C"), stringsAsFactors = FALSE)
+  expect_identical(dta_rule_failure_row_indices(rule, unique_df), integer(0))
+
+  # a missing column yields no failing rows rather than an error
+  multi_rule <- DTARuleColUnique(id = "r_unique_multi", columns = c("ID", "MISSING"))
+  expect_identical(dta_rule_failure_row_indices(multi_rule, df), integer(0))
+})
+
+test_that("dta_rule_failure_row_indices reports failing rows for a condition rule", {
+  rule <- DTARuleColCondition(
+    id = "r_condition",
+    condition = list(VISIT = list(equals = "V03")),
+    then = list(STATUS = list(equals = "COMPLETED"))
+  )
+  df <- data.frame(
+    VISIT = c("V03", "EOT", "V03"),
+    STATUS = c("X", "X", "COMPLETED"),
+    stringsAsFactors = FALSE
+  )
+
+  # Row 1 meets the IF and fails the THEN; row 2 never meets the IF and row 3
+  # satisfies both.
+  expect_identical(dta_rule_failure_row_indices(rule, df), 1L)
+
+  passing_df <- data.frame(
+    VISIT = c("V03", "EOT"),
+    STATUS = c("COMPLETED", "X"),
+    stringsAsFactors = FALSE
+  )
+  expect_identical(dta_rule_failure_row_indices(rule, passing_df), integer(0))
+})
+
+test_that("dta_rule_failure_row_indices returns no rows for unsupported rule objects", {
+  expect_identical(
+    dta_rule_failure_row_indices(list(id = "not_a_rule"), data.frame(age = 1:3)),
+    integer(0)
+  )
 })

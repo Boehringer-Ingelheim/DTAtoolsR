@@ -35,6 +35,40 @@ test_that("DTAMetaData constructor converts transmission date strings and preser
   expect_identical(md@transmission$date_last_transfer, "after approval")
 })
 
+test_that("qualified transmission dates lose their qualification (documented defect)", {
+  # DEFECT, deferred: the constructor coerces a transmission date string with
+  # strptime()/as.Date(), and those ignore TRAILING text. A phrase is therefore
+  # only preserved when it does NOT start with a parseable date:
+  #   "after approval"              -> kept as character (leading text)
+  #   "2026-12-31 at the earliest"  -> silently becomes Date 2026-12-31
+  #
+  # The second case drops a contractual qualification from a data transfer
+  # agreement: "at the earliest" states a lower bound, but the stored value
+  # reads as a firm date, and downstream consumers (get_transmission_dates(),
+  # validate_transmission_dates(), the exported DTA document) all see a hard
+  # deadline that was never agreed. The fix belongs in the coercion helper in
+  # R/DTAMetaData-class.R, which must reject trailing residue instead of
+  # discarding it.
+  #
+  # Pinned here, NOT asserted as correct: the desired assertion is that the
+  # value stays the character string "2026-12-31 at the earliest".
+  md <- DTAMetaData(
+    title = "Qualified Date",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+
+  expect_s3_class(md@transmission$date_last_transfer, "Date")
+  expect_identical(as.character(md@transmission$date_last_transfer), "2026-12-31")
+
+  # Contrast: a phrase whose leading characters are unparseable survives intact,
+  # which is why the existing "after approval" test above passes.
+  md_leading <- DTAMetaData(
+    title = "Leading Phrase",
+    transmission = list(date_last_transfer = "final transfer by 2026-12-31")
+  )
+  expect_type(md_leading@transmission$date_last_transfer, "character")
+})
+
 test_that("DTAMetaData validator rejects invalid basics", {
   expect_error(DTAMetaData(title = "", version = "1.0"), "title")
   expect_error(DTAMetaData(title = "ok", version = ""), "version")
@@ -160,6 +194,43 @@ test_that("get_receiver_reviewers handles reviewer extraction", {
   expect_null(get_receiver_reviewers(md_empty))
 })
 
+test_that("get_receiver_reviewers selects only flagged contacts", {
+  md <- DTAMetaData(
+    title = "Mixed Contacts",
+    receiver = list(contacts = list(
+      list(name = "Bob", role = "Data Manager", email = "bob@example.com", reviewer = TRUE),
+      list(name = "Eve", role = "Statistician", email = "eve@example.com")
+    ))
+  )
+
+  expect_identical(get_receiver_reviewers(md, name_only = TRUE), "Bob")
+
+  full <- get_receiver_reviewers(md, name_only = FALSE)
+  expect_length(full, 1)
+  expect_identical(full[[1]]$email, "bob@example.com")
+})
+
+test_that("get_receiver_reviewers returns list() when no contact is a reviewer (documented gap)", {
+  # Deferred: with contacts present but none flagged `reviewer = TRUE`, the
+  # empty filter result is returned as-is, so the return type depends on the
+  # data rather than on `name_only`. Callers that expect character(0) from
+  # `name_only = TRUE` (the type returned whenever at least one reviewer exists)
+  # instead get an empty list, so `paste(collapse = ", ")` and friends behave
+  # differently for "no reviewers" than for "some reviewers".
+  #
+  # Pinned, not asserted as correct: the desired result is character(0) for
+  # name_only = TRUE, which needs a fix in R/DTAMetaData-helpers.R.
+  md <- DTAMetaData(
+    title = "No Reviewer Flag",
+    receiver = list(contacts = list(
+      list(name = "Bob", role = "Data Manager", email = "bob@example.com")
+    ))
+  )
+
+  expect_identical(get_receiver_reviewers(md, name_only = TRUE), list())
+  expect_identical(get_receiver_reviewers(md, name_only = FALSE), list())
+})
+
 test_that("get_transmission_dates returns expected first/last transfer", {
   md2 <- create_example_DTAMetaData(2)
   dates2 <- get_transmission_dates(md2)
@@ -188,6 +259,24 @@ test_that("get_version_history_df returns complete and empty shapes", {
   hist_empty <- get_version_history_df(md_empty)
   expect_true(is.data.frame(hist_empty))
   expect_equal(nrow(hist_empty), 0)
+  expect_equal(colnames(hist_empty), c("version", "date", "changes"))
+  expect_s3_class(hist_empty$date, "Date")
+})
+
+test_that("get_version_history_df accepts an all-character history", {
+  md <- DTAMetaData(
+    title = "Character Dates",
+    version_history = list(
+      list(version = "1.0", date = "2026-01-01", changes = "Initial"),
+      list(version = "2.0", date = "2026-02-01", changes = "Revised")
+    )
+  )
+
+  hist <- get_version_history_df(md)
+  expect_equal(nrow(hist), 2)
+  expect_s3_class(hist$date, "Date")
+  expect_identical(as.character(hist$date), c("2026-01-01", "2026-02-01"))
+  expect_identical(hist$version, c("1.0", "2.0"))
 })
 
 test_that("validate_transmission_dates validates Date and phrase cases", {
@@ -238,11 +327,34 @@ test_that("validate_transmission_dates validates Date and phrase cases", {
   expect_true(res_empty$is_valid)
 })
 
-test_that("print methods execute without error", {
+test_that("print methods render the metadata they are given", {
+  # cli writes its alerts to the message connection, so the output has to be
+  # captured with type = "message". The previous version of this test captured
+  # stdout (always empty here) and only asserted expect_no_error(), which would
+  # have passed even if the print methods emitted nothing at all.
   md <- create_example_DTAMetaData(2)
 
-  expect_no_error(suppressMessages(capture.output(print(md))))
-  expect_no_error(suppressMessages(capture.output(print_info(md))))
-  expect_no_error(suppressMessages(capture.output(print_short_info(md))))
+  out <- capture.output(print(md), type = "message")
+  expect_true(any(grepl("DTAMetaData", out, fixed = TRUE)))
+  expect_true(any(grepl("Clinical Data Transfer Agreement", out, fixed = TRUE)))
+  expect_true(any(grepl("Version: 2.0", out, fixed = TRUE)))
+  expect_true(any(grepl("2026-01-15", out, fixed = TRUE)))
+
+  info <- capture.output(print_info(md), type = "message")
+  expect_true(any(grepl("Version History", info, fixed = TRUE)))
+  expect_true(any(grepl("Initial version", info, fixed = TRUE)))
+  expect_true(any(grepl("Receiver", info, fixed = TRUE)))
+  expect_true(any(grepl("Supplier", info, fixed = TRUE)))
+  expect_true(any(grepl("Transmission", info, fixed = TRUE)))
+  expect_true(any(grepl("Alice Smith", info, fixed = TRUE)))
+
+  short <- capture.output(print_short_info(md), type = "message")
+  expect_length(short, 1)
+  expect_match(short, "Clinical Data Transfer Agreement")
+  expect_match(short, "2.0", fixed = TRUE)
+  expect_match(short, "2026-01-15", fixed = TRUE)
+
+  # print_short_info() stays short: it must not spill the full print_info body.
+  expect_lt(length(short), length(info))
 })
 

@@ -6,8 +6,13 @@ test_that("DTADataSetTabular stores validation state per table", {
   status <- validation_status(ds, tables = "tab1")
   expect_equal(nrow(status), 1)
   expect_equal(status$table, "tab1")
+  # `status` records that a run happened, NOT that the data passed. The example
+  # fixture deliberately carries 7 schema errors, so `ok` is FALSE while
+  # `status` is "validated" — assert both so the two can never be conflated.
   expect_equal(status$status, "validated")
-  expect_true(is.logical(status$ok))
+  expect_false(status$ok)
+  expect_equal(status$n_schema_errors, 7)
+  expect_equal(status$n_rule_errors, 0)
 
   details <- validation_errors(ds, table = "tab1", source = "memory")
   expect_true(is.list(details))
@@ -26,10 +31,9 @@ test_that("DTADataSetTabular stores validation state per table", {
   expect_true(is.data.frame(result_tbl))
   expect_equal(nrow(result_tbl), 1)
   expect_equal(result_tbl$target, "tab1")
-  expect_equal(result_tbl$status, if (status$ok) "validated" else "failed")
-  expect_equal(result_tbl$dataset, "demographics")
-  expect_equal(result_tbl$n_targets, 1)
-  expect_equal(result_tbl$n_validated, 1)
+  # Was `if (status$ok) "validated" else "failed"`, which derived the expected
+  # value from the object under test and therefore could never fail.
+  expect_equal(result_tbl$status, "failed")
   expect_equal(result_tbl$dataset, "demographics")
   expect_equal(result_tbl$n_targets, 1)
   expect_equal(result_tbl$n_validated, 1)
@@ -139,11 +143,24 @@ test_that("check() forces re-validation when force=TRUE", {
   expect_gt(second_time, first_time)
 })
 
-test_that("check() aborts when table argument is missing and tables is null", {
+test_that("check() with neither `tab` nor `tables` validates every table", {
+  # Was named "check() aborts ...", asserted the opposite of its own title, and
+  # the only assertion was expect_true(TRUE) — it passed no matter what check()
+  # returned. Assert the real all-tables contract instead.
   ds <- create_example_DTADataSetTabular(2)
-  # With neither table nor tables, it checks all tables (no error)
-  ds <- check(ds, quiet = TRUE)
-  expect_true(TRUE)  # Just verify it doesn't error
+  ds@tables[["tab2"]] <- ds@tables[["tab1"]]
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  status <- validation_status(ds)
+  expect_setequal(status$table, c("tab1", "tab2"))
+  expect_true(all(status$status == "validated"))
+  expect_equal(nrow(status), 2)
+})
+
+test_that("check() rejects `tab` and `tables` given together", {
+  ds <- create_example_DTADataSetTabular(2)
+  expect_error(check(ds, tab = "tab1", tables = "tab1"), "Cannot specify both")
 })
 
 test_that("check() aborts on non-existent table", {
@@ -162,9 +179,17 @@ test_that("invalidate_by_spec_change() marks validation as outdated", {
   # Invalidate by spec change
   ds <- invalidate_by_spec_change(ds, tables = "tab1")
 
-  # specs_hash should be NULL now
-  specs_hash_after <- ds@validation_index[["tab1"]]$specs_hash
-  expect_true(is.null(specs_hash_after))
+  # `NULL$specs_hash` is also NULL, so asserting only that the hash is gone
+  # would still pass if the whole index entry had been dropped. Pin both.
+  entry <- ds@validation_index[["tab1"]]
+  expect_false(is.null(entry))
+  expect_true(is.null(entry$specs_hash))
+  expect_false(is.null(entry$table_hash))
+
+  # The documented point of invalidating is that the next check() re-runs
+  # rather than reporting "skipped".
+  ds <- check(ds, tab = "tab1", force = FALSE, persist = FALSE, quiet = TRUE)
+  expect_equal(attr(ds, "last_validation_summary")$status[[1]], "validated")
 })
 
 test_that("invalidate_by_spec_change() invalidates all tables when no tables specified", {

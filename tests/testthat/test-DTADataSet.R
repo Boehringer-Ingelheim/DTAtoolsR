@@ -70,5 +70,16 @@ test_that("DTADataSetTabular can be created with empty tables", {
 
 test_that("colspec() errors for out-of-bounds numeric index", {
   ds <- create_example_DTADataSetTabular(2)
-  expect_error(colspec(ds, 999))
+
+  # A bare expect_error() accepts ANY error, including a typo in the call
+  # itself. Assert the *kind* of error rather than its text: base R messages
+  # are translated (this machine reports them in German), so matching the
+  # English wording would make the test locale-dependent.
+  #
+  # DEFECT, pinned rather than endorsed: unlike get_table(), which aborts with
+  # a cli message ("Index {id} is out of bounds."), colspec() has no bounds
+  # check and leaks a raw base R subscript error. When a cli_abort is added
+  # this expectation SHOULD fail -- change it to
+  # expect_error(colspec(ds, 999), class = "rlang_error").
+  expect_error(colspec(ds, 999), class = "subscriptOutOfBoundsError")
 })

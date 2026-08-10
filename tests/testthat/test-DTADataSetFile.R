@@ -39,7 +39,50 @@ test_that("DTADataSetFile reports missing or unreadable files", {
   msgs <- messages(ds, as_tibble = FALSE)
   expect_equal(nrow(msgs), 1)
   expect_equal(msgs$source, "rule")
-  expect_true(grepl("not found|readable|empty", msgs$message, ignore.case = TRUE))
+  # The old alternation "not found|readable|empty" could not tell the three
+  # distinct failure reasons apart. This scenario is specifically a missing
+  # file, so pin that reason.
+  expect_match(msgs$message, "not found")
+})
+
+test_that("DTADataSetFile flags an existing but empty file", {
+  path <- tempfile(fileext = ".txt")
+  file.create(path)
+  on.exit(unlink(path), add = TRUE)
+
+  ds <- check(DTADataSetFile(name = "empty_file", paths = path), quiet = TRUE)
+
+  status <- validation_status(ds)
+  expect_false(status$ok)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_match(msgs$message, "empty")
+})
+
+test_that("DTADataSetFile keys results by basename (KNOWN DEFECT)", {
+  # DEFECT, pinned deliberately rather than endorsed: check.DTADataSetFile
+  # keys validation_index/validation_store by basename(path), so two paths
+  # sharing a basename in different directories collapse into one row and the
+  # passing file's result is overwritten by the failing one. A file silently
+  # disappears from validation. When that is fixed, this test SHOULD fail --
+  # change it to expect 2 rows and setequal(ok, c(TRUE, FALSE)).
+  dir_a <- file.path(tempdir(), "dta-basename-a")
+  dir_b <- file.path(tempdir(), "dta-basename-b")
+  dir.create(dir_a, showWarnings = FALSE)
+  dir.create(dir_b, showWarnings = FALSE)
+  on.exit(unlink(c(dir_a, dir_b), recursive = TRUE), add = TRUE)
+
+  present <- file.path(dir_a, "same.txt")
+  writeLines("content", present)
+  absent <- file.path(dir_b, "same.txt")
+
+  ds <- check(
+    DTADataSetFile(name = "collision", paths = c(present, absent)),
+    quiet = TRUE
+  )
+
+  expect_equal(nrow(validation_status(ds)), 1)
 })
 
 test_that("DTA results and messages combine tabular and file datasets", {

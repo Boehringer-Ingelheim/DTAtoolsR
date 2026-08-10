@@ -21,11 +21,87 @@ test_that("DTA object is constructed correctly from example", {
   expect_equal(datasets(dta, "demographics"), dta@datasets[["demographics"]])
   expect_s3_class(datasets(dta, "demographics"), "DTAtools::DTADataSet")
 
+  # Retrieve by index
+  expect_equal(datasets(dta, 2), dta@datasets[["vitals"]])
+
   # Error on missing container
   expect_error(datasets(dta, "missing"), "not found")
+
+  # Index bounds are checked
+  expect_error(datasets(dta, 0), "out of bounds")
+  expect_error(datasets(dta, 99), "out of bounds")
+})
+
+test_that("datasets() does not enforce a single 'name' argument (documented gap)", {
+  # The guard in method(datasets, DTA) reads
+  #   !is.null(name) && !is.character(name) && !is.numeric(name) && length(name) != 1
+  # so the length check is ANDed with the two type checks. Any character or any
+  # numeric input short-circuits the condition to FALSE, which means the
+  # "must be a single ..." abort is unreachable for exactly the inputs it was
+  # written to catch. The `&&` should be `||` around the length test.
+  #
+  # Consequences pinned below; both are gaps, not intended behaviour:
+  dta <- create_example_DTA()
+
+  # (1) A length-2 character vector passes the guard, passes the setdiff()
+  #     membership check (both names exist), and then dies inside `[[` with
+  #     R's own subscript error instead of the intended cli_abort. The message
+  #     is localised, so pin the condition class rather than the text.
+  expect_error(
+    datasets(dta, c("demographics", "vitals")),
+    class = "subscriptOutOfBoundsError"
+  )
+  expect_error(
+    datasets(dta, c(1, 2)),
+    class = "subscriptOutOfBoundsError"
+  )
+
+  # (2) A non-integer numeric index is silently truncated by `[[` rather than
+  #     rejected, so a caller asking for dataset 1.9 quietly receives dataset 1.
+  expect_identical(datasets(dta, 1.9)@name, "demographics")
+
+  # Deferred: asserting a "single value" error for all four calls above
+  # requires fixing the guard in R/DTA-class.R.
 })
 
 
+
+test_that("DTA() names datasets from the DTADataSet it is given", {
+  ds <- DTADataSetTabular(
+    name = "demographics",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(t1 = data.frame(STUDYID = "1234", VISIT = "V03"))
+  )
+
+  # A bare DTADataSet is wrapped in a list and named from its @name slot.
+  dta_bare <- DTA(datasets = ds, metadata = create_example_DTAMetaData())
+  expect_named(dta_bare@datasets, "demographics")
+  expect_length(dta_bare@datasets, 1)
+  expect_equal(dta_bare@datasets[["demographics"]], ds)
+
+  # An unnamed list takes the same path via vapply() over @name.
+  dta_list <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+  expect_named(dta_list@datasets, "demographics")
+
+  # Explicit names are kept as given, even when they differ from @name.
+  dta_named <- DTA(datasets = list(other = ds), metadata = create_example_DTAMetaData())
+  expect_named(dta_named@datasets, "other")
+})
+
+test_that("DTA() builds metadata from ... when metadata is not supplied", {
+  dta <- DTA(datasets = list(), title = "Constructed From Dots", version = "1.0")
+
+  expect_s3_class(dta@metadata, "DTAtools::DTAMetaData")
+  expect_equal(dta@metadata@title, "Constructed From Dots")
+  expect_equal(dta@metadata@version, "1.0")
+  expect_length(dta@datasets, 0)
+
+  # Deferred (implementation gap): DTA(metadata = DTAMetaData(title = "t")) with
+  # no `datasets` argument fails S7 property validation because @datasets is
+  # declared class_list but defaults to NULL -- the constructor never coerces
+  # the default to list(). Asserting that this builds an empty DTA needs a fix
+  # in R/DTA-class.R, so it is not asserted here.
+})
 
 test_that("DTA object is constructed correctly from reading YAML DTA", {
   path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
