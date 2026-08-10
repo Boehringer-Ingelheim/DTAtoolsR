@@ -36,6 +36,18 @@ test_that("write_dta exports docx when metadata has no title (regression)", {
     write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   )
   expect_true(file.exists(out_docx))
+
+  # Not merely "no error": the empty title must fall back to the literal
+  # "Data Transfer Agreement" (R/documentBuilders.R:13) and still be rendered.
+  body <- .read_docx_body_xml(out_docx)
+  expect_match(body, "<w:t[^>]*>Data Transfer Agreement</w:t>")
+
+  # The body-XML check above is necessary but not sufficient: the document also
+  # carries a level-1 section heading with exactly that text, so it would pass
+  # even if the title paragraph were dropped. The title is the first non-empty
+  # paragraph of the document, so pin that instead.
+  paragraphs <- .docx_paragraphs(out_docx)
+  expect_equal(Filter(nzchar, paragraphs)[1], "Data Transfer Agreement")
 })
 
 test_that("write_dta exports docx when title contains regex metacharacters", {
@@ -52,6 +64,14 @@ test_that("write_dta exports docx when title contains regex metacharacters", {
     write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   )
   expect_true(file.exists(out_docx))
+
+  # The metacharacters must survive verbatim into the document text, and the
+  # supplied title must not be silently replaced by the empty-title fallback.
+  body <- .read_docx_body_xml(out_docx)
+  expect_match(body, "<w:t[^>]*>Study \\(Phase 3</w:t>")
+
+  paragraphs <- .docx_paragraphs(out_docx)
+  expect_equal(Filter(nzchar, paragraphs)[1], "Study (Phase 3")
 })
 
 test_that("write_dataset_metadata and alias export metadata documents", {
@@ -93,14 +113,7 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   expect_true(file.exists(alias_out))
 })
 
-# Read a .docx file's word/document.xml as a single string (test helper).
-.read_docx_body_xml <- function(path) {
-  ex <- file.path(tempdir(), paste0("docxbody_", as.integer(Sys.time()), "_", sample.int(1e6, 1)))
-  dir.create(ex, showWarnings = FALSE)
-  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
-  utils::unzip(path, files = "word/document.xml", exdir = ex)
-  paste(readLines(file.path(ex, "word", "document.xml"), warn = FALSE), collapse = "")
-}
+# .read_docx_body_xml() and .docx_paragraphs() live in helper-docx.R.
 
 test_that("bundled numbered template ships a 'heading 4' style", {
   tp <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
@@ -116,15 +129,24 @@ test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
-  body <- .read_docx_body_xml(out_docx)
-  # Titre1..Titre4 are the styleIds for "heading 1".."heading 4"; their presence
-  # proves the Datasets -> dataset -> Files / Dataset Specifications hierarchy is
-  # rendered with the multilevel-numbered heading styles (not bold subheadings).
-  for (sid in c("Titre1", "Titre2", "Titre3", "Titre4")) {
-    expect_true(grepl(paste0('w:pStyle w:val="', sid, '"'), body, fixed = TRUE))
+  # Assert on style_name, not on the underlying styleId. The checked-in template
+  # inst/extdata/templates/dta_numbered_template.docx was saved by a French Word
+  # install, so its ids happen to be "Titre1".."Titre4"; regenerating it on an
+  # English install would yield "Heading1".. with no functional change.
+  # .add_heading() (R/documentBuilders.R:61-64) requests "heading <level>", and
+  # that is the locale-independent contract worth pinning.
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+  for (nm in c("heading 1", "heading 2", "heading 3", "heading 4")) {
+    expect_true(nm %in% summary$style_name)
   }
-  expect_true(grepl("Data Transfer Agreement", body, fixed = TRUE))
-  expect_true(grepl("Dataset Specifications", body, fixed = TRUE))
+
+  # The Datasets -> <dataset> -> Files / Dataset Specifications hierarchy must
+  # be carried by those heading levels, not by bold body paragraphs.
+  headings <- summary[summary$style_name %in% paste("heading", 1:4), ]
+  expect_equal(headings$style_name[headings$text == "Datasets"], "heading 2")
+  expect_equal(unique(headings$style_name[headings$text == "demographics"]), "heading 3")
+  expect_equal(unique(headings$style_name[headings$text == "Dataset Specifications"]), "heading 4")
+  expect_true("Data Transfer Agreement" %in% summary$text)
 })
 
 test_that("write_dta docx embeds a small-font YAML section only when requested", {
@@ -139,13 +161,49 @@ test_that("write_dta docx embeds a small-font YAML section only when requested",
   )
   body_yes <- .read_docx_body_xml(with_yaml)
   expect_true(grepl("Embedded Specification (YAML)", body_yes, fixed = TRUE))
-  expect_true(grepl("SUBJID", body_yes, fixed = TRUE))
   # 6pt font is stored as half-points (w:sz w:val="12").
   expect_true(grepl('w:sz w:val="12"', body_yes, fixed = TRUE))
+
+  # The whole reason .add_embedded_yaml_section() loops line by line
+  # (R/documentBuilders.R:99-105) is to convert each leading space to U+00A0 so
+  # Word does not collapse the YAML indentation. Assert the converted
+  # indentation, not just that "SUBJID" appears somewhere in the document.
+  nbsp <- "\u00a0"
+  expect_true(grepl(paste0(strrep(nbsp, 2), "clinical_data:"), body_yes, fixed = TRUE))
+  expect_true(grepl(paste0(strrep(nbsp, 6), "SUBJID:"), body_yes, fixed = TRUE))
+  expect_true(grepl(paste0(strrep(nbsp, 8), "type: string"), body_yes, fixed = TRUE))
+  # The indented lines must be whole paragraphs of their own, so the small-font
+  # runs really are the YAML block.
+  paragraphs_yes <- .docx_paragraphs(with_yaml)
+  expect_true(paste0(strrep(nbsp, 6), "SUBJID:") %in% paragraphs_yes)
 
   without_yaml <- tempfile(fileext = ".docx")
   on.exit(unlink(without_yaml, force = TRUE), add = TRUE)
   write_dta(dta, file = without_yaml, format = "docx", overwrite = TRUE, quiet = TRUE)
   body_no <- .read_docx_body_xml(without_yaml)
   expect_false(grepl("Embedded Specification (YAML)", body_no, fixed = TRUE))
+  expect_false(grepl(paste0(strrep(nbsp, 6), "SUBJID:"), body_no, fixed = TRUE))
+})
+
+test_that("write_dta with include_yaml = TRUE but no yaml_text drops the section", {
+  dta <- create_example_DTA()
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+
+  # KNOWN DEFECT, pinned rather than endorsed: `include_yaml = TRUE` with
+  # `yaml_text = NULL` is discarded without any diagnostic -- the guard at
+  # R/exportDocuments.R:246 requires both, so the caller's explicit request for
+  # an embedded specification silently produces a document without one. When
+  # R/exportDocuments.R:246 is fixed this SHOULD fail -- change it to
+  # expect_warning(write_dta(...), "yaml_text") and keep the expect_false below.
+  expect_no_condition(
+    write_dta(
+      dta,
+      file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE,
+      include_yaml = TRUE, yaml_text = NULL
+    )
+  )
+  expect_true(file.exists(out_docx))
+  body <- .read_docx_body_xml(out_docx)
+  expect_false(grepl("Embedded Specification (YAML)", body, fixed = TRUE))
 })
