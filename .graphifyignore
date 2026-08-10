@@ -1,0 +1,14 @@
+# Keep Graphify off vendored and generated trees.
+# Without this it walks renv/ and indexes the minified JavaScript bundled
+# inside the shiny package's www/ assets, which takes many minutes and
+# describes our dependencies rather than this package.
+renv
+renv.lock
+man
+inst/doc
+doc
+Meta
+.Rcheck
+*.Rcheck
+graphify-out
+img
