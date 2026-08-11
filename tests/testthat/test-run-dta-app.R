@@ -44,21 +44,55 @@ test_that("the packages run_dta_app() hard-requires are declared in DESCRIPTION"
   expect_true(all(required %in% declared))
 })
 
-test_that("every package the app calls is available at run time", {
-  app_files <- c(
-    file.path(.shiny_app_dir(), "app.R"),
-    .shiny_app_helper_files()
-  )
-  code <- unlist(lapply(app_files, readLines, warn = FALSE))
-
-  # Every `pkg::` prefix the app code uses.
+# Every `pkg::` prefix used by the app's own code.
+app_packages_used <- function() {
+  code <- unlist(lapply(
+    c(file.path(.shiny_app_dir(), "app.R"), .shiny_app_helper_files()),
+    readLines,
+    warn = FALSE
+  ))
   hits <- regmatches(code, gregexpr("\\b[A-Za-z][A-Za-z0-9.]*(?=::)", code, perl = TRUE))
-  used <- setdiff(sort(unique(unlist(hits))), "DTAtools")
+  list(code = code, used = setdiff(sort(unique(unlist(hits))), "DTAtools"))
+}
+
+# Package names declared anywhere in DESCRIPTION, minus version constraints.
+declared_packages <- function() {
+  desc <- read.dcf(system.file("DESCRIPTION", package = "DTAtools"))
+  fields <- intersect(colnames(desc), c("Depends", "Imports", "Suggests"))
+  out <- trimws(sub("\\(.*\\)", "", unlist(strsplit(paste(desc[, fields], collapse = ","), ","))))
+  out[nzchar(out)]
+}
+
+test_that("every package the app calls is available at run time", {
+  used <- app_packages_used()$used
   expect_gt(length(used), 5)
 
-  # The app calls these unqualified by any requireNamespace() guard in some
-  # paths, so a missing one is a run-time error in the user's face. This catches
-  # a typo'd or removed dependency, which no other test in the suite would.
+  # A typo'd or removed dependency is a run-time error in the user's face, and
+  # no other test in the suite would notice: R CMD check does not scan inst/.
   missing <- used[!vapply(used, requireNamespace, logical(1), quietly = TRUE)]
   expect_equal(missing, character(0))
+})
+
+test_that("every non-base package the app calls is declared or guarded", {
+  info <- app_packages_used()
+
+  # Base/recommended-priority packages ship with R itself and need no
+  # declaration (stats, tools, graphics, grDevices, utils, ...).
+  base_pkgs <- rownames(installed.packages(priority = "base"))
+  candidates <- setdiff(info$used, base_pkgs)
+  expect_gt(length(candidates), 5)
+
+  declared <- declared_packages()
+  undeclared <- setdiff(candidates, declared)
+
+  # An undeclared package is acceptable only when every use is behind a
+  # requireNamespace() guard, so a user without it gets a handled fallback
+  # rather than an error. Anything else must be in DESCRIPTION.
+  unguarded <- undeclared[!vapply(
+    undeclared,
+    function(p) any(grepl(sprintf('requireNamespace\\("%s"', p), info$code)),
+    logical(1)
+  )]
+
+  expect_equal(unguarded, character(0))
 })

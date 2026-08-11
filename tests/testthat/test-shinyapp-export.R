@@ -142,25 +142,23 @@ test_that("get_template_path returns NULL (not an error) for an unknown template
   expect_null(app_fn("get_template_path")(""))
 })
 
-test_that("export_modal_ui namespaces its input ids under the given module id", {
-  # NOTE (reported, not fixed here -- see task report): export_modal_ui() is
-  # not called anywhere in app.R. The real export modal is built inline in
-  # app.R (around the `input$export_modal_open` observer) with FLAT,
-  # unnamespaced ids ("export_format", "export_cancel", "export_do", ...).
-  # export_modal_ui() instead module-namespaces its ids with shiny::NS(id),
-  # which joins with "-" ("<id>-format", "<id>-cancel", "<id>-export"), and
-  # uses different short names ("export", not "do") for its button. No value
-  # of `id` makes this function's output match what app.R's server observes,
-  # so it cannot be used as an "input ids match the server" guard. This test
-  # instead checks the function's own internal contract: it does correctly
-  # apply shiny's module namespacing to the id it's given.
-  ui <- app_fn("export_modal_ui")("export")
-  txt <- as.character(ui)
+test_that("the export modal is built by app.R, with no orphaned UI builder", {
+  # export_modal_ui() used to live in utils_export.R but was never called: the
+  # real modal is built inline in app.R (around the `input$export_modal_open`
+  # observer) with flat, unnamespaced ids, while the orphan module-namespaced
+  # its ids with shiny::NS() and omitted several inputs entirely. It was
+  # removed; this guards against a second UI builder drifting back in.
+  expect_null(get0("export_modal_ui", envir = app_env(), inherits = FALSE))
 
-  expect_match(txt, 'id="export-format"', fixed = TRUE)
-  expect_match(txt, 'id="export-cancel"', fixed = TRUE)
-  expect_match(txt, 'id="export-export"', fixed = TRUE)
-  expect_match(txt, "Export Document", fixed = TRUE)
+  app_code <- readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE)
+  # The ids the server actually observes must be the ones the inline modal
+  # creates.
+  for (id in c("export_format", "export_cancel", "export_do")) {
+    expect_true(
+      any(grepl(id, app_code, fixed = TRUE)),
+      info = paste0("export modal input `", id, "` no longer appears in app.R")
+    )
+  }
 })
 
 test_that("has_pdf_engine falls back cleanly when no engine is on the PATH", {

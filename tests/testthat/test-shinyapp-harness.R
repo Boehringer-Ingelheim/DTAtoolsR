@@ -49,7 +49,7 @@ test_that("app_env() exposes the helper functions the app relies on", {
   for (nm in c(
     "dta_read_yaml", "dta_status_map", "dta_to_yaml_text", # utils_dta.R
     "create_dta_from_template", "list_set_path", # template_core.R
-    "format_datasets_summary", "export_modal_ui", # utils_export.R
+    "format_datasets_summary", "embed_yaml_markdown", # utils_export.R
     "bi_theme", "yaml_highlight_html" # theme.R
   )) {
     expect_true(

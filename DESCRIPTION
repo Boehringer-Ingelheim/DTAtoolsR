@@ -54,6 +54,8 @@ Suggests:
 	DT,
 	writexl,
 	shinyAce,
+	htmltools,
+	tinytex,
 	doconv,
 	remotes,
 	pkgload

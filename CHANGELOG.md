@@ -8,9 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Unit tests for the bundled Shiny app, which previously had none: its helper
+  files are auto-sourced by Shiny at launch and were therefore invisible to the
+  test suite.
+
 ### Changed
 
+- Removed the unused `export_modal_ui()` helper from the Shiny app. The export
+  modal has always been built inline in `app.R`; the orphaned builder produced
+  module-namespaced ids that no server ever observed.
+
 ### Fixed
+
+- Declared `htmltools` and `tinytex` in `Suggests`. Both are used by the bundled
+  Shiny app but were undeclared, working only because `htmltools` arrives
+  transitively with `shiny`. `R CMD check` does not scan `inst/`, so neither was
+  flagged.
 
 ## [0.12.2] - 2026-08-04
 
