@@ -72,6 +72,11 @@ validate_table <- function(specs, table, verbose = TRUE) {
 
 #' @keywords internal
 validate_table_detailed <- function(specs, table, verbose = TRUE) {
+  # Read before the table is touched: these were recorded when the table was
+  # typed at import, and they ride on the table so they cannot be separated
+  # from the data they describe.
+  carried_import_issues <- dta_carried_import_issues(table)
+
   # Arrow reads all-empty columns as its `null` type, which converts to a
   # `vctrs_unspecified` vector in R. jsonlite::toJSON() has no asJSON method for
   # that class, so serialising such a column would abort validation with
@@ -239,12 +244,25 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     rules_valid <- length(rule_errors) == 0
   }
 
-  # Import axis, sourced from the rule layer: every column a rule reads as a
-  # number is scanned for values that are present in the source but not
-  # representable as a number. Those rows are *also* counted as rule violations,
-  # so no error moves from one axis to the other.
-  import_errors <- dta_collect_import_errors(rule_results, specs)
-  n_import_errors <- as.integer(nrow(import_errors))
+  # Import axis, from two sources.
+  #
+  # Import time: the table was typed against its column specs when it was read,
+  # and every value that could not be represented in its declared type was made
+  # NA and recorded. This is the primary source -- it covers every specified
+  # column, whether or not a rule happens to read it.
+  #
+  # Rule time: every column a rule reads as a number is scanned for values that
+  # are present in the source but not representable as a number. This still
+  # catches the columns the import layer does not type (no spec, or a Char
+  # column a rule nevertheless compares numerically), and those rows are *also*
+  # counted as rule violations, so no error moves from one axis to the other.
+  import_errors <- dta_merge_import_errors(
+    carried_import_issues,
+    dta_collect_import_errors(rule_results, specs)
+  )
+  # Exact, even when the per-column cap truncated the retained rows, so `ok` is
+  # never affected by truncation.
+  n_import_errors <- dta_import_error_count(import_errors)
   import_valid <- n_import_errors == 0L
   if (n_import_errors == 0L) {
     import_errors <- NULL
@@ -321,30 +339,8 @@ dta_empty_import_errors <- function() {
 #' @return A length-1 character, possibly `NA_character_`.
 #' @keywords internal
 dta_spec_declared_type <- function(specs, column) {
-  columns <- tryCatch(specs@columns, error = function(e) NULL)
+  structure <- dta_spec_column_structure(specs, column)
 
-  if (!is.list(columns) || length(columns) == 0) {
-    return(NA_character_)
-  }
-
-  index <- match(column, names(columns))
-
-  if (is.na(index)) {
-    # The collection is normally named by column id, but a spec built by another
-    # route may not be, so fall back to the ids themselves.
-    ids <- vapply(
-      columns,
-      function(spec) tryCatch(as.character(spec@id)[[1]], error = function(e) NA_character_),
-      character(1)
-    )
-    index <- match(column, ids)
-  }
-
-  if (is.na(index)) {
-    return(NA_character_)
-  }
-
-  structure <- tryCatch(columns[[index]]@structure, error = function(e) NULL)
   if (is.null(structure)) {
     return(NA_character_)
   }

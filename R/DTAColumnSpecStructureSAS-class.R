@@ -206,6 +206,57 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 }
 
 
+#' @title as_r_type
+#' @description
+#' The R storage type a declared column type maps to. This is the import-time
+#' sibling of [as_json_schema_type()]: that generic says how a column is
+#' *validated*, this one says how it is *stored* when the table is read.
+#'
+#' The two must agree, so every declared type whose JSON Schema type is
+#' `"string"` maps to `"character"` here. `Date`, `Time` and `DateTime` are
+#' validated as strings by their pattern and format, so they are stored as the
+#' text that was read rather than parsed into `Date`/`POSIXct` -- parsing them
+#' would re-render the value and validate something other than what the file
+#' contained.
+#'
+#' `Char` maps to `"character"`, which is what stops the import layer from ever
+#' touching a character column: a `SUBJECT_ID` of `"007"` must survive import
+#' unchanged, and any numeric round trip would silently make it `7`.
+#' @param x A `DTAColumnSpecStructure` object.
+#' @return A length-1 character naming an R type: one of `"character"`,
+#'   `"double"`, `"integer"` or `"logical"`. Defaults to `"character"` when the
+#'   spec declares no type, so an unspecified column is never coerced.
+#' @examples
+#' as_r_type(DTAColumnSpecStructureSAS(type = "Num"))
+#' as_r_type(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+#' @name as_r_type
+#' @export
+if (!exists("as_r_type", mode = "function")) {
+  as_r_type <- new_generic("as_r_type", "x")
+}
+
+#' @export
+method(as_r_type, DTAColumnSpecStructureSAS) <- function(x) {
+  # An unset type carries no instruction to convert anything, so it falls back
+  # to the type that the coercion layer leaves alone.
+  if (!.structure_value_is_set(x@type)) {
+    return("character")
+  }
+
+  switch(
+    x@type,
+    "Char" = "character",
+    "Num" = "double",
+    "Int" = "integer",
+    "Date" = "character",
+    "Time" = "character",
+    "DateTime" = "character",
+    "Bool" = "logical",
+    "character"
+  ) # fallback
+}
+
+
 #' @title print
 #' @description
 #' prints info of the column spec structure

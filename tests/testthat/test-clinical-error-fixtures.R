@@ -10,7 +10,7 @@ load_clinical_fixture_dta <- function(filename) {
   check(dta, persist = FALSE, quiet = TRUE)
 }
 
-test_that("clinical_data_error_schema.csv triggers diverse schema failures only", {
+test_that("clinical_data_error_schema.csv triggers schema failures and one import failure", {
   dta <- load_clinical_fixture_dta("clinical_data_error_schema.csv")
 
   res <- results(dta)
@@ -25,15 +25,39 @@ test_that("clinical_data_error_schema.csv triggers diverse schema failures only"
   expect_equal(res$status, "failed")
   expect_gt(res$n_schema_errors, 0)
   expect_equal(res$n_rule_errors, 0)
+  expect_equal(res$n_import_errors, 1L)
 
   expect_false(details$schema_valid)
   expect_true(details$rules_valid)
+  expect_false(details$import_valid)
+  # The table is invalid on the three-axis verdict, not merely on the schema
+  # axis: the schema count is now lower than it was, and `ok` must not follow it.
+  expect_false(details$ok)
   expect_equal(sort(unique(schema_full$keyword)), c("const", "enum", "maxLength", "required", "type"))
   expect_equal(sort(unique(schema_full$column)), c("BMI", "GENDER", "STUDYID", "VISIT"))
 
+  # BMI is declared `SAS Num` and holds one "heavy" among 500 numbers. Before the
+  # typed import choke point, Arrow read the whole column as text and every row
+  # failed the `type` check. Now the column is a number, only the one cell that
+  # could not be represented is NA, and that cell is reported once on each axis:
+  # `type` (null against nullable: false) and `not_convertible` on the import
+  # axis. The schema count falls by ~500; `ok` is unmoved because the import axis
+  # carries the failure.
+  bmi_schema <- schema_full[schema_full$column %in% "BMI", , drop = FALSE]
+  expect_equal(nrow(bmi_schema), 1)
+  expect_equal(bmi_schema$keyword, "type")
+
+  import_errors <- details$import_errors
+  expect_true(is.data.frame(import_errors))
+  expect_equal(nrow(import_errors), 1)
+  expect_equal(import_errors$column, "BMI")
+  expect_equal(import_errors$raw, "heavy")
+  expect_equal(import_errors$declared_type, "SAS Num")
+  expect_equal(import_errors$reason, "not_convertible")
+
   expect_true(is.data.frame(msgs))
   expect_gt(nrow(msgs), 0)
-  expect_true(all(msgs$source == "schema"))
+  expect_equal(sort(unique(msgs$source)), c("import", "schema"))
   expect_true(all(msgs$target == table_name))
 })
 
@@ -50,9 +74,14 @@ test_that("clinical_data_error_rules.csv triggers representative rule failures o
   expect_equal(res$status, "failed")
   expect_equal(res$n_schema_errors, 0)
   expect_equal(res$n_rule_errors, 6)
+  # Every value in this fixture is representable in its declared type; the
+  # failures are all on the rule axis. The typed import must not add to them.
+  expect_equal(res$n_import_errors, 0L)
 
   expect_true(details$schema_valid)
   expect_false(details$rules_valid)
+  expect_true(details$import_valid)
+  expect_false(details$ok)
   expect_equal(
     sort(rule_ids),
     sort(c(
@@ -85,9 +114,12 @@ test_that("clinical_data_error_all.csv combines schema and rule failures", {
   expect_equal(res$status, "failed")
   expect_gt(res$n_schema_errors, 0)
   expect_gt(res$n_rule_errors, 0)
+  expect_equal(res$n_import_errors, 0L)
 
   expect_false(details$schema_valid)
   expect_false(details$rules_valid)
+  expect_true(details$import_valid)
+  expect_false(details$ok)
   expect_equal(sort(unique(schema_full$keyword)), c("const", "enum", "maxLength"))
   expect_equal(sort(unique(schema_full$column)), c("INCLUDE", "STUDYID", "VISIT"))
   expect_equal(

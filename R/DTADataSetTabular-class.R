@@ -47,8 +47,25 @@ DTADataSetTabular <- S7::new_class(
       files = list(files)
     }
 
+    # Type every table by its column specs before it is stored, so the declared
+    # type -- not the reader's per-column inference -- decides what each column
+    # holds. Values that cannot be represented become NA and are recorded as
+    # import issues, both here and on the table itself.
+    coerced <- lapply(tables, function(tbl) dta_coerce_table_to_specs(tbl, specs))
+
     # Transform to arrow tables
-    tables <- lapply(tables, function(x) arrow::as_arrow_table(x))
+    tables <- lapply(coerced, function(result) arrow::as_arrow_table(result$table))
+
+    import_issues <- lapply(coerced, function(result) result$issues)
+    import_issues <- import_issues[
+      vapply(import_issues, function(issues) nrow(issues) > 0, logical(1))
+    ]
+    # Subsetting a named list keeps the (empty) names attribute, and a named
+    # empty list is not `identical()` to `list()`. Normalise, so "no import
+    # issues" is one value rather than two.
+    if (length(import_issues) == 0) {
+      import_issues <- list()
+    }
 
     new_object(
       .parent = DTADataSet(
@@ -65,7 +82,7 @@ DTADataSetTabular <- S7::new_class(
       tables = tables,
       validation_index = list(),
       validation_store = list(),
-      import_issues = list(),
+      import_issues = import_issues,
       validation_artifact_dir = NULL
     )
   },
@@ -600,7 +617,26 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
     cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
   }
 
-  x@tables[[ name ]] <- files(x, handler_index) |> read_file(file)
+  # The typed import choke point. The reader infers a type per column, so one
+  # unparseable cell turns a whole numeric column into text; applying the
+  # declared type here makes the column a number, that one cell NA, and that
+  # one cell an import error.
+  coerced <- dta_coerce_table_to_specs(
+    files(x, handler_index) |> read_file(file),
+    x@specs
+  )
+
+  x@tables[[ name ]] <- coerced$table
+
+  # Canonical copy on the dataset, keyed by table name. The same frame also
+  # rides on the table itself, so a change in the issues changes the table hash
+  # and check() cannot skip revalidation with a stale result.
+  if (nrow(coerced$issues) > 0) {
+    x@import_issues[[ name ]] <- coerced$issues
+  } else {
+    x@import_issues[[ name ]] <- NULL
+  }
+
   x
 }
 

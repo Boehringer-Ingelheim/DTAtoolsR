@@ -1,5 +1,6 @@
 #' @title DTADataSet Class
 #' @description Class to handle data from files
+#' @include importConversion.R
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom stringr str_flatten_comma
