@@ -8,9 +8,12 @@
 #'
 #' @param id Character. A unique identifier for the rule.
 #' @param description Character or NULL. Free-text description of the rule.
-#' @param condition List. A list of conditions to check
-#' @param then List. A list of conditions that must be true if the
-#'   conditions are met
+#' @param condition List. Conditions to check, as a mapping of column name to
+#'   one or more operators, e.g. `list(AGE = list(greater = 18, less = 65))`.
+#'   All operators given for a column must hold. A YAML sequence of
+#'   single-column mappings is accepted and normalised to this form.
+#' @param then List. Conditions that must be true if the `condition` clause is
+#'   met. Same structure as `condition`.
 #' @return An object of class `DTARuleColCondition`.
 #'
 #' @examples
@@ -50,6 +53,11 @@ DTARuleColCondition <- S7::new_class(
       cli_abort("'then' must be a non-empty list of conditions.")
     }
 
+    # Accept the YAML sequence form (`- COLUMN:` under `condition:`) and store
+    # the canonical named form, so every consumer sees one shape.
+    condition <- dta_normalize_conditions(condition, arg = "condition")
+    then <- dta_normalize_conditions(then, arg = "then")
+
     # Create the class object
     new_object(
       DTAtools::DTARule(
@@ -82,6 +90,19 @@ DTARuleColCondition <- S7::new_class(
     }
     if (is.null(self@then) || length(self@then) < 1) {
       cli_abort("'then' must be a non-empty list of conditions.")
+    }
+    # The property union still admits a bare character for backward
+    # compatibility, but nothing can evaluate one: reject it here rather than
+    # letting it reach the engine and silently pass every row.
+    if (!is.list(self@condition)) {
+      cli_abort(
+        "'condition' must map column names to operators, not a character string."
+      )
+    }
+    if (!is.list(self@then)) {
+      cli_abort(
+        "'then' must map column names to operators, not a character string."
+      )
     }
   }
 )

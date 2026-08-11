@@ -14,8 +14,18 @@ validate_table(specs, table, verbose = TRUE)
 \item{verbose}{Logical. If TRUE (default), prints validation progress.}
 }
 \value{
-Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
+Transformed and checked table (a data.frame) if valid. If the table
+has schema errors, returns a list with \code{summarised_error}, \code{full_error},
+\code{rules_valid} and \code{rule_errors}. If the schema is valid but rules are
+violated, aborts.
 }
 \description{
 Validates a data.frame against a JSON Schema using jsonvalidate. The table is split into smaller chunks for validation to avoid argument limits.
+}
+\details{
+Both axes -- the column specs and the schema rules -- are always evaluated,
+and both are reported in a single pass. When the table has schema errors, the
+returned error list additionally carries \code{rules_valid} and \code{rule_errors}, and
+any rule violations are raised as a warning so they cannot go unnoticed while
+the schema errors are being fixed.
 }

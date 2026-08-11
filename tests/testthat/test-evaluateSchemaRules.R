@@ -587,10 +587,7 @@ test_that("Unique rules compare values verbatim (pinned, not endorsed)", {
   expect_null(result$message)
 })
 
-test_that("Unsupported condition operators abort (pinned, not endorsed)", {
-  # Pins current behaviour: this path uses base stop(), not cli::cli_abort(), so
-  # the condition is a plain simpleError rather than an rlang_error. Pinned so a
-  # future conversion to cli_abort() is noticed; the repo convention is cli.
+test_that("Unsupported condition operators abort via cli, naming column and key", {
   err <- expect_error(
     rule_check_col_condition(
       DTARuleColCondition(
@@ -600,7 +597,289 @@ test_that("Unsupported condition operators abort (pinned, not endorsed)", {
       ),
       data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
     ),
-    "Unsupported condition type for column 'AGE'"
+    class = "rlang_error"
   )
-  expect_s3_class(err, "simpleError")
+  # The abort must identify both the column and the offending key, otherwise a
+  # typo in a large DTS is untraceable.
+  expect_match(conditionMessage(err), "bogus_op")
+  expect_match(conditionMessage(err), "AGE")
+
+  # An unknown operator sitting next to a valid one must still abort; it must
+  # never be quietly skipped because another operator was recognised first.
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "bogus_mixed",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = list(greater = 0, bogus_op = 1))
+      ),
+      data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
+    ),
+    class = "rlang_error"
+  )
+})
+
+test_that("Every operator supplied for a column is evaluated and AND-combined", {
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c(200, 999),
+    stringsAsFactors = FALSE
+  )
+
+  # Two operators, both satisfied.
+  both_ok <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_ok",
+      condition = list(AGE = list(greater_equal = 0)),
+      then = list(AGE = list(greater = 18, less = 1000))
+    ),
+    df
+  )
+  expect_true(both_ok$valid)
+  expect_null(both_ok$message)
+
+  # Two operators where only the SECOND is violated. The old if/else chain
+  # return()ed on `greater`, so `less` was never evaluated and AGE = 200/999
+  # passed an 18..65 band.
+  second_violated <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_second_violated",
+      condition = list(AGE = list(greater_equal = 0)),
+      then = list(AGE = list(greater = 18, less = 65))
+    ),
+    df
+  )
+  expect_false(second_violated$valid)
+  expect_match(second_violated$message, "violated: 2 rows")
+
+  # Three operators, only the last one fires.
+  three_ops <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_three",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(greater = 18, less = 1000, not_equals = 999))
+    ),
+    df
+  )
+  expect_false(three_ops$valid)
+  expect_match(three_ops$message, "violated: 1 rows")
+
+  # Several operators across several THEN columns are all enforced.
+  multi_column <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_column",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(
+        AGE = list(greater = 18, less = 1000),
+        VISIT = list(pattern = "^V", not_equals = "V03")
+      )
+    ),
+    df
+  )
+  expect_false(multi_column$valid)
+  expect_match(multi_column$message, "violated: 2 rows")
+})
+
+test_that("min and max still express one inclusive band", {
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c(200, 999),
+    stringsAsFactors = FALSE
+  )
+
+  band_ok <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "band_ok",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 200, max = 999))
+    ),
+    df
+  )
+  expect_true(band_ok$valid)
+
+  band_violated <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "band_violated",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 0, max = 500))
+    ),
+    df
+  )
+  expect_false(band_violated$valid)
+  expect_match(band_violated$message, "violated: 1 rows")
+
+  # A lone `min` is still an open-ended lower bound, and combines with other
+  # operators rather than shadowing them.
+  min_only <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "min_plus_other",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 0, less = 500))
+    ),
+    df
+  )
+  expect_false(min_only$valid)
+  expect_match(min_only$message, "violated: 1 rows")
+})
+
+test_that("Conditions written as a YAML sequence are normalised to named form", {
+  # A YAML sequence under `condition:` parses to an UNNAMED list -- this is the
+  # exact shape a DTS author produces by writing `- VISIT:` under `condition:`.
+  parsed <- yaml::yaml.load("condition:\n  - VISIT:\n      equals: V03\n")
+  expect_null(names(parsed$condition))
+
+  df <- data.frame(
+    VISIT = c("V03", "EOT"),
+    AGE = c(10, 80),
+    stringsAsFactors = FALSE
+  )
+
+  seq_rule <- DTARuleColCondition(
+    id = "seq_condition",
+    condition = parsed$condition,
+    then = list(AGE = list(less = 5))
+  )
+  # The constructor stores the canonical named form.
+  expect_equal(seq_rule@condition, list(VISIT = list(equals = "V03")))
+
+  # Previously names(conditions) was NULL, lapply() returned list(), Reduce()
+  # returned NULL and the rule reported VALID no matter what the data held.
+  result <- rule_check_col_condition(seq_rule, df)
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 1 rows")
+
+  # Sequences work for `then` as well, and across several entries.
+  multi_seq <- DTARuleColCondition(
+    id = "seq_then",
+    condition = list(list(VISIT = list(equals = "V03")), list(AGE = list(less = 50))),
+    then = list(list(AGE = list(greater = 100)))
+  )
+  expect_equal(names(multi_seq@condition), c("VISIT", "AGE"))
+  expect_equal(names(multi_seq@then), "AGE")
+  expect_false(rule_check_col_condition(multi_seq, df)$valid)
+
+  # The engine normalises too, so a rule built by any other route is safe.
+  expect_equal(
+    evaluate_conditions(list(list(VISIT = list(equals = "V03"))), df),
+    c(TRUE, FALSE)
+  )
+})
+
+test_that("Malformed conditions abort with a clear message, never 'invalid argument type'", {
+  df <- data.frame(VISIT = "V03", AGE = 5, stringsAsFactors = FALSE)
+
+  chr_err <- expect_error(
+    DTARuleColCondition(
+      id = "chr_condition",
+      condition = "VISIT == V03",
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+  expect_match(conditionMessage(chr_err), "condition")
+  expect_false(grepl("invalid argument", conditionMessage(chr_err), fixed = TRUE))
+
+  engine_err <- expect_error(
+    evaluate_conditions("VISIT == V03", df),
+    class = "rlang_error"
+  )
+  expect_false(grepl("invalid argument", conditionMessage(engine_err), fixed = TRUE))
+
+  # A sequence entry that does not name its column is ambiguous, not silently
+  # ignored.
+  expect_error(
+    DTARuleColCondition(
+      id = "unnamed_entry",
+      condition = list(list(equals = "V03")),
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+
+  # An empty operator map must abort, not wave every row through.
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "empty_ops",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = list())
+      ),
+      df
+    ),
+    class = "rlang_error"
+  )
+
+  # The same column named twice is ambiguous: one of the two would be lost.
+  expect_error(
+    DTARuleColCondition(
+      id = "dup_column",
+      condition = list(
+        list(VISIT = list(equals = "V03")),
+        list(VISIT = list(equals = "EOT"))
+      ),
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+})
+
+test_that("A rule naming an absent column fails the rule instead of aborting the run", {
+  df <- data.frame(ID = "A", stringsAsFactors = FALSE)
+
+  range_results <- apply_schema_rules(
+    list(DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120)),
+    df,
+    verbose = FALSE
+  )
+  expect_length(range_results, 1)
+  expect_false(range_results[[1]]$valid)
+  expect_equal(range_results[[1]]$id, "age_range")
+  expect_match(range_results[[1]]$message, "age_range")
+  expect_match(range_results[[1]]$message, "AGE")
+
+  unique_results <- apply_schema_rules(
+    list(DTARuleColUnique(id = "unique_subjid", columns = "SUBJID")),
+    df,
+    verbose = FALSE
+  )
+  expect_false(unique_results[[1]]$valid)
+  expect_match(unique_results[[1]]$message, "unique_subjid")
+  expect_match(unique_results[[1]]$message, "SUBJID")
+
+  condition_results <- apply_schema_rules(
+    list(DTARuleColCondition(
+      id = "visit_rule",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(ID = list(empty = FALSE))
+    )),
+    df,
+    verbose = FALSE
+  )
+  expect_false(condition_results[[1]]$valid)
+  expect_match(condition_results[[1]]$message, "visit_rule")
+  expect_match(condition_results[[1]]$message, "VISIT")
+
+  # One unevaluable rule must not hide the verdict of the others.
+  mixed <- apply_schema_rules(
+    list(
+      DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120),
+      DTARuleColUnique(id = "unique_id", columns = "ID")
+    ),
+    df,
+    verbose = FALSE
+  )
+  expect_length(mixed, 2)
+  expect_false(mixed[[1]]$valid)
+  expect_true(mixed[[2]]$valid)
+
+  # Precision check: a malformed rule is a specification error, not an
+  # unevaluable one, and must still abort rather than be reported as a failure.
+  expect_error(
+    apply_schema_rules(
+      list(DTARuleColRange(id = "multi_col", columns = c("A", "B"), min = 0, max = 1)),
+      data.frame(A = 1, B = 2),
+      verbose = FALSE
+    ),
+    "exactly one"
+  )
 })

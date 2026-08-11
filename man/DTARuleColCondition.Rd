@@ -11,10 +11,13 @@ DTARuleColCondition(id, description = NULL, condition = NULL, then = NULL)
 
 \item{description}{Character or NULL. Free-text description of the rule.}
 
-\item{condition}{List. A list of conditions to check}
+\item{condition}{List. Conditions to check, as a mapping of column name to
+one or more operators, e.g. \code{list(AGE = list(greater = 18, less = 65))}.
+All operators given for a column must hold. A YAML sequence of
+single-column mappings is accepted and normalised to this form.}
 
-\item{then}{List. A list of conditions that must be true if the
-conditions are met}
+\item{then}{List. Conditions that must be true if the \code{condition} clause is
+met. Same structure as \code{condition}.}
 }
 \value{
 An object of class \code{DTARuleColCondition}.

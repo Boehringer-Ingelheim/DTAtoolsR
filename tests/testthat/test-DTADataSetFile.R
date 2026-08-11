@@ -60,13 +60,7 @@ test_that("DTADataSetFile flags an existing but empty file", {
   expect_match(msgs$message, "empty")
 })
 
-test_that("DTADataSetFile keys results by basename (KNOWN DEFECT)", {
-  # DEFECT, pinned deliberately rather than endorsed: check.DTADataSetFile
-  # keys validation_index/validation_store by basename(path), so two paths
-  # sharing a basename in different directories collapse into one row and the
-  # passing file's result is overwritten by the failing one. A file silently
-  # disappears from validation. When that is fixed, this test SHOULD fail --
-  # change it to expect 2 rows and setequal(ok, c(TRUE, FALSE)).
+test_that("DTADataSetFile keeps two paths that share a basename apart", {
   dir_a <- file.path(tempdir(), "dta-basename-a")
   dir_b <- file.path(tempdir(), "dta-basename-b")
   dir.create(dir_a, showWarnings = FALSE)
@@ -82,7 +76,35 @@ test_that("DTADataSetFile keys results by basename (KNOWN DEFECT)", {
     quiet = TRUE
   )
 
-  expect_equal(nrow(validation_status(ds)), 1)
+  status <- validation_status(ds)
+
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$ok, c(TRUE, FALSE))
+
+  # Exactly one message, for the absent file, and inspect() must resolve it
+  # back to the full path it came from.
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_match(msgs$message, "not found")
+
+  details <- inspect(ds, as_tibble = FALSE)
+  expect_equal(nrow(details), 1)
+  expect_equal(details$file_path, absent)
+})
+
+test_that("dta_file_target_keys disambiguates only where it has to", {
+  expect_equal(
+    dta_file_target_keys(c("a/one.txt", "b/two.txt")),
+    c("one.txt", "two.txt")
+  )
+  expect_equal(
+    dta_file_target_keys(c("a/same.txt", "b/same.txt")),
+    c("a/same.txt", "b/same.txt")
+  )
+  # Identical paths cannot be told apart by path either, so fall back to a
+  # suffix rather than silently dropping one.
+  expect_equal(length(unique(dta_file_target_keys(c("a/x.txt", "a/x.txt")))), 2)
+  expect_equal(dta_file_target_keys(character()), character())
 })
 
 test_that("DTA results and messages combine tabular and file datasets", {

@@ -32,7 +32,7 @@
 #'
 #' @export
 DTAFileTabular <- S7::new_class(
-  "DTAFile",
+  "DTAFileTabular",
   parent = DTAFile,
   constructor = function(
     filename,
@@ -68,16 +68,34 @@ DTAFileTabular <- S7::new_class(
     missing_values = class_character
   ),
   validator = function(self) {
-    if (!is.character(self@sep) || nchar(self@sep) != 1) {
-      "'sep' must be a single character."
+    # Collect every violation: returning the messages from separate `if`
+    # blocks would silently discard all but the last one.
+    problems <- character()
+
+    if (
+      !is.character(self@sep) ||
+        length(self@sep) != 1 ||
+        nchar(self@sep) != 1
+    ) {
+      problems <- c(problems, "'sep' must be a single character.")
     }
 
     if (!is.logical(self@has_header) || length(self@has_header) != 1) {
-      "'has_header' must be a single logical value."
+      problems <- c(problems, "'has_header' must be a single logical value.")
     }
 
-    if (!is.character(self@quote) || nchar(self@quote) != 1) {
-      "'quote' must be a single character."
+    if (
+      !is.character(self@quote) ||
+        length(self@quote) != 1 ||
+        nchar(self@quote) != 1
+    ) {
+      problems <- c(problems, "'quote' must be a single character.")
+    }
+
+    if (length(problems) == 0) {
+      NULL
+    } else {
+      problems
     }
   }
 )

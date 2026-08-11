@@ -9,19 +9,44 @@
 #' @param table A data.frame to validate.
 #' @param specs A specs object.
 #' @param verbose Logical. If TRUE (default), prints validation progress.
-#' @return Transformed and checked table (a data.frame) if valid, aborts otherwise. If invalid, returns a list containing summarised and full error data frames.
+#' @details
+#' Both axes -- the column specs and the schema rules -- are always evaluated,
+#' and both are reported in a single pass. When the table has schema errors, the
+#' returned error list additionally carries `rules_valid` and `rule_errors`, and
+#' any rule violations are raised as a warning so they cannot go unnoticed while
+#' the schema errors are being fixed.
+#' @return Transformed and checked table (a data.frame) if valid. If the table
+#'   has schema errors, returns a list with `summarised_error`, `full_error`,
+#'   `rules_valid` and `rule_errors`. If the schema is valid but rules are
+#'   violated, aborts.
 #' @export
 # TODO: consider moving `validate_table()` into DTADataSet-class.R.
 validate_table <- function(specs, table, verbose = TRUE) {
   details <- validate_table_detailed(specs = specs, table = table, verbose = verbose)
 
-  if (!isTRUE(details$schema_valid)) {
-    return(details$schema_errors)
+  # Always evaluate both axes: a schema error must never hide a rule violation.
+  rule_messages <- if (isTRUE(details$rules_valid)) {
+    character(0)
+  } else {
+    vapply(details$rule_errors, function(x) x$message, character(1))
   }
 
-  if (!isTRUE(details$rules_valid)) {
-    messages <- vapply(details$rule_errors, function(x) x$message, character(1))
-    cli::cli_abort(c("Schema rule violations:", messages))
+  if (!isTRUE(details$schema_valid)) {
+    schema_errors <- details$schema_errors
+    schema_errors$rules_valid <- isTRUE(details$rules_valid)
+    schema_errors$rule_errors <- details$rule_errors
+
+    if (length(rule_messages) > 0) {
+      bullets <- c("Schema rule violations were also found:", rule_messages)
+      names(bullets) <- c("", rep("x", length(rule_messages)))
+      cli::cli_warn(bullets)
+    }
+
+    return(schema_errors)
+  }
+
+  if (length(rule_messages) > 0) {
+    cli::cli_abort(c("Schema rule violations:", rule_messages))
   }
 
   if (isTRUE(verbose)) {
@@ -214,4 +239,116 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     rule_results = rule_results,
     rule_errors = rule_errors
   )
+}
+
+
+#' @title Tag Validation Details for Coercion
+#' @description
+#' Marks a `validate_table_detailed()` result so that `as.data.frame()` knows how
+#' to flatten it. The list itself is untouched: names, order and contents are
+#' unchanged, so every existing `details$...` caller keeps working.
+#' @param details A list as returned by `validate_table_detailed()`.
+#' @return The same list, with class `dta_validation_details` prepended.
+#' @keywords internal
+dta_as_validation_details <- function(details) {
+  if (!is.list(details) || inherits(details, "dta_validation_details")) {
+    return(details)
+  }
+
+  class(details) <- c("dta_validation_details", class(details))
+  details
+}
+
+
+#' @title Coerce Validation Details to a Data Frame
+#' @description
+#' Flattens the detailed validation output for one table into one row per
+#' reported error.
+#'
+#' The raw list cannot be coerced by the default method: `schema_errors` bundles
+#' a *grouped* summary table with the *ungrouped* full error table, and those two
+#' have different row counts, so `as.data.frame()` failed with "arguments imply
+#' differing number of rows". This method flattens the errors themselves instead.
+#' @param x A `dta_validation_details` object, as returned by
+#'   `validation_errors()`.
+#' @param row.names `NULL` or a character vector of row names.
+#' @param optional Logical, passed to the default method's contract; unused.
+#' @param ... Ignored.
+#' @return A data.frame with one row per schema error followed by one row per
+#'   rule failure, and columns `source`, `rule_id`, `row`, `column`, `keyword`
+#'   and `message`.
+#' @examples
+#' ds <- check(
+#'   create_example_DTADataSetTabular(2),
+#'   tables = "tab1",
+#'   persist = FALSE,
+#'   quiet = TRUE
+#' )
+#' errors <- as.data.frame(validation_errors(ds, table = "tab1"))
+#' head(errors)
+#' @export
+as.data.frame.dta_validation_details <- function(
+  x,
+  row.names = NULL,
+  optional = FALSE,
+  ...
+) {
+  empty <- data.frame(
+    source = character(0),
+    rule_id = character(0),
+    row = integer(0),
+    column = character(0),
+    keyword = character(0),
+    message = character(0),
+    stringsAsFactors = FALSE
+  )
+
+  full_error <- x$schema_errors$full_error
+  schema_rows <- if (is.null(full_error) || nrow(full_error) == 0) {
+    NULL
+  } else {
+    full_error <- as.data.frame(full_error, stringsAsFactors = FALSE)
+    data.frame(
+      source = "schema",
+      rule_id = NA_character_,
+      row = as.integer(full_error$row),
+      column = as.character(full_error$column),
+      keyword = as.character(full_error$keyword),
+      message = as.character(full_error$message),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  rule_errors <- x$rule_errors
+  rule_rows <- if (is.null(rule_errors) || length(rule_errors) == 0) {
+    NULL
+  } else {
+    data.frame(
+      source = "rule",
+      rule_id = vapply(
+        rule_errors,
+        function(e) if (is.null(e$id)) NA_character_ else as.character(e$id),
+        character(1)
+      ),
+      row = NA_integer_,
+      column = NA_character_,
+      keyword = NA_character_,
+      message = vapply(
+        rule_errors,
+        function(e) if (is.null(e$message)) NA_character_ else as.character(e$message),
+        character(1)
+      ),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  out <- rbind(empty, schema_rows, rule_rows)
+
+  if (!is.null(row.names)) {
+    rownames(out) <- row.names
+  } else {
+    rownames(out) <- NULL
+  }
+
+  out
 }

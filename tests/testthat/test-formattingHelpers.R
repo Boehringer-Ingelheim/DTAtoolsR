@@ -47,38 +47,35 @@ test_that(".format_scalar_value truncates strings longer than 80 characters", {
   expect_equal(nchar(.format_scalar_value(strrep("B", 81))), 80)
 })
 
-test_that(".format_scalar_value aborts on NA_character_ (DEFERRED defect)", {
-  # KNOWN DEFECT, pinned rather than endorsed: nchar(NA_character_) is
-  # NA_integer_, so the `if (nchar(val) > 80)` guard receives NA and R aborts
-  # with "missing value where TRUE/FALSE needed". Every export format crashes
-  # when any metadata field holds NA. When R/formattingHelpers.R:266 is fixed
-  # this SHOULD fail -- change it to
-  # expect_equal(.format_scalar_value(NA_character_), "(not specified)").
-  #
-  # Matched by condition class, not message: base R messages are translated on
-  # non-English machines.
-  expect_error(.format_scalar_value(NA_character_), class = "simpleError")
-  expect_error(.format_metadata_pairs(list(x = NA_character_)), class = "simpleError")
-  expect_error(.kv_bullets_md(list(x = NA_character_)), class = "simpleError")
+test_that(".format_scalar_value renders every flavour of NA as one display string", {
+  # A missing value has exactly one representation, MISSING_VALUE_DISPLAY, and
+  # the formatter always hands back a character scalar -- previously
+  # nchar(NA_character_) fed NA to `if (nchar(val) > 80)` and aborted, while a
+  # logical NA escaped through ifelse(NA, "Yes", "No") as a non-character NA.
+  expect_identical(MISSING_VALUE_DISPLAY, "(not specified)")
 
-  # KNOWN DEFECT, pinned rather than endorsed: a logical NA takes the
-  # is.logical() branch first and escapes the crash, but ifelse(NA, "Yes", "No")
-  # returns logical NA -- a formatter documented to return a display string
-  # hands back a non-character NA, which then reaches the rendered document as
-  # the bare text "NA". When R/formattingHelpers.R:256-258 is fixed this SHOULD
-  # fail -- change it to
-  # expect_equal(.format_scalar_value(NA), "(not specified)").
-  expect_true(is.na(.format_scalar_value(NA)))
-  expect_type(.format_scalar_value(NA), "logical")
-  expect_equal(.kv_bullets_md(list(x = NA)), "- **x:** NA")
+  for (missing in list(NA_character_, NA, NA_integer_, NA_real_, NULL, "")) {
+    out <- .format_scalar_value(missing)
+    expect_type(out, "character")
+    expect_length(out, 1L)
+    expect_equal(out, MISSING_VALUE_DISPLAY)
+  }
+
+  pairs <- .format_metadata_pairs(list(x = NA_character_))
+  expect_equal(pairs$key, "x")
+  expect_equal(pairs$value, MISSING_VALUE_DISPLAY)
+
+  expect_equal(.kv_bullets_md(list(x = NA_character_)), "- **x:** (not specified)")
+  expect_equal(.kv_bullets_md(list(x = NA)), "- **x:** (not specified)")
+
+  # The bare text "NA" must never reach a rendered document.
+  expect_false(grepl("NA", .kv_bullets_md(list(x = NA)), fixed = TRUE))
 })
 
-test_that("an NA metadata field crashes the whole export (DEFERRED defect)", {
-  # KNOWN DEFECT, pinned rather than endorsed: the .format_scalar_value(NA)
-  # abort above is reachable end to end -- a transmission field left as NA (a
-  # state the Shiny editor and YAML round-trips can produce) takes down both the
-  # Markdown and the DOCX export. When R/formattingHelpers.R:266 is fixed this
-  # SHOULD fail -- change it to expect_no_error() for both formats.
+test_that("an NA metadata field no longer breaks any export format", {
+  # A transmission field left as NA -- a state the Shiny editor and YAML
+  # round-trips can produce -- used to take down both the Markdown and the DOCX
+  # export via .format_scalar_value().
   dta <- DTA(
     datasets = list(create_example_DTADataSetTabular(2)),
     metadata = DTAMetaData(transmission = list(type = NA_character_), version = "1.0")
@@ -86,17 +83,20 @@ test_that("an NA metadata field crashes the whole export (DEFERRED defect)", {
 
   out_md <- tempfile(fileext = ".md")
   on.exit(unlink(out_md, force = TRUE), add = TRUE)
-  expect_error(
-    write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE),
-    class = "simpleError"
+  expect_no_error(
+    write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   )
+  # Not merely "no error": the NA field must be rendered as the missing-value
+  # placeholder, not as the literal "NA".
+  md_lines <- readLines(out_md, warn = FALSE)
+  expect_true(any(grepl("- **type:** (not specified)", md_lines, fixed = TRUE)))
 
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
-  expect_error(
-    write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE),
-    class = "simpleError"
+  expect_no_error(
+    write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
   )
+  expect_true(grepl("(not specified)", .docx_text(out_docx), fixed = TRUE))
 })
 
 test_that(".format_value_list drops values beyond max_items", {
@@ -123,6 +123,31 @@ test_that(".format_value_list switches to line breaks past max_width", {
 
   narrow <- c("x", "y")
   expect_equal(.format_value_list(narrow), "x, y")
+})
+
+test_that(".format_document_date renders ISO 8601 regardless of LC_TIME", {
+  old_lc_time <- Sys.getlocale("LC_TIME")
+  on.exit(Sys.setlocale("LC_TIME", old_lc_time), add = TRUE)
+
+  d <- as.Date("2026-01-15")
+  expect_equal(.format_document_date(d), "2026-01-15")
+
+  # Whichever non-English time locale this machine offers; the assertion is
+  # locale-independent either way, so nothing is skipped.
+  for (loc in c("de_DE.UTF-8", "German_Germany.1252", "fr_FR.UTF-8", "French_France.1252")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) break
+  }
+  expect_equal(.format_document_date(d), "2026-01-15")
+  expect_false(grepl("[A-Za-z]", .format_document_date(d)))
+
+  Sys.setlocale("LC_TIME", "C")
+  expect_equal(.format_document_date(d), "2026-01-15")
+
+  # POSIXct is narrowed to the date, and non-date input passes through.
+  expect_equal(.format_document_date(as.POSIXct("2026-01-15 13:45:00", tz = "UTC")), "2026-01-15")
+  expect_equal(.format_document_date("2 weeks after approval"), "2 weeks after approval")
+  expect_equal(.format_document_date(NULL), "")
+  expect_equal(.format_document_date(NA), "")
 })
 
 test_that(".title_case_field normalizes snake and dotted field names", {

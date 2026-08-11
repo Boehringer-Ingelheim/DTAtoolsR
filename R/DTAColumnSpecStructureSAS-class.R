@@ -160,18 +160,27 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 
 #' @title as.list method for as.list.DTAColumnSpecStructureSAS
 #' @description
-#' Converts a DTAColumnSpecStructureSAS object to a named list.
+#' Converts a DTAColumnSpecStructureSAS object to a named list. An unset `type`
+#' or `format` is omitted from the list instead of being written as the bare
+#' backend prefix (`"SAS "`), which would re-parse to an empty value and fail
+#' the SAS validator on the next read.
 #' @param x A DTAColumnSpecStructureSAS object.
 #' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpecStructureSAS properties.
+#' @return A named list with the DTAColumnSpecStructureSAS properties that are set.
 #' @export
 #' @name as.list
 method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
-  list(
-    type = paste(x@backend, x@type),
-    format = paste(x@backend, x@format),
-    length = x@length
-  )
+  out <- list()
+  if (.structure_value_is_set(x@type)) {
+    out$type <- .structure_backend_value(x@backend, x@type)
+  }
+  if (.structure_value_is_set(x@format)) {
+    out$format <- .structure_backend_value(x@backend, x@format)
+  }
+  if (!is.null(x@length)) {
+    out$length <- x@length
+  }
+  out
 }
 
 #' @title as_json_schema_type

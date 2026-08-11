@@ -185,25 +185,187 @@ test_that("write_dta docx embeds a small-font YAML section only when requested",
   expect_false(grepl(paste0(strrep(nbsp, 6), "SUBJID:"), body_no, fixed = TRUE))
 })
 
-test_that("write_dta with include_yaml = TRUE but no yaml_text drops the section", {
+test_that("write_dta warns when include_yaml = TRUE cannot be honoured", {
   dta <- create_example_DTA()
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
 
-  # KNOWN DEFECT, pinned rather than endorsed: `include_yaml = TRUE` with
-  # `yaml_text = NULL` is discarded without any diagnostic -- the guard at
-  # R/exportDocuments.R:246 requires both, so the caller's explicit request for
-  # an embedded specification silently produces a document without one. When
-  # R/exportDocuments.R:246 is fixed this SHOULD fail -- change it to
-  # expect_warning(write_dta(...), "yaml_text") and keep the expect_false below.
-  expect_no_condition(
+  # An explicit request for an embedded specification that cannot be honoured
+  # must say so; it used to be discarded without any diagnostic at all.
+  expect_warning(
     write_dta(
       dta,
       file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE,
       include_yaml = TRUE, yaml_text = NULL
-    )
+    ),
+    "yaml_text"
   )
   expect_true(file.exists(out_docx))
   body <- .read_docx_body_xml(out_docx)
   expect_false(grepl("Embedded Specification (YAML)", body, fixed = TRUE))
+
+  # An empty string is just as unusable as NULL.
+  out_empty <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_empty, force = TRUE), add = TRUE)
+  expect_warning(
+    write_dta(
+      dta,
+      file = out_empty, format = "docx", overwrite = TRUE, quiet = TRUE,
+      include_yaml = TRUE, yaml_text = ""
+    ),
+    "yaml_text"
+  )
+
+  # Documented-but-untested: include_yaml is ignored for markdown output. It now
+  # warns rather than being dropped in silence.
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  expect_warning(
+    write_dta(
+      dta,
+      file = out_md, format = "md", overwrite = TRUE, quiet = TRUE,
+      include_yaml = TRUE, yaml_text = "columns: {}"
+    ),
+    "include_yaml"
+  )
+
+  # ... and likewise when a template is supplied.
+  template <- .make_template("Title: {DTA_TITLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out_tpl <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_tpl, force = TRUE), add = TRUE)
+  expect_warning(
+    write_dta(
+      dta,
+      file = out_tpl, template = template, overwrite = TRUE, quiet = TRUE,
+      include_yaml = TRUE, yaml_text = "columns: {}"
+    ),
+    "include_yaml"
+  )
+})
+
+test_that("write_dta pdf export writes a real PDF or aborts loudly", {
+  dta <- create_example_DTA()
+
+  # --- No conversion backend: abort, and leave nothing behind. -------------
+  out_missing <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out_missing, force = TRUE), add = TRUE)
+  sibling_docx <- sub("\\.pdf$", ".docx", out_missing)
+  on.exit(unlink(sibling_docx, force = TRUE), add = TRUE)
+
+  local_mocked_bindings(.pdf_conversion_available = function() FALSE)
+  expect_error(
+    write_dta(dta, file = out_missing, format = "pdf", overwrite = TRUE, quiet = TRUE),
+    class = "rlang_error"
+  )
+  # The requested path must not hold a DOCX wearing a .pdf extension, and the
+  # error handler must not have written to some other path instead.
+  expect_false(file.exists(out_missing))
+  expect_false(file.exists(sibling_docx))
+})
+
+test_that("write_dta pdf export rejects a converter that yields a non-PDF", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  # A converter that just copies the DOCX across is exactly the old fallback.
+  local_mocked_bindings(
+    .pdf_conversion_available = function() TRUE,
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      file.copy(docx_file, pdf_file, overwrite = TRUE)
+      invisible(pdf_file)
+    }
+  )
+
+  expect_error(
+    write_dta(dta, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
+    class = "rlang_error"
+  )
+  # The ZIP/DOCX masquerading as a PDF must be removed, not handed to the user.
+  expect_false(file.exists(out))
+})
+
+test_that("write_dta and write_dataset_metadata produce %PDF bytes on success", {
+  dta <- create_example_DTA()
+  ds <- create_example_DTADataSetTabular(2)
+
+  local_mocked_bindings(
+    .pdf_conversion_available = function() TRUE,
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  expect_no_error(
+    write_dta(dta, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE)
+  )
+  expect_true(file.exists(out))
+  expect_identical(readBin(out, what = "raw", n = 4L), charToRaw("%PDF"))
+
+  out_ds <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out_ds, force = TRUE), add = TRUE)
+  expect_no_error(
+    write_dataset_metadata(ds, file = out_ds, format = "pdf", overwrite = TRUE, quiet = TRUE)
+  )
+  expect_identical(readBin(out_ds, what = "raw", n = 4L), charToRaw("%PDF"))
+})
+
+test_that("write_dataset_metadata pdf export aborts when conversion is impossible", {
+  ds <- create_example_DTADataSetTabular(2)
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  local_mocked_bindings(.pdf_conversion_available = function() FALSE)
+  expect_error(
+    write_dataset_metadata(ds, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
+    class = "rlang_error"
+  )
+  expect_false(file.exists(out))
+})
+
+test_that(".is_pdf_file recognises the PDF signature and nothing else", {
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(pdf, force = TRUE), add = TRUE)
+  writeBin(charToRaw("%PDF-1.4\n"), pdf)
+  expect_true(.is_pdf_file(pdf))
+
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx, force = TRUE), add = TRUE)
+  print(officer::read_docx(), target = docx)
+  # A DOCX is a ZIP archive: it starts with "PK".
+  expect_identical(readBin(docx, what = "raw", n = 2L), charToRaw("PK"))
+  expect_false(.is_pdf_file(docx))
+
+  expect_false(.is_pdf_file(tempfile(fileext = ".pdf")))
+})
+
+test_that("exported document dates are ISO 8601 under any LC_TIME", {
+  # OWNER'S DECISION: dates in exported documents are always YYYY-MM-DD. The
+  # month name must never come from LC_TIME, so run under a non-English time
+  # locale and assert the international form anyway.
+  old_lc_time <- Sys.getlocale("LC_TIME")
+  on.exit(Sys.setlocale("LC_TIME", old_lc_time), add = TRUE)
+  # Whichever non-English time locale this machine offers; the assertions below
+  # hold in every locale, so no skip is needed if none can be set.
+  for (loc in c("de_DE.UTF-8", "German_Germany.1252", "fr_FR.UTF-8", "French_France.1252")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) break
+  }
+
+  dta <- DTA(
+    datasets = create_example_DTADataSetTabular(1),
+    metadata = DTAMetaData(title = "Locale Test", version = "1.0", date = as.Date("2026-01-15"))
+  )
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  paragraphs <- .docx_paragraphs(out_docx)
+  expect_true("Date: 2026-01-15" %in% paragraphs)
+  # No localized month name may survive anywhere in the document.
+  expect_false(any(grepl("Januar|January|janvier", paragraphs)))
 })

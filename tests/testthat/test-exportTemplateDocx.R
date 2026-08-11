@@ -52,28 +52,22 @@ test_that(".extract_template_variables is robust to empty metadata", {
   expect_equal(vars[["{TEST_UPLOAD}"]], "No")
 })
 
-test_that("date placeholders render deterministically under a C time locale", {
-  # .tv_scalar() formats Date values with format(x, "%B %d, %Y")
-  # (R/exportTemplateDocx.R:231-233), whose month name comes from LC_TIME. A
-  # German machine emits "Januar 15, 2026" where an English one emits
-  # "January 15, 2026" -- the exported agreement text therefore depends on the
-  # machine that produced it. Force LC_TIME = "C" so this test is stable on
-  # every runner; the underlying portability defect is NOT fixed by doing so.
-  old_lc_time <- Sys.getlocale("LC_TIME")
-  on.exit(Sys.setlocale("LC_TIME", old_lc_time), add = TRUE)
-  Sys.setlocale("LC_TIME", "C")
-
+test_that("date placeholders render in ISO 8601, not a localized month name", {
+  # OWNER'S DECISION: every date in an exported document is YYYY-MM-DD.
+  # .tv_scalar() used to format Date values with "%B %d, %Y", whose month name
+  # comes from LC_TIME, so the very same DTA produced "Januar 15, 2026" on a
+  # German workstation and "January 15, 2026" on an English CI runner.
   ds <- create_example_DTADataSetTabular(2)
   dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData(2))
   vars <- .extract_template_variables(dta)
 
-  expect_equal(vars[["{DTA_DATE}"]], "January 15, 2026")
-  expect_equal(vars[["{TRANSMISSION_FIRST_TRANSFER}"]], "February 01, 2026")
-  expect_equal(vars[["{TRANSMISSION_LAST_TRANSFER}"]], "March 31, 2026")
+  expect_equal(vars[["{DTA_DATE}"]], "2026-01-15")
+  expect_equal(vars[["{TRANSMISSION_FIRST_TRANSFER}"]], "2026-02-01")
+  expect_equal(vars[["{TRANSMISSION_LAST_TRANSFER}"]], "2026-03-31")
   # {GENERATED_DATE} is "today", so pin its shape and its agreement with the
-  # same C-locale format string rather than a fixed literal.
-  expect_equal(vars[["{GENERATED_DATE}"]], format(Sys.Date(), "%B %d, %Y"))
-  expect_match(vars[["{GENERATED_DATE}"]], "^[A-Z][a-z]+ [0-9]{2}, [0-9]{4}$")
+  # ISO format string rather than a fixed literal.
+  expect_equal(vars[["{GENERATED_DATE}"]], format(Sys.Date(), "%Y-%m-%d"))
+  expect_match(vars[["{GENERATED_DATE}"]], "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
   # create_example_DTADataSetTabular(2) declares no validation rules.
   expect_equal(length(ds@specs@rules), 0L)
@@ -92,10 +86,44 @@ test_that("date placeholders render deterministically under a C time locale", {
   export_with_template(dta, template, out, quiet = TRUE)
 
   text <- .docx_text(out)
-  expect_match(text, "Agreement date: January 15, 2026", fixed = TRUE)
-  expect_match(text, "Window: February 01, 2026 to March 31, 2026", fixed = TRUE)
-  expect_match(text, paste0("Generated: ", format(Sys.Date(), "%B %d, %Y")), fixed = TRUE)
+  expect_match(text, "Agreement date: 2026-01-15", fixed = TRUE)
+  expect_match(text, "Window: 2026-02-01 to 2026-03-31", fixed = TRUE)
+  expect_match(text, paste0("Generated: ", format(Sys.Date(), "%Y-%m-%d")), fixed = TRUE)
   expect_match(text, "Rules: 0", fixed = TRUE)
+})
+
+test_that("date placeholders are identical under English and non-English LC_TIME", {
+  # The whole point of the ISO decision: the rendered agreement must not depend
+  # on the workstation's LC_TIME. This fails against the old "%B %d, %Y" code.
+  old_lc_time <- Sys.getlocale("LC_TIME")
+  on.exit(Sys.setlocale("LC_TIME", old_lc_time), add = TRUE)
+
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = create_example_DTAMetaData(2)
+  )
+
+  # Whichever non-English time locale this machine offers. The assertions hold
+  # in every locale, so nothing is skipped when none can be set.
+  for (loc in c("de_DE.UTF-8", "German_Germany.1252", "fr_FR.UTF-8", "French_France.1252")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) break
+  }
+  vars_local <- .extract_template_variables(dta)
+
+  expect_equal(vars_local[["{DTA_DATE}"]], "2026-01-15")
+  expect_equal(vars_local[["{TRANSMISSION_FIRST_TRANSFER}"]], "2026-02-01")
+  expect_match(vars_local[["{GENERATED_DATE}"]], "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+  expect_false(grepl("[A-Za-z]", vars_local[["{DTA_DATE}"]]))
+
+  # ... and identical to what the C locale produces.
+  Sys.setlocale("LC_TIME", "C")
+  vars_c <- .extract_template_variables(dta)
+  expect_identical(vars_local[["{DTA_DATE}"]], vars_c[["{DTA_DATE}"]])
+  expect_identical(
+    vars_local[["{TRANSMISSION_LAST_TRANSFER}"]],
+    vars_c[["{TRANSMISSION_LAST_TRANSFER}"]]
+  )
+  expect_identical(vars_local[["{GENERATED_DATE}"]], vars_c[["{GENERATED_DATE}"]])
 })
 
 test_that("TRUE transmission flags render Yes and phrase dates pass through", {
@@ -335,19 +363,16 @@ test_that("export_with_template falls back to the standard layout on failure", {
   expect_true(all(paste("heading", 1:4) %in% summary$style_name))
   expect_true(any(!is.na(summary$table_index)))
 
-  # quiet = FALSE: the fallback must be announced. cli_alert_warning() signals a
-  # message (class "cliMessage"), not a warning condition, so assert the
-  # message instead of wrapping the call in suppressWarnings().
+  # quiet = FALSE: the fallback must be announced as a real warning CONDITION
+  # (cli::cli_warn), not a cli message, so a caller can trap it.
   out_loud <- tempfile(fileext = ".docx")
   on.exit(unlink(out_loud, force = TRUE), add = TRUE)
-  # suppressMessages() wraps the outside so the other cli alerts this call
-  # emits ("Document saved to ...") do not leak into the test log; the inner
-  # expect_message() still handles the one being asserted.
+  # suppressMessages() wraps the outside so the cli alerts this call emits
+  # ("Document saved to ...") do not leak into the test log.
   suppressMessages(
-    expect_message(
+    expect_warning(
       export_with_template(dta, bad_template, out_loud, quiet = FALSE, fallback = TRUE),
-      "Falling back to the standard document format",
-      class = "cliMessage"
+      "Falling back to the standard document format"
     )
   )
   expect_true(file.exists(out_loud))
@@ -359,6 +384,50 @@ test_that("export_with_template falls back to the standard layout on failure", {
     export_with_template(dta, bad_template, out2, quiet = TRUE, fallback = FALSE),
     "Template processing failed"
   )
+})
+
+test_that("the template fallback is detectable programmatically", {
+  # The Shiny app (and any script) must be able to notice that the requested
+  # template was silently replaced by the built-in layout. cli_alert_warning()
+  # only signalled a message of class "cliMessage", which no
+  # withCallingHandlers(warning = ) / tryCatch(warning = ) can see.
+  bad_template <- tempfile(fileext = ".docx")
+  writeLines("this is not a docx", bad_template)
+  on.exit(unlink(bad_template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  caught <- NULL
+  suppressMessages(
+    withCallingHandlers(
+      export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+      warning = function(w) {
+        caught <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
+  )
+
+  expect_s3_class(caught, "warning")
+  expect_s3_class(caught, "rlang_warning")
+  expect_match(conditionMessage(caught), "Falling back to the standard document format")
+
+  # tryCatch(warning = ) sees it too, which is what a Shiny observer uses.
+  trapped <- suppressMessages(tryCatch(
+    export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+    warning = function(w) "trapped"
+  ))
+  expect_equal(trapped, "trapped")
+
+  # quiet = TRUE keeps its meaning: the fallback still happens, silently.
+  out_quiet <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_quiet, force = TRUE), add = TRUE)
+  expect_no_warning(
+    export_with_template(dta, bad_template, out_quiet, quiet = TRUE, fallback = TRUE)
+  )
+  expect_true(file.exists(out_quiet))
 })
 
 test_that("write_dta routes to the template engine when template is supplied", {

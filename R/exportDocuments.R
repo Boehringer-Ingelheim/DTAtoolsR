@@ -19,8 +19,9 @@
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param include_yaml Logical. If `TRUE`, append the machine-readable YAML
 #'   specification as a final, small-font section of the built-in DOCX/PDF
-#'   layout. Requires `yaml_text`. Ignored for `format = "md"` and when a
-#'   `template` is supplied. Default: `FALSE`.
+#'   layout. Requires `yaml_text`. Ignored -- with a warning -- for
+#'   `format = "md"`, when a `template` is supplied, and when `yaml_text` is
+#'   `NULL` or empty. Default: `FALSE`.
 #' @param yaml_text Optional character scalar holding the YAML specification to
 #'   embed when `include_yaml = TRUE`. Default: `NULL`.
 #' @param template Optional character path to a Word (`.docx`) template
@@ -90,7 +91,17 @@ write_dta <- function(
         "Template-based export is only supported for 'docx' or 'pdf' output, not '{format}'."
       )
     }
+    if (isTRUE(include_yaml)) {
+      cli::cli_warn(c(
+        "{.arg include_yaml} is ignored when a {.arg template} is supplied.",
+        i = "The embedded YAML section belongs to the built-in layout only.",
+        i = "Add the specification to the template yourself, or drop {.arg template}."
+      ))
+    }
     target_docx <- if (format == "docx") file else tempfile(fileext = ".docx")
+    if (format == "pdf") {
+      on.exit(unlink(target_docx, force = TRUE), add = TRUE)
+    }
     export_with_template(
       x,
       template = template,
@@ -101,7 +112,6 @@ write_dta <- function(
     )
     if (format == "pdf") {
       .convert_docx_to_pdf(target_docx, file)
-      unlink(target_docx)
     }
     if (!isTRUE(quiet)) {
       cli::cli_alert_success("Document saved to {file}")
@@ -117,11 +127,17 @@ write_dta <- function(
   } else if (format == "pdf") {
     # First create DOCX, then convert to PDF
     temp_docx <- tempfile(fileext = ".docx")
+    on.exit(unlink(temp_docx, force = TRUE), add = TRUE)
     doc <- .write_dta_docx(x, include_signatures, signature_list, include_yaml, yaml_text)
     print(doc, target = temp_docx)
     .convert_docx_to_pdf(temp_docx, file)
-    unlink(temp_docx)
   } else if (format == "md") {
+    if (isTRUE(include_yaml)) {
+      cli::cli_warn(c(
+        "{.arg include_yaml} is ignored for {.code format = \"md\"}.",
+        i = "The embedded YAML section is only produced for the DOCX/PDF layout."
+      ))
+    }
     .write_dta_markdown(x, file, include_signatures, signature_list)
   }
 
@@ -243,8 +259,19 @@ write_dta <- function(
   }
 
   # Embedded machine-readable YAML, appended as a final small-font section.
-  if (isTRUE(include_yaml) && !is.null(yaml_text) && nzchar(yaml_text)) {
-    doc <- .add_embedded_yaml_section(doc, yaml_text)
+  if (isTRUE(include_yaml)) {
+    has_yaml <- !is.null(yaml_text) &&
+      length(yaml_text) > 0 &&
+      !anyNA(yaml_text) &&
+      any(nzchar(yaml_text))
+    if (has_yaml) {
+      doc <- .add_embedded_yaml_section(doc, yaml_text)
+    } else {
+      cli::cli_warn(c(
+        "{.arg include_yaml} is {.code TRUE} but {.arg yaml_text} is empty; no specification was embedded.",
+        i = "Pass the YAML specification via {.arg yaml_text} to embed it."
+      ))
+    }
   }
 
   # Footer
@@ -370,25 +397,94 @@ write_dta <- function(
   lines
 }
 
-#' Convert DOCX to PDF using pandoc or similar
+#' Report whether a DOCX -> PDF conversion backend is usable
+#'
+#' Split out from [.convert_docx_to_pdf()] so the availability probe can be
+#' exercised (and mocked) independently of the conversion itself.
+#' @return `TRUE` when `rmarkdown` and a working pandoc installation are present.
+#' @keywords internal
+.pdf_conversion_available <- function() {
+  requireNamespace("rmarkdown", quietly = TRUE) &&
+    isTRUE(rmarkdown::pandoc_available())
+}
+
+#' Run the pandoc DOCX -> PDF conversion
+#'
+#' Thin wrapper around [rmarkdown::pandoc_convert()]; the only place that talks
+#' to the external converter.
+#' @param docx_file Character. Existing `.docx` to convert.
+#' @param pdf_file Character. Path of the `.pdf` to create.
+#' @return Invisibly returns `pdf_file`.
+#' @keywords internal
+.pandoc_docx_to_pdf <- function(docx_file, pdf_file) {
+  rmarkdown::pandoc_convert(
+    input = normalizePath(docx_file, winslash = "/", mustWork = TRUE),
+    to = "pdf",
+    output = normalizePath(pdf_file, winslash = "/", mustWork = FALSE)
+  )
+  invisible(pdf_file)
+}
+
+#' Does a file on disk begin with the `%PDF` signature?
+#' @param path Character. File to inspect.
+#' @return `TRUE` when the first four bytes are `%PDF`.
+#' @keywords internal
+.is_pdf_file <- function(path) {
+  if (!file.exists(path)) {
+    return(FALSE)
+  }
+  con <- file(path, open = "rb")
+  on.exit(close(con), add = TRUE)
+  identical(readBin(con, what = "raw", n = 4L), charToRaw("%PDF"))
+}
+
+#' Convert a DOCX to a PDF, or fail loudly
+#'
+#' Produces a real PDF or aborts. A DOCX is never renamed to `.pdf`, and no
+#' file is ever written to a path other than the requested `pdf_file`: any
+#' partial output is removed before the abort so the caller is not left with a
+#' misnamed or truncated document.
+#'
+#' @param docx_file Character. Existing `.docx` to convert.
+#' @param pdf_file Character. Path of the `.pdf` to create.
+#' @return Invisibly returns `pdf_file`.
 #' @keywords internal
 .convert_docx_to_pdf <- function(docx_file, pdf_file) {
-  # Try using rmarkdown, which wraps the pandoc binary bundled with R/RStudio
-  tryCatch(
+  if (!.pdf_conversion_available()) {
+    cli::cli_abort(c(
+      "Cannot export to PDF: no PDF conversion backend is available.",
+      x = "The {.pkg rmarkdown} package and a working pandoc installation are required.",
+      i = "Install pandoc, or export with {.code format = \"docx\"} instead."
+    ))
+  }
+
+  err <- tryCatch(
     {
-      if (requireNamespace("rmarkdown", quietly = TRUE) && rmarkdown::pandoc_available()) {
-        rmarkdown::pandoc_convert(input = docx_file, to = "pdf", output = pdf_file)
-      } else {
-        # Fallback: just copy DOCX as is and warn user
-        cli::cli_warn("PDF conversion not available. Saving as DOCX instead.")
-        file.copy(docx_file, pdf_file, overwrite = TRUE)
-      }
+      .pandoc_docx_to_pdf(docx_file, pdf_file)
+      NULL
     },
-    error = function(e) {
-      cli::cli_warn("Could not convert to PDF: {e$message}. Saving as DOCX instead.")
-      file.copy(docx_file, gsub("\\.pdf$", ".docx", pdf_file), overwrite = TRUE)
-    }
+    error = function(e) conditionMessage(e)
   )
+
+  if (!is.null(err)) {
+    unlink(pdf_file, force = TRUE)
+    cli::cli_abort(c(
+      "PDF conversion failed; {.file {pdf_file}} was not created.",
+      x = "{err}",
+      i = "Install a PDF engine for pandoc, or export with {.code format = \"docx\"} instead."
+    ))
+  }
+
+  if (!.is_pdf_file(pdf_file)) {
+    unlink(pdf_file, force = TRUE)
+    cli::cli_abort(c(
+      "PDF conversion did not produce a PDF; {.file {pdf_file}} was discarded.",
+      x = "The converted file does not start with the {.val %PDF} signature.",
+      i = "Install a PDF engine for pandoc, or export with {.code format = \"docx\"} instead."
+    ))
+  }
+
+  invisible(pdf_file)
 }
 
 #' @title Export Dataset Metadata as Professional Document
@@ -457,10 +553,10 @@ write_dataset_metadata <- function(
     print(doc, target = file)
   } else if (format == "pdf") {
     temp_docx <- tempfile(fileext = ".docx")
+    on.exit(unlink(temp_docx, force = TRUE), add = TRUE)
     doc <- .write_dataset_docx(x, include_signatures, include_file_specs, include_rules, signature_list)
     print(doc, target = temp_docx)
     .convert_docx_to_pdf(temp_docx, file)
-    unlink(temp_docx)
   } else if (format == "md") {
     .write_dataset_markdown(x, file, include_signatures, signature_list)
   }

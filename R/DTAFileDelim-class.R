@@ -16,6 +16,8 @@
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
 #' @param info Character or \code{NULL}; free-text description of the file.
+#' @param sep Character. Single-character field separator used in the file.
+#'   Defaults to tab (\code{"\\t"}).
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
@@ -36,6 +38,7 @@ DTAFileDelim <- S7::new_class(
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL,
+    sep = "\t",
     has_header = TRUE,
     quote = '"'
   ) {
@@ -49,7 +52,7 @@ DTAFileDelim <- S7::new_class(
         pattern = pattern,
         has_header = has_header,
         quote = quote,
-        sep = "\t"
+        sep = sep
       )
     )
   }
@@ -77,10 +80,11 @@ method(read_file_execution, DTAFileDelim) <- function(x, ...) {
   file <- list(...)[[1]]
   table_obj <- arrow::read_delim_arrow(
     file,
-    #col_types = x@col_types,
+    delim = x@sep,
     quote = x@quote,
-    skip = if (x@has_header) 0 else 1,
-    #col_names = x@has_header,
+    # col_names = FALSE makes arrow generate names and keep the first row as
+    # data; skipping a row would instead discard the first data row.
+    col_names = x@has_header,
     as_data_frame = FALSE
   )
 

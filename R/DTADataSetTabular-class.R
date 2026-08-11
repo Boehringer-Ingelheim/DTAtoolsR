@@ -656,7 +656,9 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #'     \item{table}{Character or numeric table identifier.}
 #'     \item{source}{Character. One of \'auto\', \'memory\', or \'artifact\'.}
 #'   }
-#' @return A list with detailed validation output.
+#' @return A list with detailed validation output, of class
+#'   \code{dta_validation_details}. Use \code{as.data.frame()} on it to get one
+#'   row per reported error.
 #' @usage validation_errors(x, ...)
 #' @name validation_errors
 #' @export
@@ -675,7 +677,7 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
   if (source %in% c("auto", "memory")) {
     in_memory <- x@validation_store[[table_name]]
     if (!is.null(in_memory)) {
-      return(in_memory)
+      return(dta_as_validation_details(in_memory))
     }
   }
 
@@ -692,7 +694,8 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
     )
   }
 
-  readRDS(entry$artifact_path)
+  # Tagged on read, so memory and artifact results stay identical.
+  dta_as_validation_details(readRDS(entry$artifact_path))
 }
 
 

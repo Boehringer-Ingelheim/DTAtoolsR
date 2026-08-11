@@ -40,6 +40,67 @@ test_that("DTADataSetTabular stores validation state per table", {
 })
 
 
+test_that("validation_errors() output coerces to a data frame", {
+  # Previously the returned list mixed a 5-row summary with a 7-row full error
+  # table inside `schema_errors`, so as.data.frame() died with
+  # "arguments imply differing number of rows: 5, 7".
+  ds <- check(
+    create_example_DTADataSetTabular(2),
+    tables = "tab1",
+    persist = FALSE,
+    quiet = TRUE
+  )
+  details <- validation_errors(ds, table = "tab1", source = "memory")
+
+  errors_df <- as.data.frame(details)
+  expect_s3_class(errors_df, "data.frame")
+  expect_equal(nrow(errors_df), details$n_schema_errors)
+  expect_true(all(
+    c("source", "rule_id", "row", "column", "keyword", "message") %in%
+      names(errors_df)
+  ))
+  expect_true(all(errors_df$source == "schema"))
+  expect_false(any(is.na(errors_df$message)))
+
+  # The list interface callers already rely on is untouched.
+  expect_true(is.list(details))
+  expect_true(all(c(
+    "ok",
+    "schema_valid",
+    "rules_valid",
+    "n_schema_errors",
+    "n_rule_errors",
+    "schema_errors",
+    "rule_results",
+    "rule_errors"
+  ) %in% names(details)))
+  expect_equal(nrow(as.data.frame(details$schema_errors$full_error)), 7)
+})
+
+test_that("validation_errors() data frame carries rule failures alongside schema ones", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- list(create_example_DTARuleColUnique())
+
+  bad_tab <- as.data.frame(ds@tables[["tab1"]])
+  bad_tab$SUBJID[3] <- bad_tab$SUBJID[1]
+  ds@tables[["tab1"]] <- arrow::arrow_table(bad_tab)
+
+  ds <- check(ds, tables = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
+  details <- validation_errors(ds, table = "tab1", source = "memory")
+
+  errors_df <- as.data.frame(details)
+  expect_equal(
+    nrow(errors_df),
+    details$n_schema_errors + details$n_rule_errors
+  )
+
+  rule_rows <- errors_df[errors_df$source == "rule", ]
+  expect_equal(nrow(rule_rows), 1)
+  expect_equal(rule_rows$rule_id, "rule_unique1")
+  expect_match(rule_rows$message, "violated")
+})
+
+
 test_that("DTADataSetTabular can skip unchanged table validation", {
   ds <- create_example_DTADataSetTabular(2)
 

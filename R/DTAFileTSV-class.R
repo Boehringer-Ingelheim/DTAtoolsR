@@ -78,8 +78,9 @@ method(read_file_execution, DTAFileTSV) <- function(x, ...) {
   table_obj <- arrow::read_tsv_arrow(
     file,
     quote = x@quote,
-    skip = if (x@has_header) 0 else 1,
-    #col_names = x@has_header,
+    # col_names = FALSE makes arrow generate names and keep the first row as
+    # data; skipping a row would instead discard the first data row.
+    col_names = x@has_header,
     as_data_frame = FALSE
   )
 

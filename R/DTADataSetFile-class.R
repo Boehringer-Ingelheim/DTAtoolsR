@@ -63,6 +63,25 @@ DTADataSetFile <- S7::new_class(
   }
 )
 
+# Builds one stable, unique key per target file. Plain basename() is not
+# unique: two paths in different directories sharing a basename would collapse
+# into a single validation entry and one file would silently disappear from the
+# report. Basenames are kept where they are unambiguous, so the common case
+# stays human readable, and colliding entries fall back to their full path.
+#' @keywords internal
+dta_file_target_keys <- function(paths) {
+  if (length(paths) == 0) {
+    return(character())
+  }
+
+  keys <- basename(paths)
+  colliding <- keys %in% keys[duplicated(keys)]
+  keys[colliding] <- paths[colliding]
+
+  # Guards against the same path being listed twice.
+  make.unique(keys, sep = "_")
+}
+
 #' @keywords internal
 validate_file_dataset_entry <- function(path) {
   if (!file.exists(path)) {
@@ -146,10 +165,11 @@ S7::method(check, DTADataSetFile) <- function(
   validation_details <- list()
   validation_index <- list()
   validation_store <- list()
+  target_keys <- dta_file_target_keys(target_files)
 
   for (idx in seq_along(target_files)) {
     path <- target_files[idx]
-    table_name <- basename(path)
+    table_name <- target_keys[idx]
     validation_result <- validate_file_dataset_entry(path)
     validated_at <- Sys.time()
 
@@ -160,7 +180,9 @@ S7::method(check, DTADataSetFile) <- function(
       validation_run = validation_run,
       n_schema_errors = 0L,
       n_rule_errors = if (isTRUE(validation_result$ok)) 0L else 1L,
-      artifact_path = NULL
+      artifact_path = NULL,
+      path = path,
+      label = basename(path)
     )
 
     if (!isTRUE(validation_result$ok)) {
@@ -363,7 +385,10 @@ S7::method(messages, DTADataSetFile) <- function(
        details = details
      )
 
-     if (length(x@file_paths) > 0) {
+     entry <- x@validation_index[[target_name]]
+     if (!is.null(entry$path)) {
+       out$file_path <- entry$path
+     } else if (length(x@file_paths) > 0) {
        match_idx <- which(basename(x@file_paths) == target_name)
        if (length(match_idx) > 0) {
          out$file_path <- x@file_paths[[match_idx[[1]]]]

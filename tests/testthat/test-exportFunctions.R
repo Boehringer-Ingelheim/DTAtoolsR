@@ -55,14 +55,56 @@ test_that("export_specs_table validates inputs and writes DOCX output", {
   expect_true(file.exists(out_compact))
   expect_s3_class(ft_compact, "flextable")
 
-  # KNOWN DEFECT, pinned rather than endorsed: the caller excluded "Length",
-  # but the 6-name branch of export_specs_table() builds the flextable
-  # straight from the full data frame with no select(), unlike the 7-name
-  # branch. The column widths for j = 1..6 are then applied to a 7-column
-  # table. When R/exportFunctions.R:120 is fixed this SHOULD fail -- change
-  # it to expect the 6 requested names and expect_false("Length" %in% ...).
-  expect_equal(ncol(ft_compact$body$dataset), 7)
-  expect_true("Length" %in% names(ft_compact$body$dataset))
+  # The caller excluded "Length", so the table must carry exactly the six
+  # requested columns, in the requested order -- the j = 1..6 widths applied by
+  # this branch only line up with a six-column table.
+  expect_equal(ncol(ft_compact$body$dataset), 6)
+  expect_equal(
+    names(ft_compact$body$dataset),
+    c(
+      "Variable Name",
+      "Variable Label",
+      "Type",
+      "Format",
+      "Nullable",
+      "Description"
+    )
+  )
+  expect_false("Length" %in% names(ft_compact$body$dataset))
+})
+
+test_that("export_specs_table aborts on an unsupported colnames vector", {
+  specs <- create_example_DTAColumnSpecCollection(1)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  # Neither of the two supported layouts: the abort branch at the end of the
+  # if/else chain. Matched on package-authored text, which is not translated.
+  expect_error(
+    export_specs_table(specs, file = out, overwrite = TRUE, colnames = c("A", "B"), quiet = TRUE),
+    "colnames not supported"
+  )
+  # The abort happens before any file is written.
+  expect_false(file.exists(out))
+
+  # The right names in the wrong order are equally unsupported.
+  expect_error(
+    export_specs_table(
+      specs,
+      file = out,
+      overwrite = TRUE,
+      colnames = c(
+        "Variable Label",
+        "Variable Name",
+        "Type",
+        "Format",
+        "Nullable",
+        "Description"
+      ),
+      quiet = TRUE
+    ),
+    "colnames not supported"
+  )
 })
 
 test_that("export_column_value_table writes DOCX and returns value table", {

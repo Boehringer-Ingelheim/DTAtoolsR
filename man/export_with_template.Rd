@@ -27,7 +27,9 @@ values. Names may include or omit the surrounding braces. Default: \code{NULL}.}
 
 \item{fallback}{Logical. If \code{TRUE} (default) and template processing fails,
 fall back to the standard programmatic document produced by \code{\link[=write_dta]{write_dta()}}.
-If \code{FALSE}, a failure is raised as an error.}
+The substitution is signalled as a \strong{warning} condition (unless \code{quiet = TRUE}), so it can be trapped programmatically with
+\code{withCallingHandlers(warning = )}. If \code{FALSE}, a failure is raised as an
+error.}
 }
 \value{
 Invisibly returns the \code{output} path.

@@ -241,28 +241,71 @@ translate_rule_to_human <- function(rule) {
   })
 }
 
+# The single display string used for every missing/unset value. NULL, NA (of
+# any type) and the empty string all render as this text, so a missing field
+# looks the same in every export format.
+MISSING_VALUE_DISPLAY <- "(not specified)"
+
+#' Render a date in the locale-independent ISO 8601 form (`YYYY-MM-DD`)
+#'
+#' Exported documents must read identically no matter which workstation
+#' produced them, so dates are never formatted with `%B`/`%b` (both are taken
+#' from `LC_TIME`). Non-date values are passed through unchanged.
+#'
+#' @param x A `Date`, `POSIXt`, or any value convertible with [as.character()].
+#' @return A character scalar; `""` for `NULL`/zero-length/`NA` input.
+#' @keywords internal
+.format_document_date <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return("")
+  }
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    x <- format(x, "%Y-%m-%d")
+  } else {
+    x <- as.character(x)
+  }
+  x <- x[!is.na(x) & nzchar(x)]
+  if (length(x) == 0) {
+    return("")
+  }
+  paste(x, collapse = ", ")
+}
+
 #' Format a single scalar value for display (shared by DOCX tables and Markdown)
+#'
+#' Always returns a `character(1)`. Missing values -- `NULL`, `NA` of any type,
+#' and the empty string -- all render as `MISSING_VALUE_DISPLAY`
+#' (`"(not specified)"`).
 #' @keywords internal
 .format_scalar_value <- function(val) {
-  if (is.null(val) || (is.character(val) && length(val) == 1 && !nzchar(val))) {
-    return("(not specified)")
+  if (is.null(val) || length(val) == 0) {
+    return(MISSING_VALUE_DISPLAY)
   }
   if (is.list(val)) {
     # Should rarely be hit: callers are expected to flatten nested lists
     # (e.g. affiliation/contacts) before building key-value pairs.
-    if (length(val) == 0) return("(not specified)")
-    return(paste(names(val), collapse = ", "))
+    nms <- names(val)
+    if (is.null(nms) || !any(nzchar(nms))) return(MISSING_VALUE_DISPLAY)
+    return(paste(nms, collapse = ", "))
+  }
+  # NA of any type (including the logical NA that used to slip past the
+  # is.logical() branch as ifelse(NA, "Yes", "No") -> NA).
+  if (length(val) == 1 && is.na(val)) {
+    return(MISSING_VALUE_DISPLAY)
   }
   if (is.logical(val)) {
-    return(ifelse(val, "Yes", "No"))
+    return(if (isTRUE(val)) "Yes" else "No")
   }
-  if (inherits(val, "Date")) {
-    return(format(val, "%Y-%m-%d"))
+  if (inherits(val, "Date") || inherits(val, "POSIXt")) {
+    return(.format_document_date(val))
   }
   if (length(val) > 1) {
     val <- paste(as.character(val), collapse = ", ")
   }
   val <- as.character(val)
+  if (is.na(val) || !nzchar(val)) {
+    return(MISSING_VALUE_DISPLAY)
+  }
   if (nchar(val) > 80) {
     val <- paste0(substr(val, 1, 77), "...")
   }

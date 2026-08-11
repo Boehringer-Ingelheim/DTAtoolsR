@@ -40,7 +40,11 @@ DTADataSet <- S7::new_class(
       S7_object(),
       name = name,
       type = type,
-      files = files
+      files = files,
+      description = description,
+      template_source = template_source,
+      template_version = template_version,
+      template_date = template_date
     )
   },
   properties = list(
@@ -256,7 +260,7 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
   } else {
     message <- paste0(
       "Files: ",
-      str_c('{.field ', names(x@name), '}'),
+      str_c('{.field ', x@name, '}'),
       str_glue(" ({file_info}, {x@type})")
     )
   }

@@ -117,6 +117,12 @@ export_specs_table <- function(
         )
     ))
   ) {
+    # Subset to the requested columns (as the 7-name branch does). Without this
+    # the excluded "Length" column survived into the table and the j = 1..6
+    # widths below were applied to a 7-column flextable.
+    df <- df %>%
+      dplyr::select(dplyr::any_of(colnames))
+
     ft <- flextable::flextable(df) %>%
       flextable::font(fontname = "Times New Roman", part = "all") %>%
       flextable::bold(part = "header") %>%
@@ -149,7 +155,7 @@ export_specs_table <- function(
     ))
   ) {
     df <- df %>%
-      dplyr::select(any_of(colnames))
+      dplyr::select(dplyr::any_of(colnames))
 
     ft <- flextable::flextable(df) %>%
       flextable::font(fontname = "Times New Roman", part = "all") %>%

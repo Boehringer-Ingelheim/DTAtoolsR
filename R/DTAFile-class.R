@@ -244,7 +244,7 @@ if (!exists("read_file_execution", mode = "function")) {
 
 #' @export
 method(read_file_execution, DTAFile) <- function(x, ...) {
-  stop(
+  cli::cli_abort(
     "This method is not implemented. You need to
   use an object of a class which is derived from this class."
   )
@@ -342,19 +342,22 @@ method(print, DTAFile) <- function(x, ...) {
 #' @export
 if (!exists("print_info", mode = "function")) {
   print_info <- new_generic("print_info", "x")
-  
-  #' @export
-  method(print_info, DTAFile) <- function(x) {
-    cli::cli_alert_info("Filename: {x@filename}")
-    cli::cli_alert("Pattern: {x@pattern}")
-    if (x@min_number_of_files == x@max_number_of_files) {
-      cli::cli_alert("Number of files: {x@min_number_of_files}")
-    } else {
-      cli::cli_alert("Min number of files: {x@min_number_of_files}")
-      cli::cli_alert("Max number of files: {x@max_number_of_files}")
-    }
-    invisible(x)
+}
+
+# Registered outside the guard above: when `print_info` has already been
+# created by an earlier-collated file, the method must still be attached,
+# otherwise printing a plain DTAFile has no `print_info` method to dispatch to.
+#' @export
+method(print_info, DTAFile) <- function(x) {
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  if (x@min_number_of_files == x@max_number_of_files) {
+    cli::cli_alert("Number of files: {x@min_number_of_files}")
+  } else {
+    cli::cli_alert("Min number of files: {x@min_number_of_files}")
+    cli::cli_alert("Max number of files: {x@max_number_of_files}")
   }
+  invisible(x)
 }
 
 
