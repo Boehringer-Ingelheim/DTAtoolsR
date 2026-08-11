@@ -2274,7 +2274,13 @@ server <- function(input, output, session) {
   # actual split, and the raw technical detail in a collapsible section.
   render_inspect_body <- function(d, dataset) {
     r <- as.list(d[1, , drop = FALSE])
-    typ <- r$type %||% (if ("rule_id" %in% names(d)) "rule" else "schema")
+    # `source` is the fallback for `type`: both name the axis ("schema", "rule",
+    # "import"), and falling back on the rule_id guess alone would route an
+    # import record into the schema branch.
+    typ <- .first_nonempty(r[["type"]], r[["source"]])
+    if (!nzchar(typ)) {
+      typ <- if ("rule_id" %in% names(d)) "rule" else "schema"
+    }
     msg <- .first_nonempty(r$message, r$headline)
 
     if (identical(typ, "rule")) {
@@ -2311,6 +2317,49 @@ server <- function(input, output, session) {
       )
       actual_ui <- inspect_failing_rows_ui(d)
       actual_title <- "Offending row(s) \u2014 actual values"
+    } else if (identical(typ, "import")) {
+      # Third validation axis: the value could not be represented in the type
+      # the spec declares, so the typed column holds NA and the raw text was
+      # kept. inspect() supplies it as import_* columns (from import_matches).
+      # Without this branch the record fell into the schema branch below and
+      # rendered two empty schema_* panels.
+      f <- dta_inspect_import_fields(r)
+      col <- f$column
+      raw <- f$raw
+      dtype <- f$declared_type
+      reason <- f$reason
+      arow <- f$row
+      badge <- tags$span(class = "inspect-badge import", "Import error")
+      desc <- div(
+        class = "inspect-desc",
+        div(
+          class = "inspect-desc-main",
+          tags$strong(if (nzchar(col)) col else "(column)"),
+          if (nzchar(dtype)) tags$span(class = "inspect-desc-type", dtype)
+        ),
+        if (nzchar(reason)) div(class = "inspect-desc-detail", reason),
+        div(
+          class = "inspect-desc-note",
+          "The value was kept verbatim; the typed column holds NA."
+        )
+      )
+      expected_ui <- div(
+        class = "inspect-should",
+        if (nzchar(dtype)) {
+          paste0("a value representable as declared type ", dtype)
+        } else {
+          "a value representable in the column's declared type"
+        }
+      )
+      loc <- paste0(
+        if (nzchar(col)) paste0("column ", col) else "",
+        if (nzchar(arow)) paste0(if (nzchar(col)) ", " else "", "row ", arow) else ""
+      )
+      actual_ui <- tagList(
+        div(class = "inspect-actual-val", if (nzchar(raw)) raw else "(empty)"),
+        if (nzchar(loc)) div(class = "inspect-actual-loc", loc)
+      )
+      actual_title <- "Raw value that could not be imported"
     } else {
       col <- .first_nonempty(r[["schema_column"]], r[["column"]])
       kw <- .first_nonempty(r[["schema_keyword"]], r[["keyword"]])
@@ -2410,6 +2459,28 @@ server <- function(input, output, session) {
       v <- tryCatch(S7::prop(md, field), error = function(e) NULL)
       if (is.null(v) || length(v) == 0) "" else as.character(v)[1]
     }
+    # Metadata import errors are DTA-level (target == "metadata"), so the
+    # per-dataset messages dock can never show them. The metadata editor is the
+    # one place the affected fields are on screen, so the notice goes here.
+    md_import <- dta_metadata_import_messages(dta)
+    md_import_ui <- if (is.data.frame(md_import) && nrow(md_import) > 0) {
+      div(
+        class = "md-import-warn",
+        div(
+          class = "md-import-warn-head",
+          sprintf(
+            "%d metadata value%s could not be imported in the declared type",
+            nrow(md_import),
+            if (nrow(md_import) == 1) "" else "s"
+          )
+        ),
+        tags$ul(lapply(seq_len(nrow(md_import)), function(i) {
+          tags$li(as.character(md_import$message[i]))
+        }))
+      )
+    } else {
+      NULL
+    }
     date_val <- tryCatch(S7::prop(md, "date"), error = function(e) NULL)
     tr <- dta_transmission(dta)
     trf <- function(k) {
@@ -2417,6 +2488,7 @@ server <- function(input, output, session) {
       if (is.null(v)) "" else if (inherits(v, "Date")) format(v, "%Y-%m-%d") else as.character(v)[1]
     }
     tagList(
+      md_import_ui,
       div(class = "md-section-title", "Document"),
       layout_columns(
         col_widths = c(6, 6),
@@ -3405,19 +3477,28 @@ server <- function(input, output, session) {
       rows <- lapply(recs, function(rec) {
         fid <- get_file_id(dsname, hi, rec$table)
         st <- tstatus[[rec$table]] %||% "pending"
+        # "unknown" is the third tick state: the table was validated, but by a
+        # run that predates import checking, so its import axis is unknown --
+        # neither the green pass nor the red fail (see dta_table_status_map()).
         icon_ch <- switch(st,
           pass = "\u2714",
           fail = "\u2716",
+          unknown = "?",
           "\u2014"
         )
         icls <- switch(st,
           pass = "file-ok",
           fail = "file-fail",
+          unknown = "file-unknown",
           "file-pending"
         )
         ttl <- switch(st,
           pass = "Validated \u2014 no errors",
           fail = "Validation errors \u2014 see messages below",
+          unknown = paste(
+            "Import status unknown \u2014 validated before import checking.",
+            "Re-run validation (force) to complete the check."
+          ),
           "Not validated yet"
         )
         div(

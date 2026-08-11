@@ -48,17 +48,26 @@ DTADataSetFile <- S7::new_class(
       ),
       file_paths = paths,
       validation_index = list(),
-      validation_store = list()
+      validation_store = list(),
+      validation_artifact_dir = NULL
     )
   },
   properties = list(
     file_paths = S7::new_property(S7::class_character, default = character()),
     validation_index = S7::new_property(S7::class_list, default = list()),
-    validation_store = S7::new_property(S7::class_list, default = list())
+    validation_store = S7::new_property(S7::class_list, default = list()),
+    # Same contract as DTADataSetTabular: remembers where check(persist = TRUE)
+    # wrote its artifacts so a caller-supplied directory survives to the next
+    # check() call.
+    validation_artifact_dir = class_character_or_null
   ),
   validator = function(self) {
     if (!is.character(self@file_paths) && !is.null(self@file_paths)) {
       cli_abort("'file_paths' must be a character vector or NULL.")
+    }
+
+    if (!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
+      cli_abort("Property 'validation_artifact_dir' must be a valid directory path or NULL.")
     }
   }
 )
@@ -80,6 +89,64 @@ dta_file_target_keys <- function(paths) {
 
   # Guards against the same path being listed twice.
   make.unique(keys, sep = "_")
+}
+
+# The file-dataset counterpart of dta_table_id_to_names(). It resolves against
+# an explicit vector of names rather than x@tables, because check() has to
+# select among the *targets* (which exist before any validation) while
+# validation_status()/messages() select among the *validated* entries.
+#' @keywords internal
+dta_file_id_to_names <- function(all_names, tables = NULL) {
+  if (is.null(tables)) {
+    return(all_names)
+  }
+
+  if (is.numeric(tables)) {
+    if (any(tables < 1) || any(tables > length(all_names))) {
+      cli::cli_abort("Table index out of bounds.")
+    }
+    return(all_names[tables])
+  }
+
+  if (is.character(tables)) {
+    missing <- setdiff(tables, all_names)
+    if (length(missing) > 0) {
+      cli::cli_abort("Table{?s} not found: {.field {missing}}")
+    }
+    return(tables)
+  }
+
+  cli::cli_abort("'tables' must be NULL, numeric, or character.")
+}
+
+# The paths this dataset validates: explicit paths when given, otherwise the
+# filenames declared by the file handlers.
+#' @keywords internal
+dta_file_dataset_targets <- function(x) {
+  if (length(x@file_paths) > 0) {
+    return(x@file_paths)
+  }
+
+  vapply(x@files, function(file_info) file_info@filename, character(1))
+}
+
+# Staleness signal for one target, the file-dataset analogue of the table hash
+# DTADataSetTabular compares. Identity (path), existence, size and mtime are
+# what this dataset's checks actually depend on, and all four are cheap to read
+# -- unlike a content digest, which would re-read every transfer file on every
+# check(). A touched-but-identical file merely re-validates; the fingerprint
+# never claims "unchanged" for a file that changed.
+#' @keywords internal
+dta_file_fingerprint <- function(path) {
+  info <- file.info(path)
+
+  dta_hash_object(list(
+    path = path,
+    exists = file.exists(path),
+    size = unname(info$size),
+    mtime = unname(info$mtime),
+    isdir = unname(info$isdir)
+  ))
 }
 
 #' @keywords internal
@@ -122,16 +189,48 @@ validate_file_dataset_entry <- function(path) {
   list(ok = TRUE, message = NULL)
 }
 
+# The detailed result for one target, in the same shape validate_table_detailed()
+# produces for a tabular target, so that everything downstream (messages(),
+# inspect(), the persisted artifact) reads one format.
+#' @keywords internal
+dta_file_validation_details <- function(validation_result) {
+  ok <- isTRUE(validation_result$ok)
+  failure <- list(list(
+    id = "file_presence",
+    valid = FALSE,
+    message = validation_result$message
+  ))
+
+  list(
+    ok = ok,
+    schema_valid = TRUE,
+    rules_valid = ok,
+    import_valid = TRUE,
+    n_schema_errors = 0L,
+    n_rule_errors = if (ok) 0L else 1L,
+    n_import_errors = 0L,
+    schema_errors = list(summarised_error = NULL, full_error = NULL),
+    rule_results = if (ok) {
+      list(list(id = "file_presence", valid = TRUE, message = NULL))
+    } else {
+      failure
+    },
+    rule_errors = if (ok) list() else failure,
+    import_errors = NULL,
+    schema_version = 2L
+  )
+}
+
 #' @title Check DTADataSetFile
 #' @description
 #' Validates a \code{DTADataSetFile} object's underlying file(s) and structure.
 #' @param x A \code{DTADataSetFile} object.
 #' @param ... Additional named arguments:
 #'   \describe{
-#'     \item{tables}{Optional. Character table names or numeric table indices
-#'       to validate. If NULL (default), validates all tables.}
-#'     \item{force}{Logical. If TRUE, forces re-validation even if unchanged.
-#'       Default is FALSE.}
+#'     \item{tables}{Optional. Character target names or numeric target indices
+#'       to validate. If NULL (default), validates all targets.}
+#'     \item{force}{Logical. If TRUE, forces re-validation even if the file is
+#'       unchanged since the last check. Default is FALSE.}
 #'     \item{persist}{Logical. If TRUE (default), persists validation
 #'       artifacts to disk.}
 #'     \item{artifact_dir}{Character or NULL. Optional output directory for
@@ -155,71 +254,93 @@ S7::method(check, DTADataSetFile) <- function(
     validation_run <- dta_new_validation_run_id()
   }
 
-  target_files <- if (length(x@file_paths) > 0) {
-    x@file_paths
-  } else {
-    vapply(x@files, function(file_info) file_info@filename, character(1))
+  target_files <- dta_file_dataset_targets(x)
+  target_keys <- dta_file_target_keys(target_files)
+  selected_keys <- dta_file_id_to_names(target_keys, tables)
+
+  # Entries for targets outside `tables` are carried over untouched, exactly as
+  # DTADataSetTabular does; rebuilding the index from scratch would delete the
+  # validation state of every target the caller did not ask for.
+  validation_index <- x@validation_index
+  validation_store <- x@validation_store
+  output_rows <- list()
+
+  if (isTRUE(persist)) {
+    if (is.null(artifact_dir)) {
+      artifact_dir <- if (!is.null(x@validation_artifact_dir)) {
+        x@validation_artifact_dir
+      } else {
+        dta_default_validation_artifact_dir(x)
+      }
+    }
+    dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)
+    x@validation_artifact_dir <- artifact_dir
   }
 
-  output_rows <- list()
-  validation_details <- list()
-  validation_index <- list()
-  validation_store <- list()
-  target_keys <- dta_file_target_keys(target_files)
+  for (idx in seq_along(selected_keys)) {
+    table_name <- selected_keys[idx]
+    path <- target_files[[match(table_name, target_keys)]]
+    file_hash <- dta_file_fingerprint(path)
 
-  for (idx in seq_along(target_files)) {
-    path <- target_files[idx]
-    table_name <- target_keys[idx]
+    previous <- validation_index[[table_name]]
+    unchanged <- !is.null(previous) && identical(previous$file_hash, file_hash)
+
+    if (!isTRUE(force) && unchanged) {
+      previous$validation_run <- validation_run
+      validation_index[[table_name]] <- previous
+
+      output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+        table_name = table_name,
+        status = "skipped",
+        index_entry = previous,
+        target_type = "file"
+      )
+      next
+    }
+
+    if (!isTRUE(quiet)) {
+      cli::cli_text()
+      cli::cli_rule(paste0("File ", idx, " of ", length(selected_keys), ": ", table_name))
+    }
+
     validation_result <- validate_file_dataset_entry(path)
+    details <- dta_file_validation_details(validation_result)
     validated_at <- Sys.time()
+    run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")
+    artifact_path <- NULL
+
+    if (isTRUE(persist)) {
+      safe_target <- gsub("[^A-Za-z0-9_-]", "_", table_name)
+      target_dir <- file.path(artifact_dir, safe_target)
+      dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+      artifact_path <- file.path(target_dir, paste0(run_id, ".rds"))
+      saveRDS(details, artifact_path)
+    }
+
+    if (!isTRUE(quiet)) {
+      if (isTRUE(details$ok)) {
+        cli::cli_alert_success(paste0("File '", path, "' is readable and not empty."))
+      } else {
+        cli::cli_alert_danger(validation_result$message)
+      }
+    }
 
     entry <- list(
-      ok = isTRUE(validation_result$ok),
+      ok = isTRUE(details$ok),
       validated_at = validated_at,
-      run_id = format(validated_at, "%Y%m%dT%H%M%OS3"),
+      run_id = run_id,
       validation_run = validation_run,
+      file_hash = file_hash,
       n_schema_errors = 0L,
-      n_rule_errors = if (isTRUE(validation_result$ok)) 0L else 1L,
+      n_rule_errors = details$n_rule_errors,
       n_import_errors = 0L,
-      artifact_path = NULL,
+      artifact_path = artifact_path,
       path = path,
       label = basename(path)
     )
 
-    if (!isTRUE(validation_result$ok)) {
-      validation_details[[length(validation_details) + 1]] <- list(
-        ok = FALSE,
-        schema_valid = TRUE,
-        rules_valid = FALSE,
-        import_valid = TRUE,
-        n_schema_errors = 0L,
-        n_rule_errors = 1L,
-        n_import_errors = 0L,
-        schema_errors = list(summarised_error = NULL, full_error = NULL),
-        rule_results = list(list(id = "file_presence", valid = FALSE, message = validation_result$message)),
-        rule_errors = list(list(id = "file_presence", valid = FALSE, message = validation_result$message)),
-        import_errors = NULL,
-        schema_version = 2L
-      )
-    } else {
-      validation_details[[length(validation_details) + 1]] <- list(
-        ok = TRUE,
-        schema_valid = TRUE,
-        rules_valid = TRUE,
-        import_valid = TRUE,
-        n_schema_errors = 0L,
-        n_rule_errors = 0L,
-        n_import_errors = 0L,
-        schema_errors = list(summarised_error = NULL, full_error = NULL),
-        rule_results = list(list(id = "file_presence", valid = TRUE, message = NULL)),
-        rule_errors = list(),
-        import_errors = NULL,
-        schema_version = 2L
-      )
-    }
-
     validation_index[[table_name]] <- entry
-    validation_store[[table_name]] <- validation_details[[length(validation_details)]]
+    validation_store[[table_name]] <- details
 
     output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
       table_name = table_name,
@@ -234,7 +355,59 @@ S7::method(check, DTADataSetFile) <- function(
 
   summary_df <- do.call(rbind, output_rows)
   attr(x, "last_validation_summary") <- summary_df
+
+  if (!isTRUE(quiet) && !is.null(summary_df) && nrow(summary_df) > 0) {
+    n_total <- nrow(summary_df)
+    n_valid <- sum(summary_df$ok == TRUE, na.rm = TRUE)
+    file_word <- if (n_total == 1) "file" else "files"
+
+    cli::cli_text()
+    if (n_valid < n_total) {
+      cli::cli_alert_danger(paste0(n_valid, " of ", n_total, " ", file_word, " valid"))
+    } else {
+      cli::cli_alert_success(paste0(n_total, " ", file_word, " passed validation"))
+    }
+  }
+
   invisible(x)
+}
+
+#' @export
+S7::method(validation_errors, DTADataSetFile) <- function(
+  x,
+  table,
+  source = c("auto", "memory", "artifact")
+) {
+  source <- match.arg(source)
+  table_name <- dta_file_id_to_names(names(x@validation_index), table)
+  table_name <- table_name[[1]]
+
+  if (source %in% c("auto", "memory")) {
+    in_memory <- x@validation_store[[table_name]]
+    if (!is.null(in_memory)) {
+      return(dta_as_validation_details(dta_migrate_validation_details(in_memory)))
+    }
+  }
+
+  entry <- x@validation_index[[table_name]]
+  if (is.null(entry) || is.null(entry$artifact_path)) {
+    cli::cli_abort(
+      "No validation artifact available for target '{table_name}'. Run check() first with persist = TRUE."
+    )
+  }
+
+  if (!file.exists(entry$artifact_path)) {
+    cli::cli_abort(
+      "Validation artifact for target '{table_name}' does not exist at '{entry$artifact_path}'."
+    )
+  }
+
+  # Migrated on read like the tabular artifacts: an artifact written before the
+  # import axis existed reports import_valid = NA ("unknown"), never a clean
+  # axis it never checked.
+  dta_as_validation_details(
+    dta_migrate_validation_details(readRDS(entry$artifact_path))
+  )
 }
 
 #' @export

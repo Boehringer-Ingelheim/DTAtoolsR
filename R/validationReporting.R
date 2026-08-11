@@ -31,8 +31,13 @@ results <- S7::new_generic("results", "x")
 #' @keywords internal
 dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
   if (is.null(status_df) || nrow(status_df) == 0) {
+    # `dataset` must be zero-length here like every other column. Recycling the
+    # length-1 `dataset_name` against zero-length columns is not a recycle at
+    # all: data.frame() aborts with "arguments imply differing number of rows",
+    # so this branch used to work only when the caller passed a zero-length
+    # name -- which no real caller does.
     return(data.frame(
-      dataset = dataset_name,
+      dataset = character(0),
       target = character(0),
       target_type = character(0),
       status = character(0),

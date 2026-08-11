@@ -13,8 +13,10 @@
 #' @param length Numeric or NA. The max character length.
 #' @param nullable Logical or NA. Whether the column can be null.
 #' @param pattern Character or NA. The pattern of the column.
-#' @param values Any or NA. The values of the column.
-#' @param examples Character, numeric, or NA. Example value(s) for the column.
+#' @param values Character or numeric vector, or NULL. The permitted values of
+#'   the column. A list is accepted and flattened to a vector.
+#' @param examples Character or numeric vector, or NULL. Example value(s) for
+#'   the column. A list is accepted and flattened to a vector.
 #' @param description Character or NA. The description of the column.
 #' @param colclass Character or NA. The R/SAS storage class of the column.
 #' @return An object of class DTAColumnSpec.
@@ -22,6 +24,43 @@
 #' col_format <- DTAColumnSpec(
 #'   id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234"
 #' )
+# `values` (and `examples`) enumerate the permitted/example values of ONE
+# column, which has one declared type, so the canonical representation is a
+# single atomic vector rather than a list of scalars.
+#
+# This is what makes the pair write_columns_to_yaml() ->
+# import_specs_from_yaml() return the object it was given: YAML has no
+# list/vector distinction -- both write as the same sequence -- and
+# yaml::read_yaml() simplifies a homogeneous sequence back to an atomic vector.
+# Normalising on construction means every entry point (YAML, Word, direct call)
+# produces the same representation, so whole-object equality holds.
+#
+# Flattening is deliberately not as.character(): a numeric code set stays
+# numeric, and as_json_schema() re-coerces to the column's declared type anyway.
+#
+# c() rather than unlist(): unlist() drops the class attribute, so a list of
+# Dates collapses to the underlying numbers and a date enum renders as "20454"
+# instead of "2026-01-01". c() preserves Date and POSIXct. unlist() remains the
+# fallback for a nested list, which c() would leave as a list.
+#' @keywords internal
+dta_normalise_spec_values <- function(values) {
+  if (is.null(values) || !is.list(values)) {
+    return(values)
+  }
+
+  if (length(values) == 0) {
+    return(NULL)
+  }
+
+  flattened <- do.call(c, values)
+
+  if (is.list(flattened)) {
+    return(unlist(values, recursive = TRUE, use.names = FALSE))
+  }
+
+  unname(flattened)
+}
+
 DTAColumnSpec <- S7::new_class(
   "DTAColumnSpec",
   constructor = function(
@@ -38,6 +77,9 @@ DTAColumnSpec <- S7::new_class(
     colclass = NULL
   ) {
     structure <- NULL
+
+    values <- dta_normalise_spec_values(values)
+    examples <- dta_normalise_spec_values(examples)
 
     if (!is.null(type) || !is.null(format) || !is.null(length)) {
       structure = DTAColumnSpecStructureFactory(

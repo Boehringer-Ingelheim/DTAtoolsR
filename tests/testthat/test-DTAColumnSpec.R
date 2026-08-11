@@ -16,14 +16,17 @@ test_that("DTAColumnSpec constructor works", {
   expect_equal(spec[[1]]@structure@backend, "SAS")
   expect_false(spec[[1]]@nullable)
   expect_equal(spec[[1]]@description, "Unique study identifier")
-  expect_equal(spec[[1]]@values, list("1234", "5678"))
+  # @values is normalised to an atomic vector on construction. YAML has no
+  # list/vector distinction -- both write as the same sequence and read back as
+  # a vector -- so a list representation could never survive a round trip.
+  expect_equal(spec[[1]]@values, c("1234", "5678"))
 
   expect_equal(spec[[2]]@id, "VISIT")
   expect_equal(spec[[2]]@label, "Visit")
   expect_equal(spec[[1]]@structure@type, "Char")
   expect_equal(spec[[1]]@structure@backend, "SAS")
   expect_equal(spec[[2]]@description, "Visit code")
-  expect_equal(spec[[2]]@values, list("V01", "EOT"))
+  expect_equal(spec[[2]]@values, c("V01", "EOT"))
   expect_false(spec[[2]]@nullable)
 
   expect_equal(spec[[4]]@id, "AGE")

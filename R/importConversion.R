@@ -81,6 +81,86 @@ dta_spec_r_type <- function(specs, column) {
 }
 
 
+#' @title Reader Column Types Declared by the Specs
+#' @description
+#' Builds the Arrow schema handed to the CSV/TSV/delimited reader, so the
+#' declared type of a column -- not the reader's guess at it -- decides how the
+#' bytes in the file are parsed.
+#'
+#' Arrow infers a column's type from its contents, and that inference runs
+#' *before* any code in this package sees the data. A column of quoted subject
+#' ids -- `"007"`, `"008"` -- is inferred as `int64` and arrives in R as `7` and
+#' `8`. The leading zeros are gone by the time [dta_coerce_table_to_specs()] is
+#' reached, so its "never coerce a `Char` column" guard has nothing left to
+#' protect: the corruption already happened. The only place to stop it is the
+#' read itself.
+#'
+#' The schema only ever *widens* a column to `utf8`, and only for columns whose
+#' declared R type is `"character"`. Narrowing is deliberately left alone.
+#' Telling Arrow that a column is `int64` makes it abort the entire read on the
+#' first cell it cannot parse (`CSV conversion error to int64: invalid value
+#' 'abc'`), which would turn a single reportable bad cell into a transfer that
+#' will not load at all. Numeric columns are therefore still read by inference
+#' and narrowed by [dta_coerce_table_to_specs()], where an unrepresentable value
+#' becomes `NA` and is reported as an import error.
+#'
+#' Reading a `character` column as text can never fail and never loses
+#' information, which is what makes widening the safe half of the operation.
+#' @param specs A `DTAColumnSpecCollection`, or `NULL`. `NULL` means "no
+#'   declared types are available", and yields `NULL`: the reader then infers
+#'   every column exactly as it did before.
+#' @param has_header Logical. When the file has no header, Arrow generates
+#'   positional names (`f0`, `f1`, ...) that cannot correspond to spec ids, so
+#'   no schema is built.
+#' @return An `arrow::schema()` naming the textual columns, or `NULL` when there
+#'   is nothing to pin.
+#' @keywords internal
+dta_reader_col_types <- function(specs, has_header = TRUE) {
+  if (is.null(specs) || !isTRUE(has_header)) {
+    return(NULL)
+  }
+
+  columns <- tryCatch(specs@columns, error = function(e) NULL)
+
+  if (!is.list(columns) || length(columns) == 0) {
+    return(NULL)
+  }
+
+  ids <- vapply(
+    columns,
+    function(spec) tryCatch(as.character(spec@id)[[1]], error = function(e) NA_character_),
+    character(1),
+    USE.NAMES = FALSE
+  )
+
+  # A collection is normally named by column id, but one built by another route
+  # may not be. `dta_spec_r_type()` resolves either, so both are offered to it:
+  # the reader and the coercion choke point then agree on what a column is by
+  # construction, rather than by two lookups that could drift apart.
+  keys <- unique(c(names(columns), ids))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+
+  textual <- keys[vapply(
+    keys,
+    function(key) identical(dta_spec_r_type(specs, key), "character"),
+    logical(1),
+    USE.NAMES = FALSE
+  )]
+
+  if (length(textual) == 0) {
+    return(NULL)
+  }
+
+  # A schema entry for a column the file does not contain is ignored by Arrow,
+  # so a spec that declares more columns than the file carries is not an error
+  # here. Whether the column is missing is the schema axis's question.
+  types <- rep(list(arrow::utf8()), length(textual))
+  names(types) <- textual
+
+  do.call(arrow::schema, types)
+}
+
+
 #' @title Coerce One Column to Its Declared R Type
 #' @description
 #' Converts a single column to the type its spec declares, reporting the values
