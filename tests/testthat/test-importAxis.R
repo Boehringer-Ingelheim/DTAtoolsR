@@ -499,3 +499,172 @@ test_that("stage 0 regression canaries: no behaviour changed", {
   expect_equal(ds_status$n_schema_errors, 7)
   expect_equal(ds_status$n_import_errors, 0L)
 })
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: the rule layer starts producing real import errors.
+# ---------------------------------------------------------------------------
+
+import_only_specs <- function() {
+  # An unconvertible value in the IF column leaves the row's IF condition NA, so
+  # the row is not counted as a rule violation. That isolates the import axis:
+  # schema and rules are clean and the table still fails.
+  DTAColumnSpecCollection(
+    columns = list(
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Char", length = 10, nullable = TRUE),
+      STATUS = DTAColumnSpec(id = "STATUS", type = "SAS Char", length = 10, nullable = TRUE)
+    ),
+    rules = list(DTARuleColCondition(
+      id = "adult_status",
+      condition = list(AGE = list(greater_equal = 18)),
+      then = list(STATUS = list(equals = "OK"))
+    ))
+  )
+}
+
+range_import_specs <- function() {
+  DTAColumnSpecCollection(
+    columns = list(
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Char", length = 10, nullable = TRUE)
+    ),
+    rules = list(DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65))
+  )
+}
+
+
+test_that("an unconvertible value fails the run on the import axis alone", {
+  details <- validate_table_detailed(
+    import_only_specs(),
+    data.frame(AGE = c("30", "ninety"), STATUS = c("OK", "OK"), stringsAsFactors = FALSE),
+    verbose = FALSE
+  )
+
+  expect_true(details$schema_valid)
+  expect_true(details$rules_valid)
+  expect_equal(details$n_rule_errors, 0)
+
+  # The only problem is a value that could not be represented as a number.
+  expect_false(details$import_valid)
+  expect_identical(details$n_import_errors, 1L)
+  expect_false(details$ok)
+
+  expect_equal(details$import_errors$row, 2L)
+  expect_equal(details$import_errors$column, "AGE")
+  expect_equal(details$import_errors$raw, "ninety")
+  expect_equal(details$import_errors$reason, "not_convertible")
+  # The declared type comes from the column spec, not from the storage type.
+  expect_equal(details$import_errors$declared_type, "SAS Char")
+
+  # validate_table() surfaces it rather than returning the table as valid.
+  expect_error(
+    validate_table(
+      import_only_specs(),
+      data.frame(AGE = c("30", "ninety"), STATUS = c("OK", "OK"), stringsAsFactors = FALSE),
+      verbose = FALSE
+    ),
+    class = "rlang_error"
+  )
+})
+
+
+test_that("an unconvertible value is reported on BOTH axes, never moved between them", {
+  details <- validate_table_detailed(
+    range_import_specs(),
+    data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE),
+    verbose = FALSE
+  )
+
+  # Import axis: one unrepresentable value.
+  expect_false(details$import_valid)
+  expect_identical(details$n_import_errors, 1L)
+  expect_equal(details$import_errors$raw, "ninety")
+
+  # Rule axis: unchanged in kind, and it counts BOTH offending rows. Moving
+  # "ninety" to the import axis alone would make a consumer reading
+  # n_rule_errors see fewer errors than before.
+  expect_false(details$rules_valid)
+  expect_equal(details$n_rule_errors, 1)
+  expect_match(details$rule_errors[[1]]$message, "violated: 2 rows")
+
+  expect_false(details$ok)
+
+  # Flattened details carry both sources.
+  flat <- as.data.frame(dta_as_validation_details(details))
+  expect_equal(sort(unique(flat$source)), c("import", "rule"))
+})
+
+
+test_that("import errors reach messages() as source 'import' carrying the raw value", {
+  ds <- DTADataSetTabular(
+    name = "imports",
+    specs = range_import_specs(),
+    tables = list(tab = arrow::arrow_table(
+      data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE)
+    ))
+  )
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  # The column contract is unchanged by the populated import frame.
+  expect_named(
+    msgs,
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+  )
+
+  import_msgs <- msgs[msgs$source == "import", , drop = FALSE]
+  expect_equal(nrow(import_msgs), 1)
+  expect_equal(import_msgs$severity, "error")
+  expect_equal(import_msgs$row, 2)
+  expect_equal(import_msgs$column, "AGE")
+  expect_equal(import_msgs$keyword, "not_convertible")
+  # The raw offending text must be visible in the message itself.
+  expect_true(grepl("ninety", import_msgs$message, fixed = TRUE))
+  expect_true(grepl("SAS Char", import_msgs$message, fixed = TRUE))
+
+  # The rule message is still there: both axes report.
+  expect_equal(sum(msgs$source == "rule"), 1)
+
+  status <- validation_status(ds)
+  expect_false(status$ok)
+  expect_identical(status$n_import_errors, 1L)
+  expect_equal(results(ds)$status, "failed")
+
+  # inspect() routes the import message to the import branch and shows the raw
+  # value it matched.
+  info <- inspect(ds, id = import_msgs$id[[1]], as_tibble = FALSE)
+  expect_true(all(info$type == "import"))
+  expect_true(any(grepl("ninety", info$import_raw, fixed = TRUE)))
+})
+
+
+test_that("stage 1 canaries: over-firing would show up here", {
+  # A genuinely missing value never becomes an import error.
+  clean_na <- validate_table_detailed(
+    range_import_specs(),
+    data.frame(AGE = c(NA, NA), stringsAsFactors = FALSE),
+    verbose = FALSE
+  )
+  expect_true(clean_na$rules_valid)
+  expect_true(clean_na$import_valid)
+  expect_identical(clean_na$n_import_errors, 0L)
+  expect_null(clean_na$import_errors)
+  expect_true(clean_na$ok)
+
+  # The clean clinical fixture is still validated on all three axes. This is
+  # the over-firing canary: it has range, min/max and greater_equal rules over
+  # real numeric columns.
+  dta <- read_dta_from_yaml(
+    system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  )
+  dta <- load_file(
+    dta,
+    "clinical_data",
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  )
+  dta <- check(dta, persist = FALSE, quiet = TRUE)
+
+  res <- results(dta)
+  expect_equal(res$status, "validated")
+  expect_equal(res$n_import_errors, 0L)
+  expect_equal(nrow(messages(dta, as_tibble = FALSE)), 0)
+})

@@ -35,23 +35,16 @@ test_that("DTAMetaData constructor converts transmission date strings and preser
   expect_identical(md@transmission$date_last_transfer, "after approval")
 })
 
-test_that("qualified transmission dates lose their qualification (documented defect)", {
-  # DEFECT, deferred: the constructor coerces a transmission date string with
-  # strptime()/as.Date(), and those ignore TRAILING text. A phrase is therefore
-  # only preserved when it does NOT start with a parseable date:
-  #   "after approval"              -> kept as character (leading text)
-  #   "2026-12-31 at the earliest"  -> silently becomes Date 2026-12-31
+test_that("a qualified transmission date is converted and recorded as an import error", {
+  # The constructor coerces a transmission date string with as.Date(), and
+  # strptime() ignores TRAILING text, so "2026-12-31 at the earliest" parses as
+  # 2026-12-31 and the qualification disappears. In a data transfer agreement
+  # that silently turns a lower bound into a committed deadline.
   #
-  # The second case drops a contractual qualification from a data transfer
-  # agreement: "at the earliest" states a lower bound, but the stored value
-  # reads as a firm date, and downstream consumers (get_transmission_dates(),
-  # validate_transmission_dates(), the exported DTA document) all see a hard
-  # deadline that was never agreed. The fix belongs in the coercion helper in
-  # R/DTAMetaData-class.R, which must reject trailing residue instead of
-  # discarding it.
-  #
-  # Pinned here, NOT asserted as correct: the desired assertion is that the
-  # value stays the character string "2026-12-31 at the earliest".
+  # The value is still converted - validate_transmission_dates() and the exported
+  # documents need a real Date - but the conversion is no longer silent: the
+  # original string is recorded verbatim in @import_issues, and an import error
+  # cannot pass check() (see test-DTA.R).
   md <- DTAMetaData(
     title = "Qualified Date",
     transmission = list(date_last_transfer = "2026-12-31 at the earliest")
@@ -60,13 +53,120 @@ test_that("qualified transmission dates lose their qualification (documented def
   expect_s3_class(md@transmission$date_last_transfer, "Date")
   expect_identical(as.character(md@transmission$date_last_transfer), "2026-12-31")
 
-  # Contrast: a phrase whose leading characters are unparseable survives intact,
-  # which is why the existing "after approval" test above passes.
-  md_leading <- DTAMetaData(
-    title = "Leading Phrase",
-    transmission = list(date_last_transfer = "final transfer by 2026-12-31")
+  issues <- metadata_import_errors(md)
+  expect_identical(names(issues), names(dta_empty_import_errors()))
+  expect_equal(nrow(issues), 1)
+  expect_true(is.na(issues$row))
+  expect_identical(issues$column, "transmission$date_last_transfer")
+  # The discarded text is not lost: `raw` keeps what was actually written.
+  expect_identical(issues$raw, "2026-12-31 at the earliest")
+  expect_identical(issues$declared_type, "Date")
+  expect_identical(issues$reason, "trailing_residue")
+
+  # date_first_transfer is coerced by the same helper and reports under its own
+  # field path.
+  md_first <- DTAMetaData(
+    title = "Qualified First Date",
+    transmission = list(date_first_transfer = "2026-02-01 or later")
   )
-  expect_type(md_leading@transmission$date_last_transfer, "character")
+  expect_identical(
+    metadata_import_errors(md_first)$column,
+    "transmission$date_first_transfer"
+  )
+})
+
+test_that("transfer phrases without a leading date stay character and raise no import error", {
+  # Documented, legitimate input: a transfer date may be a free-text phrase. Only
+  # a string that STARTS with an ISO date loses information when coerced, so only
+  # that case is flagged. Everything below must remain untouched.
+  phrases <- c(
+    "after approval",
+    "2 weeks after approval",
+    "final transfer by 2026-12-31",
+    "Final transfer by 2026-12-31"
+  )
+
+  for (phrase in phrases) {
+    md <- DTAMetaData(
+      title = "Phrase",
+      transmission = list(date_last_transfer = phrase)
+    )
+    expect_type(md@transmission$date_last_transfer, "character")
+    expect_identical(md@transmission$date_last_transfer, phrase)
+    expect_equal(nrow(metadata_import_errors(md)), 0)
+  }
+
+  # A bare ISO date converts cleanly and is likewise not an import error.
+  md_clean <- DTAMetaData(
+    title = "Bare Date",
+    transmission = list(date_last_transfer = "2026-12-31")
+  )
+  expect_s3_class(md_clean@transmission$date_last_transfer, "Date")
+  expect_equal(nrow(metadata_import_errors(md_clean)), 0)
+
+  # A digit-shaped string that is not a real calendar date is not a date prefix.
+  md_not_a_date <- DTAMetaData(
+    title = "Not A Date",
+    transmission = list(date_last_transfer = "2026-02-30 rescheduled")
+  )
+  expect_type(md_not_a_date@transmission$date_last_transfer, "character")
+  expect_equal(nrow(metadata_import_errors(md_not_a_date)), 0)
+})
+
+test_that("a qualified top-level date is converted and recorded as an import error", {
+  # The top-level @date runs through the same as.Date() coercion and had the same
+  # defect, with nothing pinning it: "2026-07-24 provisional" became a firm date.
+  md <- DTAMetaData(title = "Provisional", date = "2026-07-24 provisional")
+
+  expect_s3_class(md@date, "Date")
+  expect_identical(as.character(md@date), "2026-07-24")
+
+  issues <- metadata_import_errors(md)
+  expect_equal(nrow(issues), 1)
+  expect_identical(issues$column, "date")
+  expect_identical(issues$raw, "2026-07-24 provisional")
+  expect_identical(issues$reason, "trailing_residue")
+
+  # A clean date is not an issue.
+  expect_equal(
+    nrow(metadata_import_errors(DTAMetaData(title = "Clean", date = "2026-07-24"))),
+    0
+  )
+
+  # Both axes report together, each under its own field path.
+  md_both <- DTAMetaData(
+    title = "Both",
+    date = "2026-07-24 provisional",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  expect_identical(
+    metadata_import_errors(md_both)$column,
+    c("date", "transmission$date_last_transfer")
+  )
+})
+
+test_that("metadata import errors surface through messages()", {
+  md <- DTAMetaData(
+    title = "Qualified Date",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+
+  msgs <- messages(md, as_tibble = FALSE)
+
+  expect_named(
+    msgs,
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+  )
+  expect_equal(nrow(msgs), 1)
+  expect_identical(msgs$source, "import")
+  expect_identical(msgs$severity, "error")
+  expect_identical(msgs$target, "metadata")
+  expect_identical(msgs$keyword, "trailing_residue")
+  # The message must quote what was written, not only what was kept.
+  expect_true(grepl("2026-12-31 at the earliest", msgs$message, fixed = TRUE))
+
+  clean <- messages(DTAMetaData(title = "Clean"), as_tibble = FALSE)
+  expect_equal(nrow(clean), 0)
 })
 
 test_that("DTAMetaData validator rejects invalid basics", {
@@ -164,6 +264,57 @@ test_that("as.list(DTAMetaData) preserves key metadata fields", {
   expect_true("transmission" %in% names(out))
   expect_true("receiver" %in% names(out))
   expect_true("supplier" %in% names(out))
+})
+
+test_that("as.list(DTAMetaData) renders dates as ISO strings and omits import_issues", {
+  md <- create_example_DTAMetaData(2)
+  out <- as.list(md)
+
+  expect_identical(out$date, "2026-01-15")
+  expect_identical(
+    vapply(out$version_history, function(h) h$date, character(1)),
+    c("2025-10-01", "2025-12-01", "2026-01-15")
+  )
+  expect_identical(out$transmission$date_first_transfer, "2026-02-01")
+  expect_identical(out$transmission$date_last_transfer, "2026-03-31")
+
+  # Non-date transmission entries pass through unchanged.
+  expect_identical(out$transmission$type, "Secure SFTP server")
+  expect_false(out$transmission$test_upload)
+
+  # @import_issues is a runtime artifact, not spec content: exporting it would
+  # change every YAML round trip.
+  expect_false("import_issues" %in% names(out))
+})
+
+test_that("DTAMetaData survives a write_yaml/read_yaml round trip", {
+  # yaml has no date type: write_yaml() renders a Date as its day number
+  # (date: 20468.0), and the constructor only coerces when is.character(date), so
+  # reading it back used to abort with "@date must be S3<Date> ..., not <double>"
+  # -- the DTA could be written but never read again.
+  md <- create_example_DTAMetaData(2)
+
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+  yaml::write_yaml(as.list(md), path)
+
+  # The file must carry dates as strings, not numbers.
+  written <- readLines(path)
+  expect_true(any(grepl("date: '2026-01-15'", written, fixed = TRUE)))
+  expect_false(any(grepl("20468", written, fixed = TRUE)))
+
+  round_tripped <- do.call(DTAMetaData, yaml::read_yaml(path))
+
+  expect_s3_class(round_tripped, "DTAtools::DTAMetaData")
+  expect_identical(round_tripped@date, md@date)
+  expect_identical(
+    get_transmission_dates(round_tripped),
+    get_transmission_dates(md)
+  )
+  expect_equal(get_version_history_df(round_tripped), get_version_history_df(md))
+
+  # Reading a faithfully written file must not itself invent import errors.
+  expect_equal(nrow(metadata_import_errors(round_tripped)), 0)
 })
 
 test_that("get_authorized_for_corrections returns configured values", {
@@ -277,6 +428,63 @@ test_that("get_version_history_df accepts an all-character history", {
   expect_s3_class(hist$date, "Date")
   expect_identical(as.character(hist$date), c("2026-01-01", "2026-02-01"))
   expect_identical(hist$version, c("1.0", "2.0"))
+})
+
+test_that("get_version_history_df accepts a history mixing Date and character dates", {
+  # A YAML-loaded DTA whose history was appended to in R produces exactly this
+  # mix. sapply() used to flatten it to character, as.Date("20468") then failed,
+  # and the blanket tryCatch reported "x must be a DTAMetaData object with
+  # @version_history property" -- untrue, and it pointed at the wrong thing.
+  md <- DTAMetaData(
+    title = "Mixed Dates",
+    version_history = list(
+      list(version = "1.0", date = as.Date("2026-01-01"), changes = "Initial"),
+      list(version = "2.0", date = "2026-02-01", changes = "Revised")
+    )
+  )
+
+  hist <- get_version_history_df(md)
+
+  expect_equal(nrow(hist), 2)
+  expect_s3_class(hist$date, "Date")
+  expect_identical(as.character(hist$date), c("2026-01-01", "2026-02-01"))
+  expect_identical(hist$version, c("1.0", "2.0"))
+  expect_identical(hist$changes, c("Initial", "Revised"))
+})
+
+test_that("get_version_history_df tolerates missing and unparseable record dates", {
+  md <- DTAMetaData(
+    title = "Sparse Dates",
+    version_history = list(
+      list(version = "1.0", date = as.Date("2026-01-01"), changes = "Initial"),
+      list(version = "2.0", date = NULL, changes = "No date recorded"),
+      list(version = "3.0", date = "not a date", changes = "Unparseable")
+    )
+  )
+
+  hist <- get_version_history_df(md)
+
+  expect_equal(nrow(hist), 3)
+  expect_s3_class(hist$date, "Date")
+  expect_identical(is.na(hist$date), c(FALSE, TRUE, TRUE))
+  expect_identical(hist$version, c("1.0", "2.0", "3.0"))
+
+  # A record without a date used to print as "v2.0 (NULL)", because
+  # format(NULL, "%Y-%m-%d") returns the string "NULL" and `%||%` never fires.
+  out <- capture.output(print_info(md), type = "message")
+  expect_true(any(grepl("v1.0 (2026-01-01)", out, fixed = TRUE)))
+  expect_true(any(grepl("v2.0 (N/A)", out, fixed = TRUE)))
+  expect_false(any(grepl("NULL", out, fixed = TRUE)))
+})
+
+test_that("get_version_history_df still rejects a non-metadata object", {
+  # Companion to the two tests above: narrowing the tryCatch to the property
+  # access only (so that a genuine internal failure is no longer mislabelled)
+  # must not remove the guard for the case the message was actually written for.
+  expect_error(
+    get_version_history_df("not metadata"),
+    "version_history"
+  )
 })
 
 test_that("validate_transmission_dates validates Date and phrase cases", {

@@ -469,6 +469,13 @@ S7::method(messages, DTA) <- function(
     ds_messages
   })
 
+  # Metadata import errors are DTA-level, not per-dataset, so they are folded
+  # in here rather than by dta_collect_messages_for_dataset(). The frame has
+  # the same columns in the same order, so the rbind below is unaffected.
+  if (!is.null(x@metadata)) {
+    out <- c(list(dta_metadata_messages_to_df(x@metadata)), out)
+  }
+
   if (length(out) == 0) {
     return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
   }
@@ -707,8 +714,14 @@ dta_rule_failure_row_indices <- function(rule, df) {
 
     lower <- if (length(rule@min) > 0) rule@min[1] else -Inf
     upper <- if (length(rule@max) > 0) rule@max[1] else Inf
-    values <- suppressWarnings(as.numeric(df[[col]]))
-    mask <- !is.na(values) & (values < lower | values > upper)
+    # This must reproduce rule_check_range() exactly. The two carried the same
+    # defect independently -- `as.numeric()` on a factor read its level codes,
+    # and `!is.na(values)` waved an unconvertible value through -- and any
+    # divergence makes messages() report N violated rows while inspect() shows
+    # failing_row_count = 0.
+    converted <- dta_as_numeric_strict(df[[col]])
+    mask <- ((converted$values < lower | converted$values > upper) %in% TRUE) |
+      converted$unconvertible
     return(which(mask))
   }
 

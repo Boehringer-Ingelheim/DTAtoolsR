@@ -84,6 +84,15 @@ Convert a DTARuleColRange object to a list.
 
 Convert a DTARuleColUnique object to a list.
 }
+\details{
+Every \code{Date} in the result - the top-level \code{date}, each
+\code{version_history[[i]]$date}, and the transmission transfer dates - is
+rendered as an ISO \code{"YYYY-MM-DD"} string so that a YAML dump can be read
+straight back through \code{DTAMetaData()}.
+
+\code{@import_issues} is deliberately not exported: it is a runtime record of
+what was lost while coercing the input, not part of the specification.
+}
 \examples{
 x <- create_example_DTAColumnSpecCollection()
 as.list(x)

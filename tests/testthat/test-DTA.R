@@ -314,6 +314,104 @@ test_that("messages() returns human-readable messages for a checked DTA", {
   )
 })
 
+helper_dta_with_metadata <- function(metadata) {
+  dta <- read_dta_from_yaml(
+    system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  )
+  dta <- load_file(
+    dta, 1,
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  )
+  dta@metadata <- metadata
+  dta
+}
+
+test_that("check() reports a clean metadata axis for valid metadata", {
+  dta <- helper_dta_with_metadata(
+    DTAMetaData(
+      title = "Clean Metadata",
+      version = "1.0",
+      date = "2026-01-15",
+      transmission = list(date_last_transfer = "after approval")
+    )
+  )
+
+  out <- capture.output(dta <- check(dta, persist = FALSE), type = "message")
+
+  metadata_summary <- attr(dta, "last_metadata_summary")
+  expect_true(is.data.frame(metadata_summary))
+  expect_identical(metadata_summary$scope, "metadata")
+  expect_identical(metadata_summary$status, "validated")
+  expect_true(metadata_summary$ok)
+  expect_true(metadata_summary$import_valid)
+  expect_identical(metadata_summary$n_import_errors, 0L)
+
+  expect_true(attr(dta, "last_validation_ok"))
+  expect_true(any(grepl("PASSED", out, fixed = TRUE)))
+  expect_false(any(grepl("Metadata", out, fixed = TRUE)))
+
+  # The per-dataset summary keeps its own columns; metadata is not a row in it.
+  summary_df <- attr(dta, "last_validation_summary")
+  expect_identical(summary_df$dataset, "clinical_data")
+  expect_false("metadata" %in% summary_df$dataset)
+})
+
+test_that("check() FAILS when metadata carries an import error", {
+  # Before the metadata axis existed, check(DTA) iterated x@datasets only, so a
+  # DTA whose transfer date had silently lost its qualification still printed
+  # "Validation PASSED: All datasets are valid".
+  dta <- helper_dta_with_metadata(
+    DTAMetaData(
+      title = "Qualified Metadata",
+      version = "1.0",
+      transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+    )
+  )
+
+  out <- capture.output(dta <- check(dta, persist = FALSE), type = "message")
+
+  # Every dataset is still valid: the failure comes from metadata alone.
+  summary_df <- attr(dta, "last_validation_summary")
+  expect_equal(sum(summary_df$n_invalid), 0)
+  expect_equal(sum(summary_df$n_import_errors), 0)
+
+  metadata_summary <- attr(dta, "last_metadata_summary")
+  expect_identical(metadata_summary$status, "failed")
+  expect_false(metadata_summary$ok)
+  expect_false(metadata_summary$import_valid)
+  expect_identical(metadata_summary$n_import_errors, 1L)
+  expect_identical(metadata_summary$fields, "transmission$date_last_transfer")
+
+  expect_false(attr(dta, "last_validation_ok"))
+
+  # The banner must not claim a pass, and must name the offending value.
+  expect_false(any(grepl("PASSED", out, fixed = TRUE)))
+  expect_true(any(grepl("FAILED", out, fixed = TRUE)))
+  expect_true(any(grepl("2026-12-31 at the earliest", out, fixed = TRUE)))
+
+  # The same failure is queryable rather than only printed.
+  msgs <- messages(metadata(dta), as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_identical(msgs$source, "import")
+  expect_identical(msgs$target, "metadata")
+})
+
+test_that("check() metadata axis is silent under quiet = TRUE but still fails", {
+  dta <- helper_dta_with_metadata(
+    DTAMetaData(
+      title = "Qualified Metadata",
+      version = "1.0",
+      date = "2026-07-24 provisional"
+    )
+  )
+
+  out <- capture.output(dta <- check(dta, persist = FALSE, quiet = TRUE), type = "message")
+
+  expect_length(out, 0)
+  expect_false(attr(dta, "last_validation_ok"))
+  expect_identical(attr(dta, "last_metadata_summary")$fields, "date")
+})
+
 test_that("check() aborts on empty DTA", {
   dta <- DTA(datasets = list(), metadata = DTAMetaData(title = "Empty DTA"))
   expect_error(check(dta, quiet = TRUE), "no datasets")
@@ -349,4 +447,38 @@ test_that("load_file() aborts for missing dataset name", {
     ),
     "not found"
   )
+})
+
+test_that("messages(dta) folds in metadata import errors", {
+  md <- DTAMetaData(
+    title = "Qualified",
+    version = "1.0",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = md)
+  dta <- check(dta, persist = FALSE, quiet = TRUE)
+
+  msgs <- messages(dta, as_tibble = FALSE)
+
+  # The metadata frame must carry the same 10 columns in the same order as the
+  # per-table frames; two populated frames of differing width would make the
+  # rbind error rather than forgive.
+  expect_identical(names(msgs), names(dta_empty_messages()))
+  expect_identical(msgs$id, seq_len(nrow(msgs)))
+
+  meta_rows <- msgs[msgs$target %in% "metadata", ]
+  expect_equal(nrow(meta_rows), 1)
+  expect_equal(meta_rows$source, "import")
+  expect_match(meta_rows$message, "at the earliest", fixed = TRUE)
+  expect_match(meta_rows$message, "2026-12-31", fixed = TRUE)
+})
+
+test_that("messages(dta) is unchanged when metadata has no import errors", {
+  dta <- check(create_example_DTA(), persist = FALSE, quiet = TRUE)
+
+  msgs <- messages(dta, as_tibble = FALSE)
+
+  expect_false(any(msgs$target %in% "metadata"))
+  expect_false(any(msgs$source == "import"))
+  expect_identical(msgs$id, seq_len(nrow(msgs)))
 })

@@ -364,6 +364,271 @@ test_that("Range rules support min/max slots and reject multi-column usage", {
   )
 })
 
+test_that("dta_as_numeric_strict separates missing from unconvertible", {
+  # The whole point of the helper: `as.numeric()` collapses these into one NA.
+  converted <- dta_as_numeric_strict(c("30", "ninety", NA, "", "  ", "1.50", "007"))
+
+  expect_equal(converted$values, c(30, NA, NA, NA, NA, 1.5, 7))
+  expect_equal(converted$missing, c(FALSE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE))
+  expect_equal(
+    converted$unconvertible,
+    c(FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE)
+  )
+  # The raw source text is kept verbatim, so an import error can quote it.
+  expect_equal(converted$raw[[2]], "ninety")
+
+  # Owner decision: a value that converts but changes representation is a clean
+  # conversion, not an import error. "007" -> 7 and "1.50" -> 1.5 stay clean.
+  expect_false(any(converted$unconvertible[c(6, 7)]))
+
+  # Factors go via as.character(), never via their integer level codes.
+  factor_converted <- dta_as_numeric_strict(factor(c("500", "600", "700")))
+  expect_equal(factor_converted$values, c(500, 600, 700))
+  expect_false(any(factor_converted$unconvertible))
+
+  factor_labels <- dta_as_numeric_strict(factor(c("high", "12")))
+  expect_equal(factor_labels$unconvertible, c(TRUE, FALSE))
+  expect_equal(factor_labels$raw, c("high", "12"))
+
+  # Numeric and logical columns are already numbers; nothing is unconvertible.
+  expect_false(any(dta_as_numeric_strict(c(1, NA, 3))$unconvertible))
+  expect_true(dta_as_numeric_strict(c(1, NA, 3))$missing[[2]])
+})
+
+test_that("Range rules read factor labels, not factor level codes", {
+  # factor(c("500","600","700")) has level codes 1, 2, 3. `as.numeric()` on the
+  # factor returned those codes, so every value sat inside [0, 100] and the rule
+  # reported VALID on data that is an order of magnitude out of range.
+  result <- rule_check_range(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "600", "700")))
+  )
+
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 3 rows")
+
+  # The labels are real numbers, so this is a rule violation and NOT an import
+  # error: nothing here is unrecoverable.
+  import_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "600", "700")))
+  )
+  expect_equal(nrow(import_errors), 0)
+
+  # A factor level that is not a number is unrecoverable, and reported.
+  label_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "high", "700")))
+  )
+  expect_equal(nrow(label_errors), 1)
+  expect_equal(label_errors$raw, "high")
+  expect_equal(label_errors$reason, "not_convertible")
+})
+
+test_that("Range rules treat an unconvertible value as a violation, not a pass", {
+  df <- data.frame(AGE = c("ninety", "N/A", ">65"), stringsAsFactors = FALSE)
+
+  # `as.numeric()` made all three NA and `any(violated, na.rm = TRUE)` then
+  # dropped them, so a column with no usable value at all reported VALID.
+  result <- rule_check_range(
+    DTARuleColRange(id = "unconvertible", columns = "AGE", min = 18, max = 65),
+    df
+  )
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 3 rows")
+
+  # Both axes: the same three values are also import errors, carrying the raw
+  # text verbatim.
+  import_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "unconvertible", columns = "AGE", min = 18, max = 65),
+    df
+  )
+  expect_equal(nrow(import_errors), 3)
+  expect_equal(import_errors$raw, c("ninety", "N/A", ">65"))
+  expect_equal(import_errors$row, 1:3)
+  expect_true(all(import_errors$column == "AGE"))
+  expect_true(all(import_errors$reason == "not_convertible"))
+})
+
+test_that("CANARY: a genuinely missing value is never an import error", {
+  # If this flips, the implementation is wrong: NA in the source is missing
+  # data, not a value that failed to convert.
+  rule <- DTARuleColRange(id = "range_na", columns = "AGE", min = 18, max = 65)
+  df <- data.frame(AGE = c(NA, NA), stringsAsFactors = FALSE)
+
+  expect_true(rule_check_range(rule, df)$valid)
+  expect_equal(nrow(dta_rule_import_errors(rule, df)), 0)
+
+  # Empty and whitespace-only strings are missing too, not unconvertible.
+  blank <- data.frame(AGE = c("", "   ", NA), stringsAsFactors = FALSE)
+  expect_true(rule_check_range(rule, blank)$valid)
+  expect_equal(nrow(dta_rule_import_errors(rule, blank)), 0)
+})
+
+test_that("Numeric comparisons compare numbers, not collated text", {
+  # The escape: on a character column R coerced the BOUND to character, and
+  # under locale collation "9" sorts after "65", so AGE = "9" passed
+  # `greater: 65` and the rule reported VALID with zero violated rows.
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c("9", "700"),
+    stringsAsFactors = FALSE
+  )
+
+  result <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "collation_greater",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(greater = 65))
+    ),
+    df
+  )
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 1 rows")
+
+  # The same values held as numbers must agree, on every comparison operator.
+  numeric_df <- df
+  numeric_df$AGE <- as.numeric(df$AGE)
+
+  for (clause in list(
+    list(greater = 65),
+    list(less = 100),
+    list(greater_equal = 65),
+    list(less_equal = 100),
+    list(range = c(65, 1000)),
+    list(min = 65, max = 1000)
+  )) {
+    character_result <- rule_check_col_condition(
+      DTARuleColCondition(
+        id = "collation_case",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = clause)
+      ),
+      df
+    )
+    numeric_result <- rule_check_col_condition(
+      DTARuleColCondition(
+        id = "collation_case",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = clause)
+      ),
+      numeric_df
+    )
+    expect_identical(
+      character_result$valid,
+      numeric_result$valid,
+      info = paste("operator:", paste(names(clause), collapse = "/"))
+    )
+    expect_identical(character_result$message, numeric_result$message)
+  }
+})
+
+test_that("pattern and the equality/set operators still compare the raw value", {
+  # Only the numeric comparisons changed. These operators must keep matching
+  # text, and must not be dragged through numeric coercion.
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    CODE = c("007", "9"),
+    stringsAsFactors = FALSE
+  )
+
+  # "007" == 7 numerically, but equals compares the value as written.
+  expect_false(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "equals_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(equals = "7"))
+      ),
+      df
+    )$valid
+  )
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "in_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(`in` = c("007", "9")))
+      ),
+      df
+    )$valid
+  )
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "pattern_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(pattern = "^[0-9]+$"))
+      ),
+      df
+    )$valid
+  )
+
+  # A non-numeric column tested only with text operators reports no import
+  # errors: it is never read as a number.
+  expect_equal(
+    nrow(dta_rule_import_errors(
+      DTARuleColCondition(
+        id = "pattern_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(pattern = "^[0-9]+$"))
+      ),
+      df
+    )),
+    0
+  )
+})
+
+test_that("dta_rule_numeric_columns names only the numerically compared columns", {
+  expect_equal(
+    dta_rule_numeric_columns(
+      DTARuleColRange(id = "r", columns = "AGE", min = 0, max = 1)
+    ),
+    "AGE"
+  )
+  expect_equal(
+    dta_rule_numeric_columns(DTARuleColUnique(id = "u", columns = "ID")),
+    character(0)
+  )
+  expect_equal(
+    dta_rule_numeric_columns(
+      DTARuleColCondition(
+        id = "c",
+        condition = list(VISIT = list(equals = "V03"), AGE = list(greater = 1)),
+        then = list(STATUS = list(pattern = "^C"), WEIGHT = list(min = 1, max = 2))
+      )
+    ),
+    c("AGE", "WEIGHT")
+  )
+})
+
+test_that("apply_schema_rules reports import errors alongside the rule verdict", {
+  df <- data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE)
+
+  results <- apply_schema_rules(
+    list(DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)),
+    df,
+    verbose = FALSE
+  )
+
+  expect_false(results[[1]]$valid)
+  # Both rows are rule violations: the unconvertible one and the out-of-range
+  # one. Reclassifying "ninety" as an import error ALONE would make a consumer
+  # reading n_rule_errors see fewer errors than before.
+  expect_match(results[[1]]$message, "violated: 2 rows")
+  expect_equal(nrow(results[[1]]$import_errors), 1)
+  expect_equal(results[[1]]$import_errors$raw, "ninety")
+
+  # A rule that cannot be evaluated contributes no import errors.
+  absent <- apply_schema_rules(
+    list(DTARuleColRange(id = "absent", columns = "MISSING", min = 0, max = 1)),
+    df,
+    verbose = FALSE
+  )
+  expect_false(absent[[1]]$valid)
+  expect_equal(nrow(absent[[1]]$import_errors), 0)
+})
+
 test_that("Conditional rules support comparison operators and combined IF predicates", {
   df <- data.frame(
     VISIT = c("V03", "V03", "EOT"),

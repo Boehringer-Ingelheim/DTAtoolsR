@@ -52,10 +52,9 @@ validate_table <- function(specs, table, verbose = TRUE) {
     cli::cli_abort(c("Schema rule violations:", rule_messages))
   }
 
-  # The import axis fails validation independently of schema and rules. No
-  # import errors are produced yet, so this branch is unreachable in this
-  # version; it exists so that the axis can never be reported as passing here
-  # once coercion starts recording them.
+  # The import axis fails validation independently of schema and rules: a value
+  # that is present but not representable in its declared type fails the run on
+  # its own, even when every rule that read it also reported it.
   if (!isTRUE(details$import_valid)) {
     cli::cli_abort(c(
       "Import errors:",
@@ -240,13 +239,16 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     rules_valid <- length(rule_errors) == 0
   }
 
-  # Import axis. Nothing produces import errors yet: the axis is wired through
-  # every result shape first, so that when coercion starts recording errors it
-  # cannot silently remove per-row schema errors and make a bad file look
-  # cleaner than it is.
-  import_errors <- NULL
-  n_import_errors <- 0L
-  import_valid <- TRUE
+  # Import axis, sourced from the rule layer: every column a rule reads as a
+  # number is scanned for values that are present in the source but not
+  # representable as a number. Those rows are *also* counted as rule violations,
+  # so no error moves from one axis to the other.
+  import_errors <- dta_collect_import_errors(rule_results, specs)
+  n_import_errors <- as.integer(nrow(import_errors))
+  import_valid <- n_import_errors == 0L
+  if (n_import_errors == 0L) {
+    import_errors <- NULL
+  }
 
   details <- list(
     ok = NA,
@@ -307,6 +309,92 @@ dta_empty_import_errors <- function() {
     reason = character(0),
     stringsAsFactors = FALSE
   )
+}
+
+
+#' @title Declared Type of One Column
+#' @description
+#' Looks up the type a column spec declares, e.g. `"SAS Num"`. Returns `NA` when
+#' the collection has no spec for the column, or the spec declares no type.
+#' @param specs A `DTAColumnSpecCollection`, or `NULL`.
+#' @param column Character. Name of the column.
+#' @return A length-1 character, possibly `NA_character_`.
+#' @keywords internal
+dta_spec_declared_type <- function(specs, column) {
+  columns <- tryCatch(specs@columns, error = function(e) NULL)
+
+  if (!is.list(columns) || length(columns) == 0) {
+    return(NA_character_)
+  }
+
+  index <- match(column, names(columns))
+
+  if (is.na(index)) {
+    # The collection is normally named by column id, but a spec built by another
+    # route may not be, so fall back to the ids themselves.
+    ids <- vapply(
+      columns,
+      function(spec) tryCatch(as.character(spec@id)[[1]], error = function(e) NA_character_),
+      character(1)
+    )
+    index <- match(column, ids)
+  }
+
+  if (is.na(index)) {
+    return(NA_character_)
+  }
+
+  structure <- tryCatch(columns[[index]]@structure, error = function(e) NULL)
+  if (is.null(structure)) {
+    return(NA_character_)
+  }
+
+  declared <- tryCatch(as.list(structure)$type, error = function(e) NULL)
+  if (is.null(declared) || length(declared) != 1 || is.na(declared)) {
+    return(NA_character_)
+  }
+
+  as.character(declared)
+}
+
+
+#' @title Import Errors Collected From the Rule Layer
+#' @description
+#' Gathers the import errors every rule reported into the single frame carried
+#' by `details$import_errors`, and stamps each one with the type its column
+#' spec declares.
+#' @param rule_results A list of rule results from `apply_schema_rules()`.
+#' @param specs A `DTAColumnSpecCollection`, or `NULL`.
+#' @return A data.frame in the shape of `dta_empty_import_errors()`.
+#' @keywords internal
+dta_collect_import_errors <- function(rule_results, specs = NULL) {
+  frames <- lapply(rule_results, function(result) {
+    errors <- result$import_errors
+    if (!is.data.frame(errors) || nrow(errors) == 0) NULL else errors
+  })
+  frames <- Filter(Negate(is.null), frames)
+
+  if (length(frames) == 0) {
+    return(dta_empty_import_errors())
+  }
+
+  out <- do.call(rbind, frames)
+
+  # Two rules reading the same column report the same unrepresentable value.
+  # That is one import error, not one per rule.
+  out <- out[!duplicated(out[, c("row", "column"), drop = FALSE]), , drop = FALSE]
+  out <- out[order(out$row, out$column), , drop = FALSE]
+
+  declared <- vapply(
+    out$column,
+    function(column) dta_spec_declared_type(specs, column),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  out$declared_type <- ifelse(is.na(declared), out$declared_type, declared)
+
+  rownames(out) <- NULL
+  out
 }
 
 

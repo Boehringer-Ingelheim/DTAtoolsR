@@ -204,3 +204,97 @@ test_that("dta_rule_failure_row_indices returns no rows for unsupported rule obj
     integer(0)
   )
 })
+
+# The two-sites regression: rule_check_range() (messages) and
+# dta_rule_failure_row_indices() (inspect) each carried the same numeric
+# coercion defect, independently. They must agree row for row, or messages()
+# reports N violated rows while inspect() shows failing_row_count = 0.
+
+mixed_numeric_rule_dataset <- function() {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      SUBJECT_ID = DTAColumnSpec(
+        id = "SUBJECT_ID", type = "SAS Char", length = 10, nullable = FALSE
+      ),
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Char", length = 10, nullable = TRUE)
+    ),
+    rules = list(DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65))
+  )
+
+  table <- arrow::arrow_table(data.frame(
+    SUBJECT_ID = c("S1", "S2", "S3", "S4", "S5"),
+    # convertible+in range / unconvertible / convertible+out of range /
+    # genuinely missing / convertible+in range
+    AGE = c("30", "ninety", "700", NA, "50"),
+    stringsAsFactors = FALSE
+  ))
+
+  DTADataSetTabular(name = "mixed", specs = specs, tables = list(tab = table))
+}
+
+# The count a rule message states, read back out of the message text. This is a
+# package-generated sprintf() string, not a translated one.
+stated_violation_count <- function(message) {
+  if (is.null(message)) {
+    return(0L)
+  }
+
+  hit <- regmatches(message, regexpr("violated: [0-9]+ rows", message))
+  if (length(hit) == 0) {
+    return(NA_integer_)
+  }
+
+  as.integer(regmatches(hit, regexpr("[0-9]+", hit)))
+}
+
+test_that("dta_rule_failure_row_indices matches rule_check_range row for row", {
+  rule <- DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)
+
+  cases <- list(
+    data.frame(AGE = c("30", "ninety", "700", NA, "50"), stringsAsFactors = FALSE),
+    data.frame(AGE = factor(c("500", "600", "700"))),
+    data.frame(AGE = c("ninety", "N/A", ">65"), stringsAsFactors = FALSE),
+    data.frame(AGE = c(NA, NA), stringsAsFactors = FALSE),
+    data.frame(AGE = c(20, 70, NA), stringsAsFactors = FALSE)
+  )
+
+  for (df in cases) {
+    reported <- rule_check_range(rule, df)
+    counted <- length(dta_rule_failure_row_indices(rule, df))
+
+    stated <- stated_violation_count(reported$message)
+
+    expect_identical(counted, stated)
+  }
+
+  # Pin the values, not only the agreement.
+  expect_identical(
+    dta_rule_failure_row_indices(
+      rule,
+      data.frame(AGE = c("30", "ninety", "700", NA, "50"), stringsAsFactors = FALSE)
+    ),
+    c(2L, 3L)
+  )
+  expect_identical(
+    dta_rule_failure_row_indices(rule, data.frame(AGE = factor(c("500", "600", "700")))),
+    c(1L, 2L, 3L)
+  )
+})
+
+test_that("messages() violation count equals inspect() failing_row_count", {
+  ds <- check(mixed_numeric_rule_dataset(), persist = FALSE, quiet = TRUE)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  rule_msgs <- msgs[msgs$source == "rule", , drop = FALSE]
+  expect_equal(nrow(rule_msgs), 1)
+
+  stated <- stated_violation_count(rule_msgs$message[[1]])
+  expect_equal(stated, 2L)
+
+  info <- inspect(ds, id = rule_msgs$id[[1]], as_tibble = FALSE)
+  expect_true(all(info$type == "rule"))
+  expect_equal(unique(info$failing_row_count), stated)
+
+  # The previewed rows are the ones the message counted.
+  expect_equal(sort(unique(info$failing_.row)), c(2, 3))
+})

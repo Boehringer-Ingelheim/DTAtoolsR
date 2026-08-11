@@ -18,6 +18,97 @@ normalize_rule_type <- function(type) {
   )
 }
 
+#' @title Strict Numeric Conversion
+#' @description
+#' Converts a column to numeric while keeping apart the three cases that a bare
+#' `as.numeric()` collapses into a single `NA`:
+#'
+#' * **missing** -- `NA` or an empty string in the *source*. Not an error: a
+#'   missing value neither passes nor violates a numeric rule.
+#' * **unconvertible** -- present in the source but not representable as a
+#'   number (`"ninety"`, `"N/A"`, `">65"`, the factor level `"high"`). This is
+#'   an import error, and the row must not be treated as passing the rule.
+#' * **convertible** -- the numeric value is used.
+#'
+#' Factors are converted through `as.character()` **first**. `as.numeric()` on a
+#' factor returns its *integer level codes*, so `factor(c("500", "600", "700"))`
+#' reads as `1, 2, 3` and sails through any range rule that admits small
+#' integers.
+#'
+#' Only unrecoverable values are reported as unconvertible. A value that
+#' converts but changes representation (`"007"` to `7`, `"1.50"` to `1.5`) is a
+#' clean conversion, not an import error.
+#'
+#' Dates and date-times are converted through their own numeric representation
+#' and can never be unconvertible; they are never text that failed to parse.
+#' @param x A vector taken from a table column.
+#' @return A list with `values` (numeric), `raw` (character, the source text
+#'   verbatim), `missing` (logical) and `unconvertible` (logical), each the same
+#'   length as `x`.
+#' @keywords internal
+dta_as_numeric_strict <- function(x) {
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    values <- as.numeric(x)
+    return(list(
+      values = values,
+      raw = as.character(x),
+      missing = is.na(values),
+      unconvertible = rep(FALSE, length(values))
+    ))
+  }
+
+  raw <- if (is.factor(x)) as.character(x) else x
+
+  if (is.numeric(raw) || is.logical(raw)) {
+    values <- as.numeric(raw)
+    return(list(
+      values = values,
+      raw = as.character(raw),
+      missing = is.na(values),
+      unconvertible = rep(FALSE, length(values))
+    ))
+  }
+
+  raw_chr <- as.character(raw)
+  # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
+  missing <- is.na(raw_chr) | trimws(raw_chr) %in% ""
+  values <- suppressWarnings(as.numeric(trimws(raw_chr)))
+
+  list(
+    values = values,
+    raw = raw_chr,
+    missing = missing,
+    unconvertible = is.na(values) & !missing
+  )
+}
+
+#' @title Operands for a Numeric Comparison
+#' @description
+#' Returns the column and the bound of a numeric comparison as numbers.
+#'
+#' Comparing a character column with `>` coerces the *bound* to character and
+#' applies locale collation, under which `"9" > "65"` is `TRUE`. Converting both
+#' sides first is what makes the comparison mean what it says.
+#' @param x The column vector taken from the table.
+#' @param value The bound supplied in the specification.
+#' @return A list with the numeric `x` and `value`.
+#' @keywords internal
+dta_numeric_operands <- function(x, value) {
+  # Dates and date-times carry their own comparison semantics -- a character
+  # bound is parsed as a date -- so they are compared exactly as before.
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    return(list(x = x, value = value))
+  }
+
+  bound <- if (is.character(value) || is.factor(value)) {
+    suppressWarnings(as.numeric(as.character(value)))
+  } else {
+    value
+  }
+
+  list(x = dta_as_numeric_strict(x)$values, value = bound)
+}
+
 #' @title Rule: check_range
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
@@ -63,19 +154,23 @@ rule_check_range <- function(rule, df) {
     )
   }
 
-  x <- as.numeric(df[[col]])
-  in_range <- x >= range[1] & x <= range[2]
-  violated <- !in_range
+  converted <- dta_as_numeric_strict(df[[col]])
+  in_range <- converted$values >= range[1] & converted$values <= range[2]
 
-  # NA handling: ignore NAs (they neither pass nor count as violations)
-  if (any(violated, na.rm = TRUE)) {
+  # A genuinely missing value is ignored: it neither passes nor violates.
+  # A value that is present but not representable as a number is a violation,
+  # not a pass -- `any(!in_range, na.rm = TRUE)` used to drop it silently, so
+  # c("ninety", "N/A", ">65") reported a clean 18..65 range.
+  violated <- (in_range %in% FALSE) | converted$unconvertible
+
+  if (any(violated)) {
     list(
       id = rule@id,
       valid = FALSE,
       message = sprintf(
         "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
         rule@id,
-        sum(violated, na.rm = TRUE),
+        sum(violated),
         col,
         range[1],
         range[2]
@@ -238,6 +333,17 @@ dta_normalize_conditions <- function(conditions, arg = "condition") {
 #' @return A logical vector, one element per row of the table.
 #' @keywords internal
 dta_condition_mask <- function(column_name, operator, value, x) {
+  # Numeric comparisons must compare numbers. Applied to the raw column, `>` on
+  # a character vector coerces the bound to character and compares by locale
+  # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
+  # after "65". `pattern` and the equality/set operators are unaffected and
+  # deliberately stay on the raw column.
+  if (operator %in% dta_numeric_condition_operators()) {
+    operands <- dta_numeric_operands(x, value)
+    x <- operands$x
+    value <- operands$value
+  }
+
   switch(
     operator,
     equals = ,
@@ -283,6 +389,112 @@ dta_condition_operators <- function() {
   )
 }
 
+#' @title Condition Operators That Compare Numbers
+#' @description
+#' The subset of `dta_condition_operators()` whose operands are numeric. Only
+#' these go through `dta_numeric_operands()`; the equality, set, text and
+#' emptiness operators keep comparing the raw column.
+#' @return A character vector of operator names.
+#' @keywords internal
+dta_numeric_condition_operators <- function() {
+  c("greater", "less", "greater_equal", "less_equal", "min", "max", "range")
+}
+
+#' @title Columns a Rule Compares Numerically
+#' @description
+#' Names the columns whose values this rule reads as numbers. These are the
+#' columns scanned for values that are present but not representable as a
+#' number, which is what the import axis reports.
+#' @param rule A `DTARule` object.
+#' @return A character vector of column names, possibly empty.
+#' @keywords internal
+dta_rule_numeric_columns <- function(rule) {
+  type <- tryCatch(
+    normalize_rule_type(rule@type),
+    error = function(e) NA_character_
+  )
+
+  if (identical(type, "check_range")) {
+    col <- rule_get_slot(rule, "column")
+    if (is.null(col)) {
+      col <- rule_get_slot(rule, "columns")
+    }
+    return(as.character(col))
+  }
+
+  if (identical(type, "check_col_condition")) {
+    clauses <- c(
+      dta_normalize_conditions(rule_get_slot(rule, "condition"), arg = "condition"),
+      dta_normalize_conditions(rule_get_slot(rule, "then"), arg = "then")
+    )
+
+    if (length(clauses) == 0) {
+      return(character(0))
+    }
+
+    numeric_ops <- dta_numeric_condition_operators()
+    is_numeric_clause <- vapply(
+      clauses,
+      function(condition) {
+        is.list(condition) && any(names(condition) %in% numeric_ops)
+      },
+      logical(1)
+    )
+
+    return(unique(as.character(names(clauses)[is_numeric_clause])))
+  }
+
+  character(0)
+}
+
+#' @title Import Errors Contributed by One Rule
+#' @description
+#' Scans the columns this rule compares numerically and reports every value that
+#' is present in the source but not representable as a number.
+#'
+#' Such a value is reported on **both** axes: here as an import error, and by
+#' the rule itself as a violated row. Moving it to the import axis alone would
+#' make any consumer reading `n_rule_errors` see fewer errors than before.
+#' @param rule A `DTARule` object.
+#' @param df A data.frame to scan.
+#' @return A data.frame in the shape of `dta_empty_import_errors()`.
+#' @keywords internal
+dta_rule_import_errors <- function(rule, df) {
+  columns <- tryCatch(
+    dta_rule_numeric_columns(rule),
+    error = function(e) character(0)
+  )
+  columns <- unique(columns[columns %in% names(df)])
+
+  if (length(columns) == 0) {
+    return(dta_empty_import_errors())
+  }
+
+  parts <- lapply(columns, function(column) {
+    converted <- dta_as_numeric_strict(df[[column]])
+    offending <- which(converted$unconvertible)
+
+    if (length(offending) == 0) {
+      return(dta_empty_import_errors())
+    }
+
+    data.frame(
+      row = as.integer(offending),
+      column = column,
+      raw = converted$raw[offending],
+      # A placeholder the caller replaces with the declared type from the
+      # column spec; it is the observed storage type when no spec is at hand.
+      declared_type = class(df[[column]])[[1]],
+      reason = "not_convertible",
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, parts)
+  rownames(out) <- NULL
+  out
+}
+
 #' @keywords internal
 evaluate_condition <- function(column_name, condition, df) {
   if (!column_name %in% names(df)) {
@@ -310,7 +522,13 @@ evaluate_condition <- function(column_name, condition, df) {
   if (any(c("min", "max") %in% operators)) {
     lower <- if ("min" %in% operators) condition[["min"]] else -Inf
     upper <- if ("max" %in% operators) condition[["max"]] else Inf
-    masks[[length(masks) + 1L]] <- x >= lower & x <= upper
+    # Same collation trap as the other comparisons: the band is numeric, so
+    # both ends and the column are taken as numbers.
+    lower_operands <- dta_numeric_operands(x, lower)
+    upper_operands <- dta_numeric_operands(x, upper)
+    masks[[length(masks) + 1L]] <-
+      lower_operands$x >= lower_operands$value &
+        upper_operands$x <= upper_operands$value
   }
 
   for (i in seq_along(condition)) {
@@ -469,6 +687,11 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
         )
       }
     )
+
+    # The import axis is sourced from the same columns the rule just read as
+    # numbers, so an unrepresentable value is reported on both axes rather than
+    # reclassified from one to the other.
+    result$import_errors <- dta_rule_import_errors(rule, df)
 
     if (isTRUE(verbose)) {
       if (isTRUE(result$valid)) {
