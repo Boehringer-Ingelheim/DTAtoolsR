@@ -17,9 +17,9 @@
 \item{...}{Ignored.}
 }
 \value{
-A data.frame with one row per schema error followed by one row per
-rule failure, and columns \code{source}, \code{rule_id}, \code{row}, \code{column}, \code{keyword}
-and \code{message}.
+A data.frame with one row per schema error, followed by one row per
+rule failure, followed by one row per import error, and columns \code{source},
+\code{rule_id}, \code{row}, \code{column}, \code{keyword} and \code{message}.
 }
 \description{
 Flattens the detailed validation output for one table into one row per

@@ -35,6 +35,9 @@ validate_table <- function(specs, table, verbose = TRUE) {
     schema_errors <- details$schema_errors
     schema_errors$rules_valid <- isTRUE(details$rules_valid)
     schema_errors$rule_errors <- details$rule_errors
+    schema_errors$import_valid <- details$import_valid
+    schema_errors$n_import_errors <- details$n_import_errors
+    schema_errors["import_errors"] <- list(details$import_errors)
 
     if (length(rule_messages) > 0) {
       bullets <- c("Schema rule violations were also found:", rule_messages)
@@ -47,6 +50,17 @@ validate_table <- function(specs, table, verbose = TRUE) {
 
   if (length(rule_messages) > 0) {
     cli::cli_abort(c("Schema rule violations:", rule_messages))
+  }
+
+  # The import axis fails validation independently of schema and rules. No
+  # import errors are produced yet, so this branch is unreachable in this
+  # version; it exists so that the axis can never be reported as passing here
+  # once coercion starts recording them.
+  if (!isTRUE(details$import_valid)) {
+    cli::cli_abort(c(
+      "Import errors:",
+      x = "{details$n_import_errors} value{?s} could not be represented in the declared type."
+    ))
   }
 
   if (isTRUE(verbose)) {
@@ -226,19 +240,104 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     rules_valid <- length(rule_errors) == 0
   }
 
-  list(
-    ok = !has_schema_errors && isTRUE(rules_valid),
+  # Import axis. Nothing produces import errors yet: the axis is wired through
+  # every result shape first, so that when coercion starts recording errors it
+  # cannot silently remove per-row schema errors and make a bad file look
+  # cleaner than it is.
+  import_errors <- NULL
+  n_import_errors <- 0L
+  import_valid <- TRUE
+
+  details <- list(
+    ok = NA,
     schema_valid = !has_schema_errors,
     rules_valid = isTRUE(rules_valid),
+    import_valid = isTRUE(import_valid),
     n_schema_errors = if (is.null(full_error)) 0 else nrow(full_error),
     n_rule_errors = length(rule_errors),
+    n_import_errors = n_import_errors,
     schema_errors = list(
       summarised_error = summarised_error,
       full_error = full_error
     ),
     rule_results = rule_results,
-    rule_errors = rule_errors
+    rule_errors = rule_errors,
+    import_errors = import_errors,
+    schema_version = 2L
   )
+
+  details$ok <- dta_details_ok(details)
+  details
+}
+
+
+#' @title Overall Validity from the Three Validation Axes
+#' @description
+#' A table is valid only when all three independent axes pass: the column specs
+#' (schema), the schema rules, and the import axis. A value that could not be
+#' represented in its declared type fails the run on its own, regardless of what
+#' schema and rules report about the coerced column.
+#'
+#' `NA` on any axis ("unknown", e.g. an artifact written before the import axis
+#' existed) is not a pass.
+#' @param details A list carrying `schema_valid`, `rules_valid` and
+#'   `import_valid`.
+#' @return `TRUE` only when all three axes are `TRUE`.
+#' @keywords internal
+dta_details_ok <- function(details) {
+  isTRUE(details$schema_valid) &&
+    isTRUE(details$rules_valid) &&
+    isTRUE(details$import_valid)
+}
+
+
+#' @title Empty Import Error Table
+#' @description
+#' The canonical zero-row shape of `details$import_errors`. One row per value
+#' that could not be represented in its declared type.
+#' @return A zero-row data.frame with columns `row`, `column`, `raw`,
+#'   `declared_type` and `reason`.
+#' @keywords internal
+dta_empty_import_errors <- function() {
+  data.frame(
+    row = integer(0),
+    column = character(0),
+    raw = character(0),
+    declared_type = character(0),
+    reason = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+
+#' @title Migrate Validation Details to the Current Schema Version
+#' @description
+#' Brings a `validate_table_detailed()` result recorded by an older version of
+#' the package up to the current shape.
+#'
+#' Details written before the import axis existed carry no information about
+#' whether values were representable in their declared type. Defaulting them to
+#' `import_valid = TRUE` / `n_import_errors = 0` would be permissive by
+#' construction: the artifact would assert a clean import axis it never checked.
+#' They are therefore migrated to `NA` ("unknown"), and the recorded `ok` is
+#' left exactly as it was rather than recomputed from incomplete data.
+#' @param details A list as returned by `validate_table_detailed()`.
+#' @return The same list, with the import fields and `schema_version` present.
+#' @keywords internal
+dta_migrate_validation_details <- function(details) {
+  if (!is.list(details)) {
+    return(details)
+  }
+
+  if ("schema_version" %in% names(details)) {
+    return(details)
+  }
+
+  details$import_valid <- NA
+  details$n_import_errors <- NA_integer_
+  details["import_errors"] <- list(NULL)
+  details$schema_version <- 1L
+  details
 }
 
 
@@ -274,9 +373,9 @@ dta_as_validation_details <- function(details) {
 #' @param row.names `NULL` or a character vector of row names.
 #' @param optional Logical, passed to the default method's contract; unused.
 #' @param ... Ignored.
-#' @return A data.frame with one row per schema error followed by one row per
-#'   rule failure, and columns `source`, `rule_id`, `row`, `column`, `keyword`
-#'   and `message`.
+#' @return A data.frame with one row per schema error, followed by one row per
+#'   rule failure, followed by one row per import error, and columns `source`,
+#'   `rule_id`, `row`, `column`, `keyword` and `message`.
 #' @examples
 #' ds <- check(
 #'   create_example_DTADataSetTabular(2),
@@ -342,7 +441,22 @@ as.data.frame.dta_validation_details <- function(
     )
   }
 
-  out <- rbind(empty, schema_rows, rule_rows)
+  import_errors <- x$import_errors
+  import_rows <- if (!is.data.frame(import_errors) || nrow(import_errors) == 0) {
+    NULL
+  } else {
+    data.frame(
+      source = "import",
+      rule_id = NA_character_,
+      row = as.integer(import_errors$row),
+      column = as.character(import_errors$column),
+      keyword = as.character(import_errors$reason),
+      message = dta_import_error_messages(import_errors),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  out <- rbind(empty, schema_rows, rule_rows, import_rows)
 
   if (!is.null(row.names)) {
     rownames(out) <- row.names

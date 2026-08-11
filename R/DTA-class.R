@@ -368,6 +368,7 @@ method(check, DTA) <- function(
     n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
     n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
     n_skipped <- sum(val_status$status == "skipped", na.rm = TRUE)
+    n_import_errors <- sum(val_status$n_import_errors, na.rm = TRUE)
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
@@ -376,6 +377,7 @@ method(check, DTA) <- function(
       n_valid = n_valid,
       n_invalid = n_invalid,
       n_skipped = n_skipped,
+      n_import_errors = n_import_errors,
       stringsAsFactors = FALSE
     )
 
@@ -400,11 +402,17 @@ method(check, DTA) <- function(
 
   # Overall summary
   total_invalid <- sum(summary_df$n_invalid, na.rm = TRUE)
+  # An import error fails the run on its own axis, even when every table's `ok`
+  # is TRUE. No import errors are produced yet, so this cannot fire here.
+  total_import_errors <- sum(summary_df$n_import_errors, na.rm = TRUE)
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
     if (total_invalid > 0) {
       invalid_word <- if (total_invalid == 1) "table" else "tables"
       cli_alert_danger(paste0("Validation FAILED: ", total_invalid, " ", invalid_word, " with validation errors"))
+    } else if (total_import_errors > 0) {
+      import_word <- if (total_import_errors == 1) "value" else "values"
+      cli_alert_danger(paste0("Validation FAILED: ", total_import_errors, " ", import_word, " could not be imported in the declared type"))
     } else {
       cli_alert_success("Validation PASSED: All datasets are valid")
     }

@@ -503,6 +503,14 @@ dta_validation_result_to_row <- function(table_name, status, index_entry, target
     validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,
     n_schema_errors = index_entry$n_schema_errors,
     n_rule_errors = index_entry$n_rule_errors,
+    # An index entry recorded before the import axis existed knows nothing
+    # about it. NA ("unknown") is the honest value; 0 would claim a clean
+    # import axis that was never checked.
+    n_import_errors = if (is.null(index_entry$n_import_errors)) {
+      NA_integer_
+    } else {
+      as.integer(index_entry$n_import_errors)
+    },
     stringsAsFactors = FALSE
   )
 }

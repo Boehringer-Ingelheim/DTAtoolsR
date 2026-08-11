@@ -65,14 +65,17 @@ DTADataSetTabular <- S7::new_class(
       tables = tables,
       validation_index = list(),
       validation_store = list(),
+      import_issues = list(),
       validation_artifact_dir = NULL
     )
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = S7::new_property(S7::class_list, default = list()), 
+    tables = S7::new_property(S7::class_list, default = list()),
     validation_index = S7::new_property(S7::class_list, default = list()),
     validation_store = S7::new_property(S7::class_list, default = list()),
+    # Import issues detected while typing a table, keyed by table name.
+    import_issues = S7::new_property(S7::class_list, default = list()),
     validation_artifact_dir = class_character_or_null
   ),
   validator = function(self) {
@@ -110,8 +113,8 @@ DTADataSetTabular <- S7::new_class(
     #}
 
     # if list of tables is present then list of validation index and store cannot be larger than the list of tables
-    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables))) {
-      cli_abort("Properties 'validation_index' and 'validation_store' cannot be larger than the number of tables in 'tables'")
+    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables) || length(self@import_issues) > length(self@tables))) {
+      cli_abort("Properties 'validation_index', 'validation_store' and 'import_issues' cannot be larger than the number of tables in 'tables'")
     }
 
   }
@@ -631,6 +634,7 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
         validation_run = NA_character_,
         n_schema_errors = NA_integer_,
         n_rule_errors = NA_integer_,
+        n_import_errors = NA_integer_,
         stringsAsFactors = FALSE
       ))
     }
@@ -677,7 +681,9 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
   if (source %in% c("auto", "memory")) {
     in_memory <- x@validation_store[[table_name]]
     if (!is.null(in_memory)) {
-      return(dta_as_validation_details(in_memory))
+      # Migrated on read as well: a store entry can have been restored from a
+      # session that predates the import axis.
+      return(dta_as_validation_details(dta_migrate_validation_details(in_memory)))
     }
   }
 
@@ -694,8 +700,10 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
     )
   }
 
-  # Tagged on read, so memory and artifact results stay identical.
-  dta_as_validation_details(readRDS(entry$artifact_path))
+  # Tagged and migrated on read, so memory and artifact results stay identical.
+  dta_as_validation_details(
+    dta_migrate_validation_details(readRDS(entry$artifact_path))
+  )
 }
 
 
@@ -732,6 +740,7 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 
     x@validation_index[[table_name]] <- NULL
     x@validation_store[[table_name]] <- NULL
+    x@import_issues[[table_name]] <- NULL
   }
 
   invisible(x)
@@ -758,6 +767,8 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
       entry$specs_hash <- NULL
       x@validation_index[[table_name]] <- entry
     }
+    # Import issues were derived under the old specs; drop them with the rest.
+    x@import_issues[[table_name]] <- NULL
   }
 
   invisible(x)
@@ -910,6 +921,7 @@ S7::method(check, DTADataSetTabular) <- function(
       specs_hash = specs_hash,
       n_schema_errors = details$n_schema_errors,
       n_rule_errors = details$n_rule_errors,
+      n_import_errors = details$n_import_errors,
       run_id = run_id,
       validation_run = validation_run,
       artifact_path = artifact_path

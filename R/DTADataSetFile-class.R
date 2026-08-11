@@ -180,6 +180,7 @@ S7::method(check, DTADataSetFile) <- function(
       validation_run = validation_run,
       n_schema_errors = 0L,
       n_rule_errors = if (isTRUE(validation_result$ok)) 0L else 1L,
+      n_import_errors = 0L,
       artifact_path = NULL,
       path = path,
       label = basename(path)
@@ -190,22 +191,30 @@ S7::method(check, DTADataSetFile) <- function(
         ok = FALSE,
         schema_valid = TRUE,
         rules_valid = FALSE,
+        import_valid = TRUE,
         n_schema_errors = 0L,
         n_rule_errors = 1L,
+        n_import_errors = 0L,
         schema_errors = list(summarised_error = NULL, full_error = NULL),
         rule_results = list(list(id = "file_presence", valid = FALSE, message = validation_result$message)),
-        rule_errors = list(list(id = "file_presence", valid = FALSE, message = validation_result$message))
+        rule_errors = list(list(id = "file_presence", valid = FALSE, message = validation_result$message)),
+        import_errors = NULL,
+        schema_version = 2L
       )
     } else {
       validation_details[[length(validation_details) + 1]] <- list(
         ok = TRUE,
         schema_valid = TRUE,
         rules_valid = TRUE,
+        import_valid = TRUE,
         n_schema_errors = 0L,
         n_rule_errors = 0L,
+        n_import_errors = 0L,
         schema_errors = list(summarised_error = NULL, full_error = NULL),
         rule_results = list(list(id = "file_presence", valid = TRUE, message = NULL)),
-        rule_errors = list()
+        rule_errors = list(),
+        import_errors = NULL,
+        schema_version = 2L
       )
     }
 
@@ -339,6 +348,7 @@ S7::method(messages, DTADataSetFile) <- function(
          validation_run = NA_character_,
          n_schema_errors = NA_integer_,
          n_rule_errors = NA_integer_,
+         n_import_errors = NA_integer_,
          stringsAsFactors = FALSE
        ))
      }
