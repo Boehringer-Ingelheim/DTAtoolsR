@@ -617,12 +617,24 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
     cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
   }
 
-  # The typed import choke point. The reader infers a type per column, so one
-  # unparseable cell turns a whole numeric column into text; applying the
-  # declared type here makes the column a number, that one cell NA, and that
-  # one cell an import error.
+  # This is where a dataset's specs and its file handler meet, so it is the only
+  # place that can tell the reader what the columns are: `read_file()` dispatches
+  # on the handler alone and a bare `DTAFile` has no specification to consult.
+  #
+  # The specs are needed in *both* halves of the read, for damage that happens at
+  # different times:
+  #
+  # * At parse time, because the reader infers a column's type from its contents
+  #   before any code here sees the data. A column of quoted subject ids reads as
+  #   an integer and "007" arrives as 7, with the leading zeros already gone --
+  #   which no later guard can undo. Passing the specs pins the columns declared
+  #   as text to text.
+  # * At coercion time, because inference also runs the other way: one
+  #   unparseable cell turns a whole declared-numeric column into text. Applying
+  #   the declared type makes the column a number, that one cell NA, and that one
+  #   cell an import error.
   coerced <- dta_coerce_table_to_specs(
-    files(x, handler_index) |> read_file(file),
+    files(x, handler_index) |> read_file(file, specs = x@specs),
     x@specs
   )
 

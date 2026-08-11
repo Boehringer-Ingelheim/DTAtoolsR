@@ -258,6 +258,22 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
 #' @param file A character string specifying the path to the file to be read.
+#' @param namecheck Logical; when \code{TRUE} (the default) the file name must
+#'   match the object's filename or pattern.
+#' @param specs A \code{DTAColumnSpecCollection} declaring the columns, or
+#'   \code{NULL} (the default).
+#'
+#'   A reader that knows nothing about the specification has to guess a type per
+#'   column, and it guesses before any code in this package sees the data: a
+#'   column of quoted subject ids -- \code{"007"}, \code{"008"} -- is inferred as
+#'   an integer and arrives in R as \code{7} and \code{8}. Handing the specs to
+#'   the reader lets a column the specification declares as text be read as text.
+#'
+#'   \code{NULL} keeps the reader exactly as dumb as it was: every column is
+#'   inferred. This is the behaviour of a standalone \code{read_file()} call on a
+#'   bare \code{DTAFile}, which has no specification to consult;
+#'   \code{\link{load_file}()} is where a dataset's specs and its file handler
+#'   meet, and it is the caller that supplies them.
 #'
 #' @return An Arrow Table containing the file's contents.
 #'
@@ -275,7 +291,7 @@ if (!exists("read_file", mode = "function")) {
   read_file <- new_generic("read_file", "x")
 }
 
-method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
+method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
   continue = TRUE
 
   if (namecheck) {
@@ -289,7 +305,7 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE) {
 
   if (continue) {
     if (file.exists(file)) {
-      read_file_execution(x, file)
+      read_file_execution(x, file, specs = specs)
     } else {
       cli::cli_abort(stringr::str_glue(
         "File '{file}' cannot be found."

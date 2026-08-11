@@ -1,3 +1,46 @@
+# `values` (and `examples`) enumerate the permitted/example values of ONE
+# column, which has one declared type, so the canonical representation is a
+# single atomic vector rather than a list of scalars.
+#
+# This is what makes the pair write_columns_to_yaml() ->
+# import_specs_from_yaml() return the object it was given: YAML has no
+# list/vector distinction -- both write as the same sequence -- and
+# yaml::read_yaml() simplifies a homogeneous sequence back to an atomic vector.
+# Normalising on construction means every entry point (YAML, Word, direct call)
+# produces the same representation, so whole-object equality holds.
+#
+# Flattening is deliberately not as.character(): a numeric code set stays
+# numeric, and as_json_schema() re-coerces to the column's declared type anyway.
+#
+# c() rather than unlist(): unlist() drops the class attribute, so a list of
+# Dates collapses to the underlying numbers and a date enum renders as "20454"
+# instead of "2026-01-01". c() preserves Date and POSIXct. unlist() remains the
+# fallback for a nested list, which c() would leave as a list.
+#
+# NOTE: this helper must stay ABOVE the DTAColumnSpec roxygen block. Placed
+# between that block and the class definition, roxygen attaches the block --
+# including @export -- to this internal function instead, and DTAColumnSpec
+# silently stops being exported. load_all() ignores NAMESPACE, so the test
+# suite cannot catch it; only R CMD check or a real install would.
+#' @keywords internal
+dta_normalise_spec_values <- function(values) {
+  if (is.null(values) || !is.list(values)) {
+    return(values)
+  }
+
+  if (length(values) == 0) {
+    return(NULL)
+  }
+
+  flattened <- do.call(c, values)
+
+  if (is.list(flattened)) {
+    return(unlist(values, recursive = TRUE, use.names = FALSE))
+  }
+
+  unname(flattened)
+}
+
 #' @title DTA Column Format Class
 #' @description
 #' Class for column format.
@@ -24,43 +67,6 @@
 #' col_format <- DTAColumnSpec(
 #'   id = "STUDYID", type = "SAS Char", nullable = FALSE, values = "1234-1234"
 #' )
-# `values` (and `examples`) enumerate the permitted/example values of ONE
-# column, which has one declared type, so the canonical representation is a
-# single atomic vector rather than a list of scalars.
-#
-# This is what makes the pair write_columns_to_yaml() ->
-# import_specs_from_yaml() return the object it was given: YAML has no
-# list/vector distinction -- both write as the same sequence -- and
-# yaml::read_yaml() simplifies a homogeneous sequence back to an atomic vector.
-# Normalising on construction means every entry point (YAML, Word, direct call)
-# produces the same representation, so whole-object equality holds.
-#
-# Flattening is deliberately not as.character(): a numeric code set stays
-# numeric, and as_json_schema() re-coerces to the column's declared type anyway.
-#
-# c() rather than unlist(): unlist() drops the class attribute, so a list of
-# Dates collapses to the underlying numbers and a date enum renders as "20454"
-# instead of "2026-01-01". c() preserves Date and POSIXct. unlist() remains the
-# fallback for a nested list, which c() would leave as a list.
-#' @keywords internal
-dta_normalise_spec_values <- function(values) {
-  if (is.null(values) || !is.list(values)) {
-    return(values)
-  }
-
-  if (length(values) == 0) {
-    return(NULL)
-  }
-
-  flattened <- do.call(c, values)
-
-  if (is.list(flattened)) {
-    return(unlist(values, recursive = TRUE, use.names = FALSE))
-  }
-
-  unname(flattened)
-}
-
 DTAColumnSpec <- S7::new_class(
   "DTAColumnSpec",
   constructor = function(

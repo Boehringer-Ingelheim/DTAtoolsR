@@ -341,3 +341,117 @@ test_that("load_file types the table and records its import issues", {
     as.data.frame(issues)
   )
 })
+
+
+# ---------------------------------------------------------------------------
+# dta_reader_col_types(): the schema handed to the reader
+# ---------------------------------------------------------------------------
+
+id_specs <- function() {
+  make_specs(
+    DTAColumnSpec(id = "SUBJID", type = "SAS Char", format = "SAS $8."),
+    DTAColumnSpec(id = "AGE", type = "SAS Int", format = "SAS 8.")
+  )
+}
+
+test_that("dta_reader_col_types pins only the declared character columns", {
+  schema <- dta_reader_col_types(id_specs())
+
+  # AGE is declared Int and is deliberately left to inference: telling arrow a
+  # column is int64 makes it abort the entire read on the first cell it cannot
+  # parse, which would turn one reportable bad cell into a file that will not
+  # load at all.
+  expect_equal(schema$names, "SUBJID")
+  expect_true(schema$GetFieldByName("SUBJID")$type == arrow::utf8())
+})
+
+test_that("dta_reader_col_types yields NULL when there is nothing to pin", {
+  expect_null(dta_reader_col_types(NULL))
+  expect_null(dta_reader_col_types(make_specs(
+    DTAColumnSpec(id = "AGE", type = "SAS Int", format = "SAS 8.")
+  )))
+
+  # Without a header arrow generates positional names that cannot correspond to
+  # spec ids, so no schema can be built.
+  expect_null(dta_reader_col_types(id_specs(), has_header = FALSE))
+})
+
+
+# ---------------------------------------------------------------------------
+# A declared Char column survives the whole load_file path
+# ---------------------------------------------------------------------------
+
+# Before the specs reached the reader, arrow inferred a column of quoted
+# subject ids as int64 and "007" arrived in R as 7. The leading zeros were
+# already gone by the time dta_coerce_table_to_specs() ran, so its "never
+# coerce a Char column" guard had nothing left to protect.
+dta_load_id_fixture <- function(handler, name, sep) {
+  dir <- file.path(tempdir(), "dta-char-ids")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  path <- file.path(dir, name)
+  row <- function(...) paste(c(...), collapse = sep)
+  writeLines(
+    c(
+      row('"SUBJID"', '"AGE"', '"EXTRA"'),
+      row('"007"', "30", "10"),
+      row('"008"', "41", "20")
+    ),
+    path
+  )
+
+  ds <- DTADataSetTabular(
+    name = "ids",
+    specs = id_specs(),
+    files = list(handler)
+  )
+
+  ds <- DTAtools:::load_file(ds, file = path, handler_index = 1)
+  unlink(path)
+  list(
+    table = as.data.frame(ds@tables[[tools::file_path_sans_ext(name)]]),
+    issues = ds@import_issues
+  )
+}
+
+test_that("a declared Char id keeps its leading zeros through load_file (CSV)", {
+  out <- dta_load_id_fixture(DTAFileCSV("char_ids.csv"), "char_ids.csv", ",")
+
+  expect_identical(out$table$SUBJID, c("007", "008"))
+  # A declared numeric column is still a number, so range rules and schema
+  # validation see what they saw before.
+  expect_true(is.numeric(out$table$AGE))
+  expect_equal(out$table$AGE, c(30L, 41L))
+  # No new import errors on a clean file.
+  expect_identical(out$issues, list())
+})
+
+test_that("a declared Char id keeps its leading zeros through load_file (TSV)", {
+  out <- dta_load_id_fixture(DTAFileTSV("char_ids.tsv"), "char_ids.tsv", "\t")
+
+  expect_identical(out$table$SUBJID, c("007", "008"))
+  expect_true(is.numeric(out$table$AGE))
+  expect_identical(out$issues, list())
+})
+
+test_that("a declared Char id keeps its leading zeros through load_file (Delim)", {
+  out <- dta_load_id_fixture(
+    DTAFileDelim("char_ids.psv", sep = "|"),
+    "char_ids.psv",
+    "|"
+  )
+
+  expect_identical(out$table$SUBJID, c("007", "008"))
+  expect_true(is.numeric(out$table$AGE))
+  expect_identical(out$issues, list())
+})
+
+test_that("a column absent from the specs is inferred, not dropped", {
+  out <- dta_load_id_fixture(DTAFileCSV("char_ids.csv"), "char_ids.csv", ",")
+
+  # EXTRA is in neither the schema handed to the reader nor the coercion loop,
+  # so it keeps exactly the type arrow would have given it with no specs at
+  # all -- an integer here -- and it is still present.
+  expect_true("EXTRA" %in% names(out$table))
+  expect_true(is.numeric(out$table$EXTRA))
+  expect_equal(as.numeric(out$table$EXTRA), c(10, 20))
+})

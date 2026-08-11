@@ -19,10 +19,10 @@ check(x, ...)
 
 \item{...}{Additional named arguments:
 \describe{
-\item{tables}{Optional. Character table names or numeric table indices
-to validate. If NULL (default), validates all tables.}
-\item{force}{Logical. If TRUE, forces re-validation even if unchanged.
-Default is FALSE.}
+\item{tables}{Optional. Character target names or numeric target indices
+to validate. If NULL (default), validates all targets.}
+\item{force}{Logical. If TRUE, forces re-validation even if the file is
+unchanged since the last check. Default is FALSE.}
 \item{persist}{Logical. If TRUE (default), persists validation
 artifacts to disk.}
 \item{artifact_dir}{Character or NULL. Optional output directory for

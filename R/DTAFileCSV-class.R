@@ -65,19 +65,23 @@ DTAFileCSV <- S7::new_class(
 #' for efficient CSV parsing.
 #' @importFrom arrow read_csv_arrow
 #' @param x A \code{DTAFileCSV} object containing file reading parameters.
-#' @param ... A single `file` argument: character string specifying the path
-#'   to the file to be read.
+#' @param ... A `file` argument giving the path to the file to be read, and an
+#'   optional `specs` argument: a `DTAColumnSpecCollection` whose declared
+#'   types decide how the columns are parsed. Without it every column is
+#'   inferred, as before.
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileCSV) <- function(x, ...) {
-  file <- list(...)[[1]]
+  args <- dta_reader_args(...)
   table_obj <- arrow::read_csv_arrow(
-    file,
+    args$file,
     quote = x@quote,
     # col_names = FALSE makes arrow generate names and keep the first row as
     # data; skipping a row would instead discard the first data row.
     col_names = x@has_header,
+    # NULL, the reader's own default, means "infer every column".
+    col_types = dta_reader_col_types(args$specs, x@has_header),
     as_data_frame = FALSE
   )
 

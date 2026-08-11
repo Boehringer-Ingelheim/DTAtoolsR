@@ -328,3 +328,141 @@ test_that("DTAFileCSV with has_header = FALSE keeps the first row as data", {
   expect_false("STUDYID" %in% names(without_header))
 })
 
+
+# ---------------------------------------------------------------------------
+# Spec-driven column types at read time
+# ---------------------------------------------------------------------------
+
+# Arrow infers a column's type from its contents, and that inference runs
+# *before* any code in this package sees the data: a column of quoted subject
+# ids reads as int64 and arrives in R as 7 and 8, with the leading zeros
+# already destroyed. The coercion choke point cannot repair that, because the
+# damage precedes it. The specs are therefore offered to the reader, so a
+# column the specification declares as text is read as text.
+
+# Three columns: one declared Char whose text must survive, one declared Int
+# that must still parse as a number, and one the specs say nothing about.
+dta_write_id_fixture <- function(name, sep) {
+  path <- file.path(tempdir(), name)
+  row <- function(...) paste(c(...), collapse = sep)
+  writeLines(
+    c(
+      row('"SUBJID"', '"AGE"', '"EXTRA"'),
+      row('"007"', "30", "10"),
+      row('"008"', "41", "20")
+    ),
+    path
+  )
+  path
+}
+
+dta_id_specs <- function() {
+  DTAColumnSpecCollection(
+    columns = list(
+      DTAColumnSpec(id = "SUBJID", type = "SAS Char", format = "SAS $8."),
+      DTAColumnSpec(id = "AGE", type = "SAS Int", format = "SAS 8.")
+    )
+  )
+}
+
+test_that("read_file keeps a declared Char column as text for CSV", {
+  path <- dta_write_id_fixture("dta_ids_read.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  x <- read_file(DTAFileCSV(basename(path)), path, specs = dta_id_specs())
+  df <- as.data.frame(x)
+
+  expect_type(df$SUBJID, "character")
+  expect_equal(df$SUBJID, c("007", "008"))
+})
+
+test_that("read_file keeps a declared Char column as text for TSV", {
+  path <- dta_write_id_fixture("dta_ids_read.tsv", "\t")
+  on.exit(unlink(path), add = TRUE)
+
+  x <- read_file(DTAFileTSV(basename(path)), path, specs = dta_id_specs())
+  df <- as.data.frame(x)
+
+  expect_type(df$SUBJID, "character")
+  expect_equal(df$SUBJID, c("007", "008"))
+})
+
+test_that("read_file keeps a declared Char column as text for Delim", {
+  path <- dta_write_id_fixture("dta_ids_read.psv", "|")
+  on.exit(unlink(path), add = TRUE)
+
+  x <- read_file(DTAFileDelim(basename(path), sep = "|"), path, specs = dta_id_specs())
+  df <- as.data.frame(x)
+
+  expect_type(df$SUBJID, "character")
+  expect_equal(df$SUBJID, c("007", "008"))
+})
+
+test_that("read_file leaves a column the specs do not mention to inference", {
+  path <- dta_write_id_fixture("dta_ids_extra.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  x <- read_file(DTAFileCSV(basename(path)), path, specs = dta_id_specs())
+  df <- as.data.frame(x)
+
+  # EXTRA has no spec, so it is neither pinned nor dropped: arrow types it
+  # exactly as it does without any specs at all.
+  expect_true("EXTRA" %in% names(df))
+  expect_equal(as.numeric(df$EXTRA), c(10, 20))
+})
+
+test_that("read_file without specs still infers every column as before", {
+  path <- dta_write_id_fixture("dta_ids_nospec.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  bare <- read_file(DTAFileCSV(basename(path)), path)
+
+  # The standalone no-specs call is unchanged: arrow still guesses, and still
+  # guesses wrong for "007". This is the documented behaviour of read_file()
+  # on a bare DTAFile, and the fix deliberately does not alter it.
+  expect_true(all(c("Table", "ArrowTabular") %in% class(bare)))
+  expect_equal(ncol(bare), 3)
+  expect_equal(names(bare), c("SUBJID", "AGE", "EXTRA"))
+  expect_equal(as.numeric(as.data.frame(bare)$SUBJID), c(7, 8))
+
+  # Passing specs = NULL explicitly must be the same call.
+  explicit <- read_file(DTAFileCSV(basename(path)), path, specs = NULL)
+  expect_equal(as.data.frame(explicit), as.data.frame(bare))
+})
+
+test_that("dta_reader_args finds the file whatever order it was given in", {
+  specs <- dta_id_specs()
+
+  # read_file_execution() dispatches on `x` alone and takes the rest through
+  # `...`, so a `list(...)[[1]]` file would silently become the specs as soon
+  # as a caller named its arguments in the other order.
+  expect_equal(dta_reader_args("f.csv")$file, "f.csv")
+  expect_equal(dta_reader_args("f.csv", specs = specs)$file, "f.csv")
+  expect_equal(dta_reader_args(specs = specs, "f.csv")$file, "f.csv")
+  expect_equal(dta_reader_args(file = "f.csv", specs = specs)$file, "f.csv")
+
+  expect_identical(dta_reader_args("f.csv", specs = specs)$specs, specs)
+  expect_null(dta_reader_args("f.csv")$specs)
+})
+
+test_that("dta_reader_args rejects a call with no file", {
+  expect_error(dta_reader_args(specs = dta_id_specs()), "file")
+})
+
+test_that("specs are ignored when the file has no header", {
+  path <- dta_write_id_fixture("dta_ids_noheader.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  # Arrow generates positional names (f0, f1, ...) that cannot correspond to
+  # spec ids, so no schema is built and the header line becomes data.
+  x <- read_file(
+    DTAFileCSV(basename(path), has_header = FALSE),
+    path,
+    specs = dta_id_specs()
+  )
+
+  expect_equal(nrow(x), 3)
+  expect_equal(ncol(x), 3)
+  expect_false("SUBJID" %in% names(x))
+})
+
