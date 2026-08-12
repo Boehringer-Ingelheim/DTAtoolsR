@@ -18,7 +18,6 @@ DTAColumnSpecCollection <- S7::new_class(
     columns,
     rules = NULL
   ) {
-
     if (is.list(rules) && length(rules) == 0) {
       rules <- NULL
     }
@@ -100,12 +99,12 @@ column_preview <- new_generic("column_preview", "x")
 method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
   if (length(x@columns) > n) {
     col_preview <- str_flatten_comma(
-        c(unlist(map(x@columns[1:(n-1)], function(y) y@id)),
+      c(
+        unlist(map(x@columns[1:(n - 1)], function(y) y@id)),
         "...",
         x@columns[[length(x@columns)]]@id
       )
     )
-
   } else if (length(x@columns) <= n) {
     col_preview <- str_flatten_comma(map(x@columns, function(y) y@id))
   } else {
@@ -138,7 +137,7 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #' @export
 rule_preview <- new_generic("rule_preview", "x")
 method(rule_preview, DTAColumnSpecCollection) <- function(x) {
-  if (!is.null(x@rules)) { 
+  if (!is.null(x@rules)) {
     rules <- x@rules
     if (length(rules) > 5) {
       rule_preview <- stringr::str_flatten_comma(
@@ -152,7 +151,7 @@ method(rule_preview, DTAColumnSpecCollection) <- function(x) {
       rule_preview <- stringr::str_flatten_comma(map(rules, function(y) {
         y@id
       }))
-    } 
+    }
   } else {
     rule_preview <- "not set"
   }
@@ -203,7 +202,7 @@ if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
 }
 method(names, DTAColumnSpecCollection) <- function(x) {
-  return(as.character(sapply(x@columns, function(col)  col@id)))
+  return(as.character(sapply(x@columns, function(col) col@id)))
 }
 
 #' @title Get Column by ID Method
@@ -323,7 +322,6 @@ import_specs_from_yaml <- function(file) {
 #' yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' input_list <- yaml::read_yaml(yaml_file)
 #' specs <- specs_from_list(input_list$columns, input_list$rules)
-#'
 #'
 specs_from_list <- function(
   columns,
@@ -551,7 +549,7 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
   )
 
   invisible(jsonvalidate::json_schema$new(json_schema))
-  #cli::cli_alert_success("Column spec schema is correctly structured.")
+  # cli::cli_alert_success("Column spec schema is correctly structured.")
 
   return(json_schema)
 }
@@ -569,7 +567,6 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
 #' as.list(x)
 #' @name as.list
 method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
-
   columns <- lapply(x@columns, function(column) {
     as.list(column)
   })
@@ -600,8 +597,7 @@ create_example_DTAColumnSpecCollection <- function(index = 1) {
   col4 <- create_example_DTAColumnSpec(4)
   col5 <- create_example_DTAColumnSpec(5)
 
-  switch(
-    index,
+  switch(index,
     `1` = {
       example_rules <- list()
       DTAColumnSpecCollection(
@@ -678,4 +674,3 @@ write_columns_to_json <- function(
     auto_unbox = TRUE
   )
 }
-

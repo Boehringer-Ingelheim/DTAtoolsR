@@ -104,17 +104,17 @@ Print overview for DTARuleColRange
 Print overview for DTARuleColUnique
 }
 \examples{
-  dta_obj <- create_example_DTA()
-  print(dta_obj)
+dta_obj <- create_example_DTA()
+print(dta_obj)
 x <- create_example_DTAColumnSpecCollection()
 print(x)
 library(DTAtools)
 print(create_example_DTADataSetTabular())
 library(DTAtools)
 print(create_example_DTADataSetTabular())
- # do not use this, use derived classes instead, e.g.
- # DTAFileCSV or DTAFileTSV
- print(DTAFileCSV("example.csv"))
+# do not use this, use derived classes instead, e.g.
+# DTAFileCSV or DTAFileTSV
+print(DTAFileCSV("example.csv"))
 library(DTAtools)
 print(create_example_DTAFileCSV())
 

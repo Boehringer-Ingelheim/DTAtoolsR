@@ -103,14 +103,14 @@ DTAMetaData <- S7::new_class(
   ),
   validator = function(self) {
     errors <- c()
-    
+
     if (!is.null(self@version) && self@version == "") {
       errors <- c(errors, "'version' cannot be an empty string.")
     }
     if (!is.null(self@title) && self@title == "") {
       errors <- c(errors, "'title' cannot be an empty string.")
     }
-    
+
     # Validate version_history structure
     if (length(self@version_history) > 0) {
       for (i in seq_along(self@version_history)) {
@@ -121,9 +121,11 @@ DTAMetaData <- S7::new_class(
           required_fields <- c("version", "date", "changes")
           missing_fields <- setdiff(required_fields, names(hist))
           if (length(missing_fields) > 0) {
-            errors <- c(errors, paste0("version_history[[", i, "]] missing required fields: ", 
-                                      paste(missing_fields, collapse = ", "), 
-                                      ". Each version record must have: version (string), date (Date), changes (description)."))
+            errors <- c(errors, paste0(
+              "version_history[[", i, "]] missing required fields: ",
+              paste(missing_fields, collapse = ", "),
+              ". Each version record must have: version (string), date (Date), changes (description)."
+            ))
           }
           # Validate that changes is not empty
           if (!is.null(hist$changes) && is.character(hist$changes) && nchar(hist$changes) == 0) {
@@ -132,7 +134,7 @@ DTAMetaData <- S7::new_class(
         }
       }
     }
-    
+
     # Validate transmission structure if provided
     if (length(self@transmission) > 0) {
       # date_first_transfer and date_last_transfer can be either Date or character
@@ -149,7 +151,7 @@ DTAMetaData <- S7::new_class(
         }
       }
     }
-    
+
     if (length(errors) > 0) {
       paste(errors, collapse = "\n")
     }
@@ -480,12 +482,12 @@ method(print_info, DTAMetaData) <- function(x, ...) {
   if (!is.list(contact)) {
     return(as.character(contact))
   }
-  
+
   parts <- c()
   if (!is.null(contact$name)) parts <- c(parts, contact$name)
   if (!is.null(contact$role)) parts <- c(parts, paste0("(", contact$role, ")"))
   if (!is.null(contact$email)) parts <- c(parts, contact$email)
-  
+
   # Add special flags
   flags <- c()
   if (isTRUE(contact$signature)) flags <- c(flags, "signature")
@@ -494,7 +496,7 @@ method(print_info, DTAMetaData) <- function(x, ...) {
   if (length(flags) > 0) {
     parts <- c(parts, paste0("[", paste(flags, collapse = ", "), "]"))
   }
-  
+
   paste(parts, collapse = " ")
 }
 
@@ -548,8 +550,7 @@ method(print_short_info, DTAMetaData) <- function(x, ...) {
 #' @export
 create_example_DTAMetaData <- function(index = 1) {
   # nolint
-  switch(
-    as.character(index),
+  switch(as.character(index),
     `1` = DTAMetaData(
       title = "Example DTA",
       version = "1.0",

@@ -110,7 +110,7 @@ DTARuleColRange <- S7::new_class(
 method(print, DTARuleColRange) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColRange}> : {.field {x@id}}")
-  if(!is.null(x@description)) cli_text("{x@description}")
+  if (!is.null(x@description)) cli_text("{x@description}")
   cli_alert_info("columns(s): {paste(x@columns, collapse = ', ')}")
   cli_alert("min: {x@min}")
   cli_alert("max: {x@max}")
@@ -123,8 +123,8 @@ method(print, DTARuleColRange) <- function(x, ...) {
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#'  library(DTAtools)
-#'  create_example_DTARuleColRange()
+#' library(DTAtools)
+#' create_example_DTARuleColRange()
 #' @name create_example_DTARuleColRange
 #' @export
 create_example_DTARuleColRange <- function(index = 1) {

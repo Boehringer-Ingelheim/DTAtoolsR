@@ -9,8 +9,7 @@ rule_get_slot <- function(rule, name) {
 
 #' @keywords internal
 normalize_rule_type <- function(type) {
-  switch(
-    as.character(type),
+  switch(as.character(type),
     col_range = "check_range",
     col_unique = "check_unique",
     col_condition = "check_col_condition",
@@ -344,8 +343,7 @@ dta_condition_mask <- function(column_name, operator, value, x) {
     value <- operands$value
   }
 
-  switch(
-    operator,
+  switch(operator,
     equals = ,
     equal = x == value,
     not_equals = ,

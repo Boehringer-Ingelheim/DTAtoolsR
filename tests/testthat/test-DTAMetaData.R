@@ -565,4 +565,3 @@ test_that("print methods render the metadata they are given", {
   # print_short_info() stays short: it must not spill the full print_info body.
   expect_lt(length(short), length(info))
 })
-

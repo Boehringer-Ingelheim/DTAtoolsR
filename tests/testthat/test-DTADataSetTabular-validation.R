@@ -364,4 +364,3 @@ test_that("multiple manually added tables can be validated without errors", {
     expect_equal(nrow(res), 3)
   })
 })
-

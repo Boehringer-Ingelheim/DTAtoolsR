@@ -5,14 +5,14 @@
 
 # Color scheme constants
 THEME_COLORS <- list(
-  primary_dark = "#0066CC",    # Professional dark blue
-  primary_light = "#E6F0FF",   # Light blue background
-  accent = "#003366",          # Darker blue for emphasis
-  gray_dark = "#333333",       # Dark gray for text
-  gray_light = "#F5F5F5",      # Light gray for alternating rows
-  gray_border = "#CCCCCC",     # Border gray
+  primary_dark = "#0066CC", # Professional dark blue
+  primary_light = "#E6F0FF", # Light blue background
+  accent = "#003366", # Darker blue for emphasis
+  gray_dark = "#333333", # Dark gray for text
+  gray_light = "#F5F5F5", # Light gray for alternating rows
+  gray_border = "#CCCCCC", # Border gray
   white = "#FFFFFF",
-  red_error = "#CC0000"        # For attention items
+  red_error = "#CC0000" # For attention items
 )
 
 # Font configuration
@@ -39,7 +39,7 @@ FONT_SIZES <- list(
     "3" = FONT_SIZES$heading3,
     FONT_SIZES$body
   )
-  
+
   officer::fp_text(
     font.name = FONTS$primary,
     font.size = size,
@@ -89,19 +89,19 @@ FONT_SIZES <- list(
   if (is.null(values)) {
     return("(not specified)")
   }
-  
+
   if (is.list(values)) {
     values <- unlist(values)
   }
-  
+
   # Convert to character
   values <- as.character(values)
-  
+
   # Truncate if too many
   if (length(values) > max_items) {
     values <- c(values[1:max_items], paste0("... and ", length(values) - max_items, " more"))
   }
-  
+
   # Join with line breaks if too long
   combined <- paste(values, collapse = ", ")
   if (nchar(combined) > max_width) {
@@ -119,33 +119,33 @@ FONT_SIZES <- list(
 #' @keywords internal
 .format_rule_description.DTARuleColRange <- function(rule) {
   cols <- paste(rule@columns, collapse = "', '")
-  
+
   desc <- paste0(
     "Column", if (length(rule@columns) > 1) "s" else "",
     " '", cols, "' must be numeric and within the range [",
     rule@min, ", ", rule@max, "]"
   )
-  
+
   if (!is.null(rule@description) && nzchar(rule@description)) {
     desc <- paste0(desc, " (", rule@description, ")")
   }
-  
+
   desc
 }
 
 #' @keywords internal
 .format_rule_description.DTARuleColUnique <- function(rule) {
   cols <- paste(rule@columns, collapse = "' and '")
-  
+
   desc <- paste0(
     "The combination of column", if (length(rule@columns) > 1) "s" else "",
     " '", cols, "' must be unique across all rows (no duplicate combinations allowed)"
   )
-  
+
   if (!is.null(rule@description) && nzchar(rule@description)) {
     desc <- paste0(desc, " \u2014 ", rule@description)
   }
-  
+
   desc
 }
 
@@ -154,7 +154,7 @@ FONT_SIZES <- list(
   if (!is.null(rule@description) && nzchar(rule@description)) {
     return(rule@description)
   }
-  
+
   # Format a single condition element (column + constraint sub-list)
   .fmt_constraint <- function(col, constraint) {
     if (!is.list(constraint)) {
@@ -166,8 +166,11 @@ FONT_SIZES <- list(
       val_str <- if (is.logical(val)) {
         if (isTRUE(val)) "(is present / non-empty)" else "(is absent / empty)"
       } else if (is.character(val) || is.numeric(val)) {
-        if (length(val) > 1) paste0("one of (", paste(paste0("'", val, "'"), collapse = ", "), ")")
-        else paste0("'", val, "'")
+        if (length(val) > 1) {
+          paste0("one of (", paste(paste0("'", val, "'"), collapse = ", "), ")")
+        } else {
+          paste0("'", val, "'")
+        }
       } else {
         as.character(val)
       }
@@ -189,21 +192,21 @@ FONT_SIZES <- list(
     }
     paste(parts, collapse = " AND ")
   }
-  
+
   # Build IF clause
   if_parts <- character(0)
   for (col in names(rule@condition)) {
     if_parts <- c(if_parts, .fmt_constraint(col, rule@condition[[col]]))
   }
   if_str <- paste(if_parts, collapse = " AND ")
-  
+
   # Build THEN clause
   then_parts <- character(0)
   for (col in names(rule@then)) {
     then_parts <- c(then_parts, .fmt_constraint(col, rule@then[[col]]))
   }
   then_str <- paste(then_parts, collapse = " AND ")
-  
+
   paste0("IF ", if_str, " \u2192 THEN ", then_str)
 }
 
@@ -219,26 +222,29 @@ FONT_SIZES <- list(
 #' Translate a rule to human-readable format
 #' @keywords internal
 translate_rule_to_human <- function(rule) {
-  tryCatch({
-    # S3 dispatch won't work here because S7 class names carry the "DTAtools::" prefix
-    # (e.g. "DTAtools::DTARuleColRange"), which is not a valid S3 method suffix.
-    # Use explicit inherits() checks instead.
-    if (inherits(rule, "DTAtools::DTARuleColRange")) {
-      .format_rule_description.DTARuleColRange(rule)
-    } else if (inherits(rule, "DTAtools::DTARuleColUnique")) {
-      .format_rule_description.DTARuleColUnique(rule)
-    } else if (inherits(rule, "DTAtools::DTARuleColCondition")) {
-      .format_rule_description.DTARuleColCondition(rule)
-    } else {
-      .format_rule_description.default(rule)
+  tryCatch(
+    {
+      # S3 dispatch won't work here because S7 class names carry the "DTAtools::" prefix
+      # (e.g. "DTAtools::DTARuleColRange"), which is not a valid S3 method suffix.
+      # Use explicit inherits() checks instead.
+      if (inherits(rule, "DTAtools::DTARuleColRange")) {
+        .format_rule_description.DTARuleColRange(rule)
+      } else if (inherits(rule, "DTAtools::DTARuleColUnique")) {
+        .format_rule_description.DTARuleColUnique(rule)
+      } else if (inherits(rule, "DTAtools::DTARuleColCondition")) {
+        .format_rule_description.DTARuleColCondition(rule)
+      } else {
+        .format_rule_description.default(rule)
+      }
+    },
+    error = function(e) {
+      if (!is.null(rule@description) && nzchar(rule@description %||% "")) {
+        rule@description
+      } else {
+        paste0("Rule type '", rule@type, "' (", rule@id, ")")
+      }
     }
-  }, error = function(e) {
-    if (!is.null(rule@description) && nzchar(rule@description %||% "")) {
-      rule@description
-    } else {
-      paste0("Rule type '", rule@type, "' (", rule@id, ")")
-    }
-  })
+  )
 }
 
 # The single display string used for every missing/unset value. NULL, NA (of
@@ -285,7 +291,9 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     # Should rarely be hit: callers are expected to flatten nested lists
     # (e.g. affiliation/contacts) before building key-value pairs.
     nms <- names(val)
-    if (is.null(nms) || !any(nzchar(nms))) return(MISSING_VALUE_DISPLAY)
+    if (is.null(nms) || !any(nzchar(nms))) {
+      return(MISSING_VALUE_DISPLAY)
+    }
     return(paste(nms, collapse = ", "))
   }
   # NA of any type (including the logical NA that used to slip past the
@@ -321,18 +329,18 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     value = character(),
     stringsAsFactors = FALSE
   )
-  
+
   for (name in names(metadata_list)) {
     val <- metadata_list[[name]]
     value_str <- .format_scalar_value(val)
-    
+
     pairs <- rbind(pairs, data.frame(
       key = name,
       value = value_str,
       stringsAsFactors = FALSE
     ))
   }
-  
+
   pairs
 }
 
@@ -342,7 +350,9 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   x <- gsub("[_\\.]+", " ", x)
   words <- strsplit(x, " ")[[1]]
   words <- vapply(words, function(w) {
-    if (nchar(w) == 0) return(w)
+    if (nchar(w) == 0) {
+      return(w)
+    }
     paste0(toupper(substr(w, 1, 1)), substr(w, 2, nchar(w)))
   }, character(1))
   paste(words, collapse = " ")
@@ -355,24 +365,24 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.null(affiliation) || length(affiliation) == 0) {
     return(list())
   }
-  
+
   known_order <- c("name", "country", "address")
   known_labels <- c(name = "Organization", country = "Country", address = "Address")
-  
+
   out <- list()
   for (f in known_order) {
     if (!is.null(affiliation[[f]]) && nzchar(as.character(affiliation[[f]])[1])) {
       out[[known_labels[[f]]]] <- affiliation[[f]]
     }
   }
-  
+
   extra_fields <- setdiff(names(affiliation), c(known_order, "contacts"))
   for (f in extra_fields) {
     if (!is.null(affiliation[[f]])) {
       out[[.title_case_field(f)]] <- affiliation[[f]]
     }
   }
-  
+
   out
 }
 
@@ -386,11 +396,11 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     Backup = character(), `Signature Required` = character(),
     stringsAsFactors = FALSE, check.names = FALSE
   )
-  
+
   if (is.null(contacts) || length(contacts) == 0) {
     return(empty_df)
   }
-  
+
   rows <- lapply(contacts, function(ct) {
     if (!is.list(ct)) {
       ct <- list(name = as.character(ct))
@@ -407,7 +417,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       stringsAsFactors = FALSE, check.names = FALSE
     )
   })
-  
+
   do.call(rbind, rows)
 }
 
@@ -441,14 +451,14 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       )
     }))
   }
-  
+
   parts <- list(
     collect_org(meta@receiver, "Receiver"),
     collect_org(meta@supplier, "Supplier")
   )
   parts <- Filter(Negate(is.null), parts)
   auto_df <- if (length(parts) > 0) do.call(rbind, parts) else NULL
-  
+
   manual_df <- .normalize_signatories(signature_list)
   if (!is.null(manual_df)) {
     if (is.null(auto_df)) {
@@ -461,7 +471,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       }
     }
   }
-  
+
   auto_df
 }
 
@@ -473,20 +483,23 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.null(signatories)) {
     return(NULL)
   }
-  
+
   if (is.data.frame(signatories)) {
-    if (nrow(signatories) == 0) return(NULL)
+    if (nrow(signatories) == 0) {
+      return(NULL)
+    }
     if (!"Organization" %in% names(signatories)) signatories$Organization <- ""
     if (!"Role" %in% names(signatories)) signatories$Role <- ""
     if (!"Name" %in% names(signatories)) signatories$Name <- ""
     return(signatories[, c("Organization", "Name", "Role")])
   }
-  
+
   if (is.list(signatories) && length(signatories) > 0) {
     df <- do.call(rbind, lapply(signatories, function(s) {
       data.frame(
-        Organization = if (!is.null(s$organization)) as.character(s$organization)
-          else if (!is.null(s$org)) as.character(s$org) else "",
+        Organization = if (!is.null(s$organization)) {
+          as.character(s$organization)
+        } else if (!is.null(s$org)) as.character(s$org) else "",
         Name = if (!is.null(s$name)) as.character(s$name) else "",
         Role = if (!is.null(s$role)) as.character(s$role) else "",
         stringsAsFactors = FALSE
@@ -494,7 +507,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     }))
     return(df)
   }
-  
+
   NULL
 }
 
@@ -519,50 +532,52 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.null(contacts) || length(contacts) == 0) {
     return(character(0))
   }
-  
+
   h_sub <- strrep("#", heading_level)
-  
+
   # Split: backups-only vs primary (signatories/reviewers/others)
-  backups  <- Filter(function(ct) isTRUE(ct$backup) && !isTRUE(ct$signature), contacts)
+  backups <- Filter(function(ct) isTRUE(ct$backup) && !isTRUE(ct$signature), contacts)
   primaries <- Filter(function(ct) !isTRUE(ct$backup) || isTRUE(ct$signature), contacts)
-  
+
   .render_contact <- function(ct, include_signature_line) {
     out <- character(0)
-    nm  <- if (!is.null(ct$name) && nzchar(ct$name)) ct$name else "(Unnamed)"
+    nm <- if (!is.null(ct$name) && nzchar(ct$name)) ct$name else "(Unnamed)"
     out <- c(out, paste(h_sub, nm), "")
-    
-    if (!is.null(ct$role)       && nzchar(ct$role))       out <- c(out, paste0("- **Role:** ",       ct$role))
+
+    if (!is.null(ct$role) && nzchar(ct$role)) out <- c(out, paste0("- **Role:** ", ct$role))
     if (!is.null(ct$department) && nzchar(ct$department)) out <- c(out, paste0("- **Department:** ", ct$department))
-    if (!is.null(ct$email)      && nzchar(ct$email))      out <- c(out, paste0("- **Email:** ",      ct$email))
-    if (!is.null(ct$phone)      && nzchar(ct$phone))      out <- c(out, paste0("- **Phone:** ",      ct$phone))
-    
+    if (!is.null(ct$email) && nzchar(ct$email)) out <- c(out, paste0("- **Email:** ", ct$email))
+    if (!is.null(ct$phone) && nzchar(ct$phone)) out <- c(out, paste0("- **Phone:** ", ct$phone))
+
     flags <- character(0)
     if (isTRUE(ct$reviewer)) flags <- c(flags, "Reviewer")
-    if (isTRUE(ct$backup))   flags <- c(flags, "Backup")
-    if (length(flags) > 0)   out <- c(out, paste0("- **Roles:** ", paste(flags, collapse = ", ")))
-    
+    if (isTRUE(ct$backup)) flags <- c(flags, "Backup")
+    if (length(flags) > 0) out <- c(out, paste0("- **Roles:** ", paste(flags, collapse = ", ")))
+
     if (include_signature_line) {
-      out <- c(out, "",
+      out <- c(
+        out, "",
         "Signature: __________________________________     Date: ______________",
-        "")
+        ""
+      )
     } else {
       out <- c(out, "")
     }
     out
   }
-  
+
   lines <- character(0)
   for (ct in primaries) {
     lines <- c(lines, .render_contact(ct, include_signature_line = isTRUE(ct$signature)))
   }
-  
+
   if (length(backups) > 0) {
     lines <- c(lines, paste(h_sub, "Backup Contacts"), "")
     for (ct in backups) {
       lines <- c(lines, .render_contact(ct, include_signature_line = FALSE))
     }
   }
-  
+
   lines
 }
 
@@ -572,14 +587,14 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.null(df) || nrow(df) == 0) {
     return(character(0))
   }
-  
+
   # Escape pipe characters so they don't break the table layout
   df[] <- lapply(df, function(col) gsub("|", "\\|", as.character(col), fixed = TRUE))
-  
+
   header <- paste0("| ", paste(names(df), collapse = " | "), " |")
   sep <- paste0("|", paste(rep("---", ncol(df)), collapse = "|"), "|")
   rows <- apply(df, 1, function(r) paste0("| ", paste(r, collapse = " | "), " |"))
-  
+
   c(header, sep, unname(rows))
 }
 
@@ -602,7 +617,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.null(files) || length(files) == 0) {
     return(c(lines, "No files specified.", ""))
   }
-  
+
   file_data <- data.frame(
     `File Pattern` = character(),
     `Expected Count` = character(),
@@ -610,7 +625,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
-  
+
   for (f in files) {
     pattern <- if (!is.null(f@filename)) f@filename else "unspecified"
     min_n <- f@min_number_of_files %||% 0
@@ -620,7 +635,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       if (min_n != max_n) paste0("-", max_n) else ""
     )
     desc <- if (!is.null(f@pattern_description)) f@pattern_description else ""
-    
+
     file_data <- rbind(file_data, data.frame(
       `File Pattern` = pattern,
       `Expected Count` = count,
@@ -629,7 +644,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       check.names = FALSE
     ))
   }
-  
+
   c(lines, .df_to_md_table(file_data), "")
 }
 
@@ -642,12 +657,12 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (!inherits(dataset, "DTAtools::DTADataSetTabular")) {
     return(character(0))
   }
-  
+
   h <- strrep("#", base_level)
   h_sub <- strrep("#", base_level + 1)
-  
+
   lines <- c(paste(h, "Column Specifications"), "")
-  
+
   if (length(dataset@specs@columns) > 0) {
     for (spec in dataset@specs@columns) {
       type_str <- if (!is.null(spec@structure) && !is.null(spec@structure@type)) {
@@ -655,8 +670,9 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       } else {
         "unspecified"
       }
-      
-      lines <- c(lines,
+
+      lines <- c(
+        lines,
         paste(h_sub, spec@id),
         if (!is.null(spec@label)) paste0("**Label:** ", spec@label) else "",
         paste0("**Type:** ", type_str),
@@ -670,10 +686,10 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   } else {
     lines <- c(lines, "No column specifications available.", "")
   }
-  
+
   if (include_rules) {
     lines <- c(lines, paste(h, "Validation Rules"), "")
-    
+
     rules <- if (!is.null(dataset@specs@rules)) dataset@specs@rules else list()
     if (length(rules) > 0) {
       rule_data <- data.frame(
@@ -695,6 +711,6 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
       lines <- c(lines, "No validation rules specified.", "")
     }
   }
-  
+
   lines
 }

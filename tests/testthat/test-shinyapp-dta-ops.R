@@ -519,8 +519,10 @@ test_that("dta_set_rule replaces a rule at a given index without touching the ot
   dta <- app_fixture_dta()
   before_ids <- vapply(datasets(dta, "clinical_data")@specs@rules, function(r) r@id, character(1))
 
-  res <- fn(dta, "clinical_data", index = 3, id = "rule_range_example", type = "col_range",
-            columns = "AGE", min = 21, max = 60)
+  res <- fn(dta, "clinical_data",
+    index = 3, id = "rule_range_example", type = "col_range",
+    columns = "AGE", min = 21, max = 60
+  )
 
   expect_true(res$ok)
   rules <- datasets(res$value, "clinical_data")@specs@rules

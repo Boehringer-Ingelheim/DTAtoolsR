@@ -196,14 +196,14 @@ tabular data (`DTADataSetTabular`) or a simple file-presence check
 DTA                              ← top-level agreement container
 ├── metadata                     ← title, version, receiver/supplier
 |   (DTAMetaData)                     contacts, transmission schedule, ..
-│                                     
+│
 └── datasets (named list of DTADataSet)  ← one or more datasets per DTS
     │
     ├── DTADataSetTabular        ← tabular data: for tables with
     |   |                            full column-spec + rule validation
-    │   ├── files (list)         ← expected file handlers for various  
-    |   |   |                        input types, manage file names, 
-    │   │   ├── DTAFileCSV           which can have patterns, 
+    │   ├── files (list)         ← expected file handlers for various
+    |   |   |                        input types, manage file names,
+    │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
     |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
@@ -217,7 +217,7 @@ DTA                              ← top-level agreement container
     |   |   └── rules (list of DTARule)
     │   │       ├── DTARuleColCondition × N  ← if/then cross-column logic
     │   │       ├── DTARuleColRange × N      ← numeric range constraint
-    │   │       └── DTARuleColUnique × N     ← uniqueness (single or 
+    │   │       └── DTARuleColUnique × N     ← uniqueness (single or
     |   |                                              composite key)
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables

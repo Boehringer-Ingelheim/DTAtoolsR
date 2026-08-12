@@ -11,7 +11,7 @@
 #' @param length Numeric or NA. The max character length.
 #' @param backend Character. The backend system defining the type/format (e.g. \code{"SAS"}).
 #' @examples
-#'  DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")
+#' DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")
 DTAColumnSpecStructure <- S7::new_class(
   "DTAColumnSpecStructure",
   constructor = function(

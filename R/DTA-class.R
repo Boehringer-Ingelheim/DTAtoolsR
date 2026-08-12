@@ -144,9 +144,9 @@ method(datasets, DTA) <- function(x, name = NULL) {
 #' @param i A single character name or single numeric index.
 #' @return A single \code{DTADataSet} object.
 #' @examples
-#'   dta <- create_example_DTA()
-#'   dta[[1]]
-#'   dta[["demographics"]]
+#' dta <- create_example_DTA()
+#' dta[[1]]
+#' dta[["demographics"]]
 #' @usage x[[i]]
 #' @name double-bracket
 #' @aliases [[
@@ -169,9 +169,9 @@ method(`[[`, DTA) <- function(x, i) {
 #' @param i A character vector of names or a numeric index vector.
 #' @return A named list of \code{DTADataSet} objects.
 #' @examples
-#'   dta <- create_example_DTA()
-#'   dta[c(1, 2)]
-#'   dta[c("demographics", "vitals")]
+#' dta <- create_example_DTA()
+#' dta[c(1, 2)]
+#' dta[c("demographics", "vitals")]
 #' @usage x[i]
 #' @name single-bracket
 #' @aliases [
@@ -294,13 +294,13 @@ method(load_file, DTA) <- function(
 #' the "Validation PASSED" banner would print over a data transfer agreement
 #' whose dates no longer say what was agreed.
 #' @examples
-#'   dta <- create_example_DTA()
-#'   # Check all datasets
-#'   check(dta)
-#'   # Check specific dataset by name
-#'   check(dta, datasets = "demographics")
-#'   # Check by index
-#'   check(dta, datasets = 1)
+#' dta <- create_example_DTA()
+#' # Check all datasets
+#' check(dta)
+#' # Check specific dataset by name
+#' check(dta, datasets = "demographics")
+#' # Check by index
+#' check(dta, datasets = 1)
 #' @usage check(x, ...)
 #' @name check
 #' @export
@@ -493,8 +493,8 @@ method(check, DTA) <- function(
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text cli_div
 #' @examples
-#'   dta_obj <- create_example_DTA()
-#'   print(dta_obj)
+#' dta_obj <- create_example_DTA()
+#' print(dta_obj)
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
@@ -534,12 +534,11 @@ method(print, DTA) <- function(x, ...) {
 #' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples
-#'   example_dta <- create_example_DTA()
-#'   print(example_dta)
+#' example_dta <- create_example_DTA()
+#' print(example_dta)
 #' @export
 create_example_DTA <- function(index = 1) {
-  switch(
-    index,
+  switch(index,
     `1` = {
       DTA(
         datasets = list(

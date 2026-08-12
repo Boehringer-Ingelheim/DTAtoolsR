@@ -119,14 +119,14 @@ The same hierarchy, as plain text:
 DTA                              ← top-level agreement container
 ├── metadata                     ← title, version, receiver/supplier
 |   (DTAMetaData)                     contacts, transmission schedule, ..
-│                                     
+│
 └── datasets (named list of DTADataSet)  ← one or more datasets per DTS
     │
     ├── DTADataSetTabular        ← tabular data: for tables with
     |   |                            full column-spec + rule validation
-    │   ├── files (list)         ← expected file handlers for various  
-    |   |   |                        input types, manage file names, 
-    │   │   ├── DTAFileCSV           which can have patterns, 
+    │   ├── files (list)         ← expected file handlers for various
+    |   |   |                        input types, manage file names,
+    │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
     |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
@@ -140,7 +140,7 @@ DTA                              ← top-level agreement container
     |   |   └── rules (list of DTARule)
     │   │       ├── DTARuleColCondition × N  ← if/then cross-column logic
     │   │       ├── DTARuleColRange × N      ← numeric range constraint
-    │   │       └── DTARuleColUnique × N     ← uniqueness (single or 
+    │   │       └── DTARuleColUnique × N     ← uniqueness (single or
     |   |                                              composite key)
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
@@ -219,7 +219,7 @@ so the example stays self-contained:
 
 ```{r quickstart_dataset}
 # Extract one dataset entry so it stands alone (same shape as gf_dataset.yaml)
-full_yaml    <- yaml::read_yaml(
+full_yaml <- yaml::read_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
 dataset_yaml <- tempfile(fileext = ".yaml")
@@ -227,7 +227,7 @@ yaml::write_yaml(full_yaml$datasets[[1]], dataset_yaml)
 
 # 1. Load the single-dataset definition — no metadata needed
 ds <- read_dataset_from_yaml(dataset_yaml)
-ds     # a ready-to-use DTADataSetTabular, specs + file handler already set
+ds # a ready-to-use DTADataSetTabular, specs + file handler already set
 
 # 2. Load the data file — same load_file() call as for a full DTA, just
 #    without the `dataset =` argument since `ds` already is the dataset
@@ -424,13 +424,13 @@ data tables. Tables are stored internally as Arrow Tables for performance.
 ```{r create_dataset}
 # Load the clinical DTA specs from a full DTA YAML (metadata + datasets)
 clinical_yaml <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
-dta_obj       <- read_dta_from_yaml(clinical_yaml)
+dta_obj <- read_dta_from_yaml(clinical_yaml)
 
 # The DTA contains one dataset called "clinical_data" — but tables are empty
 # until you load data into them
 datasets(dta_obj)
 ds_spec <- datasets(dta_obj, "clinical_data")
-ds_spec   # specs defined, no tables yet
+ds_spec # specs defined, no tables yet
 ```
 
 The most flexible approach is to combine specs with your own data:
@@ -440,8 +440,8 @@ The most flexible approach is to combine specs with your own data:
 clinical_specs <- specs(ds_spec)
 
 # Read the CSV independently
-csv_path   <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-raw_data   <- read.csv(csv_path)
+csv_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+raw_data <- read.csv(csv_path)
 
 # Create the DTADataSetTabular with specs + data, then validate
 ds <- DTADataSetTabular(
@@ -456,11 +456,15 @@ Alternatively, create a dataset directly in R with inline data:
 
 ```{r inline_dataset}
 # Build specs
-col_studyid <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE,
-                             values = list("STUDY001"))
-col_visit   <- DTAColumnSpec(id = "VISIT",   type = "SAS Char", nullable = FALSE,
-                             values = list("SCREENING", "BASELINE", "WEEK4"))
-col_age     <- DTAColumnSpec(id = "AGE",     type = "SAS Num",  nullable = FALSE)
+col_studyid <- DTAColumnSpec(
+  id = "STUDYID", type = "SAS Char", nullable = FALSE,
+  values = list("STUDY001")
+)
+col_visit <- DTAColumnSpec(
+  id = "VISIT", type = "SAS Char", nullable = FALSE,
+  values = list("SCREENING", "BASELINE", "WEEK4")
+)
+col_age <- DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = FALSE)
 
 inline_specs <- DTAColumnSpecCollection(
   columns = list(STUDYID = col_studyid, VISIT = col_visit, AGE = col_age)
@@ -576,47 +580,51 @@ row, so `id = 1` is an import error whenever the table has one.
 ```{r inspect_example}
 # Load a dataset that has schema errors
 err_file <- system.file("extdata", "clinical_data_error_schema.csv", package = "DTAtools")
-dta_err  <- read_dta_from_yaml(
+dta_err <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-dta_err  <- load_file(dta_err, "clinical_data", file = err_file)
-dta_err  <- check(dta_err, quiet = TRUE)
+dta_err <- load_file(dta_err, "clinical_data", file = err_file)
+dta_err <- check(dta_err, quiet = TRUE)
 
 # Step 1: see which messages exist and note their ids and sources
 ds_err_loaded <- datasets(dta_err, "clinical_data")
-msgs_err      <- messages(ds_err_loaded)
+msgs_err <- messages(ds_err_loaded)
 head(msgs_err[, c("id", "source", "row", "column", "message")], 8)
 ```
 
 ```{r inspect_schema}
 # Step 2: inspect a schema error — pick the first id whose source is "schema"
 schema_id <- msgs_err$id[msgs_err$source == "schema"][1]
-detail    <- inspect(ds_err_loaded, id = schema_id)
+detail <- inspect(ds_err_loaded, id = schema_id)
 # Key fields for schema errors:
-detail[, c("id", "message", "type", "why",
-           "context_.row", "context_SUBJECT_ID", "context_VISIT",
-           "schema_keyword", "schema_message")]
+detail[, c(
+  "id", "message", "type", "why",
+  "context_.row", "context_SUBJECT_ID", "context_VISIT",
+  "schema_keyword", "schema_message"
+)]
 ```
 
 ```{r inspect_rule}
 # Rule errors: inspect shows which rows violated the rule
 rule_file <- system.file("extdata", "clinical_data_error_rules.csv", package = "DTAtools")
-dta_rule  <- read_dta_from_yaml(
+dta_rule <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-dta_rule  <- load_file(dta_rule, "clinical_data", file = rule_file)
-dta_rule  <- check(dta_rule, quiet = TRUE)
+dta_rule <- load_file(dta_rule, "clinical_data", file = rule_file)
+dta_rule <- check(dta_rule, quiet = TRUE)
 
 ds_rule_loaded <- datasets(dta_rule, "clinical_data")
-msgs_rule      <- messages(ds_rule_loaded)
+msgs_rule <- messages(ds_rule_loaded)
 msgs_rule[, c("id", "source", "rule_id", "message")]
 
 # Drill into the first rule violation
-rule_id_1   <- msgs_rule$id[msgs_rule$source == "rule"][1]
+rule_id_1 <- msgs_rule$id[msgs_rule$source == "rule"][1]
 detail_rule <- inspect(ds_rule_loaded, id = rule_id_1)
-detail_rule[, c("id", "rule_id", "type", "why",
-                "failing_row_count", "failing_.row",
-                "failing_SUBJECT_ID", "failing_VISIT")]
+detail_rule[, c(
+  "id", "rule_id", "type", "why",
+  "failing_row_count", "failing_.row",
+  "failing_SUBJECT_ID", "failing_VISIT"
+)]
 ```
 
 ### Example: Schema Errors
@@ -637,11 +645,11 @@ counts in `results()` reflect that — `n_import_errors` and `n_schema_errors` a
 counted separately and neither subsumes the other.
 
 ```{r schema_errors}
-dta_obj_e  <- read_dta_from_yaml(
+dta_obj_e <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-err_file   <- system.file("extdata", "clinical_data_error_schema.csv", package = "DTAtools")
-raw_err    <- read.csv(err_file)
+err_file <- system.file("extdata", "clinical_data_error_schema.csv", package = "DTAtools")
+raw_err <- read.csv(err_file)
 
 ds_err <- DTADataSetTabular(
   name   = "clinical_data",
@@ -669,11 +677,11 @@ This CSV has valid column values but violates semantic rules:
 - `WEIGHT < 5` when `VISIT = V03` (`check_col_condition_example`)
 
 ```{r rule_errors}
-dta_obj_r  <- read_dta_from_yaml(
+dta_obj_r <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-rule_file  <- system.file("extdata", "clinical_data_error_rules.csv", package = "DTAtools")
-raw_rule   <- read.csv(rule_file)
+rule_file <- system.file("extdata", "clinical_data_error_rules.csv", package = "DTAtools")
+raw_rule <- read.csv(rule_file)
 
 ds_rule <- DTADataSetTabular(
   name   = "clinical_data",
@@ -716,7 +724,7 @@ are no rules at all, yet the table fails:
 ```{r import_minimal}
 import_specs2 <- DTAColumnSpecCollection(columns = list(
   SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", nullable = FALSE),
-  AGE        = DTAColumnSpec(id = "AGE",        type = "SAS Num",  nullable = TRUE)
+  AGE        = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
 ))
 
 import_data <- data.frame(
@@ -731,8 +739,10 @@ ds_import <- DTADataSetTabular(
 )
 ds_import <- check(ds_import, quiet = TRUE)
 
-validation_status(ds_import)[, c("status", "ok", "n_schema_errors",
-                                 "n_rule_errors", "n_import_errors")]
+validation_status(ds_import)[, c(
+  "status", "ok", "n_schema_errors",
+  "n_rule_errors", "n_import_errors"
+)]
 ```
 
 The three axes are independent: `n_schema_errors` and `n_rule_errors` are `0`,
@@ -759,10 +769,12 @@ imp[imp$source == "import", c("id", "row", "column", "keyword", "message")]
 text exactly as it was read:
 
 ```{r import_inspect}
-import_id  <- imp$id[imp$source == "import"][1]
+import_id <- imp$id[imp$source == "import"][1]
 detail_imp <- inspect(ds_import, id = import_id)
-detail_imp[, c("import_row", "import_column", "import_raw",
-               "import_declared_type", "import_reason")]
+detail_imp[, c(
+  "import_row", "import_column", "import_raw",
+  "import_declared_type", "import_reason"
+)]
 ```
 
 The stored table holds `NA` in that cell, and the column is numeric as declared:
@@ -932,15 +944,21 @@ rule_collection <- list(range_rule, unique_rule, condition_rule)
 
 ```{r specs_with_rules}
 # Attach rules to a DTAColumnSpecCollection
-studyid  <- DTAColumnSpec(id = "STUDYID",      type = "SAS Char", nullable = FALSE,
-                          values = list("STUDY001"))
-visit2   <- DTAColumnSpec(id = "VISIT",         type = "SAS Char", nullable = FALSE,
-                          values = list("SCREENING", "BASELINE", "WEEK4"))
-age2     <- DTAColumnSpec(id = "AGE",           type = "SAS Num",  nullable = FALSE)
-consent  <- DTAColumnSpec(id = "CONSENT",       type = "SAS Char", nullable = TRUE,
-                          values = list("YES", "NO"))
-con_date <- DTAColumnSpec(id = "CONSENT_DATE",  type = "SAS Char", nullable = TRUE)
-subjid2  <- DTAColumnSpec(id = "SUBJECT_ID",    type = "SAS Char", nullable = FALSE)
+studyid <- DTAColumnSpec(
+  id = "STUDYID", type = "SAS Char", nullable = FALSE,
+  values = list("STUDY001")
+)
+visit2 <- DTAColumnSpec(
+  id = "VISIT", type = "SAS Char", nullable = FALSE,
+  values = list("SCREENING", "BASELINE", "WEEK4")
+)
+age2 <- DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = FALSE)
+consent <- DTAColumnSpec(
+  id = "CONSENT", type = "SAS Char", nullable = TRUE,
+  values = list("YES", "NO")
+)
+con_date <- DTAColumnSpec(id = "CONSENT_DATE", type = "SAS Char", nullable = TRUE)
+subjid2 <- DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", nullable = FALSE)
 
 specs_with_rules <- DTAColumnSpecCollection(
   columns = list(
@@ -955,10 +973,10 @@ print(specs_with_rules)
 bad_data <- data.frame(
   STUDYID      = c("STUDY001", "STUDY001"),
   VISIT        = c("SCREENING", "BASELINE"),
-  AGE          = c(16, 32),         # 16 violates age_range (min 18)
+  AGE          = c(16, 32), # 16 violates age_range (min 18)
   CONSENT      = c("YES", "NO"),
-  CONSENT_DATE = c(NA, NA),          # CONSENT=YES but no date: violates consent_requires_date
-  SUBJECT_ID   = c("P01", "P01")    # duplicate SUBJECT_ID: violates subject_visit_unique when VISIT differs too
+  CONSENT_DATE = c(NA, NA), # CONSENT=YES but no date: violates consent_requires_date
+  SUBJECT_ID   = c("P01", "P01") # duplicate SUBJECT_ID: violates subject_visit_unique when VISIT differs too
 )
 
 ds_bad <- DTADataSetTabular(
@@ -989,45 +1007,49 @@ print(file_handler)
 
 # Read the actual file through the handler
 csv_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-tbl      <- read_file(file_handler, csv_path)
+tbl <- read_file(file_handler, csv_path)
 cat("Loaded table class:", class(tbl)[1], "\n")
 cat("Dimensions:", nrow(tbl), "x", ncol(tbl), "\n")
 
 # The Arrow Table can be passed directly to DTADataSetTabular
 simple_specs <- DTAColumnSpecCollection(columns = list(
-  STUDYID = DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE,
-                          values = list("1234-5678")),
-  VISIT   = DTAColumnSpec(id = "VISIT",   type = "SAS Char", nullable = FALSE,
-                          values = list("V01","V02","V03","EOT")),
-  AGE     = DTAColumnSpec(id = "AGE",     type = "SAS Num",  nullable = FALSE)
+  STUDYID = DTAColumnSpec(
+    id = "STUDYID", type = "SAS Char", nullable = FALSE,
+    values = list("1234-5678")
+  ),
+  VISIT = DTAColumnSpec(
+    id = "VISIT", type = "SAS Char", nullable = FALSE,
+    values = list("V01", "V02", "V03", "EOT")
+  ),
+  AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = FALSE)
 ))
 
 # Use the Arrow Table directly in the constructor
 ds_from_file <- DTADataSetTabular(
   name   = "clinical_from_file",
   specs  = simple_specs,
-  files  = list(file_handler),    # document the expected file
-  tables = list(clinical_data = tbl)  # provide the loaded data
+  files  = list(file_handler), # document the expected file
+  tables = list(clinical_data = tbl) # provide the loaded data
 )
-names(tables(ds_from_file))   # the table names held by the dataset
+names(tables(ds_from_file)) # the table names held by the dataset
 ```
 
 For full DTA YAML specs that include file definitions, the file handlers are
 embedded in each dataset specification and can be retrieved with `files()`:
 
 ```{r file_handlers_from_dta}
-dta_spec  <- read_dta_from_yaml(
+dta_spec <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-ds_s      <- datasets(dta_spec, "clinical_data")
+ds_s <- datasets(dta_spec, "clinical_data")
 
 # Inspect the file handler defined in the YAML
 fh <- files(ds_s, 1)
 print(fh)
 
 # Read the file using the handler
-csv_path  <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-loaded    <- read_file(fh, csv_path)
+csv_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+loaded <- read_file(fh, csv_path)
 cat("Rows loaded:", nrow(loaded), "\n")
 ```
 
@@ -1065,7 +1087,7 @@ ds_file <- DTADataSetFile(
   paths = c(delivered_csv, delivered_tsv)
 )
 ds_file <- check(ds_file)
-results(ds_file)     # both files pass
+results(ds_file) # both files pass
 ```
 
 ```{r dataset_file_missing}
@@ -1076,7 +1098,7 @@ ds_missing <- DTADataSetFile(
 )
 ds_missing <- check(ds_missing)
 
-results(ds_missing)          # one row fails
+results(ds_missing) # one row fails
 
 # The message explains exactly why
 messages(ds_missing)[, c("target", "rule_id", "message")]
@@ -1090,8 +1112,8 @@ the full delivery — column-level content *and* file presence — in one `check
 ```{r dta_mixed_types, eval=FALSE}
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
-  name   = "clinical_data",
-  specs  = import_specs_from_yaml(
+  name = "clinical_data",
+  specs = import_specs_from_yaml(
     system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   ),
   tables = list(clinical_data = read.csv(delivered_csv))
@@ -1109,7 +1131,7 @@ dta_mixed <- DTA(
 )
 
 dta_mixed <- check(dta_mixed)
-results(dta_mixed)   # one row per dataset
+results(dta_mixed) # one row per dataset
 ```
 
 ---
@@ -1128,24 +1150,30 @@ print(meta_simple)
 
 # Full metadata with contacts and transmission schedule
 meta_full <- DTAMetaData(
-  title    = "Clinical Genomics Data Transmission",
-  version  = "2.0",
-  date     = as.Date("2026-01-15"),
-  header   = "Boehringer Ingelheim",
+  title = "Clinical Genomics Data Transmission",
+  version = "2.0",
+  date = as.Date("2026-01-15"),
+  header = "Boehringer Ingelheim",
   receiver = list(
     affiliation = list(name = "External CRO", country = "Germany"),
     contacts = list(
-      list(name = "Alice Smith",  role = "Lead Data Manager",
-           email = "alice@cro.com", signature = TRUE, reviewer = TRUE),
-      list(name = "Bob Johnson",  role = "Bioinformatician",
-           email = "bob@cro.com",   signature = TRUE)
+      list(
+        name = "Alice Smith", role = "Lead Data Manager",
+        email = "alice@cro.com", signature = TRUE, reviewer = TRUE
+      ),
+      list(
+        name = "Bob Johnson", role = "Bioinformatician",
+        email = "bob@cro.com", signature = TRUE
+      )
     )
   ),
   supplier = list(
     affiliation = list(name = "Pharma Company", country = "USA"),
     contacts = list(
-      list(name = "Emily Turner", role = "Senior Data Manager",
-           email = "emily@pharma.com", signature = TRUE)
+      list(
+        name = "Emily Turner", role = "Senior Data Manager",
+        email = "emily@pharma.com", signature = TRUE
+      )
     )
   ),
   transmission = list(
@@ -1165,8 +1193,8 @@ The `DTA` class holds one or more `DTADataSet` objects together with metadata.
 
 ```{r dta_object}
 # Build from scratch
-ds1 <- create_example_DTADataSetTabular(2)  # "demographics" with data
-ds2 <- create_example_DTADataSetTabular(3)  # "vitals" with data
+ds1 <- create_example_DTADataSetTabular(2) # "demographics" with data
+ds2 <- create_example_DTADataSetTabular(3) # "vitals" with data
 
 dta_obj <- DTA(
   datasets = list(ds1, ds2),
@@ -1177,7 +1205,7 @@ print(dta_obj)
 # Access datasets by name or index
 datasets(dta_obj, "demographics")
 dta_obj[["vitals"]]
-dta_obj[c(1, 2)]        # returns a list of both datasets
+dta_obj[c(1, 2)] # returns a list of both datasets
 ```
 
 ### Loading a Full DTA from YAML
@@ -1187,7 +1215,7 @@ datasets, column specs, rules, and file patterns — in a single YAML file and
 load it with `read_dta_from_yaml()`.
 
 ```{r read_dta_yaml}
-dta_file      <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+dta_file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 dta_from_file <- read_dta_from_yaml(dta_file)
 print(dta_from_file)
 
@@ -1206,7 +1234,7 @@ clinical_sps <- specs(ds_spec_full)
 
 # Load the CSV data
 csv_path_full <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-raw_full      <- read.csv(csv_path_full)
+raw_full <- read.csv(csv_path_full)
 
 # Create DTADataSetTabular with specs + data
 ds_full <- DTADataSetTabular(
@@ -1231,8 +1259,8 @@ It optionally computes and writes an MD5 checksum sidecar file.
 
 ```{r write_table}
 # Validate the clinical dataset
-csv_path_w    <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-dta_obj_w     <- read_dta_from_yaml(
+csv_path_w <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+dta_obj_w <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
 ds_w <- DTADataSetTabular(
@@ -1308,8 +1336,8 @@ listing controlled vocabulary in a DTA document.
 
 ```{r export_values, eval=FALSE}
 # Export all allowed VISIT values for the clinical dataset
-docx_values     <- tempfile(fileext = ".docx")
-dta_obj_export  <- read_dta_from_yaml(
+docx_values <- tempfile(fileext = ".docx")
+dta_obj_export <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
 clinical_specs_export <- specs(datasets(dta_obj_export, "clinical_data"))
@@ -1317,7 +1345,7 @@ clinical_specs_export <- specs(datasets(dta_obj_export, "clinical_data"))
 export_column_value_table(
   DTAColumnSpecCollection = clinical_specs_export,
   file = docx_values,
-  id   = "VISIT"
+  id = "VISIT"
 )
 ```
 

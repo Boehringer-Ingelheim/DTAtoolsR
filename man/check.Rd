@@ -91,17 +91,17 @@ the "Validation PASSED" banner would print over a data transfer agreement
 whose dates no longer say what was agreed.
 }
 \examples{
-  dta <- create_example_DTA()
-  # Check all datasets
-  check(dta)
-  # Check specific dataset by name
-  check(dta, datasets = "demographics")
-  # Check by index
-  check(dta, datasets = 1)
-  ds <- create_example_DTADataSetTabular(2)
-  # Check all tables
-  ds <- check(ds)
-  # Check specific table
-  ds <- check(ds, tables = "tab1")
- # do not manually create DTARule objects, use derived classes instead
+dta <- create_example_DTA()
+# Check all datasets
+check(dta)
+# Check specific dataset by name
+check(dta, datasets = "demographics")
+# Check by index
+check(dta, datasets = 1)
+ds <- create_example_DTADataSetTabular(2)
+# Check all tables
+ds <- check(ds)
+# Check specific table
+ds <- check(ds, tables = "tab1")
+# do not manually create DTARule objects, use derived classes instead
 }

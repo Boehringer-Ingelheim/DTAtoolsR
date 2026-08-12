@@ -54,7 +54,6 @@ test_that("dta_normalize_column_names leaves already-clean names untouched", {
 
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
-
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
   file_info <- DTAFileTSV("gf_data_small_smirna.tsv")
@@ -75,7 +74,6 @@ test_that("DTAFileTSV object is created from reading in tsv and table is accessi
 
 
 test_that("Testing pattern with DTAFileTSV", {
-
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
   file_info <- DTAFileTSV("gf_data_.*\\.tsv", pattern = TRUE, number_of_files = 1)
@@ -465,4 +463,3 @@ test_that("specs are ignored when the file has no header", {
   expect_equal(ncol(x), 3)
   expect_false("SUBJID" %in% names(x))
 })
-

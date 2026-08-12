@@ -168,7 +168,7 @@ dta_reader_args <- function(...) {
 #' @keywords internal
 dta_normalize_column_names <- function(table_obj) {
   current_names <- names(table_obj)
-  cleaned_names <- trimws(gsub('^\\s*"|"\\s*$', '', current_names))
+  cleaned_names <- trimws(gsub('^\\s*"|"\\s*$', "", current_names))
 
   if (!identical(current_names, cleaned_names)) {
     names(table_obj) <- cleaned_names
@@ -203,8 +203,8 @@ if (!exists("print_info", mode = "function")) {
 }
 method(print_info, DTAFileTabular) <- function(x) {
   # TODO This does not work, currently a workaround
-  #super(print_info, x)
-  #method(print_info, DTAFile)(x)
+  # super(print_info, x)
+  # method(print_info, DTAFile)(x)
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
   if (x@min_number_of_files == x@max_number_of_files) {

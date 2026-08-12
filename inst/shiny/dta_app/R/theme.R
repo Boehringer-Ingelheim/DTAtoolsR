@@ -6,22 +6,22 @@
 # family chosen to look on-brand and modern.
 
 BI <- list(
-  green       = "#00625B", # primary brand green/teal (deep)
-  green_dark  = "#003D38",
+  green = "#00625B", # primary brand green/teal (deep)
+  green_dark = "#003D38",
   green_light = "#E6F1EF",
-  accent      = "#00A886", # brighter accent green
-  ink         = "#1A2B2A", # near-black text
-  grey        = "#5B6B6A",
-  grey_light  = "#F4F7F6",
+  accent = "#00A886", # brighter accent green
+  ink = "#1A2B2A", # near-black text
+  grey = "#5B6B6A",
+  grey_light = "#F4F7F6",
   # Semantic status colors (harmonized with the BI green family)
-  pass        = "#1E8E5A",
-  pass_bg     = "#E5F4EC",
+  pass = "#1E8E5A",
+  pass_bg = "#E5F4EC",
   pass_border = "#9BD3B4",
-  fail        = "#C0392B",
-  fail_bg     = "#FBEAE7",
+  fail = "#C0392B",
+  fail_bg = "#FBEAE7",
   fail_border = "#E9B4AC",
-  pending     = "#5B6B6A",
-  pending_bg  = "#EEF1F1",
+  pending = "#5B6B6A",
+  pending_bg = "#EEF1F1",
   pending_border = "#CDD5D4"
 )
 
@@ -478,11 +478,15 @@ status_chip <- function(status) {
 # Accessible icon + label for a slot's state (not color-only)
 slot_state_label <- function(state, detail = NULL) {
   icon <- switch(state,
-    ok = "\u2714",      # check mark
-    warn = "\u26A0",    # warning
-    empty = "\u2014"    # em dash
+    ok = "\u2714", # check mark
+    warn = "\u26A0", # warning
+    empty = "\u2014" # em dash
   )
-  cls <- switch(state, ok = "slot-ok", warn = "slot-warn", empty = "slot-meta")
+  cls <- switch(state,
+    ok = "slot-ok",
+    warn = "slot-warn",
+    empty = "slot-meta"
+  )
   shiny::span(class = cls, paste0(icon, " ", detail %||% ""))
 }
 
@@ -499,7 +503,9 @@ yaml_highlight_html <- function(text) {
   hl_value <- function(v) {
     lead <- sub("^([[:space:]]*).*$", "\\1", v)
     tv <- substring(v, nchar(lead) + 1L)
-    if (!nzchar(tv)) return(v)
+    if (!nzchar(tv)) {
+      return(v)
+    }
     cls <- if (grepl('^".*"$', tv) || grepl("^'.*'$", tv)) {
       "yml-str"
     } else if (grepl("^(true|false|yes|no|on|off|null|~)$", tv, ignore.case = TRUE)) {
@@ -512,9 +518,13 @@ yaml_highlight_html <- function(text) {
     paste0(lead, sprintf('<span class="%s">%s</span>', cls, tv))
   }
   lines <- strsplit(text %||% "", "\n", fixed = TRUE)[[1]]
-  if (length(lines) == 0) return("")
+  if (length(lines) == 0) {
+    return("")
+  }
   out <- vapply(lines, function(line) {
-    if (!nzchar(line)) return("")
+    if (!nzchar(line)) {
+      return("")
+    }
     e <- esc(line)
     # Whole-line comment.
     if (grepl("^[[:space:]]*#", e)) {

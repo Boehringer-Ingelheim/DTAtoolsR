@@ -28,19 +28,19 @@ A rule for validating data tables with conditions
 \examples{
 # Create a check_range rule
 DTAtools::DTARuleColCondition(
- id = "check_gfreasnd2",
- condition = list(
-   GFREASND = list(
-     empty = FALSE
-   )
- ),
- then = list(
-   GFSTAT = list(
-     empty = FALSE
-   ),
-   GFORRES = list(
-     empty = TRUE
-   )
- )
+  id = "check_gfreasnd2",
+  condition = list(
+    GFREASND = list(
+      empty = FALSE
+    )
+  ),
+  then = list(
+    GFSTAT = list(
+      empty = FALSE
+    ),
+    GFORRES = list(
+      empty = TRUE
+    )
+  )
 )
 }

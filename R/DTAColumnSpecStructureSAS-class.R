@@ -77,8 +77,7 @@
   format_trimmed <- trimws(format)
   format_upper <- toupper(format_trimmed)
 
-  switch(
-    type,
+  switch(type,
     "Char" = grepl("^\\$[0-9]+\\.$", format_trimmed),
     "Num" = grepl("^(?:[0-9]+\\.|[0-9]+\\.[0-9]+|BEST[0-9]+\\.)$", format_upper),
     "Int" = grepl("^(?:[0-9]+\\.|BEST[0-9]+\\.)$", format_upper),
@@ -102,7 +101,7 @@
 #' @param format Character or NA. The format of the column.
 #' @param length Numeric or NA. The max character length.
 #' @examples
-#'  DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
+#' DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
 DTAColumnSpecStructureSAS <- S7::new_class(
   "DTAColumnSpecStructureSAS",
   parent = DTAColumnSpecStructure,
@@ -192,8 +191,7 @@ if (!exists("as_json_schema_type", mode = "function")) {
   as_json_schema_type <- new_generic("as_json_schema_type", "x")
 }
 method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
-  switch(
-    x@type,
+  switch(x@type,
     "Char" = "string",
     "Num" = "number",
     "Int" = "integer",
@@ -243,8 +241,7 @@ method(as_r_type, DTAColumnSpecStructureSAS) <- function(x) {
     return("character")
   }
 
-  switch(
-    x@type,
+  switch(x@type,
     "Char" = "character",
     "Num" = "double",
     "Int" = "integer",

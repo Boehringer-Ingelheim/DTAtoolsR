@@ -19,20 +19,20 @@
 #' @examples
 #' # Create a check_range rule
 #' DTAtools::DTARuleColCondition(
-#'  id = "check_gfreasnd2",
-#'  condition = list(
-#'    GFREASND = list(
-#'      empty = FALSE
-#'    )
-#'  ),
-#'  then = list(
-#'    GFSTAT = list(
-#'      empty = FALSE
-#'    ),
-#'    GFORRES = list(
-#'      empty = TRUE
-#'    )
-#'  )
+#'   id = "check_gfreasnd2",
+#'   condition = list(
+#'     GFREASND = list(
+#'       empty = FALSE
+#'     )
+#'   ),
+#'   then = list(
+#'     GFSTAT = list(
+#'       empty = FALSE
+#'     ),
+#'     GFORRES = list(
+#'       empty = TRUE
+#'     )
+#'   )
 #' )
 #' @include DTARule-class.R
 DTARuleColCondition <- S7::new_class(
@@ -65,7 +65,6 @@ DTARuleColCondition <- S7::new_class(
         type = "check_col_condition",
         description = description
       ),
-
       condition = condition,
       then = then
     )
@@ -122,7 +121,7 @@ method(print, DTARuleColCondition) <- function(x, ...) {
   # nolint
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
-  if(!is.null(x@description)) cli_text("{x@description}")
+  if (!is.null(x@description)) cli_text("{x@description}")
 
   # TODO: check more complicated scenarios
   if (is.list(x@condition)) {
@@ -153,8 +152,8 @@ method(print, DTARuleColCondition) <- function(x, ...) {
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#'  library(DTAtools)
-#'  create_example_DTARuleColCondition()
+#' library(DTAtools)
+#' create_example_DTARuleColCondition()
 #' @name create_example_DTARuleColCondition
 #' @export
 create_example_DTARuleColCondition <- function(index = 1) {
