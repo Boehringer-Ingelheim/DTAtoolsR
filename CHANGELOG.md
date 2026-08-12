@@ -55,6 +55,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `%PDF` magic bytes, rather than mocking the converter. CI installs TinyTeX on
   all five platforms and fails fast if no backend is present, so that test
   cannot silently start skipping.
+- `inst/extdata/clinical_data_error_import.csv`, an example file isolating the
+  import-error axis the way the existing fixtures isolate schema and rule
+  errors. It deliberately includes a genuinely blank cell alongside the
+  unconvertible ones, because missing and unconvertible are different defects
+  and only the latter is an import error.
+- `inst/extdata/clinical_data_error_all.csv` now carries import errors too, so
+  it exercises all three validation axes rather than two.
 
 ### Changed
 
