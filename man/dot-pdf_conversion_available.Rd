@@ -2,15 +2,14 @@
 % Please edit documentation in R/exportDocuments.R
 \name{.pdf_conversion_available}
 \alias{.pdf_conversion_available}
-\title{Report whether a DOCX -> PDF conversion backend is usable}
+\title{Report whether any DOCX -> PDF conversion backend is usable}
 \usage{
 .pdf_conversion_available()
 }
 \value{
-\code{TRUE} when \code{rmarkdown} and a working pandoc installation are present.
+\code{TRUE} when at least one backend in \code{\link[=.pdf_backends_available]{.pdf_backends_available()}} can run.
 }
 \description{
-Split out from \code{\link[=.convert_docx_to_pdf]{.convert_docx_to_pdf()}} so the availability probe can be
-exercised (and mocked) independently of the conversion itself.
+Report whether any DOCX -> PDF conversion backend is usable
 }
 \keyword{internal}

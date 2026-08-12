@@ -142,7 +142,9 @@ test_that("check_all reports fail for data that violates the spec", {
     # and the user is told "fail" with nothing to act on.
     msgs <- DTAtools::messages(rv$dta, as_tibble = FALSE)
     expect_gt(nrow(msgs), 0)
-    expect_setequal(unique(msgs$source), c("rule", "schema"))
+    # clinical_data_error_all.csv now also carries import errors (see
+    # test-clinical-error-fixtures.R), so "import" joins the source set.
+    expect_setequal(unique(msgs$source), c("import", "rule", "schema"))
   })
 })
 

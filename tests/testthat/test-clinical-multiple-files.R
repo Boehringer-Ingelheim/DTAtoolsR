@@ -96,7 +96,9 @@ test_that("clinical multi-file mixed error fixtures support reporting and inspec
   expect_gt(nrow(msgs), 0)
   expect_equal(msgs$id, seq_len(nrow(msgs)))
   expect_equal(sort(unique(msgs$target)), c("clinical_data2_error_schema", "clinical_data_error_all"))
-  expect_equal(sort(unique(msgs$source)), c("rule", "schema"))
+  # clinical_data_error_all.csv now also carries import errors (see
+  # test-clinical-error-fixtures.R), so the combined source set gains "import".
+  expect_equal(sort(unique(msgs$source)), c("import", "rule", "schema"))
 
   schema_msgs_target2 <- msgs[msgs$target == "clinical_data2_error_schema", , drop = FALSE]
   expect_gt(nrow(schema_msgs_target2), 0)

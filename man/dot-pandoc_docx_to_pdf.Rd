@@ -15,7 +15,8 @@
 Invisibly returns \code{pdf_file}.
 }
 \description{
-Thin wrapper around \code{\link[rmarkdown:pandoc_convert]{rmarkdown::pandoc_convert()}}; the only place that talks
-to the external converter.
+Thin wrapper around \code{\link[rmarkdown:pandoc_convert]{rmarkdown::pandoc_convert()}}. The PDF engine is resolved
+by \code{\link[=.pandoc_pdf_engine]{.pandoc_pdf_engine()}} and passed explicitly, so pandoc uses the engine we
+verified rather than defaulting to a \code{pdflatex} that may not exist.
 }
 \keyword{internal}

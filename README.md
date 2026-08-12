@@ -449,6 +449,17 @@ write_dta(dta, "clinical_dta.docx")
 write_dta(dta, "clinical_dta.docx", template = "my_template.docx")
 ```
 
+PDF output builds the Word document and converts it, which needs an external
+tool: LibreOffice (`soffice`), TinyTeX, or pandoc with another PDF engine.
+`dta_pdf_backend()` reports which will be used, or `NULL` if none is installed —
+in which case `tinytex::install_tinytex()` adds one from R without
+administrator rights. `write_dta(format = "pdf")` verifies the `%PDF` signature
+and aborts, naming that command, rather than writing a DOCX under a `.pdf` name.
+
+```r
+dta_pdf_backend()   # NULL, or a list naming the backend and engine
+```
+
 ### Interactive Shiny application
 
 `run_dta_app()` starts a browser interface over the same objects: load a DTA
@@ -718,6 +729,7 @@ row-level validation.
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                                    |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                                    |
 | `write_dta(x, file, format)`   | Write the whole DTA as a document (docx, pdf, md)            |
+| `dta_pdf_backend()`            | Report the DOCX-to-PDF backend this machine will use, or NULL |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA     |
 | `export_specs_table(x, file)`  | Export spec table to Word                                    |
 | `export_column_value_table(x, file, id)` | Export a column's allowed values to Word           |

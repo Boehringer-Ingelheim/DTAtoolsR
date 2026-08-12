@@ -15,9 +15,11 @@
 Invisibly returns \code{pdf_file}.
 }
 \description{
-Produces a real PDF or aborts. A DOCX is never renamed to \code{.pdf}, and no
-file is ever written to a path other than the requested \code{pdf_file}: any
-partial output is removed before the abort so the caller is not left with a
-misnamed or truncated document.
+Tries every backend reported by \code{\link[=.pdf_backends_available]{.pdf_backends_available()}} in priority order
+and returns as soon as one yields a genuine PDF. Produces a real PDF or
+aborts: a DOCX is never renamed to \code{.pdf}, and no file is ever written to a
+path other than the requested \code{pdf_file}. Any partial output is removed
+before the abort so the caller is not left with a misnamed or truncated
+document.
 }
 \keyword{internal}

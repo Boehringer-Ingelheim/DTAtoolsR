@@ -253,7 +253,10 @@ test_that("write_dta pdf export writes a real PDF or aborts loudly", {
   sibling_docx <- sub("\\.pdf$", ".docx", out_missing)
   on.exit(unlink(sibling_docx, force = TRUE), add = TRUE)
 
-  local_mocked_bindings(.pdf_conversion_available = function() FALSE)
+  local_mocked_bindings(
+    .pdf_backends_available = function() character(0),
+    .pdf_conversion_available = function() FALSE
+  )
   expect_error(
     write_dta(dta, file = out_missing, format = "pdf", overwrite = TRUE, quiet = TRUE),
     class = "rlang_error"
@@ -270,7 +273,10 @@ test_that("write_dta pdf export rejects a converter that yields a non-PDF", {
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
   # A converter that just copies the DOCX across is exactly the old fallback.
+  # The backend list is pinned so a real LibreOffice/TinyTeX on the test machine
+  # cannot quietly satisfy the export and hide the defect being pinned here.
   local_mocked_bindings(
+    .pdf_backends_available = function() "pandoc",
     .pdf_conversion_available = function() TRUE,
     .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
       file.copy(docx_file, pdf_file, overwrite = TRUE)
@@ -291,6 +297,7 @@ test_that("write_dta and write_dataset_metadata produce %PDF bytes on success", 
   ds <- create_example_DTADataSetTabular(2)
 
   local_mocked_bindings(
+    .pdf_backends_available = function() "pandoc",
     .pdf_conversion_available = function() TRUE,
     .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
       writeBin(charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), pdf_file)
@@ -319,12 +326,213 @@ test_that("write_dataset_metadata pdf export aborts when conversion is impossibl
   out <- tempfile(fileext = ".pdf")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  local_mocked_bindings(.pdf_conversion_available = function() FALSE)
+  local_mocked_bindings(
+    .pdf_backends_available = function() character(0),
+    .pdf_conversion_available = function() FALSE
+  )
   expect_error(
     write_dataset_metadata(ds, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
     class = "rlang_error"
   )
   expect_false(file.exists(out))
+})
+
+test_that("dta_pdf_backend reports a usable backend or NULL", {
+  backend <- dta_pdf_backend()
+
+  if (is.null(backend)) {
+    # The contract when nothing is installed: NULL, not an empty list or "".
+    expect_null(backend)
+    expect_length(.pdf_backends_available(), 0L)
+    expect_false(.pdf_conversion_available())
+  } else {
+    expect_type(backend, "list")
+    expect_named(backend, c("name", "engine", "available"))
+    expect_true(backend$name %in% c("libreoffice", "tinytex", "pandoc"))
+    # The reported backend is the first choice, not an arbitrary one.
+    expect_identical(backend$name, backend$available[[1]])
+    expect_true(all(backend$available %in% c("libreoffice", "tinytex", "pandoc")))
+    expect_true(nzchar(backend$engine))
+    expect_true(.pdf_conversion_available())
+  }
+})
+
+test_that("a PDF backend is present wherever PDF export must work", {
+  # COMPANION GUARD to the end-to-end test below. That test skips when no
+  # backend exists, and a permanently skipped test is invisible dead coverage.
+  # On CI a backend is installed by .github/workflows/R-CMD-check.yaml, so its
+  # absence is a workflow regression and must fail loudly rather than skip.
+  # This test itself never skips: both branches assert.
+  backend <- dta_pdf_backend()
+
+  if (identical(Sys.getenv("CI"), "true")) {
+    expect_false(
+      is.null(backend),
+      info = paste(
+        "CI must install a DOCX -> PDF backend (see setup-tinytex in",
+        "R-CMD-check.yaml); without one the end-to-end PDF test silently skips."
+      )
+    )
+  } else {
+    # Off CI a backend is optional, but the probe must still honour its contract.
+    expect_true(is.null(backend) || is.list(backend))
+  }
+})
+
+test_that("write_dta and write_dataset_metadata really convert to PDF end to end", {
+  # THE REAL THING: no mocked converter seam. This drives whichever backend the
+  # machine actually has and inspects the bytes that land on disk.
+  backend <- dta_pdf_backend()
+  skip_if(
+    is.null(backend),
+    "no DOCX -> PDF backend installed (see the CI guard test above)"
+  )
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_error(
+    write_dta(dta, file = out, format = "pdf", overwrite = TRUE, quiet = TRUE)
+  )
+  expect_true(file.exists(out))
+
+  # A genuine PDF: right magic bytes, ...
+  expect_identical(readBin(out, what = "raw", n = 4L), charToRaw("%PDF"))
+  # ... not a DOCX (a ZIP, "PK") that slipped through with a .pdf name, ...
+  expect_false(identical(readBin(out, what = "raw", n = 2L), charToRaw("PK")))
+  # ... and not a stub: a real document of this size is several KB.
+  expect_gt(file.info(out)$size, 4000)
+
+  out_ds <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out_ds, force = TRUE), add = TRUE)
+  ds <- create_example_DTADataSetTabular(2)
+  expect_no_error(
+    write_dataset_metadata(ds, file = out_ds, format = "pdf", overwrite = TRUE, quiet = TRUE)
+  )
+  expect_identical(readBin(out_ds, what = "raw", n = 4L), charToRaw("%PDF"))
+  expect_false(identical(readBin(out_ds, what = "raw", n = 2L), charToRaw("PK")))
+  expect_gt(file.info(out_ds)$size, 4000)
+})
+
+test_that("the no-backend abort names the command that fixes it", {
+  # An error that only says "no backend available" leaves the user stuck; the
+  # message must carry the exact remedy.
+  local_mocked_bindings(
+    .pdf_backends_available = function() character(0),
+    .pdf_conversion_available = function() FALSE
+  )
+
+  expect_error(
+    .convert_docx_to_pdf(tempfile(fileext = ".docx"), tempfile(fileext = ".pdf")),
+    regexp = "tinytex::install_tinytex\\(\\)"
+  )
+  expect_error(
+    .convert_docx_to_pdf(tempfile(fileext = ".docx"), tempfile(fileext = ".pdf")),
+    regexp = "LibreOffice"
+  )
+})
+
+test_that("the abort explains that pandoc alone cannot make a PDF", {
+  # The most confusing real-world setup: pandoc IS installed, so the old probe
+  # claimed PDF export was available, but pandoc shells out to a PDF engine and
+  # there is none. The message must say so rather than just "no backend".
+  local_mocked_bindings(.pandoc_pdf_engine = function() "")
+  bullets <- .pdf_no_backend_bullets()
+
+  pandoc_here <- requireNamespace("rmarkdown", quietly = TRUE) &&
+    isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE))
+
+  if (pandoc_here) {
+    expect_true(any(grepl("pandoc cannot write a PDF on its own", bullets, fixed = TRUE)))
+  } else {
+    # No pandoc: the bullet would be a lie, so it must be absent.
+    expect_false(any(grepl("pandoc cannot write a PDF on its own", bullets, fixed = TRUE)))
+  }
+  # The remedy is named either way.
+  expect_true(any(grepl("tinytex::install_tinytex()", bullets, fixed = TRUE)))
+})
+
+test_that("conversion falls through to the next backend when the first fails", {
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx, force = TRUE), add = TRUE)
+  print(officer::read_docx(), target = docx)
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  tried <- character(0)
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("libreoffice", "pandoc"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) {
+      tried <<- c(tried, "libreoffice")
+      cli::cli_abort("soffice exploded")
+    },
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      tried <<- c(tried, "pandoc")
+      writeBin(charToRaw("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  expect_no_error(.convert_docx_to_pdf(docx, out))
+  expect_identical(tried, c("libreoffice", "pandoc"))
+  expect_identical(readBin(out, what = "raw", n = 4L), charToRaw("%PDF"))
+})
+
+test_that("the abort reports every backend that failed, with braces intact", {
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx, force = TRUE), add = TRUE)
+  print(officer::read_docx(), target = docx)
+  out <- tempfile(fileext = ".pdf")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("libreoffice", "pandoc"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) {
+      # Braces in external tool output must not be interpolated by cli.
+      cli::cli_abort("soffice said {{weird}}")
+    },
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      # Succeeds, but writes a DOCX: the signature check must still reject it.
+      file.copy(docx_file, pdf_file, overwrite = TRUE)
+      invisible(pdf_file)
+    }
+  )
+
+  err <- expect_error(.convert_docx_to_pdf(docx, out), class = "rlang_error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "libreoffice")
+  expect_match(msg, "pandoc")
+  expect_match(msg, "%PDF")
+  # Nothing left behind at the requested path.
+  expect_false(file.exists(out))
+})
+
+test_that(".cli_escape neutralises braces so cli cannot reinterpret tool output", {
+  expect_identical(.cli_escape("a {b} c"), "a {{b}} c")
+  expect_identical(.cli_escape("no braces"), "no braces")
+  # An unbalanced brace from a truncated tool message must still be safe.
+  expect_identical(.cli_escape("{oops"), "{{oops")
+})
+
+test_that(".pandoc_pdf_engine and .find_soffice return scalar strings", {
+  engine <- .pandoc_pdf_engine()
+  expect_type(engine, "character")
+  expect_length(engine, 1L)
+
+  soffice <- .find_soffice()
+  expect_type(soffice, "character")
+  expect_length(soffice, 1L)
+  # When a path is reported it must actually exist, not be a stale guess.
+  if (nzchar(soffice)) {
+    expect_true(file.exists(soffice))
+  }
+
+  bin_dir <- .tinytex_bin_dir()
+  expect_length(bin_dir, 1L)
+  if (nzchar(bin_dir)) {
+    expect_true(dir.exists(bin_dir))
+  }
 })
 
 test_that(".is_pdf_file recognises the PDF signature and nothing else", {

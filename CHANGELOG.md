@@ -44,6 +44,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Unit tests for the bundled Shiny app, which previously had none: its helper
   files are auto-sourced by Shiny at launch and were therefore invisible to the
   test suite.
+- `dta_pdf_backend()` reports which DOCX-to-PDF backend will be used, or `NULL`
+  when none is available, so a user can check their setup before they need it.
+- PDF export tries LibreOffice (`soffice`), then TinyTeX, then pandoc with any
+  other PDF engine. LibreOffice is preferred where present because it renders
+  the Word document as Word does, preserving table shading, column widths and
+  numbered-heading fields; pandoc re-parses to its own AST and reflows the
+  layout through LaTeX.
+- An end-to-end PDF export test that performs a real conversion and asserts the
+  `%PDF` magic bytes, rather than mocking the converter. CI installs TinyTeX on
+  all five platforms and fails fast if no backend is present, so that test
+  cannot silently start skipping.
+- `inst/extdata/clinical_data_error_import.csv`, an example file isolating the
+  import-error axis the way the existing fixtures isolate schema and rule
+  errors. It deliberately includes a genuinely blank cell alongside the
+  unconvertible ones, because missing and unconvertible are different defects
+  and only the latter is an import error.
+- `inst/extdata/clinical_data_error_all.csv` now carries import errors too, so
+  it exercises all three validation axes rather than two.
 
 ### Changed
 
@@ -63,6 +81,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Removed the unused `export_modal_ui()` helper from the Shiny app. The export
   modal has always been built inline in `app.R`; the orphaned builder produced
   module-namespaced ids that no server ever observed.
+- `inst/extdata/gf_data_small_smirna.tsv` reduced from 20940 rows to 490,
+  taking the installed package from 7.6 MB to under 1 MB and clearing the CRAN
+  installed-size NOTE. The rows were selected rather than truncated: every
+  distinct value of every column with at most 100 distinct values survives,
+  plus a systematic sample. A plain `head` would have dropped the file's single
+  `GFSTAT = "NOT DONE"` record, the only carrier of the second value of five
+  columns. A test pins what the reduction was chosen to keep.
 
 ### Fixed
 
@@ -121,6 +146,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Shiny app but were undeclared, working only because `htmltools` arrives
   transitively with `shiny`. `R CMD check` does not scan `inst/`, so neither was
   flagged.
+- **PDF export reported that a backend was available when it was not.** The
+  check tested only for pandoc, but pandoc cannot write a PDF on its own — it
+  needs a separate PDF engine. With pandoc installed and no engine the guard
+  returned `TRUE`, so users bypassed the actionable "install this" error and
+  received a raw `pandoc document conversion failed with error 47` instead. The
+  one branch that named a fix was unreachable exactly when it was needed.
+- PDF export via TinyTeX routes through `tinytex::latexmk()` rather than
+  invoking pandoc's LaTeX path directly. Going direct bypasses TinyTeX's
+  on-demand package installation, so a bare TinyTeX failed for want of
+  `caption.sty`.
+- TinyTeX's binary directory is not always on the session `PATH`, which made
+  `pdflatex` appear missing even when TinyTeX was installed. It is now resolved
+  through `tinytex::tinytex_root()`.
+- External tool output containing braces crashed the error formatter, because
+  the text was interpolated by cli before being reported.
+- The two Shiny test harnesses left behind by a merge are consolidated into
+  one. The surviving harness gained the more defensive app-directory lookup
+  from the one it replaced: it validates that `app.R` actually exists at the
+  resolved path instead of only checking the path string is non-empty.
 
 ## [0.12.2] - 2026-08-04
 

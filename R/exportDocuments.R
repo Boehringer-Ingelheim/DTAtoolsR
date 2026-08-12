@@ -397,30 +397,298 @@ write_dta <- function(
   lines
 }
 
-#' Report whether a DOCX -> PDF conversion backend is usable
+#' Locate a LibreOffice (`soffice`) binary
 #'
-#' Split out from [.convert_docx_to_pdf()] so the availability probe can be
-#' exercised (and mocked) independently of the conversion itself.
-#' @return `TRUE` when `rmarkdown` and a working pandoc installation are present.
+#' Searches the `PATH` first, then the conventional install locations on
+#' Windows, Linux and macOS.
+#' @return The path to the binary, or `""` when LibreOffice is not installed.
+#' @keywords internal
+.find_soffice <- function() {
+  found <- Sys.which(c("soffice", "libreoffice"))
+  found <- found[nzchar(found)]
+  if (length(found) > 0) {
+    return(unname(found[[1]]))
+  }
+  guesses <- c(
+    "C:/Program Files/LibreOffice/program/soffice.exe",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    "/usr/bin/soffice",
+    "/usr/bin/libreoffice",
+    "/usr/local/bin/soffice",
+    "/opt/libreoffice/program/soffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+  )
+  hit <- guesses[file.exists(guesses)]
+  if (length(hit) > 0) hit[[1]] else ""
+}
+
+#' Locate the TinyTeX binary directory
+#'
+#' A fresh `tinytex::install_tinytex()` puts `pdflatex` on the *user's* `PATH`,
+#' but an R session started before (or outside) that change does not see it --
+#' `tinytex::is_tinytex()` is `TRUE` while `Sys.which("pdflatex")` is empty, and
+#' pandoc then dies with "pdflatex not found". Resolving the directory through
+#' the exported [tinytex::tinytex_root()] lets us put it back on the `PATH` for
+#' the duration of a conversion.
+#'
+#' @return The directory holding the TinyTeX binaries, or `""`.
+#' @keywords internal
+.tinytex_bin_dir <- function() {
+  if (!requireNamespace("tinytex", quietly = TRUE)) {
+    return("")
+  }
+  root <- tryCatch(tinytex::tinytex_root(), error = function(e) "")
+  if (length(root) != 1 || is.na(root) || !nzchar(root) || !dir.exists(root)) {
+    return("")
+  }
+  exe <- if (.Platform$OS.type == "windows") "pdflatex.exe" else "pdflatex"
+  candidates <- list.dirs(file.path(root, "bin"), recursive = FALSE)
+  hit <- candidates[file.exists(file.path(candidates, exe))]
+  if (length(hit) > 0) hit[[1]] else ""
+}
+
+#' Find a PDF engine that pandoc can drive
+#'
+#' pandoc cannot produce a PDF on its own -- it shells out to a PDF engine, and
+#' reports a bare "pdflatex not found" when none exists. Probing first turns
+#' that into an actionable error.
+#' @return The engine name, or `""` when no engine is installed.
+#' @keywords internal
+.pandoc_pdf_engine <- function() {
+  engines <- c(
+    "pdflatex", "xelatex", "lualatex", "tectonic",
+    "typst", "wkhtmltopdf", "weasyprint", "context", "pdfroff"
+  )
+  for (engine in engines) {
+    if (nzchar(Sys.which(engine))) {
+      return(engine)
+    }
+  }
+  # TinyTeX may be installed but absent from this session's PATH.
+  if (nzchar(.tinytex_bin_dir())) {
+    return("pdflatex")
+  }
+  ""
+}
+
+#' Which DOCX -> PDF backends can run on this machine, best first
+#'
+#' The single seam every other PDF function consults, so backend detection can
+#' be exercised (and mocked) independently of the conversion itself.
+#'
+#' LibreOffice comes first: it renders the DOCX the way Word does, preserving
+#' the flextable column widths, shading and the auto-numbered headings. The
+#' pandoc routes re-parse the DOCX into pandoc's AST and re-lay it out through
+#' LaTeX, which is a faithful *text* conversion but loses much of the layout.
+#'
+#' `"tinytex"` outranks `"pandoc"` because it compiles the intermediate LaTeX
+#' with [tinytex::latexmk()], which installs missing LaTeX packages on demand. A
+#' freshly installed TinyTeX has no `caption.sty`, so letting pandoc drive
+#' `pdflatex` directly aborts on the first document that needs one.
+#'
+#' @return A character vector of backend names in priority order, possibly
+#'   empty. One or more of `"libreoffice"`, `"tinytex"` and `"pandoc"`.
+#' @keywords internal
+.pdf_backends_available <- function() {
+  backends <- character(0)
+  if (nzchar(.find_soffice())) {
+    backends <- c(backends, "libreoffice")
+  }
+  pandoc_ok <- requireNamespace("rmarkdown", quietly = TRUE) &&
+    isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE))
+  if (pandoc_ok && nzchar(.tinytex_bin_dir())) {
+    backends <- c(backends, "tinytex")
+  }
+  if (pandoc_ok && nzchar(.pandoc_pdf_engine())) {
+    backends <- c(backends, "pandoc")
+  }
+  backends
+}
+
+#' Report whether any DOCX -> PDF conversion backend is usable
+#'
+#' @return `TRUE` when at least one backend in [.pdf_backends_available()] can run.
 #' @keywords internal
 .pdf_conversion_available <- function() {
-  requireNamespace("rmarkdown", quietly = TRUE) &&
-    isTRUE(rmarkdown::pandoc_available())
+  length(.pdf_backends_available()) > 0
+}
+
+#' Report the DOCX to PDF conversion backend this machine will use
+#'
+#' `write_dta(format = "pdf")` and `write_dataset_metadata(format = "pdf")`
+#' build a Word document and then convert it. That conversion needs an external
+#' tool, which R cannot supply on its own. Call this to check the setup *before*
+#' relying on a PDF export -- for example at the top of a batch script.
+#'
+#' Three backends are supported, tried in this order:
+#'
+#' * **LibreOffice** -- a `soffice` binary on the `PATH` or in a standard
+#'   install location. Preferred, because it renders the document as Word does
+#'   and preserves table shading, column widths and heading numbering.
+#' * **TinyTeX** -- pandoc converts the DOCX to LaTeX and [tinytex::latexmk()]
+#'   compiles it, installing any missing LaTeX packages on demand.
+#' * **pandoc** -- pandoc driving some other PDF engine already on the `PATH`
+#'   (a full LaTeX distribution, `typst`, `wkhtmltopdf`, ...).
+#'
+#' If none is present, install a LaTeX engine from R with
+#' `tinytex::install_tinytex()`; it needs no administrator rights and works on
+#' Windows, macOS and Linux.
+#'
+#' @return `NULL` when no backend is available. Otherwise a list with:
+#'   \describe{
+#'     \item{`name`}{`"libreoffice"`, `"tinytex"` or `"pandoc"`.}
+#'     \item{`engine`}{The `soffice` path, the TinyTeX binary directory, or the
+#'       pandoc PDF engine name.}
+#'     \item{`available`}{Every usable backend, in priority order.}
+#'   }
+#'
+#' @seealso [write_dta()], [write_dataset_metadata()]
+#' @export
+#' @examples
+#' backend <- dta_pdf_backend()
+#' if (is.null(backend)) {
+#'   message("No PDF backend; run tinytex::install_tinytex() to add one.")
+#' } else {
+#'   message("PDF export will use: ", backend$name)
+#' }
+dta_pdf_backend <- function() {
+  backends <- .pdf_backends_available()
+  if (length(backends) == 0) {
+    return(NULL)
+  }
+  list(
+    name = backends[[1]],
+    engine = switch(backends[[1]],
+      libreoffice = .find_soffice(),
+      tinytex = .tinytex_bin_dir(),
+      .pandoc_pdf_engine()
+    ),
+    available = backends
+  )
+}
+
+#' Run the LibreOffice DOCX -> PDF conversion
+#'
+#' Converts in a private profile directory (`-env:UserInstallation`) so a
+#' LibreOffice window already open on the user's desktop cannot make the
+#' headless run fail or hang.
+#' @param docx_file Character. Existing `.docx` to convert.
+#' @param pdf_file Character. Path of the `.pdf` to create.
+#' @return Invisibly returns `pdf_file`.
+#' @keywords internal
+.soffice_docx_to_pdf <- function(docx_file, pdf_file) {
+  soffice <- .find_soffice()
+  out_dir <- tempfile("dta_pdf_")
+  dir.create(out_dir)
+  on.exit(unlink(out_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  profile_dir <- tempfile("dta_lo_profile_")
+  on.exit(unlink(profile_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  system2(
+    soffice,
+    c(
+      paste0(
+        "-env:UserInstallation=file:///",
+        gsub("^/+", "", gsub("\\\\", "/", normalizePath(profile_dir, winslash = "/", mustWork = FALSE)))
+      ),
+      "--headless", "--norestore", "--convert-to", "pdf",
+      "--outdir", shQuote(normalizePath(out_dir, winslash = "/", mustWork = TRUE)),
+      shQuote(normalizePath(docx_file, winslash = "/", mustWork = TRUE))
+    ),
+    stdout = TRUE,
+    stderr = TRUE,
+    timeout = 180
+  )
+
+  produced <- file.path(
+    out_dir,
+    paste0(tools::file_path_sans_ext(basename(docx_file)), ".pdf")
+  )
+  if (!file.exists(produced)) {
+    cli::cli_abort("LibreOffice did not write a PDF for {.file {docx_file}}.")
+  }
+  if (!file.copy(produced, pdf_file, overwrite = TRUE)) {
+    cli::cli_abort("Could not move the converted PDF to {.file {pdf_file}}.")
+  }
+  invisible(pdf_file)
+}
+
+#' Run the TinyTeX DOCX -> PDF conversion
+#'
+#' Two steps rather than one: pandoc writes a standalone LaTeX document, then
+#' [tinytex::latexmk()] compiles it. Going through `latexmk` is the whole point
+#' -- it installs missing LaTeX packages on demand, so a minimal TinyTeX grows
+#' whatever the document needs instead of aborting on a missing `.sty`.
+#' @param docx_file Character. Existing `.docx` to convert.
+#' @param pdf_file Character. Path of the `.pdf` to create.
+#' @return Invisibly returns `pdf_file`.
+#' @keywords internal
+.tinytex_docx_to_pdf <- function(docx_file, pdf_file) {
+  # Resolved before the setwd() below, so a relative target still lands in the
+  # caller's working directory rather than in the scratch directory.
+  target <- file.path(
+    normalizePath(dirname(pdf_file), winslash = "/", mustWork = TRUE),
+    basename(pdf_file)
+  )
+  work_dir <- tempfile("dta_tex_")
+  dir.create(work_dir)
+  on.exit(unlink(work_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  tex_file <- file.path(work_dir, "dta_document.tex")
+  rmarkdown::pandoc_convert(
+    input = normalizePath(docx_file, winslash = "/", mustWork = TRUE),
+    to = "latex",
+    output = normalizePath(tex_file, winslash = "/", mustWork = FALSE),
+    options = c(
+      "--standalone",
+      "--extract-media", normalizePath(work_dir, winslash = "/", mustWork = TRUE)
+    )
+  )
+  if (!file.exists(tex_file)) {
+    cli::cli_abort("pandoc did not write the intermediate LaTeX document.")
+  }
+
+  # latexmk resolves \includegraphics paths relative to the working directory.
+  old_wd <- setwd(work_dir)
+  on.exit(setwd(old_wd), add = TRUE, after = FALSE)
+  produced <- tinytex::latexmk(basename(tex_file), engine = "pdflatex")
+
+  produced <- file.path(work_dir, basename(produced))
+  if (!file.exists(produced)) {
+    cli::cli_abort("TinyTeX did not write a PDF for {.file {docx_file}}.")
+  }
+  if (!file.copy(produced, target, overwrite = TRUE)) {
+    cli::cli_abort("Could not move the converted PDF to {.file {pdf_file}}.")
+  }
+  invisible(pdf_file)
 }
 
 #' Run the pandoc DOCX -> PDF conversion
 #'
-#' Thin wrapper around [rmarkdown::pandoc_convert()]; the only place that talks
-#' to the external converter.
+#' Thin wrapper around [rmarkdown::pandoc_convert()]. The PDF engine is resolved
+#' by [.pandoc_pdf_engine()] and passed explicitly, so pandoc uses the engine we
+#' verified rather than defaulting to a `pdflatex` that may not exist.
 #' @param docx_file Character. Existing `.docx` to convert.
 #' @param pdf_file Character. Path of the `.pdf` to create.
 #' @return Invisibly returns `pdf_file`.
 #' @keywords internal
 .pandoc_docx_to_pdf <- function(docx_file, pdf_file) {
+  engine <- .pandoc_pdf_engine()
+
+  # pandoc resolves the engine through the PATH it inherits, so a TinyTeX that
+  # this session cannot see must be put back on the PATH for the call.
+  bin_dir <- .tinytex_bin_dir()
+  if (nzchar(bin_dir) && !nzchar(Sys.which(engine))) {
+    old_path <- Sys.getenv("PATH")
+    Sys.setenv(PATH = paste(bin_dir, old_path, sep = .Platform$path.sep))
+    on.exit(Sys.setenv(PATH = old_path), add = TRUE)
+  }
+
   rmarkdown::pandoc_convert(
     input = normalizePath(docx_file, winslash = "/", mustWork = TRUE),
     to = "pdf",
-    output = normalizePath(pdf_file, winslash = "/", mustWork = FALSE)
+    output = normalizePath(pdf_file, winslash = "/", mustWork = FALSE),
+    options = if (nzchar(engine)) c("--pdf-engine", engine) else NULL
   )
   invisible(pdf_file)
 }
@@ -438,53 +706,108 @@ write_dta <- function(
   identical(readBin(con, what = "raw", n = 4L), charToRaw("%PDF"))
 }
 
+#' Escape braces in text that cli will interpolate
+#'
+#' External tools report errors containing `{` and `}`; cli would treat those as
+#' interpolation markers and fail while formatting the abort.
+#' @param x Character vector.
+#' @return `x` with braces doubled.
+#' @keywords internal
+.cli_escape <- function(x) {
+  gsub("\\}", "}}", gsub("\\{", "{{", as.character(x)))
+}
+
+#' Bullets naming the exact commands that make PDF export work
+#'
+#' Kept separate so the "no backend at all" abort stays actionable rather than
+#' merely descriptive.
+#' @return A named character vector of cli bullets.
+#' @keywords internal
+.pdf_no_backend_bullets <- function() {
+  pandoc_but_no_engine <- requireNamespace("rmarkdown", quietly = TRUE) &&
+    isTRUE(tryCatch(rmarkdown::pandoc_available(), error = function(e) FALSE)) &&
+    !nzchar(.pandoc_pdf_engine())
+
+  bullets <- c(
+    "Cannot export to PDF: no DOCX to PDF conversion backend is available.",
+    x = paste(
+      "{.pkg DTAtools} builds a Word document and converts it with LibreOffice,",
+      "or with pandoc plus a PDF engine. Neither was found."
+    )
+  )
+  if (pandoc_but_no_engine) {
+    bullets <- c(bullets, x = paste(
+      "pandoc is installed, but pandoc cannot write a PDF on its own -",
+      "it needs a separate PDF engine, and no engine was found."
+    ))
+  }
+  c(
+    bullets,
+    i = "Easiest fix, from R and without administrator rights: {.run tinytex::install_tinytex()}.",
+    i = "Or install LibreOffice ({.url https://www.libreoffice.org/}) so {.code soffice} is on the PATH.",
+    i = "Check the result with {.run DTAtools::dta_pdf_backend()}.",
+    i = "Or export with {.code format = \"docx\"} or {.code format = \"md\"}, which need no external tools."
+  )
+}
+
 #' Convert a DOCX to a PDF, or fail loudly
 #'
-#' Produces a real PDF or aborts. A DOCX is never renamed to `.pdf`, and no
-#' file is ever written to a path other than the requested `pdf_file`: any
-#' partial output is removed before the abort so the caller is not left with a
-#' misnamed or truncated document.
+#' Tries every backend reported by [.pdf_backends_available()] in priority order
+#' and returns as soon as one yields a genuine PDF. Produces a real PDF or
+#' aborts: a DOCX is never renamed to `.pdf`, and no file is ever written to a
+#' path other than the requested `pdf_file`. Any partial output is removed
+#' before the abort so the caller is not left with a misnamed or truncated
+#' document.
 #'
 #' @param docx_file Character. Existing `.docx` to convert.
 #' @param pdf_file Character. Path of the `.pdf` to create.
 #' @return Invisibly returns `pdf_file`.
 #' @keywords internal
 .convert_docx_to_pdf <- function(docx_file, pdf_file) {
-  if (!.pdf_conversion_available()) {
-    cli::cli_abort(c(
-      "Cannot export to PDF: no PDF conversion backend is available.",
-      x = "The {.pkg rmarkdown} package and a working pandoc installation are required.",
-      i = "Install pandoc, or export with {.code format = \"docx\"} instead."
-    ))
+  backends <- .pdf_backends_available()
+
+  if (!.pdf_conversion_available() || length(backends) == 0) {
+    cli::cli_abort(.pdf_no_backend_bullets())
   }
 
-  err <- tryCatch(
-    {
-      .pandoc_docx_to_pdf(docx_file, pdf_file)
-      NULL
-    },
-    error = function(e) conditionMessage(e)
-  )
+  failures <- character(0)
+  for (backend in backends) {
+    err <- tryCatch(
+      {
+        switch(backend,
+          libreoffice = .soffice_docx_to_pdf(docx_file, pdf_file),
+          tinytex = .tinytex_docx_to_pdf(docx_file, pdf_file),
+          .pandoc_docx_to_pdf(docx_file, pdf_file)
+        )
+        NULL
+      },
+      error = function(e) conditionMessage(e)
+    )
 
-  if (!is.null(err)) {
+    if (is.null(err) && .is_pdf_file(pdf_file)) {
+      return(invisible(pdf_file))
+    }
+
+    # Never leave a failed or non-PDF artefact at the requested path.
     unlink(pdf_file, force = TRUE)
-    cli::cli_abort(c(
-      "PDF conversion failed; {.file {pdf_file}} was not created.",
-      x = "{err}",
-      i = "Install a PDF engine for pandoc, or export with {.code format = \"docx\"} instead."
-    ))
+    detail <- paste0(
+      backend, ": ",
+      if (is.null(err)) {
+        "conversion ran but the output did not start with the %PDF signature"
+      } else {
+        .cli_escape(err)
+      }
+    )
+    names(detail) <- "x"
+    failures <- c(failures, detail)
   }
 
-  if (!.is_pdf_file(pdf_file)) {
-    unlink(pdf_file, force = TRUE)
-    cli::cli_abort(c(
-      "PDF conversion did not produce a PDF; {.file {pdf_file}} was discarded.",
-      x = "The converted file does not start with the {.val %PDF} signature.",
-      i = "Install a PDF engine for pandoc, or export with {.code format = \"docx\"} instead."
-    ))
-  }
-
-  invisible(pdf_file)
+  cli::cli_abort(c(
+    "PDF conversion failed; {.file {pdf_file}} was not created.",
+    failures,
+    i = "Check the backend in use with {.run DTAtools::dta_pdf_backend()}.",
+    i = "Install a PDF engine with {.run tinytex::install_tinytex()}, or export with {.code format = \"docx\"} instead."
+  ))
 }
 
 #' @title Export Dataset Metadata as Professional Document

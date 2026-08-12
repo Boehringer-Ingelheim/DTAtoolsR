@@ -170,7 +170,9 @@ test_that("dta_dataset_messages is empty before checking and populated with expe
   after <- fn(app_fixture_dta_with_data("clinical_data_error_all.csv", checked = TRUE), "clinical_data")
   expect_gt(nrow(after), 0)
   expect_true(all(c("source", "column", "message", "severity") %in% names(after)))
-  expect_setequal(unique(after$source), c("schema", "rule"))
+  # clinical_data_error_all.csv now also carries import errors (see
+  # test-clinical-error-fixtures.R), so "import" joins the source set.
+  expect_setequal(unique(after$source), c("schema", "rule", "import"))
 })
 
 test_that("dta_dataset_messages returns an empty data.frame for a nonexistent dataset", {

@@ -1,7 +1,7 @@
 # Tests for the Shiny app shipped under inst/shiny/dta_app.
 #
 # The app is not part of the package namespace, so its helpers are sourced into
-# a scratch environment by helper-shiny-app.R and fetched with dta_app_fn().
+# a scratch environment by helper-shinyapp.R and fetched with app_fn().
 # app.R itself calls Shiny at top level and cannot be evaluated outside a
 # running app; the few assertions about its wiring parse it instead.
 #
@@ -15,7 +15,7 @@
 app_test_dataset <- function(val, name = "ds1") {
   DTAtools::DTADataSetTabular(
     name = name,
-    specs = dta_app_char_num_specs(),
+    specs = app_fixture_char_num_specs(),
     tables = list(
       t1 = data.frame(
         SUBJID = c("a", "b"),
@@ -52,17 +52,17 @@ app_status_row <- function(table = "t1", ok = TRUE, schema = 0L, rule = 0L,
 
 
 test_that("the app directory is found and its helpers load", {
-  dir <- dta_app_dir()
+  dir <- .shiny_app_dir()
   expect_true(dir.exists(dir))
   expect_true(file.exists(file.path(dir, "app.R")))
-  expect_true(is.function(dta_app_fn("dta_table_status_map")))
+  expect_true(is.function(app_fn("dta_table_status_map")))
 })
 
 
 # ---- Task 1: the per-file tick weighs the import axis ---------------------
 
 test_that("dta_table_status_from_status_df weighs all three axes", {
-  status_of <- dta_app_fn("dta_table_status_from_status_df")
+  status_of <- app_fn("dta_table_status_from_status_df")
 
   # The clean case: nothing wrong on any axis.
   expect_identical(
@@ -98,7 +98,7 @@ test_that("dta_table_status_from_status_df weighs all three axes", {
 
 
 test_that("an unknown import axis is neither pass nor fail", {
-  status_of <- dta_app_fn("dta_table_status_from_status_df")
+  status_of <- app_fn("dta_table_status_from_status_df")
 
   # A pre-v2 artifact: the two-axis run it came from recorded ok = TRUE, and the
   # import axis was never checked (NA). Reading NA as 0 would paint it green and
@@ -126,7 +126,7 @@ test_that("an unknown import axis is neither pass nor fail", {
 
 
 test_that("a status frame without the import column keeps two-axis behaviour", {
-  status_of <- dta_app_fn("dta_table_status_from_status_df")
+  status_of <- app_fn("dta_table_status_from_status_df")
 
   # The column being ABSENT is not the same as being NA: it means the frame
   # predates the column entirely. Treating that as "unknown" would turn every
@@ -162,7 +162,7 @@ test_that("dta_table_status_map reports a real import-only failure as fail", {
   expect_false(vs$ok)
 
   expect_identical(
-    dta_app_fn("dta_table_status_map")(dta, "ds1"),
+    app_fn("dta_table_status_map")(dta, "ds1"),
     c(t1 = "fail")
   )
 })
@@ -187,7 +187,7 @@ test_that("dta_table_status_map reports a pre-import-axis artifact as unknown", 
 
   dta <- DTAtools::DTA(datasets = ds)
   expect_identical(
-    dta_app_fn("dta_table_status_map")(dta, "ds1"),
+    app_fn("dta_table_status_map")(dta, "ds1"),
     c(t1 = "unknown")
   )
 })
@@ -196,14 +196,14 @@ test_that("dta_table_status_map reports a pre-import-axis artifact as unknown", 
 test_that("dta_table_status_map passes a table that is clean on all axes", {
   dta <- app_test_dta(c("1.5", "2.5"))
   expect_identical(
-    dta_app_fn("dta_table_status_map")(dta, "ds1"),
+    app_fn("dta_table_status_map")(dta, "ds1"),
     c(t1 = "pass")
   )
 })
 
 
 test_that("the loaded-file list renders unknown distinctly from pass and fail", {
-  app_src <- dta_app_source("app.R")
+  app_src <- app_source("app.R")
 
   # Three distinct icons, three distinct CSS classes: an unknown import axis
   # must not fall through to the pending dash or borrow the pass/fail look.
@@ -211,7 +211,7 @@ test_that("the loaded-file list renders unknown distinctly from pass and fail", 
   expect_match(app_src, 'unknown = "?"', fixed = TRUE)
 
   testthat::skip_if_not_installed("shiny")
-  css <- as.character(dta_app_fn("bi_css")())
+  css <- as.character(app_fn("bi_css")())
   expect_match(css, ".file-unknown", fixed = TRUE)
   expect_match(css, ".file-ok", fixed = TRUE)
   expect_match(css, ".file-fail", fixed = TRUE)
@@ -222,7 +222,7 @@ test_that("the loaded-file list renders unknown distinctly from pass and fail", 
 
 test_that("the HTML validation report carries the import error count", {
   dta <- app_test_dta(c("1.5", "heavy"))
-  report <- dta_app_fn("dta_build_validation_report")(dta, list(ds1 = "fail"))
+  report <- app_fn("dta_build_validation_report")(dta, list(ds1 = "fail"))
 
   expect_true(is.character(report))
   # Without the column the report shows two zero counts and no reason at all
@@ -243,7 +243,7 @@ test_that("dta_unload_table drops the table's import issues", {
   dta <- app_test_dta(c("1.5", "heavy"))
   expect_named(DTAtools::datasets(dta, "ds1")@import_issues, "t1")
 
-  res <- dta_app_fn("dta_unload_table")(dta, "ds1", "t1")
+  res <- app_fn("dta_unload_table")(dta, "ds1", "t1")
   expect_true(res$ok)
 
   ds <- DTAtools::datasets(res$value, "ds1")
@@ -258,7 +258,7 @@ test_that("dta_unload_table drops the table's import issues", {
 
 test_that("dta_unload_all drops every table's import issues", {
   dta <- app_test_dta(c("1.5", "heavy"))
-  res <- dta_app_fn("dta_unload_all")(dta, "ds1")
+  res <- app_fn("dta_unload_all")(dta, "ds1")
   expect_true(res$ok)
 
   ds <- DTAtools::datasets(res$value, "ds1")
@@ -270,7 +270,7 @@ test_that("dta_unload_all drops every table's import issues", {
 test_that("unloading works on a dataset that has no import_issues property", {
   # A file dataset carries no typed tables, so @import_issues does not exist on
   # it. The unload helpers must not assume the property is there.
-  has_issues <- dta_app_fn("dta_has_import_issues")
+  has_issues <- app_fn("dta_has_import_issues")
   expect_true(has_issues(app_test_dataset(c("1.5", "2.5"))))
   expect_false(has_issues(DTAtools::DTAMetaData(title = "not a dataset")))
   expect_false(has_issues(NULL))
@@ -290,7 +290,7 @@ test_that("dta_inspect_import_fields reads what inspect() emits for an import me
   rec <- as.data.frame(DTAtools::inspect(ds, id = import_ids[[1]]))
   expect_identical(as.character(rec$type[1]), "import")
 
-  fields <- dta_app_fn("dta_inspect_import_fields")(as.list(rec[1, , drop = FALSE]))
+  fields <- app_fn("dta_inspect_import_fields")(as.list(rec[1, , drop = FALSE]))
 
   # The three things the modal promises to show: the raw value, the declared
   # type, and the reason it could not be represented.
@@ -303,7 +303,7 @@ test_that("dta_inspect_import_fields reads what inspect() emits for an import me
 
 
 test_that("dta_inspect_import_fields falls back to the flat message columns", {
-  fields <- dta_app_fn("dta_inspect_import_fields")(list(
+  fields <- app_fn("dta_inspect_import_fields")(list(
     column = "AGE",
     row = 7,
     keyword = "not_convertible"
@@ -314,13 +314,13 @@ test_that("dta_inspect_import_fields falls back to the flat message columns", {
 
   # Nothing available is "" throughout, never NA or NULL -- the modal calls
   # nzchar() on every one of them.
-  empty <- dta_app_fn("dta_inspect_import_fields")(list())
+  empty <- app_fn("dta_inspect_import_fields")(list())
   expect_identical(
     empty,
     list(column = "", raw = "", declared_type = "", reason = "", row = "")
   )
   expect_identical(
-    dta_app_fn("dta_inspect_import_fields")(
+    app_fn("dta_inspect_import_fields")(
       list(import_column = NA_character_, import_raw = NA_character_)
     )$raw,
     ""
@@ -329,7 +329,7 @@ test_that("dta_inspect_import_fields falls back to the flat message columns", {
 
 
 test_that("the inspect modal routes import records to their own branch", {
-  app_src <- dta_app_source("app.R")
+  app_src <- app_source("app.R")
 
   # app.R cannot be sourced outside a running app, so parse it: this is what
   # catches a syntax error in the branch that was added.
@@ -344,7 +344,7 @@ test_that("the inspect modal routes import records to their own branch", {
   expect_match(app_src, '.first_nonempty(r[["type"]], r[["source"]])', fixed = TRUE)
 
   testthat::skip_if_not_installed("shiny")
-  css <- as.character(dta_app_fn("bi_css")())
+  css <- as.character(app_fn("bi_css")())
   # Its own hue, so it never reads as a rule or schema failure.
   expect_match(css, ".inspect-badge.import", fixed = TRUE)
   expect_match(css, ".inspect-badge.rule", fixed = TRUE)
@@ -369,7 +369,7 @@ test_that("dta_metadata_import_messages surfaces DTA-level metadata errors", {
     )
   )
 
-  found <- dta_app_fn("dta_metadata_import_messages")(dta)
+  found <- app_fn("dta_metadata_import_messages")(dta)
   expect_true(is.data.frame(found))
   expect_equal(nrow(found), 1)
   expect_identical(as.character(found$target), "metadata")
@@ -382,26 +382,26 @@ test_that("dta_metadata_import_messages surfaces DTA-level metadata errors", {
 
   # These are DTA-level, so the per-dataset dock -- which reads messages(ds) --
   # cannot show them. That is the whole reason the metadata editor has to.
-  ds_msgs <- dta_app_fn("dta_dataset_messages")(dta, "ds1")
+  ds_msgs <- app_fn("dta_dataset_messages")(dta, "ds1")
   expect_false("metadata" %in% as.character(ds_msgs$target))
 })
 
 
 test_that("clean metadata produces no import notice", {
   dta <- app_test_dta(c("1.5", "2.5"))
-  found <- dta_app_fn("dta_metadata_import_messages")(dta)
+  found <- app_fn("dta_metadata_import_messages")(dta)
   expect_equal(nrow(found), 0)
 })
 
 
 test_that("the metadata editor renders the import notice", {
-  app_src <- dta_app_source("app.R")
+  app_src <- app_source("app.R")
   expect_match(app_src, "dta_metadata_import_messages(dta)", fixed = TRUE)
   expect_match(app_src, 'class = "md-import-warn"', fixed = TRUE)
 
   testthat::skip_if_not_installed("shiny")
   expect_match(
-    as.character(dta_app_fn("bi_css")()),
+    as.character(app_fn("bi_css")()),
     ".md-import-warn",
     fixed = TRUE
   )
