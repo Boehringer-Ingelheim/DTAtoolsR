@@ -143,6 +143,31 @@ test_that("export_column_value_table writes DOCX and returns value table", {
   expect_equal(as.character(values_df$VISIT), c("V01", "EOT"))
 })
 
+test_that("export_column_value_table() aborts with a clear cli error for a column with no values", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      STUDYID = DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = FALSE)
+    )
+  )
+
+  # Before the fix this raised base R's raw
+  # "'names' attribute [1] must be the same length as the vector [0]" out of
+  # `colnames(df) <- id`, not a cli_abort naming the column.
+  expect_error(
+    export_column_value_table(specs, file = tempfile(fileext = ".docx"), id = "STUDYID"),
+    regexp = "STUDYID",
+    class = "rlang_error"
+  )
+
+  # A column id absent from the collection altogether hit the same crash
+  # (`specs@values` on NULL); it gets the same clear treatment.
+  expect_error(
+    export_column_value_table(specs, file = tempfile(fileext = ".docx"), id = "NOT_A_COLUMN"),
+    regexp = "NOT_A_COLUMN",
+    class = "rlang_error"
+  )
+})
+
 test_that("write_metadata validates file input and creates optional sidecar", {
   missing_file <- file.path(tempdir(), "missing-export-metadata.csv")
   expect_error(write_metadata(missing_file, data.frame(A = 1), write_to_file = FALSE), "does not exist")

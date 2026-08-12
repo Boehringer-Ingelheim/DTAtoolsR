@@ -230,17 +230,38 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
 #' @title List of tables labels within DTADataSetTabular Object
 #' @description
 #' Method to get a all tables labels within a DTADataSetTabular Object.
-#' @param x An object of class DTADataSetTabular
+#' @param object An object of class DTADataSetTabular
 #' @param ... Additional arguments (not used).
 #' @return A character vector with table names.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' labels(ds)
-#' @name labels-DTADataSetTabular
-labels <- new_generic("labels", "x")
+#' @name labels
 #' @export
-method(labels, DTADataSetTabular) <- function(x) {
-  return(names(x@tables))
+# `labels` already exists as a base R (S3) generic, so this extends it rather
+# than replacing it -- exactly the pattern already used for `names`/`print`
+# below and in DTAColumnSpecCollection-class.R. Unconditionally creating a
+# brand-new S7 generic under this name would, once exported, mask
+# base::labels() entirely for every class once the package is attached, and
+# the new generic has no fallback method for anything but
+# DTADataSetTabular -- `labels()` on an lm/dendrogram/etc. would then abort
+# with "Can't find method" instead of falling back to base's own dispatch.
+if (!exists("labels", mode = "function")) {
+  labels <- new_generic("labels", "x")
+}
+#' @export
+# Method formals must match base::labels' own formals -- function(object, ...)
+# -- rather than the function(x) used for names()/print() below. Those two
+# match base::names()/base::print() because those generics happen to declare
+# their dispatch argument as `x`; base::labels() declares it as `object`.
+# R CMD check's S3 generic/method consistency check compares the registered
+# method's formals against the real base generic's formals (arg names and
+# all), so mismatching here reintroduces the WARNING this fix removes. S7
+# does not enforce or care about the argument name -- `method<-` merely calls
+# registerS3method() for base S3 generics like this one -- so this is purely
+# to satisfy R CMD check.
+method(labels, DTADataSetTabular) <- function(object, ...) {
+  return(names(object@tables))
 }
 
 #' @title Write DTA Table to File

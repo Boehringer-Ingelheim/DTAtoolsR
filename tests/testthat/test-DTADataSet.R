@@ -139,3 +139,33 @@ test_that("colspec() errors for out-of-bounds numeric index", {
   # expect_error(colspec(ds, 999), class = "rlang_error").
   expect_error(colspec(ds, 999), class = "subscriptOutOfBoundsError")
 })
+
+test_that("labels() is exported, not left to base::labels' silent fallback", {
+  # The defect: `labels <- new_generic("labels", "x")` was defined and had a
+  # method registered for DTADataSetTabular, but no `@export` ever reached the
+  # generic itself, so it never made it into NAMESPACE. In an INSTALLED
+  # package (export_all = FALSE is the real, non-dev behaviour that
+  # pkgload::load_all()'s default of TRUE merely papers over) an unexported
+  # `labels()` is invisible to a caller; the call falls through to
+  # base::labels.default, which does not error -- it silently returns a
+  # plausible-looking wrong value. getNamespaceExports() reports the real
+  # NAMESPACE-declared exports regardless of load_all()'s export_all default,
+  # so this check catches the silent fallback without needing to flip global
+  # session state.
+  exported <- getNamespaceExports(asNamespace("DTAtools"))
+  expect_true("labels" %in% exported)
+
+  ds <- create_example_DTADataSetTabular(2)
+  expect_identical(labels(ds), names(tables(ds)))
+
+  # The fix must not achieve export by replacing base::labels with an
+  # independent S7 generic that has no method for anything else: that would
+  # newly break `labels()` on every other object type once the package is
+  # attached (library(DTAtools) masks base::labels only for the classes it
+  # actually handles). The correct fix extends the existing base generic, so
+  # `labels` in this package IS base::labels, and base's own dispatch for
+  # unrelated classes keeps working.
+  expect_identical(labels, base::labels)
+  m <- lm(mpg ~ wt, data = mtcars)
+  expect_equal(labels(m), "wt")
+})

@@ -268,6 +268,36 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     import_errors <- NULL
   }
 
+  # Report the import axis with the same visibility as the schema and rule
+  # axes above. Without this, a table whose only defect is an unconvertible
+  # value prints the schema success line and the rules success line, then
+  # fails downstream with no stated cause -- actively misleading for a
+  # clinical data package.
+  if (isTRUE(verbose)) {
+    cli::cli_h3("validating imports")
+
+    if (import_valid) {
+      cli::cli_alert_success("All values were imported cleanly into their declared types.")
+    } else {
+      preview <- utils::head(import_errors, 5)
+      for (i in seq_len(nrow(preview))) {
+        raw_display <- substr(as.character(preview$raw[i]), 1L, 80L)
+        cli::cli_alert_danger(
+          "Row {preview$row[i]}, column '{preview$column[i]}': value \"{raw_display}\" could not be represented as {preview$declared_type[i]}."
+        )
+      }
+      n_more <- nrow(import_errors) - nrow(preview)
+      if (n_more > 0) {
+        cli::cli_alert_danger("... and {n_more} more import error{?s}.")
+      }
+
+      affected_columns <- unique(import_errors$column)
+      cli::cli_alert_danger(
+        "{n_import_errors} value{?s} could not be represented in the declared type ({length(affected_columns)} column{?s}: {affected_columns})."
+      )
+    }
+  }
+
   details <- list(
     ok = NA,
     schema_valid = !has_schema_errors,

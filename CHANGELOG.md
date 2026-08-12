@@ -36,6 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   instead of being recorded while the banner still reported success.
 - `metadata_import_errors()` returns a `DTAMetaData` object's import issues.
 - `as.data.frame()` method for validation details.
+- `labels()` is exported. It was defined but never exported, so in an installed
+  package the call fell through to `base::labels.default` and silently returned
+  `"1"` — a wrong answer rather than an error. It is registered through the same
+  guard the package uses for `names()` and `print()`, so `base::labels` keeps
+  working for every other class.
 
 ### Changed
 
@@ -96,6 +101,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   frame.
 - The Shiny app ignored import errors when colouring table status, showing a
   failing table as clean.
+- **`check()` claimed a table was valid and then failed it.** The console report
+  covered the schema and rule axes but not the import axis, so a table whose
+  only defect was an unconvertible value printed
+  `Table format, length, pattern, and values are valid` followed by
+  `0 of 1 table valid`, with no stated cause. It now names the row, column, raw
+  text and declared type.
+- `export_column_value_table()` on a column with no `values` failed with a raw
+  R error about `names` attribute lengths instead of naming the column.
+- The vignette could not be built. It selected `inspect()` columns by a
+  hard-coded message id, which the new import axis reordered.
 
 ## [0.12.2] - 2026-08-04
 

@@ -668,3 +668,52 @@ test_that("stage 1 canaries: over-firing would show up here", {
   expect_equal(res$n_import_errors, 0L)
   expect_equal(nrow(messages(dta, as_tibble = FALSE)), 0)
 })
+
+
+# ---------------------------------------------------------------------------
+# check() console reporting must name the import axis.
+# ---------------------------------------------------------------------------
+
+test_that("check() console output states the import failure instead of only claiming success", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      BMI = DTAColumnSpec(id = "BMI", type = "SAS Num", nullable = TRUE)
+    )
+  )
+  ds <- DTADataSetTabular(
+    name = "imports",
+    specs = specs,
+    tables = list(tab1 = data.frame(BMI = c("20.5", "heavy"), stringsAsFactors = FALSE))
+  )
+
+  # Confirm this is exactly the reported scenario: schema and rules are both
+  # clean (the column is nullable, so the NA left by the failed conversion is
+  # not itself a schema error), and the ONLY defect is on the import axis.
+  details <- validate_table_detailed(
+    specs,
+    as.data.frame(ds@tables[["tab1"]]),
+    verbose = FALSE
+  )
+  expect_true(details$schema_valid)
+  expect_true(details$rules_valid)
+  expect_false(details$import_valid)
+  expect_false(details$ok)
+
+  # cli's alerts are emitted as conditions (message()), not stdout, so they
+  # must be captured with capture_messages() -- capture_output_lines() alone
+  # sees none of this output and would pass vacuously.
+  output <- paste(
+    testthat::capture_messages(
+      check(ds, persist = FALSE, quiet = FALSE)
+    ),
+    collapse = "\n"
+  )
+
+  # The console report must name the actual cause of failure: the import
+  # axis, the offending column, and the raw text that could not be
+  # represented -- not merely assert schema/rule success and then fail
+  # silently.
+  expect_true(grepl("import", output, ignore.case = TRUE))
+  expect_true(grepl("BMI", output, fixed = TRUE))
+  expect_true(grepl("heavy", output, fixed = TRUE))
+})
