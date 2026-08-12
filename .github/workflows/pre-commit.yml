@@ -1,10 +1,17 @@
+# Pull requests only: the autofix step below pushes to `github.head_ref`, which
+# is empty outside a `pull_request` event, so a push-triggered run could never
+# commit anything. Branches are master/dev — this workflow previously listed
+# `main`, which does not exist here, so it never ran at all.
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches: [master, dev]
+  workflow_dispatch:
 
 name: pre-commit
+
+concurrency:
+  group: pre-commit-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   pre-commit:

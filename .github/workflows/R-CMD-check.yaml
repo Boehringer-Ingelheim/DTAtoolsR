@@ -1,14 +1,31 @@
 # Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+#
+# Triggers deliberately exclude `push`. A `pull_request` run checks the
+# *merge commit* (refs/pull/N/merge), which is byte-for-byte what lands on the
+# target branch, so re-running on the subsequent push to master — or on the
+# master -> dev back-merge — would check the same tree two or three more times.
+# The PR run is the gate; make it a required check in branch protection.
+# Direct pushes (release-only commits on master) are covered by the weekly
+# schedule, which also catches breakage from CRAN dependency updates.
 on:
-  push:
-    branches: [main, master, dev]
   pull_request:
-    branches: [main, master, dev]
+    branches: [master, dev]
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
 
 name: R-CMD-check
 
 permissions: read-all
+
+# Superseded PR pushes cancel the still-running matrix instead of queueing a
+# second full one. Non-PR runs fall back to run_id, which is unique per run, so
+# a manual dispatch can never cancel an in-flight scheduled run (they would
+# otherwise share the constant group "refs/heads/master").
+concurrency:
+  group: R-CMD-check-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   R-CMD-check:
