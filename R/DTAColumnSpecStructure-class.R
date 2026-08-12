@@ -41,20 +41,56 @@ DTAColumnSpecStructure <- S7::new_class(
     }
   }
 )
+#' Is a structure property set to something worth serializing?
+#'
+#' `NULL`, `NA` and blank strings all mean "not specified" and must not be
+#' written out, because a backend-prefixed blank (e.g. `"SAS "`) re-parses to an
+#' empty type/format that no backend validator accepts.
+#' @param value A property value.
+#' @return `TRUE` when the value carries information.
+#' @keywords internal
+.structure_value_is_set <- function(value) {
+  if (is.null(value) || length(value) == 0) {
+    return(FALSE)
+  }
+  value <- value[!is.na(value)]
+  if (length(value) == 0) {
+    return(FALSE)
+  }
+  any(nzchar(trimws(as.character(value))))
+}
+
+#' Prefix a structure property with its backend, e.g. `"Char"` -> `"SAS Char"`
+#' @param backend Character. The backend name.
+#' @param value The property value.
+#' @return A character scalar.
+#' @keywords internal
+.structure_backend_value <- function(backend, value) {
+  paste(backend, paste(as.character(value), collapse = " "))
+}
+
 #' @title as.list method for as.list.DTAColumnSpecStructure
 #' @description
-#' Converts a DTAColumnSpecStructure object to a list.
+#' Converts a DTAColumnSpecStructure object to a list. Properties that are not
+#' set are omitted entirely rather than serialized as a backend prefix followed
+#' by nothing (`"SAS "`), which would not survive a YAML round trip.
 #' @param x A DTAColumnSpecStructure object.
 #' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpecStructure properties.
+#' @return A named list with the DTAColumnSpecStructure properties that are set.
 #' @export
 #' @name as.list
 method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
-  list(
-    type = paste(x@backend, x@type),
-    format = paste(x@format, x@backend),
-    length = x@length,
-  )
+  out <- list()
+  if (.structure_value_is_set(x@type)) {
+    out$type <- .structure_backend_value(x@backend, x@type)
+  }
+  if (.structure_value_is_set(x@format)) {
+    out$format <- .structure_backend_value(x@backend, x@format)
+  }
+  if (!is.null(x@length)) {
+    out$length <- x@length
+  }
+  out
 }
 
 #' @title as_json_schema_type

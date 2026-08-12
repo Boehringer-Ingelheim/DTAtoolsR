@@ -42,3 +42,10 @@ CHANGELOG.md
 ^\.Rcheck
 ^check_out
 
+# AI assistant configuration — never part of the shipped package
+^CLAUDE\.md$
+^CLAUDE\.local\.md$
+^\.claude$
+^\.claude/
+^\.graphifyignore$
+

@@ -32,7 +32,7 @@
 #'
 #' @export
 DTAFileTabular <- S7::new_class(
-  "DTAFile",
+  "DTAFileTabular",
   parent = DTAFile,
   constructor = function(
     filename,
@@ -68,16 +68,34 @@ DTAFileTabular <- S7::new_class(
     missing_values = class_character
   ),
   validator = function(self) {
-    if (!is.character(self@sep) || nchar(self@sep) != 1) {
-      "'sep' must be a single character."
+    # Collect every violation: returning the messages from separate `if`
+    # blocks would silently discard all but the last one.
+    problems <- character()
+
+    if (
+      !is.character(self@sep) ||
+        length(self@sep) != 1 ||
+        nchar(self@sep) != 1
+    ) {
+      problems <- c(problems, "'sep' must be a single character.")
     }
 
     if (!is.logical(self@has_header) || length(self@has_header) != 1) {
-      "'has_header' must be a single logical value."
+      problems <- c(problems, "'has_header' must be a single logical value.")
     }
 
-    if (!is.character(self@quote) || nchar(self@quote) != 1) {
-      "'quote' must be a single character."
+    if (
+      !is.character(self@quote) ||
+        length(self@quote) != 1 ||
+        nchar(self@quote) != 1
+    ) {
+      problems <- c(problems, "'quote' must be a single character.")
+    }
+
+    if (length(problems) == 0) {
+      NULL
+    } else {
+      problems
     }
   }
 )
@@ -101,6 +119,50 @@ method(read_file_execution, DTAFileTabular) <- function(x, ...) {
     "This method is not implemented. You need to
   use an object of a class which is derived from DTAFileTabular class."
   )
+}
+
+#' @title Reader Arguments Passed Through `...`
+#' @description
+#' `read_file_execution()` dispatches on `x` alone and takes everything else
+#' through `...`, so each concrete method has to pull its arguments back out.
+#' Doing that as `list(...)[[1]]` makes the file the *first* argument by
+#' position, which silently picks up `specs` if a caller ever names its
+#' arguments in the other order. Removing the named entries first leaves the
+#' file as the only positional one, so the three readers agree on what they were
+#' given however the call was written.
+#' @param ... The arguments `read_file_execution()` was called with.
+#' @return A list with `file` (the path) and `specs` (a
+#'   `DTAColumnSpecCollection`, or `NULL` when the caller supplied none).
+#' @keywords internal
+dta_reader_args <- function(...) {
+  args <- list(...)
+  nms <- names(args)
+
+  if (is.null(nms)) {
+    nms <- rep("", length(args))
+  }
+
+  # Exact matching: `[[` with a character index partial-matches only when asked
+  # to, unlike `$`, which would let a stray `spec = ` argument bind to `specs`.
+  pick <- function(name) {
+    index <- which(nms == name)
+    if (length(index) == 0) NULL else args[[index[[1]]]]
+  }
+
+  specs <- pick("specs")
+  file <- pick("file")
+
+  if (is.null(file)) {
+    positional <- args[!nzchar(nms)]
+
+    if (length(positional) == 0) {
+      cli::cli_abort("{.fn read_file_execution} requires a {.arg file} argument.")
+    }
+
+    file <- positional[[1]]
+  }
+
+  list(file = file, specs = specs)
 }
 
 #' @keywords internal

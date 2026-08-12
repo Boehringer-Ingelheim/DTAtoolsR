@@ -46,14 +46,17 @@
 #' @param quiet Logical. If `TRUE`, suppresses console output. Default: `FALSE`.
 #' @param fallback Logical. If `TRUE` (default) and template processing fails,
 #'   fall back to the standard programmatic document produced by [write_dta()].
-#'   If `FALSE`, a failure is raised as an error.
+#'   The substitution is signalled as a **warning** condition (unless `quiet =
+#'   TRUE`), so it can be trapped programmatically with
+#'   `withCallingHandlers(warning = )`. If `FALSE`, a failure is raised as an
+#'   error.
 #'
 #' @return Invisibly returns the `output` path.
 #'
 #' @seealso [write_dta()], which accepts a `template` argument to route through
 #'   this function.
 #'
-#' @importFrom cli cli_abort cli_alert_success cli_alert_warning
+#' @importFrom cli cli_abort cli_alert_success cli_warn
 #' @importFrom tools file_ext
 #'
 #' @examples
@@ -115,9 +118,14 @@ export_with_template <- function(
     error = function(e) {
       if (isTRUE(fallback)) {
         if (!isTRUE(quiet)) {
-          cli::cli_alert_warning(
-            "Template processing failed: {conditionMessage(e)}. Falling back to the standard document format."
-          )
+          # A real warning condition (not cli_alert_warning(), which only
+          # signals a message): callers -- notably the Shiny app -- must be able
+          # to trap the silent substitution of the built-in layout with
+          # withCallingHandlers(warning = ) / tryCatch(warning = ).
+          cli::cli_warn(c(
+            "Template processing failed: {conditionMessage(e)}",
+            i = "Falling back to the standard document format."
+          ))
         }
         write_dta(dta, output, format = "docx", overwrite = TRUE, quiet = quiet)
         invisible(output)
@@ -217,19 +225,23 @@ export_with_template <- function(
     "{ERROR_HANDLING}" = .tv_scalar(meta@error_handling),
     "{AUTHORIZED_CORRECTIONS}" = auth_str,
     "{VERSION_HISTORY}" = version_history_str,
-    "{GENERATED_DATE}" = format(Sys.Date(), "%B %d, %Y")
+    "{GENERATED_DATE}" = .format_document_date(Sys.Date())
   )
 }
 
 
 #' Coerce a metadata value to a single-line display string
+#'
+#' Dates render in ISO 8601 (`YYYY-MM-DD`) so a template filled on a German
+#' workstation and one filled on an English CI runner produce identical text.
 #' @keywords internal
 .tv_scalar <- function(x, default = "") {
   if (is.null(x) || length(x) == 0) {
     return(default)
   }
-  if (inherits(x, "Date")) {
-    return(format(x, "%B %d, %Y"))
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    out <- .format_document_date(x)
+    return(if (nzchar(out)) out else default)
   }
   if (is.logical(x)) {
     return(if (isTRUE(x)) "Yes" else "No")

@@ -15,6 +15,13 @@ A data frame with columns: version, date, changes
 \description{
 Convert version history to a data frame for easier inspection
 }
+\details{
+Version history records may carry their date as a \code{Date} (built in R), as
+a character string (loaded from YAML), or not at all. Each record's date is
+therefore converted individually via \code{.history_date()}; a missing or
+unparseable date becomes \code{NA} on that row instead of aborting the whole
+call.
+}
 \examples{
 library(DTAtools)
 md <- create_example_DTAMetaData(2)

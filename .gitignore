@@ -27,3 +27,6 @@ test_comprehensive.md
 test_output.md
 Rplots.pdf
 IMPLEMENTATION_TECHNICAL_DETAILS.md
+CLAUDE.local.md
+.claude/settings.local.json
+graphify-out/

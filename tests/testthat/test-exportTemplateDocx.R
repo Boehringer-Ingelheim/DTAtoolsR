@@ -1,19 +1,4 @@
-# Build a minimal Word template containing the given lines as paragraphs.
-.make_template <- function(lines) {
-  path <- tempfile(fileext = ".docx")
-  doc <- officer::read_docx()
-  for (ln in lines) {
-    doc <- officer::body_add_par(doc, ln, style = "Normal")
-  }
-  print(doc, target = path)
-  path
-}
-
-# Return the concatenated visible text of a Word document.
-.docx_text <- function(path) {
-  summary <- officer::docx_summary(officer::read_docx(path))
-  paste(summary$text, collapse = "\n")
-}
+# .make_template(), .docx_text() and .docx_paragraphs() live in helper-docx.R.
 
 test_that(".extract_template_variables maps DTA metadata to placeholders", {
   ds <- create_example_DTADataSetTabular(2)
@@ -65,6 +50,116 @@ test_that(".extract_template_variables is robust to empty metadata", {
   expect_equal(vars[["{RECEIVER_CONTACTS}"]], "")
   expect_equal(vars[["{DATASET_COUNT}"]], "1")
   expect_equal(vars[["{TEST_UPLOAD}"]], "No")
+})
+
+test_that("date placeholders render in ISO 8601, not a localized month name", {
+  # OWNER'S DECISION: every date in an exported document is YYYY-MM-DD.
+  # .tv_scalar() used to format Date values with "%B %d, %Y", whose month name
+  # comes from LC_TIME, so the very same DTA produced "Januar 15, 2026" on a
+  # German workstation and "January 15, 2026" on an English CI runner.
+  ds <- create_example_DTADataSetTabular(2)
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData(2))
+  vars <- .extract_template_variables(dta)
+
+  expect_equal(vars[["{DTA_DATE}"]], "2026-01-15")
+  expect_equal(vars[["{TRANSMISSION_FIRST_TRANSFER}"]], "2026-02-01")
+  expect_equal(vars[["{TRANSMISSION_LAST_TRANSFER}"]], "2026-03-31")
+  # {GENERATED_DATE} is "today", so pin its shape and its agreement with the
+  # ISO format string rather than a fixed literal.
+  expect_equal(vars[["{GENERATED_DATE}"]], format(Sys.Date(), "%Y-%m-%d"))
+  expect_match(vars[["{GENERATED_DATE}"]], "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+  # create_example_DTADataSetTabular(2) declares no validation rules.
+  expect_equal(length(ds@specs@rules), 0L)
+  expect_equal(vars[["{TOTAL_RULES}"]], "0")
+
+  # The same values must reach the rendered document.
+  template <- .make_template(c(
+    "Agreement date: {DTA_DATE}",
+    "Window: {TRANSMISSION_FIRST_TRANSFER} to {TRANSMISSION_LAST_TRANSFER}",
+    "Generated: {GENERATED_DATE}",
+    "Rules: {TOTAL_RULES}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  text <- .docx_text(out)
+  expect_match(text, "Agreement date: 2026-01-15", fixed = TRUE)
+  expect_match(text, "Window: 2026-02-01 to 2026-03-31", fixed = TRUE)
+  expect_match(text, paste0("Generated: ", format(Sys.Date(), "%Y-%m-%d")), fixed = TRUE)
+  expect_match(text, "Rules: 0", fixed = TRUE)
+})
+
+test_that("date placeholders are identical under English and non-English LC_TIME", {
+  # The whole point of the ISO decision: the rendered agreement must not depend
+  # on the workstation's LC_TIME. This fails against the old "%B %d, %Y" code.
+  old_lc_time <- Sys.getlocale("LC_TIME")
+  on.exit(Sys.setlocale("LC_TIME", old_lc_time), add = TRUE)
+
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = create_example_DTAMetaData(2)
+  )
+
+  # Whichever non-English time locale this machine offers. The assertions hold
+  # in every locale, so nothing is skipped when none can be set.
+  for (loc in c("de_DE.UTF-8", "German_Germany.1252", "fr_FR.UTF-8", "French_France.1252")) {
+    if (nzchar(suppressWarnings(Sys.setlocale("LC_TIME", loc)))) break
+  }
+  vars_local <- .extract_template_variables(dta)
+
+  expect_equal(vars_local[["{DTA_DATE}"]], "2026-01-15")
+  expect_equal(vars_local[["{TRANSMISSION_FIRST_TRANSFER}"]], "2026-02-01")
+  expect_match(vars_local[["{GENERATED_DATE}"]], "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+  expect_false(grepl("[A-Za-z]", vars_local[["{DTA_DATE}"]]))
+
+  # ... and identical to what the C locale produces.
+  Sys.setlocale("LC_TIME", "C")
+  vars_c <- .extract_template_variables(dta)
+  expect_identical(vars_local[["{DTA_DATE}"]], vars_c[["{DTA_DATE}"]])
+  expect_identical(
+    vars_local[["{TRANSMISSION_LAST_TRANSFER}"]],
+    vars_c[["{TRANSMISSION_LAST_TRANSFER}"]]
+  )
+  expect_identical(vars_local[["{GENERATED_DATE}"]], vars_c[["{GENERATED_DATE}"]])
+})
+
+test_that("TRUE transmission flags render Yes and phrase dates pass through", {
+  # create_example_DTAMetaData(3) is the only fixture that sets test_upload and
+  # blinded_transfer to TRUE. Without it an implementation that returned a
+  # constant "No" would satisfy the entire suite.
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = create_example_DTAMetaData(3)
+  )
+  vars <- .extract_template_variables(dta)
+
+  expect_equal(vars[["{TEST_UPLOAD}"]], "Yes")
+  expect_equal(vars[["{BLINDED_TRANSFER}"]], "Yes")
+
+  # Transfer "dates" are frequently free-text phrases rather than Date objects;
+  # .tv_scalar() must pass those through verbatim and not coerce or reformat.
+  expect_equal(vars[["{TRANSMISSION_FIRST_TRANSFER}"]], "2 weeks after approval")
+  expect_equal(vars[["{TRANSMISSION_LAST_TRANSFER}"]], "Final transfer by 2026-12-31")
+  expect_equal(vars[["{TRANSMISSION_TYPE}"]], "Secure cloud storage")
+  expect_equal(vars[["{TRANSMISSION_FREQUENCY}"]], "Monthly transfers")
+
+  template <- .make_template(c(
+    "Test upload: {TEST_UPLOAD}",
+    "Blinded: {BLINDED_TRANSFER}",
+    "First transfer: {TRANSMISSION_FIRST_TRANSFER}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  text <- .docx_text(out)
+  expect_match(text, "Test upload: Yes", fixed = TRUE)
+  expect_match(text, "Blinded: Yes", fixed = TRUE)
+  expect_match(text, "First transfer: 2 weeks after approval", fixed = TRUE)
 })
 
 test_that("export_with_template fills placeholders in a Word template", {
@@ -180,6 +275,44 @@ test_that("export_with_template warns about unresolved placeholders", {
   expect_match(.docx_text(out), "Unknown: \\{NOT_A_FIELD\\}")
 })
 
+test_that("unresolved detection misreads braces coming from substituted values", {
+  # KNOWN DEFECT, pinned rather than endorsed: .substitute_placeholder_text()
+  # scans for leftover tokens in the POST-substitution text, so any brace that
+  # arrived as part of a substituted VALUE is reported as an unresolved
+  # placeholder the template never contained. When
+  # R/exportTemplateDocx.R:485-488 is fixed this SHOULD fail -- change it to
+  # expect_length(res$unresolved, 0).
+  res <- .substitute_placeholder_text(
+    "T: {DTA_TITLE}",
+    list("{DTA_TITLE}" = "Study {ARM_A}")
+  )
+  expect_equal(res$text, "T: Study {ARM_A}")
+  expect_equal(res$unresolved, "{ARM_A}")
+
+  # The same defect surfaces end to end: a DTA whose title legitimately
+  # contains braces exports correctly, yet the user is warned about tokens they
+  # never wrote.
+  template <- .make_template("Title: {DTA_TITLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = DTAMetaData(title = "Study {A} vs {B}", version = "1.0")
+  )
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  # KNOWN DEFECT, pinned rather than endorsed: this export is correct yet emits
+  # a false "unresolved placeholders" warning naming {A} and {B}. When
+  # R/exportTemplateDocx.R:485-488 is fixed this SHOULD fail -- change it to
+  # expect_no_warning(export_with_template(dta, template, out, quiet = TRUE)).
+  expect_warning(
+    export_with_template(dta, template, out, quiet = TRUE),
+    "placeholders"
+  )
+  # The document itself is fine: the title is rendered verbatim.
+  expect_match(.docx_text(out), "Title: Study {A} vs {B}", fixed = TRUE)
+})
+
 test_that("export_with_template validates its inputs", {
   dta <- create_example_DTA()
 
@@ -211,12 +344,38 @@ test_that("export_with_template falls back to the standard layout on failure", {
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  # fallback = TRUE (default): a valid document is still produced
-  suppressWarnings(
+  # fallback = TRUE (default) with quiet = TRUE: the fallback happens silently.
+  expect_no_warning(
     export_with_template(dta, bad_template, out, quiet = TRUE, fallback = TRUE)
   )
   expect_true(file.exists(out))
   expect_s3_class(officer::read_docx(out), "rdocx")
+
+  # "A valid rdocx" is satisfied by an empty document, so assert that the
+  # fallback really produced the standard write_dta() layout: the DTA title,
+  # the metadata and dataset sections, the numbered heading hierarchy, and the
+  # metadata/spec tables.
+  paragraphs <- .docx_paragraphs(out)
+  expect_true("Example DTA" %in% paragraphs)
+  expect_true("Data Transfer Agreement Metadata" %in% paragraphs)
+  expect_true("Dataset Specifications" %in% paragraphs)
+  summary <- officer::docx_summary(officer::read_docx(out))
+  expect_true(all(paste("heading", 1:4) %in% summary$style_name))
+  expect_true(any(!is.na(summary$table_index)))
+
+  # quiet = FALSE: the fallback must be announced as a real warning CONDITION
+  # (cli::cli_warn), not a cli message, so a caller can trap it.
+  out_loud <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_loud, force = TRUE), add = TRUE)
+  # suppressMessages() wraps the outside so the cli alerts this call emits
+  # ("Document saved to ...") do not leak into the test log.
+  suppressMessages(
+    expect_warning(
+      export_with_template(dta, bad_template, out_loud, quiet = FALSE, fallback = TRUE),
+      "Falling back to the standard document format"
+    )
+  )
+  expect_true(file.exists(out_loud))
 
   # fallback = FALSE: the failure is raised
   out2 <- tempfile(fileext = ".docx")
@@ -225,6 +384,50 @@ test_that("export_with_template falls back to the standard layout on failure", {
     export_with_template(dta, bad_template, out2, quiet = TRUE, fallback = FALSE),
     "Template processing failed"
   )
+})
+
+test_that("the template fallback is detectable programmatically", {
+  # The Shiny app (and any script) must be able to notice that the requested
+  # template was silently replaced by the built-in layout. cli_alert_warning()
+  # only signalled a message of class "cliMessage", which no
+  # withCallingHandlers(warning = ) / tryCatch(warning = ) can see.
+  bad_template <- tempfile(fileext = ".docx")
+  writeLines("this is not a docx", bad_template)
+  on.exit(unlink(bad_template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  caught <- NULL
+  suppressMessages(
+    withCallingHandlers(
+      export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+      warning = function(w) {
+        caught <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
+  )
+
+  expect_s3_class(caught, "warning")
+  expect_s3_class(caught, "rlang_warning")
+  expect_match(conditionMessage(caught), "Falling back to the standard document format")
+
+  # tryCatch(warning = ) sees it too, which is what a Shiny observer uses.
+  trapped <- suppressMessages(tryCatch(
+    export_with_template(dta, bad_template, out, quiet = FALSE, fallback = TRUE),
+    warning = function(w) "trapped"
+  ))
+  expect_equal(trapped, "trapped")
+
+  # quiet = TRUE keeps its meaning: the fallback still happens, silently.
+  out_quiet <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_quiet, force = TRUE), add = TRUE)
+  expect_no_warning(
+    export_with_template(dta, bad_template, out_quiet, quiet = TRUE, fallback = TRUE)
+  )
+  expect_true(file.exists(out_quiet))
 })
 
 test_that("write_dta routes to the template engine when template is supplied", {
@@ -273,4 +476,13 @@ test_that("template variables are extracted from a bundled YAML fixture", {
   expect_equal(vars[["{SUPPLIER_COUNTRY}"]], "Test Country")
   expect_match(vars[["{DATASET_NAMES}"]], "clinical_data")
   expect_equal(vars[["{TRANSMISSION_TYPE}"]], "secure S3 bucket")
+
+  # The only fixture with validation rules, so the only place where a non-zero
+  # {TOTAL_RULES} / {TOTAL_COLUMNS} is exercised.
+  expect_equal(
+    vars[["{TOTAL_RULES}"]],
+    as.character(sum(vapply(dta@datasets, function(d) length(d@specs@rules), integer(1))))
+  )
+  expect_equal(vars[["{TOTAL_RULES}"]], "6")
+  expect_equal(vars[["{TOTAL_COLUMNS}"]], "14")
 })

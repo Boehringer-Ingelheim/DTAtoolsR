@@ -50,6 +50,24 @@ An object of class DTAMetaData.
 This class holds comprehensive metadata information for Data Transfer Agreements,
 including version history, transmission details, error handling, and contact information.
 }
+\details{
+Date-valued metadata fields (\code{date}, \code{transmission$date_first_transfer}
+and \code{transmission$date_last_transfer}) may be supplied as strings. A string
+that is exactly an ISO date becomes a \code{Date}. A string that has no ISO date
+at its start (\code{"after approval"}, \code{"2 weeks after approval"},
+\code{"final transfer by 2026-12-31"}) is a legitimate free-text phrase and is
+kept verbatim as character.
+
+A string that \emph{starts} with an ISO date but carries trailing text
+(\code{"2026-12-31 at the earliest"}) is the dangerous case: \code{as.Date()}
+silently discards the trailing words, turning a qualified statement in a data
+transfer agreement into a committed date. Such a value is still converted to the
+\code{Date} - \code{validate_transmission_dates()} and the exported documents
+need a real \code{Date} - but the loss is recorded as an import issue in
+\code{@import_issues}, carrying the original string verbatim. Import issues make
+\code{check()} on the enclosing \code{DTA} fail, so the discarded qualification
+can never pass silently.
+}
 \examples{
 
 DTAMetaData(title = "Clinical Data Transfer", version = "1.0")

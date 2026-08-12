@@ -11,7 +11,7 @@ rule_check_col_condition(rule, df)
 \itemize{
 \item \verb{@id} character
 \item \verb{@type} = "check_col_condition"
-\item \verb{@condition} list: named by column, each with one of:
+\item \verb{@condition} list: named by column, each with one or more of:
 \code{equals}, \code{not_equals}, \verb{in}, \code{not_in},
 \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{min}, \code{max},
 \code{range}, \code{pattern}, \code{empty}
@@ -30,8 +30,13 @@ predicates must also be TRUE. For rows where the IF holds, \code{NA} in THEN
 is considered a \strong{violation}.
 }
 \details{
-Supported operators per column (single operator per column, except that
-\code{min} and \code{max} may be combined to express an inclusive band):
+A column may carry \strong{several operators}; all of them must hold for the row
+to satisfy that column (they are combined with logical AND). \code{min} and \code{max}
+are the one exception: together they describe a single inclusive band rather
+than two independent tests. An operator key that is not recognised aborts,
+naming the column and the offending key.
+
+Supported operators per column:
 \itemize{
 \item Equality: \code{equals}, \code{not_equals}
 \item Set: \verb{in}, \code{not_in}
@@ -40,6 +45,9 @@ Supported operators per column (single operator per column, except that
 \item Text: \code{pattern} (a regular expression; row passes when the value matches)
 \item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, or \code{""}; FALSE means not empty)
 }
+
+Both \verb{@condition} and \verb{@then} may also be written as a YAML sequence of
+single-column mappings; they are normalised to the named form.
 
 If \verb{@condition} is empty, the \verb{@then} part applies to \strong{all rows}.
 }

@@ -14,6 +14,8 @@ test_that("Range rules evaluate inclusive bounds and ignore missing values", {
   )
   expect_false(result$valid)
   expect_match(result$message, "not in range")
+  # Only AGE = 70 violates: NA is ignored and 65 sits on the inclusive bound.
+  expect_match(result$message, "violated: 1 rows")
 
   result <- rule_check_range(
     DTARuleColRange(
@@ -25,6 +27,22 @@ test_that("Range rules evaluate inclusive bounds and ignore missing values", {
   )
   expect_true(result$valid)
   expect_null(result$message)
+})
+
+test_that("Range rule bounds are inclusive at both ends", {
+  on_bounds <- rule_check_range(
+    DTARuleColRange(id = "on_bounds", columns = "AGE", min = 18, max = 65),
+    data.frame(AGE = c(18, 65), stringsAsFactors = FALSE)
+  )
+  expect_true(on_bounds$valid)
+  expect_null(on_bounds$message)
+
+  just_outside <- rule_check_range(
+    DTARuleColRange(id = "just_outside", columns = "AGE", min = 18, max = 65),
+    data.frame(AGE = c(17.999, 65.001), stringsAsFactors = FALSE)
+  )
+  expect_false(just_outside$valid)
+  expect_match(just_outside$message, "violated: 2 rows")
 })
 
 test_that("Range rules reject malformed bounds and missing columns", {
@@ -59,6 +77,17 @@ test_that("Unique rules detect duplicate combinations and accept unique ones", {
   )
   expect_false(result$valid)
   expect_match(result$message, "duplicate row")
+  # Rows 1 and 3 are the same (SUBJECT_ID, VISIT) pair => 1 duplicate.
+  expect_match(result$message, "violated: 1 duplicate")
+  expect_match(result$message, "SUBJECT_ID, VISIT")
+
+  # The count is "rows beyond the first", not "rows involved": 3x"A" => 2.
+  repeated <- rule_check_unique(
+    DTARuleColUnique(id = "u", columns = "ID"),
+    data.frame(ID = c("A", "A", "A", "B"), stringsAsFactors = FALSE)
+  )
+  expect_false(repeated$valid)
+  expect_match(repeated$message, "violated: 2 duplicate")
 
   result <- rule_check_unique(
     DTARuleColUnique(
@@ -92,14 +121,38 @@ test_that("DTARuleColCondition and DTARuleColUnique constructors validate inputs
 test_that("create_example_DTARule helpers create runnable rules", {
   rule <- create_example_DTARuleColCondition()
   expect_true(methods::is(rule, "DTAtools::DTARuleColCondition"))
+  expect_equal(rule@id, "rule3")
+  expect_equal(rule@type, "check_col_condition")
+  expect_equal(rule@condition, list(age = list(equals = 18)))
+  expect_equal(rule@then, list(status = list(equals = "adult")))
 
   range_rule <- create_example_DTARuleColRange()
   expect_true(methods::is(range_rule, "DTAtools::DTARuleColRange"))
+  expect_equal(range_rule@id, "check_age_range")
+  expect_equal(range_rule@type, "check_range")
+  expect_equal(range_rule@columns, "AGE")
+  expect_equal(range_rule@min, 18)
+  expect_equal(range_rule@max, 65)
 
   unique_rule <- create_example_DTARuleColUnique(index = 2)
   expect_true(methods::is(unique_rule, "DTAtools::DTARuleColUnique"))
+  expect_equal(unique_rule@columns, c("SUBJID", "VISIT"))
 
   expect_error(create_example_DTARuleColUnique(index = 99), "No example found")
+  expect_error(create_example_DTARuleColRange(99), "No example found with index 99")
+  expect_error(create_example_DTARuleColCondition(2), "Invalid index: 2")
+})
+
+test_that("The example rules actually run against a matching data frame", {
+  range_rule <- create_example_DTARuleColRange()
+  expect_true(rule_check_range(range_rule, data.frame(AGE = c(18, 40, 65)))$valid)
+  expect_false(rule_check_range(range_rule, data.frame(AGE = c(17, 40)))$valid)
+
+  condition_rule <- create_example_DTARuleColCondition()
+  passing <- data.frame(age = c(18, 21), status = c("adult", "minor"), stringsAsFactors = FALSE)
+  failing <- data.frame(age = c(18, 21), status = c("minor", "minor"), stringsAsFactors = FALSE)
+  expect_true(rule_check_col_condition(condition_rule, passing)$valid)
+  expect_false(rule_check_col_condition(condition_rule, failing)$valid)
 })
 
 test_that("Conditional rules evaluate equals, not_equals, in, not_in, range and empty operators", {
@@ -311,6 +364,271 @@ test_that("Range rules support min/max slots and reject multi-column usage", {
   )
 })
 
+test_that("dta_as_numeric_strict separates missing from unconvertible", {
+  # The whole point of the helper: `as.numeric()` collapses these into one NA.
+  converted <- dta_as_numeric_strict(c("30", "ninety", NA, "", "  ", "1.50", "007"))
+
+  expect_equal(converted$values, c(30, NA, NA, NA, NA, 1.5, 7))
+  expect_equal(converted$missing, c(FALSE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE))
+  expect_equal(
+    converted$unconvertible,
+    c(FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE)
+  )
+  # The raw source text is kept verbatim, so an import error can quote it.
+  expect_equal(converted$raw[[2]], "ninety")
+
+  # Owner decision: a value that converts but changes representation is a clean
+  # conversion, not an import error. "007" -> 7 and "1.50" -> 1.5 stay clean.
+  expect_false(any(converted$unconvertible[c(6, 7)]))
+
+  # Factors go via as.character(), never via their integer level codes.
+  factor_converted <- dta_as_numeric_strict(factor(c("500", "600", "700")))
+  expect_equal(factor_converted$values, c(500, 600, 700))
+  expect_false(any(factor_converted$unconvertible))
+
+  factor_labels <- dta_as_numeric_strict(factor(c("high", "12")))
+  expect_equal(factor_labels$unconvertible, c(TRUE, FALSE))
+  expect_equal(factor_labels$raw, c("high", "12"))
+
+  # Numeric and logical columns are already numbers; nothing is unconvertible.
+  expect_false(any(dta_as_numeric_strict(c(1, NA, 3))$unconvertible))
+  expect_true(dta_as_numeric_strict(c(1, NA, 3))$missing[[2]])
+})
+
+test_that("Range rules read factor labels, not factor level codes", {
+  # factor(c("500","600","700")) has level codes 1, 2, 3. `as.numeric()` on the
+  # factor returned those codes, so every value sat inside [0, 100] and the rule
+  # reported VALID on data that is an order of magnitude out of range.
+  result <- rule_check_range(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "600", "700")))
+  )
+
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 3 rows")
+
+  # The labels are real numbers, so this is a rule violation and NOT an import
+  # error: nothing here is unrecoverable.
+  import_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "600", "700")))
+  )
+  expect_equal(nrow(import_errors), 0)
+
+  # A factor level that is not a number is unrecoverable, and reported.
+  label_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "factor_range", columns = "AGE", min = 0, max = 100),
+    data.frame(AGE = factor(c("500", "high", "700")))
+  )
+  expect_equal(nrow(label_errors), 1)
+  expect_equal(label_errors$raw, "high")
+  expect_equal(label_errors$reason, "not_convertible")
+})
+
+test_that("Range rules treat an unconvertible value as a violation, not a pass", {
+  df <- data.frame(AGE = c("ninety", "N/A", ">65"), stringsAsFactors = FALSE)
+
+  # `as.numeric()` made all three NA and `any(violated, na.rm = TRUE)` then
+  # dropped them, so a column with no usable value at all reported VALID.
+  result <- rule_check_range(
+    DTARuleColRange(id = "unconvertible", columns = "AGE", min = 18, max = 65),
+    df
+  )
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 3 rows")
+
+  # Both axes: the same three values are also import errors, carrying the raw
+  # text verbatim.
+  import_errors <- dta_rule_import_errors(
+    DTARuleColRange(id = "unconvertible", columns = "AGE", min = 18, max = 65),
+    df
+  )
+  expect_equal(nrow(import_errors), 3)
+  expect_equal(import_errors$raw, c("ninety", "N/A", ">65"))
+  expect_equal(import_errors$row, 1:3)
+  expect_true(all(import_errors$column == "AGE"))
+  expect_true(all(import_errors$reason == "not_convertible"))
+})
+
+test_that("CANARY: a genuinely missing value is never an import error", {
+  # If this flips, the implementation is wrong: NA in the source is missing
+  # data, not a value that failed to convert.
+  rule <- DTARuleColRange(id = "range_na", columns = "AGE", min = 18, max = 65)
+  df <- data.frame(AGE = c(NA, NA), stringsAsFactors = FALSE)
+
+  expect_true(rule_check_range(rule, df)$valid)
+  expect_equal(nrow(dta_rule_import_errors(rule, df)), 0)
+
+  # Empty and whitespace-only strings are missing too, not unconvertible.
+  blank <- data.frame(AGE = c("", "   ", NA), stringsAsFactors = FALSE)
+  expect_true(rule_check_range(rule, blank)$valid)
+  expect_equal(nrow(dta_rule_import_errors(rule, blank)), 0)
+})
+
+test_that("Numeric comparisons compare numbers, not collated text", {
+  # The escape: on a character column R coerced the BOUND to character, and
+  # under locale collation "9" sorts after "65", so AGE = "9" passed
+  # `greater: 65` and the rule reported VALID with zero violated rows.
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c("9", "700"),
+    stringsAsFactors = FALSE
+  )
+
+  result <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "collation_greater",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(greater = 65))
+    ),
+    df
+  )
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 1 rows")
+
+  # The same values held as numbers must agree, on every comparison operator.
+  numeric_df <- df
+  numeric_df$AGE <- as.numeric(df$AGE)
+
+  for (clause in list(
+    list(greater = 65),
+    list(less = 100),
+    list(greater_equal = 65),
+    list(less_equal = 100),
+    list(range = c(65, 1000)),
+    list(min = 65, max = 1000)
+  )) {
+    character_result <- rule_check_col_condition(
+      DTARuleColCondition(
+        id = "collation_case",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = clause)
+      ),
+      df
+    )
+    numeric_result <- rule_check_col_condition(
+      DTARuleColCondition(
+        id = "collation_case",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = clause)
+      ),
+      numeric_df
+    )
+    expect_identical(
+      character_result$valid,
+      numeric_result$valid,
+      info = paste("operator:", paste(names(clause), collapse = "/"))
+    )
+    expect_identical(character_result$message, numeric_result$message)
+  }
+})
+
+test_that("pattern and the equality/set operators still compare the raw value", {
+  # Only the numeric comparisons changed. These operators must keep matching
+  # text, and must not be dragged through numeric coercion.
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    CODE = c("007", "9"),
+    stringsAsFactors = FALSE
+  )
+
+  # "007" == 7 numerically, but equals compares the value as written.
+  expect_false(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "equals_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(equals = "7"))
+      ),
+      df
+    )$valid
+  )
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "in_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(`in` = c("007", "9")))
+      ),
+      df
+    )$valid
+  )
+  expect_true(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "pattern_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(pattern = "^[0-9]+$"))
+      ),
+      df
+    )$valid
+  )
+
+  # A non-numeric column tested only with text operators reports no import
+  # errors: it is never read as a number.
+  expect_equal(
+    nrow(dta_rule_import_errors(
+      DTARuleColCondition(
+        id = "pattern_raw",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(CODE = list(pattern = "^[0-9]+$"))
+      ),
+      df
+    )),
+    0
+  )
+})
+
+test_that("dta_rule_numeric_columns names only the numerically compared columns", {
+  expect_equal(
+    dta_rule_numeric_columns(
+      DTARuleColRange(id = "r", columns = "AGE", min = 0, max = 1)
+    ),
+    "AGE"
+  )
+  expect_equal(
+    dta_rule_numeric_columns(DTARuleColUnique(id = "u", columns = "ID")),
+    character(0)
+  )
+  expect_equal(
+    dta_rule_numeric_columns(
+      DTARuleColCondition(
+        id = "c",
+        condition = list(VISIT = list(equals = "V03"), AGE = list(greater = 1)),
+        then = list(STATUS = list(pattern = "^C"), WEIGHT = list(min = 1, max = 2))
+      )
+    ),
+    c("AGE", "WEIGHT")
+  )
+})
+
+test_that("apply_schema_rules reports import errors alongside the rule verdict", {
+  df <- data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE)
+
+  results <- apply_schema_rules(
+    list(DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)),
+    df,
+    verbose = FALSE
+  )
+
+  expect_false(results[[1]]$valid)
+  # Both rows are rule violations: the unconvertible one and the out-of-range
+  # one. Reclassifying "ninety" as an import error ALONE would make a consumer
+  # reading n_rule_errors see fewer errors than before.
+  expect_match(results[[1]]$message, "violated: 2 rows")
+  expect_equal(nrow(results[[1]]$import_errors), 1)
+  expect_equal(results[[1]]$import_errors$raw, "ninety")
+
+  # A rule that cannot be evaluated contributes no import errors.
+  absent <- apply_schema_rules(
+    list(DTARuleColRange(id = "absent", columns = "MISSING", min = 0, max = 1)),
+    df,
+    verbose = FALSE
+  )
+  expect_false(absent[[1]]$valid)
+  expect_equal(nrow(absent[[1]]$import_errors), 0)
+})
+
 test_that("Conditional rules support comparison operators and combined IF predicates", {
   df <- data.frame(
     VISIT = c("V03", "V03", "EOT"),
@@ -365,6 +683,62 @@ test_that("Conditional rules support comparison operators and combined IF predic
   )
 })
 
+test_that("Comparison operators also detect violations", {
+  # Same shape as the passing fixture above, but each row now breaks the
+  # operator under test, so a branch stubbed out with TRUE would fail here.
+  df <- data.frame(
+    VISIT = c("V03", "V03", "EOT"),
+    STATUS = c("COMPLETED", "DROPPED", "DROPPED"),
+    AGE = c(25, 130, 80),
+    WEIGHT = c(80, 20, 40),
+    stringsAsFactors = FALSE
+  )
+
+  greater <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_greater_violated",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(WEIGHT = list(greater = 50))
+    ),
+    df
+  )
+  expect_false(greater$valid)
+  expect_match(greater$message, "violated: 1 rows")
+
+  less <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_less_violated",
+      condition = list(VISIT = list(equals = "EOT")),
+      then = list(AGE = list(less = 50))
+    ),
+    df
+  )
+  expect_false(less$valid)
+  expect_match(less$message, "violated: 1 rows")
+
+  less_equal <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_less_equal_violated",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(less_equal = 30))
+    ),
+    df
+  )
+  expect_false(less_equal$valid)
+  expect_match(less_equal$message, "violated: 1 rows")
+
+  not_in_vector <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "rule_not_in_vector_violated",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(STATUS = list(not_in = c("DROPPED", "FAILED")))
+    ),
+    df
+  )
+  expect_false(not_in_vector$valid)
+  expect_match(not_in_vector$message, "violated: 1 rows")
+})
+
 test_that("Conditional rules error for missing columns", {
   df <- data.frame(AGE = c(20, 30), stringsAsFactors = FALSE)
 
@@ -376,7 +750,8 @@ test_that("Conditional rules error for missing columns", {
         then = list(AGE = list(greater_equal = 18))
       ),
       df
-    )
+    ),
+    "Column not found in table: MISSING"
   )
 
   expect_error(
@@ -387,7 +762,8 @@ test_that("Conditional rules error for missing columns", {
         then = list(MISSING = list(not_equals = "X"))
       ),
       df
-    )
+    ),
+    "Column not found in table: MISSING"
   )
 })
 
@@ -401,10 +777,374 @@ test_that("Unique rules treat repeated NA combinations as duplicates", {
 
   expect_false(result$valid)
   expect_match(result$message, "duplicate row")
+  # Two NAs in VISIT => the second one counts as the single duplicate.
+  expect_match(result$message, "violated: 1 duplicate")
 })
 
 test_that("apply_schema_rules returns empty list for empty rule set", {
   result <- apply_schema_rules(list(), data.frame(A = 1), verbose = FALSE)
   expect_type(result, "list")
   expect_length(result, 0)
+})
+
+test_that("Rule checkers reject objects that are not DTARule instances", {
+  df <- data.frame(AGE = c(20, 30), ID = c("A", "B"), stringsAsFactors = FALSE)
+  not_a_rule <- list(id = "fake", columns = "AGE", min = 18, max = 65)
+
+  expect_error(rule_check_range(not_a_rule, df), "Rule is not of class 'DTARule'")
+  expect_error(rule_check_unique(not_a_rule, df), "Rule is not of class 'DTARule'")
+  expect_error(rule_check_col_condition(not_a_rule, df), "Rule is not of class 'DTARule'")
+
+  expect_error(rule_check_range(NULL, df), "Rule is not of class 'DTARule'")
+  expect_error(rule_check_range("AGE", df), "Rule is not of class 'DTARule'")
+})
+
+test_that("validate_rules passes clean tables and aborts on rule violations", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "unique_id", columns = "ID"))
+  )
+
+  results <- suppressMessages(
+    validate_rules(specs, data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE))
+  )
+  expect_type(results, "list")
+  expect_length(results, 1)
+  expect_equal(results[[1]]$id, "unique_id")
+  expect_true(results[[1]]$valid)
+  expect_null(results[[1]]$message)
+
+  expect_error(
+    suppressMessages(
+      validate_rules(specs, data.frame(ID = c("A001", "A001"), stringsAsFactors = FALSE))
+    ),
+    "Rule 'unique_id' violated: 1 duplicate row"
+  )
+})
+
+test_that("validate_rules returns an empty result when the collection has no rules", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
+    )
+  )
+
+  results <- suppressMessages(
+    validate_rules(specs, data.frame(ID = "A001", stringsAsFactors = FALSE))
+  )
+  expect_type(results, "list")
+  expect_length(results, 0)
+})
+
+test_that("Unique rules compare values verbatim (pinned, not endorsed)", {
+  # Pins current behaviour: uniqueness is case- and whitespace-sensitive, so
+  # "A001", "a001" and "A001 " are three distinct values. Recorded so that a
+  # future move to normalised comparison is a deliberate change, not a silent
+  # one -- this is not an endorsement of the current semantics.
+  result <- rule_check_unique(
+    DTARuleColUnique(id = "verbatim", columns = "ID"),
+    data.frame(ID = c("A001", "a001", "A001 "), stringsAsFactors = FALSE)
+  )
+
+  expect_true(result$valid)
+  expect_null(result$message)
+})
+
+test_that("Unsupported condition operators abort via cli, naming column and key", {
+  err <- expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "bogus",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = list(bogus_op = 1))
+      ),
+      data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
+    ),
+    class = "rlang_error"
+  )
+  # The abort must identify both the column and the offending key, otherwise a
+  # typo in a large DTS is untraceable.
+  expect_match(conditionMessage(err), "bogus_op")
+  expect_match(conditionMessage(err), "AGE")
+
+  # An unknown operator sitting next to a valid one must still abort; it must
+  # never be quietly skipped because another operator was recognised first.
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "bogus_mixed",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = list(greater = 0, bogus_op = 1))
+      ),
+      data.frame(VISIT = "V03", AGE = 1, stringsAsFactors = FALSE)
+    ),
+    class = "rlang_error"
+  )
+})
+
+test_that("Every operator supplied for a column is evaluated and AND-combined", {
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c(200, 999),
+    stringsAsFactors = FALSE
+  )
+
+  # Two operators, both satisfied.
+  both_ok <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_ok",
+      condition = list(AGE = list(greater_equal = 0)),
+      then = list(AGE = list(greater = 18, less = 1000))
+    ),
+    df
+  )
+  expect_true(both_ok$valid)
+  expect_null(both_ok$message)
+
+  # Two operators where only the SECOND is violated. The old if/else chain
+  # return()ed on `greater`, so `less` was never evaluated and AGE = 200/999
+  # passed an 18..65 band.
+  second_violated <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_second_violated",
+      condition = list(AGE = list(greater_equal = 0)),
+      then = list(AGE = list(greater = 18, less = 65))
+    ),
+    df
+  )
+  expect_false(second_violated$valid)
+  expect_match(second_violated$message, "violated: 2 rows")
+
+  # Three operators, only the last one fires.
+  three_ops <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_three",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(greater = 18, less = 1000, not_equals = 999))
+    ),
+    df
+  )
+  expect_false(three_ops$valid)
+  expect_match(three_ops$message, "violated: 1 rows")
+
+  # Several operators across several THEN columns are all enforced.
+  multi_column <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "multi_column",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(
+        AGE = list(greater = 18, less = 1000),
+        VISIT = list(pattern = "^V", not_equals = "V03")
+      )
+    ),
+    df
+  )
+  expect_false(multi_column$valid)
+  expect_match(multi_column$message, "violated: 2 rows")
+})
+
+test_that("min and max still express one inclusive band", {
+  df <- data.frame(
+    VISIT = c("V03", "V03"),
+    AGE = c(200, 999),
+    stringsAsFactors = FALSE
+  )
+
+  band_ok <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "band_ok",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 200, max = 999))
+    ),
+    df
+  )
+  expect_true(band_ok$valid)
+
+  band_violated <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "band_violated",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 0, max = 500))
+    ),
+    df
+  )
+  expect_false(band_violated$valid)
+  expect_match(band_violated$message, "violated: 1 rows")
+
+  # A lone `min` is still an open-ended lower bound, and combines with other
+  # operators rather than shadowing them.
+  min_only <- rule_check_col_condition(
+    DTARuleColCondition(
+      id = "min_plus_other",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(AGE = list(min = 0, less = 500))
+    ),
+    df
+  )
+  expect_false(min_only$valid)
+  expect_match(min_only$message, "violated: 1 rows")
+})
+
+test_that("Conditions written as a YAML sequence are normalised to named form", {
+  # A YAML sequence under `condition:` parses to an UNNAMED list -- this is the
+  # exact shape a DTS author produces by writing `- VISIT:` under `condition:`.
+  parsed <- yaml::yaml.load("condition:\n  - VISIT:\n      equals: V03\n")
+  expect_null(names(parsed$condition))
+
+  df <- data.frame(
+    VISIT = c("V03", "EOT"),
+    AGE = c(10, 80),
+    stringsAsFactors = FALSE
+  )
+
+  seq_rule <- DTARuleColCondition(
+    id = "seq_condition",
+    condition = parsed$condition,
+    then = list(AGE = list(less = 5))
+  )
+  # The constructor stores the canonical named form.
+  expect_equal(seq_rule@condition, list(VISIT = list(equals = "V03")))
+
+  # Previously names(conditions) was NULL, lapply() returned list(), Reduce()
+  # returned NULL and the rule reported VALID no matter what the data held.
+  result <- rule_check_col_condition(seq_rule, df)
+  expect_false(result$valid)
+  expect_match(result$message, "violated: 1 rows")
+
+  # Sequences work for `then` as well, and across several entries.
+  multi_seq <- DTARuleColCondition(
+    id = "seq_then",
+    condition = list(list(VISIT = list(equals = "V03")), list(AGE = list(less = 50))),
+    then = list(list(AGE = list(greater = 100)))
+  )
+  expect_equal(names(multi_seq@condition), c("VISIT", "AGE"))
+  expect_equal(names(multi_seq@then), "AGE")
+  expect_false(rule_check_col_condition(multi_seq, df)$valid)
+
+  # The engine normalises too, so a rule built by any other route is safe.
+  expect_equal(
+    evaluate_conditions(list(list(VISIT = list(equals = "V03"))), df),
+    c(TRUE, FALSE)
+  )
+})
+
+test_that("Malformed conditions abort with a clear message, never 'invalid argument type'", {
+  df <- data.frame(VISIT = "V03", AGE = 5, stringsAsFactors = FALSE)
+
+  chr_err <- expect_error(
+    DTARuleColCondition(
+      id = "chr_condition",
+      condition = "VISIT == V03",
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+  expect_match(conditionMessage(chr_err), "condition")
+  expect_false(grepl("invalid argument", conditionMessage(chr_err), fixed = TRUE))
+
+  engine_err <- expect_error(
+    evaluate_conditions("VISIT == V03", df),
+    class = "rlang_error"
+  )
+  expect_false(grepl("invalid argument", conditionMessage(engine_err), fixed = TRUE))
+
+  # A sequence entry that does not name its column is ambiguous, not silently
+  # ignored.
+  expect_error(
+    DTARuleColCondition(
+      id = "unnamed_entry",
+      condition = list(list(equals = "V03")),
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+
+  # An empty operator map must abort, not wave every row through.
+  expect_error(
+    rule_check_col_condition(
+      DTARuleColCondition(
+        id = "empty_ops",
+        condition = list(VISIT = list(equals = "V03")),
+        then = list(AGE = list())
+      ),
+      df
+    ),
+    class = "rlang_error"
+  )
+
+  # The same column named twice is ambiguous: one of the two would be lost.
+  expect_error(
+    DTARuleColCondition(
+      id = "dup_column",
+      condition = list(
+        list(VISIT = list(equals = "V03")),
+        list(VISIT = list(equals = "EOT"))
+      ),
+      then = list(AGE = list(less = 5))
+    ),
+    class = "rlang_error"
+  )
+})
+
+test_that("A rule naming an absent column fails the rule instead of aborting the run", {
+  df <- data.frame(ID = "A", stringsAsFactors = FALSE)
+
+  range_results <- apply_schema_rules(
+    list(DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120)),
+    df,
+    verbose = FALSE
+  )
+  expect_length(range_results, 1)
+  expect_false(range_results[[1]]$valid)
+  expect_equal(range_results[[1]]$id, "age_range")
+  expect_match(range_results[[1]]$message, "age_range")
+  expect_match(range_results[[1]]$message, "AGE")
+
+  unique_results <- apply_schema_rules(
+    list(DTARuleColUnique(id = "unique_subjid", columns = "SUBJID")),
+    df,
+    verbose = FALSE
+  )
+  expect_false(unique_results[[1]]$valid)
+  expect_match(unique_results[[1]]$message, "unique_subjid")
+  expect_match(unique_results[[1]]$message, "SUBJID")
+
+  condition_results <- apply_schema_rules(
+    list(DTARuleColCondition(
+      id = "visit_rule",
+      condition = list(VISIT = list(equals = "V03")),
+      then = list(ID = list(empty = FALSE))
+    )),
+    df,
+    verbose = FALSE
+  )
+  expect_false(condition_results[[1]]$valid)
+  expect_match(condition_results[[1]]$message, "visit_rule")
+  expect_match(condition_results[[1]]$message, "VISIT")
+
+  # One unevaluable rule must not hide the verdict of the others.
+  mixed <- apply_schema_rules(
+    list(
+      DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120),
+      DTARuleColUnique(id = "unique_id", columns = "ID")
+    ),
+    df,
+    verbose = FALSE
+  )
+  expect_length(mixed, 2)
+  expect_false(mixed[[1]]$valid)
+  expect_true(mixed[[2]]$valid)
+
+  # Precision check: a malformed rule is a specification error, not an
+  # unevaluable one, and must still abort rather than be reported as a failure.
+  expect_error(
+    apply_schema_rules(
+      list(DTARuleColRange(id = "multi_col", columns = c("A", "B"), min = 0, max = 1)),
+      data.frame(A = 1, B = 2),
+      verbose = FALSE
+    ),
+    "exactly one"
+  )
 })

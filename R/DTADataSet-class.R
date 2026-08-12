@@ -1,5 +1,6 @@
 #' @title DTADataSet Class
 #' @description Class to handle data from files
+#' @include importConversion.R
 #' @import S7
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom stringr str_flatten_comma
@@ -40,7 +41,11 @@ DTADataSet <- S7::new_class(
       S7_object(),
       name = name,
       type = type,
-      files = files
+      files = files,
+      description = description,
+      template_source = template_source,
+      template_version = template_version,
+      template_date = template_date
     )
   },
   properties = list(
@@ -256,7 +261,7 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
   } else {
     message <- paste0(
       "Files: ",
-      str_c('{.field ', names(x@name), '}'),
+      str_c('{.field ', x@name, '}'),
       str_glue(" ({file_info}, {x@type})")
     )
   }
@@ -499,6 +504,14 @@ dta_validation_result_to_row <- function(table_name, status, index_entry, target
     validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,
     n_schema_errors = index_entry$n_schema_errors,
     n_rule_errors = index_entry$n_rule_errors,
+    # An index entry recorded before the import axis existed knows nothing
+    # about it. NA ("unknown") is the honest value; 0 would claim a clean
+    # import axis that was never checked.
+    n_import_errors = if (is.null(index_entry$n_import_errors)) {
+      NA_integer_
+    } else {
+      as.integer(index_entry$n_import_errors)
+    },
     stringsAsFactors = FALSE
   )
 }

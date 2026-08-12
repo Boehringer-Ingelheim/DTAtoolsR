@@ -454,23 +454,58 @@ dta_dataset_table_names <- function(ds) {
   }
 }
 
-# Per-table validation status: named vector table -> "pass" | "fail" | "pending".
-# "pending" = not validated yet (no tick); "pass" = validated, zero errors;
-# "fail" = validated with schema/rule errors. Drives the per-file tick color.
+# Per-table validation status: named vector
+# table -> "pass" | "fail" | "unknown" | "pending".
+#
+#   "pending" = not validated yet (no tick)
+#   "pass"    = validated, all THREE axes clean (schema, rules, import)
+#   "fail"    = validated with schema, rule OR import errors
+#   "unknown" = validated, but the import axis was never checked
+#
+# Validation has three axes, and ok = schema_valid && rules_valid &&
+# import_valid. A table whose only defect is a value that could not be
+# represented in its declared type has zero schema and zero rule errors, so
+# reading only those two axes paints it green while ok is FALSE. n_import_errors
+# is therefore weighed exactly like the other two counts.
+#
+# NA is not a pass. A validation artifact written before the import axis existed
+# reports n_import_errors = NA ("unknown"), and its recorded `ok` is whatever the
+# two-axis run concluded -- so an NA import count can arrive alongside ok = TRUE.
+# That combination means "re-run check(force = TRUE)", not "clean", and gets its
+# own third state rather than being folded into pass or fail. The column being
+# entirely ABSENT is a different situation (an object older than the column
+# itself, e.g. a hand-built status frame) and keeps the old two-axis behaviour.
 dta_table_status_map <- function(dta, dataset) {
-  empty <- stats::setNames(character(0), character(0))
   ds <- dta_get_dataset(dta, dataset)
-  if (is.null(ds)) return(empty)
+  if (is.null(ds)) return(stats::setNames(character(0), character(0)))
   vs <- tryCatch(as.data.frame(DTAtools::validation_status(ds)),
                  error = function(e) NULL)
-  if (is.null(vs) || nrow(vs) == 0) return(empty)
+  dta_table_status_from_status_df(vs)
+}
+
+# Pure core of dta_table_status_map(): maps a validation_status() data.frame to
+# the per-table status vector. Split out so the status logic is testable without
+# constructing a DTA.
+dta_table_status_from_status_df <- function(vs) {
+  empty <- stats::setNames(character(0), character(0))
+  if (is.null(vs) || !is.data.frame(vs) || nrow(vs) == 0) return(empty)
   tcol <- if ("table" %in% names(vs)) "table" else if ("target" %in% names(vs)) "target" else names(vs)[1]
-  ok  <- if ("ok" %in% names(vs)) vs$ok else rep(NA, nrow(vs))
-  nse <- if ("n_schema_errors" %in% names(vs)) suppressWarnings(as.numeric(vs$n_schema_errors)) else rep(NA_real_, nrow(vs))
-  nre <- if ("n_rule_errors" %in% names(vs)) suppressWarnings(as.numeric(vs$n_rule_errors)) else rep(NA_real_, nrow(vs))
-  has_err <- (!is.na(nse) & nse > 0) | (!is.na(nre) & nre > 0) | (!is.na(ok) & !ok)
+  ok <- if ("ok" %in% names(vs)) vs$ok else rep(NA, nrow(vs))
+  count <- function(col) {
+    if (col %in% names(vs)) suppressWarnings(as.numeric(vs[[col]])) else rep(NA_real_, nrow(vs))
+  }
+  nse <- count("n_schema_errors")
+  nre <- count("n_rule_errors")
+  nie <- count("n_import_errors")
+  positive <- function(n) !is.na(n) & n > 0
+  has_err <- positive(nse) | positive(nre) | positive(nie) | (!is.na(ok) & !ok)
+  import_unknown <- ("n_import_errors" %in% names(vs)) & is.na(nie)
+
   st <- rep("pending", nrow(vs))
   st[!is.na(ok) & ok] <- "pass"
+  # An unchecked import axis downgrades a pass to "unknown" ...
+  st[import_unknown & st == "pass"] <- "unknown"
+  # ... but a defect observed on any axis is still a definite failure.
   st[has_err] <- "fail"
   stats::setNames(st, as.character(vs[[tcol]]))
 }
@@ -487,14 +522,27 @@ dta_clear_validation <- function(dta, dataset, tables = NULL) {
   })
 }
 
+# Does this dataset carry an @import_issues property? Only DTADataSetTabular
+# does; a file dataset has no typed tables and therefore no import issues.
+# DTAMetaData also carries an @import_issues property (its own, metadata-level
+# shape), so a bare prop_names() check would claim a metadata object has
+# per-table issues. Require a dataset as well as the property.
+dta_has_import_issues <- function(ds) {
+  if (!inherits(ds, "DTAtools::DTADataSet")) {
+    return(FALSE)
+  }
+
+  isTRUE("import_issues" %in% tryCatch(S7::prop_names(ds), error = function(e) character(0)))
+}
+
 # Remove ONE bound file/table (and its validation state) from a dataset.
-# ORDER MATTERS: the table's validation entries (validation_index AND
-# validation_store) are cleared BEFORE the table/file itself is dropped. The
-# DTADataSetTabular validator forbids validation_index/store being LONGER than
+# ORDER MATTERS: the table's per-table state (validation_index, validation_store
+# AND import_issues) is cleared BEFORE the table/file itself is dropped. The
+# DTADataSetTabular validator forbids any of those three lists being LONGER than
 # `tables`, so dropping a VALIDATED table first would transiently leave more
-# validation entries than tables (vindex > tables) and abort the whole removal
-# (F20). Clearing the validation state first keeps every intermediate object
-# valid, so removing a table that was already validated always succeeds.
+# entries than tables (vindex > tables) and abort the whole removal (F20).
+# Clearing that state first keeps every intermediate object valid, so removing a
+# table that was already validated always succeeds.
 dta_unload_table <- function(dta, dataset, table) {
   dta_try({
     ds <- DTAtools::datasets(dta, dataset)
@@ -505,6 +553,14 @@ dta_unload_table <- function(dta, dataset, table) {
     vsr <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
     vsr[[table]] <- NULL
     ds@validation_store <- vsr
+    # ... and its import issues, which are keyed by table name just the same.
+    # Left behind, they would outlive the table and be re-attached to a new file
+    # that happens to reuse the name.
+    if (dta_has_import_issues(ds)) {
+      ii <- tryCatch(ds@import_issues, error = function(e) list()) %||% list()
+      ii[[table]] <- NULL
+      ds@import_issues <- ii
+    }
     # 2) Then remove the table/file itself.
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
@@ -524,14 +580,19 @@ dta_unload_table <- function(dta, dataset, table) {
 dta_unload_all <- function(dta, dataset) {
   dta_try({
     ds <- DTAtools::datasets(dta, dataset)
+    # Same order as dta_unload_table(): clear the per-table state before the
+    # tables, so no intermediate object has more state entries than tables.
+    ds@validation_index <- list()
+    ds@validation_store <- list()
+    if (dta_has_import_issues(ds)) {
+      ds@import_issues <- list()
+    }
     ty <- tryCatch(ds@type, error = function(e) NA_character_)
     if (identical(ty, "file")) {
       ds@file_paths <- character(0)
     } else {
       ds@tables <- list()
     }
-    ds@validation_index <- list()
-    ds@validation_store <- list()
     dta@datasets[[dataset]] <- ds
     dta
   })
@@ -544,6 +605,49 @@ dta_dataset_messages <- function(dta, dataset) {
   res <- dta_try(as.data.frame(DTAtools::messages(ds)))
   if (!res$ok || is.null(res$value)) return(data.frame())
   res$value
+}
+
+# Metadata import errors, as message rows (data.frame; empty df if none).
+#
+# These are DTA-LEVEL: metadata belongs to the document, not to a dataset, so
+# messages(dta) reports them with target == "metadata" and messages(ds) -- what
+# the per-dataset messages dock shows -- never contains them. The metadata
+# editor is the only place they can be seen, hence this helper. Queried through
+# messages(metadata(dta)), which yields exactly those rows and, unlike
+# messages(dta), does not require the DTA to have any datasets.
+dta_metadata_import_messages <- function(dta) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  if (is.null(md)) return(data.frame())
+  res <- dta_try(as.data.frame(DTAtools::messages(md)))
+  if (!res$ok || is.null(res$value)) return(data.frame())
+  res$value
+}
+
+# Pull the fields an IMPORT inspect record carries out of one flattened
+# inspect() row (as a list). inspect() puts the structured import error in
+# `import_*` columns (from its import_matches frame); the flat message columns
+# are the fallback for a record that carries only those.
+#
+# Kept here, out of the server, so the column names and their fallbacks -- the
+# part that silently breaks when the package renames a field -- are testable
+# without launching Shiny. Every element is a length-1 character, "" when
+# absent.
+dta_inspect_import_fields <- function(r) {
+  first <- function(...) {
+    for (v in list(...)) {
+      if (!is.null(v) && length(v) >= 1 && !is.na(v[[1]]) && nzchar(as.character(v[[1]]))) {
+        return(as.character(v[[1]]))
+      }
+    }
+    ""
+  }
+  list(
+    column = first(r[["import_column"]], r[["column"]]),
+    raw = first(r[["import_raw"]]),
+    declared_type = first(r[["import_declared_type"]]),
+    reason = first(r[["import_reason"]], r[["keyword"]]),
+    row = first(r[["import_row"]], r[["row"]], r[["context_.row"]])
+  )
 }
 
 # Deep-dive detail for one message id within a dataset (data.frame).
@@ -976,8 +1080,12 @@ dta_build_validation_report <- function(dta, status = NULL) {
 
   detail_html <- ""
   if (!is.null(rdf) && nrow(rdf) > 0) {
+    # n_import_errors is the third validation axis: without it a table that
+    # failed ONLY because a value was unrepresentable in its declared type shows
+    # up in the report with two zero counts and no visible reason.
     want <- intersect(c("dataset", "target", "status", "n_schema_errors",
-                        "n_rule_errors", "validated_at"), names(rdf))
+                        "n_rule_errors", "n_import_errors", "validated_at"),
+                      names(rdf))
     if (length(want) > 0) {
       head_cells <- paste0(vapply(want, function(h) paste0("<th>", esc(h), "</th>"),
                                   character(1)), collapse = "")

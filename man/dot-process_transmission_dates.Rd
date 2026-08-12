@@ -6,6 +6,13 @@
 \usage{
 .process_transmission_dates(transmission)
 }
+\arguments{
+\item{transmission}{A transmission list.}
+}
+\value{
+A list with \code{transmission} (the processed list) and \code{issues}
+(a possibly empty list of import issue records).
+}
 \description{
 Helper to convert transmission date fields from character to Date if they're valid dates
 }

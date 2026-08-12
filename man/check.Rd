@@ -19,10 +19,10 @@ check(x, ...)
 
 \item{...}{Additional named arguments:
 \describe{
-\item{tables}{Optional. Character table names or numeric table indices
-to validate. If NULL (default), validates all tables.}
-\item{force}{Logical. If TRUE, forces re-validation even if unchanged.
-Default is FALSE.}
+\item{tables}{Optional. Character target names or numeric target indices
+to validate. If NULL (default), validates all targets.}
+\item{force}{Logical. If TRUE, forces re-validation even if the file is
+unchanged since the last check. Default is FALSE.}
 \item{persist}{Logical. If TRUE (default), persists validation
 artifacts to disk.}
 \item{artifact_dir}{Character or NULL. Optional output directory for
@@ -35,9 +35,20 @@ Depends on the method implementation.
 
 Invisibly returns the updated \code{DTA} object \code{x} with all
 validated datasets having their \code{validation_index} and
-\code{validation_store} populated. A \code{"last_validation_summary"}
-attribute is attached with a data.frame of columns: dataset, n_targets,
-n_validated, n_valid, n_invalid, n_skipped.
+\code{validation_store} populated. Three attributes are attached:
+\describe{
+\item{\code{"last_validation_summary"}}{data.frame with one row per
+dataset and columns dataset, n_targets, n_validated, n_valid,
+n_invalid, n_skipped, n_import_errors.}
+\item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
+axis, with columns scope, status, import_valid, n_import_errors, fields,
+ok. Metadata belongs to the \code{DTA} itself rather than to any
+dataset, so it is reported as its own DTA-level result and never as a
+row of the per-dataset summary.}
+\item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
+no dataset is invalid, no table has an import error, and the metadata
+imported cleanly.}
+}
 
 Invisibly returns \code{x}.
 
@@ -70,6 +81,14 @@ validation state.
 Validates a \code{DTADataSetFile} object's underlying file(s) and structure.
 
 check rule against data
+}
+\details{
+\code{check()} validates two things: every requested dataset, and the DTA's
+own metadata. A metadata value that could only reach its declared type by
+discarding part of what was written (see \code{metadata_import_errors()})
+fails the run on the import axis, exactly as a table value would - otherwise
+the "Validation PASSED" banner would print over a data transfer agreement
+whose dates no longer say what was agreed.
 }
 \examples{
   dta <- create_example_DTA()

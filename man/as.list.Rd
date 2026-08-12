@@ -45,9 +45,9 @@ A named list with the DTAColumnSpec properties.
 
 A list representation of the DTAColumnSpecCollection object.
 
-A named list with the DTAColumnSpecStructure properties.
+A named list with the DTAColumnSpecStructure properties that are set.
 
-A named list with the DTAColumnSpecStructureSAS properties.
+A named list with the DTAColumnSpecStructureSAS properties that are set.
 
 A list with all metadata fields
 
@@ -64,9 +64,14 @@ Converts a DTAColumnSpec object to a named list.
 
 This function transforms a DTAColumnSpecCollection object to a list.
 
-Converts a DTAColumnSpecStructure object to a list.
+Converts a DTAColumnSpecStructure object to a list. Properties that are not
+set are omitted entirely rather than serialized as a backend prefix followed
+by nothing (\code{"SAS "}), which would not survive a YAML round trip.
 
-Converts a DTAColumnSpecStructureSAS object to a named list.
+Converts a DTAColumnSpecStructureSAS object to a named list. An unset \code{type}
+or \code{format} is omitted from the list instead of being written as the bare
+backend prefix (\code{"SAS "}), which would re-parse to an empty value and fail
+the SAS validator on the next read.
 
 Convert a DTAMetaData object to a nested list structure suitable for YAML export
 or programmatic access.
@@ -78,6 +83,15 @@ Convert a DTARuleColCondition object to a list.
 Convert a DTARuleColRange object to a list.
 
 Convert a DTARuleColUnique object to a list.
+}
+\details{
+Every \code{Date} in the result - the top-level \code{date}, each
+\code{version_history[[i]]$date}, and the transmission transfer dates - is
+rendered as an ISO \code{"YYYY-MM-DD"} string so that a YAML dump can be read
+straight back through \code{DTAMetaData()}.
+
+\code{@import_issues} is deliberately not exported: it is a runtime record of
+what was lost while coercing the input, not part of the specification.
 }
 \examples{
 x <- create_example_DTAColumnSpecCollection()

@@ -33,9 +33,11 @@ DTAColumnSpec(
 
 \item{pattern}{Character or NA. The pattern of the column.}
 
-\item{values}{Any or NA. The values of the column.}
+\item{values}{Character or numeric vector, or NULL. The permitted values of
+the column. A list is accepted and flattened to a vector.}
 
-\item{examples}{Character, numeric, or NA. Example value(s) for the column.}
+\item{examples}{Character or numeric vector, or NULL. Example value(s) for
+the column. A list is accepted and flattened to a vector.}
 
 \item{description}{Character or NA. The description of the column.}
 

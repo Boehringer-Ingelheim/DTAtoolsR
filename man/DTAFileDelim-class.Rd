@@ -12,6 +12,7 @@ DTAFileDelim(
   min_number_of_files = NULL,
   max_number_of_files = NULL,
   info = NULL,
+  sep = "\\t",
   has_header = TRUE,
   quote = "\\""
 )
@@ -33,6 +34,9 @@ expected.}
 expected.}
 
 \item{info}{Character or \code{NULL}; free-text description of the file.}
+
+\item{sep}{Character. Single-character field separator used in the file.
+Defaults to tab (\code{"\\t"}).}
 
 \item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
 is \code{TRUE}.}
