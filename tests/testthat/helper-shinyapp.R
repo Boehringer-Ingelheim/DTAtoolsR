@@ -7,19 +7,49 @@
 # environment so their functions can be unit tested directly, without starting
 # a Shiny server.
 #
+# This is the ONLY harness for the app's test files (test-shinyapp-*.R). It
+# used to coexist with a second, independently grown harness
+# (helper-shiny-app.R, dta_app_*() names) that solved the same problem; the two
+# were merged here, keeping app_env()'s wider file coverage (all four helper
+# files, not just utils_dta.R and theme.R) and dta_app_dir()'s more defensive
+# handling of the app-directory lookup trap described below.
+#
 # testthat sources helper-*.R before any test file, so these are available
 # everywhere in the suite.
 
 # Directory of the bundled Shiny app.
 #
-# Resolved via system.file() so it works both under devtools::test() (pkgload
-# shims system.file() onto inst/) and under R CMD check against the installed
-# package. The app is a guaranteed package asset — a missing app directory is
-# a failure, not a skip.
+# LOCATING THE APP IS THE TRAP: system.file() returns "" (not an error) when
+# it misses, and a "" path silently degrades to the working directory rather
+# than blowing up. system.file() alone is normally enough here -- pkgload
+# shims it onto inst/ under devtools::test(), and base::system.file() finds it
+# directly once the package is installed for R CMD check -- but a fallback
+# candidate list plus a hard existence check closes the gap for any
+# invocation where the shim isn't in play. Every candidate is tried, the
+# first one that actually contains app.R wins, and a total miss is a hard
+# error, never a silently empty or wrong directory. The app is a guaranteed
+# package asset — a missing app directory is a failure, not a skip.
 .shiny_app_dir <- function() {
-  dir <- system.file("shiny", "dta_app", package = "DTAtools")
-  expect_true(nzchar(dir), info = "inst/shiny/dta_app missing from the package")
-  dir
+  candidates <- c(
+    system.file("shiny", "dta_app", package = "DTAtools"),
+    testthat::test_path("..", "..", "inst", "shiny", "dta_app"),
+    tryCatch(
+      file.path(find.package("DTAtools"), "inst", "shiny", "dta_app"),
+      error = function(e) ""
+    ),
+    tryCatch(
+      file.path(find.package("DTAtools"), "shiny", "dta_app"),
+      error = function(e) ""
+    )
+  )
+  candidates <- candidates[nzchar(candidates)]
+  hit <- candidates[file.exists(file.path(candidates, "app.R"))]
+  if (length(hit) == 0) {
+    cli::cli_abort(
+      "Could not locate the Shiny app directory (no {.file app.R} in any candidate)."
+    )
+  }
+  normalizePath(hit[[1]], winslash = "/", mustWork = TRUE)
 }
 
 # The app's helper .R files, in the order Shiny would source them.
@@ -113,4 +143,28 @@ app_fixture_dta_with_data <- function(filename = "clinical_data.csv", checked = 
     dta <- check(dta, persist = FALSE, quiet = TRUE)
   }
   dta
+}
+
+# A two-column spec collection: one character column and one numeric column, so
+# a non-numeric value in VAL is an import error and nothing else.
+app_fixture_char_num_specs <- function() {
+  cols <- list(
+    DTAtools::DTAColumnSpec(id = "SUBJID", type = "SAS Char", nullable = FALSE),
+    DTAtools::DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  )
+  DTAtools::DTAColumnSpecCollection(
+    columns = stats::setNames(cols, vapply(cols, function(x) x@id, character(1))),
+    rules = list()
+  )
+}
+
+# ---- Static-source assertions for app-wiring tests --------------------------
+
+# The full text of one app source file, for the few assertions that are about
+# the app's static wiring (a CSS class, a UI branch) rather than a function.
+app_source <- function(file) {
+  paste(
+    readLines(file.path(.shiny_app_dir(), file), warn = FALSE, encoding = "UTF-8"),
+    collapse = "\n"
+  )
 }

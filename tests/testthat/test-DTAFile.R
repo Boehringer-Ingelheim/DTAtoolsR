@@ -272,7 +272,7 @@ test_that("DTAFileDelim parses with its own separator, not a hardcoded comma", {
   # read_delim_arrow() was called without `delim`, so it fell back to a comma
   # and collapsed the tab file into a single column.
   expect_equal(ncol(x), 33)
-  expect_equal(nrow(x), 20940)
+  expect_equal(nrow(x), 490)
   expect_true(all(c("STUDYID", "DOMAIN") %in% names(x)))
 })
 
@@ -296,8 +296,8 @@ test_that("DTAFileTSV with has_header = FALSE keeps the first row as data", {
   x <- read_file(DTAFileTSV("gf_data_small_smirna.tsv", has_header = FALSE), path)
 
   # has_header = FALSE used to be implemented as skip = 1, which discarded the
-  # first *data* row and promoted the second one to the header (20939 rows).
-  expect_equal(nrow(x), 20941)
+  # first *data* row and promoted the second one to the header (489 rows).
+  expect_equal(nrow(x), 491)
   expect_equal(ncol(x), 33)
   expect_false("STUDYID" %in% names(x))
   expect_false("1234-5678" %in% names(x))
@@ -308,7 +308,7 @@ test_that("DTAFileDelim with has_header = FALSE keeps the first row as data", {
 
   x <- read_file(DTAFileDelim("gf_data_small_smirna.tsv", has_header = FALSE), path)
 
-  expect_equal(nrow(x), 20941)
+  expect_equal(nrow(x), 491)
   expect_equal(ncol(x), 33)
   expect_false("STUDYID" %in% names(x))
 })

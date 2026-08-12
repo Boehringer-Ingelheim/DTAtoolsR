@@ -78,3 +78,38 @@ test_that("Examples can be built with current constructors", {
     system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
   )
 })
+
+test_that("the GF fixture still carries the value coverage it was reduced to keep", {
+  # gf_data_small_smirna.tsv is a coverage-preserving extract of a 20940-row
+  # delivery: 490 rows chosen so that every distinct value of every column with
+  # at most 100 distinct values survives, plus a 1-in-50 systematic sample for
+  # a realistic spread of the high-cardinality columns. Nothing in the suite
+  # needed the full row count (the 5000-row validation chunk boundary has its
+  # own synthetic tests), but a naive head -n truncation would silently drop
+  # the single "record not done" row, and with it the only non-empty values of
+  # GFSTAT and GFREASND. Pin what the reduction was chosen to preserve, so a
+  # future re-trim cannot quietly throw it away.
+  path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
+  tbl <- read.delim(
+    path,
+    sep = "\t",
+    header = TRUE,
+    colClasses = "character",
+    check.names = FALSE
+  )
+  tbl[is.na(tbl)] <- ""
+
+  expect_equal(dim(tbl), c(490L, 33L))
+  expect_equal(length(unique(tbl$SUBJIDN)), 50L)
+  expect_equal(length(unique(tbl$GFREFID)), 75L)
+  expect_setequal(unique(tbl$VISIT), c("VISIT 02", "VISIT 05"))
+
+  # The "not done" record: the only row exercising the second value of these
+  # five columns.
+  not_done <- tbl[tbl$GFSTAT == "NOT DONE", ]
+  expect_equal(nrow(not_done), 1L)
+  expect_equal(not_done$GFREASND, "DATA ANALYSIS QC FAILED")
+  expect_equal(not_done$GFTSTDTL, "")
+  expect_equal(not_done$GFGENREF, "")
+  expect_equal(not_done$SWVER, "")
+})

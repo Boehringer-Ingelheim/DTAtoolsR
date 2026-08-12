@@ -1334,10 +1334,44 @@ write_dta(dta_from_file, "clinical_dta.docx")
 write_dta(dta_from_file, "clinical_dta.docx", template = "my_template.docx")
 ```
 
-PDF output requires a PDF backend; `write_dta(format = "pdf")` aborts when none
-is available rather than writing a DOCX under a `.pdf` name. Dates in the
-generated documents are written as ISO 8601 (`YYYY-MM-DD`), so the same DTA
-produces the same document regardless of the machine's locale.
+Dates in the generated documents are written as ISO 8601 (`YYYY-MM-DD`), so the
+same DTA produces the same document regardless of the machine's locale.
+
+#### PDF output
+
+PDF is produced by building the Word document and converting it, which needs an
+external tool. `dta_pdf_backend()` reports what this machine will use, and
+returns `NULL` when nothing is installed:
+
+```{r dta_pdf_backend_example, eval=FALSE}
+dta_pdf_backend()
+#> $name
+#> [1] "tinytex"
+#> $engine
+#> [1] "~/.TinyTeX/bin/windows"
+#> $available
+#> [1] "tinytex" "pandoc"
+```
+
+Three backends are tried in order:
+
+1. **LibreOffice** — a `soffice` binary on the `PATH`. Preferred, because it
+   renders the document as Word does and keeps table shading, column widths and
+   heading numbering.
+2. **TinyTeX** — pandoc converts to LaTeX and `tinytex::latexmk()` compiles it,
+   installing any missing LaTeX packages on demand.
+3. **pandoc** with some other PDF engine already installed.
+
+If none is present, install one from R — no administrator rights required:
+
+```{r install_tinytex_example, eval=FALSE}
+tinytex::install_tinytex()
+```
+
+`write_dta(format = "pdf")` aborts, naming that command, rather than writing a
+DOCX under a `.pdf` name. The output is verified to start with the `%PDF`
+signature before it is handed back, so a failed conversion never leaves a
+mislabelled file behind.
 
 ---
 
@@ -1645,6 +1679,7 @@ datasets:
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                               |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                               |
 | `write_dta(x, file, format)` | Write the whole DTA as a document (`docx`, `pdf`, `md`)     |
+| `dta_pdf_backend()` | Report the DOCX-to-PDF backend this machine will use, or `NULL` |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA  |
 | `export_specs_table(x, file)` | Export spec table to Word                               |
 | `export_column_value_table(x, file, id)` | Export value list for a column to Word         |

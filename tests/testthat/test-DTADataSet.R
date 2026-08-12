@@ -35,7 +35,7 @@ test_that("DTADataSet object is created and table can be loaded", {
   expect_error(read_file(ds@files[[1]], "blala.tsv"),  "does not match the filename")
   
   expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
-  expect_equal(nrow(tab), 20940)
+  expect_equal(nrow(tab), 490)
   expect_equal(ncol(tab), 33)
 
   expect_true(is.list(files(ds)))
