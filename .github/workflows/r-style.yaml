@@ -1,0 +1,116 @@
+# R-specific style/lint/doc checks that used to run as the lorenzwalthert/precommit
+# hooks (style-files, parsable-R, no-browser-statement, no-debug-statement,
+# deps-in-desc, roxygenize, use-tidy-description). That repo builds its OWN
+# isolated ~40-package renv library on every run, separate from the library
+# r-lib/actions/setup-r-dependencies has already built for R-CMD-check. That
+# duplication is what broke three separate times (a `digest` that will not
+# compile on R 4.5 + Rtools45, a cache-outage with no error tolerance, and the
+# two renv caches colliding on the same runner path) -- see CHANGELOG.md.
+#
+# This workflow replaces those hooks with plain R scripts run against the
+# packages r-lib/actions/setup-r-dependencies installs for THIS project (the
+# same library R-CMD-check uses) -- no second environment, nothing to
+# collide, nothing pinned to a separate revision that can drift out from
+# under an R upgrade.
+#
+# A separate workflow rather than a job in R-CMD-check.yaml: R-CMD-check runs
+# a 5-leg OS/R-version matrix, and these checks are style/doc/dependency
+# checks, not code-behaviour checks -- running them once here, instead of
+# once per matrix leg, avoids repeating the identical result five times (the
+# same reasoning as the "check each code state once" change in
+# 80c107d). It also keeps a style failure and a genuine cross-platform test
+# failure visibly separate in the PR checks list.
+on:
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch:
+
+name: r-style
+
+permissions: read-all
+
+concurrency:
+  group: r-style-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  r-style:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      # needs: check installs Imports + Depends + LinkingTo + Suggests, i.e.
+      # the same library R-CMD-check uses -- including the Suggests packages
+      # (shiny, tinytex, rmarkdown) that roxygen2 needs installed to resolve
+      # markdown cross-reference links such as [shiny::runApp()] in roxygen
+      # comments.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::styler, any::roxygen2
+          needs: check
+
+      # Parity with parsable-R / no-browser-statement / no-debug-statement.
+      # See .github/scripts/check_r_sanity.R for what each still buys us.
+      - name: Check R/ parses and has no browser()/debug() calls
+        shell: Rscript {0}
+        run: source(".github/scripts/check_r_sanity.R")
+
+      # Parity with deps-in-desc. See .github/scripts/check_deps_in_desc.R
+      # for exactly what this does and does not catch.
+      - name: Check every R/ namespaced call is declared in DESCRIPTION
+        shell: Rscript {0}
+        run: source(".github/scripts/check_deps_in_desc.R")
+
+      # Parity with style-files. Fails rather than auto-fixes: this workflow
+      # has no write-back step (see the note on the roxygen step below for
+      # why), so a fixable style diff and an unfixable one are treated the
+      # same way -- reported, not silently changed. `dry = "fail"` refuses to
+      # write and errors if styling would change any file.
+      - name: Check styler formatting
+        shell: Rscript {0}
+        run: |
+          styler::style_pkg(
+            style = styler::tidyverse_style,
+            scope = "tokens",
+            dry = "fail"
+          )
+
+      # Parity with roxygenize -- and the one that matters most: this project
+      # has twice had an export silently disappear from NAMESPACE (a helper
+      # placed between a roxygen block and its object stole the block's
+      # @export; exporting labels() needed a guard against masking
+      # base::labels). So this step regenerates docs and diffs man/ +
+      # NAMESPACE against what's committed, and FAILS on any difference -- it
+      # never writes the regenerated files back. Auto-committing a NAMESPACE
+      # change is exactly the silent-export failure mode this check exists to
+      # catch; the fix belongs in the PR, reviewed, not pushed by a bot.
+      #
+      # use-tidy-description (the remaining hook from the old repo) is NOT
+      # reimplemented here. It never actually ran on this project -- the R
+      # hooks could not build their environment at all until 307c4f4 -- so
+      # DESCRIPTION was never brought into `desc::desc_normalize()`'s house
+      # style (alphabetised dependency lists, 2-space rewrap, reordered
+      # top-level fields). Turning that check on now would fail on an
+      # unrelated, purely cosmetic diff across all of DESCRIPTION, in a PR
+      # about CI plumbing. It has also never caught a real defect the way
+      # roxygenize/deps-in-desc have. Left for a separate, deliberate change.
+      - name: Regenerate docs
+        shell: Rscript {0}
+        run: roxygen2::roxygenise()
+
+      - name: Fail loudly and print the diff if man/ or NAMESPACE is out of date
+        if: '!cancelled()'
+        run: |
+          if ! git diff --exit-code -- man NAMESPACE; then
+            echo
+            echo "::error::man/ or NAMESPACE is out of date. Run" \
+              "'Rscript -e \"roxygen2::roxygenise()\"' locally and commit the result."
+            exit 1
+          fi
