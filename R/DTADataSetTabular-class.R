@@ -47,8 +47,25 @@ DTADataSetTabular <- S7::new_class(
       files = list(files)
     }
 
+    # Type every table by its column specs before it is stored, so the declared
+    # type -- not the reader's per-column inference -- decides what each column
+    # holds. Values that cannot be represented become NA and are recorded as
+    # import issues, both here and on the table itself.
+    coerced <- lapply(tables, function(tbl) dta_coerce_table_to_specs(tbl, specs))
+
     # Transform to arrow tables
-    tables <- lapply(tables, function(x) arrow::as_arrow_table(x))
+    tables <- lapply(coerced, function(result) arrow::as_arrow_table(result$table))
+
+    import_issues <- lapply(coerced, function(result) result$issues)
+    import_issues <- import_issues[
+      vapply(import_issues, function(issues) nrow(issues) > 0, logical(1))
+    ]
+    # Subsetting a named list keeps the (empty) names attribute, and a named
+    # empty list is not `identical()` to `list()`. Normalise, so "no import
+    # issues" is one value rather than two.
+    if (length(import_issues) == 0) {
+      import_issues <- list()
+    }
 
     new_object(
       .parent = DTADataSet(
@@ -65,14 +82,17 @@ DTADataSetTabular <- S7::new_class(
       tables = tables,
       validation_index = list(),
       validation_store = list(),
+      import_issues = import_issues,
       validation_artifact_dir = NULL
     )
   },
   properties = list(
     specs = class_DTAColumnSpecCollection,
-    tables = S7::new_property(S7::class_list, default = list()), 
+    tables = S7::new_property(S7::class_list, default = list()),
     validation_index = S7::new_property(S7::class_list, default = list()),
     validation_store = S7::new_property(S7::class_list, default = list()),
+    # Import issues detected while typing a table, keyed by table name.
+    import_issues = S7::new_property(S7::class_list, default = list()),
     validation_artifact_dir = class_character_or_null
   ),
   validator = function(self) {
@@ -110,8 +130,8 @@ DTADataSetTabular <- S7::new_class(
     #}
 
     # if list of tables is present then list of validation index and store cannot be larger than the list of tables
-    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables))) {
-      cli_abort("Properties 'validation_index' and 'validation_store' cannot be larger than the number of tables in 'tables'")
+    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables) || length(self@import_issues) > length(self@tables))) {
+      cli_abort("Properties 'validation_index', 'validation_store' and 'import_issues' cannot be larger than the number of tables in 'tables'")
     }
 
   }
@@ -210,17 +230,38 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
 #' @title List of tables labels within DTADataSetTabular Object
 #' @description
 #' Method to get a all tables labels within a DTADataSetTabular Object.
-#' @param x An object of class DTADataSetTabular
+#' @param object An object of class DTADataSetTabular
 #' @param ... Additional arguments (not used).
 #' @return A character vector with table names.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' labels(ds)
-#' @name labels-DTADataSetTabular
-labels <- new_generic("labels", "x")
+#' @name labels
 #' @export
-method(labels, DTADataSetTabular) <- function(x) {
-  return(names(x@tables))
+# `labels` already exists as a base R (S3) generic, so this extends it rather
+# than replacing it -- exactly the pattern already used for `names`/`print`
+# below and in DTAColumnSpecCollection-class.R. Unconditionally creating a
+# brand-new S7 generic under this name would, once exported, mask
+# base::labels() entirely for every class once the package is attached, and
+# the new generic has no fallback method for anything but
+# DTADataSetTabular -- `labels()` on an lm/dendrogram/etc. would then abort
+# with "Can't find method" instead of falling back to base's own dispatch.
+if (!exists("labels", mode = "function")) {
+  labels <- new_generic("labels", "x")
+}
+#' @export
+# Method formals must match base::labels' own formals -- function(object, ...)
+# -- rather than the function(x) used for names()/print() below. Those two
+# match base::names()/base::print() because those generics happen to declare
+# their dispatch argument as `x`; base::labels() declares it as `object`.
+# R CMD check's S3 generic/method consistency check compares the registered
+# method's formals against the real base generic's formals (arg names and
+# all), so mismatching here reintroduces the WARNING this fix removes. S7
+# does not enforce or care about the argument name -- `method<-` merely calls
+# registerS3method() for base S3 generics like this one -- so this is purely
+# to satisfy R CMD check.
+method(labels, DTADataSetTabular) <- function(object, ...) {
+  return(names(object@tables))
 }
 
 #' @title Write DTA Table to File
@@ -597,7 +638,38 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
     cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
   }
 
-  x@tables[[ name ]] <- files(x, handler_index) |> read_file(file)
+  # This is where a dataset's specs and its file handler meet, so it is the only
+  # place that can tell the reader what the columns are: `read_file()` dispatches
+  # on the handler alone and a bare `DTAFile` has no specification to consult.
+  #
+  # The specs are needed in *both* halves of the read, for damage that happens at
+  # different times:
+  #
+  # * At parse time, because the reader infers a column's type from its contents
+  #   before any code here sees the data. A column of quoted subject ids reads as
+  #   an integer and "007" arrives as 7, with the leading zeros already gone --
+  #   which no later guard can undo. Passing the specs pins the columns declared
+  #   as text to text.
+  # * At coercion time, because inference also runs the other way: one
+  #   unparseable cell turns a whole declared-numeric column into text. Applying
+  #   the declared type makes the column a number, that one cell NA, and that one
+  #   cell an import error.
+  coerced <- dta_coerce_table_to_specs(
+    files(x, handler_index) |> read_file(file, specs = x@specs),
+    x@specs
+  )
+
+  x@tables[[ name ]] <- coerced$table
+
+  # Canonical copy on the dataset, keyed by table name. The same frame also
+  # rides on the table itself, so a change in the issues changes the table hash
+  # and check() cannot skip revalidation with a stale result.
+  if (nrow(coerced$issues) > 0) {
+    x@import_issues[[ name ]] <- coerced$issues
+  } else {
+    x@import_issues[[ name ]] <- NULL
+  }
+
   x
 }
 
@@ -631,6 +703,7 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
         validation_run = NA_character_,
         n_schema_errors = NA_integer_,
         n_rule_errors = NA_integer_,
+        n_import_errors = NA_integer_,
         stringsAsFactors = FALSE
       ))
     }
@@ -656,7 +729,9 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #'     \item{table}{Character or numeric table identifier.}
 #'     \item{source}{Character. One of \'auto\', \'memory\', or \'artifact\'.}
 #'   }
-#' @return A list with detailed validation output.
+#' @return A list with detailed validation output, of class
+#'   \code{dta_validation_details}. Use \code{as.data.frame()} on it to get one
+#'   row per reported error.
 #' @usage validation_errors(x, ...)
 #' @name validation_errors
 #' @export
@@ -675,7 +750,9 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
   if (source %in% c("auto", "memory")) {
     in_memory <- x@validation_store[[table_name]]
     if (!is.null(in_memory)) {
-      return(in_memory)
+      # Migrated on read as well: a store entry can have been restored from a
+      # session that predates the import axis.
+      return(dta_as_validation_details(dta_migrate_validation_details(in_memory)))
     }
   }
 
@@ -692,7 +769,10 @@ S7::method(validation_errors, DTADataSetTabular) <- function(
     )
   }
 
-  readRDS(entry$artifact_path)
+  # Tagged and migrated on read, so memory and artifact results stay identical.
+  dta_as_validation_details(
+    dta_migrate_validation_details(readRDS(entry$artifact_path))
+  )
 }
 
 
@@ -729,6 +809,7 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 
     x@validation_index[[table_name]] <- NULL
     x@validation_store[[table_name]] <- NULL
+    x@import_issues[[table_name]] <- NULL
   }
 
   invisible(x)
@@ -755,6 +836,8 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
       entry$specs_hash <- NULL
       x@validation_index[[table_name]] <- entry
     }
+    # Import issues were derived under the old specs; drop them with the rest.
+    x@import_issues[[table_name]] <- NULL
   }
 
   invisible(x)
@@ -907,6 +990,7 @@ S7::method(check, DTADataSetTabular) <- function(
       specs_hash = specs_hash,
       n_schema_errors = details$n_schema_errors,
       n_rule_errors = details$n_rule_errors,
+      n_import_errors = details$n_import_errors,
       run_id = run_id,
       validation_run = validation_run,
       artifact_path = artifact_path

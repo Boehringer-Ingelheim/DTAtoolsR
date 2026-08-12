@@ -2,11 +2,22 @@
 % Please edit documentation in R/exportDocuments.R
 \name{.convert_docx_to_pdf}
 \alias{.convert_docx_to_pdf}
-\title{Convert DOCX to PDF using pandoc or similar}
+\title{Convert a DOCX to a PDF, or fail loudly}
 \usage{
 .convert_docx_to_pdf(docx_file, pdf_file)
 }
+\arguments{
+\item{docx_file}{Character. Existing \code{.docx} to convert.}
+
+\item{pdf_file}{Character. Path of the \code{.pdf} to create.}
+}
+\value{
+Invisibly returns \code{pdf_file}.
+}
 \description{
-Convert DOCX to PDF using pandoc or similar
+Produces a real PDF or aborts. A DOCX is never renamed to \code{.pdf}, and no
+file is ever written to a path other than the requested \code{pdf_file}: any
+partial output is removed before the abort so the caller is not left with a
+misnamed or truncated document.
 }
 \keyword{internal}

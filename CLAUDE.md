@@ -58,8 +58,23 @@ Plan on the main thread; delegate the token-heavy work to subagents.
 - Call dependencies namespaced (`dplyr::filter`) and declare them in
   `DESCRIPTION` `Imports:` — the `deps-in-desc` hook fails otherwise.
 - Every exported function: roxygen block with `@export` and a runnable
-  `@examples` (executed by `tests/testthat/test-examples.R`).
+  `@examples`. Examples are executed by `R CMD check`, **not** by the test
+  suite — `tests/testthat/test-examples.R` exercises the bundled example
+  *data* under `inst/extdata`, despite its name. An example wrapped in
+  `\dontrun{}` is therefore never executed anywhere, so use it only when the
+  code genuinely cannot run unattended (it writes outside `tempdir()`, needs
+  a network, or launches the Shiny app).
 - Every behaviour change: a test in `tests/testthat/test-<Topic>.R`.
+- Tests must assert behaviour, not existence. `expect_error()` needs a
+  `regexp` or `class`; a file-producing function is checked by reading the
+  file back, not by `file.exists()`. Note `expect_s3_class(x, c("A","B"))` is
+  an ANY-match, not ALL. Some tests deliberately pin known defects — search
+  `KNOWN DEFECT, pinned rather than endorsed`; when the fix lands they are
+  *meant* to fail, and the comment names the assertion to switch to.
+- Never assert on translated text. R renders base errors and `%B` month names
+  in the system language (German on the primary dev machine), so match
+  condition classes (`subscriptOutOfBoundsError`), package-authored `cli`
+  strings, or force `LC_TIME = "C"`.
 - tidyverse style, applied by `styler` in pre-commit — do not hand-format.
 
 ## Guardrails

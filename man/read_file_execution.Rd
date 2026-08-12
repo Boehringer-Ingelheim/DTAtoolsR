@@ -16,8 +16,10 @@ read_file_execution(x, ...)
 \arguments{
 \item{x}{A \code{DTAFileTSV} object containing file reading parameters.}
 
-\item{...}{A single \code{file} argument: character string specifying the path
-to the file to be read.}
+\item{...}{A \code{file} argument giving the path to the file to be read, and an
+optional \code{specs} argument: a \code{DTAColumnSpecCollection} whose declared
+types decide how the columns are parsed. Without it every column is
+inferred, as before.}
 }
 \value{
 An Arrow Table containing the file's contents.

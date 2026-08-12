@@ -165,6 +165,16 @@ bi_css <- function() {
       text-transform: uppercase; color: var(--bi-grey); margin: 2px 0 6px;
     }
 
+    /* Metadata import errors: DTA-level, so they appear nowhere else in the UI
+       (the messages dock is per-dataset). Shown above the metadata form. */
+    .md-import-warn {
+      border: 1px solid var(--bi-fail-border); background: var(--bi-fail-bg);
+      color: var(--bi-fail); border-radius: 8px; padding: 10px 14px;
+      margin-bottom: 14px; font-size: .86rem;
+    }
+    .md-import-warn-head { font-weight: 700; margin-bottom: 4px; }
+    .md-import-warn ul { margin: 0; padding-left: 18px; }
+
     /* Raw YAML syntax-highlighted view (dark editor theme) */
     .yaml-view {
       margin: 0; background: #0d1117; color: #c9d1d9; padding: 14px 16px;
@@ -214,6 +224,9 @@ bi_css <- function() {
     .loaded-file-row .file-ok      { color: var(--bi-pass); }
     .loaded-file-row .file-fail    { color: var(--bi-fail); }
     .loaded-file-row .file-pending { color: var(--bi-grey); }
+    /* Validated, but the import axis was never checked -- amber, so it reads
+       as neither the green pass nor the red fail. */
+    .loaded-file-row .file-unknown { color: #b8860b; }
     .loaded-file-row .file-remove {
       margin-left: auto; flex: none; color: var(--bi-fail);
       border: none; background: transparent; padding: 2px 7px; line-height: 1; font-size: 1rem;
@@ -410,6 +423,9 @@ bi_css <- function() {
     }
     .inspect-badge.rule { background: var(--bi-fail); }
     .inspect-badge.schema { background: #b8860b; }
+    /* Third validation axis (a value unrepresentable in its declared type).
+       Its own hue so it is never mistaken for a rule or schema failure. */
+    .inspect-badge.import { background: #1f6feb; }
     .inspect-msg { font-size: 1.02rem; font-weight: 600; margin: 6px 0; }
     .inspect-desc-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .inspect-desc-type {

@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.12.2
+Version: 0.13.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -69,6 +69,7 @@ Collate:
     'DTAColumnSpecCollection-class.R'
     'DTAColumnSpecStructure-class.R'
     'DTAColumnSpecStructureSAS-class.R'
+    'importConversion.R'
     'DTADataSet-class.R'
     'DTADataSetTabular-class.R'
     'validationReporting.R'

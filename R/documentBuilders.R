@@ -44,7 +44,9 @@ NULL
   doc <- officer::body_add_par(doc, "", style = "Normal")
 
   # Date and version
-  doc <- officer::body_add_par(doc, paste("Date:", format(date, "%B %d, %Y")), style = "Normal")
+  # ISO 8601 (YYYY-MM-DD): locale-independent, unlike "%B %d, %Y", whose month
+  # name is taken from LC_TIME and differs per workstation.
+  doc <- officer::body_add_par(doc, paste("Date:", .format_document_date(date)), style = "Normal")
 
   if (!is.null(version)) {
     doc <- officer::body_add_par(doc, paste("Version:", version), style = "Normal")

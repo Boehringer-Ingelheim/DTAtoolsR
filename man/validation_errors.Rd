@@ -16,7 +16,9 @@ validation_errors(x, ...)
 }}
 }
 \value{
-A list with detailed validation output.
+A list with detailed validation output, of class
+\code{dta_validation_details}. Use \code{as.data.frame()} on it to get one
+row per reported error.
 }
 \description{
 Returns detailed validation output for one table, either from in-memory

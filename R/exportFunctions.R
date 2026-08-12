@@ -117,6 +117,12 @@ export_specs_table <- function(
         )
     ))
   ) {
+    # Subset to the requested columns (as the 7-name branch does). Without this
+    # the excluded "Length" column survived into the table and the j = 1..6
+    # widths below were applied to a 7-column flextable.
+    df <- df %>%
+      dplyr::select(dplyr::any_of(colnames))
+
     ft <- flextable::flextable(df) %>%
       flextable::font(fontname = "Times New Roman", part = "all") %>%
       flextable::bold(part = "header") %>%
@@ -149,7 +155,7 @@ export_specs_table <- function(
     ))
   ) {
     df <- df %>%
-      dplyr::select(any_of(colnames))
+      dplyr::select(dplyr::any_of(colnames))
 
     ft <- flextable::flextable(df) %>%
       flextable::font(fontname = "Times New Roman", part = "all") %>%
@@ -202,7 +208,7 @@ export_specs_table <- function(
 #' This function takes all values defined in a column and prints a word table containing those values. Can be copied into the DTA
 #' @importFrom yaml read_yaml
 #' @importFrom magrittr %>%
-#' @importFrom cli cli_alert_success
+#' @importFrom cli cli_alert_success cli_abort
 #' @importFrom flextable flextable font bold bg italic border_outer border_inner align padding valign save_as_docx
 #' @param DTAColumnSpecCollection A DTAColumnSpecCollection object containing
 #'   column specifications.
@@ -222,6 +228,16 @@ export_column_value_table <- function(
 ) {
   # get values from column within DTAColumnSpecCollection
   specs <- DTAColumnSpecCollection@columns[[id]]
+
+  if (is.null(specs)) {
+    cli::cli_abort("No column named {.val {id}} found in the column spec collection.")
+  }
+
+  if (length(specs@values) == 0) {
+    cli::cli_abort(
+      "Column {.val {id}} has no {.field values} defined; there is nothing to export."
+    )
+  }
 
   df <- data.frame(id = specs@values)
   colnames(df) <- id

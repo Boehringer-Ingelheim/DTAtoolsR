@@ -18,6 +18,97 @@ normalize_rule_type <- function(type) {
   )
 }
 
+#' @title Strict Numeric Conversion
+#' @description
+#' Converts a column to numeric while keeping apart the three cases that a bare
+#' `as.numeric()` collapses into a single `NA`:
+#'
+#' * **missing** -- `NA` or an empty string in the *source*. Not an error: a
+#'   missing value neither passes nor violates a numeric rule.
+#' * **unconvertible** -- present in the source but not representable as a
+#'   number (`"ninety"`, `"N/A"`, `">65"`, the factor level `"high"`). This is
+#'   an import error, and the row must not be treated as passing the rule.
+#' * **convertible** -- the numeric value is used.
+#'
+#' Factors are converted through `as.character()` **first**. `as.numeric()` on a
+#' factor returns its *integer level codes*, so `factor(c("500", "600", "700"))`
+#' reads as `1, 2, 3` and sails through any range rule that admits small
+#' integers.
+#'
+#' Only unrecoverable values are reported as unconvertible. A value that
+#' converts but changes representation (`"007"` to `7`, `"1.50"` to `1.5`) is a
+#' clean conversion, not an import error.
+#'
+#' Dates and date-times are converted through their own numeric representation
+#' and can never be unconvertible; they are never text that failed to parse.
+#' @param x A vector taken from a table column.
+#' @return A list with `values` (numeric), `raw` (character, the source text
+#'   verbatim), `missing` (logical) and `unconvertible` (logical), each the same
+#'   length as `x`.
+#' @keywords internal
+dta_as_numeric_strict <- function(x) {
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    values <- as.numeric(x)
+    return(list(
+      values = values,
+      raw = as.character(x),
+      missing = is.na(values),
+      unconvertible = rep(FALSE, length(values))
+    ))
+  }
+
+  raw <- if (is.factor(x)) as.character(x) else x
+
+  if (is.numeric(raw) || is.logical(raw)) {
+    values <- as.numeric(raw)
+    return(list(
+      values = values,
+      raw = as.character(raw),
+      missing = is.na(values),
+      unconvertible = rep(FALSE, length(values))
+    ))
+  }
+
+  raw_chr <- as.character(raw)
+  # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
+  missing <- is.na(raw_chr) | trimws(raw_chr) %in% ""
+  values <- suppressWarnings(as.numeric(trimws(raw_chr)))
+
+  list(
+    values = values,
+    raw = raw_chr,
+    missing = missing,
+    unconvertible = is.na(values) & !missing
+  )
+}
+
+#' @title Operands for a Numeric Comparison
+#' @description
+#' Returns the column and the bound of a numeric comparison as numbers.
+#'
+#' Comparing a character column with `>` coerces the *bound* to character and
+#' applies locale collation, under which `"9" > "65"` is `TRUE`. Converting both
+#' sides first is what makes the comparison mean what it says.
+#' @param x The column vector taken from the table.
+#' @param value The bound supplied in the specification.
+#' @return A list with the numeric `x` and `value`.
+#' @keywords internal
+dta_numeric_operands <- function(x, value) {
+  # Dates and date-times carry their own comparison semantics -- a character
+  # bound is parsed as a date -- so they are compared exactly as before.
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    return(list(x = x, value = value))
+  }
+
+  bound <- if (is.character(value) || is.factor(value)) {
+    suppressWarnings(as.numeric(as.character(value)))
+  } else {
+    value
+  }
+
+  list(x = dta_as_numeric_strict(x)$values, value = bound)
+}
+
 #' @title Rule: check_range
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
@@ -57,22 +148,29 @@ rule_check_range <- function(rule, df) {
   }
 
   if (!col %in% names(df)) {
-    cli::cli_abort("Column '{col}' not found in table.")
+    cli::cli_abort(
+      "Column '{col}' not found in table.",
+      class = "dta_rule_not_applicable"
+    )
   }
 
-  x <- as.numeric(df[[col]])
-  in_range <- x >= range[1] & x <= range[2]
-  violated <- !in_range
+  converted <- dta_as_numeric_strict(df[[col]])
+  in_range <- converted$values >= range[1] & converted$values <= range[2]
 
-  # NA handling: ignore NAs (they neither pass nor count as violations)
-  if (any(violated, na.rm = TRUE)) {
+  # A genuinely missing value is ignored: it neither passes nor violates.
+  # A value that is present but not representable as a number is a violation,
+  # not a pass -- `any(!in_range, na.rm = TRUE)` used to drop it silently, so
+  # c("ninety", "N/A", ">65") reported a clean 18..65 range.
+  violated <- (in_range %in% FALSE) | converted$unconvertible
+
+  if (any(violated)) {
     list(
       id = rule@id,
       valid = FALSE,
       message = sprintf(
         "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
         rule@id,
-        sum(violated, na.rm = TRUE),
+        sum(violated),
         col,
         range[1],
         range[2]
@@ -105,7 +203,8 @@ rule_check_unique <- function(rule, df) {
   missing_cols <- setdiff(cols, names(df))
   if (length(missing_cols) > 0) {
     cli::cli_abort(
-      "Column{?s} not found in table: {paste(missing_cols, collapse = ', ')}"
+      "Column{?s} not found in table: {paste(missing_cols, collapse = ', ')}",
+      class = "dta_rule_not_applicable"
     )
   }
 
@@ -128,62 +227,332 @@ rule_check_unique <- function(rule, df) {
   }
 }
 
+#' @title Normalise a condition mapping
+#' @description
+#' Brings the `condition` / `then` clause of a conditional rule into the
+#' canonical named-list form `list(<column> = list(<operator> = <value>))`.
+#'
+#' YAML authors legitimately write the clause as a sequence of single-column
+#' mappings:
+#'
+#' ```yaml
+#' condition:
+#'   - VISIT:
+#'       equals: V03
+#' ```
+#'
+#' which `yaml::read_yaml()` parses into an **unnamed** list. That form is
+#' unambiguous (a column may be constrained only once), so it is accepted and
+#' folded into the named form rather than rejected. Anything that cannot be
+#' interpreted -- a bare character string, an entry that does not name its
+#' column, or the same column named twice -- aborts with an explicit message.
+#' @param conditions The raw clause as supplied by the user or the YAML parser.
+#' @param arg Name of the clause, used in error messages.
+#' @return A named list of column conditions, possibly empty.
+#' @keywords internal
+dta_normalize_conditions <- function(conditions, arg = "condition") {
+  if (is.null(conditions)) {
+    return(list())
+  }
+
+  if (is.character(conditions)) {
+    cli::cli_abort(c(
+      "{.arg {arg}} must map column names to operators, not a character string.",
+      x = "Got the string {.val {conditions}}.",
+      i = "Write conditions as {.code list(VISIT = list(equals = \"V03\"))}."
+    ))
+  }
+
+  if (!is.list(conditions)) {
+    cli::cli_abort(c(
+      "{.arg {arg}} must be a list mapping column names to operators.",
+      x = "Got an object of type {.cls {class(conditions)}}."
+    ))
+  }
+
+  if (length(conditions) == 0L) {
+    return(list())
+  }
+
+  clause_names <- names(conditions)
+  if (!is.null(clause_names) && all(nzchar(clause_names))) {
+    return(conditions)
+  }
+
+  # YAML sequence form: fold the sequence of single-column mappings into one
+  # named mapping.
+  out <- list()
+  for (i in seq_along(conditions)) {
+    entry_name <- if (is.null(clause_names)) "" else clause_names[[i]]
+
+    entry <- if (nzchar(entry_name)) {
+      conditions[i]
+    } else {
+      conditions[[i]]
+    }
+
+    # A sequence entry must be `<column>: <operator mapping>`. Requiring the
+    # value to be a mapping is what separates a real entry from an operator
+    # mapping that forgot to name its column: `- equals: V03` would otherwise be
+    # silently read as a column literally called "equals".
+    entry_is_column_mapping <- is.list(entry) &&
+      length(entry) > 0L &&
+      !is.null(names(entry)) &&
+      all(nzchar(names(entry))) &&
+      all(vapply(entry, is.list, logical(1)))
+
+    if (!entry_is_column_mapping) {
+      cli::cli_abort(c(
+        "{.arg {arg}} entry {i} must name the column it applies to.",
+        i = "A sequence entry looks like {.code - VISIT:} followed by its operators."
+      ))
+    }
+
+    for (column_name in names(entry)) {
+      if (column_name %in% names(out)) {
+        cli::cli_abort(c(
+          "{.arg {arg}} constrains column {.field {column_name}} more than once.",
+          i = "Merge the operators for {.field {column_name}} into a single entry."
+        ))
+      }
+      out[column_name] <- entry[column_name]
+    }
+  }
+
+  out
+}
+
+#' @title Evaluate one operator of a column condition
+#' @description
+#' Returns the row mask for a single `<operator>: <value>` pair. Unrecognised
+#' operators abort, naming both the column and the offending key.
+#' @param column_name Name of the column being tested.
+#' @param operator The operator key supplied in the specification.
+#' @param value The value supplied for that operator.
+#' @param x The column vector taken from the table.
+#' @return A logical vector, one element per row of the table.
+#' @keywords internal
+dta_condition_mask <- function(column_name, operator, value, x) {
+  # Numeric comparisons must compare numbers. Applied to the raw column, `>` on
+  # a character vector coerces the bound to character and compares by locale
+  # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
+  # after "65". `pattern` and the equality/set operators are unaffected and
+  # deliberately stay on the raw column.
+  if (operator %in% dta_numeric_condition_operators()) {
+    operands <- dta_numeric_operands(x, value)
+    x <- operands$x
+    value <- operands$value
+  }
+
+  switch(
+    operator,
+    equals = ,
+    equal = x == value,
+    not_equals = ,
+    not_equal = x != value,
+    `in` = x %in% value,
+    not_in = !(x %in% value),
+    greater = x > value,
+    less = x < value,
+    greater_equal = x >= value,
+    less_equal = x <= value,
+    range = x >= value[1] & x <= value[2],
+    pattern = grepl(value, as.character(x), perl = TRUE),
+    empty = {
+      empty_mask <- is.na(x)
+
+      if (is.character(x)) {
+        empty_mask <- empty_mask | trimws(x) == ""
+      } else if (is.factor(x)) {
+        x_chr <- as.character(x)
+        empty_mask <- is.na(x_chr) | trimws(x_chr) == ""
+      }
+
+      if (isTRUE(value)) empty_mask else !empty_mask
+    },
+    cli::cli_abort(c(
+      "Unsupported condition operator {.val {operator}} for column {.field {column_name}}.",
+      i = "Supported operators: {.val {dta_condition_operators()}}."
+    ))
+  )
+}
+
+#' @title Supported condition operators
+#' @description The operator keys accepted inside a conditional rule clause.
+#' @return A character vector of operator names.
+#' @keywords internal
+dta_condition_operators <- function() {
+  c(
+    "equals", "equal", "not_equals", "not_equal", "in", "not_in",
+    "greater", "less", "greater_equal", "less_equal",
+    "min", "max", "range", "pattern", "empty"
+  )
+}
+
+#' @title Condition Operators That Compare Numbers
+#' @description
+#' The subset of `dta_condition_operators()` whose operands are numeric. Only
+#' these go through `dta_numeric_operands()`; the equality, set, text and
+#' emptiness operators keep comparing the raw column.
+#' @return A character vector of operator names.
+#' @keywords internal
+dta_numeric_condition_operators <- function() {
+  c("greater", "less", "greater_equal", "less_equal", "min", "max", "range")
+}
+
+#' @title Columns a Rule Compares Numerically
+#' @description
+#' Names the columns whose values this rule reads as numbers. These are the
+#' columns scanned for values that are present but not representable as a
+#' number, which is what the import axis reports.
+#' @param rule A `DTARule` object.
+#' @return A character vector of column names, possibly empty.
+#' @keywords internal
+dta_rule_numeric_columns <- function(rule) {
+  type <- tryCatch(
+    normalize_rule_type(rule@type),
+    error = function(e) NA_character_
+  )
+
+  if (identical(type, "check_range")) {
+    col <- rule_get_slot(rule, "column")
+    if (is.null(col)) {
+      col <- rule_get_slot(rule, "columns")
+    }
+    return(as.character(col))
+  }
+
+  if (identical(type, "check_col_condition")) {
+    clauses <- c(
+      dta_normalize_conditions(rule_get_slot(rule, "condition"), arg = "condition"),
+      dta_normalize_conditions(rule_get_slot(rule, "then"), arg = "then")
+    )
+
+    if (length(clauses) == 0) {
+      return(character(0))
+    }
+
+    numeric_ops <- dta_numeric_condition_operators()
+    is_numeric_clause <- vapply(
+      clauses,
+      function(condition) {
+        is.list(condition) && any(names(condition) %in% numeric_ops)
+      },
+      logical(1)
+    )
+
+    return(unique(as.character(names(clauses)[is_numeric_clause])))
+  }
+
+  character(0)
+}
+
+#' @title Import Errors Contributed by One Rule
+#' @description
+#' Scans the columns this rule compares numerically and reports every value that
+#' is present in the source but not representable as a number.
+#'
+#' Such a value is reported on **both** axes: here as an import error, and by
+#' the rule itself as a violated row. Moving it to the import axis alone would
+#' make any consumer reading `n_rule_errors` see fewer errors than before.
+#' @param rule A `DTARule` object.
+#' @param df A data.frame to scan.
+#' @return A data.frame in the shape of `dta_empty_import_errors()`.
+#' @keywords internal
+dta_rule_import_errors <- function(rule, df) {
+  columns <- tryCatch(
+    dta_rule_numeric_columns(rule),
+    error = function(e) character(0)
+  )
+  columns <- unique(columns[columns %in% names(df)])
+
+  if (length(columns) == 0) {
+    return(dta_empty_import_errors())
+  }
+
+  parts <- lapply(columns, function(column) {
+    converted <- dta_as_numeric_strict(df[[column]])
+    offending <- which(converted$unconvertible)
+
+    if (length(offending) == 0) {
+      return(dta_empty_import_errors())
+    }
+
+    data.frame(
+      row = as.integer(offending),
+      column = column,
+      raw = converted$raw[offending],
+      # A placeholder the caller replaces with the declared type from the
+      # column spec; it is the observed storage type when no spec is at hand.
+      declared_type = class(df[[column]])[[1]],
+      reason = "not_convertible",
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, parts)
+  rownames(out) <- NULL
+  out
+}
+
 #' @keywords internal
 evaluate_condition <- function(column_name, condition, df) {
   if (!column_name %in% names(df)) {
-    cli::cli_abort("Column not found in table: {column_name}")
+    cli::cli_abort(
+      "Column not found in table: {column_name}",
+      class = "dta_rule_not_applicable"
+    )
+  }
+
+  # An empty or unnamed operator map is a specification error, not "no
+  # restriction": silently passing every row would make the rule invisible.
+  operators <- names(condition)
+  if (length(condition) == 0L || is.null(operators) || !all(nzchar(operators))) {
+    cli::cli_abort(c(
+      "Condition for column {.field {column_name}} must map operators to values.",
+      i = "Supported operators: {.val {dta_condition_operators()}}."
+    ))
   }
 
   x <- df[[column_name]]
+  masks <- list()
 
-  if ("equals" %in% names(condition) || "equal" %in% names(condition)) {
-    value <- if ("equals" %in% names(condition)) condition[["equals"]] else condition[["equal"]]
-    return(x == value)
-  } else if ("not_equals" %in% names(condition) || "not_equal" %in% names(condition)) {
-    value <- if ("not_equals" %in% names(condition)) condition[["not_equals"]] else condition[["not_equal"]]
-    return(x != value)
-  } else if ("in" %in% names(condition)) {
-    return(x %in% condition[["in"]])
-  } else if ("not_in" %in% names(condition)) {
-    return(!(x %in% condition[["not_in"]]))
-  } else if ("greater" %in% names(condition)) {
-    return(x > condition[["greater"]])
-  } else if ("less" %in% names(condition)) {
-    return(x < condition[["less"]])
-  } else if ("greater_equal" %in% names(condition)) {
-    return(x >= condition[["greater_equal"]])
-  } else if ("less_equal" %in% names(condition)) {
-    return(x <= condition[["less_equal"]])
-  } else if ("min" %in% names(condition) || "max" %in% names(condition)) {
-    lower <- if ("min" %in% names(condition)) condition[["min"]] else -Inf
-    upper <- if ("max" %in% names(condition)) condition[["max"]] else Inf
-    return(x >= lower & x <= upper)
-  } else if ("range" %in% names(condition)) {
-    return(x >= condition[["range"]][1] & x <= condition[["range"]][2])
-  } else if ("pattern" %in% names(condition)) {
-    return(grepl(condition[["pattern"]], as.character(x), perl = TRUE))
-  } else if ("empty" %in% names(condition)) {
-    empty_mask <- is.na(x)
-
-    if (is.character(x)) {
-      empty_mask <- empty_mask | trimws(x) == ""
-    } else if (is.factor(x)) {
-      x_chr <- as.character(x)
-      empty_mask <- is.na(x_chr) | trimws(x_chr) == ""
-    }
-
-    if (isTRUE(condition[["empty"]])) {
-      return(empty_mask)
-    } else {
-      return(!empty_mask)
-    }
-  } else {
-    stop(sprintf("Unsupported condition type for column '%s'.", column_name))
+  # `min` and `max` are the one documented pair: together they describe a single
+  # inclusive band, so they are consumed as a unit rather than as two operators.
+  if (any(c("min", "max") %in% operators)) {
+    lower <- if ("min" %in% operators) condition[["min"]] else -Inf
+    upper <- if ("max" %in% operators) condition[["max"]] else Inf
+    # Same collation trap as the other comparisons: the band is numeric, so
+    # both ends and the column are taken as numbers.
+    lower_operands <- dta_numeric_operands(x, lower)
+    upper_operands <- dta_numeric_operands(x, upper)
+    masks[[length(masks) + 1L]] <-
+      lower_operands$x >= lower_operands$value &
+        upper_operands$x <= upper_operands$value
   }
+
+  for (i in seq_along(condition)) {
+    operator <- operators[[i]]
+    if (operator %in% c("min", "max")) {
+      next
+    }
+    masks[[length(masks) + 1L]] <- dta_condition_mask(
+      column_name = column_name,
+      operator = operator,
+      value = condition[[i]],
+      x = x
+    )
+  }
+
+  # Every operator supplied for a column must hold: combine with AND.
+  # NA propagates, and is treated as a THEN violation by the caller.
+  Reduce(`&`, masks)
 }
 
 #' @keywords internal
 evaluate_conditions <- function(conditions, df) {
+  conditions <- dta_normalize_conditions(conditions)
+
   if (length(conditions) == 0L) {
     # No conditions => no restriction (all TRUE)
     return(rep(TRUE, nrow(df)))
@@ -203,7 +572,7 @@ evaluate_conditions <- function(conditions, df) {
 #' @param rule A DTARule object of type `"check_col_condition"`. Expected slots:
 #'   - `@id` character
 #'   - `@type` = "check_col_condition"
-#'   - `@condition` list: named by column, each with one of:
+#'   - `@condition` list: named by column, each with one or more of:
 #'       `equals`, `not_equals`, `in`, `not_in`,
 #'       `greater`, `less`, `greater_equal`, `less_equal`, `min`, `max`,
 #'       `range`, `pattern`, `empty`
@@ -214,14 +583,22 @@ evaluate_conditions <- function(conditions, df) {
 #'   predicates must also be TRUE. For rows where the IF holds, `NA` in THEN
 #'   is considered a **violation**.
 #' @details
-#' Supported operators per column (single operator per column, except that
-#' `min` and `max` may be combined to express an inclusive band):
+#' A column may carry **several operators**; all of them must hold for the row
+#' to satisfy that column (they are combined with logical AND). `min` and `max`
+#' are the one exception: together they describe a single inclusive band rather
+#' than two independent tests. An operator key that is not recognised aborts,
+#' naming the column and the offending key.
+#'
+#' Supported operators per column:
 #' - Equality: `equals`, `not_equals`
 #' - Set: `in`, `not_in`
 #' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`,
 #'   `min`, `max`, `range`
 #' - Text: `pattern` (a regular expression; row passes when the value matches)
 #' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
+#'
+#' Both `@condition` and `@then` may also be written as a YAML sequence of
+#' single-column mappings; they are normalised to the named form.
 #'
 #' If `@condition` is empty, the `@then` part applies to **all rows**.
 #' @return A list with elements `id`, `valid`, and `message`.
@@ -291,7 +668,30 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
       ))
     }
 
-    result <- rule_functions[[rule_type]](rule, df)
+    # A rule that cannot be evaluated against this table -- typically a stale
+    # rule naming a column the table does not have -- is a rule FAILURE, not a
+    # reason to abort validation of everything else. Only the narrowly classed
+    # `dta_rule_not_applicable` condition is caught here; genuine programming
+    # errors and malformed rule specifications still propagate.
+    result <- tryCatch(
+      rule_functions[[rule_type]](rule, df),
+      dta_rule_not_applicable = function(cnd) {
+        list(
+          id = rule@id,
+          valid = FALSE,
+          message = sprintf(
+            "Rule '%s' could not be evaluated: %s",
+            rule@id,
+            conditionMessage(cnd)
+          )
+        )
+      }
+    )
+
+    # The import axis is sourced from the same columns the rule just read as
+    # numbers, so an unrepresentable value is reported on both axes rather than
+    # reclassified from one to the other.
+    result$import_errors <- dta_rule_import_errors(rule, df)
 
     if (isTRUE(verbose)) {
       if (isTRUE(result$valid)) {

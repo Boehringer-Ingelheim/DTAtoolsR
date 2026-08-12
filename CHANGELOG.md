@@ -8,18 +8,115 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.13.0] - 2026-08-12
+
+> **Data that passed validation before may now fail, and that is the point of
+> this release.** Several defects caused invalid data to be reported as clean.
+> Re-run `check(..., force = TRUE)` on existing datasets: validation artifacts
+> written by earlier versions report the new import axis as unknown rather than
+> as passing, because they were never checked for it.
+
+### Added
+
+- Validation now has a third axis. Alongside schema and rule errors, an **import
+  error** records a value that cannot be represented in its declared type. The
+  value becomes `NA`, the original text is retained, and any import error makes
+  validation fail. Surfaced through `validation_status()`, `results()`,
+  `messages()` (as `source = "import"`) and `inspect()`, all of which gain
+  `n_import_errors`.
+- Columns are typed against the specification at import. `as_r_type()` maps a
+  declared type to an R type, and `dta_coerce_table_to_specs()` applies it when
+  a file is read. Previously the declared type was used only to build the JSON
+  schema and never to read a column.
+- `check()` validates metadata. A metadata import error now fails the whole DTA
+  instead of being recorded while the banner still reported success.
+- `metadata_import_errors()` returns a `DTAMetaData` object's import issues.
+- `as.data.frame()` method for validation details.
+- `labels()` is exported. It was defined but never exported, so in an installed
+  package the call fell through to `base::labels.default` and silently returned
+  `"1"` — a wrong answer rather than an error. It is registered through the same
+  guard the package uses for `names()` and `print()`, so `base::labels` keeps
+  working for every other class.
 - Unit tests for the bundled Shiny app, which previously had none: its helper
   files are auto-sourced by Shiny at launch and were therefore invisible to the
   test suite.
 
 ### Changed
 
+- Dates in exported documents are ISO 8601 (`YYYY-MM-DD`). They previously used
+  `%B`, so the same DTA produced `Januar 15, 2026` on a German machine and
+  `January 15, 2026` in CI — two different legal documents from one input.
+- `write_dta(format = "pdf")` aborts when no PDF backend is available instead of
+  producing a DOCX with a `.pdf` extension.
+- The template fallback notice is a warning condition rather than a message, so
+  callers can trap it with `tryCatch()` or `options(warn = 2)`.
+- `include_yaml = TRUE` warns when it cannot be honoured instead of being
+  silently discarded.
+- `@values` is normalised to an atomic vector, so a spec collection survives a
+  YAML round trip with whole-object equality.
+- `check()` on file datasets honours `force`, `persist`, `artifact_dir`, `quiet`
+  and `tables`, which it previously accepted and ignored.
 - Removed the unused `export_modal_ui()` helper from the Shiny app. The export
   modal has always been built inline in `app.R`; the orphaned builder produced
   module-namespaced ids that no server ever observed.
 
 ### Fixed
 
+- **Conditions with more than one operator dropped all but the first.**
+  `then: {AGE: {greater: 18, less: 65}}` never evaluated `less`, so `AGE = 999`
+  validated as clean.
+- **Range rules compared factor level codes.** `factor(c("500","600","700"))`
+  against `min: 0, max: 100` passed, because `as.numeric()` yielded `1, 2, 3`.
+  Non-numeric text coerced to `NA`, which counted as a pass.
+- **Numeric comparisons on character columns used locale collation**, so
+  `"9" > 65` was `TRUE` and an underage subject passed an adults-only rule.
+- **Conditions written as a YAML sequence returned valid = TRUE**, silently
+  passing every row rather than being evaluated.
+- **Rule violations were invisible whenever a schema error existed**, because
+  validation returned early. Both axes are always evaluated now.
+- **A rule naming a column absent from the table aborted the entire run**
+  instead of reporting a rule failure.
+- **A date-prefixed phrase was silently converted to a date.**
+  `"2026-12-31 at the earliest"` became `2026-12-31`, destroying the
+  qualification. The date is kept and the original text is recorded as an
+  import error.
+- **Metadata dates serialized as bare numbers**, so a written DTA could not be
+  read back.
+- **Declared `Char` columns lost their text at read.** `"007"` arrived as `7`
+  because arrow inferred the type from the data before any package code ran.
+- `DTAFileTabular` was registered under the name `DTAFile`, so its methods
+  overwrote the base class methods and every load printed `Overwriting method`.
+- `DTAFileDelim` never passed its separator to the reader, so tab-delimited
+  files parsed into a single column.
+- `has_header = FALSE` discarded the first data row and promoted the second to
+  the header.
+- Two of the three `DTAFileTabular` validator rules could never fire.
+- `DTADataSet` accepted `description` and the three `template_*` arguments and
+  discarded them.
+- Two files sharing a basename collapsed into one validation result, and
+  `inspect()` reported the wrong path for them.
+- A single `NA` metadata field aborted every export format.
+- The compact six-column specification table returned seven columns.
+- `as.list()` emitted the literal `"SAS "` for an unset format, so the bundled
+  example collection could not survive its own YAML round trip.
+- `validation_errors()` returned a list that could not be coerced to a data
+  frame.
+- The Shiny app ignored import errors when colouring table status, showing a
+  failing table as clean.
+- **`check()` claimed a table was valid and then failed it.** The console report
+  covered the schema and rule axes but not the import axis, so a table whose
+  only defect was an unconvertible value printed
+  `Table format, length, pattern, and values are valid` followed by
+  `0 of 1 table valid`, with no stated cause. It now names the row, column, raw
+  text and declared type.
+- `export_column_value_table()` on a column with no `values` failed with a raw
+  R error about `names` attribute lengths instead of naming the column.
+- The vignette could not be built. It selected `inspect()` columns by a
+  hard-coded message id, which the new import axis reordered.
 - Declared `htmltools` and `tinytex` in `Suggests`. Both are used by the bundled
   Shiny app but were undeclared, working only because `htmltools` arrives
   transitively with `shiny`. `R CMD check` does not scan `inst/`, so neither was

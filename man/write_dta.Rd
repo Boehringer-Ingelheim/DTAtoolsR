@@ -36,8 +36,9 @@ If NULL, inferred from file extension.}
 
 \item{include_yaml}{Logical. If \code{TRUE}, append the machine-readable YAML
 specification as a final, small-font section of the built-in DOCX/PDF
-layout. Requires \code{yaml_text}. Ignored for \code{format = "md"} and when a
-\code{template} is supplied. Default: \code{FALSE}.}
+layout. Requires \code{yaml_text}. Ignored -- with a warning -- for
+\code{format = "md"}, when a \code{template} is supplied, and when \code{yaml_text} is
+\code{NULL} or empty. Default: \code{FALSE}.}
 
 \item{yaml_text}{Optional character scalar holding the YAML specification to
 embed when \code{include_yaml = TRUE}. Default: \code{NULL}.}

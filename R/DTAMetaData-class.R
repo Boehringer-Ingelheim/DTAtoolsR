@@ -21,6 +21,24 @@
 #' @param authorized_for_corrections character or list indicating BI contact(s) authorized to request corrections
 #' @return An object of class DTAMetaData.
 #'
+#' @details
+#' Date-valued metadata fields (\code{date}, \code{transmission$date_first_transfer}
+#' and \code{transmission$date_last_transfer}) may be supplied as strings. A string
+#' that is exactly an ISO date becomes a \code{Date}. A string that has no ISO date
+#' at its start (\code{"after approval"}, \code{"2 weeks after approval"},
+#' \code{"final transfer by 2026-12-31"}) is a legitimate free-text phrase and is
+#' kept verbatim as character.
+#'
+#' A string that *starts* with an ISO date but carries trailing text
+#' (\code{"2026-12-31 at the earliest"}) is the dangerous case: \code{as.Date()}
+#' silently discards the trailing words, turning a qualified statement in a data
+#' transfer agreement into a committed date. Such a value is still converted to the
+#' \code{Date} - \code{validate_transmission_dates()} and the exported documents
+#' need a real \code{Date} - but the loss is recorded as an import issue in
+#' \code{@import_issues}, carrying the original string verbatim. Import issues make
+#' \code{check()} on the enclosing \code{DTA} fail, so the discarded qualification
+#' can never pass silently.
+#'
 #' @examples
 #'
 #' DTAMetaData(title = "Clinical Data Transfer", version = "1.0")
@@ -38,15 +56,23 @@ DTAMetaData <- S7::new_class(
     error_handling = NULL,
     authorized_for_corrections = NULL
   ) {
+    import_issues <- list()
+
     if (is.character(date)) {
-      date <- as.Date(date, format = "%Y-%m-%d")
+      parsed <- .parse_metadata_date(date, field = "date", require_date = TRUE)
+      date <- parsed$value
+      import_issues <- c(import_issues, parsed$issues)
     }
-    
-    # Process transmission dates: convert character dates to Date, keep phrases as-is
+
+    # Process transmission dates: convert character dates to Date, keep phrases
+    # as-is, and record an import issue for any date that had to drop trailing
+    # text to become a Date.
     if (length(transmission) > 0) {
-      transmission <- .process_transmission_dates(transmission)
+      processed <- .process_transmission_dates(transmission)
+      transmission <- processed$transmission
+      import_issues <- c(import_issues, processed$issues)
     }
-    
+
     new_object(
       S7_object(),
       title = title,
@@ -58,7 +84,8 @@ DTAMetaData <- S7::new_class(
       supplier = supplier,
       transmission = transmission,
       error_handling = error_handling,
-      authorized_for_corrections = authorized_for_corrections
+      authorized_for_corrections = authorized_for_corrections,
+      import_issues = import_issues
     )
   },
   properties = list(
@@ -71,7 +98,8 @@ DTAMetaData <- S7::new_class(
     supplier = class_list,
     transmission = class_list,
     error_handling = class_character_or_null,
-    authorized_for_corrections = class_character_or_list_or_null
+    authorized_for_corrections = class_character_or_list_or_null,
+    import_issues = S7::new_property(S7::class_list, default = list())
   ),
   validator = function(self) {
     errors <- c()
@@ -129,29 +157,170 @@ DTAMetaData <- S7::new_class(
 )
 
 
+#' @title Split an ISO Date Prefix from a String
+#' @description
+#' Returns the leading \code{YYYY-MM-DD} date of a string together with whatever
+#' text follows it. Unlike \code{as.Date(x, format = "\%Y-\%m-\%d")}, which parses
+#' the prefix and throws the rest away without a word, the trailing text is
+#' handed back so the caller can decide what to do with it.
+#' @param value A single character string.
+#' @return A list with \code{date} (a \code{Date}, or \code{NA} when the string
+#'   does not start with a real calendar date) and \code{residue} (the trimmed
+#'   trailing text, \code{""} when the string is exactly a date).
+#' @keywords internal
+.split_date_prefix <- function(value) {
+  no_date <- list(date = as.Date(NA), residue = NA_character_)
+
+  matched <- regmatches(
+    value,
+    regexec("^\\s*(\\d{4}-\\d{2}-\\d{2})(.*)$", value)
+  )[[1]]
+
+  if (length(matched) == 0) {
+    return(no_date)
+  }
+
+  parsed <- suppressWarnings(as.Date(matched[2], format = "%Y-%m-%d"))
+  if (is.na(parsed)) {
+    # Digit-shaped but not a real calendar date (e.g. "2026-02-30 foo").
+    return(no_date)
+  }
+
+  list(date = parsed, residue = trimws(matched[3]))
+}
+
+
+#' @title Import Issue Record for a Metadata Field
+#' @description
+#' Builds a one-row record in the canonical import-error shape
+#' (\code{dta_empty_import_errors()}). Metadata values have no row/column
+#' coordinates, so the metadata field path is recorded in \code{column} and
+#' \code{row} stays \code{NA}.
+#' @param field Character. Field path, e.g. \code{"transmission$date_last_transfer"}.
+#' @param raw Character. The original value, verbatim.
+#' @param reason Character. Machine-readable reason code.
+#' @param declared_type Character. The type the value was coerced into.
+#' @return A one-row data.frame with columns \code{row}, \code{column},
+#'   \code{raw}, \code{declared_type} and \code{reason}.
+#' @keywords internal
+.metadata_import_issue <- function(field, raw, reason, declared_type = "Date") {
+  rbind(
+    dta_empty_import_errors(),
+    data.frame(
+      row = NA_integer_,
+      column = field,
+      raw = raw,
+      declared_type = declared_type,
+      reason = reason,
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+
+#' @title Parse a Metadata Date Field
+#' @description
+#' Converts a metadata date string to a \code{Date} without silently discarding
+#' anything. A bare ISO date converts cleanly; a date followed by qualifying text
+#' converts but reports an import issue carrying the original string; a string
+#' with no leading ISO date is a free-text phrase and is returned untouched.
+#' @param value The supplied value.
+#' @param field Character. Field path used in the import issue record.
+#' @param require_date Logical. When \code{TRUE} the field is typed \code{Date}
+#'   and a phrase cannot be stored, so an unparseable string is coerced the way
+#'   \code{as.Date()} would coerce it (to \code{NA}).
+#' @return A list with \code{value} (the value to store) and \code{issues} (a
+#'   possibly empty list of import issue records).
+#' @keywords internal
+.parse_metadata_date <- function(value, field, require_date = FALSE) {
+  none <- list(value = value, issues = list())
+
+  if (!is.character(value) || length(value) != 1 || is.na(value)) {
+    return(none)
+  }
+
+  split <- .split_date_prefix(value)
+
+  if (is.na(split$date)) {
+    # A phrase with no parseable date prefix ("after approval", "2 weeks after
+    # approval", "final transfer by 2026-12-31"). Documented, legitimate input:
+    # keep it verbatim and do NOT report an import issue.
+    if (isTRUE(require_date)) {
+      return(list(
+        value = suppressWarnings(as.Date(value, format = "%Y-%m-%d")),
+        issues = list()
+      ))
+    }
+    return(none)
+  }
+
+  issues <- if (nzchar(split$residue)) {
+    list(.metadata_import_issue(field, value, "trailing_residue"))
+  } else {
+    list()
+  }
+
+  list(value = split$date, issues = issues)
+}
+
+
 #' @title Process Transmission Dates
 #' @description Helper to convert transmission date fields from character to Date if they're valid dates
+#' @param transmission A transmission list.
+#' @return A list with \code{transmission} (the processed list) and \code{issues}
+#'   (a possibly empty list of import issue records).
 #' @keywords internal
 .process_transmission_dates <- function(transmission) {
   date_fields <- c("date_first_transfer", "date_last_transfer")
-  
+  issues <- list()
+
   for (field in date_fields) {
-    if (!is.null(transmission[[field]]) && is.character(transmission[[field]])) {
-      # Try to parse as date; if it fails, keep as character (phrase)
-      tryCatch(
-        {
-          parsed_date <- as.Date(transmission[[field]], format = "%Y-%m-%d")
-          if (!is.na(parsed_date)) {
-            transmission[[field]] <- parsed_date
-          }
-        },
-        error = function(e) {
-          # Keep as character if parsing fails
-        }
-      )
+    if (is.null(transmission[[field]]) || !is.character(transmission[[field]])) {
+      next
     }
+
+    parsed <- .parse_metadata_date(
+      transmission[[field]],
+      field = paste0("transmission$", field)
+    )
+    transmission[[field]] <- parsed$value
+    issues <- c(issues, parsed$issues)
   }
-  transmission
+
+  list(transmission = transmission, issues = issues)
+}
+
+
+#' @title Coerce a Version History Date to a Date
+#' @description
+#' Version history records reach this package from three routes - built in R
+#' (a \code{Date}), loaded from YAML (a character string), or omitted entirely
+#' (\code{NULL}) - and the validator accepts all three. This helper normalises
+#' any of them to a length-one \code{Date}, using \code{NA} for a missing or
+#' unparseable value rather than raising, so that a single odd record cannot take
+#' down a whole history.
+#' @param value A \code{Date}, number, character string, \code{NULL}, or anything
+#'   else found in a \code{version_history} record.
+#' @return A length-one \code{Date}, possibly \code{NA}.
+#' @keywords internal
+.history_date <- function(value) {
+  if (is.null(value) || length(value) == 0) {
+    return(as.Date(NA))
+  }
+
+  value <- value[[1]]
+
+  if (inherits(value, "Date")) {
+    return(value)
+  }
+  if (is.numeric(value)) {
+    return(as.Date(value, origin = "1970-01-01"))
+  }
+  if (is.character(value)) {
+    return(suppressWarnings(as.Date(value, format = "%Y-%m-%d")))
+  }
+
+  as.Date(NA)
 }
 
 
@@ -214,7 +383,10 @@ method(print_info, DTAMetaData) <- function(x, ...) {
     for (i in seq_along(x@version_history)) {
       hist <- x@version_history[[i]]
       version_str <- hist$version %||% "N/A"
-      date_str <- format(hist$date, "%Y-%m-%d") %||% "N/A"
+      # `format(NULL, "%Y-%m-%d")` returns the string "NULL", which `%||%` does
+      # not catch, so a record without a date used to print "v1.0 (NULL)".
+      hist_date <- .history_date(hist$date)
+      date_str <- if (is.na(hist_date)) "N/A" else format(hist_date, "%Y-%m-%d")
       cli::cli_alert("  [{i}] v{version_str} ({date_str})")
       if (!is.null(hist$changes)) {
         cli::cli_text("       {hist$changes}")

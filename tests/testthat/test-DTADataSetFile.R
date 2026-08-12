@@ -39,7 +39,72 @@ test_that("DTADataSetFile reports missing or unreadable files", {
   msgs <- messages(ds, as_tibble = FALSE)
   expect_equal(nrow(msgs), 1)
   expect_equal(msgs$source, "rule")
-  expect_true(grepl("not found|readable|empty", msgs$message, ignore.case = TRUE))
+  # The old alternation "not found|readable|empty" could not tell the three
+  # distinct failure reasons apart. This scenario is specifically a missing
+  # file, so pin that reason.
+  expect_match(msgs$message, "not found")
+})
+
+test_that("DTADataSetFile flags an existing but empty file", {
+  path <- tempfile(fileext = ".txt")
+  file.create(path)
+  on.exit(unlink(path), add = TRUE)
+
+  ds <- check(DTADataSetFile(name = "empty_file", paths = path), quiet = TRUE)
+
+  status <- validation_status(ds)
+  expect_false(status$ok)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_match(msgs$message, "empty")
+})
+
+test_that("DTADataSetFile keeps two paths that share a basename apart", {
+  dir_a <- file.path(tempdir(), "dta-basename-a")
+  dir_b <- file.path(tempdir(), "dta-basename-b")
+  dir.create(dir_a, showWarnings = FALSE)
+  dir.create(dir_b, showWarnings = FALSE)
+  on.exit(unlink(c(dir_a, dir_b), recursive = TRUE), add = TRUE)
+
+  present <- file.path(dir_a, "same.txt")
+  writeLines("content", present)
+  absent <- file.path(dir_b, "same.txt")
+
+  ds <- check(
+    DTADataSetFile(name = "collision", paths = c(present, absent)),
+    quiet = TRUE
+  )
+
+  status <- validation_status(ds)
+
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$ok, c(TRUE, FALSE))
+
+  # Exactly one message, for the absent file, and inspect() must resolve it
+  # back to the full path it came from.
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_match(msgs$message, "not found")
+
+  details <- inspect(ds, as_tibble = FALSE)
+  expect_equal(nrow(details), 1)
+  expect_equal(details$file_path, absent)
+})
+
+test_that("dta_file_target_keys disambiguates only where it has to", {
+  expect_equal(
+    dta_file_target_keys(c("a/one.txt", "b/two.txt")),
+    c("one.txt", "two.txt")
+  )
+  expect_equal(
+    dta_file_target_keys(c("a/same.txt", "b/same.txt")),
+    c("a/same.txt", "b/same.txt")
+  )
+  # Identical paths cannot be told apart by path either, so fall back to a
+  # suffix rather than silently dropping one.
+  expect_equal(length(unique(dta_file_target_keys(c("a/x.txt", "a/x.txt")))), 2)
+  expect_equal(dta_file_target_keys(character()), character())
 })
 
 test_that("DTA results and messages combine tabular and file datasets", {

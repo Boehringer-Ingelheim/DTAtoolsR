@@ -11,7 +11,7 @@
 #'
 #' For `DTADataSetTabular`, columns are:
 #' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
-#' `n_schema_errors`, `n_rule_errors`.
+#' `n_schema_errors`, `n_rule_errors`, `n_import_errors`.
 #'
 #' For `DTA`, the summary is aggregated per dataset and includes:
 #' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
@@ -31,8 +31,13 @@ results <- S7::new_generic("results", "x")
 #' @keywords internal
 dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
   if (is.null(status_df) || nrow(status_df) == 0) {
+    # `dataset` must be zero-length here like every other column. Recycling the
+    # length-1 `dataset_name` against zero-length columns is not a recycle at
+    # all: data.frame() aborts with "arguments imply differing number of rows",
+    # so this branch used to work only when the caller passed a zero-length
+    # name -- which no real caller does.
     return(data.frame(
-      dataset = dataset_name,
+      dataset = character(0),
       target = character(0),
       target_type = character(0),
       status = character(0),
@@ -41,6 +46,7 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
       validation_run = character(0),
       n_schema_errors = integer(0),
       n_rule_errors = integer(0),
+      n_import_errors = integer(0),
       n_targets = integer(0),
       n_validated = integer(0),
       n_valid = integer(0),
@@ -67,6 +73,11 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
     validation_run = status_df$validation_run,
     n_schema_errors = status_df$n_schema_errors,
     n_rule_errors = status_df$n_rule_errors,
+    n_import_errors = if (is.null(status_df$n_import_errors)) {
+      NA_integer_
+    } else {
+      status_df$n_import_errors
+    },
     n_targets = nrow(status_df),
     n_validated = sum(status_df$status == "validated", na.rm = TRUE),
     n_valid = sum(status_df$ok == TRUE, na.rm = TRUE),
@@ -137,6 +148,7 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
         validation_run = NA_character_,
         n_schema_errors = NA_integer_,
         n_rule_errors = NA_integer_,
+        n_import_errors = NA_integer_,
         n_targets = NA_integer_,
         n_validated = NA_integer_,
         n_valid = NA_integer_,
@@ -270,6 +282,80 @@ dta_rule_messages_to_df <- function(dataset_name, table_name, details) {
 }
 
 #' @keywords internal
+dta_import_error_messages <- function(import_errors) {
+  if (!is.data.frame(import_errors) || nrow(import_errors) == 0) {
+    return(character(0))
+  }
+
+  sprintf(
+    "value '%s' in column '%s' cannot be represented as declared type '%s' (%s); imported as NA",
+    as.character(import_errors$raw),
+    as.character(import_errors$column),
+    as.character(import_errors$declared_type),
+    as.character(import_errors$reason)
+  )
+}
+
+#' @title Import Messages for One Table
+#' @description
+#' Converts the import axis of one `validate_table_detailed()` result into
+#' message rows.
+#'
+#' The returned frame carries exactly the same nine columns, in the same order,
+#' as `dta_schema_messages_to_df()` and `dta_rule_messages_to_df()`. Two
+#' populated frames with differing columns make the `rbind()` in
+#' `dta_collect_messages_for_dataset()` error, so the raw offending value is
+#' embedded in `message` rather than added as a column; the structured value
+#' stays in `details$import_errors` and in `inspect()`.
+#' @param dataset_name Character. Name of the dataset.
+#' @param table_name Character. Name of the table.
+#' @param details A list as returned by `validate_table_detailed()`.
+#' @return A data.frame of messages, or the empty message frame.
+#' @keywords internal
+dta_import_messages_to_df <- function(dataset_name, table_name, details) {
+  import_valid <- details$import_valid
+
+  # Unknown (an artifact written before the import axis existed) is reported,
+  # not assumed clean.
+  if (is.null(import_valid) || is.na(import_valid)) {
+    return(data.frame(
+      dataset = dataset_name,
+      target = table_name,
+      severity = "warning",
+      source = "import",
+      rule_id = NA_character_,
+      row = NA_real_,
+      column = NA_character_,
+      keyword = NA_character_,
+      message = paste0(
+        "validation artifact predates import checking (schema_version 1); ",
+        "re-run check(force = TRUE)"
+      ),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  import_errors <- details$import_errors
+
+  if (!is.data.frame(import_errors) || nrow(import_errors) == 0) {
+    return(dta_empty_messages())
+  }
+
+  data.frame(
+    dataset = rep(dataset_name, nrow(import_errors)),
+    target = rep(table_name, nrow(import_errors)),
+    severity = rep("error", nrow(import_errors)),
+    source = rep("import", nrow(import_errors)),
+    rule_id = rep(NA_character_, nrow(import_errors)),
+    row = suppressWarnings(as.numeric(import_errors$row)),
+    column = as.character(import_errors$column),
+    keyword = as.character(import_errors$reason),
+    message = dta_import_error_messages(import_errors),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
 dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto", "memory", "artifact")) {
   source <- match.arg(source)
   target_tables <- dta_table_id_to_names(x, tables)
@@ -286,8 +372,9 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
     schema_df <- dta_schema_messages_to_df(dataset_name, table_name, details)
     rule_df <- dta_rule_messages_to_df(dataset_name, table_name, details)
+    import_df <- dta_import_messages_to_df(dataset_name, table_name, details)
 
-    rbind(schema_df, rule_df)
+    rbind(schema_df, rule_df, import_df)
   })
 
   if (length(out) == 0) {
@@ -386,6 +473,13 @@ S7::method(messages, DTA) <- function(
     ds_messages$dataset <- ds_name
     ds_messages
   })
+
+  # Metadata import errors are DTA-level, not per-dataset, so they are folded
+  # in here rather than by dta_collect_messages_for_dataset(). The frame has
+  # the same columns in the same order, so the rbind below is unaffected.
+  if (!is.null(x@metadata)) {
+    out <- c(list(dta_metadata_messages_to_df(x@metadata)), out)
+  }
 
   if (length(out) == 0) {
     return(dta_to_tibble_if_available(dta_empty_messages(), as_tibble = as_tibble))
@@ -549,7 +643,8 @@ dta_flatten_inspect_record <- function(record) {
   detail_sources <- list(
     schema = record$schema_matches,
     context = record$row_context,
-    failing = record$failing_rows_preview
+    failing = record$failing_rows_preview,
+    import = record$import_matches
   )
 
   detail_rows <- vapply(detail_sources, function(x) {
@@ -558,7 +653,7 @@ dta_flatten_inspect_record <- function(record) {
 
   out_n <- max(1L, detail_rows)
 
-  base_names <- setdiff(names(record), c("schema_matches", "row_context", "failing_rows_preview", "rule_definition", "details"))
+  base_names <- setdiff(names(record), c("schema_matches", "row_context", "failing_rows_preview", "import_matches", "rule_definition", "details"))
   base <- as.data.frame(lapply(record[base_names], function(x) {
     if (is.null(x)) NA else x
   }), stringsAsFactors = FALSE, optional = TRUE)
@@ -586,8 +681,14 @@ dta_flatten_inspect_record <- function(record) {
     if (!is.null(details$ok)) extra$details_ok <- isTRUE(details$ok)
     if (!is.null(details$schema_valid)) extra$details_schema_valid <- isTRUE(details$schema_valid)
     if (!is.null(details$rules_valid)) extra$details_rules_valid <- isTRUE(details$rules_valid)
+    # NA ("unknown", a pre-import-axis artifact) must stay NA here: isTRUE()
+    # would report it as FALSE and invent a failure that was never observed.
+    if (!is.null(details$import_valid)) {
+      extra$details_import_valid <- if (is.na(details$import_valid)) NA else isTRUE(details$import_valid)
+    }
     if (!is.null(details$n_schema_errors)) extra$details_n_schema_errors <- as.integer(details$n_schema_errors)
     if (!is.null(details$n_rule_errors)) extra$details_n_rule_errors <- as.integer(details$n_rule_errors)
+    if (!is.null(details$n_import_errors)) extra$details_n_import_errors <- as.integer(details$n_import_errors)
   }
   if (ncol(extra) > 0) {
     extra <- extra[rep(1L, out_n), , drop = FALSE]
@@ -618,8 +719,14 @@ dta_rule_failure_row_indices <- function(rule, df) {
 
     lower <- if (length(rule@min) > 0) rule@min[1] else -Inf
     upper <- if (length(rule@max) > 0) rule@max[1] else Inf
-    values <- suppressWarnings(as.numeric(df[[col]]))
-    mask <- !is.na(values) & (values < lower | values > upper)
+    # This must reproduce rule_check_range() exactly. The two carried the same
+    # defect independently -- `as.numeric()` on a factor read its level codes,
+    # and `!is.na(values)` waved an unconvertible value through -- and any
+    # divergence makes messages() report N violated rows while inspect() shows
+    # failing_row_count = 0.
+    converted <- dta_as_numeric_strict(df[[col]])
+    mask <- ((converted$values < lower | converted$values > upper) %in% TRUE) |
+      converted$unconvertible
     return(which(mask))
   }
 
@@ -730,6 +837,34 @@ dta_filter_schema_matches <- function(schema_full, msg_row) {
 }
 
 #' @keywords internal
+dta_filter_import_matches <- function(import_errors, msg_row) {
+  if (!is.data.frame(import_errors) || nrow(import_errors) == 0) {
+    return(NULL)
+  }
+
+  keep <- rep(TRUE, nrow(import_errors))
+
+  msg_row_no <- suppressWarnings(as.numeric(msg_row$row))
+  if (length(msg_row_no) == 1 && !is.na(msg_row_no) && "row" %in% names(import_errors)) {
+    keep <- keep & suppressWarnings(as.numeric(import_errors$row)) == msg_row_no
+  }
+
+  msg_col <- as.character(msg_row$column)
+  if (length(msg_col) == 1 && !is.na(msg_col) && "column" %in% names(import_errors)) {
+    keep <- keep & as.character(import_errors$column) == msg_col
+  }
+
+  hits <- import_errors[keep %in% TRUE, , drop = FALSE]
+  rownames(hits) <- NULL
+
+  if (nrow(hits) == 0) {
+    return(import_errors)
+  }
+
+  hits
+}
+
+#' @keywords internal
 dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory", "artifact")) {
   source <- match.arg(source)
   table_name <- as.character(msg_row$target)
@@ -754,6 +889,22 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
     out$why <- "Column values violate JSON schema constraints (type/value/length/required)."
     out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
     out$schema_matches <- utils::head(schema_match, 20)
+    return(out)
+  }
+
+  # Without an explicit branch an import message would fall through to the rule
+  # branch below, look up rule_id = NA, and return a nonsense record.
+  if (identical(as.character(msg_row$source), "import")) {
+    out$type <- "import"
+    out$why <- paste(
+      "A value could not be represented in the column's declared type,",
+      "so the typed column holds NA and the raw value was kept."
+    )
+    out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
+    out$import_matches <- utils::head(
+      dta_filter_import_matches(details$import_errors, msg_row),
+      20
+    )
     return(out)
   }
 

@@ -160,18 +160,27 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 
 #' @title as.list method for as.list.DTAColumnSpecStructureSAS
 #' @description
-#' Converts a DTAColumnSpecStructureSAS object to a named list.
+#' Converts a DTAColumnSpecStructureSAS object to a named list. An unset `type`
+#' or `format` is omitted from the list instead of being written as the bare
+#' backend prefix (`"SAS "`), which would re-parse to an empty value and fail
+#' the SAS validator on the next read.
 #' @param x A DTAColumnSpecStructureSAS object.
 #' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpecStructureSAS properties.
+#' @return A named list with the DTAColumnSpecStructureSAS properties that are set.
 #' @export
 #' @name as.list
 method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
-  list(
-    type = paste(x@backend, x@type),
-    format = paste(x@backend, x@format),
-    length = x@length
-  )
+  out <- list()
+  if (.structure_value_is_set(x@type)) {
+    out$type <- .structure_backend_value(x@backend, x@type)
+  }
+  if (.structure_value_is_set(x@format)) {
+    out$format <- .structure_backend_value(x@backend, x@format)
+  }
+  if (!is.null(x@length)) {
+    out$length <- x@length
+  }
+  out
 }
 
 #' @title as_json_schema_type
@@ -193,6 +202,57 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
     "DateTime" = "string",
     "Bool" = "boolean",
     "string"
+  ) # fallback
+}
+
+
+#' @title as_r_type
+#' @description
+#' The R storage type a declared column type maps to. This is the import-time
+#' sibling of [as_json_schema_type()]: that generic says how a column is
+#' *validated*, this one says how it is *stored* when the table is read.
+#'
+#' The two must agree, so every declared type whose JSON Schema type is
+#' `"string"` maps to `"character"` here. `Date`, `Time` and `DateTime` are
+#' validated as strings by their pattern and format, so they are stored as the
+#' text that was read rather than parsed into `Date`/`POSIXct` -- parsing them
+#' would re-render the value and validate something other than what the file
+#' contained.
+#'
+#' `Char` maps to `"character"`, which is what stops the import layer from ever
+#' touching a character column: a `SUBJECT_ID` of `"007"` must survive import
+#' unchanged, and any numeric round trip would silently make it `7`.
+#' @param x A `DTAColumnSpecStructure` object.
+#' @return A length-1 character naming an R type: one of `"character"`,
+#'   `"double"`, `"integer"` or `"logical"`. Defaults to `"character"` when the
+#'   spec declares no type, so an unspecified column is never coerced.
+#' @examples
+#' as_r_type(DTAColumnSpecStructureSAS(type = "Num"))
+#' as_r_type(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+#' @name as_r_type
+#' @export
+if (!exists("as_r_type", mode = "function")) {
+  as_r_type <- new_generic("as_r_type", "x")
+}
+
+#' @export
+method(as_r_type, DTAColumnSpecStructureSAS) <- function(x) {
+  # An unset type carries no instruction to convert anything, so it falls back
+  # to the type that the coercion layer leaves alone.
+  if (!.structure_value_is_set(x@type)) {
+    return("character")
+  }
+
+  switch(
+    x@type,
+    "Char" = "character",
+    "Num" = "double",
+    "Int" = "integer",
+    "Date" = "character",
+    "Time" = "character",
+    "DateTime" = "character",
+    "Bool" = "logical",
+    "character"
   ) # fallback
 }
 

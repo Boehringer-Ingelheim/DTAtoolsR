@@ -272,9 +272,27 @@ method(load_file, DTA) <- function(
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
 #'   validated datasets having their \code{validation_index} and
-#'   \code{validation_store} populated. A \code{"last_validation_summary"}
-#'   attribute is attached with a data.frame of columns: dataset, n_targets,
-#'   n_validated, n_valid, n_invalid, n_skipped.
+#'   \code{validation_store} populated. Three attributes are attached:
+#'   \describe{
+#'     \item{\code{"last_validation_summary"}}{data.frame with one row per
+#'       dataset and columns dataset, n_targets, n_validated, n_valid,
+#'       n_invalid, n_skipped, n_import_errors.}
+#'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
+#'       axis, with columns scope, status, import_valid, n_import_errors, fields,
+#'       ok. Metadata belongs to the \code{DTA} itself rather than to any
+#'       dataset, so it is reported as its own DTA-level result and never as a
+#'       row of the per-dataset summary.}
+#'     \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
+#'       no dataset is invalid, no table has an import error, and the metadata
+#'       imported cleanly.}
+#'   }
+#' @details
+#' \code{check()} validates two things: every requested dataset, and the DTA's
+#' own metadata. A metadata value that could only reach its declared type by
+#' discarding part of what was written (see \code{metadata_import_errors()})
+#' fails the run on the import axis, exactly as a table value would - otherwise
+#' the "Validation PASSED" banner would print over a data transfer agreement
+#' whose dates no longer say what was agreed.
 #' @examples
 #'   dta <- create_example_DTA()
 #'   # Check all datasets
@@ -368,6 +386,7 @@ method(check, DTA) <- function(
     n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
     n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
     n_skipped <- sum(val_status$status == "skipped", na.rm = TRUE)
+    n_import_errors <- sum(val_status$n_import_errors, na.rm = TRUE)
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
@@ -376,6 +395,7 @@ method(check, DTA) <- function(
       n_valid = n_valid,
       n_invalid = n_invalid,
       n_skipped = n_skipped,
+      n_import_errors = n_import_errors,
       stringsAsFactors = FALSE
     )
 
@@ -398,19 +418,69 @@ method(check, DTA) <- function(
   summary_df <- do.call(rbind, summary_rows)
   rownames(summary_df) <- NULL
 
+  # Metadata axis. The DTA has exactly two parts, `datasets` and `metadata`, and
+  # only the first was ever checked, so a corrupted transfer date could sit in an
+  # agreement while the run reported PASSED. Metadata is reported as a DTA-level
+  # result rather than as an extra row of `summary_df`: every column there counts
+  # tables inside one dataset, so a metadata row would have to fake five of them,
+  # and the per-row aggregations below (and `results()`, which rebuilds its frame
+  # by iterating `x@datasets`) would then be mixing a non-dataset row into
+  # per-dataset totals.
+  metadata_errors <- metadata_import_errors(x@metadata)
+  n_metadata_import_errors <- nrow(metadata_errors)
+  metadata_ok <- n_metadata_import_errors == 0
+
+  metadata_summary <- data.frame(
+    scope = "metadata",
+    status = if (metadata_ok) "validated" else "failed",
+    import_valid = metadata_ok,
+    n_import_errors = as.integer(n_metadata_import_errors),
+    fields = if (metadata_ok) {
+      NA_character_
+    } else {
+      paste(unique(metadata_errors$column), collapse = ", ")
+    },
+    ok = metadata_ok,
+    stringsAsFactors = FALSE
+  )
+
+  if (!isTRUE(quiet) && !metadata_ok) {
+    cli::cli_h1("Metadata")
+    value_word <- if (n_metadata_import_errors == 1) "value" else "values"
+    cli_alert_danger(
+      paste0(n_metadata_import_errors, " metadata ", value_word, " could not be imported in the declared type")
+    )
+    for (msg in dta_metadata_import_error_messages(metadata_errors)) {
+      # Interpolate `msg` as a variable: the raw metadata value is arbitrary text
+      # and a literal "{" in it would otherwise be parsed as a cli/glue field.
+      cli::cli_alert("  {msg}")
+    }
+  }
+
   # Overall summary
   total_invalid <- sum(summary_df$n_invalid, na.rm = TRUE)
+  # An import error fails the run on its own axis, even when every table's `ok`
+  # is TRUE. Metadata import errors count on that same axis.
+  total_import_errors <- sum(summary_df$n_import_errors, na.rm = TRUE) +
+    n_metadata_import_errors
+  overall_ok <- total_invalid == 0 && total_import_errors == 0
+
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
     if (total_invalid > 0) {
       invalid_word <- if (total_invalid == 1) "table" else "tables"
       cli_alert_danger(paste0("Validation FAILED: ", total_invalid, " ", invalid_word, " with validation errors"))
+    } else if (total_import_errors > 0) {
+      import_word <- if (total_import_errors == 1) "value" else "values"
+      cli_alert_danger(paste0("Validation FAILED: ", total_import_errors, " ", import_word, " could not be imported in the declared type"))
     } else {
       cli_alert_success("Validation PASSED: All datasets are valid")
     }
   }
 
   attr(x, "last_validation_summary") <- summary_df
+  attr(x, "last_metadata_summary") <- metadata_summary
+  attr(x, "last_validation_ok") <- overall_ok
   invisible(x)
 }
 

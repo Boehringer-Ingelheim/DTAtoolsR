@@ -7,6 +7,7 @@
 .tv_scalar(x, default = "")
 }
 \description{
-Coerce a metadata value to a single-line display string
+Dates render in ISO 8601 (\code{YYYY-MM-DD}) so a template filled on a German
+workstation and one filled on an English CI runner produce identical text.
 }
 \keyword{internal}

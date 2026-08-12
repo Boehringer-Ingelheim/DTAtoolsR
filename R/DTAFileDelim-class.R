@@ -16,6 +16,8 @@
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
 #' @param info Character or \code{NULL}; free-text description of the file.
+#' @param sep Character. Single-character field separator used in the file.
+#'   Defaults to tab (\code{"\\t"}).
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
@@ -36,6 +38,7 @@ DTAFileDelim <- S7::new_class(
     min_number_of_files = NULL,
     max_number_of_files = NULL,
     info = NULL,
+    sep = "\t",
     has_header = TRUE,
     quote = '"'
   ) {
@@ -49,7 +52,7 @@ DTAFileDelim <- S7::new_class(
         pattern = pattern,
         has_header = has_header,
         quote = quote,
-        sep = "\t"
+        sep = sep
       )
     )
   }
@@ -65,8 +68,10 @@ DTAFileDelim <- S7::new_class(
 #' @importFrom arrow read_delim_arrow
 #'
 #' @param x A \code{DTAFileDelim} object containing file reading parameters.
-#' @param ... A single `file` argument: character string specifying the path
-#'   to the file to be read.
+#' @param ... A `file` argument giving the path to the file to be read, and an
+#'   optional `specs` argument: a `DTAColumnSpecCollection` whose declared
+#'   types decide how the columns are parsed. Without it every column is
+#'   inferred, as before.
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
@@ -74,13 +79,16 @@ DTAFileDelim <- S7::new_class(
 ##' @name read_file_execution
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileDelim) <- function(x, ...) {
-  file <- list(...)[[1]]
+  args <- dta_reader_args(...)
   table_obj <- arrow::read_delim_arrow(
-    file,
-    #col_types = x@col_types,
+    args$file,
+    delim = x@sep,
     quote = x@quote,
-    skip = if (x@has_header) 0 else 1,
-    #col_names = x@has_header,
+    # col_names = FALSE makes arrow generate names and keep the first row as
+    # data; skipping a row would instead discard the first data row.
+    col_names = x@has_header,
+    # NULL, the reader's own default, means "infer every column".
+    col_types = dta_reader_col_types(args$specs, x@has_header),
     as_data_frame = FALSE
   )
 

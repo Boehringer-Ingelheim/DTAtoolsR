@@ -38,11 +38,18 @@ reproducible, auditable data exchange.
 `DTAtools` stores specifications in human-readable **YAML** files and provides
 an R API to:
 
-1. **Import** column specifications and semantic rules from YAML (or Word documents).
+1. **Import** column specifications and semantic rules from YAML (or Word documents),
+   reading each column in the type the specification declares for it.
 2. **Validate** tabular data against those specifications — types, nullability, allowed values, regex patterns, and cross-column rules.
 3. **Inspect** validation results programmatically: which tables failed, which rows, which columns, which rules — and drill into individual errors with `inspect()`.
 4. **Export** validated data to files (TSV/CSV, optionally gzip-compressed, with MD5 checksums).
 5. **Generate** Word documentation tables directly from specs — for use inside DTA/DTS documents.
+
+Validation reports on three independent axes: **schema** errors (a value breaks a
+column constraint), **rule** errors (a row breaks an inter-column rule), and
+**import** errors (a value cannot be represented in the type the specification
+declares for its column). See
+[Import Errors](#import-errors-values-that-do-not-fit-their-declared-type).
 
 `DTAtools` is built on the S7 object system and uses JSON Schema for fast,
 row-level validation.
@@ -60,6 +67,40 @@ library(DTAtools)
 ```{r}
 library(DTAtools)
 ```
+
+---
+
+## Upgrading from 0.12.x
+
+Data that passed validation under 0.12.x can fail under 0.13.0, by design.
+Three changes account for almost all of it:
+
+- **A third axis was added.** A value that cannot be represented in its declared
+  type is now an *import error*, and a single import error fails the table on
+  its own. Nothing reported this before. See
+  [Import Errors](#import-errors-values-that-do-not-fit-their-declared-type).
+- **Several checks that silently passed now fire.** A `col_condition` with more
+  than one operator in its `then:` block evaluated only the first; a `col_range`
+  rule on a factor column compared level codes rather than values; numeric
+  comparisons on character columns used locale collation, so `"9" > 65` was
+  `TRUE`; and rule violations were invisible whenever the table also had a
+  schema error. All of these now report.
+- **Metadata is validated too.** A transmission date that had to be coerced to
+  fit its declared type fails the whole `DTA`, where before it was recorded
+  while the banner still reported success.
+
+If a dataset carries validation artifacts written by an earlier version, those
+artifacts know nothing about the import axis. `validation_status()` and
+`results()` therefore report `n_import_errors` as `NA` — unknown, not zero — and
+`messages()` returns a warning row saying the artifact predates import checking.
+Re-validate to replace them:
+
+```{r upgrade_force, eval=FALSE}
+dta <- check(dta, force = TRUE)
+```
+
+`force = TRUE` bypasses the skip-if-unchanged shortcut, so every table is
+validated again and every artifact is rewritten on the current schema version.
 
 ---
 
@@ -124,10 +165,12 @@ DTA                              ← top-level agreement container
 
 **Validation flow:**
 
-1. `load_file(dta, dataset, file)` — reads a file into the dataset using its file handler
-2. `check(dta)` or `check(ds)` — runs JSON Schema validation + rule checks; returns the updated object
-3. `results(x)` — one-row-per-table summary (pass/fail, error counts)
-4. `messages(x)` — one-row-per-error detail table (column, row, rule, message, `id`)
+1. `load_file(dta, dataset, file)` — reads a file into the dataset using its file
+   handler, typing each column as the specification declares it
+2. `check(dta)` or `check(ds)` — runs the import, JSON Schema and rule checks;
+   returns the updated object
+3. `results(x)` — one-row-per-table summary (pass/fail, error counts per axis)
+4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule, message, `id`)
 5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
 
 ---
@@ -210,7 +253,7 @@ directly to a column entry in a YAML specification.
 |---------------|----------|-----------------------------------------------------------|
 | `id`          | ✔        | Column name (must match the data frame header exactly)    |
 | `label`       |          | Human-readable label for documentation                   |
-| `type`        |          | SAS-style type: `SAS Char`, `SAS Num`, `SAS Int`         |
+| `type`        |          | SAS-style type: `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`, `SAS DateTime` |
 | `format`      |          | SAS format string, e.g. `SAS $10.`, `SAS 8.`            |
 | `length`      |          | Maximum character length (`maxLength` in JSON Schema)     |
 | `nullable`    |          | `TRUE`/`FALSE` — whether the column may be empty/NA      |
@@ -220,6 +263,22 @@ directly to a column entry in a YAML specification.
 
 > **Note:** `values` and `pattern` are mutually exclusive — a column either has
 > a closed value list or a regex pattern, not both.
+
+`type` is not documentation: it decides how the column is *read*. A column
+declared `SAS Num` or `SAS Int` is stored as a number, so `"007"` in such a
+column becomes `7`; a column declared `SAS Char` is pinned to text, so `"007"`
+stays `"007"` even when every value in the file looks numeric. `SAS Date`,
+`SAS Time` and `SAS DateTime` are kept as the text that was read and validated
+by pattern, so no value is silently re-rendered. `as_r_type()` reports the
+mapping:
+
+```{r as_r_type_demo}
+vapply(
+  c("Char", "Num", "Int", "Date", "Time", "DateTime"),
+  function(t) as_r_type(DTAColumnSpecStructureSAS(type = t)),
+  character(1)
+)
+```
 
 ```{r column_spec_manual}
 # A column with a closed value list
@@ -425,14 +484,32 @@ inline_ds
 
 ### Validating with `check()`
 
-`check()` runs two validation passes:
+`check()` reports on three independent axes:
 
-1. **JSON Schema validation** — checks every row against column types,
+1. **Import errors** — a value that cannot be represented in the type its column
+   declares. The value is stored as `NA` and the original text is retained. See
+   [Import Errors](#import-errors-values-that-do-not-fit-their-declared-type).
+2. **Schema errors** — JSON Schema validation of every row against column types,
    `nullable`, `values`, `pattern`, and `length`.
-2. **Schema rule validation** — evaluates inter-column rules (`col_condition`,
-   `col_range`, `col_unique`).
+3. **Rule errors** — inter-column rules (`col_condition`, `col_range`,
+   `col_unique`).
 
-`check()` **always returns the updated object** — assign the result back.
+All three are always evaluated, and a failure on any one of them fails the
+table. `check()` **always returns the updated object** — assign the result back.
+
+Useful arguments:
+
+| Argument       | Default | Description                                                              |
+|----------------|---------|--------------------------------------------------------------------------|
+| `force`        | `FALSE` | Revalidate even when neither the data nor the specs have changed         |
+| `persist`      | `TRUE`  | Write a validation artifact per table, readable later by `validation_errors()` |
+| `artifact_dir` | `NULL`  | Where those artifacts go; defaults to a per-dataset directory under `tempdir()` |
+| `quiet`        | `FALSE` | Suppress the console report                                              |
+| `tables`       | `NULL`  | Restrict validation to named or indexed tables (`datasets` on a `DTA`)   |
+
+Without `force`, a table whose data and specs hash unchanged is skipped and its
+previous result is reused — which is why upgrading requires
+`check(x, force = TRUE)` once.
 
 #### Validating a dataset
 
@@ -446,9 +523,19 @@ After `check()`, use these functions to inspect what happened:
 
 | Function              | Returns                                                   |
 |-----------------------|-----------------------------------------------------------|
-| `results(x)`          | One row per table: status, error counts, timestamps       |
-| `messages(x)`         | One row per error: column, row, rule, message             |
-| `validation_status(x)`| Compact status table (status, ok, n_schema_errors, …)    |
+| `results(x)`          | One row per table: status, per-axis error counts, timestamps |
+| `messages(x)`         | One row per error: `id`, `source`, column, row, rule, message |
+| `validation_status(x)`| Compact status table, one row per table                    |
+| `validation_errors(x, table)` | The full stored detail object for one table; `as.data.frame()` gives one row per reported error |
+
+`validation_status()` returns exactly these columns: `table`, `target_type`,
+`status`, `ok`, `validated_at`, `run_id`, `validation_run`, `n_schema_errors`,
+`n_rule_errors`, `n_import_errors`. `results()` returns the same per-axis counts
+plus `dataset`, `target` and the roll-up columns `n_targets`, `n_validated`,
+`n_valid`, `n_invalid`, `n_skipped`, `n_not_validated`.
+
+`n_import_errors` is `NA` rather than `0` when the recorded result predates the
+import axis; see [Upgrading from 0.12.x](#upgrading-from-0.12.x).
 
 ```{r inspect_results}
 # Summary per table
@@ -472,12 +559,19 @@ messages(x)    → per-error table — note the `id` of the error you care about
 inspect(x, id) → deep detail for that error: row context, schema clause, failing rows
 ```
 
-`inspect()` returns a flat data frame. Columns differ by error type:
+`inspect()` returns a flat data frame. Every row carries `id`, `source`, `type`,
+`message` and `why`; the remaining columns depend on which axis the error came
+from, and are prefixed by that axis:
 
 | Source   | Key columns added by `inspect()`                                              |
 |----------|-------------------------------------------------------------------------------|
+| `import` | `import_row`, `import_column`, `import_raw` (the original text), `import_declared_type`, `import_reason` |
 | `schema` | `context_*` (the actual row values), `schema_keyword`, `schema_message`       |
 | `rule`   | `rule_id`, `failing_row_count`, `failing_*` (preview of violating rows)       |
+
+Because the columns differ by source, select the `id` you want by source rather
+than assuming a position. `messages()` is sorted by dataset, target, source and
+row, so `id = 1` is an import error whenever the table has one.
 
 ```{r inspect_example}
 # Load a dataset that has schema errors
@@ -488,14 +582,16 @@ dta_err  <- read_dta_from_yaml(
 dta_err  <- load_file(dta_err, "clinical_data", file = err_file)
 dta_err  <- check(dta_err, quiet = TRUE)
 
-# Step 1: see which messages exist and note their ids
-msgs_err <- messages(datasets(dta_err, "clinical_data"))
+# Step 1: see which messages exist and note their ids and sources
+ds_err_loaded <- datasets(dta_err, "clinical_data")
+msgs_err      <- messages(ds_err_loaded)
 head(msgs_err[, c("id", "source", "row", "column", "message")], 8)
 ```
 
 ```{r inspect_schema}
-# Step 2: inspect a schema error by id — returns the failing row in context
-detail <- inspect(datasets(dta_err, "clinical_data"), id = 1)
+# Step 2: inspect a schema error — pick the first id whose source is "schema"
+schema_id <- msgs_err$id[msgs_err$source == "schema"][1]
+detail    <- inspect(ds_err_loaded, id = schema_id)
 # Key fields for schema errors:
 detail[, c("id", "message", "type", "why",
            "context_.row", "context_SUBJECT_ID", "context_VISIT",
@@ -511,11 +607,13 @@ dta_rule  <- read_dta_from_yaml(
 dta_rule  <- load_file(dta_rule, "clinical_data", file = rule_file)
 dta_rule  <- check(dta_rule, quiet = TRUE)
 
-msgs_rule <- messages(datasets(dta_rule, "clinical_data"))
-msgs_rule[, c("id", "rule_id", "message")]
+ds_rule_loaded <- datasets(dta_rule, "clinical_data")
+msgs_rule      <- messages(ds_rule_loaded)
+msgs_rule[, c("id", "source", "rule_id", "message")]
 
 # Drill into the first rule violation
-detail_rule <- inspect(datasets(dta_rule, "clinical_data"), id = 1)
+rule_id_1   <- msgs_rule$id[msgs_rule$source == "rule"][1]
+detail_rule <- inspect(ds_rule_loaded, id = rule_id_1)
 detail_rule[, c("id", "rule_id", "type", "why",
                 "failing_row_count", "failing_.row",
                 "failing_SUBJECT_ID", "failing_VISIT")]
@@ -528,9 +626,15 @@ constraints. The error file has:
 
 - A missing `HEIGHT` column (required by spec, since `nullable: false`)
 - An invalid `GENDER` value `"Alien"` (not in the allowed list)
-- A non-numeric `BMI` cell (column is `SAS Num`)
+- A non-numeric `BMI` cell, `"heavy"`, in a `SAS Num` column
 - An invalid `STUDYID` `"9999-9999"` (not in allowed values)
 - A `VISIT` value that exceeds the `length: 12` constraint
+
+Note that the `BMI` cell is reported twice, on two different axes: once as an
+import error, because `"heavy"` is not a number and became `NA`, and once as a
+schema error, because the resulting `NA` fails a `nullable: false` column. The
+counts in `results()` reflect that — `n_import_errors` and `n_schema_errors` are
+counted separately and neither subsumes the other.
 
 ```{r schema_errors}
 dta_obj_e  <- read_dta_from_yaml(
@@ -581,6 +685,117 @@ ds_rule <- check(ds_rule)
 results(ds_rule)
 messages(ds_rule)[, c("target", "source", "rule_id", "message")]
 ```
+
+---
+
+## Import Errors: Values That Do Not Fit Their Declared Type
+
+An **import error** is a value that is present in the source but cannot be
+represented in the type its column declares. Reading a `SAS Num` column whose
+file contains `"unknown"` is the canonical case.
+
+When this happens, three things follow:
+
+1. The stored value becomes `NA`. The column keeps its declared type, so one bad
+   cell does not turn a whole numeric column into text.
+2. The original text is retained and reported, so nothing is lost silently.
+3. The table fails validation. **Any import error makes validation fail**, on
+   its own, even when every schema constraint and every rule passes.
+
+The third point is what a returning user notices first: a file that validated
+cleanly under 0.12.x can fail now without a single schema or rule error against
+it. That is not a false positive — it means a value was being quietly discarded
+before.
+
+### A minimal example
+
+The specification below declares `AGE` as `SAS Num` and permits missing values.
+The data contains the text `"unknown"`. Nothing violates the schema, and there
+are no rules at all, yet the table fails:
+
+```{r import_minimal}
+import_specs2 <- DTAColumnSpecCollection(columns = list(
+  SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", nullable = FALSE),
+  AGE        = DTAColumnSpec(id = "AGE",        type = "SAS Num",  nullable = TRUE)
+))
+
+import_data <- data.frame(
+  SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
+  AGE        = c("34", "unknown")
+)
+
+ds_import <- DTADataSetTabular(
+  name   = "import_demo",
+  specs  = import_specs2,
+  tables = list(demo = import_data)
+)
+ds_import <- check(ds_import, quiet = TRUE)
+
+validation_status(ds_import)[, c("status", "ok", "n_schema_errors",
+                                 "n_rule_errors", "n_import_errors")]
+```
+
+The three axes are independent: `n_schema_errors` and `n_rule_errors` are `0`,
+`n_import_errors` is `1`, and `ok` is `FALSE`.
+
+> **Reading the console output.** `check()` prints a per-axis report for the
+> schema and rule passes but not for the import pass, so a table that fails on
+> the import axis alone shows `Table format, length, pattern, and values are
+> valid` followed by `0 of 1 table valid`. Consult `n_import_errors` — or
+> `messages()` — rather than the banner when a table fails for no visible
+> reason.
+
+### Finding the value that caused it
+
+Import errors appear in `messages()` with `source == "import"`, and the `keyword`
+column carries the reason:
+
+```{r import_messages}
+imp <- messages(ds_import)
+imp[imp$source == "import", c("id", "row", "column", "keyword", "message")]
+```
+
+`inspect()` gives the structured version, including `import_raw` — the original
+text exactly as it was read:
+
+```{r import_inspect}
+import_id  <- imp$id[imp$source == "import"][1]
+detail_imp <- inspect(ds_import, id = import_id)
+detail_imp[, c("import_row", "import_column", "import_raw",
+               "import_declared_type", "import_reason")]
+```
+
+The stored table holds `NA` in that cell, and the column is numeric as declared:
+
+```{r import_stored_value}
+as.data.frame(get_table(ds_import, "demo"))
+```
+
+Two reasons are reported:
+
+| `reason` / `keyword` | Meaning                                                                 |
+|----------------------|-------------------------------------------------------------------------|
+| `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
+| `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` as a date |
+
+### Import errors in metadata
+
+Metadata is validated on the same axis. A transmission date written with a
+qualification cannot be stored as a date without discarding the qualification,
+so it is recorded as an import error and fails the whole `DTA`:
+
+```{r import_metadata}
+meta_bad <- DTAMetaData(
+  title        = "Qualified transmission date",
+  version      = "1.0",
+  transmission = list(date_first_transfer = "2026-12-31 at the earliest")
+)
+
+metadata_import_errors(meta_bad)
+```
+
+`metadata_import_errors()` returns the same five columns as the table-level
+frame, with `column` naming the metadata field path rather than a data column.
 
 ---
 
@@ -794,7 +1009,7 @@ ds_from_file <- DTADataSetTabular(
   files  = list(file_handler),    # document the expected file
   tables = list(clinical_data = tbl)  # provide the loaded data
 )
-labels(ds_from_file)
+names(tables(ds_from_file))   # the table names held by the dataset
 ```
 
 For full DTA YAML specs that include file definitions, the file handlers are
@@ -1106,6 +1321,40 @@ export_column_value_table(
 )
 ```
 
+### Export the Whole DTA as a Document
+
+`write_dta()` writes the complete agreement — metadata, contacts, transmission
+details and every dataset specification — as a Word, PDF or Markdown document.
+The format is taken from the file extension unless `format` is given.
+
+```{r write_dta_example, eval=FALSE}
+write_dta(dta_from_file, "clinical_dta.docx")
+
+# Route the output through a user-authored Word template instead
+write_dta(dta_from_file, "clinical_dta.docx", template = "my_template.docx")
+```
+
+PDF output requires a PDF backend; `write_dta(format = "pdf")` aborts when none
+is available rather than writing a DOCX under a `.pdf` name. Dates in the
+generated documents are written as ISO 8601 (`YYYY-MM-DD`), so the same DTA
+produces the same document regardless of the machine's locale.
+
+---
+
+## The Shiny Application
+
+`run_dta_app()` starts a browser interface over the same objects: load a DTA
+YAML, upload a data file per dataset, run `check()`, browse the errors, edit the
+metadata and export the document. Table status in the app reflects all three
+validation axes, import errors included.
+
+```{r shiny_app, eval=FALSE}
+run_dta_app()
+```
+
+The app needs the suggested packages **shiny**, **bslib** and **DT**; if any is
+missing, `run_dta_app()` says which to install.
+
 ---
 
 ## YAML Format Reference
@@ -1156,7 +1405,9 @@ columns:
     description: Adverse event verbatim term, empty if no event
 ```
 
-**Supported types:** `SAS Char`, `SAS Num`, `SAS Int`
+**Supported types:** `SAS Char`, `SAS Num`, `SAS Int`, `SAS Date`, `SAS Time`,
+`SAS DateTime`. The type decides how the column is read as well as how it is
+validated — see [Column Specifications](#the-dtacolumnspec-object).
 
 **Nullable values:** `true`/`false` or `Yes`/`No`
 
@@ -1374,16 +1625,18 @@ datasets:
 | `columns_specs_from_word(file)` | Import column specs from a Word table                   |
 | `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
-| `check(x)`                  | Validate all datasets / tables; returns updated object       |
-| `results(x)`                | Summary table: status, error counts per table                |
-| `messages(x)`               | Detailed error table: row, column, rule, message, `id`       |
-| `inspect(x, id)`            | Deep detail for error `id`: row context, schema clause, failing rows |
-| `validation_status(x)`      | Compact status data frame                                    |
+| `check(x, force, persist, quiet, …)` | Validate all datasets / tables; returns updated object |
+| `results(x)`                | Summary table: status, per-axis error counts per table       |
+| `messages(x)`               | Detailed error table: `id`, `source`, row, column, rule, message |
+| `inspect(x, id)`            | Deep detail for error `id`: row context, schema clause, failing rows, original imported text |
+| `validation_status(x)`      | Compact status data frame, one row per table                 |
 | `validation_errors(x, table)` | Full raw error output for one table                       |
+| `clear_validation(x)`       | Discard stored validation state for one or all tables        |
+| `metadata_import_errors(x)` | Import errors recorded on a `DTAMetaData` object             |
+| `as_r_type(x)`              | R storage type a declared column type maps to                |
 | `datasets(x, name)`         | Extract dataset(s) from a DTA object                        |
 | `tables(x, i)`              | Extract table(s) from a DTADataSetTabular                    |
 | `get_table(x, id)`          | Extract a single Arrow Table by name or index               |
-| `labels(x)`                 | Names of all tables in a DTADataSetTabular                   |
 | `specs(x)`                  | DTAColumnSpecCollection from a DTADataSetTabular             |
 | `colspec(x, id)`            | Single DTAColumnSpec by column ID                           |
 | `rules(x)`                  | List of DTARule objects from a collection or dataset         |
@@ -1391,9 +1644,14 @@ datasets:
 | `write_table_to_file(…)`    | Write a validated table to disk (TSV/CSV, gzip, MD5)        |
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                               |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                               |
+| `write_dta(x, file, format)` | Write the whole DTA as a document (`docx`, `pdf`, `md`)     |
+| `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA  |
 | `export_specs_table(x, file)` | Export spec table to Word                               |
 | `export_column_value_table(x, file, id)` | Export value list for a column to Word         |
 | `as_json_schema(x)`         | Convert specs to JSON Schema string                         |
+| `run_dta_app()`             | Launch the bundled Shiny application                        |
+
+Table names are read with `names(tables(x))`.
 
 ---
 
