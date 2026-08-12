@@ -122,14 +122,13 @@ DTAColumnSpecStructureFactory <- function(
     )
   }
 
-  backend = if (!is.null(type_info$prefix)) {
+  backend <- if (!is.null(type_info$prefix)) {
     type_info$prefix
   } else {
     format_info$prefix
   }
 
-  switch(
-    backend,
+  switch(backend,
     SAS = DTAtools::DTAColumnSpecStructureSAS(
       type = type_info[["rest"]],
       format = format_info[["rest"]],
@@ -179,8 +178,7 @@ DTADataSetFactory <- function(
     )
   }
 
-  switch(
-    type,
+  switch(type,
     "tabular" = {
       return(DTADataSetTabular(
         specs = specs_from_list(columns = columns, rules = rules),
@@ -230,8 +228,7 @@ DTAFileFactory <- function(
     )
   }
 
-  switch(
-    type,
+  switch(type,
     csv = DTAFileCSV(
       ...
     ),

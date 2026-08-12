@@ -13,6 +13,6 @@ create_example_DTARuleColRange(index = 1)
 create example for DTARuleColRange
 }
 \examples{
- library(DTAtools)
- create_example_DTARuleColRange()
+library(DTAtools)
+create_example_DTARuleColRange()
 }

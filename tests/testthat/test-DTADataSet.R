@@ -32,8 +32,8 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   tab <- read_file(ds@files[[1]], table_path)
 
-  expect_error(read_file(ds@files[[1]], "blala.tsv"),  "does not match the filename")
-  
+  expect_error(read_file(ds@files[[1]], "blala.tsv"), "does not match the filename")
+
   expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
   expect_equal(nrow(tab), 490)
   expect_equal(ncol(tab), 33)
@@ -43,7 +43,7 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   expect_s3_class(specs(ds), "DTAtools::DTAColumnSpecCollection")
 
-  expect_true(is.list(tables(ds)))    
+  expect_true(is.list(tables(ds)))
 
   expect_s3_class(colspec(ds, 1), "DTAtools::DTAColumnSpec")
   expect_s3_class(colspec(ds, "STUDYID"), "DTAtools::DTAColumnSpec")

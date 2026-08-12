@@ -23,7 +23,9 @@ dta_creation_templates_dir <- function() {
 # ".dta-template.yaml" or ".dta-template.yml".
 list_dta_creation_templates <- function() {
   dir <- dta_creation_templates_dir()
-  if (!nzchar(dir) || !dir.exists(dir)) return(character(0))
+  if (!nzchar(dir) || !dir.exists(dir)) {
+    return(character(0))
+  }
   files <- list.files(dir,
     pattern = "\\.dta-template\\.ya?ml$",
     ignore.case = TRUE,
@@ -34,7 +36,9 @@ list_dta_creation_templates <- function() {
 
 # Resolve creation-template file path by basename.
 get_dta_creation_template_path <- function(template_name) {
-  if (is.null(template_name) || !nzchar(template_name)) return(NULL)
+  if (is.null(template_name) || !nzchar(template_name)) {
+    return(NULL)
+  }
   full <- file.path(dta_creation_templates_dir(), basename(template_name))
   if (file.exists(full)) full else NULL
 }
@@ -84,20 +88,28 @@ dta_template_metadata_fields <- function() {
 # 2) relative to template file directory
 # 3) package extdata root
 resolve_template_dataset_path <- function(ref, template_path) {
-  if (is.null(ref) || !nzchar(ref)) return("")
+  if (is.null(ref) || !nzchar(ref)) {
+    return("")
+  }
   # 1) absolute/direct
-  if (file.exists(ref)) return(normalizePath(ref, winslash = "/", mustWork = TRUE))
+  if (file.exists(ref)) {
+    return(normalizePath(ref, winslash = "/", mustWork = TRUE))
+  }
 
   # 2) relative to template file
   td <- dirname(template_path %||% "")
   if (nzchar(td)) {
     p2 <- file.path(td, ref)
-    if (file.exists(p2)) return(normalizePath(p2, winslash = "/", mustWork = TRUE))
+    if (file.exists(p2)) {
+      return(normalizePath(p2, winslash = "/", mustWork = TRUE))
+    }
   }
 
   # 3) package extdata root
   p3 <- system.file("extdata", ref, package = "DTAtools")
-  if (nzchar(p3) && file.exists(p3)) return(normalizePath(p3, winslash = "/", mustWork = TRUE))
+  if (nzchar(p3) && file.exists(p3)) {
+    return(normalizePath(p3, winslash = "/", mustWork = TRUE))
+  }
 
   ""
 }
@@ -112,8 +124,12 @@ resolve_template_dataset_path <- function(ref, template_path) {
 #     label: "No"
 dta_template_choices <- function(opt) {
   ch <- opt$choices %||% list()
-  if (length(ch) == 0) return(character(0))
-  if (is.character(ch)) return(stats::setNames(ch, ch))
+  if (length(ch) == 0) {
+    return(character(0))
+  }
+  if (is.character(ch)) {
+    return(stats::setNames(ch, ch))
+  }
   # list entries
   vals <- vapply(ch, function(x) as.character(x$value %||% ""), character(1))
   labs <- vapply(ch, function(x) as.character(x$label %||% x$value %||% ""), character(1))
@@ -124,21 +140,27 @@ dta_template_choices <- function(opt) {
 # Default value for one option.
 dta_template_default <- function(opt) {
   d <- opt$default
-  if (is.null(d) || length(d) == 0) return(NULL)
+  if (is.null(d) || length(d) == 0) {
+    return(NULL)
+  }
   d[[1]]
 }
 
 # Should a choice-like option allow custom user entries?
 dta_template_allow_custom <- function(opt, default = FALSE) {
   v <- opt$allow_custom
-  if (is.null(v) || length(v) == 0) return(default)
+  if (is.null(v) || length(v) == 0) {
+    return(default)
+  }
   isTRUE(v)
 }
 
 # Set nested value in list by key path. If value is NULL, key is removed.
 list_set_path <- function(x, keys, value) {
   if (!is.list(x)) x <- list()
-  if (length(keys) == 0) return(x)
+  if (length(keys) == 0) {
+    return(x)
+  }
   k <- keys[[1]]
   if (length(keys) == 1) {
     if (is.null(value)) {

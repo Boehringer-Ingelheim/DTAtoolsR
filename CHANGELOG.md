@@ -10,7 +10,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The `pre-commit` hooks run for the first time. The R hooks could not build
+  their environment on R 4.5 (the pinned revision installed a `digest` that no
+  longer compiles), so `styler` and `roxygen` had never been applied; the
+  source is reformatted accordingly. Hook revisions are updated, `roxygenize`
+  declares the dependencies it needs to load the package, and the vendored
+  `renv/staging_excluded/` tree is excluded so hooks stop trying to lint other
+  packages' sources.
+- The `pre-commit` CI job no longer fails when GitHub's cache service is
+  unavailable. `pre-commit/action@v2.0.3` bundled its own cache step with no
+  error tolerance, so an outage failed the job before a single hook ran. The
+  cache is now inlined with `continue-on-error`, and a cache problem only makes
+  the run slower.
+
 ### Fixed
+
+- The whitespace hooks no longer rewrite files under `inst/extdata`. In a
+  delimited file trailing whitespace is data: `trailing-whitespace` stripped
+  the trailing tabs from the one row of `gf_data_small_smirna.tsv` whose last
+  columns are legitimately empty, turning a 33-field row into a 27-field one.
 
 ## [0.13.0] - 2026-08-12
 
@@ -260,7 +278,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - functions to access slots
 - S7 validators for all classes
 - introduced `DTAColumnSpecStructure` and `DTAColumnSpecStructureSAS` for handling `type`, `format`, `length` of a column spec
-- info variables to `DTADataSet` and `DTADataSetTabular` 
+- info variables to `DTADataSet` and `DTADataSetTabular`
 - example factory functions: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTADataSetTabular()`, `create_example_DTAFileCSV()`, `create_example_DTAFileTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
 - `as.list` methods for `DTAColumnSpecCollection`, `DTAColumnSpec`, and `DTARule` derivatives
 
@@ -281,10 +299,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - moved rules to `DTARule` and derivative classes
 - renamed getter functions to shorter names
 - renamed constructor variables
-- DTA-class constructor to handle DTAMetaData  
+- DTA-class constructor to handle DTAMetaData
 - changed `container` to `datasets` in class DTA
 - moved json schema generation to classes
-- removed stored `json_schema` as it can be dynamically generated 
+- removed stored `json_schema` as it can be dynamically generated
 
 ## [0.9.0] - 2025-09-11
 

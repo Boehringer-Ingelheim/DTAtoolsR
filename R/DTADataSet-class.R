@@ -34,7 +34,7 @@ DTADataSet <- S7::new_class(
     template_date = NULL
   ) {
     if (inherits(files, "DTAtools::DTAFile")) {
-      files = list(files)
+      files <- list(files)
     }
 
     new_object(
@@ -257,11 +257,11 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
   }
 
   if (max_n == 0) {
-    message <- str_c('Files: none associated, type: {x@type}')
+    message <- str_c("Files: none associated, type: {x@type}")
   } else {
     message <- paste0(
       "Files: ",
-      str_c('{.field ', x@name, '}'),
+      str_c("{.field ", x@name, "}"),
       str_glue(" ({file_info}, {x@type})")
     )
   }
@@ -380,8 +380,6 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 }
 
 
-
-
 #' @title Get tables from DTADataSet Object
 #' @description
 #' Method to get tables from DTADataSet object.
@@ -402,9 +400,9 @@ tables <- new_generic("tables", "x")
 
 #' @export
 method(tables, DTADataSet) <- function(x, i = NULL) {
-  if(is.null(i)) {
+  if (is.null(i)) {
     return(x@tables)
-  } else if(length(i) == 1) {
+  } else if (length(i) == 1) {
     return(x@tables[[i]])
   } else {
     return(x@tables[i])
@@ -544,7 +542,7 @@ S7::method(check, DTADataSet) <- function(
 ) {
   # Base class method: just validate that required properties exist.
   # Subclasses (e.g., DTADataSetTabular) override this to add table validation.
-  
+
   has_specs <- !is.null(tryCatch(x@specs, error = function(e) NULL))
   has_tables <- !is.null(tryCatch(x@tables, error = function(e) NULL))
   has_validation_index <- !is.null(tryCatch(x@validation_index, error = function(e) NULL))
@@ -559,4 +557,3 @@ S7::method(check, DTADataSet) <- function(
   # Base class just validates structure; subclasses do table-specific work.
   invisible(x)
 }
-

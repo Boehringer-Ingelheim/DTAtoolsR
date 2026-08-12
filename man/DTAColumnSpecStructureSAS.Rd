@@ -19,5 +19,5 @@ Class for column types for SAS structures.
 This class defines the structure of a column in a DTA dataset.
 }
 \examples{
- DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
+DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
 }

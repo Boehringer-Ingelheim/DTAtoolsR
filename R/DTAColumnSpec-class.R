@@ -88,7 +88,7 @@ DTAColumnSpec <- S7::new_class(
     examples <- dta_normalise_spec_values(examples)
 
     if (!is.null(type) || !is.null(format) || !is.null(length)) {
-      structure = DTAColumnSpecStructureFactory(
+      structure <- DTAColumnSpecStructureFactory(
         type = type,
         format = format,
         length = length
@@ -198,8 +198,7 @@ get_arrow_schema_type <- function(x) {
   if (is.null(type)) {
     stop(glue::glue("Type is not set for {x@id}."))
   }
-  switch(
-    type,
+  switch(type,
     "Char" = "utf8",
     "Num" = "double",
     "Int" = "int32",
@@ -220,8 +219,7 @@ get_arrow_schema_type <- function(x) {
 #' create_example_DTAColumnSpec()
 #' @export
 create_example_DTAColumnSpec <- function(index = 1) {
-  switch(
-    as.character(index),
+  switch(as.character(index),
     "1" = {
       DTAtools::DTAColumnSpec(
         id = "STUDYID",
@@ -409,8 +407,7 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
     schema_types <- schema$type
     base_type <- schema_types[schema_types != "null"][1]
 
-    values <- switch(
-      base_type,
+    values <- switch(base_type,
       "integer" = as.integer(values_flat),
       "number" = as.numeric(values_flat),
       "boolean" = as.logical(values_flat),

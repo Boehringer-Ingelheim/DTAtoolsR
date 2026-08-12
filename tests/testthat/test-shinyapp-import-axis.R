@@ -118,8 +118,10 @@ test_that("an unknown import axis is neither pass nor fail", {
   # n_import_errors. That is "pending", not "unknown" -- the import axis is no
   # more unknown than the other two.
   expect_identical(
-    status_of(app_status_row(ok = NA, schema = NA_integer_,
-                             rule = NA_integer_, import = NA_integer_)),
+    status_of(app_status_row(
+      ok = NA, schema = NA_integer_,
+      rule = NA_integer_, import = NA_integer_
+    )),
     c(t1 = "pending")
   )
 })

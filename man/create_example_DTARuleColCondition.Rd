@@ -13,6 +13,6 @@ create_example_DTARuleColCondition(index = 1)
 create example for DTARule
 }
 \examples{
- library(DTAtools)
- create_example_DTARuleColCondition()
+library(DTAtools)
+create_example_DTARuleColCondition()
 }

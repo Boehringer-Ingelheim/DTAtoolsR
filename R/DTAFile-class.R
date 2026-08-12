@@ -29,8 +29,8 @@
 #' manage metadata and properties of DTA files.
 #' @keywords internal
 #' @examples
-#'   file_info <- DTAFile("file.txt")
-#'   file_info_pattern <- DTAFile("file\\d+\\.txt", pattern = TRUE)
+#' file_info <- DTAFile("file.txt")
+#' file_info_pattern <- DTAFile("file\\d+\\.txt", pattern = TRUE)
 #' @export
 DTAFile <- S7::new_class(
   "DTAFile",
@@ -147,8 +147,8 @@ if (!exists("min_number_of_files", mode = "function")) {
 #' @return The number of files.
 #'
 #' @examples
-#'   file_info <- DTAFile("file.txt", number_of_files = 1)
-#'   min_number_of_files(file_info)
+#' file_info <- DTAFile("file.txt", number_of_files = 1)
+#' min_number_of_files(file_info)
 #'
 #' @section Methods:
 #' \describe{
@@ -172,8 +172,8 @@ if (!exists("max_number_of_files", mode = "function")) {
 #' @return The number of files.
 #'
 #' @examples
-#'   file_info <- DTAFile("file.txt", number_of_files = 1)
-#'   max_number_of_files(file_info)
+#' file_info <- DTAFile("file.txt", number_of_files = 1)
+#' max_number_of_files(file_info)
 #'
 #' @section Methods:
 #' \describe{
@@ -195,8 +195,8 @@ method(max_number_of_files, DTAFile) <- function(x, ...) {
 #' @return A logical value indicating whether the filename matches.
 #' @importFrom stringr str_detect
 #' @examples
-#'   file_info <- DTAFile("file.txt")
-#'   matches_filename(file_info, "file.txt")
+#' file_info <- DTAFile("file.txt")
+#' matches_filename(file_info, "file.txt")
 #'
 #' @section Methods:
 #' \describe{
@@ -292,7 +292,7 @@ if (!exists("read_file", mode = "function")) {
 }
 
 method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
-  continue = TRUE
+  continue <- TRUE
 
   if (namecheck) {
     if (!DTAtools::matches_filename(x, basename(file))) {
@@ -322,9 +322,9 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
 #' @return Invisibly returns the input object
 #' @importFrom cli cli_text cli_div
 #' @examples
-#'  # do not use this, use derived classes instead, e.g.
-#'  # DTAFileCSV or DTAFileTSV
-#'  print(DTAFileCSV("example.csv"))
+#' # do not use this, use derived classes instead, e.g.
+#' # DTAFileCSV or DTAFileTSV
+#' print(DTAFileCSV("example.csv"))
 #' @name print
 #' @export
 method(print, DTAFile) <- function(x, ...) {

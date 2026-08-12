@@ -20,7 +20,7 @@ Extract one or more \code{DTADataSet} objects from a \code{DTA} object using
 single-bracket notation. Always returns a named list.
 }
 \examples{
-  dta <- create_example_DTA()
-  dta[c(1, 2)]
-  dta[c("demographics", "vitals")]
+dta <- create_example_DTA()
+dta[c(1, 2)]
+dta[c("demographics", "vitals")]
 }

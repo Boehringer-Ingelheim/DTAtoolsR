@@ -34,13 +34,13 @@ brandbar <- div(
       href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
       target = "_blank", rel = "noopener noreferrer",
       "About"
-    )#,
-    #tags$a(
+    ) # ,
+    # tags$a(
     #  class = "brand-link",
     #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
     #  target = "_blank", rel = "noopener noreferrer",
     #  "Documentation"
-    #)
+    # )
   )
 )
 
@@ -305,7 +305,9 @@ server <- function(input, output, session) {
   # option can be a suggestion, blank, or custom text.
   render_template_option_input <- function(opt) {
     oid <- as.character(opt$id %||% "")
-    if (!nzchar(oid)) return(NULL)
+    if (!nzchar(oid)) {
+      return(NULL)
+    }
     iid <- paste0("tmpl_opt_", oid)
     label <- as.character(opt$label %||% oid)
     typ <- tolower(as.character(opt$type %||% "text"))
@@ -356,7 +358,8 @@ server <- function(input, output, session) {
       select = dropdown_with_custom(dta_template_choices(opt)),
       boolean = {
         ch <- c("Yes" = "yes", "No" = "no")
-        selectInput(iid, label, choices = ch,
+        selectInput(iid, label,
+          choices = ch,
           selected = if (identical(def, TRUE) || identical(def, "yes")) "yes" else "no"
         )
       },
@@ -563,7 +566,8 @@ server <- function(input, output, session) {
     created <- create_dta_from_template(rv$template_def, rv$template_path, sels)
     if (!created$ok) {
       showNotification(paste("Could not create DTA from template:", created$error),
-                       type = "error", duration = 10)
+        type = "error", duration = 10
+      )
       return()
     }
 

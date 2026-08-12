@@ -78,7 +78,7 @@ method(print, DTARule) <- function(x, ...) {
 #' check rule against data
 #' @importFrom cli cli_abort
 #' @examples
-#'  # do not manually create DTARule objects, use derived classes instead
+#' # do not manually create DTARule objects, use derived classes instead
 #' @name check
 #' @export
 if (!exists("check", mode = "function")) {
@@ -87,7 +87,7 @@ if (!exists("check", mode = "function")) {
 
 #' @export
 method(check, DTARule) <- function(x, index = 1) {
-  #nolint
+  # nolint
   cli::cli_abort(stringr::str_c(
     "Check needs to be run from Class",
     " derived from DTAtools::DTARule class."
@@ -123,16 +123,14 @@ DTARuleFactory <- function(id, type, ...) {
     id
   }
 
-  type <- switch(
-    as.character(type),
+  type <- switch(as.character(type),
     check_col_condition = "col_condition",
     check_range = "col_range",
     check_unique = "col_unique",
     as.character(type)
   )
 
-  switch(
-    type,
+  switch(type,
     col_condition = DTAtools::DTARuleColCondition(
       id = id,
       ...
