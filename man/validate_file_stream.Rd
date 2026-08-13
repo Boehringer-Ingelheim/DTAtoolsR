@@ -53,6 +53,18 @@ of distinct keys for uniqueness rules, and by \code{max_errors} for the retained
 error detail. Grouped rules are the exception: a group may span any part of
 the file, so the columns those rules read are held for the whole scan.
 }
+\section{Choosing between this and the in-memory path}{
+
+This buys feasibility, not speed. Measured over a 16-fold increase in input,
+the working set this holds stayed flat at about 19 MB while the in-memory
+path's grew from 51 MB to 272 MB -- but scanning ran roughly twice as slow,
+because each batch pays its own dispatch and typing overhead.
+
+So: use this when the file is large enough that holding it is the problem.
+For a file that fits in memory comfortably, \code{validate_table()} is the faster
+choice and there is nothing to gain here.
+}
+
 \examples{
 specs <- DTAtools::DTAColumnSpecCollection(
   columns = list(

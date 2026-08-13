@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   rules are the exception: a group may span any part of the file, so the
   columns those rules read are held for the whole scan.
 
+  **This buys feasibility, not speed.** Measured across a 16-fold increase in
+  input, the working set held by the scan stayed flat at ~19 MB while the
+  in-memory path's grew from 51 MB to 272 MB — but scanning ran about twice as
+  slow, since every batch pays its own dispatch and typing overhead. Use it
+  when holding the file is the problem; for a file that fits in memory
+  comfortably, `validate_table()` remains the faster choice.
+
 - A `DTADataSetTabular`'s `tables` may now hold a lazy Arrow `Dataset`,
   `arrow_dplyr_query` or `RecordBatchReader` as well as a materialised `Table`.
 
