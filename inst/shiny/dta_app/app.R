@@ -45,16 +45,9 @@ brandbar <- div(
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-# Prefer the installed package version; fall back to a nearby DESCRIPTION when
-# the app is launched from source during development.
+# Prefer a nearby DESCRIPTION (deployed app bundle/source of truth), then fall
+# back to the installed package version.
 dta_package_version <- function() {
-  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
-    error = function(e) ""
-  )
-  if (nzchar(v)) {
-    return(v)
-  }
-
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),
@@ -78,6 +71,13 @@ dta_package_version <- function() {
         return(vv)
       }
     }
+  }
+
+  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
+    error = function(e) ""
+  )
+  if (nzchar(v)) {
+    return(v)
   }
 
   ""
