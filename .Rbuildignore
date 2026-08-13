@@ -42,6 +42,9 @@ CHANGELOG.md
 ^\.Rcheck
 ^check_out
 
+# Performance benchmarks — developer tooling, not shipped
+^benchmarks$
+
 # AI assistant configuration — never part of the shipped package
 ^CLAUDE\.md$
 ^CLAUDE\.local\.md$
