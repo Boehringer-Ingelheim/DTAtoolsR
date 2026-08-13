@@ -954,11 +954,18 @@ S7::method(check, DTADataSetTabular) <- function(
   for (idx in seq_along(target_tables)) {
     table_name <- target_tables[idx]
     current_table <- x@tables[[table_name]]
-    current_df <- as.data.frame(current_table)
-    table_hash <- dta_hash_object(current_df)
+
+    # Deliberately NOT as.data.frame() here. A lazy table is lazy precisely
+    # because materialising it is not affordable, and hashing it to decide
+    # whether to skip it would spend more than validating it costs.
+    table_hash <- dta_table_change_signal(current_table)
 
     previous <- x@validation_index[[table_name]]
+    # A NULL signal means identity could not be established, so the table is
+    # assumed changed. Without the explicit NULL guard two unidentifiable
+    # tables would compare equal and the second would be skipped.
     unchanged <- !is.null(previous) &&
+      !is.null(table_hash) &&
       identical(previous$table_hash, table_hash) &&
       identical(previous$specs_hash, specs_hash)
 
@@ -985,7 +992,11 @@ S7::method(check, DTADataSetTabular) <- function(
       }
     }
 
-    details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
+    details <- dta_validate_any_table(
+      x@specs,
+      current_table,
+      verbose = !isTRUE(quiet)
+    )
     artifact_path <- NULL
     validated_at <- Sys.time()
     run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")

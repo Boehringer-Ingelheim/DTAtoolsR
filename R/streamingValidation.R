@@ -556,6 +556,98 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
   errors
 }
 
+# ---- detecting that a table changed ------------------------------------------
+
+#' @title A Signal That a Table Has Changed
+#' @description
+#' Validation results are cached against a signature of the table they were
+#' produced from, so an unchanged table is not revalidated. The signature for a
+#' materialised table is a hash of its contents, which is exact but requires the
+#' contents -- it serialises the whole table to compute.
+#'
+#' A lazy dataset cannot afford that: hashing an 80 GB table writes 80 GB to
+#' disk before any validation happens, which defeats the purpose of not loading
+#' it. For those, identity comes from the files behind it -- their names, sizes
+#' and modification times -- plus the column names. That is cheap at any size.
+#'
+#' The trade is honest: file metadata can in principle miss an edit that
+#' preserves size and timestamp. Returning `NULL` when identity cannot be
+#' established at all is treated by callers as "assume changed", so the failure
+#' direction is revalidating unnecessarily rather than skipping a table that
+#' needs it.
+#' @param x An Arrow `Table`, `Dataset`, or other table representation.
+#' @return A single string, or `NULL` when no identity can be established.
+#' @keywords internal
+dta_table_change_signal <- function(x) {
+  if (inherits(x, "Table")) {
+    return(dta_hash_object(as.data.frame(x)))
+  }
+
+  if (inherits(x, "Dataset")) {
+    files <- tryCatch(x$files, error = function(e) character(0))
+    if (length(files) == 0) {
+      return(NULL)
+    }
+    info <- file.info(files)
+    return(dta_hash_object(list(
+      files = files,
+      size = info$size,
+      mtime = info$mtime,
+      columns = names(x$schema)
+    )))
+  }
+
+  # A reader is consumable: reading it to identify it would spend the very
+  # thing the caller needs. It has no stable identity, so it always revalidates.
+  NULL
+}
+
+#' @title Is This Table Lazy?
+#' @param x A table representation.
+#' @return `TRUE` when the table is scanned rather than held in memory.
+#' @keywords internal
+dta_table_is_lazy <- function(x) {
+  inherits(x, "Dataset") ||
+    inherits(x, "arrow_dplyr_query") ||
+    inherits(x, "RecordBatchReader")
+}
+
+#' @title Validate a Table However It Is Held
+#' @description
+#' Dispatches to the streaming path for a lazy table and the materialising path
+#' for one already in memory, returning the same details either way. This is
+#' what lets `check()` accept both without its callers knowing which they have.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @param table An Arrow `Table`, `Dataset`, or reader.
+#' @param verbose Logical. Print progress.
+#' @param batch_rows Integer. Rows per batch when scanning.
+#' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
+#' @return A validation details list.
+#' @keywords internal
+dta_validate_any_table <- function(specs,
+                                   table,
+                                   verbose = FALSE,
+                                   batch_rows = 131072L,
+                                   max_errors = NULL) {
+  if (!dta_table_is_lazy(table)) {
+    return(validate_table_detailed(specs, as.data.frame(table), verbose = verbose))
+  }
+
+  reader <- if (inherits(table, "RecordBatchReader")) {
+    table
+  } else {
+    arrow::Scanner$create(table, batch_size = batch_rows)$ToRecordBatchReader()
+  }
+
+  dta_validate_table_stream(
+    specs,
+    reader,
+    verbose = verbose,
+    max_errors = max_errors,
+    coerce = TRUE
+  )
+}
+
 # ---- the structural gate -----------------------------------------------------
 #
 # Some failures are decidable from the column names alone, before a single row

@@ -57,6 +57,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Previously invisible: the per-row checks have no way to notice a column no
   spec describes.
 
+- **`check()` validates a lazy table by scanning it.** A dataset held in
+  `tables` is no longer converted to a data frame first, so the streaming path
+  is reachable from the ordinary workflow rather than only through
+  `validate_file_stream()`.
+
+  Cached validation results are keyed differently for lazy tables. A
+  materialised table is still identified by hashing its contents; a dataset is
+  identified by the files behind it — names, sizes, modification times — plus
+  its column names, because hashing the contents would mean serialising the
+  whole table to decide whether to skip validating it. The trade: file metadata
+  can in principle miss an edit that preserves both size and timestamp. Where
+  no identity can be established the table is treated as changed, so the
+  failure direction is revalidating unnecessarily rather than skipping a table
+  that needed checking.
+
 ### Changed
 
 - Schema validation no longer serialises the table to JSON and runs a JSON

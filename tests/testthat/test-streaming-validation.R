@@ -486,6 +486,82 @@ test_that("the structural result still satisfies the details contract", {
   expect_equal(nrow(flat), 1)
 })
 
+# ---- change detection without materialising -----------------------------------
+
+test_that("an in-memory table is identified by its contents", {
+  a <- arrow::as_arrow_table(data.frame(x = 1:3))
+  b <- arrow::as_arrow_table(data.frame(x = 1:3))
+  c <- arrow::as_arrow_table(data.frame(x = 1:4))
+
+  expect_equal(dta_table_change_signal(a), dta_table_change_signal(b))
+  expect_false(identical(dta_table_change_signal(a), dta_table_change_signal(c)))
+})
+
+test_that("a dataset is identified without reading its rows", {
+  path <- vs_write_csv(data.frame(x = 1:100))
+  on.exit(unlink(path), add = TRUE)
+
+  ds <- arrow::open_delim_dataset(path, delim = ",")
+  first <- dta_table_change_signal(ds)
+
+  expect_type(first, "character")
+  # Stable across repeated calls on an unchanged file.
+  expect_equal(first, dta_table_change_signal(arrow::open_delim_dataset(path, delim = ",")))
+})
+
+test_that("rewriting the file changes the dataset's signal", {
+  path <- vs_write_csv(data.frame(x = 1:100))
+  on.exit(unlink(path), add = TRUE)
+  before <- dta_table_change_signal(arrow::open_delim_dataset(path, delim = ","))
+
+  utils::write.csv(data.frame(x = 1:250), path, row.names = FALSE)
+  after <- dta_table_change_signal(arrow::open_delim_dataset(path, delim = ","))
+
+  expect_false(identical(before, after))
+})
+
+test_that("a consumable reader has no stable identity and always revalidates", {
+  # Reading a reader to identify it would spend the very thing the caller
+  # needs, so it reports no identity rather than a wrong one.
+  reader <- vs_reader(data.frame(x = 1:4), 2L)
+  expect_null(dta_table_change_signal(reader))
+})
+
+test_that("lazy and materialised tables are told apart", {
+  path <- vs_write_csv(data.frame(x = 1:4))
+  on.exit(unlink(path), add = TRUE)
+
+  expect_false(dta_table_is_lazy(arrow::as_arrow_table(data.frame(x = 1:4))))
+  expect_true(dta_table_is_lazy(arrow::open_delim_dataset(path, delim = ",")))
+  expect_true(dta_table_is_lazy(vs_reader(data.frame(x = 1:4), 2L)))
+})
+
+test_that("dispatching by holding produces the same verdict either way", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  frame <- data.frame(ID = c("A001", "TOOLONG", "B002"), stringsAsFactors = FALSE)
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  materialised <- dta_validate_any_table(
+    specs, arrow::as_arrow_table(frame),
+    verbose = FALSE
+  )
+  lazy <- dta_validate_any_table(
+    specs, arrow::open_delim_dataset(path, delim = ","),
+    verbose = FALSE
+  )
+
+  expect_equal(materialised$ok, lazy$ok)
+  expect_equal(materialised$schema_valid, lazy$schema_valid)
+  expect_equal(materialised$n_schema_errors, lazy$n_schema_errors)
+  expect_equal(
+    materialised$schema_errors$full_error$row,
+    lazy$schema_errors$full_error$row
+  )
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {
