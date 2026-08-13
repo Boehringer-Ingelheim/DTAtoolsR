@@ -313,7 +313,7 @@ server <- function(input, output, session) {
   # "(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals
   # a companion text field next to the dropdown for a free-typed value, so any
   # option can be a suggestion, blank, or custom text.
-  render_template_option_input <- function(opt) {
+  render_template_option_input <- function(opt, base_metadata = list()) {
     oid <- as.character(opt$id %||% "")
     if (!nzchar(oid)) {
       return(NULL)
@@ -321,7 +321,7 @@ server <- function(input, output, session) {
     iid <- paste0("tmpl_opt_", oid)
     label <- as.character(opt$label %||% oid)
     typ <- tolower(as.character(opt$type %||% "text"))
-    def <- dta_template_default(opt)
+    def <- dta_template_default(opt, base_metadata)
     help <- as.character(opt$help %||% "")
 
     # Sentinel values for the extra dropdown entries.
@@ -437,7 +437,16 @@ server <- function(input, output, session) {
       if (length(opts) == 0) {
         p("This template has no configurable options. Click 'Create DTA' to continue.")
       } else {
-        tagList(lapply(opts, render_template_option_input))
+        tagList(lapply(
+          opts,
+          render_template_option_input,
+          # Resolve ${today} for the preview as well, so the modal never offers
+          # a raw token as a default where the created DTA would carry a date.
+          base_metadata = resolve_template_expressions(
+            def$base$metadata %||% list(),
+            dta_template_today_env()
+          )
+        ))
       },
       footer = tagList(
         modalButton("Cancel"),
@@ -529,7 +538,11 @@ server <- function(input, output, session) {
     files <- list_dta_creation_templates()
     if (length(files) == 0) {
       showNotification(
-        "No creation templates found. Add *.dta-template.yaml files to inst/extdata/templates.",
+        paste(
+          "No creation templates found. Add *.dta-template.yaml files to a",
+          "./dta-templates folder, or point options(DTAtools.template_dir=) at",
+          "a directory of your own."
+        ),
         type = "warning", duration = 8
       )
       return()

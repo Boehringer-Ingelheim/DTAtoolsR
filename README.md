@@ -772,6 +772,7 @@ row-level validation.
 | `write_dta(x, file, format)`   | Write the whole DTA as a document (docx, pdf, md)            |
 | `dta_pdf_backend()`            | Report the DOCX-to-PDF backend this machine will use, or NULL |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA     |
+| `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |
 | `export_specs_table(x, file)`  | Export spec table to Word                                    |
 | `export_column_value_table(x, file, id)` | Export a column's allowed values to Word           |
 | `as_json_schema(x)`            | Convert specs to a JSON Schema string                        |
