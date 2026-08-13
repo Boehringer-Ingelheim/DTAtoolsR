@@ -612,7 +612,7 @@ test_that("rules are classified by how much of the table they need", {
 
   expect_equal(
     unname(kinds),
-    c("decomposable", "keyed", "decomposable", "buffered")
+    c("decomposable", "keyed", "decomposable", "grouped")
   )
 })
 
@@ -687,13 +687,124 @@ test_that("repeated missing values count as duplicates when streamed", {
   expect_equal(streamed$message, expected$message)
 })
 
-test_that("a buffered rule retains only the columns it reads", {
+test_that("grouped rules stream rather than retaining their rows", {
   rule <- vc_corpus()$rule_group_exclusive$specs@rules[[1]]
-  needed <- dta_rule_buffer_columns(rule)
+  expect_equal(dta_rule_stream_kind(rule), "grouped")
+})
 
-  expect_true(all(c("SUBJ", "REASND", "ORRES") %in% needed))
-  # A wide table's other columns must not be retained.
-  expect_false("UNRELATED" %in% needed)
+test_that("a group split across batches still reaches the same verdict", {
+  # The case that decides whether grouped streaming works at all: the two rows
+  # that jointly violate the constraint never appear in the same batch, so only
+  # a per-group reduction folded across batches can see them together.
+  rule <- DTARuleGroupCondition(
+    id = "grp",
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      reported = list(REASND = list(empty = TRUE), ORRES = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "failed", right = "reported")
+    )
+  )
+  table <- data.frame(
+    SUBJ = c("A", "B", "A"),
+    REASND = c("BROKEN", NA_character_, NA_character_),
+    ORRES = c(NA_character_, "9", "12"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+
+  for (batch_rows in c(1L, 2L, 100L)) {
+    streamed <- vs_stream_rule(rule, table, batch_rows)
+    expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_equal(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("an implication across batches reproduces the materialised message", {
+  rule <- DTARuleGroupCondition(
+    id = "grp_req",
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      not_done = list(STAT = list(equals = "NOT DONE"))
+    ),
+    constraints = list(
+      list(type = "requires", `if` = "failed", then = "not_done")
+    )
+  )
+  table <- data.frame(
+    SUBJ = c("A", "B", "A", "B"),
+    REASND = c("BROKEN", NA_character_, NA_character_, "ALSO"),
+    STAT = c("DONE", "DONE", "DONE", "DONE"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+  for (batch_rows in c(1L, 2L, 3L)) {
+    streamed <- vs_stream_rule(rule, table, batch_rows)
+    expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_equal(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("row numbers in grouped messages are global and truncate identically", {
+  # More than ten violating rows, so the "(+N more)" branch is exercised in both
+  # paths -- the streamed one from a capped head plus a count, the materialised
+  # one from the whole vector.
+  rule <- DTARuleGroupCondition(
+    id = "grp_many",
+    group_by = "SUBJ",
+    conditions = list(
+      failed = list(REASND = list(empty = FALSE)),
+      reported = list(REASND = list(empty = TRUE), ORRES = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "failed", right = "reported")
+    )
+  )
+  n <- 30
+  table <- data.frame(
+    SUBJ = rep("A", n),
+    REASND = c(rep("BROKEN", 15), rep(NA_character_, n - 15)),
+    ORRES = c(rep(NA_character_, 15), rep("12", n - 15)),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+  streamed <- vs_stream_rule(rule, table, batch_rows = 4L)
+
+  expect_equal(streamed$message, expected$message)
+  expect_match(streamed$message, "more)", fixed = TRUE)
+})
+
+test_that("scope = all is not satisfied vacuously by an empty group", {
+  # all(logical(0)) is TRUE, so a group that contributed no rows must not be
+  # allowed to satisfy an "all" scope by accident.
+  rule <- DTARuleGroupCondition(
+    id = "grp_all",
+    group_by = "SUBJ",
+    conditions = list(
+      done = list(STAT = list(equals = "DONE"))
+    ),
+    constraints = list(
+      list(type = "requires", `if` = "done", then = "done", then_scope = "all")
+    )
+  )
+  table <- data.frame(
+    SUBJ = c("A", "A", "B"),
+    STAT = c("DONE", "OPEN", "DONE"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+  for (batch_rows in c(1L, 2L)) {
+    streamed <- vs_stream_rule(rule, table, batch_rows)
+    expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_equal(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
 })
 
 test_that("max_errors leaves an under-cap result untruncated", {

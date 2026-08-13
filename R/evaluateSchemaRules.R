@@ -737,6 +737,58 @@ dta_unique_violation_message <- function(id, n, cols) {
   )
 }
 
+#' @title Render Row Numbers for a Grouped Constraint Message
+#' @description
+#' Shows the first `max_show` rows and, beyond that, how many more there were.
+#'
+#' Takes the leading rows and the total separately rather than the whole vector,
+#' because a streaming evaluation never holds the whole vector: it keeps the
+#' first few row numbers it sees and counts the rest. Passing both makes the
+#' streamed and materialised messages identical by construction.
+#' @param head_rows Integer. The leading row numbers, already sorted and unique.
+#' @param total Integer. How many rows there were in total.
+#' @param max_show Integer. How many to name before summarising the remainder.
+#' @return A single string.
+#' @keywords internal
+dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
+  if (total == 0) {
+    return("none")
+  }
+  head_rows <- sort(unique(as.integer(head_rows)))
+  if (total > max_show) {
+    paste0(
+      paste(head_rows[seq_len(min(max_show, length(head_rows)))], collapse = ","),
+      " (+",
+      total - max_show,
+      " more)"
+    )
+  } else {
+    paste(head_rows, collapse = ",")
+  }
+}
+
+#' @title Group Key for a Set of Grouping Columns
+#' @description
+#' The key by which rows are grouped. Shared between the materialising and
+#' streaming paths so a group is the same group in both: a separator appearing
+#' in the data is escaped, and a missing value groups with other missing values
+#' rather than forming its own.
+#' @param df A data frame.
+#' @param group_by Character. The grouping columns.
+#' @return A character vector, one key per row.
+#' @keywords internal
+dta_group_key <- function(df, group_by) {
+  # ASCII unit separator. Written as a code point rather than an escape so the
+  # source carries no raw control byte for tooling to mangle.
+  group_sep <- intToUtf8(31L)
+  key_parts <- lapply(df[, group_by, drop = FALSE], function(x) {
+    chr <- as.character(x)
+    chr[is.na(chr)] <- "<NA>"
+    gsub(group_sep, paste0(group_sep, group_sep), chr, fixed = TRUE)
+  })
+  do.call(paste, c(key_parts, sep = group_sep))
+}
+
 #' @keywords internal
 dta_group_scope_truth <- function(mask, scope) {
   hit <- mask %in% TRUE
@@ -779,19 +831,7 @@ rule_check_group_condition <- function(rule, df) {
 
   format_rows <- function(rows, max_show = 10L) {
     rows <- sort(unique(as.integer(rows)))
-    if (length(rows) == 0) {
-      return("none")
-    }
-    if (length(rows) > max_show) {
-      paste0(
-        paste(rows[seq_len(max_show)], collapse = ","),
-        " (+",
-        length(rows) - max_show,
-        " more)"
-      )
-    } else {
-      paste(rows, collapse = ",")
-    }
+    dta_format_group_rows(rows, length(rows), max_show)
   }
 
   group_by <- rule_get_slot(rule, "group_by")
@@ -815,13 +855,7 @@ rule_check_group_condition <- function(rule, df) {
   }
 
   grouped <- df[, group_by, drop = FALSE]
-  group_sep <- "\u001f"
-  key_parts <- lapply(grouped, function(x) {
-    chr <- as.character(x)
-    chr[is.na(chr)] <- "<NA>"
-    gsub(group_sep, paste0(group_sep, group_sep), chr, fixed = TRUE)
-  })
-  split_key <- do.call(paste, c(key_parts, sep = group_sep))
+  split_key <- dta_group_key(df, group_by)
   groups <- split(seq_len(nrow(df)), split_key)
 
   violations <- list()

@@ -23,10 +23,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   retained detail is truncated — a report says "20 problems, here are 5", never
   "5 problems".
 
-  Memory is bounded by the batch size for the column-spec checks and by the
-  number of distinct keys for uniqueness rules. Grouped (`group_condition`)
-  rules are the exception: a group may span any part of the file, so the
-  columns those rules read are held for the whole scan.
+  Nothing in the validation path now scales with the number of rows. Memory is
+  bounded by the batch size for the column-spec checks, by the number of
+  distinct keys for uniqueness rules, by the number of distinct groups for
+  grouped rules, and by `max_errors` for retained error detail.
 
   **This buys feasibility, not speed.** Measured across a 16-fold increase in
   input, the working set held by the scan stayed flat at ~19 MB while the

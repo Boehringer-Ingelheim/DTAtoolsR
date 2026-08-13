@@ -56,10 +56,10 @@ validate a single row.
 The result is the same \code{details} structure the in-memory path returns, so
 \code{results()}, \code{messages()} and \code{inspect()} accept it unchanged.
 
-Memory is bounded by the batch size for the column-spec checks, by the number
-of distinct keys for uniqueness rules, and by \code{max_errors} for the retained
-error detail. Grouped rules are the exception: a group may span any part of
-the file, so the columns those rules read are held for the whole scan.
+Nothing here scales with the number of rows. Memory is bounded by the batch
+size for the column-spec checks, by the number of distinct keys for
+uniqueness rules, by the number of distinct groups for grouped rules, and by
+\code{max_errors} for the retained error detail.
 }
 \section{Choosing between this and the in-memory path}{
 

@@ -132,7 +132,7 @@ dta_rule_stream_kind <- function(rule) {
     check_range = "decomposable",
     check_col_condition = "decomposable",
     check_unique = "keyed",
-    check_group_condition = "buffered",
+    check_group_condition = "grouped",
     # An unrecognised type must not be silently treated as buffered and handed
     # to the grouped evaluator; it is reported as a rule failure, as the
     # materialising path does.
@@ -173,8 +173,9 @@ dta_rule_stream_init <- function(rule) {
     # with distinct keys rather than with rows.
     state$seen <- new.env(hash = TRUE, parent = emptyenv())
   }
-  if (kind == "buffered") {
-    state$rows <- list()
+  if (kind == "grouped") {
+    state$grouped <- dta_group_stream_init(rule)
+    state$row_offset <- 0L
   }
 
   state
@@ -222,9 +223,9 @@ dta_rule_stream_update <- function(state, rule, df) {
             }
           }
         },
-        buffered = {
-          cols <- intersect(dta_rule_buffer_columns(rule), names(df))
-          state$rows[[length(state$rows) + 1]] <- df[, cols, drop = FALSE]
+        grouped = {
+          dta_group_stream_update(state$grouped, rule, df, state$row_offset)
+          state$row_offset <- state$row_offset + nrow(df)
         }
       )
       NULL
@@ -269,18 +270,8 @@ dta_rule_stream_finalise <- function(state, rule) {
     ))
   }
 
-  if (state$kind == "buffered") {
-    # Groups span batches, so this rule could only ever be answered once every
-    # row it reads had been seen.
-    buffered <- if (length(state$rows) == 0) {
-      NULL
-    } else {
-      do.call(rbind, state$rows)
-    }
-    if (is.null(buffered)) {
-      return(list(id = rule@id, valid = TRUE, message = NULL))
-    }
-    return(rule_check_group_condition(rule, buffered))
+  if (state$kind == "grouped") {
+    return(dta_group_stream_finalise(state$grouped, rule))
   }
 
   if (state$count == 0) {
@@ -309,26 +300,6 @@ dta_unique_columns <- function(rule) {
     cols <- rule_get_slot(rule, "columns")
   }
   cols
-}
-
-#' @title Columns a Buffered Rule Needs Retained
-#' @description
-#' Grouped rules cannot be answered batch by batch, but they read far fewer
-#' columns than a table has. Retaining only these turns "buffer the table" into
-#' "buffer a few columns of it".
-#' @param rule A grouped rule.
-#' @return A character vector of column names.
-#' @keywords internal
-dta_rule_buffer_columns <- function(rule) {
-  group_by <- tryCatch(rule_get_slot(rule, "group_by"), error = function(e) NULL)
-  conditions <- tryCatch(rule_get_slot(rule, "conditions"), error = function(e) NULL)
-
-  condition_cols <- unlist(
-    lapply(conditions, names),
-    use.names = FALSE
-  )
-
-  unique(c(as.character(group_by), as.character(condition_cols)))
 }
 
 # ---- the streaming driver ----------------------------------------------------
@@ -556,6 +527,272 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
   errors
 }
 
+# ---- grouped rules, without holding the rows ---------------------------------
+#
+# A grouped rule asks, per group, whether a named condition holds for ANY row or
+# for ALL rows. Both are associative reductions -- OR and AND -- so a group's
+# answer can be folded batch by batch and never needs the group's rows present
+# together.
+#
+# What the messages additionally need is row numbers, and only the first ten:
+# beyond that they say "(+N more)". So each condition keeps a capped head of the
+# row numbers it saw and a count of the rest.
+#
+# Memory is therefore proportional to the number of distinct GROUPS times the
+# number of conditions, not to the number of rows. That is the same class as
+# uniqueness, and unbounded in group cardinality rather than in file size -- an
+# improvement over retaining every row of every column the rule reads, but not
+# a constant.
+
+DTA_GROUP_ROW_HEAD <- 10L
+
+dta_group_cond_state <- function() {
+  list(
+    any_true = FALSE,
+    all_true = TRUE,
+    n_seen = 0L,
+    true_head = integer(0),
+    true_n = 0L,
+    false_head = integer(0),
+    false_n = 0L
+  )
+}
+
+dta_group_fold_rows <- function(head, count, new_rows) {
+  count <- count + length(new_rows)
+  room <- DTA_GROUP_ROW_HEAD - length(head)
+  if (room > 0 && length(new_rows) > 0) {
+    head <- c(head, new_rows[seq_len(min(room, length(new_rows)))])
+  }
+  list(head = head, count = count)
+}
+
+#' @title Start Accumulating a Grouped Rule
+#' @param rule A grouped rule.
+#' @return A mutable accumulator.
+#' @keywords internal
+dta_group_stream_init <- function(rule) {
+  state <- new.env(parent = emptyenv())
+  state$groups <- new.env(hash = TRUE, parent = emptyenv())
+  state$keys <- character(0)
+  state$condition_names <- names(rule_get_slot(rule, "conditions"))
+  state
+}
+
+#' @title Fold One Batch into a Grouped Rule's Accumulator
+#' @param state An accumulator from `dta_group_stream_init()`.
+#' @param rule The grouped rule.
+#' @param df A data frame holding one batch.
+#' @param row_offset Integer. Rows already consumed, so row numbers are global.
+#' @return The accumulator, updated in place.
+#' @keywords internal
+dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
+  group_by <- rule_get_slot(rule, "group_by")
+  conditions <- rule_get_slot(rule, "conditions")
+
+  missing_group_cols <- setdiff(group_by, names(df))
+  if (length(missing_group_cols) > 0) {
+    cli::cli_abort(
+      c(
+        "Rule {.val {rule@id}} cannot be evaluated as group_condition.",
+        x = "Grouping column{?s} missing in input data: {.val {missing_group_cols}}.",
+        i = "Available columns: {.val {names(df)}}."
+      ),
+      class = "dta_rule_not_applicable"
+    )
+  }
+
+  if (nrow(df) == 0) {
+    return(state)
+  }
+
+  split_key <- dta_group_key(df, group_by)
+  local_groups <- split(seq_len(nrow(df)), split_key)
+  grouped <- df[, group_by, drop = FALSE]
+
+  for (key in names(local_groups)) {
+    local_idx <- local_groups[[key]]
+    gdf <- df[local_idx, , drop = FALSE]
+    global_idx <- local_idx + row_offset
+
+    entry <- state$groups[[key]]
+    if (is.null(entry)) {
+      state$keys <- c(state$keys, key)
+      entry <- list(
+        label = paste(
+          vapply(group_by, function(col) {
+            paste0(col, "=", as.character(grouped[[col]][local_idx[1]]))
+          }, character(1)),
+          collapse = ", "
+        ),
+        conds = stats::setNames(
+          lapply(state$condition_names, function(...) dta_group_cond_state()),
+          state$condition_names
+        )
+      )
+    }
+
+    for (cond_name in state$condition_names) {
+      spec <- conditions[[cond_name]]
+      mask <- tryCatch(
+        evaluate_conditions(spec, gdf),
+        dta_rule_not_applicable = function(cnd) {
+          cli::cli_abort(
+            c(
+              "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
+              x = "{conditionMessage(cnd)}"
+            ),
+            class = "dta_rule_not_applicable"
+          )
+        }
+      )
+
+      hit <- mask %in% TRUE
+      cond <- entry$conds[[cond_name]]
+
+      cond$any_true <- cond$any_true || any(hit)
+      cond$all_true <- cond$all_true && all(hit)
+      cond$n_seen <- cond$n_seen + length(hit)
+
+      folded_true <- dta_group_fold_rows(cond$true_head, cond$true_n, global_idx[hit])
+      cond$true_head <- folded_true$head
+      cond$true_n <- folded_true$count
+
+      folded_false <- dta_group_fold_rows(cond$false_head, cond$false_n, global_idx[!hit])
+      cond$false_head <- folded_false$head
+      cond$false_n <- folded_false$count
+
+      entry$conds[[cond_name]] <- cond
+    }
+
+    assign(key, entry, envir = state$groups)
+  }
+
+  state
+}
+
+# Whether a condition holds for a group under the given scope. "all" requires
+# the group to have had at least one row, matching the materialising path where
+# all(logical(0)) would otherwise be vacuously TRUE.
+dta_group_stream_truth <- function(cond, scope) {
+  if (identical(scope, "all")) {
+    cond$n_seen > 0 && cond$all_true
+  } else {
+    cond$any_true
+  }
+}
+
+#' @title Turn a Grouped Rule's Accumulator into a Result
+#' @param state An accumulator that has seen every batch.
+#' @param rule The grouped rule.
+#' @return A list with `id`, `valid` and `message`, matching what
+#'   `rule_check_group_condition()` returns for the same data.
+#' @keywords internal
+dta_group_stream_finalise <- function(state, rule) {
+  constraints <- rule_get_slot(rule, "constraints")
+  violations <- list()
+
+  fmt <- function(cond, which = "true") {
+    if (identical(which, "true")) {
+      dta_format_group_rows(cond$true_head, cond$true_n, DTA_GROUP_ROW_HEAD)
+    } else {
+      dta_format_group_rows(cond$false_head, cond$false_n, DTA_GROUP_ROW_HEAD)
+    }
+  }
+
+  # split() orders groups by sorted key, so the materialising path reports
+  # violations in that order. Sorting here keeps the assembled message identical.
+  for (key in sort(state$keys)) {
+    entry <- state$groups[[key]]
+    conds <- entry$conds
+
+    for (constraint in constraints) {
+      ctype <- constraint$type
+
+      if (identical(ctype, "mutually_exclusive")) {
+        left <- constraint$left
+        right <- constraint$right
+        left_scope <- constraint$left_scope %||% "any"
+        right_scope <- constraint$right_scope %||% "any"
+
+        if (dta_group_stream_truth(conds[[left]], left_scope) &&
+          dta_group_stream_truth(conds[[right]], right_scope)) {
+          message <- constraint$message %||%
+            sprintf(
+              "Constraint '%s' failed: '%s' (scope=%s; rows=%s) and '%s' (scope=%s; rows=%s) are both TRUE, but mutually_exclusive requires they cannot both hold.",
+              constraint$id,
+              left, left_scope, fmt(conds[[left]]),
+              right, right_scope, fmt(conds[[right]])
+            )
+          violations[[length(violations) + 1L]] <- list(
+            constraint_id = constraint$id,
+            group = entry$label,
+            message = message,
+            rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head)))
+          )
+        }
+      } else if (identical(ctype, "requires")) {
+        if_name <- constraint[["if"]]
+        then_name <- constraint[["then"]]
+        if_scope <- constraint$if_scope %||% "any"
+        then_scope <- constraint$then_scope %||% "any"
+
+        if (dta_group_stream_truth(conds[[if_name]], if_scope) &&
+          !dta_group_stream_truth(conds[[then_name]], then_scope)) {
+          then_scope_reason <- if (identical(then_scope, "all")) {
+            sprintf("failing rows=%s", fmt(conds[[then_name]], "false"))
+          } else {
+            sprintf(
+              "no row in the group satisfied '%s' (rows with TRUE=%s)",
+              then_name,
+              fmt(conds[[then_name]])
+            )
+          }
+          message <- constraint$message %||%
+            sprintf(
+              "Constraint '%s' failed: IF condition '%s' (scope=%s; rows=%s) is TRUE, but THEN condition '%s' (scope=%s) is not satisfied (%s).",
+              constraint$id,
+              if_name, if_scope, fmt(conds[[if_name]]),
+              then_name, then_scope, then_scope_reason
+            )
+          then_failed <- if (identical(then_scope, "all")) {
+            conds[[then_name]]$false_head
+          } else {
+            integer(0)
+          }
+          violations[[length(violations) + 1L]] <- list(
+            constraint_id = constraint$id,
+            group = entry$label,
+            message = message,
+            rows = sort(unique(c(conds[[if_name]]$true_head, then_failed)))
+          )
+        }
+      }
+    }
+  }
+
+  if (length(violations) == 0) {
+    return(list(id = rule@id, valid = TRUE, message = NULL))
+  }
+
+  summary <- sprintf(
+    "Rule '%s' failed: %d grouped constraint violation%s detected.",
+    rule@id,
+    length(violations),
+    if (length(violations) == 1) "" else "s"
+  )
+  details <- vapply(violations, function(v) {
+    sprintf("%s [%s]", v$message, v$group)
+  }, character(1))
+
+  list(
+    id = rule@id,
+    valid = FALSE,
+    message = paste(c(summary, details), collapse = " "),
+    details = violations
+  )
+}
+
 # ---- detecting that a table changed ------------------------------------------
 
 #' @title A Signal That a Table Has Changed
@@ -759,10 +996,10 @@ dta_open_delimited_dataset <- function(path,
 #' The result is the same `details` structure the in-memory path returns, so
 #' `results()`, `messages()` and `inspect()` accept it unchanged.
 #'
-#' Memory is bounded by the batch size for the column-spec checks, by the number
-#' of distinct keys for uniqueness rules, and by `max_errors` for the retained
-#' error detail. Grouped rules are the exception: a group may span any part of
-#' the file, so the columns those rules read are held for the whole scan.
+#' Nothing here scales with the number of rows. Memory is bounded by the batch
+#' size for the column-spec checks, by the number of distinct keys for
+#' uniqueness rules, by the number of distinct groups for grouped rules, and by
+#' `max_errors` for the retained error detail.
 #'
 #' @section Choosing between this and the in-memory path:
 #' This buys feasibility, not speed. Measured over a 16-fold increase in input,
