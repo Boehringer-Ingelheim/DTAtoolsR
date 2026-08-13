@@ -116,13 +116,22 @@ vc_corpus <- function() {
       )),
       data.frame(CODE = c("ABC123", "bad!!!"), stringsAsFactors = FALSE)
     ),
+    # The second column is load-bearing, not padding. With ID alone, the row
+    # whose only value is NA serialises to a blank line, which every CSV parser
+    # skips - so the round-trip layer would silently test blank-line handling
+    # rather than nullability. SITE keeps the line populated.
     schema_nullable = vc_case(
       "missing value in a non-nullable column",
       "schema",
       vc_specs(list(
-        DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+        DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+        DTAColumnSpec(id = "SITE", type = "SAS Char", length = 4, nullable = FALSE)
       )),
-      data.frame(ID = c("A001", NA_character_), stringsAsFactors = FALSE)
+      data.frame(
+        ID = c("A001", NA_character_),
+        SITE = c("S01", "S02"),
+        stringsAsFactors = FALSE
+      )
     ),
 
     # --- rules axis ----------------------------------------------------------
@@ -155,14 +164,24 @@ vc_corpus <- function() {
 
     # Pins duplicated()'s treatment of repeated NAs as duplicates. Arrow's
     # distinct counting does not agree by default, so this case is the tripwire.
+    # SITE exists for the same reason as in schema_nullable: without it the two
+    # NA rows are blank lines and never survive the round trip. The uniqueness
+    # rule reads K only, so SITE does not affect the key.
     rule_unique_na = vc_case(
       "repeated missing values in the uniqueness key",
       "rule",
       vc_specs(
-        list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = TRUE)),
+        list(
+          DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = TRUE),
+          DTAColumnSpec(id = "SITE", type = "SAS Char", length = 4, nullable = FALSE)
+        ),
         list(DTARuleColUnique(id = "k_unique", columns = "K"))
       ),
-      data.frame(K = c("a", NA_character_, NA_character_), stringsAsFactors = FALSE)
+      data.frame(
+        K = c("a", NA_character_, NA_character_),
+        SITE = c("S01", "S02", "S03"),
+        stringsAsFactors = FALSE
+      )
     ),
     rule_condition = vc_case(
       "IF matches but THEN fails",

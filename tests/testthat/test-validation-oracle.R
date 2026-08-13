@@ -228,6 +228,32 @@ vc_roundtrip <- function(case) {
   )
 }
 
+test_that("a row whose every field is empty is dropped by the CSV reader", {
+  # Known reader behaviour, pinned so the streaming rewrite reproduces it
+  # rather than diverging by accident.
+  #
+  # A line with no content at all is treated as a record separator and skipped,
+  # which is what essentially every CSV parser does. A row that is merely
+  # PARTIALLY empty survives intact, so this is narrow: it costs a row only
+  # when every column of that row is absent. The practical consequence is that
+  # a file containing all-empty rows validates fewer rows than it contains,
+  # with no warning.
+  path <- tempfile(fileext = ".csv")
+  on.exit(unlink(path), add = TRUE)
+
+  writeLines(c("ID,AGE", "A001,30", "", "B002,50"), path)
+  expect_equal(nrow(arrow::read_csv_arrow(path, as_data_frame = FALSE)), 2)
+
+  # The contrast: partially-populated rows are NOT lost. Both a leading and a
+  # trailing empty field round-trip, so nullability and uniqueness checks on
+  # real multi-column data are unaffected.
+  writeLines(c("ID,AGE", "A001,30", ",40", "B002,"), path)
+  partial <- arrow::read_csv_arrow(path, as_data_frame = FALSE)
+  expect_equal(nrow(partial), 3)
+  expect_true(is.na(as.vector(partial$ID)[[2]]))
+  expect_true(is.na(as.vector(partial$AGE)[[3]]))
+})
+
 test_that("the read and import-typing path produces stable verdicts", {
   corpus <- vc_corpus()
   facts <- do.call(
