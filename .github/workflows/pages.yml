@@ -1,8 +1,19 @@
 name: Deploy GitHub Pages
 
+# Deploys from master, not dev, for two reasons that both have to hold:
+#
+#   * The `github-pages` environment carries a deployment branch policy that
+#     permits `master` alone. A run triggered from `dev` is rejected by the
+#     environment before any step executes, which surfaces as a failed job with
+#     no failed step -- the state this workflow was in from the day it was
+#     added until the first change to docs/ actually triggered it.
+#   * The repository's Pages source is configured as `master`.
+#
+# It also gives the right behaviour: the published tutorial tracks what has
+# been released, rather than whatever is currently in development.
 on:
   push:
-    branches: [dev]
+    branches: [master]
     paths:
       - docs/**
   workflow_dispatch:
