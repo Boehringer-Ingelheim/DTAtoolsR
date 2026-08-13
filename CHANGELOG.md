@@ -38,6 +38,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - A `DTADataSetTabular`'s `tables` may now hold a lazy Arrow `Dataset`,
   `arrow_dplyr_query` or `RecordBatchReader` as well as a materialised `Table`.
 
+- **`validate_file_stream(fail_fast = TRUE)` stops at the first problem.**
+  Answers "is this file valid?" without paying for a full pass, which on a
+  large file that fails early is the difference between seconds and hours.
+
+  The resulting report is explicitly incomplete rather than quietly so. It
+  carries a `partial_scan` attribute, lists only rules that actually failed,
+  and reports `NA` — not `TRUE` — for any axis that could not be settled. A
+  rule that has not failed yet has not passed: a duplicate further into the
+  file was simply never read. The overall `ok` verdict is unaffected, since it
+  requires all three axes to be `TRUE`.
+
 - **A structural gate, via `validate_file_stream(on_missing_column = "stop")`.**
   A column the specs require but the file lacks is decidable from the header
   alone. Scanning reports that absence once per *row* — faithful to what the

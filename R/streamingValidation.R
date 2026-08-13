@@ -387,7 +387,8 @@ dta_validate_table_stream <- function(specs,
                                       reader,
                                       verbose = FALSE,
                                       max_errors = NULL,
-                                      coerce = TRUE) {
+                                      coerce = TRUE,
+                                      fail_fast = FALSE) {
   rules_list <- tryCatch(specs@rules, error = function(e) NULL)
   if (is.null(rules_list)) {
     rules_list <- list()
@@ -399,6 +400,7 @@ dta_validate_table_stream <- function(specs,
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
   row_offset <- 0L
+  partial_scan <- FALSE
 
   if (isTRUE(verbose)) {
     cli::cli_h3("validating with column specs")
@@ -453,6 +455,15 @@ dta_validate_table_stream <- function(specs,
     }
 
     row_offset <- row_offset + n_batch_rows
+
+    if (isTRUE(fail_fast) &&
+      (schema_sink$total > 0 ||
+        carried_sink$total > 0 ||
+        rule_import_sink$total > 0 ||
+        any(vapply(states, function(s) s$count > 0, logical(1))))) {
+      partial_scan <- TRUE
+      break
+    }
   }
 
   full_error <- dta_error_sink_collect(schema_sink)
@@ -499,6 +510,20 @@ dta_validate_table_stream <- function(specs,
     import_errors = import_errors,
     schema_version = 2L
   )
+
+  if (partial_scan) {
+    # The scan stopped at the first problem, so the rest of the file was never
+    # read. A rule that has not failed YET has not passed -- a duplicate later
+    # in the file was simply never seen -- so the axes that could not be
+    # settled report NA rather than a reassuring TRUE. `ok` is unaffected:
+    # dta_details_ok() requires all three to be TRUE, and NA is not.
+    details$rules_valid <- if (length(details$rule_errors) > 0) FALSE else NA
+    details$import_valid <- if (n_import_errors > 0L) FALSE else NA
+    # Only rules that actually failed are reported. Their failures are real;
+    # the silence of the others is not evidence.
+    details$rule_results <- details$rule_errors
+    attr(details, "partial_scan") <- TRUE
+  }
 
   details$ok <- dta_details_ok(details)
   details
@@ -1020,6 +1045,15 @@ dta_open_delimited_dataset <- function(path,
 #' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
 #'   Counting is unaffected, so totals and the pass/fail verdict stay exact even
 #'   when the retained detail is truncated.
+#' @param fail_fast Logical. Stop at the first batch that shows any problem,
+#'   instead of scanning to the end. Answers "is this file valid?" without
+#'   costing a full pass, which on a large file that fails early is the
+#'   difference between seconds and hours.
+#'
+#'   The report is then explicitly incomplete: it carries a `partial_scan`
+#'   attribute, only rules that actually failed are listed, and axes that could
+#'   not be settled report `NA` rather than `TRUE`. A rule that has not failed
+#'   yet has not passed -- a duplicate later in the file was never read.
 #' @param on_missing_column One of `"scan"` or `"stop"`. A column the specs
 #'   require but the file lacks is decidable from the header alone. `"scan"`,
 #'   the default, preserves existing behaviour: the file is read and the absence
@@ -1057,6 +1091,7 @@ validate_file_stream <- function(specs,
                                  has_header = TRUE,
                                  batch_rows = 131072L,
                                  max_errors = NULL,
+                                 fail_fast = FALSE,
                                  on_missing_column = c("scan", "stop"),
                                  verbose = TRUE) {
   if (!file.exists(path)) {
@@ -1098,7 +1133,8 @@ validate_file_stream <- function(specs,
     reader,
     verbose = verbose,
     max_errors = max_errors,
-    coerce = TRUE
+    coerce = TRUE,
+    fail_fast = fail_fast
   )
 }
 

@@ -9,7 +9,8 @@ dta_validate_table_stream(
   reader,
   verbose = FALSE,
   max_errors = NULL,
-  coerce = TRUE
+  coerce = TRUE,
+  fail_fast = FALSE
 )
 }
 \arguments{

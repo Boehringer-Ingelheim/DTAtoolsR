@@ -562,6 +562,104 @@ test_that("dispatching by holding produces the same verdict either way", {
   )
 })
 
+# ---- stopping at the first problem -------------------------------------------
+
+test_that("fail_fast stops the scan once something is wrong", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  ids <- sprintf("A%03d", 1:100)
+  ids[3] <- "TOOLONG"
+  ids[90] <- "ALSOTOOLONG"
+  path <- vs_write_csv(data.frame(ID = ids, stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  quick <- validate_file_stream(
+    specs, path,
+    batch_rows = 10L, fail_fast = TRUE, verbose = FALSE
+  )
+  full <- validate_file_stream(specs, path, batch_rows = 10L, verbose = FALSE)
+
+  # Both agree the file is invalid.
+  expect_false(quick$ok)
+  expect_false(full$ok)
+  expect_false(quick$schema_valid)
+
+  # The full scan sees both violations; the quick one stops after the first
+  # batch that showed a problem, so it sees only the early one.
+  expect_equal(full$n_schema_errors, 2)
+  expect_equal(quick$n_schema_errors, 1)
+  expect_true(isTRUE(attr(quick, "partial_scan")))
+})
+
+test_that("a stopped scan does not claim the axes it never finished are clean", {
+  # The trap this guards: reporting rules_valid = TRUE after reading a tenth of
+  # the file would state that no duplicates exist, having never looked.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = TRUE)
+    ),
+    list(DTARuleColUnique(id = "k_unique", columns = "K"))
+  )
+  ids <- sprintf("A%03d", 1:40)
+  ids[2] <- "TOOLONG"
+  # The duplicate sits far past where the scan will stop.
+  ks <- sprintf("K%03d", 1:40)
+  ks[40] <- ks[1]
+  path <- vs_write_csv(data.frame(ID = ids, K = ks, stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  quick <- validate_file_stream(
+    specs, path,
+    batch_rows = 5L, fail_fast = TRUE, verbose = FALSE
+  )
+
+  expect_true(isTRUE(attr(quick, "partial_scan")))
+  # Not TRUE, and not FALSE: unknown.
+  expect_true(is.na(quick$rules_valid))
+  expect_false(quick$ok)
+
+  # The full scan does find the duplicate, which is exactly why the quick one
+  # must not have claimed there was none.
+  full <- validate_file_stream(specs, path, batch_rows = 5L, verbose = FALSE)
+  expect_false(full$rules_valid)
+})
+
+test_that("fail_fast on a clean file scans it all and reports normally", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = sprintf("A%03d", 1:50), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  quick <- validate_file_stream(
+    specs, path,
+    batch_rows = 5L, fail_fast = TRUE, verbose = FALSE
+  )
+
+  expect_true(quick$ok)
+  expect_true(quick$schema_valid)
+  expect_true(quick$rules_valid)
+  # Nothing was cut short, so the result is complete.
+  expect_null(attr(quick, "partial_scan"))
+})
+
+test_that("fail_fast defaults off so a full report is the norm", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  ids <- sprintf("A%03d", 1:20)
+  ids[1] <- "TOOLONG"
+  ids[20] <- "ALSOTOOLONG"
+  path <- vs_write_csv(data.frame(ID = ids, stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  defaulted <- validate_file_stream(specs, path, batch_rows = 2L, verbose = FALSE)
+  expect_equal(defaulted$n_schema_errors, 2)
+  expect_null(attr(defaulted, "partial_scan"))
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {
