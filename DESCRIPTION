@@ -92,6 +92,7 @@ Collate:
     'formattingHelpers.R'
     'run_dta_app.R'
     'schemaChecks.R'
+    'streamingValidation.R'
     'validationFunctions.R'
     'zzz.R'
 Config/roxygen2/version: 8.0.0
