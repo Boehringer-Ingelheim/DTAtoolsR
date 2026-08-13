@@ -47,6 +47,14 @@ DTAFile <- S7::new_class(
       pattern <- FALSE
     }
 
+    # A YAML sequence of file names parses to a LIST of strings, which the
+    # character property would reject outright -- even though `filename` is
+    # documented as a vector and matches_filename() implements the several-names
+    # case. Flatten it here so a `filename:` sequence is the vector it means.
+    if (is.list(filename) && all(vapply(filename, is.character, logical(1)))) {
+      filename <- unlist(filename, use.names = FALSE)
+    }
+
     if (
       is.null(number_of_files) &&
         is.null(min_number_of_files) &&
@@ -55,10 +63,19 @@ DTAFile <- S7::new_class(
       number_of_files <- 1
     }
 
-    if (!pattern && number_of_files != 1) {
-      cli::cli_abort(
-        "if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename."
-      )
+    # A non-pattern handler names one exact file, so every count it declares
+    # must be 1 -- whichever of the three arguments it used to say so. Testing
+    # `number_of_files != 1` alone left two holes: a min/max pair was never
+    # checked at all, and with only a min/max set `number_of_files` is NULL, so
+    # the comparison was on a zero-length value and errored with a message about
+    # the wrong thing.
+    if (!pattern) {
+      declared <- c(number_of_files, min_number_of_files, max_number_of_files)
+      if (length(declared) > 0 && any(declared != 1)) {
+        cli::cli_abort(
+          "if pattern is FALSE, then number_of_files must be 1. Then only one file can exist for this filename."
+        )
+      }
     }
 
     if (length(number_of_files) > 1) {
@@ -120,10 +137,14 @@ DTAFile <- S7::new_class(
     info = class_character_or_list_or_null
   ),
   validator = function(self) {
+    # `self@filename == ""` was a length-1 test on a property documented as a
+    # VECTOR: a handler carrying two names made the `if` condition length 2,
+    # which is an error in R, so the several-names case that
+    # matches_filename() implements could never be constructed.
     if (
       !is.character(self@filename) ||
-        is.null(self@filename) ||
-        self@filename == ""
+        length(self@filename) == 0 ||
+        any(!nzchar(self@filename))
     ) {
       cli::cli_abort(
         "The 'filename' property must be a non-empty character vector."

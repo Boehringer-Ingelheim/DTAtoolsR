@@ -13,7 +13,11 @@ DTADataSetFactory(type, columns = NULL, rules = NULL, files = NULL, ...)
 
 \item{rules}{A list of rules specifications (optional)}
 
-\item{files}{A list of for conversion to DTAFile objects (optional)}
+\item{files}{Specification of the dataset's file handlers (optional). Either
+a single named list -- one handler, the shape a YAML \code{files:} mapping
+parses to -- or an unnamed list of such lists, one per handler, the shape a
+YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
+dataset with no file handlers.}
 
 \item{...}{Character. Arguments passed on to the specific backend constructor.}
 }
@@ -31,6 +35,16 @@ DTADataSetFactory(
   type = "file",
   name = "mydataset",
   files = list(type = "csv", filename = "clinical_data.csv")
+)
+
+# Several file handlers: an unnamed list of handler specifications.
+DTADataSetFactory(
+  type = "file",
+  name = "mydataset",
+  files = list(
+    list(type = "csv", filename = "clinical_data.csv"),
+    list(type = "tsv", filename = "gf_data_small_smirna.tsv")
+  )
 )
 
 }

@@ -1417,6 +1417,15 @@ dta_condition_operators <- function() {
 }
 
 # Recover a handler's file-type token ("csv" / "tsv") from its S7 class.
+#
+# KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
+# discards its `sep`. DTAFileFactory() -- the only route from a document back to
+# an object -- implements csv and tsv only, so no YAML can produce a
+# DTAFileDelim and the file editor deliberately does not offer one
+# (dta_handler_types()). A Delim handler can therefore only arrive here from an
+# object built in R and handed to the app. Giving it its own token would make
+# every document containing one unreadable instead; the real fix is a `delim`
+# branch in DTAFileFactory, at which point this should return "delim".
 dta_handler_type <- function(h) {
   if (inherits(h, "DTAtools::DTAFileTSV")) {
     return("tsv")
@@ -1895,6 +1904,302 @@ dta_move_rule <- function(dta, dataset, index, direction) {
     }
     dta
   })
+}
+
+# ---- File-handler editing -------------------------------------------------
+# A dataset's file handlers (DTAFile objects in `ds@files`) are what the app
+# shows as upload SLOTS. Unlike columns and rules they live in an UNNAMED,
+# positional list, so every helper here addresses a handler by its 1-based
+# index -- the same index the app uses in its upload keys ("<dataset>||<hi>").
+
+# File types the editor can offer. Deliberately narrower than the DTAFile class
+# tree: DTAFileFactory() -- the only route from a YAML document back to an
+# object -- implements csv and tsv only, so offering `delim` would create a
+# handler that cannot be read back.
+dta_handler_types <- function() {
+  c("csv", "tsv")
+}
+
+# A compact data.frame overview of a dataset's file handlers (editor table).
+dta_handlers_overview <- function(dta, dataset) {
+  hs <- dta_handlers(dta_get_dataset(dta, dataset))
+  if (length(hs) == 0) {
+    return(data.frame())
+  }
+  do.call(rbind, lapply(hs, function(h) {
+    data.frame(
+      filename = handler_expected(h),
+      type = dta_handler_type(h),
+      pattern = if (handler_is_pattern(h)) "yes" else "no",
+      files = handler_count_label(h),
+      description = handler_hint(h),
+      stringsAsFactors = FALSE
+    )
+  }))
+}
+
+# Split a multi-line text-area value into trimmed, non-empty lines. Also
+# tolerates an already-split character vector, so the same helper serves the
+# editor's inputs and a direct programmatic call.
+.dta_split_lines <- function(x) {
+  parts <- unlist(strsplit(as.character(x %||% ""), "\n", fixed = TRUE))
+  parts <- trimws(parts %||% character(0))
+  parts[nzchar(parts)]
+}
+
+# A handler's `info` is free-form: the bundled specs use a YAML sequence of
+# single-key mappings (`- data: smrnaseq`), others a plain list of strings. The
+# editor shows one entry per line, so a KEYED entry has to render as "key: value"
+# and parse back into the same mapping -- rendering it as a bare string would
+# silently drop the key the moment the handler was saved.
+.dta_info_to_lines <- function(info) {
+  if (is.null(info) || length(info) == 0) {
+    return(character(0))
+  }
+  unlist(lapply(seq_along(info), function(i) {
+    entry <- info[[i]]
+    nm <- names(info)[i]
+    if (is.list(entry) && !is.null(names(entry))) {
+      return(paste0(names(entry), ": ", unlist(entry)))
+    }
+    if (!is.null(nm) && nzchar(nm)) {
+      return(paste0(nm, ": ", as.character(entry)))
+    }
+    as.character(entry)
+  }), use.names = FALSE)
+}
+
+.dta_lines_to_info <- function(lines) {
+  # Accepts either a character vector of lines or the single newline-joined
+  # string dta_handler_fields() produces (and the textarea hands back), so a
+  # fields -> set round trip cannot fold several entries into one value.
+  lines <- .dta_split_lines(lines)
+  if (length(lines) == 0) {
+    return(NULL)
+  }
+  lapply(lines, function(line) {
+    # POSIX classes, not \\s: inside a bracket expression R's default engine
+    # reads \\s as the literal characters, so [^:\\s] would also exclude "s"
+    # and a key like "class" would never match.
+    m <- regmatches(
+      line,
+      regexec("^([^:[:space:]]+):[[:space:]]+(.*)$", line)
+    )[[1]]
+    if (length(m) == 3) stats::setNames(list(m[3]), m[2]) else line
+  })
+}
+
+# Editable fields of a single handler, by index. NULL when out of bounds.
+dta_handler_fields <- function(dta, dataset, index) {
+  hs <- dta_handlers(dta_get_dataset(dta, dataset))
+  index <- suppressWarnings(as.integer(index))[1]
+  if (is.na(index) || index < 1 || index > length(hs)) {
+    return(NULL)
+  }
+  h <- hs[[index]]
+  fn <- tryCatch(h@filename, error = function(e) character(0)) %||% character(0)
+  mn <- handler_min(h)
+  mx <- handler_max(h)
+  exact <- !is.na(mn) && !is.na(mx) && mn == mx
+  info <- tryCatch(h@info, error = function(e) NULL)
+  list(
+    filename = paste(fn, collapse = "\n"),
+    type = dta_handler_type(h),
+    pattern = handler_is_pattern(h),
+    count_mode = if (exact) "exact" else "range",
+    number_of_files = if (exact) as.integer(mn) else 1L,
+    min_number_of_files = if (is.na(mn)) 1L else as.integer(mn),
+    max_number_of_files = if (is.na(mx)) 1L else as.integer(mx),
+    pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
+    info = paste(.dta_info_to_lines(info), collapse = "\n")
+  )
+}
+
+# Add (index = NULL) or replace (index = i) one file handler.
+#
+# The count arguments mirror DTAFile's own contract, which this validates BEFORE
+# constructing so the editor can report a sentence rather than surface a class
+# validator's abort: a non-pattern handler matches exactly one literal name and
+# must therefore expect exactly 1 file, and `number_of_files` may never be
+# combined with a min/max range. Returns dta_try().
+dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
+                            pattern = FALSE, count_mode = "exact",
+                            number_of_files = 1, min_number_of_files = 1,
+                            max_number_of_files = 1, pattern_description = NULL,
+                            info = NULL) {
+  dta_try({
+    # One name or pattern per line, so a multi-name handler survives the
+    # fields -> form -> set round trip as several names rather than one.
+    fn <- .dta_split_lines(filename)
+    if (length(fn) == 0) stop("A file name or pattern is required.")
+
+    type <- tolower(trimws(as.character(type %||% "")[1]))
+    if (!type %in% dta_handler_types()) {
+      stop(sprintf(
+        "File type must be one of: %s.",
+        paste(dta_handler_types(), collapse = ", ")
+      ))
+    }
+
+    pattern <- isTRUE(pattern)
+    exact <- identical(count_mode, "exact")
+    as_count <- function(x, what) {
+      v <- suppressWarnings(as.integer(x))[1]
+      if (is.na(v) || v < 0) stop(sprintf("%s must be a whole number of 0 or more.", what))
+      v
+    }
+
+    if (exact) {
+      n <- as_count(number_of_files, "The number of files")
+      if (!pattern && n != 1) {
+        stop(
+          "A handler that is not a pattern matches one exact file name, so it must expect exactly 1 file. Tick 'Filename is a pattern' to accept several."
+        )
+      }
+      args <- list(number_of_files = n)
+    } else {
+      if (!pattern) {
+        stop(
+          "A range of files only makes sense for a pattern. Tick 'Filename is a pattern', or switch to an exact count of 1."
+        )
+      }
+      mn <- as_count(min_number_of_files, "The minimum number of files")
+      mx <- as_count(max_number_of_files, "The maximum number of files")
+      if (mn > mx) stop("The minimum number of files cannot exceed the maximum.")
+      args <- list(min_number_of_files = mn, max_number_of_files = mx)
+    }
+
+    if (!pattern && length(fn) > 1) {
+      stop("Only a pattern handler can carry more than one file name.")
+    }
+
+    pd <- trimws(as.character(pattern_description %||% "")[1])
+
+    handler <- do.call(DTAtools::DTAFileFactory, c(
+      list(
+        type = type,
+        filename = fn,
+        pattern = pattern,
+        pattern_description = if (nzchar(pd)) pd else NULL,
+        info = .dta_lines_to_info(info)
+      ),
+      args
+    ))
+
+    ds <- DTAtools::datasets(dta, dataset)
+    hs <- dta_handlers(ds)
+    if (is.null(index)) {
+      hs[[length(hs) + 1L]] <- handler
+    } else {
+      idx <- suppressWarnings(as.integer(index))[1]
+      if (is.na(idx) || idx < 1 || idx > length(hs)) stop("File handler not found.")
+      hs[[idx]] <- handler
+    }
+    ds@files <- unname(hs)
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+}
+
+# Remove one file handler by index. Removing the LAST handler is allowed: the
+# dataset then declares no expected files, which the reader and the app both
+# handle, and is the only way back out of a handler added by mistake.
+dta_remove_handler <- function(dta, dataset, index) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    hs <- dta_handlers(ds)
+    idx <- suppressWarnings(as.integer(index))[1]
+    if (is.na(idx) || idx < 1 || idx > length(hs)) stop("File handler not found.")
+    hs[[idx]] <- NULL
+    ds@files <- unname(hs)
+    dta@datasets[[dataset]] <- ds
+    dta
+  })
+}
+
+# Move a handler one position up or down. A move past either end is a no-op.
+# Order is not cosmetic: the exported DTA document lists the expected files in
+# this order. Returns dta_try().
+dta_move_handler <- function(dta, dataset, index, direction) {
+  dta_try({
+    ds <- DTAtools::datasets(dta, dataset)
+    hs <- dta_handlers(ds)
+    n <- length(hs)
+    idx <- suppressWarnings(as.integer(index))[1]
+    target <- if (identical(direction, "up")) idx - 1L else idx + 1L
+    if (!is.na(idx) && idx >= 1L && idx <= n && target >= 1L && target <= n) {
+      hs[c(idx, target)] <- hs[c(target, idx)]
+      ds@files <- unname(hs)
+      dta@datasets[[dataset]] <- ds
+    }
+    dta
+  })
+}
+
+# The index each handler of `dataset` ends up at after a mutation, as a map from
+# the OLD 1-based index to the new one (NA = the handler is gone). The app's
+# upload records are keyed by handler POSITION, so every mutation that shifts
+# positions has to re-key them or bound files are orphaned: still in the dataset,
+# no longer reachable from any slot.
+dta_handler_index_map <- function(n, action = c("add", "remove", "move"),
+                                  index = NULL, direction = NULL) {
+  action <- match.arg(action)
+  map <- stats::setNames(seq_len(n), as.character(seq_len(n)))
+  if (n == 0 || identical(action, "add")) {
+    return(map)
+  }
+  idx <- suppressWarnings(as.integer(index))[1]
+  if (is.na(idx) || idx < 1 || idx > n) {
+    return(map)
+  }
+  if (identical(action, "remove")) {
+    map[idx] <- NA_integer_
+    later <- seq_len(n) > idx
+    map[later] <- map[later] - 1L
+    return(map)
+  }
+  target <- if (identical(direction, "up")) idx - 1L else idx + 1L
+  if (target >= 1L && target <= n) {
+    map[c(idx, target)] <- map[c(target, idx)]
+  }
+  map
+}
+
+# Match a dataset's OLD file handlers against its NEW ones, by identity rather
+# than by position: returns old index -> new index, NA where the old handler is
+# not in the new list at all.
+#
+# The Edit-files dialog knows which operation it performed and can say exactly
+# where every handler went (dta_handler_index_map()). A re-parsed document
+# cannot: the user may have reordered the `files:` entries, inserted one in the
+# middle, or rewritten one in place, and only the handlers themselves say which
+# is which. Keeping upload records at their old POSITION would then show a file
+# under a slot that expects something else entirely.
+#
+# Handlers are compared on their serialised form, and equal handlers are matched
+# in order, so a document containing two identical entries still maps 1->1, 2->2.
+dta_match_handlers <- function(old_ds, new_ds) {
+  old_sigs <- vapply(
+    dta_handlers(old_ds),
+    function(h) yaml::as.yaml(dta_handler_to_list(h)),
+    character(1)
+  )
+  new_sigs <- vapply(
+    dta_handlers(new_ds),
+    function(h) yaml::as.yaml(dta_handler_to_list(h)),
+    character(1)
+  )
+
+  map <- rep(NA_integer_, length(old_sigs))
+  taken <- rep(FALSE, length(new_sigs))
+  for (i in seq_along(old_sigs)) {
+    hit <- which(!taken & new_sigs == old_sigs[i])
+    if (length(hit) > 0) {
+      map[i] <- hit[1]
+      taken[hit[1]] <- TRUE
+    }
+  }
+  stats::setNames(map, as.character(seq_along(old_sigs)))
 }
 
 # ---- Metadata: transmission + generic scalar fields ----------------------

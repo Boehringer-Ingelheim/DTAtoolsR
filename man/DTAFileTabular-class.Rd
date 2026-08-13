@@ -8,6 +8,7 @@
 DTAFileTabular(
   filename,
   pattern = FALSE,
+  pattern_description = NULL,
   number_of_files = NULL,
   min_number_of_files = NULL,
   max_number_of_files = NULL,
@@ -24,6 +25,9 @@ to match files.}
 
 \item{pattern}{Logical; if \code{TRUE}, \code{filename} is treated as a regex
 pattern. Default is \code{FALSE}.}
+
+\item{pattern_description}{Character or \code{NULL}; human-readable
+description of the \code{filename} pattern.}
 
 \item{number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected. Default is \code{1}.}

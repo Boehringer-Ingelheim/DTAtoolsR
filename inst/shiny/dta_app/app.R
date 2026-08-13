@@ -195,7 +195,13 @@ server <- function(input, output, session) {
     contacts_token = 0, # bump to re-render contacts list
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
-    editor_dataset = NULL, # dataset name the column/rule editor modal targets
+    editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
+    file_view = "list", # file-handler editor view: "list" | "form"
+    file_token = 0, # bump to re-render the file-handler editor body
+    file_edit_index = NULL, # index of the handler being edited (NULL = adding new)
+    file_prefill = NULL, # list() of the handler fields currently loaded in the form
+    file_msg = NULL, # inline file-handler-editor result: NULL | list(ok, error)
+    pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
     col_view = "list", # column editor view: "list" | "form"
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
@@ -1164,6 +1170,168 @@ server <- function(input, output, session) {
     rv$status <- st
   }
 
+  # Re-key a dataset's upload records after its file handlers were added,
+  # removed or reordered.
+  #
+  # Uploads are keyed by handler POSITION ("<dataset>||<hi>"), and so are the
+  # per-slot file inputs and the stable ids behind the per-file trash buttons.
+  # Removing handler 1 of 3 therefore shifts 2 -> 1 and 3 -> 2 while the records
+  # still sit under the old keys: the files vanish from "Loaded files" but stay
+  # bound inside the dataset, counting towards validation and export with no way
+  # to reach them. `map` (from dta_handler_index_map()) says where each old index
+  # went; NA means the handler is gone and its records go with it.
+  remap_uploads <- function(dsname, map) {
+    up <- rv$uploads
+    prefix <- paste0(dsname, "||")
+    # names() of an empty list is NULL, which startsWith() rejects outright.
+    keys <- names(up) %||% character(0)
+    kept <- up[!startsWith(keys, prefix)]
+    for (old in seq_along(map)) {
+      new <- map[[old]]
+      if (is.na(new)) next
+      recs <- up[[paste0(prefix, old)]]
+      if (is.null(recs) || length(recs) == 0) next
+      kept[[paste0(prefix, new)]] <- recs
+    }
+    rv$uploads <- kept
+
+    purge_file_ids(dsname)
+  }
+
+  # Forget the stable per-file ids of one dataset (or of every dataset when
+  # `dsname` is NULL). Those ids encode the handler index they were minted at,
+  # so after a shift a trash button would remove from the wrong key;
+  # get_file_id() mints them again against the new positions on the next render.
+  # Selected via file_id_meta, which records the dataset outright, rather than
+  # by parsing file_id_env's composite keys.
+  purge_file_ids <- function(dsname = NULL) {
+    stale <- Filter(
+      function(id) {
+        is.null(dsname) || identical(file_id_meta[[id]]$dataset, dsname)
+      },
+      ls(file_id_meta)
+    )
+    if (length(stale) == 0) {
+      return(invisible(NULL))
+    }
+    rm(list = stale, envir = file_id_meta)
+    for (key in ls(file_id_env)) {
+      if (as.character(file_id_env[[key]]) %in% stale) {
+        rm(list = key, envir = file_id_env)
+      }
+    }
+    invisible(NULL)
+  }
+
+  # Clear every file input of a dataset's slots. The controls are position-based,
+  # so after a shift a slot would keep showing the file name dropped on whatever
+  # handler used to occupy that position.
+  reset_dataset_fileinputs <- function(dsname) {
+    s <- rv$structure[[dsname]]
+    if (is.null(s)) {
+      return(invisible(NULL))
+    }
+    # One past the current count as well: the input of a just-removed slot is
+    # still in the DOM until the re-render lands.
+    for (hi in seq_len(length(s$handlers) + 1L)) {
+      session$sendCustomMessage(
+        "dta_reset_fileinput", sprintf("up_%d_%d", s$index, hi)
+      )
+    }
+    invisible(NULL)
+  }
+
+  # The four things every file-handler mutation must do: clear this dataset's
+  # validation, rebuild the slot structure (which is what registers the upload
+  # observers for a new slot), re-render the editor, and re-serialise the YAML.
+  after_handler_change <- function(ed, map = NULL) {
+    if (!is.null(map)) remap_uploads(ed, map)
+    invalidate_dataset(ed)
+    rv$structure <- build_structure(rv$dta)
+    reset_dataset_fileinputs(ed)
+    rv$file_token <- rv$file_token + 1
+    sync_yaml_text()
+  }
+
+  # Remove handler `idx` of `ed`, unloading the tables bound through it first.
+  # Unloading before removing keeps every intermediate object valid, the same
+  # ordering dta_unload_table() itself relies on.
+  do_remove_handler <- function(ed, idx, tables) {
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    for (tbl in tables) {
+      r <- dta_unload_table(rv$dta, ed, tbl)
+      if (isTRUE(r$ok)) {
+        rv$dta <- r$value
+      } else {
+        showNotification(paste("Could not unload file:", r$error), type = "error")
+        return(invisible(NULL))
+      }
+    }
+    r <- dta_remove_handler(rv$dta, ed, idx)
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return(invisible(NULL))
+    }
+    rv$dta <- r$value
+    after_handler_change(
+      ed,
+      map = dta_handler_index_map(n, "remove", index = idx)
+    )
+    showNotification(
+      if (length(tables) > 0) {
+        sprintf("File removed, along with %d loaded file(s).", length(tables))
+      } else {
+        "File removed."
+      },
+      type = "message"
+    )
+    invisible(NULL)
+  }
+
+  move_handler <- function(idx, direction) {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > n) {
+      return(invisible(NULL))
+    }
+    r <- dta_move_handler(isolate(rv$dta), ed, idx, direction)
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return(invisible(NULL))
+    }
+    rv$dta <- r$value
+    after_handler_change(
+      ed,
+      map = dta_handler_index_map(n, "move", index = idx, direction = direction)
+    )
+    invisible(NULL)
+  }
+
+  show_file_editor_modal <- function(ed) {
+    showModal(modalDialog(
+      title = paste("Edit files —", ed),
+      size = "xl", easyClose = FALSE,
+      uiOutput("file_modal_body"),
+      footer = NULL
+    ))
+  }
+
+  # The remove-confirmation dialog replaces the editor modal (Shiny shows one at
+  # a time), so the editor is re-opened afterwards rather than leaving the user
+  # back at the dataset view mid-edit.
+  reopen_file_editor <- function() {
+    ed <- isolate(rv$editor_dataset)
+    if (is.null(ed)) {
+      return(invisible(NULL))
+    }
+    rv$file_view <- "list"
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+    show_file_editor_modal(ed)
+    invisible(NULL)
+  }
+
   # Per-row edit (pencil) + delete (bin) buttons for the editor DT tables.
   # Clicking sets a Shiny input to the 1-based data-row index (priority=event
   # so re-clicking the same row still fires). Render the column with escape=FALSE.
@@ -1203,6 +1371,312 @@ server <- function(input, output, session) {
       )
     }, character(1))
   }
+
+  # ========================= Edit file handlers ===========================
+  # Same single-modal, two-view (list <-> form) shape as the column and rule
+  # editors. What is different here is the blast radius: a file handler IS an
+  # upload slot, and the app keys uploads, file inputs and per-file trash
+  # buttons by the handler's POSITION -- so every mutation goes through
+  # after_handler_change(), which re-keys that state before anything re-renders.
+  observeEvent(input$edit_files, {
+    req(rv$active)
+    rv$editor_dataset <- rv$active
+    rv$file_view <- "list"
+    rv$file_edit_index <- NULL
+    rv$file_prefill <- list()
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+    show_file_editor_modal(rv$active)
+  })
+
+  output$file_modal_body <- renderUI({
+    rv$file_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (identical(isolate(rv$file_view), "list")) {
+      n_handlers <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+      tagList(
+        div(
+          class = "spec-toolbar",
+          actionButton("file_add", HTML("&#x2795; Add file"),
+            class = "btn btn-sm btn-outline-primary"
+          ),
+          span(
+            class = "spec-hint",
+            paste(
+              "Each entry is one expected file (or pattern) and becomes an upload slot.",
+              "Any change resets this dataset's validation; removing an entry also",
+              "unloads the files that were loaded into it."
+            )
+          )
+        ),
+        DT::dataTableOutput("file_tbl"),
+        if (n_handlers == 0) {
+          div(
+            class = "yaml-valid err", style = "margin-top:8px;",
+            HTML("&#x2716;"),
+            paste(
+              " This dataset expects no files at all, so nothing can be loaded",
+              "into it. Add at least one entry."
+            )
+          )
+        },
+        tags$hr(),
+        div(style = "text-align:right;", modalButton("Close"))
+      )
+    } else {
+      pf <- isolate(rv$file_prefill) %||% list()
+      g <- function(k, d = "") pf[[k]] %||% d
+      is_pattern <- isTRUE(pf$pattern)
+      tagList(
+        div(
+          class = "spec-form",
+          layout_columns(
+            col_widths = c(8, 4),
+            textAreaInput("file_filename", "File name or pattern",
+              value = g("filename"), width = "100%", rows = 2,
+              placeholder = "clinical_data.csv   |   clinical_data.*[.]csv$"
+            ),
+            selectInput("file_type", "File type",
+              choices = dta_handler_types(),
+              selected = g("type", dta_handler_types()[1]), width = "100%"
+            )
+          ),
+          checkboxInput("file_pattern",
+            "Filename is a regular-expression pattern (matches several files)",
+            value = is_pattern
+          ),
+          div(
+            class = "msg-hint", style = "margin:-8px 0 10px;",
+            paste(
+              "Without a pattern the entry matches one exact file name and",
+              "expects exactly 1 file. One name or pattern per line."
+            )
+          ),
+          conditionalPanel(
+            condition = "input.file_pattern == true",
+            radioButtons("file_count_mode", "How many files may match?",
+              choices = c(
+                "An exact number" = "exact",
+                "A range (min to max)" = "range"
+              ),
+              selected = g("count_mode", "exact"), inline = TRUE
+            ),
+            layout_columns(
+              col_widths = c(4, 4, 4),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'exact'",
+                numericInput("file_number_of_files", "Number of files",
+                  value = as.integer(g("number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              ),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'range'",
+                numericInput("file_min_number_of_files", "Minimum",
+                  value = as.integer(g("min_number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              ),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'range'",
+                numericInput("file_max_number_of_files", "Maximum",
+                  value = as.integer(g("max_number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              )
+            )
+          ),
+          textInput("file_pattern_description", "Pattern description",
+            value = g("pattern_description"), width = "100%",
+            placeholder = "What the pattern means, in words"
+          ),
+          textAreaInput("file_info", "Info (one entry per line)",
+            value = g("info"), width = "100%", rows = 2
+          )
+        ),
+        uiOutput("file_editor_msg"),
+        div(
+          style = "display:flex; justify-content:space-between; margin-top:8px;",
+          actionButton("file_back", HTML("&#x2190; Back to list"),
+            class = "btn btn-outline-secondary"
+          ),
+          actionButton("file_save", "Save file", class = "btn btn-primary")
+        )
+      )
+    }
+  })
+
+  output$file_tbl <- DT::renderDataTable({
+    rv$file_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ov <- dta_handlers_overview(isolate(rv$dta), ed)
+    if (is.null(ov) || nrow(ov) == 0) {
+      ov <- data.frame(
+        filename = character(0), type = character(0), pattern = character(0),
+        files = character(0), description = character(0),
+        stringsAsFactors = FALSE
+      )
+    }
+    ov$Actions <- if (nrow(ov) > 0) {
+      row_action_buttons(
+        "file_edit_click", "file_del_click", nrow(ov),
+        "file_up_click", "file_down_click"
+      )
+    } else {
+      character(0)
+    }
+    DT::datatable(
+      ov,
+      rownames = FALSE, selection = "none", escape = FALSE,
+      class = "display compact", width = "100%",
+      options = list(
+        pageLength = 8, dom = "tp", scrollX = TRUE,
+        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+      )
+    )
+  })
+
+  output$file_editor_msg <- renderUI({
+    m <- rv$file_msg
+    if (is.null(m)) {
+      return(NULL)
+    }
+    if (isTRUE(m$ok)) {
+      div(class = "yaml-valid ok", HTML("&#x2714;"), " File saved.")
+    } else {
+      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+    }
+  })
+
+  observeEvent(input$file_add, {
+    rv$file_edit_index <- NULL
+    rv$file_prefill <- list()
+    rv$file_msg <- NULL
+    rv$file_view <- "form"
+    rv$file_token <- rv$file_token + 1
+  })
+
+  observeEvent(input$file_back, {
+    rv$file_view <- "list"
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+  })
+
+  observeEvent(input$file_edit_click, {
+    idx <- as.integer(input$file_edit_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    f <- dta_handler_fields(isolate(rv$dta), ed, idx)
+    if (is.null(f)) {
+      return()
+    }
+    rv$file_edit_index <- idx
+    rv$file_prefill <- f
+    rv$file_msg <- NULL
+    rv$file_view <- "form"
+    rv$file_token <- rv$file_token + 1
+  })
+
+  # Removing a handler removes an upload slot. Anything loaded through it would
+  # otherwise stay bound to the dataset with no slot to show it under, so the
+  # files go too -- and the user is told which ones before it happens.
+  observeEvent(input$file_del_click, {
+    idx <- as.integer(input$file_del_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > n) {
+      return()
+    }
+    recs <- isolate(rv$uploads)[[paste0(ed, "||", idx)]] %||% list()
+    tbls <- vapply(recs, function(r) r$table %||% "", character(1))
+    tbls <- tbls[nzchar(tbls)]
+    if (length(tbls) == 0) {
+      do_remove_handler(ed, idx, character(0))
+      return()
+    }
+    rv$pending_handler_removal <- list(dataset = ed, index = idx, tables = tbls)
+    showModal(modalDialog(
+      title = "Remove this file and its loaded data?",
+      tags$p(sprintf(
+        "Removing this entry also unloads %d loaded file(s) from '%s':",
+        length(tbls), ed
+      )),
+      tags$ul(lapply(tbls, function(t) tags$li(tags$code(t)))),
+      tags$p("The specification and the loaded data are kept in step; you can load them again afterwards."),
+      footer = tagList(
+        actionButton("cancel_remove_handler", "Cancel"),
+        actionButton("confirm_remove_handler", "Remove", class = "btn btn-danger")
+      ),
+      easyClose = TRUE
+    ))
+  })
+
+  observeEvent(input$cancel_remove_handler, {
+    rv$pending_handler_removal <- NULL
+    removeModal()
+    # The removal modal replaced the editor modal; bring the editor back.
+    reopen_file_editor()
+  })
+
+  observeEvent(input$confirm_remove_handler, {
+    pending <- rv$pending_handler_removal
+    rv$pending_handler_removal <- NULL
+    removeModal()
+    if (is.null(pending)) {
+      return()
+    }
+    do_remove_handler(pending$dataset, pending$index, pending$tables)
+    reopen_file_editor()
+  })
+
+  observeEvent(input$file_up_click, {
+    move_handler(as.integer(input$file_up_click), "up")
+  })
+
+  observeEvent(input$file_down_click, {
+    move_handler(as.integer(input$file_down_click), "down")
+  })
+
+  observeEvent(input$file_save, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    # Both text areas are one entry per line; dta_set_handler() does the split.
+    pattern <- isTRUE(input$file_pattern)
+    # The count controls only exist while `pattern` is ticked; without it the
+    # class contract fixes the count at exactly 1.
+    r <- dta_set_handler(
+      isolate(rv$dta), ed,
+      index = isolate(rv$file_edit_index),
+      filename = input$file_filename,
+      type = input$file_type,
+      pattern = pattern,
+      count_mode = if (pattern) (input$file_count_mode %||% "exact") else "exact",
+      number_of_files = if (pattern) (input$file_number_of_files %||% 1) else 1,
+      min_number_of_files = input$file_min_number_of_files %||% 1,
+      max_number_of_files = input$file_max_number_of_files %||% 1,
+      pattern_description = input$file_pattern_description,
+      info = input$file_info
+    )
+    if (!isTRUE(r$ok)) {
+      rv$file_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    adding <- is.null(isolate(rv$file_edit_index))
+    rv$dta <- r$value
+    # An edit in place and an append both leave every existing handler at its
+    # own index, so no upload record has to move.
+    after_handler_change(ed, map = NULL)
+    rv$file_msg <- NULL
+    rv$file_view <- "list"
+    rv$file_token <- rv$file_token + 1
+    showNotification(
+      if (adding) "File added." else "File updated.",
+      type = "message"
+    )
+  })
 
   # ============================ Edit columns ==============================
   # A single modal with two swappable views (list <-> form) so only ONE popup
@@ -3017,23 +3491,60 @@ server <- function(input, output, session) {
         dta_specs_signature(old_ds),
         dta_specs_signature(new_ds)
       )
-      if (handlers_same && dta_dataset_content_count(old_ds) > 0) {
-        tr <- dta_transfer_bound_data(new_dta, nm, old_ds, keep_validation = specs_same)
-        if (isTRUE(tr$ok)) {
-          new_dta <- tr$value
-          for (k in names(old_uploads)) {
-            if (startsWith(k, paste0(nm, "||"))) new_uploads[[k]] <- old_uploads[[k]]
-          }
-          new_status[[nm]] <- if (specs_same) (old_status[[nm]] %||% "pending") else "pending"
+      if (dta_dataset_content_count(old_ds) == 0) next # nothing to carry over
+
+      # A dataset that still declares at least one file handler keeps its bound
+      # data even when the handlers changed -- the same bargain the file editor
+      # offers, so editing `files:` here is not silently more destructive than
+      # editing it in the Edit-files dialog. Validation survives only when the
+      # columns and rules are untouched.
+      n_new_handlers <- length(dta_handlers(new_ds))
+      if (!handlers_same && n_new_handlers == 0) next # no slot left to show data in
+
+      tr <- dta_transfer_bound_data(
+        new_dta, nm, old_ds,
+        keep_validation = specs_same && handlers_same
+      )
+      if (!isTRUE(tr$ok)) next
+      new_dta <- tr$value
+
+      # Upload records are keyed by handler POSITION, and a re-parsed document
+      # may have reordered or replaced entries as easily as appended one. Match
+      # the old handlers to the new ones by identity and move each record to
+      # where ITS handler went; a record whose handler is gone has no slot left
+      # to appear under, so that file is unloaded rather than left bound to the
+      # dataset and unreachable.
+      hmap <- dta_match_handlers(old_ds, new_ds)
+      for (k in names(old_uploads)) {
+        if (!startsWith(k, paste0(nm, "||"))) next
+        hi <- suppressWarnings(as.integer(sub(".*\\|\\|", "", k)))
+        target <- if (!is.na(hi) && hi >= 1 && hi <= length(hmap)) hmap[[hi]] else NA_integer_
+        if (!is.na(target)) {
+          new_uploads[[paste0(nm, "||", target)]] <- old_uploads[[k]]
+          next
+        }
+        for (rec in (old_uploads[[k]] %||% list())) {
+          uv <- dta_unload_table(new_dta, nm, rec$table)
+          if (isTRUE(uv$ok)) new_dta <- uv$value
         }
       }
-      # handlers changed OR no bound data -> fresh (uploads dropped, pending)
+      new_status[[nm]] <- if (specs_same && handlers_same) {
+        old_status[[nm]] %||% "pending"
+      } else {
+        "pending"
+      }
     }
 
     rv$dta <- new_dta
     rv$yaml_text <- txt
     rv$structure <- build_structure(new_dta)
     rv$uploads <- new_uploads
+    # A re-parsed document can move any dataset's handlers, so the same
+    # position-keyed state the Edit-files dialog resets has to be reset here:
+    # stale per-file ids, and file inputs still displaying the name dropped on
+    # whatever handler used to occupy that position.
+    purge_file_ids()
+    for (nm in new_names) reset_dataset_fileinputs(nm)
     for (nm in new_names) {
       if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
         identical(new_status[[nm]], "pending")) {
@@ -3055,9 +3566,9 @@ server <- function(input, output, session) {
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset YAML wrapped into a new DTA (uploads kept where handlers are unchanged)."
+        "Dataset YAML wrapped into a new DTA (loaded files kept where a slot remains for them)."
       } else {
-        "DTA YAML applied (uploads kept where handlers are unchanged)."
+        "DTA YAML applied (loaded files kept where a slot remains for them)."
       },
       type = "message"
     )
@@ -3645,16 +4156,7 @@ server <- function(input, output, session) {
         actionButton("check_one", "Check this dataset",
           class = "btn btn-primary"
         ),
-        actionButton("edit_cols",
-          label = HTML("&#x1F4D0; Edit columns"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit column specifications"
-        ),
-        actionButton("edit_rules",
-          label = HTML("&#x2696;&#xFE0F; Edit rules"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit validation rules"
-        ),
+        ds_edit_menu(),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
           class = "btn btn-outline-primary",
           title = "Download this dataset's specification as YAML"
@@ -3757,7 +4259,7 @@ server <- function(input, output, session) {
                 class = "yaml-edit-bar",
                 div(
                   class = "msg-hint",
-                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Uploaded files are kept for datasets whose file handlers are unchanged; a dataset's validation is cleared only if its columns or rules changed, and deleted datasets drop their uploads.")
+                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Loaded files are kept, including when you edit <code>files:</code>, as long as the dataset still has a slot to show them under; files belonging to a slot you deleted are unloaded with it. A dataset's validation is cleared whenever its files, columns or rules changed, and deleted datasets drop everything.")
                 ),
                 div(
                   class = "yaml-edit-actions",
