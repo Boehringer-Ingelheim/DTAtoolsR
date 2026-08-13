@@ -26,6 +26,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The three *Edit files* / *Edit columns* / *Edit rules* buttons are now one
+  **Edit** menu. They all act on the same object — this dataset's specification
+  — so they read as one entry point instead of three siblings competing with
+  *Check this dataset* and the export. Each row names what it changes
+  (*Columns*, *Rules*, *Files*, in that order) with a one-line description.
 - Removing a file handler in the app also unloads the files that were loaded
   through it, after a confirmation listing them by name. The specification and
   the loaded data are kept in step: a slot that no longer exists can no longer

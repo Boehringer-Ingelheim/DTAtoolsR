@@ -4156,21 +4156,7 @@ server <- function(input, output, session) {
         actionButton("check_one", "Check this dataset",
           class = "btn btn-primary"
         ),
-        actionButton("edit_files",
-          label = HTML("&#x1F5C2;&#xFE0F; Edit files"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit the expected files (file handlers)"
-        ),
-        actionButton("edit_cols",
-          label = HTML("&#x1F4D0; Edit columns"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit column specifications"
-        ),
-        actionButton("edit_rules",
-          label = HTML("&#x2696;&#xFE0F; Edit rules"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit validation rules"
-        ),
+        ds_edit_menu(),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
           class = "btn btn-outline-primary",
           title = "Download this dataset's specification as YAML"

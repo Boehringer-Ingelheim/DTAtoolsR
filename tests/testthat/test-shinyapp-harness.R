@@ -30,7 +30,10 @@ test_that("every helper file in the app sources cleanly", {
   files <- .shiny_app_helper_files()
   expect_setequal(
     basename(files),
-    c("template_core.R", "theme.R", "utils_dta.R", "utils_export.R")
+    c(
+      "template_core.R", "theme.R", "ui_components.R", "utils_dta.R",
+      "utils_export.R"
+    )
   )
 
   # Source each file on its own, so a failure names the file that broke.
