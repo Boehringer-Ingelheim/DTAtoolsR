@@ -37,10 +37,10 @@ axes -- column specs, rules, and import typing -- reading one batch at a
 time, and returns the same \code{details} structure, so every existing consumer
 (\code{results()}, \code{messages()}, \code{inspect()}, the Shiny app) works unchanged.
 
-Peak memory is bounded by the batch size for the schema axis, by the number
-of distinct keys for uniqueness rules, and by the retained-error cap. Grouped
-rules are the exception: a group can span any number of batches, so the
-columns those rules read are retained for the whole scan.
+Nothing here scales with the number of rows. Peak memory is bounded by the
+batch size for the schema axis, by the number of distinct keys for uniqueness
+rules, by the number of distinct groups for grouped rules, and by the
+retained-error cap.
 
 Row numbers are positions in the input, not in the batch a value happened to
 fall in.

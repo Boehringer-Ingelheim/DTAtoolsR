@@ -302,6 +302,52 @@ messages(data_obj)  # one row per error: source, column, row, rule, message, id
 written), `quiet`, and `tables` (restrict to named or indexed tables;
 `datasets` on a `DTA`).
 
+### Validating a file too large to load
+
+The workflow above reads the file into memory first. For a file larger than
+the memory available, that is not slow but impossible — so `validate_file_stream()`
+scans the file in batches instead, and never holds more than one batch:
+
+```r
+details <- validate_file_stream(specs, "transfer.csv")
+
+details$ok                # TRUE / FALSE, the same three-axis verdict
+details$n_schema_errors   # per-axis counts, as check() reports them
+as.data.frame(details)    # one row per error: source, row, column, keyword, message
+```
+
+Nothing in the scan grows with the number of rows. Memory is bounded by the
+batch size for the column checks, by the number of distinct keys for
+uniqueness rules, by the number of distinct groups for grouped rules, and by
+`max_errors` for how much per-cell detail is kept. Measured across a 16-fold
+increase in input, the working set stayed flat at ~19 MB while the in-memory
+path grew from 51 MB to 272 MB.
+
+**This buys feasibility, not speed.** Scanning runs about twice as slow as
+validating a table already in memory, because every batch pays its own
+overhead. Use it when *holding* the file is the problem; otherwise `check()`
+is the faster choice.
+
+Two options are worth knowing:
+
+```r
+# Stop at the first problem instead of scanning to the end.
+validate_file_stream(specs, "transfer.csv", fail_fast = TRUE)
+
+# A missing column is decidable from the header. "stop" says so without
+# reading the file; the default "scan" reports it once per row.
+validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")
+```
+
+A `fail_fast` result is explicitly incomplete: it carries a `partial_scan`
+attribute and reports `NA` — not `TRUE` — for any axis it could not settle. A
+rule that has not failed yet has not passed.
+
+`cache_as_parquet()` rewrites a delimited file as Parquet so repeated
+validations skip re-parsing text. Measure before using it: on a file whose
+specs read every column it was **not** faster, because evaluating the
+constraints dominates and parsing is not the bottleneck.
+
 ### Inspecting results in depth
 
 `results()` and `messages()` cover most needs, but `messages()` gives you a
@@ -788,6 +834,8 @@ row-level validation.
 | `load_file(dta, dataset, file)`| Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
 | `check(x, force, persist, quiet, …)` | Validate all datasets/tables; returns the updated object |
+| `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it into memory |
+| `cache_as_parquet(specs, path, …)` | Rewrite a delimited file as Parquet for repeated validation (measure first) |
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |
 | `messages(x)`                  | Detailed error table: id, source, row, column, rule, message |
 | `inspect(x, id)`               | Deep detail for a specific error: row context, failing rows, original imported text |

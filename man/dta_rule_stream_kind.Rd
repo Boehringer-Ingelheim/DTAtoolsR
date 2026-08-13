@@ -10,7 +10,7 @@ dta_rule_stream_kind(rule)
 \item{rule}{A rule object.}
 }
 \value{
-One of \code{"decomposable"}, \code{"keyed"} or \code{"buffered"}.
+One of \code{"decomposable"}, \code{"keyed"}, \code{"grouped"} or \code{"unsupported"}.
 }
 \description{
 How a Rule Can Be Streamed

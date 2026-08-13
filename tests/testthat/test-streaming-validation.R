@@ -14,6 +14,22 @@ vs_reader <- function(table, batch_rows) {
   dta_as_batch_reader(arrow::as_arrow_table(table), batch_rows = batch_rows)
 }
 
+# The schema axis as the production driver evaluates it. These tests used to
+# call a separate schema-only streamer, which was a second hand-maintained copy
+# of the batch loop that nothing in the package actually used. Going through the
+# real driver means these assertions constrain the code that ships.
+vs_schema_stream <- function(specs, reader, max_errors = NULL) {
+  details <- dta_validate_table_stream(
+    specs, reader,
+    verbose = FALSE, coerce = FALSE, max_errors = max_errors
+  )
+  list(
+    full_error = details$schema_errors$full_error,
+    summarised_error = details$schema_errors$summarised_error,
+    n_errors = details$n_schema_errors
+  )
+}
+
 test_that("the batch reader actually yields more than one batch", {
   # Without this, every equivalence test below could pass trivially by handing
   # the whole table over in a single batch and never exercising an offset.
@@ -37,7 +53,7 @@ test_that("streaming reproduces the materialised schema axis for every corpus ca
     expected <- dta_schema_errors(case$specs, case$table)
 
     for (batch_rows in c(1L, 2L)) {
-      streamed <- dta_schema_errors_stream(
+      streamed <- vs_schema_stream(
         case$specs,
         vs_reader(case$table, batch_rows)
       )
@@ -67,7 +83,7 @@ test_that("row numbers are positions in the input, not in the batch", {
     stringsAsFactors = FALSE
   )
 
-  streamed <- dta_schema_errors_stream(specs, vs_reader(table, batch_rows = 1L))
+  streamed <- vs_schema_stream(specs, vs_reader(table, batch_rows = 1L))
 
   expect_equal(nrow(streamed$full_error), 1)
   expect_equal(streamed$full_error$row, 4L)
@@ -83,7 +99,7 @@ test_that("violations spread across batches are all reported, in row order", {
     stringsAsFactors = FALSE
   )
 
-  streamed <- dta_schema_errors_stream(specs, vs_reader(table, batch_rows = 2L))
+  streamed <- vs_schema_stream(specs, vs_reader(table, batch_rows = 2L))
 
   expect_equal(streamed$full_error$row, c(1L, 3L, 5L))
   expect_equal(streamed$n_errors, 3L)
@@ -96,7 +112,7 @@ test_that("a missing column is reported for every row across every batch", {
   table <- data.frame(ID = sprintf("A%03d", 1:7), stringsAsFactors = FALSE)
 
   for (batch_rows in c(1L, 3L, 7L, 100L)) {
-    streamed <- dta_schema_errors_stream(specs, vs_reader(table, batch_rows))
+    streamed <- vs_schema_stream(specs, vs_reader(table, batch_rows))
     expect_equal(nrow(streamed$full_error), 7)
     expect_equal(streamed$full_error$row, 1:7)
   }
@@ -365,6 +381,65 @@ test_that("rules are enforced across a scanned file", {
   messages <- vapply(streamed$rule_errors, function(e) e$message, character(1))
   expect_true(any(grepl("age_range", messages, fixed = TRUE)))
   expect_true(any(grepl("id_unique", messages, fixed = TRUE)))
+})
+
+test_that("the returned result is usable without reaching for internals", {
+  # It is handed straight to a user, so as.data.frame() must dispatch to the
+  # method that flattens it. An untagged list fails with a row-count error that
+  # says nothing about the cause, and the internal tagging helper is not
+  # exported, so there would be no way for a caller to recover.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = c("A001", "TOOLONG"), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  details <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_s3_class(details, "dta_validation_details")
+
+  flat <- as.data.frame(details)
+  expect_true(all(
+    c("source", "rule_id", "row", "column", "keyword", "message") %in% names(flat)
+  ))
+  expect_equal(nrow(flat), 1)
+  expect_equal(flat$row, 2)
+})
+
+test_that("tagging does not lose the partial_scan marker", {
+  # The class is applied last; an attribute set earlier must survive it.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  ids <- sprintf("A%03d", 1:20)
+  ids[2] <- "TOOLONG"
+  path <- vs_write_csv(data.frame(ID = ids, stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  quick <- validate_file_stream(
+    specs, path,
+    batch_rows = 4L, fail_fast = TRUE, verbose = FALSE
+  )
+
+  expect_s3_class(quick, "dta_validation_details")
+  expect_true(isTRUE(attr(quick, "partial_scan")))
+})
+
+test_that("a structural verdict is tagged and flattens too", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  stopped <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+
+  expect_s3_class(stopped, "dta_validation_details")
+  expect_true(isTRUE(attr(stopped, "structural_only")))
+  expect_equal(nrow(as.data.frame(stopped)), 1)
 })
 
 test_that("a missing file is reported rather than failing obscurely", {
@@ -758,6 +833,97 @@ test_that("caching a file that is not there is reported plainly", {
   )
 })
 
+# ---- counting past the per-column retention cap -------------------------------
+
+test_that("import errors are counted in full even past the retention cap", {
+  # Import typing keeps at most dta_import_max_rows_per_column (10,000) rows per
+  # column but records the true total on the frame. Counting the retained rows
+  # instead of that total under-reports exactly the case the cap exists for, and
+  # every smaller test passes while it is wrong.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  ))
+  n_bad <- 12000L
+  path <- vs_write_csv(data.frame(VAL = rep("abc", n_bad), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  # One batch, so the whole column is typed in a single coercion and the cap
+  # bites within it.
+  streamed <- validate_file_stream(
+    specs, path,
+    batch_rows = 131072L, verbose = FALSE
+  )
+
+  expect_false(streamed$import_valid)
+  expect_equal(as.integer(streamed$n_import_errors), n_bad)
+  # The retained detail is capped; the count is not.
+  expect_lt(nrow(streamed$import_errors), n_bad)
+})
+
+# ---- a lazy table inside a dataset --------------------------------------------
+
+test_that("check() scans a lazy table held in a DTADataSetTabular", {
+  # The @tables contract was widened to accept a Dataset, and check() dispatches
+  # to the streaming path for one. Asserted through the object itself, not just
+  # through the helper, because that is what the widened contract promises.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    ),
+    list(DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70)))
+  )
+  frame <- data.frame(
+    ID = c("A001", "TOOLONG", "B002"),
+    AGE = c(30, 40, 99),
+    stringsAsFactors = FALSE
+  )
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  ds <- DTADataSetTabular(
+    name = "lazy_demo",
+    specs = specs,
+    tables = list(demo = arrow::as_arrow_table(frame))
+  )
+
+  # Swap the materialised table for a lazy dataset over the same rows.
+  ds@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
+
+  ds <- check(ds, quiet = TRUE)
+  status <- validation_status(ds)
+
+  expect_false(status$ok[[1]])
+  expect_equal(status$n_schema_errors[[1]], 1)
+  expect_equal(status$n_rule_errors[[1]], 1)
+})
+
+test_that("a lazy table is accepted by the tables property contract", {
+  path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  ds <- DTADataSetTabular(
+    name = "lazy_ok",
+    specs = specs,
+    tables = list(demo = arrow::as_arrow_table(data.frame(ID = "A001")))
+  )
+
+  expect_no_error({
+    ds@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
+  })
+  # A plain data frame is still rejected: the point was to admit lazier forms,
+  # not looser ones.
+  expect_error(
+    {
+      ds@tables[["demo"]] <- data.frame(ID = "A001")
+    },
+    "Table"
+  )
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {
@@ -769,7 +935,7 @@ test_that("max_errors bounds retained detail while keeping the count exact", {
   ))
   table <- data.frame(ID = rep("TOOLONG", 10), stringsAsFactors = FALSE)
 
-  streamed <- dta_schema_errors_stream(
+  streamed <- vs_schema_stream(
     specs,
     vs_reader(table, batch_rows = 2L),
     max_errors = 3L
@@ -1012,7 +1178,7 @@ test_that("max_errors leaves an under-cap result untruncated", {
     stringsAsFactors = FALSE
   )
 
-  streamed <- dta_schema_errors_stream(
+  streamed <- vs_schema_stream(
     specs,
     vs_reader(table, batch_rows = 1L),
     max_errors = 100L

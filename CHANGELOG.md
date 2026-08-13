@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-13
+
 ### Added
 
 - **`validate_file_stream()` validates a delimited file without loading it.**

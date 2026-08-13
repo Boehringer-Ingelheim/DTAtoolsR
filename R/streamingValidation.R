@@ -1,105 +1,24 @@
-# Streaming evaluation of the schema axis.
+# Validating a table without holding it.
 #
 # The non-streaming path takes a materialised data frame. That is fatal at the
 # sizes this package is meant to reach: an 80 GB file cannot be an R data frame
 # at all, whatever the validation costs once it is one.
 #
-# The property that makes streaming safe here is that the schema axis is
-# per-row. No constraint it evaluates -- type, maxLength, enum, const, pattern
-# -- depends on any other row, so a batch can be checked in isolation and the
-# results concatenated. The only cross-batch state needed is the row offset,
-# so that reported row numbers are positions in the FILE rather than in the
-# batch.
+# What makes streaming safe rather than merely possible is that the schema axis
+# is purely per-row. No constraint it evaluates -- type, maxLength, enum, const,
+# pattern -- consults another row, so a batch can be checked in isolation and
+# the results concatenated. The only cross-batch state is the row offset, so
+# that reported row numbers are positions in the FILE rather than in whichever
+# batch a value happened to fall in.
 #
 # `required` is the exception worth naming: a column absent from the schema
 # produces one error per row, so it is emitted per batch like everything else
 # and simply accumulates. That is faithful to the non-streaming behaviour, and
-# it is also why a structural check belongs ahead of the scan entirely -- a
-# later phase gates it there.
+# it is also why a structural check belongs ahead of the scan entirely -- the
+# gate further down this file decides it from the header instead.
+#
+# The rules axis is folded in the same pass; see the note on rule kinds below.
 
-#' @title Schema-Axis Validation over a Stream of Record Batches
-#' @description
-#' Evaluates the schema axis batch by batch, so peak memory is bounded by the
-#' batch size rather than by the size of the input. Produces exactly the
-#' `summarised_error` / `full_error` pair that `dta_schema_errors()` produces
-#' for the same data.
-#'
-#' Row numbers are global: each batch's errors are offset by the number of rows
-#' already consumed, so a row number identifies a position in the input, not in
-#' the batch it happened to fall in.
-#' @param specs A `DTAColumnSpecCollection`.
-#' @param reader An object with a `read_next_batch()` method -- an
-#'   `arrow::RecordBatchReader` or a `Scanner`'s reader.
-#' @param max_errors Integer or `NULL`. Stop retaining individual errors once
-#'   this many have been collected. Counting continues regardless, so the
-#'   reported total is exact even when the retained detail is truncated. `NULL`
-#'   retains everything, matching the non-streaming path.
-#' @return A list with `summarised_error`, `full_error` and `n_errors`. When
-#'   retention was truncated, `full_error` carries a `truncated` attribute.
-#' @keywords internal
-dta_schema_errors_stream <- function(specs, reader, max_errors = NULL) {
-  parts <- list()
-  row_offset <- 0L
-  n_errors <- 0L
-  truncated <- FALSE
-
-  repeat {
-    batch <- reader$read_next_batch()
-    if (is.null(batch)) {
-      break
-    }
-
-    df <- as.data.frame(batch)
-    n_batch_rows <- nrow(df)
-
-    if (n_batch_rows == 0) {
-      next
-    }
-
-    result <- dta_schema_errors(specs, df)
-    errs <- result$full_error
-
-    if (!is.null(errs) && nrow(errs) > 0) {
-      # Row numbers arrive batch-local; make them global.
-      errs$row <- errs$row + row_offset
-      n_errors <- n_errors + nrow(errs)
-
-      if (is.null(max_errors)) {
-        parts[[length(parts) + 1]] <- errs
-      } else {
-        retained <- sum(vapply(parts, nrow, integer(1)))
-        room <- max_errors - retained
-        if (room > 0) {
-          if (nrow(errs) > room) {
-            errs <- errs[seq_len(room), , drop = FALSE]
-            truncated <- TRUE
-          }
-          parts[[length(parts) + 1]] <- errs
-        } else {
-          truncated <- TRUE
-        }
-      }
-    }
-
-    row_offset <- row_offset + n_batch_rows
-  }
-
-  if (length(parts) == 0) {
-    return(list(summarised_error = NULL, full_error = NULL, n_errors = 0L))
-  }
-
-  full_error <- do.call(rbind, parts)
-  rownames(full_error) <- NULL
-  if (truncated) {
-    attr(full_error, "truncated") <- TRUE
-  }
-
-  list(
-    summarised_error = dta_summarise_schema_errors(full_error),
-    full_error = full_error,
-    n_errors = n_errors
-  )
-}
 
 # ---- streaming the rules axis ------------------------------------------------
 #
@@ -115,17 +34,21 @@ dta_schema_errors_stream <- function(specs, reader, max_errors = NULL) {
 #                 only the KEY, not the row. Memory grows with the number of
 #                 distinct keys rather than with the number of rows.
 #
-#   buffered      Grouped cross-row rules. A group can span any number of
-#                 batches, so these genuinely need their rows retained. Only
-#                 the columns the rule reads are kept, which on a wide table is
-#                 a large reduction but is not a bound.
+#   grouped       Grouped cross-row rules. A group can span any number of
+#                 batches, but the questions asked of it -- does a condition
+#                 hold for ANY row, or for ALL rows -- are OR and AND, which
+#                 fold batch by batch. Memory grows with the number of distinct
+#                 groups times conditions, not with the number of rows.
+#
+#   unsupported   An unrecognised rule type, reported as a rule failure rather
+#                 than guessed at.
 #
 # The violation masks come from the same functions the materialising path uses
 # (dta_range_violated, dta_condition_violated), so the two cannot drift.
 
 #' @title How a Rule Can Be Streamed
 #' @param rule A rule object.
-#' @return One of `"decomposable"`, `"keyed"` or `"buffered"`.
+#' @return One of `"decomposable"`, `"keyed"`, `"grouped"` or `"unsupported"`.
 #' @keywords internal
 dta_rule_stream_kind <- function(rule) {
   switch(normalize_rule_type(rule@type),
@@ -320,11 +243,29 @@ dta_error_sink <- function(max_errors) {
   sink
 }
 
-dta_error_sink_add <- function(sink, errs) {
+#' @param n_total Integer or `NULL`. The true number of errors these rows
+#'   represent, when the caller has already truncated them. Import typing caps
+#'   retained rows per column but records the real total on the frame, so
+#'   counting `nrow()` here would silently under-report exactly the case the cap
+#'   exists for.
+#' @noRd
+dta_error_sink_add <- function(sink, errs, n_total = NULL) {
   if (is.null(errs) || nrow(errs) == 0) {
+    # A caller may have truncated everything away while still knowing how many
+    # there were.
+    if (!is.null(n_total) && n_total > 0) {
+      sink$total <- sink$total + n_total
+      sink$truncated <- TRUE
+    }
     return(sink)
   }
-  sink$total <- sink$total + nrow(errs)
+
+  arriving <- if (is.null(n_total)) nrow(errs) else max(n_total, nrow(errs))
+  sink$total <- sink$total + arriving
+  if (arriving > nrow(errs)) {
+    # Rows were dropped before they reached this sink.
+    sink$truncated <- TRUE
+  }
 
   if (is.null(sink$max)) {
     sink$parts[[length(sink$parts) + 1]] <- errs
@@ -365,10 +306,10 @@ dta_error_sink_collect <- function(sink) {
 #' time, and returns the same `details` structure, so every existing consumer
 #' (`results()`, `messages()`, `inspect()`, the Shiny app) works unchanged.
 #'
-#' Peak memory is bounded by the batch size for the schema axis, by the number
-#' of distinct keys for uniqueness rules, and by the retained-error cap. Grouped
-#' rules are the exception: a group can span any number of batches, so the
-#' columns those rules read are retained for the whole scan.
+#' Nothing here scales with the number of rows. Peak memory is bounded by the
+#' batch size for the schema axis, by the number of distinct keys for uniqueness
+#' rules, by the number of distinct groups for grouped rules, and by the
+#' retained-error cap.
 #'
 #' Row numbers are positions in the input, not in the batch a value happened to
 #' fall in.
@@ -425,9 +366,17 @@ dta_validate_table_stream <- function(specs,
       coerced <- dta_coerce_table_to_specs(df, specs)
       df <- coerced$table
       issues <- coerced$issues
-      if (is.data.frame(issues) && nrow(issues) > 0) {
-        issues$row <- issues$row + row_offset
-        dta_error_sink_add(carried_sink, issues)
+      if (is.data.frame(issues)) {
+        # Read the true count BEFORE touching the frame: import typing caps the
+        # rows it retains per column but records how many there really were on
+        # the frame itself, and modifying a column can drop that attribute.
+        n_issues <- dta_import_error_count(issues)
+        if (nrow(issues) > 0) {
+          issues$row <- issues$row + row_offset
+        }
+        if (n_issues > 0) {
+          dta_error_sink_add(carried_sink, issues, n_total = n_issues)
+        }
       }
     }
 
@@ -526,7 +475,13 @@ dta_validate_table_stream <- function(specs,
   }
 
   details$ok <- dta_details_ok(details)
-  details
+
+  # Tagged before returning, so `as.data.frame()` dispatches to the method that
+  # flattens it. The materialising path leaves this to its callers, which is
+  # workable when every caller is inside the package -- but this result is
+  # handed straight to a user, and an untagged list makes as.data.frame() fail
+  # with a row-count error that says nothing about the cause.
+  dta_as_validation_details(details)
 }
 
 #' @title Fill In Declared Types on Import Errors
@@ -1291,7 +1246,7 @@ dta_structural_failure_details <- function(findings) {
   # Flags that this verdict rests on the header alone, so a reader is never
   # misled into thinking the rows were examined and found clean.
   attr(details, "structural_only") <- TRUE
-  details
+  dta_as_validation_details(details)
 }
 
 #' @title Record Batch Reader for an In-Memory Table

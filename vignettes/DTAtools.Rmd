@@ -1095,6 +1095,128 @@ messages(ds_bad)[, c("source", "rule_id", "row", "column", "message")]
 
 ---
 
+## Validating a File Too Large to Load
+
+Everything above reads the data into memory before checking it. For a file
+larger than the memory available that is not merely slow — it is impossible,
+because the table has to exist as an R object before a single row can be
+validated.
+
+`validate_file_stream()` scans the file in batches instead. It opens the file
+as a lazy Arrow dataset and never holds more than one batch at a time.
+
+```{r stream-basic}
+stream_specs <- DTAColumnSpecCollection(
+  columns = list(
+    ID  = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+  ),
+  rules = list(DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70)))
+)
+
+stream_path <- file.path(tempdir(), "vignette_stream.csv")
+utils::write.csv(
+  data.frame(
+    ID  = c("A001", "TOOLONG", "B002"),
+    AGE = c(30, 40, 99)
+  ),
+  stream_path,
+  row.names = FALSE
+)
+
+details <- validate_file_stream(stream_specs, stream_path, verbose = FALSE)
+c(ok = details$ok, schema = details$n_schema_errors, rules = details$n_rule_errors)
+```
+
+The result carries the same three-axis structure `check()` produces, and
+flattens to one row per error:
+
+```{r stream-messages}
+as.data.frame(details)[, c("source", "row", "column", "keyword")]
+```
+
+### What is bounded, and what is not
+
+Nothing in the scan grows with the number of rows:
+
+| what | bounded by |
+|------|------------|
+| column-spec checks | the batch size |
+| range and if/then rules | the batch size |
+| uniqueness rules | the number of distinct keys |
+| grouped rules | the number of distinct groups |
+| retained error detail | `max_errors` |
+
+Measured across a sixteen-fold increase in input, the working set held by the
+scan stayed flat at about 19 MB, while the in-memory path's grew from 51 MB to
+272 MB.
+
+**This buys feasibility, not speed.** Scanning runs roughly twice as slow as
+validating a table already in memory, because each batch pays its own dispatch
+and typing overhead. Use it when *holding* the file is the problem; for a file
+that fits comfortably, `check()` is faster and there is nothing to gain here.
+
+### Stopping early
+
+Two options change how much work the scan does.
+
+`fail_fast = TRUE` stops at the first batch that shows a problem. On a large
+file that fails early this is the difference between seconds and hours:
+
+```{r stream-failfast}
+quick <- validate_file_stream(
+  stream_specs, stream_path,
+  fail_fast = TRUE, verbose = FALSE
+)
+c(ok = quick$ok, partial = isTRUE(attr(quick, "partial_scan")))
+```
+
+A stopped scan is explicitly incomplete. It carries a `partial_scan` attribute,
+lists only the rules that actually failed, and reports `NA` — not `TRUE` — for
+any axis it could not settle. A rule that has not failed yet has not passed: a
+duplicate further into the file was simply never read.
+
+`on_missing_column = "stop"` uses the fact that a missing column is decidable
+from the header alone. The default, `"scan"`, reads the file and reports the
+absence once per row — faithful, but on a 400-million-row file that restates
+one fact 400 million times.
+
+```{r stream-structural}
+missing_specs <- DTAColumnSpecCollection(
+  columns = list(
+    ID      = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    ABSENT  = DTAColumnSpec(id = "ABSENT", type = "SAS Char", length = 4, nullable = FALSE)
+  )
+)
+
+structural <- validate_file_stream(
+  missing_specs, stream_path,
+  on_missing_column = "stop", verbose = FALSE
+)
+structural$schema_errors$full_error[, c("keyword", "message")]
+```
+
+Columns present in the file but absent from the specs are reported too — the
+per-row checks have no way to notice a column no spec describes.
+
+### Caching as Parquet
+
+`cache_as_parquet()` rewrites a delimited file as Parquet, streaming, so
+repeated validations read a columnar format instead of re-parsing text.
+
+Measure before adopting it. On a 500,000-row file of 20 columns where the specs
+read every column, validating from the cache was *not* faster — evaluating the
+constraints dominates, and a format that only makes reading cheaper cannot move
+a cost that is not there. The case it should win, a wide file where the specs
+read only a few columns, is untested; `benchmarks/bench_parquet.R` reports the
+break-even for your own data.
+
+```{r stream-cleanup, include=FALSE}
+unlink(stream_path)
+```
+
+---
+
 ## File-based Workflow
 
 When the DTA defines expected files, use `DTAFileCSV` (or `DTAFileTSV`,
@@ -1812,6 +1934,7 @@ datasets:
 | `DTARuleColCondition`     | If/then cross-column rule                                   |
 | `DTARuleColRange`         | Numeric range constraint for a column                       |
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)             |
+| `DTARuleGroupCondition`   | Grouped cross-row rule (`mutually_exclusive`, `requires`)   |
 | `DTAFileCSV`              | CSV file handler for `read_file()`                          |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                          |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`        |
@@ -1827,6 +1950,8 @@ datasets:
 | `load_file(dta, dataset, file)` | Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`  | Read a file using a file handler (`DTAFileCSV`, etc.)        |
 | `check(x, force, persist, quiet, …)` | Validate all datasets / tables; returns updated object |
+| `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it |
+| `cache_as_parquet(specs, path, …)` | Rewrite a delimited file as Parquet for repeated validation |
 | `results(x)`                | Summary table: status, per-axis error counts per table       |
 | `messages(x)`               | Detailed error table: `id`, `source`, row, column, rule, message |
 | `inspect(x, id)`            | Deep detail for error `id`: row context, schema clause, failing rows, original imported text |

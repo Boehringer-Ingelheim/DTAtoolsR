@@ -523,7 +523,7 @@
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.15.0</span>
+  <span class="version-badge">v0.16.0</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -564,6 +564,7 @@
     <a class="nav-item" href="#section-4-4">Import Errors Detail</a>
     <a class="nav-item" href="#section-4-5">Exporting Data</a>
     <a class="nav-item" href="#section-4-6">Word Documentation</a>
+    <a class="nav-item" href="#section-4-7">Large Files</a>
 
     <div class="nav-part">Part 5 — Quick Reference</div>
     <a class="nav-item" href="#section-5-1">Function Cheat Sheet</a>
@@ -1497,6 +1498,74 @@ export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
       </div>
     </div>
 
+    <!-- ===== LARGE FILES ===== -->
+    <h3 id="section-4-7">🌊 Validating a File Too Large to Load</h3>
+    <p>Everything so far reads the data into memory before checking it. For a file
+    larger than the memory available that is not merely slow — it is impossible,
+    because the table has to exist as an R object before a single row can be validated.</p>
+    <p><code>validate_file_stream()</code> scans the file in batches instead, and never
+    holds more than one batch at a time.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">details &lt;- validate_file_stream(specs, "transfer.csv")
+
+details$ok                # TRUE / FALSE, the same three-axis verdict
+details$n_schema_errors   # per-axis counts, as check() reports them
+as.data.frame(details)    # one row per error: source, row, column, keyword, message
+
+# Stop at the first problem rather than scanning to the end.
+validate_file_stream(specs, "transfer.csv", fail_fast = TRUE)
+
+# A missing column is decidable from the header alone.
+validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></pre>
+    </div>
+
+    <p>Nothing in the scan grows with the number of rows:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>What</th><th>Bounded by</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Column-spec checks</td><td>the batch size</td></tr>
+          <tr><td>Range and if/then rules</td><td>the batch size</td></tr>
+          <tr><td><code>col_unique</code></td><td>the number of distinct keys</td></tr>
+          <tr><td><code>group_condition</code></td><td>the number of distinct groups</td></tr>
+          <tr><td>Retained error detail</td><td><code>max_errors</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>This buys feasibility, not speed.</strong>
+        <p>Measured across a sixteen-fold increase in input, the working set held by the
+        scan stayed flat at about 19 MB while the in-memory path's grew from 51 MB to
+        272 MB — but scanning runs roughly <em>twice as slow</em>, because every batch pays
+        its own overhead. Use it when <em>holding</em> the file is the problem; for a file
+        that fits comfortably, <code>check()</code> is faster.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>A stopped scan is explicitly incomplete.</strong>
+        <p>With <code>fail_fast = TRUE</code> the result carries a <code>partial_scan</code>
+        attribute, lists only the rules that actually failed, and reports <code>NA</code> —
+        not <code>TRUE</code> — for any axis it could not settle. A rule that has not failed
+        yet has not passed: a duplicate further into the file was simply never read.</p>
+      </div>
+    </div>
+
+    <p><code>cache_as_parquet()</code> rewrites a delimited file as Parquet so repeated
+    validations skip re-parsing text. Measure before adopting it: on a file whose specs
+    read every column it was <em>not</em> faster, because evaluating the constraints
+    dominates and parsing is not the bottleneck.</p>
+
     <!-- ==============================
          PART 5: QUICK REFERENCE
          ============================== -->
@@ -1578,6 +1647,16 @@ export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
             <td>Export validated data to TSV/CSV (optional gzip + MD5)</td>
             <td>(file written)</td>
           </tr>
+          <tr>
+            <td class="cheat-fn">validate_file_stream(specs, path, ...)</td>
+            <td>Validate a delimited file by scanning it, without loading it into memory</td>
+            <td>validation details</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">cache_as_parquet(specs, path, ...)</td>
+            <td>Rewrite a delimited file as Parquet for repeated validation (measure first)</td>
+            <td>cache path</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1622,7 +1701,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.15.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.16.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>
