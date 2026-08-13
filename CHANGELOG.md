@@ -38,6 +38,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - A `DTADataSetTabular`'s `tables` may now hold a lazy Arrow `Dataset`,
   `arrow_dplyr_query` or `RecordBatchReader` as well as a materialised `Table`.
 
+- **A structural gate, via `validate_file_stream(on_missing_column = "stop")`.**
+  A column the specs require but the file lacks is decidable from the header
+  alone. Scanning reports that absence once per *row* — faithful to what the
+  generated schema meant, but useless at scale, since a 400-million-row file
+  restates the same fact 400 million times. `"stop"` reports it once, having
+  read nothing.
+
+  The default is `"scan"`, so existing behaviour is unchanged unless you ask
+  for the gate.
+
+  A result produced this way carries a `structural_only` attribute. Its
+  `rules_valid` and `import_valid` read `TRUE` because those axes were never
+  evaluated, not because they passed — the attribute exists so that cannot be
+  misread.
+
+- **Columns present in the file but absent from the specs are now reported.**
+  Previously invisible: the per-row checks have no way to notice a column no
+  spec describes.
+
 ### Changed
 
 - Schema validation no longer serialises the table to JSON and runs a JSON

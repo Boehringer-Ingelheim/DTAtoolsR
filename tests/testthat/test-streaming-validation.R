@@ -377,6 +377,115 @@ test_that("a missing file is reported rather than failing obscurely", {
   )
 })
 
+# ---- the structural gate -----------------------------------------------------
+
+test_that("structural findings name both missing and unexpected columns", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+  ))
+
+  findings <- dta_structure_findings(specs, c("ID", "EXTRA"))
+
+  expect_equal(findings$missing, "AGE")
+  expect_equal(findings$unexpected, "EXTRA")
+  expect_false(findings$ok)
+})
+
+test_that("a file whose columns all match reports a sound structure", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  findings <- dta_structure_findings(specs, "ID")
+
+  expect_length(findings$missing, 0)
+  expect_length(findings$unexpected, 0)
+  expect_true(findings$ok)
+})
+
+test_that("stopping on a missing column reports it once, not once per row", {
+  # The whole point of the gate. Scanning reports the absence for every row,
+  # which on a large file means restating one fact millions of times.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "MISSING", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = sprintf("A%03d", 1:50), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  stopped <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+  scanned <- validate_file_stream(
+    specs, path,
+    on_missing_column = "scan", verbose = FALSE
+  )
+
+  expect_equal(stopped$n_schema_errors, 1)
+  expect_equal(scanned$n_schema_errors, 50)
+
+  # Both agree the file is invalid; they differ only in how much they say.
+  expect_false(stopped$ok)
+  expect_false(scanned$ok)
+  expect_false(stopped$schema_valid)
+  expect_false(scanned$schema_valid)
+})
+
+test_that("the default still scans, so existing behaviour is unchanged", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "MISSING", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = sprintf("A%03d", 1:7), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  defaulted <- validate_file_stream(specs, path, verbose = FALSE)
+  expect_equal(defaulted$n_schema_errors, 7)
+})
+
+test_that("a structural verdict is marked as resting on the header alone", {
+  # Without this a caller could read rules_valid = TRUE as "the rules were
+  # checked and passed", when in fact nothing was read.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  stopped <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+
+  expect_true(isTRUE(attr(stopped, "structural_only")))
+  expect_equal(stopped$schema_errors$full_error$keyword, "required")
+  expect_match(
+    stopped$schema_errors$full_error$message,
+    "must have required property 'GONE'",
+    fixed = TRUE
+  )
+})
+
+test_that("the structural result still satisfies the details contract", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  stopped <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+  flat <- as.data.frame(dta_as_validation_details(stopped))
+
+  expect_true(all(
+    c("source", "rule_id", "row", "column", "keyword", "message") %in% names(flat)
+  ))
+  expect_equal(nrow(flat), 1)
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {

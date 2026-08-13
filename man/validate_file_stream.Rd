@@ -12,6 +12,7 @@ validate_file_stream(
   has_header = TRUE,
   batch_rows = 131072L,
   max_errors = NULL,
+  on_missing_column = c("scan", "stop"),
   verbose = TRUE
 )
 }
@@ -32,6 +33,13 @@ fewer per-batch overheads.}
 \item{max_errors}{Integer or \code{NULL}. Cap on retained per-cell error detail.
 Counting is unaffected, so totals and the pass/fail verdict stay exact even
 when the retained detail is truncated.}
+
+\item{on_missing_column}{One of \code{"scan"} or \code{"stop"}. A column the specs
+require but the file lacks is decidable from the header alone. \code{"scan"},
+the default, preserves existing behaviour: the file is read and the absence
+is reported once per row. \code{"stop"} reports it structurally and reads
+nothing, which on a large file is the difference between an immediate
+answer and hours spent restating it per row.}
 
 \item{verbose}{Logical. Print progress.}
 }

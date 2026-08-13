@@ -556,6 +556,76 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
   errors
 }
 
+# ---- the structural gate -----------------------------------------------------
+#
+# Some failures are decidable from the column names alone, before a single row
+# is read. A column the specs require but the file does not have is the clearest
+# case: every per-row check on it is undefined, and scanning 400 million rows to
+# discover it is both slow and less useful than saying so immediately.
+#
+# The full scan reports a missing column once per ROW, because the generated
+# schema made the property required of every element. That is faithful, and it
+# is retained as the default. But it is a poor way to learn that a column is
+# absent, so a caller can ask to be told structurally instead.
+
+#' @title Structural Findings from Column Names Alone
+#' @description
+#' Compares the columns a spec collection declares against the columns a file
+#' actually has. Costs nothing beyond reading the header, so it can run before
+#' any scan.
+#'
+#' Unexpected columns -- present in the file, absent from the specs -- are
+#' reported here and nowhere else; the per-row checks have no way to notice a
+#' column no spec describes.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @param column_names Character. The columns the file actually has.
+#' @return A list with `missing`, `unexpected` and `ok`.
+#' @keywords internal
+dta_structure_findings <- function(specs, column_names) {
+  columns <- tryCatch(specs@columns, error = function(e) NULL)
+  declared <- if (is.null(columns)) {
+    character(0)
+  } else {
+    nm <- names(columns)
+    if (is.null(nm)) vapply(columns, function(s) s@id, character(1)) else nm
+  }
+
+  missing <- setdiff(declared, column_names)
+  unexpected <- setdiff(column_names, declared)
+
+  list(
+    missing = missing,
+    unexpected = unexpected,
+    ok = length(missing) == 0
+  )
+}
+
+#' @title Structural Findings as Schema Errors
+#' @description
+#' Renders structural findings in the same shape the per-row schema axis uses,
+#' so a caller that stopped early still receives a recognisable error frame.
+#' Row is `NA`: the finding is about the file, not about any row in it.
+#' @param findings A list from `dta_structure_findings()`.
+#' @return A data frame of errors, or `NULL` when the structure is sound.
+#' @keywords internal
+dta_structure_errors <- function(findings) {
+  if (length(findings$missing) == 0) {
+    return(NULL)
+  }
+
+  out <- data.frame(
+    row = NA_integer_,
+    column = NA_character_,
+    keyword = "required",
+    message = paste0("must have required property '", findings$missing, "'"),
+    schema = findings$missing,
+    data = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  rownames(out) <- NULL
+  out
+}
+
 # ---- reading a file without materialising it ---------------------------------
 
 #' @title Open a Delimited File as a Lazy Dataset
@@ -621,6 +691,12 @@ dta_open_delimited_dataset <- function(path,
 #' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
 #'   Counting is unaffected, so totals and the pass/fail verdict stay exact even
 #'   when the retained detail is truncated.
+#' @param on_missing_column One of `"scan"` or `"stop"`. A column the specs
+#'   require but the file lacks is decidable from the header alone. `"scan"`,
+#'   the default, preserves existing behaviour: the file is read and the absence
+#'   is reported once per row. `"stop"` reports it structurally and reads
+#'   nothing, which on a large file is the difference between an immediate
+#'   answer and hours spent restating it per row.
 #' @param verbose Logical. Print progress.
 #' @return A validation details list.
 #' @examples
@@ -652,10 +728,12 @@ validate_file_stream <- function(specs,
                                  has_header = TRUE,
                                  batch_rows = 131072L,
                                  max_errors = NULL,
+                                 on_missing_column = c("scan", "stop"),
                                  verbose = TRUE) {
   if (!file.exists(path)) {
     cli::cli_abort("File not found: {.path {path}}")
   }
+  on_missing_column <- match.arg(on_missing_column)
 
   dataset <- dta_open_delimited_dataset(
     path,
@@ -664,6 +742,25 @@ validate_file_stream <- function(specs,
     quote = quote,
     has_header = has_header
   )
+
+  # Opening a dataset reads the header, not the data, so this costs nothing
+  # even on a file of any size.
+  findings <- dta_structure_findings(specs, names(dataset$schema))
+
+  if (isTRUE(verbose) && length(findings$unexpected) > 0) {
+    cli::cli_alert_warning(
+      "{length(findings$unexpected)} column{?s} in the file {?is/are} not described by the specs: {.field {findings$unexpected}}"
+    )
+  }
+
+  if (!findings$ok && identical(on_missing_column, "stop")) {
+    if (isTRUE(verbose)) {
+      cli::cli_alert_danger(
+        "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the file."
+      )
+    }
+    return(dta_structural_failure_details(findings))
+  }
 
   reader <- arrow::Scanner$create(dataset, batch_size = batch_rows)$ToRecordBatchReader()
 
@@ -674,6 +771,42 @@ validate_file_stream <- function(specs,
     max_errors = max_errors,
     coerce = TRUE
   )
+}
+
+#' @title Details for a File That Failed Structurally
+#' @description
+#' The same `details` shape a scan produces, for a file rejected before any row
+#' was read. The rule and import axes report as valid because they were never
+#' evaluated -- there is no table to evaluate them against, and claiming a
+#' failure would be as wrong as claiming a pass.
+#' @param findings A list from `dta_structure_findings()`.
+#' @return A validation details list.
+#' @keywords internal
+dta_structural_failure_details <- function(findings) {
+  full_error <- dta_structure_errors(findings)
+
+  details <- list(
+    ok = FALSE,
+    schema_valid = FALSE,
+    rules_valid = TRUE,
+    import_valid = TRUE,
+    n_schema_errors = nrow(full_error),
+    n_rule_errors = 0L,
+    n_import_errors = 0L,
+    schema_errors = list(
+      summarised_error = unique(full_error[, c("keyword", "message"), drop = FALSE]),
+      full_error = full_error
+    ),
+    rule_results = list(),
+    rule_errors = list(),
+    import_errors = NULL,
+    schema_version = 2L
+  )
+
+  # Flags that this verdict rests on the header alone, so a reader is never
+  # misled into thinking the rows were examined and found clean.
+  attr(details, "structural_only") <- TRUE
+  details
 }
 
 #' @title Record Batch Reader for an In-Memory Table
