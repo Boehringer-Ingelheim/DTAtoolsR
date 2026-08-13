@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- `dta_template_placeholders()` is exported. It lists the `{PLACEHOLDER}`
+  tokens a Word export template may use, and given a `DTA` resolves each one, so
+  a template author can discover the set without exporting a document to find
+  out or reading it out of the documentation by hand.
+- Creation templates accept a **`target:` shorthand**. `target: metadata.title`
+  replaces the four-line `effects: / __selection__: / path: / value:` block that
+  every option previously needed to say "write my value to this field".
+  `effects:` still works, and is still the way to have one choice set several
+  fields at once.
+- Creation-template values may use **`${today}` and `${version}`**, resolved
+  when the DTA is created.
+- Creation templates are searched for in more than one place:
+  `getOption("DTAtools.template_dir")`, then a project-local `./dta-templates`,
+  then the packaged directory. The packaged directory sits inside the installed
+  library, which users cannot write to and a reinstall wipes, so it could not
+  remain the only place a template was allowed to live.
 - A dataset's **file handlers can be edited in the Shiny app**. A third button,
   *Edit files*, sits next to *Edit columns* and *Edit rules* and opens the same
   kind of list/form dialog: add, edit, remove and reorder the expected files
@@ -26,6 +42,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Unresolved placeholders in a Word template are now reported whatever their
+  case.** Detection and reporting previously used different patterns, so a
+  lower- or mixed-case token such as `{customField}` was left untouched *and*
+  never warned about, contradicting the documented contract that every
+  placeholder without a value is reported. Both now read one shared grammar.
+  Note the consequence: braces used as prose in a template, such as `{n}`, will
+  now produce a warning. The text is still left exactly as written.
+- A creation-template option that omits `default:` inherits the value from
+  `base.metadata`, so a template states each value once. Previously the two
+  duplicated each other with nothing enforcing agreement, and the option
+  silently won whenever they drifted apart.
+- The metadata fields a creation template may write are derived from the
+  `DTAMetaData` S7 class instead of being mirrored by hand in three places, so a
+  new property cannot silently become un-settable from a template.
 - The three *Edit files* / *Edit columns* / *Edit rules* buttons are now one
   **Edit** menu. They all act on the same object — this dataset's specification
   — so they read as one entry point instead of three siblings competing with
@@ -69,6 +99,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A Word template no longer loses its formatting where a placeholder sits.**
+  Any placeholder in a paragraph caused the whole paragraph's text to be written
+  into its first run with every other run blanked, so
+  `Vendor: **{SUPPLIER_NAME}** (confidential)` came back with the bold and the
+  trailing run's styling gone. Substitution is now run-local, and falls back to
+  joining the paragraph only when a placeholder genuinely straddles a run
+  boundary — which Word does routinely, and which is the only case where
+  joining is the sole way to match the placeholder at all.
+- **A placeholder value containing another placeholder's token is no longer
+  re-substituted.** Substitution looped `gsub()` over the variable names,
+  mutating the text each pass, so a title such as `"See {DTA_VERSION} below"`
+  had the version interpolated into it. Substitution is now a single pass over
+  the original text and a value is never rescanned. This also removes the
+  mirror-image defect where braces arriving from a value were reported as
+  unresolved placeholders the template never contained.
+- A creation template's dataset reference is no longer resolved against the
+  process working directory. A packaged template asking for `gf_dataset.yaml`
+  could silently pick up an unrelated file of that name from wherever the app
+  happened to be launched; a bare relative name is now resolved against the
+  template's own directory, then the package, and only a genuinely absolute
+  path is taken as given.
+- A DTA created from the bundled GF template is dated the day it was created,
+  and its first version-history entry records the version the user actually
+  chose. Both were frozen at the template author's values, so every DTA claimed
+  to be dated 2026-07-29 and at version 1.0 regardless.
+- `export_with_template()`'s example is no longer wrapped in `\dontrun{}`. It
+  writes only to `tempdir()`, so it now runs under `R CMD check` like every
+  other example instead of being documentation nobody executes.
 - A handler that is not a pattern now rejects any file count other than 1
   whichever way it is declared. The guard only ever looked at
   `number_of_files`, so a `min_number_of_files`/`max_number_of_files` pair went
