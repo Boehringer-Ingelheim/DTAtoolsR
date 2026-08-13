@@ -54,6 +54,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   error tolerance, so an outage failed the job before a single hook ran. The
   cache is now inlined with `continue-on-error`, and a cache problem only makes
   the run slower.
+- The R-specific `pre-commit` hooks (`lorenzwalthert/precommit`) are removed.
+  They built a second, isolated ~40-package `renv` library on every run,
+  separate from the one CI already installs, and that duplication broke three
+  times in a row: a `digest` that will not compile on R 4.5, a cache outage
+  with no error tolerance, and finally the two `renv` caches colliding on the
+  same runner path. `styler`, `roxygen2`/`NAMESPACE` and a
+  dependency-declaration check now run in a new `r-style` workflow against the
+  project's own installed library. `pre-commit` keeps only the fast,
+  language-agnostic hooks. Note that `styler::style_pkg()` and
+  `roxygen2::roxygenise()` are no longer run for you locally — see the Commands
+  table in `CLAUDE.md`. CI fails on a diff rather than auto-fixing, so stale
+  `man/`/`NAMESPACE` cannot be silently committed on your behalf.
 
 ### Fixed
 
