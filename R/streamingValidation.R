@@ -132,7 +132,11 @@ dta_rule_stream_kind <- function(rule) {
     check_range = "decomposable",
     check_col_condition = "decomposable",
     check_unique = "keyed",
-    "buffered"
+    check_group_condition = "buffered",
+    # An unrecognised type must not be silently treated as buffered and handed
+    # to the grouped evaluator; it is reported as a rule failure, as the
+    # materialising path does.
+    "unsupported"
   )
 }
 
@@ -183,7 +187,7 @@ dta_rule_stream_init <- function(rule) {
 #' @return The accumulator, updated in place.
 #' @keywords internal
 dta_rule_stream_update <- function(state, rule, df) {
-  if (!state$applicable) {
+  if (!state$applicable || state$kind == "unsupported") {
     return(state)
   }
 
@@ -243,12 +247,25 @@ dta_rule_stream_update <- function(state, rule, df) {
 #'   materialising rule functions return.
 #' @keywords internal
 dta_rule_stream_finalise <- function(state, rule) {
-  if (!state$applicable) {
+  if (state$kind == "unsupported") {
     return(list(
       id = rule@id,
-      valid = NA,
-      message = conditionMessage(state$condition),
-      not_applicable = TRUE
+      valid = FALSE,
+      message = paste("Unknown rule type:", normalize_rule_type(rule@type))
+    ))
+  }
+
+  if (!state$applicable) {
+    # Matches apply_schema_rules(): a rule that cannot be evaluated against this
+    # table is a rule FAILURE, not a reason to abandon the rest of validation.
+    return(list(
+      id = rule@id,
+      valid = FALSE,
+      message = sprintf(
+        "Rule '%s' could not be evaluated: %s",
+        rule@id,
+        conditionMessage(state$condition)
+      )
     ))
   }
 
@@ -312,6 +329,231 @@ dta_rule_buffer_columns <- function(rule) {
   )
 
   unique(c(as.character(group_by), as.character(condition_cols)))
+}
+
+# ---- the streaming driver ----------------------------------------------------
+
+# Bounded accumulation of a per-cell error frame.
+#
+# Both the schema and import axes can produce one error per bad cell, so on a
+# dirty file the error frame is O(rows) and exhausts memory as surely as the
+# data would. Retention is capped; counting is not, so the reported totals stay
+# exact and the pass/fail verdict is never an artefact of truncation.
+dta_error_sink <- function(max_errors) {
+  sink <- new.env(parent = emptyenv())
+  sink$parts <- list()
+  sink$retained <- 0L
+  sink$total <- 0L
+  sink$truncated <- FALSE
+  sink$max <- max_errors
+  sink
+}
+
+dta_error_sink_add <- function(sink, errs) {
+  if (is.null(errs) || nrow(errs) == 0) {
+    return(sink)
+  }
+  sink$total <- sink$total + nrow(errs)
+
+  if (is.null(sink$max)) {
+    sink$parts[[length(sink$parts) + 1]] <- errs
+    sink$retained <- sink$retained + nrow(errs)
+    return(sink)
+  }
+
+  room <- sink$max - sink$retained
+  if (room <= 0) {
+    sink$truncated <- TRUE
+    return(sink)
+  }
+  if (nrow(errs) > room) {
+    errs <- errs[seq_len(room), , drop = FALSE]
+    sink$truncated <- TRUE
+  }
+  sink$parts[[length(sink$parts) + 1]] <- errs
+  sink$retained <- sink$retained + nrow(errs)
+  sink
+}
+
+dta_error_sink_collect <- function(sink) {
+  if (length(sink$parts) == 0) {
+    return(NULL)
+  }
+  out <- do.call(rbind, sink$parts)
+  rownames(out) <- NULL
+  if (sink$truncated) {
+    attr(out, "truncated") <- TRUE
+  }
+  out
+}
+
+#' @title Validate a Table from a Stream of Record Batches
+#' @description
+#' The streaming counterpart of `validate_table_detailed()`. Evaluates all three
+#' axes -- column specs, rules, and import typing -- reading one batch at a
+#' time, and returns the same `details` structure, so every existing consumer
+#' (`results()`, `messages()`, `inspect()`, the Shiny app) works unchanged.
+#'
+#' Peak memory is bounded by the batch size for the schema axis, by the number
+#' of distinct keys for uniqueness rules, and by the retained-error cap. Grouped
+#' rules are the exception: a group can span any number of batches, so the
+#' columns those rules read are retained for the whole scan.
+#'
+#' Row numbers are positions in the input, not in the batch a value happened to
+#' fall in.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @param reader An object with a `read_next_batch()` method.
+#' @param verbose Logical. Print progress.
+#' @param max_errors Integer or `NULL`. Cap on retained per-cell errors. `NULL`
+#'   retains everything, matching the materialising path.
+#' @param coerce Logical. Type each batch against the specs as it arrives,
+#'   recording values that cannot be represented. This is the streaming
+#'   equivalent of typing the table once at import.
+#' @return A `details` list of the same shape `validate_table_detailed()`
+#'   returns.
+#' @keywords internal
+dta_validate_table_stream <- function(specs,
+                                      reader,
+                                      verbose = FALSE,
+                                      max_errors = NULL,
+                                      coerce = TRUE) {
+  rules_list <- tryCatch(specs@rules, error = function(e) NULL)
+  if (is.null(rules_list)) {
+    rules_list <- list()
+  }
+
+  states <- lapply(rules_list, dta_rule_stream_init)
+
+  schema_sink <- dta_error_sink(max_errors)
+  carried_sink <- dta_error_sink(max_errors)
+  rule_import_sink <- dta_error_sink(max_errors)
+  row_offset <- 0L
+
+  if (isTRUE(verbose)) {
+    cli::cli_h3("validating with column specs")
+  }
+
+  repeat {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) {
+      break
+    }
+
+    df <- as.data.frame(batch)
+    n_batch_rows <- nrow(df)
+    if (n_batch_rows == 0) {
+      next
+    }
+
+    # Import typing, per batch. The materialising path types the whole table
+    # once and hangs the issues on it as an attribute; with no single table to
+    # hang anything on, the issues accumulate here instead.
+    if (isTRUE(coerce)) {
+      coerced <- dta_coerce_table_to_specs(df, specs)
+      df <- coerced$table
+      issues <- coerced$issues
+      if (is.data.frame(issues) && nrow(issues) > 0) {
+        issues$row <- issues$row + row_offset
+        dta_error_sink_add(carried_sink, issues)
+      }
+    }
+
+    schema_result <- dta_schema_errors(specs, df)
+    schema_errs <- schema_result$full_error
+    if (!is.null(schema_errs) && nrow(schema_errs) > 0) {
+      schema_errs$row <- schema_errs$row + row_offset
+      dta_error_sink_add(schema_sink, schema_errs)
+    }
+
+    for (i in seq_along(rules_list)) {
+      dta_rule_stream_update(states[[i]], rules_list[[i]], df)
+
+      # Sourced from the same columns the rule just read as numbers, so an
+      # unrepresentable value is reported on both axes rather than moved
+      # from one to the other.
+      rule_errs <- tryCatch(
+        dta_rule_import_errors(rules_list[[i]], df),
+        error = function(e) NULL
+      )
+      if (is.data.frame(rule_errs) && nrow(rule_errs) > 0) {
+        rule_errs$row <- rule_errs$row + row_offset
+        dta_error_sink_add(rule_import_sink, rule_errs)
+      }
+    }
+
+    row_offset <- row_offset + n_batch_rows
+  }
+
+  full_error <- dta_error_sink_collect(schema_sink)
+  summarised_error <- dta_summarise_schema_errors(full_error)
+  has_schema_errors <- schema_sink$total > 0
+
+  rule_results <- lapply(seq_along(rules_list), function(i) {
+    dta_rule_stream_finalise(states[[i]], rules_list[[i]])
+  })
+  rule_errors <- Filter(function(x) !isTRUE(x$valid), rule_results)
+  rules_valid <- length(rule_errors) == 0
+
+  carried <- dta_error_sink_collect(carried_sink)
+  rule_import <- dta_error_sink_collect(rule_import_sink)
+  if (!is.null(rule_import)) {
+    rule_import <- rule_import[
+      !duplicated(rule_import[, c("row", "column"), drop = FALSE]), ,
+      drop = FALSE
+    ]
+    rule_import <- dta_apply_spec_declared_types(rule_import, specs)
+  }
+
+  import_errors <- dta_merge_import_errors(carried, rule_import)
+  n_import_errors <- carried_sink$total + rule_import_sink$total
+  import_valid <- n_import_errors == 0L
+  if (n_import_errors == 0L) {
+    import_errors <- NULL
+  }
+
+  details <- list(
+    ok = NA,
+    schema_valid = !has_schema_errors,
+    rules_valid = isTRUE(rules_valid),
+    import_valid = isTRUE(import_valid),
+    n_schema_errors = schema_sink$total,
+    n_rule_errors = length(rule_errors),
+    n_import_errors = as.integer(n_import_errors),
+    schema_errors = list(
+      summarised_error = summarised_error,
+      full_error = full_error
+    ),
+    rule_results = rule_results,
+    rule_errors = rule_errors,
+    import_errors = import_errors,
+    schema_version = 2L
+  )
+
+  details$ok <- dta_details_ok(details)
+  details
+}
+
+#' @title Fill In Declared Types on Import Errors
+#' @description
+#' Import errors carry the observed storage type as a placeholder; the column
+#' spec's declared type replaces it where one exists. Shared with the
+#' materialising path's collection step.
+#' @param errors A data frame of import errors.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @return The data frame, with `declared_type` filled in.
+#' @keywords internal
+dta_apply_spec_declared_types <- function(errors, specs = NULL) {
+  if (is.null(errors) || nrow(errors) == 0) {
+    return(errors)
+  }
+  declared <- vapply(
+    errors$column,
+    function(column) dta_spec_declared_type(specs, column),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  errors$declared_type <- ifelse(is.na(declared), errors$declared_type, declared)
+  errors
 }
 
 #' @title Record Batch Reader for an In-Memory Table

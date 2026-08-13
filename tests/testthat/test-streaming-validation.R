@@ -102,6 +102,173 @@ test_that("a missing column is reported for every row across every batch", {
   }
 })
 
+# ---- the full driver ---------------------------------------------------------
+
+# The strongest claim P3 makes: a streamed validation and a materialised one
+# produce the same verdict, the same counts and the same errors. Asserted over
+# the whole corpus so every axis and every rule type is covered.
+
+vs_details_equal <- function(streamed, expected, label) {
+  expect_equal(streamed$ok, expected$ok, info = label)
+  expect_equal(streamed$schema_valid, expected$schema_valid, info = label)
+  expect_equal(streamed$rules_valid, expected$rules_valid, info = label)
+  expect_equal(streamed$import_valid, expected$import_valid, info = label)
+  expect_equal(streamed$n_schema_errors, expected$n_schema_errors, info = label)
+  expect_equal(streamed$n_rule_errors, expected$n_rule_errors, info = label)
+  expect_equal(
+    as.integer(streamed$n_import_errors),
+    as.integer(expected$n_import_errors),
+    info = label
+  )
+}
+
+test_that("streaming reproduces the materialised verdict for every corpus case", {
+  corpus <- vc_corpus()
+
+  for (name in names(corpus)) {
+    case <- corpus[[name]]
+    expected <- validate_table_detailed(
+      specs = case$specs, table = case$table, verbose = FALSE
+    )
+
+    for (batch_rows in c(1L, 2L, 1000L)) {
+      streamed <- dta_validate_table_stream(
+        case$specs,
+        vs_reader(case$table, batch_rows),
+        verbose = FALSE,
+        # The materialising path does not type the table itself; it receives one
+        # already typed. Match that here so the comparison is like for like.
+        coerce = FALSE
+      )
+      vs_details_equal(
+        streamed, expected,
+        paste0("case '", name, "' at batch_rows = ", batch_rows)
+      )
+    }
+  }
+})
+
+test_that("streamed schema errors match the materialised ones row for row", {
+  corpus <- vc_corpus()
+
+  for (name in names(corpus)) {
+    case <- corpus[[name]]
+    expected <- validate_table_detailed(
+      specs = case$specs, table = case$table, verbose = FALSE
+    )
+    streamed <- dta_validate_table_stream(
+      case$specs, vs_reader(case$table, 1L),
+      verbose = FALSE, coerce = FALSE
+    )
+
+    expect_equal(
+      streamed$schema_errors$full_error,
+      expected$schema_errors$full_error,
+      info = paste0("case '", name, "'")
+    )
+  }
+})
+
+test_that("streamed rule messages match the materialised ones", {
+  corpus <- vc_corpus()
+  rule_cases <- Filter(function(case) length(case$specs@rules) > 0, corpus)
+
+  for (name in names(rule_cases)) {
+    case <- rule_cases[[name]]
+    expected <- validate_table_detailed(
+      specs = case$specs, table = case$table, verbose = FALSE
+    )
+    streamed <- dta_validate_table_stream(
+      case$specs, vs_reader(case$table, 1L),
+      verbose = FALSE, coerce = FALSE
+    )
+
+    expect_equal(
+      vapply(streamed$rule_errors, function(e) e$message, character(1)),
+      vapply(expected$rule_errors, function(e) e$message, character(1)),
+      info = paste0("case '", name, "'")
+    )
+  }
+})
+
+test_that("the streamed details object satisfies the published contract", {
+  # Every field the exported reporting functions read must be present, with the
+  # type they expect. A streamed result has to be a drop-in for a materialised
+  # one, not merely similar to it.
+  case <- vc_corpus()$all_axes
+  streamed <- dta_validate_table_stream(
+    case$specs, vs_reader(case$table, 2L),
+    verbose = FALSE, coerce = FALSE
+  )
+
+  expect_named(
+    streamed,
+    c(
+      "ok", "schema_valid", "rules_valid", "import_valid",
+      "n_schema_errors", "n_rule_errors", "n_import_errors",
+      "schema_errors", "rule_results", "rule_errors", "import_errors",
+      "schema_version"
+    )
+  )
+  expect_named(streamed$schema_errors, c("summarised_error", "full_error"))
+  expect_type(streamed$n_import_errors, "integer")
+
+  # And it must survive the coercion every consumer goes through.
+  flat <- as.data.frame(dta_as_validation_details(streamed))
+  expect_true(all(
+    c("source", "rule_id", "row", "column", "keyword", "message") %in% names(flat)
+  ))
+  expect_gt(nrow(flat), 0)
+})
+
+test_that("streaming types each batch when asked, recording import errors", {
+  # With coerce = TRUE the driver does the work the import layer does once for
+  # a materialised table, but batch by batch and with global row numbers.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  ))
+  table <- data.frame(
+    VAL = c("10", "abc", "30", "xyz"),
+    stringsAsFactors = FALSE
+  )
+
+  streamed <- dta_validate_table_stream(
+    specs, vs_reader(table, 1L),
+    verbose = FALSE, coerce = TRUE
+  )
+
+  expect_false(streamed$import_valid)
+  expect_equal(as.integer(streamed$n_import_errors), 2L)
+  # Row numbers are global, so the second bad value is row 4 and not row 1 of
+  # its own batch.
+  expect_equal(sort(streamed$import_errors$row), c(2L, 4L))
+})
+
+test_that("max_errors caps retained schema detail without changing the verdict", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
+  ))
+  table <- data.frame(ID = rep("TOOLONG", 20), stringsAsFactors = FALSE)
+
+  capped <- dta_validate_table_stream(
+    specs, vs_reader(table, 3L),
+    verbose = FALSE, max_errors = 5L, coerce = FALSE
+  )
+  uncapped <- dta_validate_table_stream(
+    specs, vs_reader(table, 3L),
+    verbose = FALSE, coerce = FALSE
+  )
+
+  expect_equal(nrow(capped$schema_errors$full_error), 5)
+  expect_equal(nrow(uncapped$schema_errors$full_error), 20)
+
+  # The count and the verdict are unaffected by how much detail was kept.
+  expect_equal(capped$n_schema_errors, 20)
+  expect_equal(capped$n_schema_errors, uncapped$n_schema_errors)
+  expect_equal(capped$ok, uncapped$ok)
+  expect_false(capped$schema_valid)
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {
