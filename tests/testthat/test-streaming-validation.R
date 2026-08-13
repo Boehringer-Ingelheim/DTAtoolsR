@@ -269,6 +269,114 @@ test_that("max_errors caps retained schema detail without changing the verdict",
   expect_false(capped$schema_valid)
 })
 
+# ---- end to end, from a file -------------------------------------------------
+
+vs_write_csv <- function(df) {
+  path <- tempfile(fileext = ".csv")
+  utils::write.csv(df, path, row.names = FALSE)
+  path
+}
+
+test_that("a file is validated by scanning it, matching the in-memory verdict", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+  ))
+  table <- data.frame(
+    ID = c("A001", "TOOLONG", "B002"),
+    AGE = c(30, 40, 50),
+    stringsAsFactors = FALSE
+  )
+  path <- vs_write_csv(table)
+  on.exit(unlink(path), add = TRUE)
+
+  streamed <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_false(streamed$schema_valid)
+  expect_equal(streamed$n_schema_errors, 1)
+  expect_equal(streamed$schema_errors$full_error$row, 2L)
+  expect_equal(streamed$schema_errors$full_error$keyword, "maxLength")
+})
+
+test_that("the scanned result is a drop-in for the reporting functions", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = c("A001", "TOOLONG"), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  streamed <- validate_file_stream(specs, path, verbose = FALSE)
+  flat <- as.data.frame(dta_as_validation_details(streamed))
+
+  expect_true(all(
+    c("source", "rule_id", "row", "column", "keyword", "message") %in% names(flat)
+  ))
+  expect_equal(flat$source, "schema")
+  expect_equal(flat$row, 2)
+})
+
+test_that("row numbers survive a scan divided into many batches", {
+  # The point of the whole exercise: a violation deep in a file is reported at
+  # its position in the file, whatever batch size the scan happened to use.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  ids <- sprintf("A%03d", 1:200)
+  ids[177] <- "WAY-TOO-LONG"
+  path <- vs_write_csv(data.frame(ID = ids, stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  for (batch_rows in c(8L, 64L, 100000L)) {
+    streamed <- validate_file_stream(
+      specs, path,
+      batch_rows = batch_rows, verbose = FALSE
+    )
+    expect_equal(streamed$n_schema_errors, 1)
+    expect_equal(streamed$schema_errors$full_error$row, 177L)
+  }
+})
+
+test_that("rules are enforced across a scanned file", {
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    ),
+    list(
+      DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70)),
+      DTARuleColUnique(id = "id_unique", columns = "ID")
+    )
+  )
+  table <- data.frame(
+    ID = c("A001", "A002", "A001", "A004"),
+    AGE = c(30, 99, 40, 50),
+    stringsAsFactors = FALSE
+  )
+  path <- vs_write_csv(table)
+  on.exit(unlink(path), add = TRUE)
+
+  # A batch size of 1 puts the duplicate in a different batch from its original
+  # and the out-of-range value in a batch of its own.
+  streamed <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
+
+  expect_false(streamed$rules_valid)
+  expect_equal(streamed$n_rule_errors, 2)
+
+  messages <- vapply(streamed$rule_errors, function(e) e$message, character(1))
+  expect_true(any(grepl("age_range", messages, fixed = TRUE)))
+  expect_true(any(grepl("id_unique", messages, fixed = TRUE)))
+})
+
+test_that("a missing file is reported rather than failing obscurely", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  expect_error(
+    validate_file_stream(specs, file.path(tempdir(), "definitely-not-here.csv")),
+    "File not found"
+  )
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {

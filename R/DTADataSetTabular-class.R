@@ -100,8 +100,28 @@ DTADataSetTabular <- S7::new_class(
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
     }
 
-    if (length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "Table")))) {
-      cli_abort("All elements of 'tables' must be of class 'Table'")
+    # A table may be materialised (an Arrow Table) or lazy (a Dataset, a query
+    # over one, or a batch reader). The lazy forms exist so a file larger than
+    # memory can be validated by scanning it, which an in-memory Table forbids
+    # by construction. Everything downstream either scans batches or converts,
+    # so both are usable; what is rejected is a plain data frame or a list,
+    # which would silently skip Arrow entirely.
+    if (length(self@tables) > 0) {
+      acceptable <- vapply(
+        self@tables,
+        function(x) {
+          inherits(x, "Table") ||
+            inherits(x, "Dataset") ||
+            inherits(x, "arrow_dplyr_query") ||
+            inherits(x, "RecordBatchReader")
+        },
+        logical(1)
+      )
+      if (!all(acceptable)) {
+        cli_abort(
+          "All elements of 'tables' must be an Arrow {.cls Table}, {.cls Dataset}, {.cls arrow_dplyr_query} or {.cls RecordBatchReader}."
+        )
+      }
     }
 
     # if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "arrow::ArrowTabular")))) {

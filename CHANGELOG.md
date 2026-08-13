@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`validate_file_stream()` validates a delimited file without loading it.**
+  The file is opened as a lazy Arrow dataset and scanned in batches, so peak
+  memory is governed by the batch size rather than by the size of the file.
+  This is what makes a file larger than memory checkable at all: the existing
+  path has to hold the whole table as an R data frame before it can validate a
+  single row.
+
+  It returns the same validation details the in-memory path returns, so
+  `results()`, `messages()` and `inspect()` accept the result unchanged.
+
+  `max_errors` caps how much per-cell error detail is retained. Counting is
+  unaffected, so totals and the pass/fail verdict stay exact even when the
+  retained detail is truncated — a report says "20 problems, here are 5", never
+  "5 problems".
+
+  Memory is bounded by the batch size for the column-spec checks and by the
+  number of distinct keys for uniqueness rules. Grouped (`group_condition`)
+  rules are the exception: a group may span any part of the file, so the
+  columns those rules read are held for the whole scan.
+
+- A `DTADataSetTabular`'s `tables` may now hold a lazy Arrow `Dataset`,
+  `arrow_dplyr_query` or `RecordBatchReader` as well as a materialised `Table`.
+
 ### Changed
 
 - Schema validation no longer serialises the table to JSON and runs a JSON

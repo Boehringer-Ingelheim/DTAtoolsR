@@ -556,6 +556,116 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
   errors
 }
 
+# ---- reading a file without materialising it ---------------------------------
+
+#' @title Open a Delimited File as a Lazy Dataset
+#' @description
+#' Opens a delimited file for scanning rather than reading it into memory. The
+#' parse options and the spec-driven column types are the same ones the eager
+#' reader uses, so the columns are typed identically -- the difference is only
+#' that nothing is read until a scan asks for it.
+#' @param path Character. Path to the file.
+#' @param specs A `DTAColumnSpecCollection` or `NULL`. Declared types decide how
+#'   columns are parsed; without it every column is inferred.
+#' @param delim Character. The field separator.
+#' @param quote Character. The quoting character.
+#' @param has_header Logical. Whether the first line names the columns.
+#' @return An `arrow::Dataset`.
+#' @keywords internal
+dta_open_delimited_dataset <- function(path,
+                                       specs = NULL,
+                                       delim = ",",
+                                       quote = "\"",
+                                       has_header = TRUE) {
+  arrow::open_delim_dataset(
+    path,
+    delim = delim,
+    quote = quote,
+    col_names = has_header,
+    col_types = dta_reader_col_types(specs, has_header)
+  )
+}
+
+#' @title Validate a Delimited File Without Loading It
+#' @description
+#' Validates a delimited file against a set of column specs by scanning it in
+#' batches, so peak memory is governed by the batch size rather than by the size
+#' of the file. This is what makes a file larger than memory checkable at all:
+#' the eager path has to hold the whole table as an R data frame before it can
+#' validate a single row.
+#'
+#' The result is the same `details` structure the in-memory path returns, so
+#' `results()`, `messages()` and `inspect()` accept it unchanged.
+#'
+#' Memory is bounded by the batch size for the column-spec checks, by the number
+#' of distinct keys for uniqueness rules, and by `max_errors` for the retained
+#' error detail. Grouped rules are the exception: a group may span any part of
+#' the file, so the columns those rules read are held for the whole scan.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @param path Character. Path to the delimited file.
+#' @param delim Character. The field separator. Defaults to a comma.
+#' @param quote Character. The quoting character.
+#' @param has_header Logical. Whether the first line names the columns.
+#' @param batch_rows Integer. Rows per batch. Larger batches trade memory for
+#'   fewer per-batch overheads.
+#' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
+#'   Counting is unaffected, so totals and the pass/fail verdict stay exact even
+#'   when the retained detail is truncated.
+#' @param verbose Logical. Print progress.
+#' @return A validation details list.
+#' @examples
+#' specs <- DTAtools::DTAColumnSpecCollection(
+#'   columns = list(
+#'     ID = DTAtools::DTAColumnSpec(
+#'       id = "ID", type = "SAS Char", length = 4, nullable = FALSE
+#'     ),
+#'     AGE = DTAtools::DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+#'   )
+#' )
+#'
+#' path <- file.path(tempdir(), "dta_stream_example.csv")
+#' utils::write.csv(
+#'   data.frame(ID = c("A001", "TOOLONG"), AGE = c(30, 40)),
+#'   path,
+#'   row.names = FALSE
+#' )
+#'
+#' details <- validate_file_stream(specs, path, verbose = FALSE)
+#' details$n_schema_errors
+#'
+#' unlink(path)
+#' @export
+validate_file_stream <- function(specs,
+                                 path,
+                                 delim = ",",
+                                 quote = "\"",
+                                 has_header = TRUE,
+                                 batch_rows = 131072L,
+                                 max_errors = NULL,
+                                 verbose = TRUE) {
+  if (!file.exists(path)) {
+    cli::cli_abort("File not found: {.path {path}}")
+  }
+
+  dataset <- dta_open_delimited_dataset(
+    path,
+    specs = specs,
+    delim = delim,
+    quote = quote,
+    has_header = has_header
+  )
+
+  reader <- arrow::Scanner$create(dataset, batch_size = batch_rows)$ToRecordBatchReader()
+
+  dta_validate_table_stream(
+    specs,
+    reader,
+    verbose = verbose,
+    max_errors = max_errors,
+    coerce = TRUE
+  )
+}
+
 #' @title Record Batch Reader for an In-Memory Table
 #' @description
 #' Wraps an Arrow table or an R data frame as a reader that yields fixed-size
