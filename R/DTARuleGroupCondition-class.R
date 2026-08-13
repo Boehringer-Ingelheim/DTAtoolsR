@@ -172,8 +172,7 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
     }
 
     ctype <- cst$type %||% ""
-    ctype <- switch(
-      as.character(ctype),
+    ctype <- switch(as.character(ctype),
       not_both = "mutually_exclusive",
       implies = "requires",
       as.character(ctype)
