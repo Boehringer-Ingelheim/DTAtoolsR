@@ -165,6 +165,62 @@ test_that("dta_as_numeric_strict separates missing from unconvertible", {
   expect_false(any(got$missing & got$unconvertible))
 })
 
+# ---- the summarised error frame ---------------------------------------------
+
+# `as.data.frame(details)` selects only source/rule_id/row/column/keyword/
+# message, so the snapshots above never see `summarised_error`. It is returned
+# to users by validate_table(), and its grouping was rewritten along with the
+# rest of the schema axis, so it needs assertions of its own.
+
+test_that("repeated identical violations collapse into one summarised row", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  table <- data.frame(
+    ID = c("A001", "TOOLONG", "B002", "TOOLONG"),
+    stringsAsFactors = FALSE
+  )
+
+  details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
+  summarised <- details$schema_errors$summarised_error
+
+  expect_equal(nrow(summarised), 1)
+  expect_equal(summarised$keyword, "maxLength")
+  expect_equal(summarised$first.row.affected, 2)
+  expect_equal(summarised$last.row.affected, 4)
+  expect_equal(summarised$n.rows.affected, 2L)
+})
+
+test_that("distinct offending values are summarised separately", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  table <- data.frame(
+    ID = c("A001", "TOOLONG", "ALSOTOOLONG"),
+    stringsAsFactors = FALSE
+  )
+
+  details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
+  summarised <- details$schema_errors$summarised_error
+
+  # Same constraint, different values: two groups, each spanning one row.
+  expect_equal(nrow(summarised), 2)
+  expect_setequal(summarised$data, c("TOOLONG", "ALSOTOOLONG"))
+  expect_true(all(summarised$n.rows.affected == 1L))
+})
+
+test_that("a missing column is summarised by constraint, not by row range", {
+  # A column absent from every row gains nothing from a row range, so the
+  # summary collapses to the distinct constraint and its message.
+  details <- vc_details(vc_corpus()$schema_required)
+  summarised <- details$schema_errors$summarised_error
+
+  expect_equal(nrow(summarised), 1)
+  expect_equal(summarised$keyword, "required")
+  expect_match(summarised$message, "must have required property 'MISSING'", fixed = TRUE)
+  expect_false("first.row.affected" %in% names(summarised))
+})
+
 # ---- the cost of a structural failure ---------------------------------------
 
 test_that("a missing column costs one schema error per row, not one per table", {

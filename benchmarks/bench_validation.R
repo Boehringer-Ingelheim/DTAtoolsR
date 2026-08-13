@@ -164,22 +164,11 @@ bench_one <- function(n_rows, n_cols) {
   df <- materialise$value
 
   # 4. schema axis ------------------------------------------------------------
-  # Mirrors validationFunctions.R:111-205. Replicated rather than called
-  # because the loop is inline in validate_table_detailed() and cannot be timed
-  # separately without changing product code.
-  schema <- timed("schema_json", {
-    schema_json <- as_json_schema(specs)
-    obj <- jsonvalidate::json_schema$new(schema_json)
-    chunks <- split(df, ceiling(seq_len(nrow(df)) / 5000))
-    for (chunk in chunks) {
-      json_data <- jsonlite::toJSON(
-        chunk,
-        dataframe = "rows", auto_unbox = TRUE, na = "null"
-      )
-      obj$validate(json_data, verbose = TRUE, greedy = TRUE)
-    }
-    length(chunks)
-  })
+  # Now a direct call: the schema axis is a single function rather than a loop
+  # inlined in validate_table_detailed(), so it needs no replication to be
+  # timed. The stage keeps its name so runs before and after the rewrite line
+  # up in baseline.csv.
+  schema <- timed("schema_json", dta_schema_errors(specs, df))
   stages[[length(stages) + 1]] <- schema
 
   # 5. rules axis -------------------------------------------------------------

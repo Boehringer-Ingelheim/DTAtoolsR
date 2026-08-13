@@ -2,7 +2,7 @@
 % Please edit documentation in R/validationFunctions.R
 \name{validate_table}
 \alias{validate_table}
-\title{Validate Table Against JSON Schema}
+\title{Validate Table Against Its Column Specs}
 \usage{
 validate_table(specs, table, verbose = TRUE)
 }
@@ -20,7 +20,9 @@ has schema errors, returns a list with \code{summarised_error}, \code{full_error
 violated, aborts.
 }
 \description{
-Validates a data.frame against a JSON Schema using jsonvalidate. The table is split into smaller chunks for validation to avoid argument limits.
+Validates a data.frame against the constraints declared by its
+column specs, evaluating each column's values directly rather than
+serialising the table and running a JSON Schema validator over it.
 }
 \details{
 Both axes -- the column specs and the schema rules -- are always evaluated,

@@ -516,7 +516,6 @@ columns_specs_from_word <- function(
 #' @name as_json_schema
 #' @return A list representing the JSON Schema.
 #' @importFrom jsonlite toJSON
-#' @importFrom jsonvalidate json_schema
 #' @examples
 #' library(DTAtools)
 #' specs <- create_example_DTAColumnSpecCollection()
@@ -548,9 +547,11 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
     na = "null"
   )
 
-  invisible(jsonvalidate::json_schema$new(json_schema))
-  # cli::cli_alert_success("Column spec schema is correctly structured.")
-
+  # This previously compiled a JSON Schema validator here and discarded it --
+  # a full schema compile on every call, for nothing. Validation no longer runs
+  # through a JSON Schema validator at all (see R/schemaChecks.R); this
+  # function's job is serialising a spec collection to JSON Schema for other
+  # tools to consume, which is useful in its own right.
   return(json_schema)
 }
 

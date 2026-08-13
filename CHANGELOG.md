@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Schema validation no longer serialises the table to JSON and runs a JSON
+  Schema validator over it. Each column's values are now checked directly
+  against the constraints its spec declares. Validation output is unchanged:
+  the same keywords (`type`, `maxLength`, `enum`, `const`, `pattern`,
+  `required`), the same messages, the same row and column attribution, and the
+  same summarised error frame. A golden-oracle test suite recorded against the
+  previous implementation reports no differences.
+
+  On a 1,000,000-row table the schema axis went from being unmeasurably slow at
+  that size to 8.7 seconds, and throughput rose from 4.5 MB/s to 17.6 MB/s.
+  The axis is still the dominant cost of validation.
+
+### Removed
+
+- **`jsonvalidate` and `tidyr` are no longer dependencies.** `jsonvalidate`
+  brought **V8** with it, a heavy system dependency that slowed installation
+  and CI everywhere, not just validation. `tidyr` was used only to parse the
+  validator's error paths back into row and column numbers, which is no longer
+  necessary.
+
+  `as_json_schema()` remains exported and unchanged. Serialising a spec
+  collection to JSON Schema for other tools is useful in its own right; it is
+  simply no longer how this package validates. It also no longer compiles a
+  validator on every call and throws it away.
+
 ## [0.15.1] - 2026-08-13
 
 ### Fixed
