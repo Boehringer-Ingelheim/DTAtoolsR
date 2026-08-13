@@ -581,3 +581,75 @@ test_that("an empty name is still rejected, in any position", {
     "must be a non-empty character vector"
   )
 })
+
+
+# ---- A non-pattern handler expects exactly one file -------------------------
+# The guard used to test `number_of_files != 1` only. A handler declaring its
+# count as a min/max pair was never checked, and with only a min/max set
+# `number_of_files` is NULL, so the comparison ran on a zero-length value: the
+# object either failed with a message about the wrong thing or -- worse -- was
+# built inconsistent and crashed later, in print_info(), where min and max are
+# compared directly.
+
+test_that("a non-pattern handler rejects a count other than 1, however it is declared", {
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, number_of_files = 2),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, min_number_of_files = 2),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, max_number_of_files = 3),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, min_number_of_files = 1, max_number_of_files = 2),
+    "number_of_files must be 1"
+  )
+})
+
+test_that("a non-pattern handler accepts the counts that do mean one file", {
+  # Whatever is accepted must be complete enough to print: min and max are
+  # compared to each other there, so a half-built object surfaces as a crash.
+  implicit <- DTAFile("file.txt", pattern = FALSE)
+  expect_equal(min_number_of_files(implicit), 1)
+  expect_equal(max_number_of_files(implicit), 1)
+  # print_info() reports through cli, i.e. on the message stream. It compares
+  # min to max directly, so a half-built object surfaces here as an error.
+  expect_match(
+    paste(capture_messages(print_info(implicit)), collapse = ""),
+    "Number of files"
+  )
+
+  explicit <- DTAFile("file.txt", pattern = FALSE, number_of_files = 1)
+  expect_equal(min_number_of_files(explicit), 1)
+  expect_equal(max_number_of_files(explicit), 1)
+
+  as_range <- DTAFile(
+    "file.txt",
+    pattern = FALSE, min_number_of_files = 1, max_number_of_files = 1
+  )
+  expect_equal(min_number_of_files(as_range), 1)
+  expect_equal(max_number_of_files(as_range), 1)
+  expect_match(
+    paste(capture_messages(print_info(as_range)), collapse = ""),
+    "Number of files"
+  )
+})
+
+test_that("a pattern handler may still declare a range", {
+  ranged <- DTAFile(
+    "data.*[.]csv$",
+    pattern = TRUE, min_number_of_files = 1, max_number_of_files = 4
+  )
+
+  expect_equal(min_number_of_files(ranged), 1)
+  expect_equal(max_number_of_files(ranged), 4)
+  # A genuine range reports both bounds, not the single-count line.
+  expect_match(
+    paste(capture_messages(print_info(ranged)), collapse = ""),
+    "Min number of files"
+  )
+})

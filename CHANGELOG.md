@@ -52,6 +52,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A handler that is not a pattern now rejects any file count other than 1
+  whichever way it is declared. The guard only ever looked at
+  `number_of_files`, so a `min_number_of_files`/`max_number_of_files` pair went
+  unchecked, and declaring only a minimum compared against a zero-length value
+  and failed with a message about something else.
 - A file handler could not carry more than one file name. `filename` is
   documented as a character vector and `matches_filename()` implements the
   several-names case, but the validator tested `filename == ""` — a length-1

@@ -648,3 +648,27 @@ test_that("applying raw YAML that rewrites a slot unloads the file it no longer 
     expect_equal(unname(rv$status[["clinical_data"]]), "nodata")
   })
 })
+
+test_that("raw YAML that removes every file handler unloads that dataset's data", {
+  # The most destructive raw-YAML edit there is: with no slot left, a bound
+  # table could neither be shown nor removed, so it must not survive the apply.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    expect_equal(names(rv$uploads), "clinical_data||1")
+
+    stripped <- app_fn("dta_remove_handler")(rv$dta, "clinical_data", 1)
+    expect_true(stripped$ok)
+    yaml_text <- app_fn("dta_to_yaml_text")(stripped$value)
+    session$setInputs(raw_yaml_editor = yaml_text$value)
+    session$setInputs(apply_yaml = 1)
+
+    expect_true(rv$yaml_msg$ok)
+    expect_length(rv$structure$clinical_data$handlers, 0)
+    expect_length(rv$uploads, 0)
+    expect_length(DTAtools::tables(DTAtools::datasets(rv$dta, "clinical_data")), 0)
+    expect_equal(unname(rv$status[["clinical_data"]]), "nodata")
+  })
+})
