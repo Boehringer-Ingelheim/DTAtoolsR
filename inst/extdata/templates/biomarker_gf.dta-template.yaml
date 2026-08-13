@@ -10,11 +10,14 @@ base:
   metadata:
     title: BIOMARKER GF DATA TRANSFER SPECIFICATIONS (DTS)
     version: "1.0"
-    date: 2026-07-29
+    # ${today} and ${version} are resolved when the DTA is created, so a DTA
+    # made from this template is dated the day it was made and its first
+    # version-history entry always agrees with the version the user chose.
+    date: "${today}"
     header: Test Company 1
     version_history:
-      - version: "1.0"
-        date: 2026-07-29
+      - version: "${version}"
+        date: "${today}"
         changes: Initial template-generated version
     receiver:
       affiliation:
@@ -28,174 +31,133 @@ base:
       type: Secure EDT server (SSH sFTP)
       frequency: one-time
       notification: email
+      test_upload: true
+      blinded_transfer: true
+      date_first_transfer: 3 weeks after first batch of sample delivery
+      date_last_transfer: 2 weeks after last batch of samples arrive at laboratory
     error_handling: >-
       Format or content errors are reported by email to the authorized
       contacts and corrected in a follow-up transfer.
     authorized_for_corrections: TDM
 
 options:
-  # Every option below writes to a REAL DTAMetaData field so the values are
-  # visible and editable in the app metadata editor after creation. Text
-  # options offer suggestions in a dropdown AND accept a typed custom value.
+  # Every option writes to a REAL DTAMetaData field via `target:`, so its value
+  # is visible and editable in the app metadata editor after creation.
+  #
+  # `target:` is shorthand for "write my selected value to this field". An
+  # option with no `default:` inherits the value already in base.metadata
+  # above, so each value is stated exactly once instead of being duplicated
+  # between `base` and the option -- a duplication nothing enforced, and which
+  # the option silently won whenever the two drifted apart.
+  #
+  # Text options offer suggestions in a dropdown AND accept a typed custom
+  # value. Use the longhand `effects:` block only when one choice has to set
+  # several fields at once.
 
   - id: title
     label: Document title
     type: text
-    default: BIOMARKER GF DATA TRANSFER SPECIFICATIONS (DTS)
-    help: Title shown on the DTS document (metadata.title). Pick a suggestion or type your own.
+    target: metadata.title
+    help: Title shown on the DTS document. Pick a suggestion or type your own.
     choices:
       - BIOMARKER GF DATA TRANSFER SPECIFICATIONS (DTS)
       - GENOMIC FINDINGS (GF) DATA TRANSFER SPECIFICATIONS
-    effects:
-      __selection__:
-        - path: metadata.title
-          value: __selection__
 
   - id: version
     label: Document version
     type: text
-    default: "1.0"
-    help: Version string (metadata.version).
-    effects:
-      __selection__:
-        - path: metadata.version
-          value: __selection__
+    target: metadata.version
+    help: Version string. Also fills the first version-history entry.
 
   - id: header
     label: Header / organization
     type: text
-    default: Test Company 1
-    help: Organization shown in the document header (metadata.header).
+    target: metadata.header
+    help: Organization shown in the document header.
     choices:
       - Test Company 1
       - Example Pharma Inc.
-    effects:
-      __selection__:
-        - path: metadata.header
-          value: __selection__
 
   - id: transmission_type
     label: Transfer method / type
     type: text
-    default: Secure EDT server (SSH sFTP)
-    help: How the data is transferred (metadata.transmission.type).
+    target: metadata.transmission.type
+    help: How the data is transferred.
     choices:
       - Secure EDT server (SSH sFTP)
       - Secure S3 bucket
       - AWS S3 bucket
       - Secure email
-    effects:
-      __selection__:
-        - path: metadata.transmission.type
-          value: __selection__
 
   - id: transmission_frequency
     label: Transfer frequency
     type: text
-    default: one-time
-    help: How often data is transferred (metadata.transmission.frequency).
+    target: metadata.transmission.frequency
+    help: How often data is transferred.
     choices:
       - one-time
       - weekly
       - monthly
       - upon request
-    effects:
-      __selection__:
-        - path: metadata.transmission.frequency
-          value: __selection__
 
   - id: transmission_notification
     label: Transfer notification
     type: text
-    default: email
-    help: How the recipient is notified of a transfer (metadata.transmission.notification).
+    target: metadata.transmission.notification
+    help: How the recipient is notified of a transfer.
     choices:
       - email
       - none
-    effects:
-      __selection__:
-        - path: metadata.transmission.notification
-          value: __selection__
 
   - id: test_upload
     label: Test upload required?
     type: boolean
-    default: yes
-    help: Sets metadata.transmission.test_upload (Yes/No).
-    effects:
-      yes:
-        - path: metadata.transmission.test_upload
-          value: true
-      no:
-        - path: metadata.transmission.test_upload
-          value: false
+    target: metadata.transmission.test_upload
+    help: Whether a test upload is required before the first real transfer.
 
   - id: blinded_transfer
     label: Blinded transfer required?
     type: boolean
-    default: yes
-    help: Sets metadata.transmission.blinded_transfer (Yes/No).
-    effects:
-      yes:
-        - path: metadata.transmission.blinded_transfer
-          value: true
-      no:
-        - path: metadata.transmission.blinded_transfer
-          value: false
+    target: metadata.transmission.blinded_transfer
+    help: Whether the transfer must be blinded.
 
   - id: date_first_transfer
     label: Date of first transfer
     type: text
-    default: 3 weeks after first batch of sample delivery
-    help: Date or phrase for the first transfer (metadata.transmission.date_first_transfer).
+    target: metadata.transmission.date_first_transfer
+    help: Date or phrase for the first transfer.
     choices:
       - 3 weeks after first batch of sample delivery
       - 3 working days after treatment unblinding
-    effects:
-      __selection__:
-        - path: metadata.transmission.date_first_transfer
-          value: __selection__
 
   - id: date_last_transfer
     label: Date of last transfer
     type: text
-    default: 2 weeks after last batch of samples arrive at laboratory
-    help: Date or phrase for the final transfer (metadata.transmission.date_last_transfer).
+    target: metadata.transmission.date_last_transfer
+    help: Date or phrase for the final transfer.
     choices:
       - 2 weeks after last batch of samples arrive at laboratory
       - 1 week before final SDTM run
       - 4 weeks after last sample arrival
-    effects:
-      __selection__:
-        - path: metadata.transmission.date_last_transfer
-          value: __selection__
 
   - id: error_handling
     label: Error handling
     type: text
-    default: Format or content errors are reported by email to the authorized contacts and corrected in a follow-up transfer.
-    help: How data/format errors are handled and communicated (metadata.error_handling).
+    target: metadata.error_handling
+    help: How data/format errors are handled and communicated.
     choices:
       - Format or content errors are reported by email to the authorized contacts and corrected in a follow-up transfer.
       - Errors are logged and resolved before the next scheduled transfer.
-    effects:
-      __selection__:
-        - path: metadata.error_handling
-          value: __selection__
 
   - id: authorized_for_corrections
     label: Authorized for corrections
     type: text
-    default: TDM
-    help: Contact(s) authorized to request corrections (metadata.authorized_for_corrections).
+    target: metadata.authorized_for_corrections
+    help: Contact(s) authorized to request corrections.
     choices:
       - TDM
       - SciMo
       - Trial Data Manager (TDM)
-    effects:
-      __selection__:
-        - path: metadata.authorized_for_corrections
-          value: __selection__
 
 
 datasets:

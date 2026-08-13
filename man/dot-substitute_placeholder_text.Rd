@@ -6,7 +6,26 @@
 \usage{
 .substitute_placeholder_text(text, variables)
 }
+\arguments{
+\item{text}{Character scalar to substitute into.}
+
+\item{variables}{Named list of brace-delimited placeholder values.}
+}
+\value{
+A list with \code{text} (the substituted string) and \code{unresolved} (unique
+token-shaped matches that had no value).
+}
 \description{
-Replace known placeholders in a text string and report unresolved tokens
+One left-to-right pass over the \strong{original} text. Every match is either
+mapped to its value or emitted verbatim, and the result is accumulated in a
+separate buffer, so a substituted value is never rescanned. That is what
+stops a value which itself contains braces -- a title like
+\code{"Study {A} vs {B}"} -- from being re-substituted or falsely reported as an
+unresolved placeholder the template never contained.
+}
+\details{
+The match set is "any known key" \emph{or} "anything token-shaped". Known keys
+come first so that an exact variable name wins over the generic grammar, and
+so that keys which do not fit the grammar still match.
 }
 \keyword{internal}
