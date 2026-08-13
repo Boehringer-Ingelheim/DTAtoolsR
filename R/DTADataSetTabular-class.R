@@ -1025,9 +1025,14 @@ S7::method(check, DTADataSetTabular) <- function(
     x@validation_index[[table_name]] <- index_entry
     x@validation_store[[table_name]] <- details
 
-    # Attach details for single table mode
+    # Attach details for single table mode.
+    #
+    # Tagged on the way out. `dta_validate_any_table()` returns a tagged result
+    # for a lazy table and an untagged one for a materialised table, so without
+    # this the attribute's class would depend on how the table happened to be
+    # held -- and `as.data.frame()` would work on one and fail on the other.
     if (single_table_mode) {
-      attr(x, "last_validation_details") <- details
+      attr(x, "last_validation_details") <- dta_as_validation_details(details)
     }
 
     output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(

@@ -898,6 +898,40 @@ test_that("check() scans a lazy table held in a DTADataSetTabular", {
   expect_equal(status$n_rule_errors[[1]], 1)
 })
 
+test_that("last_validation_details is usable however the table was held", {
+  # dta_validate_any_table() returns a tagged result for a lazy table and an
+  # untagged one for a materialised table. The attribute must not inherit that
+  # difference, or as.data.frame() would work on one and fail on the other.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  frame <- data.frame(ID = c("A001", "TOOLONG"), stringsAsFactors = FALSE)
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  materialised <- DTADataSetTabular(
+    name = "eager", specs = specs,
+    tables = list(demo = arrow::as_arrow_table(frame))
+  )
+  # `tab =` is what puts check() in single-table mode; the attribute is only
+  # attached there, which is deliberate and not something this test should
+  # widen.
+  materialised <- check(materialised, tab = "demo", quiet = TRUE)
+
+  lazy <- DTADataSetTabular(
+    name = "lazy", specs = specs,
+    tables = list(demo = arrow::as_arrow_table(frame))
+  )
+  lazy@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
+  lazy <- check(lazy, tab = "demo", quiet = TRUE)
+
+  for (obj in list(materialised, lazy)) {
+    details <- attr(obj, "last_validation_details")
+    expect_s3_class(details, "dta_validation_details")
+    expect_equal(nrow(as.data.frame(details)), 1)
+  }
+})
+
 test_that("a lazy table is accepted by the tables property contract", {
   path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
   on.exit(unlink(path), add = TRUE)
