@@ -483,6 +483,6 @@ test_that("template variables are extracted from a bundled YAML fixture", {
     vars[["{TOTAL_RULES}"]],
     as.character(sum(vapply(dta@datasets, function(d) length(d@specs@rules), integer(1))))
   )
-  expect_equal(vars[["{TOTAL_RULES}"]], "6")
+  expect_equal(vars[["{TOTAL_RULES}"]], "8")
   expect_equal(vars[["{TOTAL_COLUMNS}"]], "14")
 })

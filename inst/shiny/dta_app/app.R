@@ -214,6 +214,8 @@ server <- function(input, output, session) {
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
     then_n = 1L, # condition-builder row count (THEN ...)
+    gcond_n = 1L, # grouped condition row count
+    gconstr_n = 1L, # grouped constraint row count
     template_def = NULL, # active creation-template definition (modal flow)
     template_path = NULL # source path of active creation-template
   )
@@ -225,6 +227,8 @@ server <- function(input, output, session) {
   file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
   file_id_meta <- new.env(parent = emptyenv()) # id (as chr) -> list(dataset, hi, table)
   file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
+  gcond_rm_registry <- new.env(parent = emptyenv()) # grouped-condition remove observers
+  gconstr_rm_registry <- new.env(parent = emptyenv()) # grouped-constraint remove observers
   file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
@@ -2056,6 +2060,326 @@ server <- function(input, output, session) {
     out
   }
 
+  one_group_cond_row <- function(i, cols, pf = list(name = "", col = "", op = "equals", val = "")) {
+    rid <- paste0("gcond_row_", i)
+    nid <- paste0("gcond_name_", i)
+    cid <- paste0("gcond_col_", i)
+    oid <- paste0("gcond_op_", i)
+    vid <- paste0("gcond_val_", i)
+    bid <- paste0("gcond_remove_", i)
+    div(
+      id = rid,
+      class = "cond-row",
+      textInput(nid, if (i == 1) "Condition name" else NULL,
+        value = pf$name %||% "", width = "100%",
+        placeholder = "c1_failed"
+      ),
+      selectInput(cid, if (i == 1) "Column" else NULL,
+        choices = c("(select)" = "", cols),
+        selected = pf$col %||% "", width = "100%"
+      ),
+      selectInput(oid, if (i == 1) "Operator" else NULL,
+        choices = dta_condition_operators(),
+        selected = pf$op %||% "equals", width = "100%"
+      ),
+      textInput(vid, if (i == 1) "Value" else NULL,
+        value = pf$val %||% "", width = "100%",
+        placeholder = "5 | a, b | 0, 99 | true"
+      ),
+      actionButton(
+        bid,
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger"
+      )
+    )
+  }
+
+  flatten_group_conditions <- function(conditions) {
+    if (is.null(conditions) || length(conditions) == 0) {
+      return(list())
+    }
+    rows <- list()
+    for (nm in names(conditions)) {
+      spec <- conditions[[nm]]
+      converted <- cond_to_rows(spec)
+      if (length(converted) == 0) {
+        rows[[length(rows) + 1L]] <- list(name = nm, col = "", op = "equals", val = "")
+      } else {
+        for (entry in converted) {
+          rows[[length(rows) + 1L]] <- c(list(name = nm), entry)
+        }
+      }
+    }
+    rows
+  }
+
+  build_group_cond_rows <- function(n, cols, prefill) {
+    lapply(seq_len(max(1L, n)), function(i) {
+      pf <- if (i <= length(prefill)) prefill[[i]] else list(name = "", col = "", op = "equals", val = "")
+      one_group_cond_row(i, cols, pf)
+    })
+  }
+
+  collect_group_conditions <- function(n) {
+    out <- list()
+    for (i in seq_len(max(1L, n))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      col <- trimws(input[[paste0("gcond_col_", i)]] %||% "")
+      if (!nzchar(nm) || !nzchar(col)) next
+
+      op <- input[[paste0("gcond_op_", i)]] %||% "equals"
+      txt <- input[[paste0("gcond_val_", i)]]
+
+      if (is.null(out[[nm]])) {
+        out[[nm]] <- list()
+      }
+
+      if (is.null(out[[nm]][[col]])) {
+        out[[nm]][[col]] <- list()
+      }
+
+      if (identical(op, "min_max")) {
+        parts <- trimws(strsplit(txt %||% "", ",", fixed = TRUE)[[1]])
+        mn <- if (length(parts) >= 1 && nzchar(parts[1])) suppressWarnings(as.numeric(parts[1])) else NA_real_
+        mx <- if (length(parts) >= 2 && nzchar(parts[2])) suppressWarnings(as.numeric(parts[2])) else NA_real_
+        if (!is.na(mn)) out[[nm]][[col]]$min <- mn
+        if (!is.na(mx)) out[[nm]][[col]]$max <- mx
+      } else {
+        out[[nm]][[col]][[op]] <- parse_cond_value(op, txt)
+      }
+    }
+    out
+  }
+
+  one_group_constraint_row <- function(i, cond_names, pf = list()) {
+    rowid <- paste0("gconstr_row_", i)
+    cid <- paste0("gconstr_id_", i)
+    tid <- paste0("gconstr_type_", i)
+    lid <- paste0("gconstr_left_", i)
+    rid <- paste0("gconstr_right_", i)
+    lsid <- paste0("gconstr_lscope_", i)
+    rsid <- paste0("gconstr_rscope_", i)
+    mid <- paste0("gconstr_msg_", i)
+    bid <- paste0("gconstr_remove_", i)
+
+    ctype <- pf$type %||% "mutually_exclusive"
+    left_name <- pf$left %||% pf[["if"]] %||% ""
+    right_name <- pf$right %||% pf$then %||% ""
+
+    div(
+      id = rowid,
+      class = "cond-row",
+      textInput(cid, if (i == 1) "Constraint id" else NULL,
+        value = pf$id %||% "", width = "100%",
+        placeholder = paste0("constraint_", i)
+      ),
+      selectInput(tid, if (i == 1) "Type" else NULL,
+        choices = c("mutually_exclusive", "requires"),
+        selected = ctype,
+        width = "100%"
+      ),
+      selectInput(lid, if (i == 1) "Left / IF" else NULL,
+        choices = c("(select)" = "", cond_names),
+        selected = left_name,
+        width = "100%"
+      ),
+      selectInput(rid, if (i == 1) "Right / THEN" else NULL,
+        choices = c("(select)" = "", cond_names),
+        selected = right_name,
+        width = "100%"
+      ),
+      selectInput(lsid, if (i == 1) "Left/IF scope" else NULL,
+        choices = c("any", "all"),
+        selected = pf$left_scope %||% pf$if_scope %||% "any",
+        width = "100%"
+      ),
+      selectInput(rsid, if (i == 1) "Right/THEN scope" else NULL,
+        choices = c("any", "all"),
+        selected = pf$right_scope %||% pf$then_scope %||% "any",
+        width = "100%"
+      ),
+      textInput(mid, if (i == 1) "Message" else NULL,
+        value = pf$message %||% "", width = "100%"
+      ),
+      actionButton(
+        bid,
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger"
+      )
+    )
+  }
+
+  visible_group_condition_rows <- function() {
+    out <- integer(0)
+    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      if (!is.null(input[[paste0("gcond_name_", i)]])) {
+        out <- c(out, i)
+      }
+    }
+    out
+  }
+
+  visible_group_constraint_rows <- function() {
+    out <- integer(0)
+    for (i in seq_len(max(1L, isolate(rv$gconstr_n)))) {
+      if (!is.null(input[[paste0("gconstr_type_", i)]])) {
+        out <- c(out, i)
+      }
+    }
+    out
+  }
+
+  find_condition_dependencies <- function(condition_name, excluding_row) {
+    if (!nzchar(condition_name)) {
+      return(character(0))
+    }
+
+    # If another condition row with the same name remains, constraints still
+    # have a valid target and this row can be removed safely.
+    has_other_named_row <- FALSE
+    for (k in visible_group_condition_rows()) {
+      if (k == excluding_row) next
+      nm <- trimws(input[[paste0("gcond_name_", k)]] %||% "")
+      if (identical(nm, condition_name)) {
+        has_other_named_row <- TRUE
+        break
+      }
+    }
+    if (has_other_named_row) {
+      return(character(0))
+    }
+
+    deps <- character(0)
+    for (j in visible_group_constraint_rows()) {
+      left <- trimws(input[[paste0("gconstr_left_", j)]] %||% "")
+      right <- trimws(input[[paste0("gconstr_right_", j)]] %||% "")
+      if (identical(left, condition_name) || identical(right, condition_name)) {
+        cid <- trimws(input[[paste0("gconstr_id_", j)]] %||% "")
+        deps <- c(deps, if (nzchar(cid)) cid else paste0("constraint_", j))
+      }
+    }
+
+    unique(deps)
+  }
+
+  clear_group_condition_row <- function(i) {
+    updateTextInput(session, paste0("gcond_name_", i), value = "")
+    updateSelectInput(session, paste0("gcond_col_", i), selected = "")
+    updateSelectInput(session, paste0("gcond_op_", i), selected = "equals")
+    updateTextInput(session, paste0("gcond_val_", i), value = "")
+  }
+
+  clear_group_constraint_row <- function(i) {
+    updateTextInput(session, paste0("gconstr_id_", i), value = "")
+    updateSelectInput(session, paste0("gconstr_type_", i), selected = "mutually_exclusive")
+    updateSelectInput(session, paste0("gconstr_left_", i), selected = "")
+    updateSelectInput(session, paste0("gconstr_right_", i), selected = "")
+    updateSelectInput(session, paste0("gconstr_lscope_", i), selected = "any")
+    updateSelectInput(session, paste0("gconstr_rscope_", i), selected = "any")
+    updateTextInput(session, paste0("gconstr_msg_", i), value = "")
+  }
+
+  ensure_gcond_remove_observer <- function(i) {
+    bid <- paste0("gcond_remove_", i)
+    if (isTRUE(gcond_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    gcond_rm_registry[[bid]] <- TRUE
+
+    observeEvent(input[[bid]], {
+      row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      deps <- find_condition_dependencies(row_name, excluding_row = i)
+
+      if (length(deps) > 0) {
+        rv$rule_msg <- list(
+          ok = FALSE,
+          error = paste0(
+            "Cannot remove condition '", row_name,
+            "' because it is referenced by: ",
+            paste(deps, collapse = ", "),
+            ". Remove dependent constraints first."
+          )
+        )
+        return()
+      }
+
+      vis <- visible_group_condition_rows()
+      if (length(vis) <= 1) {
+        clear_group_condition_row(i)
+      } else {
+        removeUI(selector = paste0("#gcond_row_", i))
+      }
+      rv$rule_msg <- NULL
+    }, ignoreInit = TRUE)
+  }
+
+  ensure_gconstr_remove_observer <- function(i) {
+    bid <- paste0("gconstr_remove_", i)
+    if (isTRUE(gconstr_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    gconstr_rm_registry[[bid]] <- TRUE
+
+    observeEvent(input[[bid]], {
+      vis <- visible_group_constraint_rows()
+      if (length(vis) <= 1) {
+        clear_group_constraint_row(i)
+      } else {
+        removeUI(selector = paste0("#gconstr_row_", i))
+      }
+      rv$rule_msg <- NULL
+    }, ignoreInit = TRUE)
+  }
+
+  flatten_group_constraints <- function(constraints) {
+    if (is.null(constraints) || length(constraints) == 0) {
+      return(list())
+    }
+    lapply(constraints, function(cst) {
+      if (identical(cst$type %||% "", "not_both")) cst$type <- "mutually_exclusive"
+      if (identical(cst$type %||% "", "implies")) cst$type <- "requires"
+      cst
+    })
+  }
+
+  collect_group_constraints <- function(n) {
+    out <- list()
+    for (i in seq_len(max(1L, n))) {
+      ctype <- trimws(input[[paste0("gconstr_type_", i)]] %||% "")
+      left <- trimws(input[[paste0("gconstr_left_", i)]] %||% "")
+      right <- trimws(input[[paste0("gconstr_right_", i)]] %||% "")
+      if (!nzchar(ctype) || !nzchar(left) || !nzchar(right)) next
+
+      cid <- trimws(input[[paste0("gconstr_id_", i)]] %||% "")
+      msg <- trimws(input[[paste0("gconstr_msg_", i)]] %||% "")
+      left_scope <- trimws(input[[paste0("gconstr_lscope_", i)]] %||% "any")
+      right_scope <- trimws(input[[paste0("gconstr_rscope_", i)]] %||% "any")
+
+      if (identical(ctype, "requires")) {
+        out[[length(out) + 1L]] <- list(
+          id = if (nzchar(cid)) cid else paste0("constraint_", i),
+          type = "requires",
+          `if` = left,
+          then = right,
+          if_scope = left_scope,
+          then_scope = right_scope,
+          message = if (nzchar(msg)) msg else NULL
+        )
+      } else {
+        out[[length(out) + 1L]] <- list(
+          id = if (nzchar(cid)) cid else paste0("constraint_", i),
+          type = "mutually_exclusive",
+          left = left,
+          right = right,
+          left_scope = left_scope,
+          right_scope = right_scope,
+          message = if (nzchar(msg)) msg else NULL
+        )
+      }
+    }
+    out
+  }
+
   # A single modal with two swappable views (list <-> form) so only ONE popup is
   # ever open. rv$rule_view drives the view; rv$rule_token forces re-renders.
   observeEvent(input$edit_rules, {
@@ -2067,6 +2391,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- 1L
     rv$then_n <- 1L
+    rv$gcond_n <- 1L
+    rv$gconstr_n <- 1L
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
       title = paste("Edit rules \u2014", rv$active),
@@ -2159,6 +2485,52 @@ server <- function(input, output, session) {
           "Rows must be unique across the selected column(s) taken together."
         )
       )
+    } else if (identical(rt, "group_condition")) {
+      group_rows <- flatten_group_conditions(pf$conditions)
+      constraint_rows <- flatten_group_constraints(pf$constraints)
+      cond_names <- unique(vapply(group_rows, function(x) trimws(x$name %||% ""), character(1)))
+      cond_names <- cond_names[nzchar(cond_names)]
+      tagList(
+        selectizeInput("rule_group_by", "Group by column(s)",
+          choices = cols,
+          selected = pf$group_by %||% character(0),
+          multiple = TRUE,
+          width = "100%"
+        ),
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "Conditions (named):"),
+          div(
+            id = "gcond_rows",
+            build_group_cond_rows(
+              isolate(rv$gcond_n),
+              cols,
+              if (length(group_rows) > 0) group_rows else list()
+            )
+          ),
+          actionButton("gcond_add", HTML("&#x2795; Add condition row"),
+            class = "btn btn-sm btn-outline-secondary"
+          )
+        ),
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "Constraints:"),
+          div(
+            id = "gconstr_rows",
+            lapply(seq_len(max(1L, isolate(rv$gconstr_n))), function(i) {
+              pf_row <- if (i <= length(constraint_rows)) constraint_rows[[i]] else list()
+              one_group_constraint_row(i, cond_names, pf_row)
+            })
+          ),
+          actionButton("gconstr_add", HTML("&#x2795; Add constraint"),
+            class = "btn btn-sm btn-outline-secondary"
+          )
+        ),
+        div(
+          class = "cond-hint",
+          "Use one condition name across multiple rows to build compound conditions."
+        )
+      )
     } else {
       div(
         class = "cond-hint",
@@ -2179,7 +2551,8 @@ server <- function(input, output, session) {
           "\u2014 select a rule type \u2014" = "",
           "Conditional (IF/THEN)" = "col_condition",
           "Range" = "col_range",
-          "Unique" = "col_unique"
+          "Unique" = "col_unique",
+          "Grouped condition" = "group_condition"
         ),
         selected = rt, width = "100%"
       )
@@ -2257,6 +2630,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- 1L
     rv$then_n <- 1L
+    rv$gcond_n <- 1L
+    rv$gconstr_n <- 1L
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -2283,6 +2658,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- max(1L, length(cond_to_rows(f$condition)))
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
+    rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
+    rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -2364,6 +2741,70 @@ server <- function(input, output, session) {
     )
   })
 
+  observeEvent(input$gcond_add, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    cols <- dta_column_ids(isolate(rv$dta), ed)
+    rv$gcond_n <- isolate(rv$gcond_n) + 1L
+    insertUI("#gcond_rows",
+      where = "beforeEnd",
+      ui = one_group_cond_row(isolate(rv$gcond_n), cols)
+    )
+  })
+
+  observeEvent(input$gconstr_add, {
+    cond_names <- character(0)
+    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      if (nzchar(nm)) cond_names <- c(cond_names, nm)
+    }
+    cond_names <- unique(cond_names)
+    rv$gconstr_n <- isolate(rv$gconstr_n) + 1L
+    insertUI("#gconstr_rows",
+      where = "beforeEnd",
+      ui = one_group_constraint_row(isolate(rv$gconstr_n), cond_names)
+    )
+  })
+
+  observe({
+    req(identical(rv$rule_view, "form"))
+    req(rv$gconstr_n >= 1)
+
+    for (i in seq_len(max(1L, rv$gcond_n))) {
+      ensure_gcond_remove_observer(i)
+    }
+    for (i in seq_len(max(1L, rv$gconstr_n))) {
+      ensure_gconstr_remove_observer(i)
+    }
+
+    cond_names <- character(0)
+    for (i in seq_len(max(1L, rv$gcond_n))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      if (nzchar(nm)) cond_names <- c(cond_names, nm)
+    }
+    cond_names <- unique(cond_names)
+
+    for (i in seq_len(max(1L, rv$gconstr_n))) {
+      left_id <- paste0("gconstr_left_", i)
+      right_id <- paste0("gconstr_right_", i)
+      left_selected <- input[[left_id]]
+      right_selected <- input[[right_id]]
+
+      updateSelectInput(
+        session,
+        left_id,
+        choices = c("(select)" = "", cond_names),
+        selected = if (!is.null(left_selected) && nzchar(left_selected)) left_selected else ""
+      )
+      updateSelectInput(
+        session,
+        right_id,
+        choices = c("(select)" = "", cond_names),
+        selected = if (!is.null(right_selected) && nzchar(right_selected)) right_selected else ""
+      )
+    }
+  })
+
   # When the user switches the rule type, reset the type-specific part but keep
   # the id/description they typed. A programmatic sync (the select rendering with
   # its prefilled value) is ignored by comparing against the prefill's type.
@@ -2388,9 +2829,14 @@ server <- function(input, output, session) {
       pf$columns <- NULL
       pf$min <- NULL
       pf$max <- NULL
+      pf$group_by <- NULL
+      pf$conditions <- NULL
+      pf$constraints <- NULL
       rv$rule_prefill <- pf
       rv$cond_n <- 1L
       rv$then_n <- 1L
+      rv$gcond_n <- 1L
+      rv$gconstr_n <- 1L
       rv$rule_msg <- NULL
       rv$rule_token <- rv$rule_token + 1
     },
@@ -2447,13 +2893,41 @@ server <- function(input, output, session) {
         rv$rule_msg <- list(ok = FALSE, error = "A range rule needs a minimum and/or maximum.")
         return()
       }
-    } else {
+    } else if (identical(rt, "col_unique")) {
       cols <- input$rule_cols
       if (length(cols) == 0) {
         rv$rule_msg <- list(ok = FALSE, error = "Select at least one column.")
         return()
       }
       args$columns <- cols
+    } else if (identical(rt, "group_condition")) {
+      gby <- input$rule_group_by %||% character(0)
+      if (length(gby) == 0) {
+        rv$rule_msg <- list(ok = FALSE, error = "Select at least one grouping column.")
+        return()
+      }
+
+      gconds <- collect_group_conditions(isolate(rv$gcond_n))
+      if (length(gconds) == 0) {
+        rv$rule_msg <- list(
+          ok = FALSE,
+          error = "Define at least one named grouped condition with a column and operator."
+        )
+        return()
+      }
+
+      gconstraints <- collect_group_constraints(isolate(rv$gconstr_n))
+      if (length(gconstraints) == 0) {
+        rv$rule_msg <- list(ok = FALSE, error = "Define at least one grouped constraint.")
+        return()
+      }
+
+      args$group_by <- gby
+      args$conditions <- gconds
+      args$constraints <- gconstraints
+    } else {
+      rv$rule_msg <- list(ok = FALSE, error = sprintf("Unsupported rule type: %s", rt))
+      return()
     }
     r <- do.call(dta_set_rule, args)
     if (!isTRUE(r$ok)) {

@@ -496,6 +496,26 @@ test_that("dta_build_rule dispatches to DTARuleColUnique for a col_unique rule",
   expect_equal(rule@columns, c("SUBJECT_ID", "VISIT"))
 })
 
+test_that("dta_build_rule dispatches to DTARuleGroupCondition for a group_condition rule", {
+  fn <- app_fn("dta_build_rule")
+
+  rule <- fn(
+    id = "r_group",
+    type = "group_condition",
+    group_by = c("SUBJECT_ID", "VISIT"),
+    conditions = list(
+      c1 = list(STATUS = list(equals = "FAILED")),
+      c2 = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "requires", `if` = "c1", then = "c2"))
+  )
+
+  expect_s3_class(rule, "DTAtools::DTARuleGroupCondition")
+  expect_equal(rule@group_by, c("SUBJECT_ID", "VISIT"))
+  expect_equal(names(rule@conditions), c("c1", "c2"))
+  expect_equal(rule@constraints[[1]]$type, "requires")
+})
+
 test_that("dta_build_rule errors for an unknown rule type", {
   fn <- app_fn("dta_build_rule")
 

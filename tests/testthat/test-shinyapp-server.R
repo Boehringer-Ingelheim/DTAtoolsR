@@ -278,6 +278,107 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
   })
 })
 
+test_that("saving a group_condition rule from the rule editor updates spec and YAML", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    before_n <- length(DTAtools::datasets(rv$dta, "clinical_data")@specs@rules)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+
+    session$setInputs(
+      rule_id = "sample_visit_status_logic",
+      rule_desc = "Grouped check",
+      rule_group_by = c("SUBJECT_ID", "VISIT"),
+      gcond_name_1 = "c1_failed",
+      gcond_col_1 = "STATUS",
+      gcond_op_1 = "equals",
+      gcond_val_1 = "FAILED"
+    )
+
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "c2_reported",
+      gcond_col_2 = "CONSENT_DATE",
+      gcond_op_2 = "empty",
+      gcond_val_2 = "false"
+    )
+
+    session$setInputs(
+      gconstr_id_1 = "no_failed_and_reported",
+      gconstr_type_1 = "mutually_exclusive",
+      gconstr_left_1 = "c1_failed",
+      gconstr_right_1 = "c2_reported",
+      gconstr_lscope_1 = "any",
+      gconstr_rscope_1 = "any",
+      gconstr_msg_1 = "Conflict in group"
+    )
+
+    session$setInputs(rule_save = 1)
+
+    expect_null(rv$rule_msg)
+    expect_equal(rv$rule_view, "list")
+
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    expect_equal(length(rules), before_n + 1)
+
+    new_rule <- rules[[length(rules)]]
+    expect_s3_class(new_rule, "DTAtools::DTARuleGroupCondition")
+    expect_equal(new_rule@id, "sample_visit_status_logic")
+    expect_equal(new_rule@group_by, c("SUBJECT_ID", "VISIT"))
+    expect_match(rv$yaml_text, "type: group_condition", fixed = TRUE)
+  })
+})
+
+test_that("group_condition constraint selectors follow condition name changes", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+
+    session$setInputs(
+      rule_id = "group_condition_name_sync",
+      rule_group_by = c("SUBJECT_ID", "VISIT"),
+      gcond_name_1 = "old_name",
+      gcond_col_1 = "STATUS",
+      gcond_op_1 = "equals",
+      gcond_val_1 = "FAILED"
+    )
+
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "reported",
+      gcond_col_2 = "CONSENT_DATE",
+      gcond_op_2 = "empty",
+      gcond_val_2 = "false"
+    )
+
+    session$setInputs(gcond_name_1 = "failed")
+    session$setInputs(
+      gconstr_type_1 = "mutually_exclusive",
+      gconstr_left_1 = "failed",
+      gconstr_right_1 = "reported"
+    )
+
+    session$setInputs(rule_save = 1)
+
+    expect_null(rv$rule_msg)
+    saved <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    rule <- saved[[length(saved)]]
+    expect_s3_class(rule, "DTAtools::DTARuleGroupCondition")
+    expect_equal(rule@constraints[[1]]$left, "failed")
+    expect_equal(rule@constraints[[1]]$right, "reported")
+  })
+})
+
 test_that("a column save with an incomplete type is rejected without touching the spec", {
   clean_session_file()
 

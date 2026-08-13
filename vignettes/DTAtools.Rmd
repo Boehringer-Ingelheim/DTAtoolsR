@@ -1553,7 +1553,42 @@ rules:
     column:
       - SUBJECT_ID
       - VISIT
+
+  # ── group_condition ───────────────────────────────────────────────────────
+  # Within a sample/visit group, failed and reported must not both occur,
+  # and failed implies NOT DONE.
+  - id: sample_visit_status_logic
+    type: group_condition
+    group_by: [SUBJIDN, GFREFID, VISIT]
+    conditions:
+      c1_failed:
+        GFREASND:
+          empty: false
+      c2_reported:
+        GFREASND:
+          empty: true
+        GFORRES:
+          empty: false
+      c3_not_done:
+        GFSTAT:
+          equals: NOT DONE
+    constraints:
+      - id: no_failed_and_reported
+        type: mutually_exclusive
+        left: c1_failed
+        right: c2_reported
+        left_scope: any
+        right_scope: any
+      - id: failed_requires_not_done
+        type: requires
+        if: c1_failed
+        then: c3_not_done
+        if_scope: any
+        then_scope: all
 ```
+
+For compatibility with earlier drafts, `not_both` is accepted as an alias for
+`mutually_exclusive`, and `implies` as an alias for `requires`.
 
 ### Full DTA YAML Structure
 

@@ -298,6 +298,13 @@ format_datasets_detail <- function(dta) {
     )
   } else if (identical(ty, "col_unique")) {
     sprintf("unique(%s)", paste(l$columns, collapse = ", "))
+  } else if (identical(ty, "group_condition")) {
+    sprintf(
+      "group(%s): %s condition(s), %s constraint(s)",
+      paste(l$group_by %||% character(0), collapse = ", "),
+      length(l$conditions %||% list()),
+      length(l$constraints %||% list())
+    )
   } else if (nzchar(ty)) {
     ty
   } else {

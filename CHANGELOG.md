@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-13
+
 ### Added
+
+- New schema rule type `group_condition` for grouped cross-row validation.
+  Rules define `group_by`, named `conditions`, and `constraints` so checks like
+  mutually exclusive statuses or implication logic can be enforced within each
+  group. Constraint aliases are supported: `not_both` maps to
+  `mutually_exclusive`, and `implies` maps to `requires`.
+- The Shiny app's *Edit rules* dialog now supports full GUI authoring of
+  `group_condition` rules, including grouped condition rows, grouped
+  constraints, and round-trip serialization to YAML.
 
 - A dataset's **file handlers can be edited in the Shiny app**. A third button,
   *Edit files*, sits next to *Edit columns* and *Edit rules* and opens the same

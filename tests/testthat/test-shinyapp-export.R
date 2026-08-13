@@ -79,6 +79,17 @@ test_that(".format_rule_detail formats a col_unique rule", {
   expect_identical(f(l), "unique(SUBJECT_ID, VISIT)")
 })
 
+test_that(".format_rule_detail formats a group_condition rule", {
+  f <- app_fn(".format_rule_detail")
+  l <- list(
+    type = "group_condition",
+    group_by = c("SUBJECT_ID", "VISIT"),
+    conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
+    constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
+  )
+  expect_identical(f(l), "group(SUBJECT_ID, VISIT): 1 condition(s), 1 constraint(s)")
+})
+
 test_that(".format_rule_detail falls back to the raw type token for an unrecognised rule type, and to empty for no rule", {
   f <- app_fn(".format_rule_detail")
   expect_identical(f(list(type = "mystery_type")), "mystery_type")
