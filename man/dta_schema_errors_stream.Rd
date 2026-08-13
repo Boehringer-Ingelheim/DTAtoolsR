@@ -24,7 +24,7 @@ retention was truncated, \code{full_error} carries a \code{truncated} attribute.
 \description{
 Evaluates the schema axis batch by batch, so peak memory is bounded by the
 batch size rather than by the size of the input. Produces exactly the
-\code{summarised_error} / \code{full_error} pair that \code{\link[=dta_schema_errors]{dta_schema_errors()}} produces
+\code{summarised_error} / \code{full_error} pair that \code{dta_schema_errors()} produces
 for the same data.
 
 Row numbers are global: each batch's errors are offset by the number of rows

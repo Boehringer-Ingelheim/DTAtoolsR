@@ -125,6 +125,31 @@ dta_numeric_operands <- function(x, value) {
 #' @export
 rule_check_range <- function(rule, df) {
   check_rule_class(rule)
+  target <- dta_range_target(rule)
+  violated <- dta_range_violated(rule, df)
+
+  if (any(violated)) {
+    list(
+      id = rule@id,
+      valid = FALSE,
+      message = dta_range_violation_message(
+        rule@id, sum(violated), target$col, target$range
+      )
+    )
+  } else {
+    list(id = rule@id, valid = TRUE, message = NULL)
+  }
+}
+
+#' @title Resolved Column and Bounds of a Range Rule
+#' @description
+#' A range rule may state its bounds as `range` or as `min`/`max`, and its
+#' target as `column` or `columns`. Resolving that once, here, keeps every
+#' caller agreeing about what the rule actually says.
+#' @param rule A range rule.
+#' @return A list with `col` and `range`.
+#' @keywords internal
+dta_range_target <- function(rule) {
   col <- rule_get_slot(rule, "column")
   if (is.null(col)) {
     col <- rule_get_slot(rule, "columns")
@@ -147,6 +172,25 @@ rule_check_range <- function(rule, df) {
     cli::cli_abort("Range rules require numeric bounds via 'range' or 'min'/'max'.")
   }
 
+  list(col = col, range = range)
+}
+
+#' @title Rows a Range Rule Counts as Violations
+#' @description
+#' The per-row violation mask for a range rule.
+#'
+#' This exists so that evaluating a whole table and evaluating one batch of it
+#' cannot drift apart: both go through this function, and a violation is
+#' whatever this says it is. A count is an associative reduction over the mask,
+#' which is what lets a batched scan reproduce a whole-table answer exactly.
+#' @param rule A range rule.
+#' @param df A data.frame.
+#' @return A logical vector with one element per row.
+#' @keywords internal
+dta_range_violated <- function(rule, df) {
+  target <- dta_range_target(rule)
+  col <- target$col
+
   if (!col %in% names(df)) {
     cli::cli_abort(
       "Column '{col}' not found in table.",
@@ -155,30 +199,27 @@ rule_check_range <- function(rule, df) {
   }
 
   converted <- dta_as_numeric_strict(df[[col]])
-  in_range <- converted$values >= range[1] & converted$values <= range[2]
+  in_range <- converted$values >= target$range[1] & converted$values <= target$range[2]
 
   # A genuinely missing value is ignored: it neither passes nor violates.
   # A value that is present but not representable as a number is a violation,
   # not a pass -- `any(!in_range, na.rm = TRUE)` used to drop it silently, so
   # c("ninety", "N/A", ">65") reported a clean 18..65 range.
-  violated <- (in_range %in% FALSE) | converted$unconvertible
+  (in_range %in% FALSE) | converted$unconvertible
+}
 
-  if (any(violated)) {
-    list(
-      id = rule@id,
-      valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
-        rule@id,
-        sum(violated),
-        col,
-        range[1],
-        range[2]
-      )
-    )
-  } else {
-    list(id = rule@id, valid = TRUE, message = NULL)
-  }
+#' @title Message for a Range Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of violating rows.
+#' @param col Character. The column checked.
+#' @param range Numeric. The inclusive bounds.
+#' @return A single string.
+#' @keywords internal
+dta_range_violation_message <- function(id, n, col, range) {
+  sprintf(
+    "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
+    id, n, col, range[1], range[2]
+  )
 }
 
 #' @title Rule: check_unique
@@ -215,11 +256,8 @@ rule_check_unique <- function(rule, df) {
     list(
       id = rule@id,
       valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
-        rule@id,
-        sum(duplicated_rows, na.rm = TRUE),
-        paste(cols, collapse = ", ")
+      message = dta_unique_violation_message(
+        rule@id, sum(duplicated_rows, na.rm = TRUE), cols
       )
     )
   } else {
@@ -650,15 +688,53 @@ rule_check_col_condition <- function(rule, df) {
     list(
       id = rule@id,
       valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
-        rule@id,
-        violated_count
-      )
+      message = dta_condition_violation_message(rule@id, violated_count)
     )
   } else {
     list(id = rule@id, valid = TRUE, message = NULL)
   }
+}
+
+#' @title Rows an IF/THEN Rule Counts as Violations
+#' @description
+#' The per-row violation mask for a conditional rule: the IF holds but the THEN
+#' does not, where a missing THEN counts against the row.
+#'
+#' Shared with the streaming path so a batched scan and a whole-table pass
+#' cannot disagree about what a violation is.
+#' @param rule A conditional rule.
+#' @param df A data.frame.
+#' @return A logical vector with one element per row.
+#' @keywords internal
+dta_condition_violated <- function(rule, df) {
+  if_rows <- evaluate_conditions(rule@condition, df)
+  then_rows <- evaluate_conditions(rule@then, df)
+  if_rows & (is.na(then_rows) | !then_rows)
+}
+
+#' @title Message for a Conditional Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of violating rows.
+#' @return A single string.
+#' @keywords internal
+dta_condition_violation_message <- function(id, n) {
+  sprintf(
+    "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
+    id, n
+  )
+}
+
+#' @title Message for a Uniqueness Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of duplicate rows.
+#' @param cols Character. The columns forming the key.
+#' @return A single string.
+#' @keywords internal
+dta_unique_violation_message <- function(id, n, cols) {
+  sprintf(
+    "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
+    id, n, paste(cols, collapse = ", ")
+  )
 }
 
 #' @keywords internal
