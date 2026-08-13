@@ -40,7 +40,7 @@ jobs:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: r-lib/actions/setup-r@v2
         with:
@@ -51,9 +51,20 @@ jobs:
       # (shiny, tinytex, rmarkdown) that roxygen2 needs installed to resolve
       # markdown cross-reference links such as [shiny::runApp()] in roxygen
       # comments.
+      #
+      # PIN both tools to an exact version. This job fails on a DIFF, so an
+      # unpinned tool turns any upstream release into a red build on an
+      # unrelated PR: roxygen2 8.1.0 rewrote every `importFrom(pkg, fn)` in
+      # NAMESPACE into a multi-line grouped form, so a contributor whose local
+      # roxygen2 was 8.0.0 could regenerate, see no diff, push, and still be
+      # told the docs were stale.
+      #
+      # Keep these in step with `Config/roxygen2/version` in DESCRIPTION and
+      # with whatever contributors install; bumping a pin is a deliberate
+      # commit that carries the regenerated files with it.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::styler, any::roxygen2
+          extra-packages: cran::styler@1.11.0, cran::roxygen2@8.0.0
           needs: check
 
       # Parity with parsable-R / no-browser-statement / no-debug-statement.

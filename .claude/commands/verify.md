@@ -26,7 +26,13 @@ tell me only what failed and what you intend to do about it.
 `Rscript -e "styler::style_pkg()"` yourself and show me the resulting diff —
 never ask the subagent to rewrite R sources.
 
-Remember the local environment: `Rscript` is not on `PATH` here, and
-`pre-commit` is not installed locally — do not claim the hooks passed. Note also
-that `pre-commit` runs only the fast language-agnostic hooks; it does not style
-or roxygenise, so those stages are not covered by running the hooks.
+Remember the local environment: `Rscript` is not on `PATH` in a shell started
+before 2026-08-13, so prefer the absolute path from `CLAUDE.local.md`.
+`pre-commit` **is** installed locally and its git hook runs on every commit, but
+it runs only the fast language-agnostic hooks — it does not style or roxygenise,
+so those stages are not covered by running the hooks. Use `style` and `docs`
+above.
+
+`r-style` pins the exact `styler` and `roxygen2` versions it installs. If a
+stage disagrees with CI, compare `packageVersion()` locally against the pins in
+`.github/workflows/r-style.yaml` before assuming the sources are wrong.
