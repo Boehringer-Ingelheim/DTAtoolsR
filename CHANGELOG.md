@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.15.1] - 2026-08-13
 
+### Fixed
+
+- **Shiny app shows correct version on Posit Connect.** The footer's version
+  lookup previously preferred the *installed* package version, which on Connect
+  is the server-side library version rather than the deployed app's version. The
+  lookup order is now reversed: a nearby `DESCRIPTION` file (the app bundle) is
+  checked first, and the installed package is only the fallback. The displayed
+  version now matches the running app on Connect and during local source
+  development.
+
 ### Added
 
 - GitHub Pages tutorial site (`docs/`): a self-contained, five-part static HTML
