@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-13
+
+### Fixed
+
+- The `DTARuleGroupCondition()` documentation example could not be parsed, so
+  `R CMD check` failed on it. The `requires` constraint was written as
+  `list(type = "requires", if = "c1_failed", ...)`, but `if` is a reserved word
+  and cannot be an unquoted argument name; it is now `` `if` = ``. The example
+  runs. The test suite could not have caught this — examples are executed by
+  `R CMD check`, not by `devtools::test()`.
+
 ## [0.15.0] - 2026-08-13
 
 ### Added
