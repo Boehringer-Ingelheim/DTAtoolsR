@@ -660,6 +660,104 @@ test_that("fail_fast defaults off so a full report is the norm", {
   expect_null(attr(defaulted, "partial_scan"))
 })
 
+# ---- the Parquet cache --------------------------------------------------------
+
+test_that("a cached file validates to the same verdict as the original", {
+  # The cache must not change any answer. If it did it would be a way of
+  # getting a different result by being fast, which is worthless.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    ),
+    list(DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70)))
+  )
+  frame <- data.frame(
+    ID = c("A001", "TOOLONG", "B002"),
+    AGE = c(30, 40, 99),
+    stringsAsFactors = FALSE
+  )
+  csv <- vs_write_csv(frame)
+  cache <- file.path(tempdir(), paste0("vs_cache_", as.integer(runif(1, 1, 1e8))))
+  on.exit(
+    {
+      unlink(csv)
+      unlink(cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  cache_as_parquet(specs, csv, cache_path = cache)
+  expect_true(dir.exists(cache))
+
+  from_csv <- validate_file_stream(specs, csv, verbose = FALSE)
+  from_cache <- validate_file_stream(specs, cache, verbose = FALSE)
+
+  expect_equal(from_cache$ok, from_csv$ok)
+  expect_equal(from_cache$schema_valid, from_csv$schema_valid)
+  expect_equal(from_cache$rules_valid, from_csv$rules_valid)
+  expect_equal(from_cache$n_schema_errors, from_csv$n_schema_errors)
+  expect_equal(from_cache$n_rule_errors, from_csv$n_rule_errors)
+  expect_equal(
+    from_cache$schema_errors$full_error$row,
+    from_csv$schema_errors$full_error$row
+  )
+})
+
+test_that("caching preserves declared types rather than re-inferring them", {
+  # The reason the cache is written through the specs: an ID like "007" must
+  # stay text. A cache that let Parquet infer the type would turn it into 7 and
+  # silently change what the file means.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  csv <- vs_write_csv(data.frame(ID = c("007", "042"), stringsAsFactors = FALSE))
+  cache <- file.path(tempdir(), paste0("vs_types_", as.integer(runif(1, 1, 1e8))))
+  on.exit(
+    {
+      unlink(csv)
+      unlink(cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  cache_as_parquet(specs, csv, cache_path = cache)
+  back <- as.data.frame(arrow::open_dataset(cache, format = "parquet"))
+
+  expect_type(back$ID, "character")
+  expect_equal(back$ID, c("007", "042"))
+})
+
+test_that("the format is chosen from the path", {
+  csv <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
+  cache <- file.path(tempdir(), paste0("vs_fmt_", as.integer(runif(1, 1, 1e8))))
+  on.exit(
+    {
+      unlink(csv)
+      unlink(cache, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  cache_as_parquet(specs, csv, cache_path = cache)
+
+  expect_s3_class(dta_open_validation_dataset(csv, specs), "Dataset")
+  expect_s3_class(dta_open_validation_dataset(cache, specs), "Dataset")
+})
+
+test_that("caching a file that is not there is reported plainly", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  expect_error(
+    cache_as_parquet(specs, file.path(tempdir(), "no-such-input.csv")),
+    "File not found"
+  )
+})
+
 # ---- bounded retention -------------------------------------------------------
 
 test_that("max_errors bounds retained detail while keeping the count exact", {

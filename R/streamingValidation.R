@@ -1010,6 +1010,125 @@ dta_open_delimited_dataset <- function(path,
   )
 }
 
+#' @title Open a File for Validation, Whatever Its Format
+#' @description
+#' Opens a path as a lazy dataset, choosing the reader from the path itself: a
+#' directory or a `.parquet` file is read as Parquet, anything else as
+#' delimited text.
+#' @param path Character. Path to a file or to a Parquet directory.
+#' @param specs A `DTAColumnSpecCollection` or `NULL`.
+#' @param delim,quote,has_header Delimited-text parse options, ignored for
+#'   Parquet, which carries its own schema.
+#' @return An `arrow::Dataset`.
+#' @keywords internal
+dta_open_validation_dataset <- function(path,
+                                        specs = NULL,
+                                        delim = ",",
+                                        quote = "\"",
+                                        has_header = TRUE) {
+  is_parquet <- dir.exists(path) ||
+    grepl("\\.parquet$", path, ignore.case = TRUE)
+
+  if (is_parquet) {
+    # Parquet stores its own types, so the spec-driven column types that keep a
+    # delimited reader from inferring "007" as 7 are unnecessary here: the
+    # types were fixed when the cache was written.
+    return(arrow::open_dataset(path, format = "parquet"))
+  }
+
+  dta_open_delimited_dataset(
+    path,
+    specs = specs,
+    delim = delim,
+    quote = quote,
+    has_header = has_header
+  )
+}
+
+#' @title Cache a Delimited File as Parquet
+#' @description
+#' Rewrites a delimited file as a Parquet dataset, once, so that repeated
+#' validations read a columnar format instead of re-parsing text. The
+#' conversion streams: the file is scanned in batches and written out, never
+#' materialised.
+#'
+#' @section Whether this is worth doing:
+#' Measured, on a 500,000-row file of 20 columns where the specs read every
+#' column: validating from the cache was **0.95x the speed** of validating the
+#' text — that is, slightly slower — on top of a one-off conversion. On that
+#' shape the cache never repays itself, and `benchmarks/bench_parquet.R`
+#' reports exactly that.
+#'
+#' The reason is that parsing is not the bottleneck. Evaluating the constraints
+#' in R dominates, so a format that only makes reading cheaper cannot help.
+#'
+#' What that benchmark does *not* test is the case Parquet is strongest at: a
+#' wide file where the specs and rules read only a few of its columns, so the
+#' rest need never be read at all. If your data looks like that, measure it.
+#' Otherwise, do not convert.
+#'
+#' The columns are typed by the specs during conversion, exactly as they would
+#' be when validating the text directly, so the cache preserves the declared
+#' types rather than Parquet's own inference of them.
+#' @param specs A `DTAColumnSpecCollection`, used to type the columns.
+#' @param path Character. Path to the delimited file.
+#' @param cache_path Character or `NULL`. Where to write. Defaults to the input
+#'   path with a `_parquet` suffix.
+#' @param delim,quote,has_header Parse options for the input file.
+#' @param compression Character. Parquet compression codec.
+#' @return The cache path, invisibly.
+#' @examples
+#' specs <- DTAtools::DTAColumnSpecCollection(
+#'   columns = list(
+#'     ID = DTAtools::DTAColumnSpec(
+#'       id = "ID", type = "SAS Char", length = 8, nullable = FALSE
+#'     )
+#'   )
+#' )
+#'
+#' csv <- file.path(tempdir(), "dta_cache_example.csv")
+#' utils::write.csv(data.frame(ID = c("A001", "A002")), csv, row.names = FALSE)
+#'
+#' cached <- cache_as_parquet(specs, csv)
+#' details <- validate_file_stream(specs, cached, verbose = FALSE)
+#' details$ok
+#'
+#' unlink(csv)
+#' unlink(cached, recursive = TRUE)
+#' @export
+cache_as_parquet <- function(specs,
+                             path,
+                             cache_path = NULL,
+                             delim = ",",
+                             quote = "\"",
+                             has_header = TRUE,
+                             compression = "zstd") {
+  if (!file.exists(path)) {
+    cli::cli_abort("File not found: {.path {path}}")
+  }
+
+  if (is.null(cache_path)) {
+    cache_path <- paste0(tools::file_path_sans_ext(path), "_parquet")
+  }
+
+  dataset <- dta_open_delimited_dataset(
+    path,
+    specs = specs,
+    delim = delim,
+    quote = quote,
+    has_header = has_header
+  )
+
+  arrow::write_dataset(
+    dataset,
+    cache_path,
+    format = "parquet",
+    compression = compression
+  )
+
+  invisible(cache_path)
+}
+
 #' @title Validate a Delimited File Without Loading It
 #' @description
 #' Validates a delimited file against a set of column specs by scanning it in
@@ -1036,7 +1155,8 @@ dta_open_delimited_dataset <- function(path,
 #' For a file that fits in memory comfortably, `validate_table()` is the faster
 #' choice and there is nothing to gain here.
 #' @param specs A `DTAColumnSpecCollection`.
-#' @param path Character. Path to the delimited file.
+#' @param path Character. Path to the delimited file, or to a Parquet dataset
+#'   written by [cache_as_parquet()]. The format is chosen from the path.
 #' @param delim Character. The field separator. Defaults to a comma.
 #' @param quote Character. The quoting character.
 #' @param has_header Logical. Whether the first line names the columns.
@@ -1094,12 +1214,12 @@ validate_file_stream <- function(specs,
                                  fail_fast = FALSE,
                                  on_missing_column = c("scan", "stop"),
                                  verbose = TRUE) {
-  if (!file.exists(path)) {
+  if (!file.exists(path) && !dir.exists(path)) {
     cli::cli_abort("File not found: {.path {path}}")
   }
   on_missing_column <- match.arg(on_missing_column)
 
-  dataset <- dta_open_delimited_dataset(
+  dataset <- dta_open_validation_dataset(
     path,
     specs = specs,
     delim = delim,

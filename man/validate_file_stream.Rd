@@ -20,7 +20,8 @@ validate_file_stream(
 \arguments{
 \item{specs}{A \code{DTAColumnSpecCollection}.}
 
-\item{path}{Character. Path to the delimited file.}
+\item{path}{Character. Path to the delimited file, or to a Parquet dataset
+written by \code{\link[=cache_as_parquet]{cache_as_parquet()}}. The format is chosen from the path.}
 
 \item{delim}{Character. The field separator. Defaults to a comma.}
 
