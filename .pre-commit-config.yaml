@@ -33,9 +33,13 @@ repos:
       # to preserve. Line endings are equally load-bearing: fixtures are read
       # back byte-wise by some tests. So the whitespace hooks skip the data
       # directory. `.Rd` files stay excluded from end-of-file-fixer because
-      # roxygen2 owns their exact trailing bytes.
+      # roxygen2 owns their exact trailing bytes, and
+      # `tests/testthat/_snaps/` is excluded for the same reason: testthat
+      # writes those files and restores the trailing newline on every run, so
+      # letting the hook strip it puts the two in a tug-of-war that dirties the
+      # working tree after each test invocation.
       - id: end-of-file-fixer
-        exclude: '(\.Rd$|^inst/extdata/)'
+        exclude: '(\.Rd$|^inst/extdata/|^tests/testthat/_snaps/)'
       - id: detect-private-key
       - id: check-ast
       - id: mixed-line-ending
