@@ -347,6 +347,7 @@ dta_schema_errors <- function(specs, table) {
 #' adds nothing.
 #' @param full_error A data frame of violations.
 #' @return A summarised data frame.
+#' @importFrom rlang .data
 #' @keywords internal
 dta_summarise_schema_errors <- function(full_error) {
   if (is.null(full_error) || nrow(full_error) == 0) {
