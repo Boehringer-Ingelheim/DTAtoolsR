@@ -8,8 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- A dataset's **file handlers can be edited in the Shiny app**. A third button,
+  *Edit files*, sits next to *Edit columns* and *Edit rules* and opens the same
+  kind of list/form dialog: add, edit, remove and reorder the expected files
+  (name or pattern, type, how many files may match, description). Each entry is
+  one upload slot, so adding one adds a slot and removing one removes it.
+- `pattern_description` reaches the concrete file classes. `DTAFile` has always
+  had the property and the app has always written it into `files:`, but no
+  `DTAFileCSV`/`DTAFileTSV`/`DTAFileDelim`/`DTAFileTabular` constructor accepted
+  one, so a handler that described its own pattern in words could be written and
+  never read back.
+- A dataset may declare **more than one file handler in YAML**. `files:` is now
+  read as either a single mapping (one handler, unchanged) or a sequence of
+  mappings (one per handler). A dataset with no `files:` block at all is read as
+  a dataset with no handlers instead of aborting. `dta_file_handlers_from_list()`
+  is exported for the conversion.
+
 ### Changed
 
+- Removing a file handler in the app also unloads the files that were loaded
+  through it, after a confirmation listing them by name. The specification and
+  the loaded data are kept in step: a slot that no longer exists can no longer
+  hide bound data from the *Loaded files* list.
+- Applying edited **Raw YAML** is less destructive. Editing a dataset's `files:`
+  block used to discard every file loaded into that dataset; loaded files are
+  now kept as long as their own slot is still in the document, and follow it if
+  the entries were reordered. A file whose slot was deleted or rewritten is
+  unloaded with it, rather than left bound to the dataset under a slot that asks
+  for something else. Validation is still cleared whenever files, columns or
+  rules changed.
 - The `pre-commit` hooks run for the first time. The R hooks could not build
   their environment on R 4.5 (the pinned revision installed a `digest` that no
   longer compiles), so `styler` and `roxygen` had never been applied; the
@@ -25,6 +52,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A file handler could not carry more than one file name. `filename` is
+  documented as a character vector and `matches_filename()` implements the
+  several-names case, but the validator tested `filename == ""` — a length-1
+  test that made the condition length 2 and errored — and a YAML `filename:`
+  sequence arrived as a list the character property refused. Both now work.
+- A specification with more than one file handler could be written but never
+  read back. The app already serialised such a dataset as a `files:` sequence,
+  while the reader passed the whole sequence where a single handler was
+  expected and died inside a base-R coercion, so exporting a two-handler DTA
+  produced a document the app itself rejected on load.
 - The whitespace hooks no longer rewrite files under `inst/extdata`. In a
   delimited file trailing whitespace is data: `trailing-whitespace` stripped
   the trailing tabs from the one row of `gf_data_small_smirna.tsv` whose last

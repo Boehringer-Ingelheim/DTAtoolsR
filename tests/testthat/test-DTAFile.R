@@ -463,3 +463,121 @@ test_that("specs are ignored when the file has no header", {
   expect_equal(ncol(x), 3)
   expect_false("SUBJID" %in% names(x))
 })
+
+
+# ---- pattern_description reaches the concrete subclasses ---------------------
+# DTAFile has carried a `pattern_description` property from the start, and the
+# app serialises it into `files:`, but none of the concrete constructors took
+# one: DTAFileFactory(type = "csv", pattern_description = ...) failed on an
+# unused argument. A specification that described its own pattern in words could
+# therefore be written and never read back.
+
+test_that("a csv handler keeps the pattern description it was given", {
+  f <- DTAFileCSV(
+    filename = "clinical_data.*[.]csv$",
+    pattern = TRUE,
+    number_of_files = 2,
+    pattern_description = "one file per site"
+  )
+
+  expect_equal(f@pattern_description, "one file per site")
+})
+
+test_that("every tabular file type accepts a pattern description", {
+  for (ctor in list(DTAFileCSV, DTAFileTSV, DTAFileDelim, DTAFileTabular)) {
+    f <- ctor(
+      filename = "a.*[.]txt$", pattern = TRUE, number_of_files = 1,
+      pattern_description = "described"
+    )
+    expect_equal(f@pattern_description, "described")
+  }
+})
+
+test_that("a pattern description survives the factory and a YAML round trip", {
+  f <- DTAFileFactory(
+    type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
+    min_number_of_files = 1, max_number_of_files = 4,
+    pattern_description = "one file per batch"
+  )
+  expect_equal(f@pattern_description, "one file per batch")
+
+  ds <- dta_dataset_from_list(list(
+    name = "described",
+    type = "tabular",
+    files = list(
+      type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
+      min_number_of_files = 1, max_number_of_files = 4,
+      pattern_description = "one file per batch"
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_equal(ds@files[[1]]@pattern_description, "one file per batch")
+})
+
+test_that("a handler without a pattern description still has none", {
+  f <- DTAFileCSV(filename = "clinical_data.csv")
+
+  expect_null(f@pattern_description)
+})
+
+
+# ---- Several file names on one handler --------------------------------------
+# `filename` is documented as a character VECTOR and matches_filename() has a
+# `%in%` branch for exactly that case, but the validator tested
+# `self@filename == ""` -- a length-1 test. Two names made the `if` condition
+# length 2, which R rejects outright, so the documented case could never be
+# built. A YAML `filename:` sequence hit it from the other side: it parses to a
+# list, which the character property refused.
+
+test_that("a handler can carry several file names", {
+  f <- DTAFileCSV(
+    filename = c("site_a.csv", "site_b.csv"),
+    pattern = TRUE, number_of_files = 2
+  )
+
+  expect_equal(f@filename, c("site_a.csv", "site_b.csv"))
+})
+
+test_that("a filename sequence from YAML becomes a character vector", {
+  ds <- dta_dataset_from_list(list(
+    name = "multi_name",
+    type = "tabular",
+    files = list(
+      type = "csv", filename = list("site_a.csv", "site_b.csv"),
+      pattern = TRUE, number_of_files = 2
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_equal(ds@files[[1]]@filename, c("site_a.csv", "site_b.csv"))
+})
+
+test_that("matches_filename accepts any of a handler's names and nothing else", {
+  f <- DTAFileCSV(
+    filename = c("site_a.csv", "site_b.csv"),
+    pattern = TRUE, number_of_files = 2
+  )
+
+  # A non-pattern check over several names is the `%in%` branch; with pattern
+  # TRUE each name is a regex, so both still match themselves and a stranger
+  # matches neither.
+  expect_true(any(matches_filename(f, "site_a.csv")))
+  expect_true(any(matches_filename(f, "site_b.csv")))
+  expect_false(any(matches_filename(f, "site_c.csv")))
+})
+
+test_that("an empty name is still rejected, in any position", {
+  expect_error(
+    DTAFileCSV(filename = ""),
+    "must be a non-empty character vector"
+  )
+  expect_error(
+    DTAFileCSV(filename = c("a.csv", ""), pattern = TRUE, number_of_files = 2),
+    "must be a non-empty character vector"
+  )
+  expect_error(
+    DTAFileCSV(filename = character(0)),
+    "must be a non-empty character vector"
+  )
+})

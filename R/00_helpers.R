@@ -148,7 +148,11 @@ DTAColumnSpecStructureFactory <- function(
 #' @param type Character. The type specification, potentially prefixed with a backend identifier.
 #' @param columns A list with column specifications (optional)
 #' @param rules A list of rules specifications (optional)
-#' @param files A list of for conversion to DTAFile objects (optional)
+#' @param files Specification of the dataset's file handlers (optional). Either
+#'   a single named list -- one handler, the shape a YAML \code{files:} mapping
+#'   parses to -- or an unnamed list of such lists, one per handler, the shape a
+#'   YAML \code{files:} sequence parses to. \code{NULL} or an empty list yields a
+#'   dataset with no file handlers.
 #' @param ... Character. Arguments passed on to the specific backend constructor.
 #' @importFrom cli cli_abort
 #' @return An object derived from class \code{DTADataSet} like \code{DTADataSetTabular},
@@ -160,6 +164,16 @@ DTAColumnSpecStructureFactory <- function(
 #'   type = "file",
 #'   name = "mydataset",
 #'   files = list(type = "csv", filename = "clinical_data.csv")
+#' )
+#'
+#' # Several file handlers: an unnamed list of handler specifications.
+#' DTADataSetFactory(
+#'   type = "file",
+#'   name = "mydataset",
+#'   files = list(
+#'     list(type = "csv", filename = "clinical_data.csv"),
+#'     list(type = "tsv", filename = "gf_data_small_smirna.tsv")
+#'   )
 #' )
 #'
 #' @seealso \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}}
@@ -178,22 +192,91 @@ DTADataSetFactory <- function(
     )
   }
 
+  file_handlers <- dta_file_handlers_from_list(files)
+
   switch(type,
     "tabular" = {
       return(DTADataSetTabular(
         specs = specs_from_list(columns = columns, rules = rules),
-        files = do.call(DTAFileFactory, files),
+        files = file_handlers,
         ...
       ))
     },
     "file" = {
       return(DTADataSetFile(
-        files = do.call(DTAFileFactory, files),
+        files = file_handlers,
         ...
       ))
     },
     cli_abort("Dataset type '{type}' not implemented.")
   )
+}
+
+
+#' @title Build the file handlers of a dataset from a list
+#' @description
+#' Turns the \code{files} element of a dataset specification into the list of
+#' \code{DTAFile} objects a \code{DTADataSet} expects.
+#'
+#' A dataset may declare more than one file handler, so \code{files} is accepted
+#' in both shapes YAML can produce: a mapping (one handler, a *named* list) or a
+#' sequence of mappings (several handlers, an *unnamed* list). Names are what
+#' separates the two -- \code{yaml::read_yaml()} names the elements of a mapping
+#' and leaves those of a sequence unnamed -- so a handler whose own value is a
+#' sequence (\code{info:}) is still read as the single mapping it is.
+#'
+#' @param files \code{NULL}, a named list (one handler), or an unnamed list of
+#'   named lists (one per handler).
+#' @importFrom cli cli_abort
+#' @return A list of \code{DTAFile} objects, empty when \code{files} is
+#'   \code{NULL} or empty.
+#' @examples
+#' library(DTAtools)
+#' dta_file_handlers_from_list(list(type = "csv", filename = "clinical_data.csv"))
+#' dta_file_handlers_from_list(list(
+#'   list(type = "csv", filename = "a.csv"),
+#'   list(type = "tsv", filename = "b.tsv")
+#' ))
+#' dta_file_handlers_from_list(NULL)
+#' @export
+dta_file_handlers_from_list <- function(files) {
+  if (is.null(files) || length(files) == 0) {
+    return(list())
+  }
+
+  if (!is.list(files)) {
+    cli_abort(
+      "'files' must be a list describing one file handler, or a list of such lists."
+    )
+  }
+
+  # A mapping (one handler) is FULLY named; a sequence (several) is fully
+  # unnamed. Anything in between is neither -- a half-named list would otherwise
+  # be forwarded whole to DTAFileFactory as if it were one handler, and fail
+  # somewhere further in with a message about the wrong thing.
+  nms <- names(files)
+  fully_named <- !is.null(nms) && all(nzchar(nms))
+  fully_unnamed <- is.null(nms) || !any(nzchar(nms))
+
+  if (fully_named) {
+    return(list(do.call(DTAFileFactory, files)))
+  }
+
+  if (!fully_unnamed) {
+    cli_abort(
+      "'files' must be either one named file handler or a list of file handlers, not a mix of named and unnamed entries."
+    )
+  }
+
+  lapply(seq_along(files), function(i) {
+    entry <- files[[i]]
+    if (!is.list(entry) || is.null(names(entry))) {
+      cli_abort(
+        "File handler {i} must be a named list with at least a 'type' and a 'filename'."
+      )
+    }
+    do.call(DTAFileFactory, entry)
+  })
 }
 
 
