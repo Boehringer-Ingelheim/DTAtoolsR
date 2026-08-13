@@ -101,10 +101,13 @@ method(check, DTARule) <- function(x, index = 1) {
 #'
 #' @param id A character string specifying the rule identifier.
 #' @param type A character string specifying the type of rule to create.
-#'   Supported types are \code{"col_condition"}, \code{"col_range"}, and \code{"col_unique"}.
+#'   Supported types are \code{"col_condition"}, \code{"col_range"},
+#'   \code{"col_unique"}, and \code{"group_condition"}.
 #' @param ... Additional arguments passed to the specific DTARule constructor.
 #'
-#' @return An object of class \code{DTARuleColCondition}, \code{DTARuleColRange}, or \code{DTARuleColUnique}, depending on \code{type}.
+#' @return An object of class \code{DTARuleColCondition}, \code{DTARuleColRange},
+#'   \code{DTARuleColUnique}, or \code{DTARuleGroupCondition}, depending on
+#'   \code{type}.
 #' @export
 #'
 #' @examples
@@ -127,6 +130,7 @@ DTARuleFactory <- function(id, type, ...) {
     check_col_condition = "col_condition",
     check_range = "col_range",
     check_unique = "col_unique",
+    check_group_condition = "group_condition",
     as.character(type)
   )
 
@@ -140,6 +144,10 @@ DTARuleFactory <- function(id, type, ...) {
       ...
     ),
     col_unique = DTAtools::DTARuleColUnique(
+      id = id,
+      ...
+    ),
+    group_condition = DTAtools::DTARuleGroupCondition(
       id = id,
       ...
     ),

@@ -3,7 +3,8 @@
 %   R/DTAColumnSpecCollection-class.R, R/DTAColumnSpecStructure-class.R,
 %   R/DTAColumnSpecStructureSAS-class.R, R/DTAMetaData-helpers.R,
 %   R/DTARule-class.R, R/DTARuleColCondition-class.R,
-%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R
+%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
+%   R/DTARuleGroupCondition-class.R
 \name{as.list}
 \alias{as.list}
 \title{as.list method for DTAColumnSpec}
@@ -34,9 +35,12 @@ as.list(x, ...)
 
 ## S7 method for class <DTAtools::DTARuleColUnique>
 as.list(x, ...)
+
+## S7 method for class <DTAtools::DTARuleGroupCondition>
+as.list(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTARuleColUnique}
+\item{x}{An object of class DTARuleGroupCondition}
 
 \item{...}{Additional arguments (not used).}
 }
@@ -58,6 +62,8 @@ A named list containing the properties of the DTARuleColCondition object.
 A named list containing the properties of the DTARuleColRange object.
 
 A named list containing the properties of the DTARuleColUnique object.
+
+A named list containing the properties of the rule.
 }
 \description{
 Converts a DTAColumnSpec object to a named list.
@@ -83,6 +89,8 @@ Convert a DTARuleColCondition object to a list.
 Convert a DTARuleColRange object to a list.
 
 Convert a DTARuleColUnique object to a list.
+
+Convert a DTARuleGroupCondition object to a list.
 }
 \details{
 Every \code{Date} in the result - the top-level \code{date}, each

@@ -232,3 +232,41 @@ datasets:
             max: 100
           WEIGHT:
             greater_equal: 5
+      - id: group_condition_pass_example
+        type: group_condition
+        description: Grouped pass showcase - every row with a visit must have status
+        group_by:
+          - SUBJECT_ID
+        conditions:
+          c_has_visit:
+            VISIT:
+              empty: false
+          c_has_status:
+            STATUS:
+              empty: false
+        constraints:
+          - id: visit_requires_status
+            type: requires
+            if: c_has_visit
+            then: c_has_status
+            if_scope: any
+            then_scope: all
+      - id: group_condition_fail_example
+        type: group_condition
+        description: Grouped fail showcase - consented records need a consent date
+        group_by:
+          - SUBJECT_ID
+        conditions:
+          c_consent_yes:
+            CONSENT:
+              equals: "YES"
+          c_consent_date_present:
+            CONSENT_DATE:
+              empty: false
+        constraints:
+          - id: consent_requires_date_grouped
+            type: requires
+            if: c_consent_yes
+            then: c_consent_date_present
+            if_scope: any
+            then_scope: all

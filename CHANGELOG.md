@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-13
+
 ### Added
+
+- New schema rule type `group_condition` for grouped cross-row validation.
+  Rules define `group_by`, named `conditions`, and `constraints` so checks like
+  mutually exclusive statuses or implication logic can be enforced within each
+  group. Constraint aliases are supported: `not_both` maps to
+  `mutually_exclusive`, and `implies` maps to `requires`.
+- The Shiny app's *Edit rules* dialog now supports full GUI authoring of
+  `group_condition` rules, including grouped condition rows, grouped
+  constraints, and round-trip serialization to YAML.
 
 - `dta_template_placeholders()` is exported. It lists the `{PLACEHOLDER}`
   tokens a Word export template may use, and given a `DTA` resolves each one, so

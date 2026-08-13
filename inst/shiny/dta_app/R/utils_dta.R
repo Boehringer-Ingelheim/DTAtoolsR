@@ -1506,6 +1506,8 @@ dta_rule_to_list <- function(rule) {
     col_range = "col_range",
     check_unique = ,
     col_unique = "col_unique",
+    check_group_condition = ,
+    group_condition = "group_condition",
     ty
   )
   out <- list(id = raw$id, type = ty)
@@ -1521,6 +1523,10 @@ dta_rule_to_list <- function(rule) {
     if (!is.null(raw$max)) out$max <- raw$max
   } else if (identical(ty, "col_unique")) {
     out$columns <- raw$columns
+  } else if (identical(ty, "group_condition")) {
+    out$group_by <- raw$group_by
+    out$conditions <- raw$conditions
+    out$constraints <- raw$constraints
   }
   out
 }
@@ -1533,6 +1539,7 @@ dta_rule_type_label <- function(type) {
     col_condition = "Conditional (IF/THEN)",
     col_range = "Range",
     col_unique = "Unique",
+    group_condition = "Grouped condition",
     if (nzchar(t)) t else "\u2014"
   )
 }
@@ -1793,6 +1800,13 @@ dta_rules_overview <- function(dta, dataset) {
       )
     } else if (identical(l$type, "col_unique")) {
       sprintf("unique(%s)", paste(l$columns, collapse = ", "))
+    } else if (identical(l$type, "group_condition")) {
+      sprintf(
+        "group(%s): %s condition(s), %s constraint(s)",
+        paste(l$group_by %||% character(0), collapse = ", "),
+        length(l$conditions %||% list()),
+        length(l$constraints %||% list())
+      )
     } else {
       ""
     }
@@ -1816,7 +1830,8 @@ dta_rule_fields <- function(dta, dataset, index) {
 
 # Build a DTARule from parts (dispatches on the short type token).
 dta_build_rule <- function(id, type, description = NULL, condition = NULL,
-                           then = NULL, columns = NULL, min = NULL, max = NULL) {
+                           then = NULL, columns = NULL, min = NULL, max = NULL,
+                           group_by = NULL, conditions = NULL, constraints = NULL) {
   id <- trimws(as.character(id)[1] %||% "")
   if (!nzchar(id)) stop("A rule id is required.")
   if (grepl("\\s", id)) stop("Rule id cannot contain whitespace.")
@@ -1828,6 +1843,8 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
     check_range = "col_range",
     col_unique = ,
     check_unique = "col_unique",
+    group_condition = ,
+    check_group_condition = "group_condition",
     type
   )
   if (identical(ty, "col_condition")) {
@@ -1842,6 +1859,14 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
     )
   } else if (identical(ty, "col_unique")) {
     DTAtools::DTARuleColUnique(id = id, columns = columns, description = desc)
+  } else if (identical(ty, "group_condition")) {
+    DTAtools::DTARuleGroupCondition(
+      id = id,
+      description = desc,
+      group_by = group_by,
+      conditions = conditions,
+      constraints = constraints
+    )
   } else {
     stop(sprintf("Unknown rule type '%s'.", type))
   }
@@ -1850,12 +1875,14 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
 # Add (index NULL) or replace (1-based index) a rule. Returns dta_try().
 dta_set_rule <- function(dta, dataset, index = NULL, id, type, description = NULL,
                          condition = NULL, then = NULL, columns = NULL,
-                         min = NULL, max = NULL) {
+                         min = NULL, max = NULL,
+                         group_by = NULL, conditions = NULL, constraints = NULL) {
   dta_try({
     rule <- dta_build_rule(
       id = id, type = type, description = description,
       condition = condition, then = then, columns = columns,
-      min = min, max = max
+      min = min, max = max,
+      group_by = group_by, conditions = conditions, constraints = constraints
     )
     ds <- DTAtools::datasets(dta, dataset)
     specs <- ds@specs

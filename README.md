@@ -39,7 +39,7 @@ once installed).
 - Comprehensive validation of tabular data: type, format, nullability,
   allowed values, and regex patterns
 - Cross-column schema rule validation (`col_condition`, `col_range`,
-  `col_unique`)
+  `col_unique`, `group_condition`)
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
   `inspect()`)
@@ -101,7 +101,7 @@ fails the table, and `results()` counts each separately:
 | Axis                     | Column            | What it means                                                      |
 |--------------------------|-------------------|--------------------------------------------------------------------|
 | **Schema** errors        | `n_schema_errors` | A value breaks a column constraint: type, `nullable`, `values`, `pattern`, `length` |
-| **Rule** errors          | `n_rule_errors`   | A row breaks an inter-column rule: `col_condition`, `col_range`, `col_unique` |
+| **Rule** errors          | `n_rule_errors`   | A row breaks an inter-column rule: `col_condition`, `col_range`, `col_unique`, `group_condition` |
 | **Import** errors        | `n_import_errors` | A value cannot be represented in the type its column declares      |
 
 An **import error** is raised when a value is present in the source but does
@@ -635,6 +635,46 @@ rules:
       - VISIT
 ```
 
+#### `group_condition`
+
+Evaluates named conditions per group and then applies constraints between those
+condition hits inside each group.
+
+```yaml
+rules:
+  - id: sample_visit_status_logic
+    type: group_condition
+    group_by: [SUBJIDN, GFREFID, VISIT]
+    conditions:
+      c1_failed:
+        GFREASND:
+          empty: false
+      c2_reported:
+        GFREASND:
+          empty: true
+        GFORRES:
+          empty: false
+      c3_not_done:
+        GFSTAT:
+          equals: NOT DONE
+    constraints:
+      - id: no_failed_and_reported
+        type: mutually_exclusive
+        left: c1_failed
+        right: c2_reported
+        left_scope: any
+        right_scope: any
+      - id: failed_requires_not_done
+        type: requires
+        if: c1_failed
+        then: c3_not_done
+        if_scope: any
+        then_scope: all
+```
+
+Constraint aliases are accepted for backward compatibility:
+`not_both` == `mutually_exclusive`, `implies` == `requires`.
+
 ## YAML Metadata
 
 `metadata:` captures the administrative information of a DTA/DTS: title,
@@ -695,6 +735,7 @@ row-level validation.
 | `DTARuleColCondition`     | If/then cross-column rule                                     |
 | `DTARuleColRange`         | Numeric range constraint for a column                        |
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)               |
+| `DTARuleGroupCondition`   | Grouped cross-row condition + constraint logic                |
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
