@@ -121,6 +121,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   runs. The test suite could not have caught this — examples are executed by
   `R CMD check`, not by `devtools::test()`.
 
+- **Shiny app shows correct version on Posit Connect.** The footer's version
+  lookup previously preferred the *installed* package version, which on Connect
+  is the server-side library version rather than the deployed app's version. The
+  lookup order is now reversed: a nearby `DESCRIPTION` file (the app bundle) is
+  checked first, and the installed package is only the fallback. The displayed
+  version now matches the running app on Connect and during local source
+  development.
+
+### Added
+
+- GitHub Pages tutorial site (`docs/`): a self-contained, five-part static HTML
+  tutorial covering installation, the beginner validation workflow, column
+  specifications, all four rule types (`col_condition`, `col_range`,
+  `col_unique`, `group_condition`), advanced API usage, and a quick-reference
+  cheat sheet. Deployed automatically via `.github/workflows/pages.yml`.
+- `.github/workflows/pages.yml`: GitHub Actions workflow that deploys `docs/`
+  to GitHub Pages on every push to `dev` that touches the folder.
+- `.github/copilot-instructions.md`: repository-level instructions for GitHub
+  Copilot covering commands, S7 architecture, conventions, and subagent
+  workflow.
+
+### Changed
+
+- `README.md` and `vignettes/DTAtools.Rmd`: expanded `group_condition`
+  documentation with full prose, constraint-type and scope-value reference
+  tables, two annotated YAML examples (`requires` and `mutually_exclusive`),
+  and a programmatic `DTARuleGroupCondition()` constructor example.
+
 ## [0.15.0] - 2026-08-13
 
 ### Added

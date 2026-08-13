@@ -637,11 +637,51 @@ rules:
 
 #### `group_condition`
 
-Evaluates named conditions per group and then applies constraints between those
-condition hits inside each group.
+Unlike `col_condition`, which evaluates each row in isolation, `group_condition`
+first groups rows by one or more columns and then applies constraint logic
+*across the whole group*. Use it when a rule depends on what happened across
+multiple rows for the same entity — for example, "if any row in this subject's
+group records consent, then every row in that group must supply a consent date."
+
+A `group_condition` rule has three parts:
+
+- **`group_by`** — columns that define the group (e.g. `SUBJECT_ID`, or a
+  composite key like `[SUBJIDN, VISIT]`).
+- **`conditions`** — named Boolean flags, each a column test in the same
+  operator syntax used by `col_condition` (`equals`, `empty`, `in`, …).
+- **`constraints`** — rules over those flags. Two types are supported:
+  - `requires` (alias `implies`): IF condition `if` holds, THEN condition
+    `then` must hold.
+  - `mutually_exclusive` (alias `not_both`): `left` and `right` cannot both
+    be true in the same group.
+
+The `if_scope` / `then_scope` (or `left_scope` / `right_scope`) fields specify
+how a condition is aggregated across the rows of a group: `any` (default, at
+least one row matches) or `all` (every row must match).
 
 ```yaml
 rules:
+  # requires: IF any row for the subject has CONSENT="YES",
+  #           THEN all rows for that subject must have a CONSENT_DATE
+  - id: consent_requires_date_per_subject
+    type: group_condition
+    group_by: [SUBJECT_ID]
+    conditions:
+      c_consent_yes:
+        CONSENT:
+          equals: "YES"
+      c_consent_date_present:
+        CONSENT_DATE:
+          empty: false
+    constraints:
+      - id: consent_needs_date
+        type: requires        # alias: implies
+        if: c_consent_yes
+        then: c_consent_date_present
+        if_scope: any         # true when ANY row in the group matches
+        then_scope: all       # requires ALL rows in the group to match
+
+  # mutually_exclusive: failed QC and a reported result cannot coexist
   - id: sample_visit_status_logic
     type: group_condition
     group_by: [SUBJIDN, GFREFID, VISIT]
@@ -659,7 +699,7 @@ rules:
           equals: NOT DONE
     constraints:
       - id: no_failed_and_reported
-        type: mutually_exclusive
+        type: mutually_exclusive    # alias: not_both
         left: c1_failed
         right: c2_reported
         left_scope: any
@@ -671,9 +711,6 @@ rules:
         if_scope: any
         then_scope: all
 ```
-
-Constraint aliases are accepted for backward compatibility:
-`not_both` == `mutually_exclusive`, `implies` == `requires`.
 
 ## YAML Metadata
 

@@ -1,0 +1,1733 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DTAtools — R Package Tutorial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/r.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+  <style>
+    /* ===== CSS RESET & VARIABLES ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #0d6efd;
+      --primary-dark: #0a58ca;
+      --success: #198754;
+      --danger: #dc3545;
+      --warning: #fd7e14;
+      --purple: #6f42c1;
+      --yellow: #ffc107;
+
+      --bg: #ffffff;
+      --bg-subtle: #f8f9fa;
+      --bg-card: #ffffff;
+      --border: #dee2e6;
+      --text: #212529;
+      --text-muted: #6c757d;
+      --sidebar-bg: #f8f9fa;
+      --sidebar-active-bg: #e7f1ff;
+      --sidebar-active-text: #0d6efd;
+      --header-bg: #ffffff;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 2px 8px rgba(0,0,0,.04);
+      --shadow-md: 0 4px 16px rgba(0,0,0,.10);
+      --radius: 8px;
+      --radius-lg: 12px;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0d1117;
+      --bg-subtle: #161b22;
+      --bg-card: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --sidebar-bg: #161b22;
+      --sidebar-active-bg: #1f3051;
+      --sidebar-active-text: #58a6ff;
+      --header-bg: #161b22;
+      --shadow: 0 1px 3px rgba(0,0,0,.3);
+      --shadow-md: 0 4px 16px rgba(0,0,0,.4);
+    }
+
+    /* ===== BASE ===== */
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      transition: background .2s, color .2s;
+    }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ===== HEADER ===== */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      padding: 0 1.5rem;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--text);
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+    .header-brand .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--primary), var(--purple));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+      color: white;
+    }
+    .header-spacer { flex: 1; }
+    .version-badge {
+      background: var(--primary);
+      color: white;
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .2rem .6rem;
+      border-radius: 999px;
+    }
+    .theme-toggle {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: .3rem .8rem;
+      cursor: pointer;
+      font-size: .85rem;
+      color: var(--text);
+      display: flex; align-items: center; gap: .4rem;
+      transition: all .2s;
+    }
+    .theme-toggle:hover { background: var(--border); }
+    .hamburger {
+      display: none;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: .35rem .55rem;
+      cursor: pointer;
+      font-size: 1.1rem;
+      color: var(--text);
+    }
+
+    /* ===== LAYOUT ===== */
+    .layout {
+      display: flex;
+      max-width: 1200px;
+      margin: 0 auto;
+      min-height: calc(100vh - 60px);
+    }
+
+    /* ===== SIDEBAR ===== */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 60px;
+      height: calc(100vh - 60px);
+      overflow-y: auto;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 0 2rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .nav-part {
+      padding: .25rem 1.25rem .1rem;
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-top: 1rem;
+    }
+    .nav-item {
+      display: block;
+      padding: .4rem 1.25rem .4rem 1.5rem;
+      font-size: .88rem;
+      color: var(--text);
+      border-left: 3px solid transparent;
+      transition: all .15s;
+      line-height: 1.4;
+    }
+    .nav-item:hover { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); text-decoration: none; }
+    .nav-item.active {
+      background: var(--sidebar-active-bg);
+      color: var(--sidebar-active-text);
+      border-left-color: var(--primary);
+      font-weight: 600;
+    }
+    .nav-item.sub { padding-left: 2.25rem; font-size: .84rem; }
+
+    /* ===== MAIN CONTENT ===== */
+    .main-content {
+      flex: 1;
+      min-width: 0;
+      padding: 2.5rem 2rem 4rem;
+      max-width: 960px;
+    }
+
+    /* ===== SECTION HEADINGS ===== */
+    .part-header {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      margin: 3rem 0 1.5rem;
+      padding-bottom: .75rem;
+      border-bottom: 2px solid var(--primary);
+    }
+    .part-header:first-child { margin-top: 0; }
+    .part-num {
+      background: var(--primary);
+      color: white;
+      font-weight: 700;
+      font-size: .8rem;
+      padding: .2rem .6rem;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .part-title { font-size: 1.55rem; font-weight: 700; color: var(--text); }
+
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin: 2rem 0 .9rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    h3::before { content: ''; display: inline-block; width: 4px; height: 1em; background: var(--primary); border-radius: 2px; flex-shrink: 0; }
+
+    p { margin-bottom: 1rem; }
+
+    /* ===== CODE BLOCKS ===== */
+    .code-wrap {
+      position: relative;
+      margin: 1.25rem 0;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .code-label {
+      background: #1f2937;
+      color: #9ca3af;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .72rem;
+      padding: .35rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .copy-btn {
+      background: none;
+      border: 1px solid #374151;
+      color: #9ca3af;
+      border-radius: 5px;
+      padding: .2rem .55rem;
+      cursor: pointer;
+      font-size: .72rem;
+      display: flex; align-items: center; gap: .3rem;
+      transition: all .2s;
+    }
+    .copy-btn:hover { background: #374151; color: #fff; }
+    .copy-btn.copied { border-color: #16a34a; color: #4ade80; }
+    pre { margin: 0 !important; border-radius: 0 !important; }
+    pre code.hljs {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+      font-size: .875rem !important;
+      line-height: 1.65 !important;
+      padding: 1.1rem 1.25rem !important;
+    }
+    code:not(.hljs) {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .88em;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: .12em .4em;
+      color: var(--purple);
+    }
+    [data-theme="dark"] code:not(.hljs) { color: #c792ea; }
+
+    /* ===== CALLOUTS ===== */
+    .callout {
+      display: flex;
+      gap: .75rem;
+      padding: 1rem 1.25rem;
+      border-radius: var(--radius);
+      margin: 1.25rem 0;
+      border-left: 4px solid;
+    }
+    .callout-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: .1rem; }
+    .callout-body { flex: 1; font-size: .93rem; }
+    .callout-body strong { display: block; margin-bottom: .25rem; }
+    .callout-body p { margin: 0; }
+    .callout-body p + p { margin-top: .5rem; }
+
+    .callout-tip    { background: #eff6ff; border-color: var(--primary); }
+    .callout-warn   { background: #fff7ed; border-color: var(--warning); }
+    .callout-success{ background: #f0fdf4; border-color: var(--success); }
+    .callout-error  { background: #fef2f2; border-color: var(--danger); }
+
+    [data-theme="dark"] .callout-tip    { background: #1e3a5f; }
+    [data-theme="dark"] .callout-warn   { background: #3d2a10; }
+    [data-theme="dark"] .callout-success{ background: #14532d; }
+    [data-theme="dark"] .callout-error  { background: #450a0a; }
+
+    /* ===== TABLES ===== */
+    .table-wrap { overflow-x: auto; margin: 1.25rem 0; border-radius: var(--radius); box-shadow: var(--shadow); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+      background: var(--bg-card);
+    }
+    th {
+      background: var(--bg-subtle);
+      border-bottom: 2px solid var(--border);
+      padding: .7rem 1rem;
+      text-align: left;
+      font-weight: 600;
+      font-size: .82rem;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    td { padding: .65rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:nth-child(even) { background: var(--bg-subtle); }
+    tbody tr:hover { background: var(--sidebar-active-bg); }
+    [data-theme="dark"] th { background: #21262d; }
+
+    /* ===== CARDS ===== */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.4rem 1.5rem;
+      margin: 1rem 0;
+      box-shadow: var(--shadow);
+    }
+    .card-title { font-weight: 700; font-size: 1.05rem; margin-bottom: .6rem; }
+
+    /* ===== DIAGRAM ===== */
+    .diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: .5rem;
+      margin: 1.75rem 0;
+      padding: 1.5rem;
+      background: var(--bg-subtle);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+    }
+    .diag-box {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: .65rem 1.1rem;
+      text-align: center;
+      font-size: .9rem;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+      min-width: 110px;
+    }
+    .diag-box.yaml  { border-color: var(--primary); color: var(--primary); }
+    .diag-box.engine{ border-color: var(--purple); color: var(--purple); background: #f3e8ff; }
+    [data-theme="dark"] .diag-box.engine { background: #2d1b69; }
+    .diag-box.data  { border-color: var(--text-muted); }
+    .diag-box.pass  { border-color: var(--success); color: var(--success); }
+    .diag-box.fail  { border-color: var(--danger);  color: var(--danger); }
+    .diag-arrow { font-size: 1.3rem; color: var(--text-muted); font-weight: 300; }
+
+    /* ===== STEP FLOW ===== */
+    .steps { margin: 1.75rem 0; }
+    .step {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 38px; height: 38px;
+      background: var(--primary);
+      color: white;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+      box-shadow: 0 2px 8px rgba(13,110,253,.35);
+    }
+    .step-body { flex: 1; padding-top: .4rem; }
+    .step-body strong { font-weight: 600; color: var(--text); }
+    .step-connector {
+      width: 38px;
+      display: flex;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      padding: .15rem 0;
+    }
+
+    /* ===== BENEFITS ===== */
+    .benefits { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
+    .benefit {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.1rem 1.2rem;
+      box-shadow: var(--shadow);
+      display: flex; gap: .75rem; align-items: flex-start;
+    }
+    .benefit-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .benefit-text { font-size: .9rem; }
+    .benefit-text strong { display: block; margin-bottom: .2rem; }
+
+    /* ===== ERROR CARDS ===== */
+    .error-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
+    .error-card {
+      border-radius: var(--radius-lg);
+      padding: 1.2rem 1.3rem;
+      border-left: 5px solid;
+    }
+    .error-card.import { background: #fef2f2; border-color: var(--danger); }
+    .error-card.schema { background: #fff7ed; border-color: var(--warning); }
+    .error-card.rule   { background: #fefce8; border-color: var(--yellow); }
+    [data-theme="dark"] .error-card.import { background: #450a0a; }
+    [data-theme="dark"] .error-card.schema { background: #3d2a10; }
+    [data-theme="dark"] .error-card.rule   { background: #3d3200; }
+    .error-card-title { font-weight: 700; font-size: 1rem; margin-bottom: .5rem; }
+    .error-card ul { margin: .5rem 0 0 1rem; font-size: .88rem; }
+    .error-card li { margin-bottom: .3rem; }
+
+    /* ===== DRILL DOWN ===== */
+    .drilldown {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0;
+      margin: 1.25rem 0;
+    }
+    .drilldown-step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .75rem 1.2rem;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: var(--shadow);
+    }
+    .drilldown-step code { font-size: .9rem; }
+    .drilldown-step .dd-desc { color: var(--text-muted); font-size: .88rem; }
+    .drilldown-arrow { padding: .3rem 1.5rem; font-size: 1.3rem; color: var(--text-muted); }
+
+    /* ===== OPERATOR TABLE ===== */
+    .badge {
+      display: inline-block;
+      padding: .15rem .5rem;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+    .badge-yes  { background: #dcfce7; color: #15803d; }
+    .badge-no   { background: #fee2e2; color: #dc2626; }
+    [data-theme="dark"] .badge-yes { background: #14532d; color: #86efac; }
+    [data-theme="dark"] .badge-no  { background: #450a0a; color: #fca5a5; }
+
+    /* ===== CHEAT SHEET ===== */
+    .cheat-fn { font-family: 'JetBrains Mono', monospace; font-size: .85rem; color: var(--purple); }
+    [data-theme="dark"] .cheat-fn { color: #c792ea; }
+
+    /* ===== FOOTER ===== */
+    .site-footer {
+      border-top: 1px solid var(--border);
+      background: var(--bg-subtle);
+      padding: 1.5rem 2rem;
+      text-align: center;
+      font-size: .87rem;
+      color: var(--text-muted);
+    }
+    .site-footer a { color: var(--primary); }
+
+    /* ===== MOBILE ===== */
+    @media (max-width: 768px) {
+      .hamburger { display: block; }
+      .sidebar {
+        position: fixed;
+        top: 60px;
+        left: 0;
+        z-index: 90;
+        height: calc(100vh - 60px);
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        box-shadow: var(--shadow-md);
+        width: 280px;
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 60px 0 0 0;
+        z-index: 89;
+        background: rgba(0,0,0,.4);
+      }
+      .sidebar-overlay.open { display: block; }
+      .main-content { padding: 1.5rem 1rem 3rem; }
+      .layout { max-width: 100%; }
+      .error-cards, .benefits { grid-template-columns: 1fr; }
+      .diagram { flex-direction: column; }
+      .diag-arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="site-header">
+  <button class="hamburger" id="hamburger" aria-label="Toggle navigation">☰</button>
+  <a href="#" class="header-brand">
+    <div class="logo-icon">🧪</div>
+    DTAtools
+  </a>
+  <div class="header-spacer"></div>
+  <span class="version-badge">v0.15.0</span>
+  <button class="theme-toggle" id="themeToggle">
+    <span id="themeIcon">🌙</span>
+    <span id="themeLabel">Dark</span>
+  </button>
+</header>
+
+<div class="sidebar-overlay" id="overlay"></div>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar">
+    <div class="nav-part">Part 1 — Getting Started</div>
+    <a class="nav-item active" href="#section-1-1">What is DTAtools?</a>
+    <a class="nav-item" href="#section-1-2">Installation</a>
+    <a class="nav-item" href="#section-1-3">5-Step Workflow</a>
+    <a class="nav-item" href="#section-1-4">Your First Validation</a>
+    <a class="nav-item" href="#section-1-5">Understanding Output</a>
+    <a class="nav-item" href="#section-1-6">Finding Your Errors</a>
+
+    <div class="nav-part">Part 2 — Specifications</div>
+    <a class="nav-item" href="#section-2-1">What is a YAML Spec?</a>
+    <a class="nav-item" href="#section-2-2">Column Types</a>
+    <a class="nav-item" href="#section-2-3">Column Properties</a>
+    <a class="nav-item" href="#section-2-4">Three Error Types</a>
+
+    <div class="nav-part">Part 3 — Validation Rules</div>
+    <a class="nav-item" href="#section-3-1">Rules Overview</a>
+    <a class="nav-item" href="#section-3-2">col_condition</a>
+    <a class="nav-item" href="#section-3-3">col_range</a>
+    <a class="nav-item" href="#section-3-4">col_unique</a>
+    <a class="nav-item" href="#section-3-5">group_condition</a>
+
+    <div class="nav-part">Part 4 — Advanced Usage</div>
+    <a class="nav-item" href="#section-4-1">Single Dataset</a>
+    <a class="nav-item" href="#section-4-2">Build Specs in R</a>
+    <a class="nav-item" href="#section-4-3">Build Rules in R</a>
+    <a class="nav-item" href="#section-4-4">Import Errors Detail</a>
+    <a class="nav-item" href="#section-4-5">Exporting Data</a>
+    <a class="nav-item" href="#section-4-6">Word Documentation</a>
+
+    <div class="nav-part">Part 5 — Quick Reference</div>
+    <a class="nav-item" href="#section-5-1">Function Cheat Sheet</a>
+    <a class="nav-item" href="#section-5-2">YAML Template</a>
+  </nav>
+
+  <!-- MAIN -->
+  <main class="main-content" id="mainContent">
+
+    <!-- ==============================
+         PART 1: GETTING STARTED
+         ============================== -->
+    <div class="part-header" id="section-1-1">
+      <span class="part-num">PART 1</span>
+      <h2 class="part-title">🚀 Check Your Data in 5 Minutes</h2>
+    </div>
+
+    <h3 id="section-1-1-h">📦 What is DTAtools?</h3>
+    <p>
+      <strong>DTAtools</strong> is an R package that validates tabular data files (CSV or TSV) against a
+      <em>Data Transfer Agreement specification</em> written in YAML — before you send the data to a partner,
+      a regulator, or a data warehouse. Think of it as a spell-checker for your clinical or study data:
+      it reads your spec, reads your data, and tells you exactly what's wrong and where.
+    </p>
+
+    <!-- Diagram -->
+    <div class="diagram">
+      <div class="diag-box yaml">📄 YAML Spec</div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box engine">⚙️ DTAtools</div>
+      <div class="diag-arrow">←</div>
+      <div class="diag-box data">📊 Your Data</div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box pass">✅ PASS</div>
+      <div style="color:var(--text-muted);font-weight:300;font-size:1.1rem;">/</div>
+      <div class="diag-box fail">❌ ERRORS</div>
+    </div>
+
+    <div class="benefits">
+      <div class="benefit">
+        <div class="benefit-icon">🎯</div>
+        <div class="benefit-text">
+          <strong>Catch errors early</strong>
+          Find problems before submission, not after rejection.
+        </div>
+      </div>
+      <div class="benefit">
+        <div class="benefit-icon">🔄</div>
+        <div class="benefit-text">
+          <strong>Auto-read column types</strong>
+          Numbers, dates, and text are parsed according to your spec.
+        </div>
+      </div>
+      <div class="benefit">
+        <div class="benefit-icon">📋</div>
+        <div class="benefit-text">
+          <strong>Detailed error reports</strong>
+          Exact row numbers, column names, and reasons for every failure.
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== INSTALLATION ===== -->
+    <h3 id="section-1-2">📥 Installation</h3>
+    <p>Install DTAtools from GitHub using <code>remotes</code>:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">remotes::install_github("Boehringer-Ingelheim/DTAtoolsR")
+library(DTAtools)</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Reproducibility tip</strong>
+        <p>For production workflows, use <a href="https://rstudio.github.io/renv/" target="_blank">renv</a> to lock
+        the exact package version: <code>renv::snapshot()</code> after installing, then <code>renv::restore()</code>
+        on any other machine.</p>
+      </div>
+    </div>
+
+    <!-- ===== 5-STEP WORKFLOW ===== -->
+    <h3 id="section-1-3">🗺️ The 5-Step Workflow</h3>
+    <p>Every DTAtools session follows the same five steps. Learn these once and you'll never forget them.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body"><strong>Load your specification</strong> — read a YAML file that describes what your data should look like</div>
+      </div>
+      <div class="step-connector">↓</div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body"><strong>Load your data file</strong> — attach a CSV or TSV file to the dataset defined in your spec</div>
+      </div>
+      <div class="step-connector">↓</div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body"><strong>Run validation</strong> — call <code>check()</code> to perform all import, schema, and rule checks</div>
+      </div>
+      <div class="step-connector">↓</div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body"><strong>See results</strong> — call <code>results()</code> for a summary table showing PASS / FAIL per dataset</div>
+      </div>
+      <div class="step-connector">↓</div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body"><strong>Drill into errors</strong> — use <code>messages()</code> for the error list and <code>inspect()</code> for row-level detail</div>
+      </div>
+    </div>
+
+    <!-- ===== FIRST VALIDATION ===== -->
+    <h3 id="section-1-4">🧪 Your First Validation</h3>
+    <p>Here is the complete beginner workflow from start to finish:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">library(DTAtools)
+
+# Step 1: Load the specification (YAML defines what your data should look like)
+dta <- read_dta_from_yaml("path/to/clinical_dta.yaml")
+
+# Step 2: Load your data file
+dta <- load_file(dta, dataset = "clinical_data", file = "path/to/your_data.csv")
+
+# Step 3: Validate everything
+dta <- check(dta)
+
+# Step 4: See results — did your data pass?
+results(dta)
+
+# Step 5: If there are errors, see what they are
+messages(dta)</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Always assign the result back!</strong>
+        <p><code>dta &lt;- check(dta)</code> — <code>check()</code> returns the updated object with validation results attached.
+        If you forget the assignment, your results will be lost.</p>
+      </div>
+    </div>
+
+    <!-- ===== UNDERSTANDING OUTPUT ===== -->
+    <h3 id="section-1-5">📊 Understanding the Output — What <code>results()</code> Shows</h3>
+    <p>
+      <code>results()</code> returns a data frame with one row per validated dataset. Here is what each column means:
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Column</th>
+            <th>Description</th>
+            <th>Possible values</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>dataset</code> / <code>target</code></td>
+            <td>Which dataset and table was validated (<code>dataset</code> is the dataset name, <code>target</code> is the table name within it)</td>
+            <td>Name strings</td>
+          </tr>
+          <tr>
+            <td><code>status</code></td>
+            <td>Overall validation result as a string</td>
+            <td><code>"validated"</code> / <code>"failed"</code> / <code>"skipped"</code> / <code>"not_validated"</code></td>
+          </tr>
+          <tr>
+            <td><code>ok</code></td>
+            <td>Boolean pass/fail — use this for programmatic checks (e.g. <code>if (results(dta)$ok)</code>)</td>
+            <td><code>TRUE</code> / <code>FALSE</code></td>
+          </tr>
+          <tr>
+            <td><code>n_schema_errors</code></td>
+            <td>Column rule violations — wrong type, invalid value, pattern mismatch, etc.</td>
+            <td>Integer ≥ 0</td>
+          </tr>
+          <tr>
+            <td><code>n_rule_errors</code></td>
+            <td>Cross-column logic violations (see Part 3)</td>
+            <td>Integer ≥ 0</td>
+          </tr>
+          <tr>
+            <td><code>n_import_errors</code></td>
+            <td>Values that couldn't be read in the declared type</td>
+            <td>Integer ≥ 0, or <code>NA</code> if result predates import checking</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Even one import error fails the table</strong>
+        <p>A dataset with <code>n_import_errors = 1</code> will always have <code>ok = FALSE</code> (status: <code>"failed"</code>),
+        even if all schema and rule checks would otherwise pass.</p>
+      </div>
+    </div>
+
+    <!-- ===== FINDING ERRORS ===== -->
+    <h3 id="section-1-6">🔍 Finding Your Errors</h3>
+    <p>Use a three-level drill-down to zero in on exactly what went wrong:</p>
+
+    <div class="drilldown">
+      <div class="drilldown-step">
+        <code>results(dta)</code>
+        <span class="dd-desc">→ &nbsp;"2 tables failed"</span>
+      </div>
+      <div class="drilldown-arrow">↓</div>
+      <div class="drilldown-step">
+        <code>messages(dta)</code>
+        <span class="dd-desc">→ &nbsp;"AGE column: 3 errors on rows 5, 7, 12"</span>
+      </div>
+      <div class="drilldown-arrow">↓</div>
+      <div class="drilldown-step">
+        <code>inspect(dta, id = msgs$id[1])</code>
+        <span class="dd-desc">→ &nbsp;"Row 5: AGE='unknown' — cannot be read as a number"</span>
+      </div>
+    </div>
+
+    <p>The <code>messages()</code> output has rows colored by error type:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Source</th><th>Color</th><th>Example message</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span style="color:var(--danger);font-weight:600">import</span></td>
+            <td><span style="background:#fef2f2;color:var(--danger);padding:.1rem .5rem;border-radius:4px">🔴 red</span></td>
+            <td>Value <code>"unknown"</code> cannot be read as <code>SAS Num</code></td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--warning);font-weight:600">schema</span></td>
+            <td><span style="background:#fff7ed;color:var(--warning);padding:.1rem .5rem;border-radius:4px">🟠 orange</span></td>
+            <td>Value <code>"V99"</code> not in allowed values list</td>
+          </tr>
+          <tr>
+            <td><span style="color:#a16207;font-weight:600">rule</span></td>
+            <td><span style="background:#fefce8;color:#a16207;padding:.1rem .5rem;border-radius:4px">🟡 yellow</span></td>
+            <td>CONSENT='YES' but CONSENT_DATE is empty (rule: consent_requires_date)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ==============================
+         PART 2: SPECIFICATIONS
+         ============================== -->
+    <div class="part-header" id="section-2-1">
+      <span class="part-num">PART 2</span>
+      <h2 class="part-title">📄 Understanding Specifications</h2>
+    </div>
+
+    <h3 id="section-2-1-h">🗂️ What is a YAML Specification?</h3>
+    <p>
+      A <strong>YAML spec file</strong> is a plain-text description of your data: which columns exist,
+      what type they hold, whether they can be empty, what values are allowed, and what cross-column
+      rules must hold. DTAtools reads this file and uses it as the ground truth to validate your data against.
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml">datasets:
+  - name: my_data
+    type: tabular
+    files:
+      filename: "my_data.csv"
+      type: csv
+    columns:
+      - id: PATIENT_ID
+        type: SAS Char
+        nullable: false
+        pattern: "^PAT[0-9]{4}$"   # must look like PAT0001
+
+      - id: AGE
+        type: SAS Num
+        nullable: false             # every patient must have an age
+
+      - id: VISIT
+        type: SAS Char
+        nullable: false
+        values:                     # closed list of allowed values
+          - V01
+          - V02
+          - V03
+
+      - id: STATUS
+        type: SAS Char
+        nullable: true              # allowed to be empty
+        values:
+          - COMPLETED
+          - DROPPED</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>The <code>name</code> must match exactly</strong>
+        <p>The <code>name:</code> field in your YAML must be passed as-is to <code>load_file(..., dataset = "my_data")</code>.
+        They are case-sensitive.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Two YAML shapes: full DTA vs. single dataset</strong>
+        <p>The YAML above (starting with <code>datasets:</code>) is the format for <code>read_dta_from_yaml()</code>, which loads a full agreement with metadata.</p>
+        <p>If you use <code>read_dataset_from_yaml()</code> (for a single dataset without metadata), the YAML must start <em>directly</em> with <code>name:</code>, <code>type:</code>, <code>files:</code>, <code>columns:</code> — <strong>no <code>datasets:</code> wrapper</strong>. See Section 4.1 for an example.</p>
+      </div>
+    </div>
+
+    <!-- ===== COLUMN TYPES ===== -->
+    <h3 id="section-2-2">🏷️ Column Types — What does "SAS Char" mean?</h3>
+    <p>
+      DTAtools uses SAS-style type names. This controls how values are <em>read</em> from the raw text
+      of your CSV file, not just how they are validated.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Type</th><th>Stored as</th><th>Example values</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>SAS Char</code></td><td>Text (character)</td><td><code>"SUBJ001"</code>, <code>"V03"</code></td></tr>
+          <tr><td><code>SAS Num</code></td><td>Number (double)</td><td><code>32</code>, <code>72.5</code></td></tr>
+          <tr><td><code>SAS Int</code></td><td>Integer</td><td><code>42</code></td></tr>
+          <tr><td><code>SAS Date</code></td><td>Text (validated by pattern)</td><td><code>"2024-06-19"</code></td></tr>
+          <tr><td><code>SAS Time</code></td><td>Text (validated by pattern)</td><td><code>"14:30:00"</code></td></tr>
+          <tr><td><code>SAS DateTime</code></td><td>Text (validated by pattern)</td><td><code>"2024-06-19T14:30:00"</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Type matters for reading!</strong>
+        <p>A column declared <code>SAS Num</code> will turn <code>'007'</code> into <code>7</code> (the leading zeros are lost).
+        A column declared <code>SAS Char</code> will keep <code>'007'</code> as <code>'007'</code>.
+        This is intentional — choose your types carefully!</p>
+      </div>
+    </div>
+
+    <!-- ===== COLUMN PROPERTIES ===== -->
+    <h3 id="section-2-3">🔧 Column Properties Reference</h3>
+    <p>All properties you can set on a column in the YAML spec:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Property</th><th>Required?</th><th>Description</th><th>Example</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>id</code></td>
+            <td><span class="badge badge-yes">✔ yes</span></td>
+            <td>Column name — must match the CSV header exactly</td>
+            <td><code>PATIENT_ID</code></td>
+          </tr>
+          <tr>
+            <td><code>label</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Human-readable label for documentation</td>
+            <td><code>Patient Identifier</code></td>
+          </tr>
+          <tr>
+            <td><code>type</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>SAS type (see above)</td>
+            <td><code>SAS Char</code></td>
+          </tr>
+          <tr>
+            <td><code>nullable</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Whether empty / NA values are allowed</td>
+            <td><code>true</code> or <code>false</code></td>
+          </tr>
+          <tr>
+            <td><code>values</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Closed list of allowed values. Mutually exclusive with <code>pattern</code>.</td>
+            <td><code>[V01, V02, V03]</code></td>
+          </tr>
+          <tr>
+            <td><code>pattern</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Regex that every value must match. Mutually exclusive with <code>values</code>.</td>
+            <td><code>^PAT[0-9]{4}$</code></td>
+          </tr>
+          <tr>
+            <td><code>length</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Maximum character length</td>
+            <td><code>12</code></td>
+          </tr>
+          <tr>
+            <td><code>format</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>SAS format string (documentation only)</td>
+            <td><code>SAS $10.</code></td>
+          </tr>
+          <tr>
+            <td><code>description</code></td>
+            <td><span class="badge badge-no">optional</span></td>
+            <td>Free-text documentation</td>
+            <td><code>Planned visit code</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-error">
+      <div class="callout-icon">❌</div>
+      <div class="callout-body">
+        <strong><code>values</code> and <code>pattern</code> are mutually exclusive</strong>
+        <p>You cannot specify both on the same column. Use <code>values</code> for a finite list,
+        or <code>pattern</code> for a regular expression constraint.</p>
+      </div>
+    </div>
+
+    <!-- ===== THREE ERROR TYPES ===== -->
+    <h3 id="section-2-4">🚦 Three Types of Errors Explained</h3>
+    <p>DTAtools distinguishes three fundamentally different kinds of problems in your data:</p>
+
+    <div class="error-cards">
+      <div class="error-card import">
+        <div class="error-card-title">🔴 Import Errors — "The value can't even be read"</div>
+        <p style="font-size:.88rem">The column is declared <code>SAS Num</code> but the cell contains <code>"unknown"</code>.
+        R can't convert that to a number, so it becomes <code>NA</code> and an import error is recorded.</p>
+        <ul>
+          <li>Always causes <code>ok = FALSE</code> (status: <code>"failed"</code>)</li>
+          <li>Cell is stored as <code>NA</code></li>
+          <li>See <code>import_raw</code> in <code>inspect()</code></li>
+        </ul>
+      </div>
+      <div class="error-card schema">
+        <div class="error-card-title">🟠 Schema Errors — "Readable, but breaks a column rule"</div>
+        <p style="font-size:.88rem">The value was successfully parsed, but it violates a constraint on the column itself.</p>
+        <ul>
+          <li>Value not in <code>values</code> list</li>
+          <li>Value fails <code>pattern</code> regex</li>
+          <li>Required column is empty (<code>nullable: false</code>)</li>
+          <li>String exceeds <code>length</code></li>
+        </ul>
+      </div>
+      <div class="error-card rule">
+        <div class="error-card-title">🟡 Rule Errors — "Values OK individually, but break a cross-column rule"</div>
+        <p style="font-size:.88rem">Each value is valid on its own, but the combination violates a rule.</p>
+        <ul>
+          <li>CONSENT='YES' but CONSENT_DATE is empty</li>
+          <li>AGE=70 but max allowed is 65</li>
+          <li>SUBJECT_ID+VISIT is not unique</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ==============================
+         PART 3: VALIDATION RULES
+         ============================== -->
+    <div class="part-header" id="section-3-1">
+      <span class="part-num">PART 3</span>
+      <h2 class="part-title">⚖️ Validation Rules</h2>
+    </div>
+
+    <h3 id="section-3-1-h">📖 Rules Overview</h3>
+    <p>
+      Rules check that columns make sense <em>together</em>, not just individually.
+      They are defined under a <code>rules:</code> key inside your dataset spec and run
+      after all schema checks have passed.
+    </p>
+
+    <p>DTAtools supports three built-in rule types:</p>
+    <ul style="margin:.5rem 0 1rem 1.5rem">
+      <li><strong><code>col_condition</code></strong> — if/then logic between columns</li>
+      <li><strong><code>col_range</code></strong> — numeric min/max constraint on a single column</li>
+      <li><strong><code>col_unique</code></strong> — uniqueness constraint (single column or combination)</li>
+    </ul>
+
+    <!-- ===== COL_CONDITION ===== -->
+    <h3 id="section-3-2">🔀 col_condition — If/Then Logic</h3>
+    <p>This is the most powerful rule type. It lets you say:</p>
+
+    <div class="diagram" style="font-size:.95rem">
+      <div class="diag-box" style="border-color:var(--primary);min-width:200px">
+        IF [condition on column A]
+      </div>
+      <div class="diag-arrow">→</div>
+      <div class="diag-box" style="border-color:var(--success);min-width:200px">
+        THEN [constraint on column B]
+      </div>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml"># IF consent was given, the consent date must be filled
+- id: consent_requires_date
+  type: col_condition
+  condition:
+    CONSENT:
+      equals: "YES"
+  then:
+    CONSENT_DATE:
+      empty: false
+
+# IF visit is V03, status must be COMPLETED
+- id: v03_must_be_completed
+  type: col_condition
+  condition:
+    VISIT:
+      equals: V03
+  then:
+    STATUS:
+      equals: COMPLETED</code></pre>
+    </div>
+
+    <p>All supported operators for both <code>condition</code> and <code>then</code>:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Operator</th>
+            <th>In <code>condition</code>?</th>
+            <th>In <code>then</code>?</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>equals</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>equals: "YES"</code></td></tr>
+          <tr><td><code>not_equals</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>not_equals: DROPPED</code></td></tr>
+          <tr><td><code>empty</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>empty: false</code></td></tr>
+          <tr><td><code>in</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>in: [V01, V02, EOT]</code></td></tr>
+          <tr><td><code>not_in</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>not_in: [REJECTED]</code></td></tr>
+          <tr><td><code>pattern</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>pattern: "^PAT[0-9]{4}$"</code></td></tr>
+          <tr><td><code>greater</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>greater: 0</code></td></tr>
+          <tr><td><code>greater_equal</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>greater_equal: 18</code></td></tr>
+          <tr><td><code>less</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>less: 200</code></td></tr>
+          <tr><td><code>less_equal</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>less_equal: 65</code></td></tr>
+          <tr><td><code>min</code> + <code>max</code></td><td><span class="badge badge-yes">✅</span></td><td><span class="badge badge-yes">✅</span></td><td><code>min: 10</code> + <code>max: 100</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== COL_RANGE ===== -->
+    <h3 id="section-3-3">📏 col_range — Numeric Range Check</h3>
+    <p>Validates that all values in a numeric column fall within a specified range.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml">- id: age_range
+  type: col_range
+  column: AGE
+  min: 18
+  max: 65</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <p>Both <code>min</code> and <code>max</code> are <strong>inclusive</strong>. A patient aged exactly
+        18 or exactly 65 will pass this rule.</p>
+      </div>
+    </div>
+
+    <!-- ===== COL_UNIQUE ===== -->
+    <h3 id="section-3-4">🔑 col_unique — Uniqueness Constraint</h3>
+    <p>Ensures no duplicate values exist — either in a single column or across a combination of columns.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml"># Single column must be unique
+- id: patient_unique
+  type: col_unique
+  column: PATIENT_ID
+
+# Combination of PATIENT_ID + VISIT must be unique
+# (same patient can appear in multiple visits, just not twice in the same visit)
+- id: patient_visit_unique
+  type: col_unique
+  column:
+    - PATIENT_ID
+    - VISIT</code></pre>
+    </div>
+
+    <!-- ===== GROUP_CONDITION — Part 3 full treatment ===== -->
+    <h3 id="section-3-5">🧩 group_condition — Group-Level If/Then Logic</h3>
+    <p>
+      Unlike <code>col_condition</code>, which evaluates each row independently,
+      <code>group_condition</code> first groups rows by one or more columns and then applies
+      constraint logic <em>across the whole group</em>. This lets you express rules like
+      "if any row in this subject's group has consent, then all rows in the group must have a consent date."
+    </p>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>When to use <code>group_condition</code> instead of <code>col_condition</code></strong>
+        <p><code>col_condition</code> checks each row against the rule on its own — it doesn't know about the other rows for that subject. Use <code>group_condition</code> when the rule depends on what happened <em>across</em> multiple rows belonging to the same entity (subject, sample, visit, …).</p>
+      </div>
+    </div>
+
+    <h4 style="margin:1.5rem 0 .5rem;font-size:1rem;color:var(--text-muted)">Structure</h4>
+    <p>A <code>group_condition</code> rule has three parts:</p>
+    <ol style="margin:.5rem 0 1rem 1.5rem;line-height:2">
+      <li><strong><code>group_by</code></strong> — which columns define a group (e.g. <code>SUBJECT_ID</code>)</li>
+      <li><strong><code>conditions</code></strong> — named Boolean flags, each a column test (same operators as <code>col_condition</code>)</li>
+      <li><strong><code>constraints</code></strong> — rules over those flags: <code>requires</code> or <code>mutually_exclusive</code></li>
+    </ol>
+
+    <h4 style="margin:1.5rem 0 .5rem;font-size:1rem;color:var(--text-muted)">Constraint types</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Type</th><th>Aliases</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>requires</code></td>
+            <td><code>implies</code></td>
+            <td>IF condition <code>if</code> holds (scope: <code>any</code>/<code>all</code> rows in group), THEN condition <code>then</code> must hold (scope: <code>any</code>/<code>all</code>)</td>
+          </tr>
+          <tr>
+            <td><code>mutually_exclusive</code></td>
+            <td><code>not_both</code></td>
+            <td><code>left</code> and <code>right</code> conditions cannot both be true in the same group</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Scope value</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>any</code> (default)</td><td>At least one row in the group satisfies the condition</td></tr>
+          <tr><td><code>all</code></td><td>Every row in the group satisfies the condition</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 style="margin:1.5rem 0 .5rem;font-size:1rem;color:var(--text-muted)">YAML examples</h4>
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML — requires constraint</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml"># IF any row in the subject group has CONSENT="YES",
+# THEN all rows in the group must have a CONSENT_DATE
+- id: consent_requires_date_per_subject
+  type: group_condition
+  group_by:
+    - SUBJECT_ID
+  conditions:
+    c_consent_yes:
+      CONSENT:
+        equals: "YES"
+    c_consent_date_present:
+      CONSENT_DATE:
+        empty: false
+  constraints:
+    - id: consent_needs_date
+      type: requires        # alias: implies
+      if: c_consent_yes
+      then: c_consent_date_present
+      if_scope: any         # true if ANY row in group matches
+      then_scope: all       # requires ALL rows in group to match</code></pre>
+    </div>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML — mutually_exclusive constraint</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml"># A sample can't be both "failed QC" and "reported with a result" in the same group
+- id: failed_vs_reported
+  type: group_condition
+  group_by:
+    - SUBJIDN
+    - VISIT
+  conditions:
+    c_failed:
+      GFREASND:
+        empty: false     # a failure reason is populated
+    c_reported:
+      GFORRES:
+        empty: false     # a numeric result is present
+  constraints:
+    - id: qc_fail_and_result_are_exclusive
+      type: mutually_exclusive   # alias: not_both
+      left: c_failed
+      right: c_reported</code></pre>
+    </div>
+
+    <h4 style="margin:1.5rem 0 .5rem;font-size:1rem;color:var(--text-muted)">R — constructing in code</h4>
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">group_rule <- DTARuleGroupCondition(
+  id       = "consent_requires_date_per_subject",
+  group_by = "SUBJECT_ID",
+  conditions = list(
+    c_consent_yes = list(CONSENT = list(equals = "YES")),
+    c_consent_date_present = list(CONSENT_DATE = list(empty = FALSE))
+  ),
+  constraints = list(
+    list(
+      id         = "consent_needs_date",
+      type       = "requires",      # or "implies"
+      `if`       = "c_consent_yes",
+      `then`     = "c_consent_date_present",
+      if_scope   = "any",           # "any" or "all"
+      then_scope = "all"
+    )
+  )
+)
+
+# Attach to a spec collection alongside other rules
+specs_with_group_rule <- DTAColumnSpecCollection(
+  columns = list(
+    SUBJECT_ID   = DTAColumnSpec(id = "SUBJECT_ID",   type = "SAS Char", nullable = FALSE),
+    CONSENT      = DTAColumnSpec(id = "CONSENT",      type = "SAS Char", nullable = TRUE,
+                                 values = list("YES", "NO")),
+    CONSENT_DATE = DTAColumnSpec(id = "CONSENT_DATE", type = "SAS Char", nullable = TRUE)
+  ),
+  rules = list(group_rule)
+)</code></pre>
+    </div>
+
+    <!-- ==============================
+         PART 4: ADVANCED USAGE
+         ============================== -->
+    <div class="part-header" id="section-4-1">
+      <span class="part-num">PART 4</span>
+      <h2 class="part-title">🔬 Advanced Usage</h2>
+    </div>
+
+    <h3 id="section-4-1-h">📂 Validating a Single Dataset (without full DTA metadata)</h3>
+    <p>
+      If you just have a single dataset spec (not a full DTA with metadata), use
+      <code>read_dataset_from_yaml()</code> instead of <code>read_dta_from_yaml()</code>:
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Load just one dataset definition (no top-level metadata)
+# Note: the YAML must start directly with name/type/files/columns
+#   (no surrounding "datasets:" wrapper — that's only for read_dta_from_yaml())
+ds <- read_dataset_from_yaml("my_dataset_spec.yaml")
+
+# handler_index = 1 selects the first file handler defined in the YAML's files: block
+ds <- load_file(ds, file = "my_data.csv", handler_index = 1)
+ds <- check(ds)
+results(ds)</code></pre>
+    </div>
+
+    <!-- ===== BUILD SPECS ===== -->
+    <h3 id="section-4-2">🏗️ Building Specs Programmatically in R</h3>
+    <p>You don't have to write YAML manually — you can build specifications entirely in R code:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">library(DTAtools)
+
+# Define columns
+col_id    <- DTAColumnSpec(id = "PATIENT_ID", type = "SAS Char", nullable = FALSE,
+                           pattern = "^PAT[0-9]{4}$")
+col_age   <- DTAColumnSpec(id = "AGE",        type = "SAS Num",  nullable = FALSE)
+col_visit <- DTAColumnSpec(id = "VISIT",      type = "SAS Char", nullable = FALSE,
+                           values = list("V01", "V02", "V03"))
+
+# Group into a collection
+my_specs <- DTAColumnSpecCollection(
+  columns = list(PATIENT_ID = col_id, AGE = col_age, VISIT = col_visit)
+)
+
+# Create a dataset with inline data
+my_data <- data.frame(
+  PATIENT_ID = c("PAT0001", "PAT0002"),
+  AGE        = c(32, 45),
+  VISIT      = c("V01", "V02")
+)
+
+ds <- DTADataSetTabular(name = "my_dataset", specs = my_specs,
+                        tables = list(my_table = my_data))
+ds <- check(ds)
+results(ds)</code></pre>
+    </div>
+
+    <!-- ===== BUILD RULES ===== -->
+    <h3 id="section-4-3">📐 Building Rules Programmatically</h3>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Range rule
+age_rule <- DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)
+
+# Uniqueness rule
+unique_rule <- DTARuleColUnique(id = "patient_visit_unique",
+                                columns = c("PATIENT_ID", "VISIT"))
+
+# Condition rule: IF CONSENT == "YES" THEN CONSENT_DATE must not be empty
+condition_rule <- DTARuleColCondition(
+  id        = "consent_requires_date",
+  condition = list(CONSENT      = list(equals = "YES")),
+  then      = list(CONSENT_DATE = list(empty  = FALSE))
+)
+
+# Attach rules to specs
+specs_with_rules <- DTAColumnSpecCollection(
+  columns = list(...),
+  rules   = list(age_rule, unique_rule, condition_rule)
+)</code></pre>
+    </div>
+
+    <!-- ===== IMPORT ERRORS ===== -->
+    <h3 id="section-4-4">⚠️ Import Errors in Detail</h3>
+    <p>Import errors are fundamentally different from schema and rule errors.
+    They happen <em>before</em> validation — during the read phase.</p>
+
+    <div class="callout callout-error">
+      <div class="callout-icon">❌</div>
+      <div class="callout-body">
+        <strong>Key distinction</strong>
+        <p>A <code>SAS Num</code> column with cell <code>"unknown"</code> → import error (NA stored)
+        AND possibly a schema error if <code>nullable: false</code>.</p>
+        <p>Use <code>msgs &lt;- messages(ds); msgs[msgs$source == "import", ]</code> to filter to just import errors.</p>
+        <p>Use <code>inspect(ds, id = N)</code> to see <code>import_raw</code> (original text),
+        <code>import_declared_type</code>, and <code>import_reason</code>.</p>
+      </div>
+    </div>
+
+    <p>The <code>import_reason</code> column has two possible values:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Reason</th><th>Meaning</th><th>Example</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>not_convertible</code></td>
+            <td>Value has no numeric/date prefix at all</td>
+            <td><code>"unknown"</code>, <code>"n/a"</code></td>
+          </tr>
+          <tr>
+            <td><code>trailing_residue</code></td>
+            <td>Value has a valid prefix but trailing garbage</td>
+            <td><code>"2024-06-19 at the earliest"</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== EXPORTING ===== -->
+    <h3 id="section-4-5">💾 Exporting Validated Data</h3>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Export to TSV (gzip-compressed, with MD5 checksum file written alongside)
+write_table_to_file(
+  DTADataSetTabular = datasets(dta, "clinical_data"),
+  table      = "clinical_data",           # name of the table inside the dataset
+  filename   = "output/clinical_data.tsv",
+  compression = "gzip",                   # "none" or "gzip"
+  get_md5sum  = TRUE,                     # compute MD5 checksum
+  write_md5sum_to_file = TRUE             # write it to a companion .md5 file
+)</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <p><code>get_md5sum = TRUE</code> computes an MD5 checksum, and <code>write_md5sum_to_file = TRUE</code> writes a companion <code>.md5</code> file alongside the output — which your partner can use to verify transfer integrity.</p>
+      </div>
+    </div>
+
+    <!-- ===== WORD DOCS ===== -->
+    <h3 id="section-4-6">📝 Generating Word Documentation</h3>
+    <p>DTAtools can generate polished Word documents from your spec automatically — useful for sharing with partners who don't use R.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Generate a Word document with the full DTA specification
+write_dta(dta, file = "DTA_document.docx")
+
+# Export a column spec table for one dataset as a Word document
+# export_specs_table() takes a DTAColumnSpecCollection as its first argument
+ds <- datasets(dta, "clinical_data")
+export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
+    </div>
+
+    <!-- ===== GROUP_CONDITION ===== -->
+    <h3 id="section-4-7">🧩 group_condition Rule (Advanced)</h3>
+    <p>
+      <code>group_condition</code> applies if/then logic <em>at the group level</em> rather than
+      row-by-row. First, rows are grouped (e.g., by <code>SUBJECT_ID</code>); then named conditions
+      are evaluated across each group; finally, constraints specify which combinations of conditions
+      must hold across the group.
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml">- id: group_condition_example
+  type: group_condition
+  group_by:
+    - SUBJECT_ID
+  conditions:
+    c_consent_yes:
+      CONSENT:
+        equals: "YES"
+    c_consent_date_present:
+      CONSENT_DATE:
+        empty: false
+  constraints:
+    - id: consent_needs_date_per_subject
+      type: requires
+      if: c_consent_yes
+      then: c_consent_date_present
+      if_scope: any        # IF any row in the group matches
+      then_scope: all      # THEN all rows in the group must match</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Reading the example above:</strong>
+        <p>Group rows by <code>SUBJECT_ID</code>. For each subject group:
+        if <em>any</em> row has <code>CONSENT="YES"</code>, then <em>all</em> rows must have a
+        <code>CONSENT_DATE</code> present.</p>
+      </div>
+    </div>
+
+    <!-- ==============================
+         PART 5: QUICK REFERENCE
+         ============================== -->
+    <div class="part-header" id="section-5-1">
+      <span class="part-num">PART 5</span>
+      <h2 class="part-title">⚡ Quick Reference</h2>
+    </div>
+
+    <h3 id="section-5-1-h">📋 Function Cheat Sheet</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Function</th><th>What it does</th><th>Returns</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="cheat-fn">read_dta_from_yaml(file)</td>
+            <td>Load full DTA spec (metadata + datasets)</td>
+            <td>DTA object</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">read_dataset_from_yaml(file)</td>
+            <td>Load a single dataset spec</td>
+            <td>DTADataSetTabular</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">load_file(dta, dataset, file)</td>
+            <td>Load a data file into a dataset</td>
+            <td>Updated DTA / dataset</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">check(dta)</td>
+            <td>Run all validation (import + schema + rules)</td>
+            <td>Updated DTA / dataset</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">results(dta)</td>
+            <td>Summary table: pass/fail + error counts</td>
+            <td>data.frame</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">messages(dta)</td>
+            <td>Detailed error list with row / column / message</td>
+            <td>data.frame</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">inspect(dta, id = N)</td>
+            <td>Deep-dive into one error by its <code>id</code></td>
+            <td>data.frame</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">validation_status(dta)</td>
+            <td>Compact status per table</td>
+            <td>data.frame</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">datasets(dta)</td>
+            <td>List datasets in the DTA</td>
+            <td>named list</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">specs(ds)</td>
+            <td>Get column specs from a dataset</td>
+            <td>DTAColumnSpecCollection</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">write_dta(dta, file)</td>
+            <td>Export DTA as Word document</td>
+            <td>(file written)</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">export_specs_table(specs(ds), file)</td>
+            <td>Export column spec table for one dataset as Word document</td>
+            <td>(file written)</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">write_table_to_file(ds, table, filename, ...)</td>
+            <td>Export validated data to TSV/CSV (optional gzip + MD5)</td>
+            <td>(file written)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ===== YAML TEMPLATE ===== -->
+    <h3 id="section-5-2">📄 YAML Minimal Template</h3>
+    <p>Copy-paste this as your starting point for any new spec:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>YAML — copy-paste template</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-yaml"># Minimal DTAtools specification
+datasets:
+  - name: my_dataset          # must match what you pass to load_file()
+    type: tabular
+    files:
+      filename: "my_data.csv" # or a regex pattern
+      type: csv               # csv or tsv
+    columns:
+      - id: COLUMN_NAME       # must match exact CSV header
+        type: SAS Char        # SAS Char / SAS Num / SAS Int / SAS Date
+        nullable: false       # true = empty values allowed
+        # Add ONE of these optional constraints:
+        # values: [VALUE1, VALUE2, VALUE3]   # allowed value list
+        # pattern: "^regex$"                # regex pattern
+        # length: 20                        # max character length
+    rules: []                 # add rules here or omit if none needed</code></pre>
+    </div>
+
+    <div class="callout callout-success">
+      <div class="callout-icon">✅</div>
+      <div class="callout-body">
+        <strong>You're ready to go!</strong>
+        <p>Start with this template, add your columns, load it with
+        <code>read_dta_from_yaml()</code>, attach your CSV with <code>load_file()</code>,
+        and run <code>check()</code>. Happy validating! 🎉</p>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <p>
+    DTAtools v0.15.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>
+  </p>
+</footer>
+
+<script>
+  // ===== HIGHLIGHT.JS =====
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  });
+
+  // ===== COPY BUTTON =====
+  function copyCode(btn) {
+    const pre = btn.closest('.code-wrap').querySelector('pre code');
+    const text = pre.innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = '✅ Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = '📋 Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => {
+      btn.textContent = '❌ Failed';
+      setTimeout(() => { btn.innerHTML = '📋 Copy'; }, 2000);
+    });
+  }
+
+  // ===== DARK MODE =====
+  const themeToggle = document.getElementById('themeToggle');
+  const themeIcon   = document.getElementById('themeIcon');
+  const themeLabel  = document.getElementById('themeLabel');
+  const html        = document.documentElement;
+
+  function applyTheme(dark) {
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    themeIcon.textContent  = dark ? '☀️' : '🌙';
+    themeLabel.textContent = dark ? 'Light' : 'Dark';
+  }
+
+  // Restore saved preference
+  const saved = localStorage.getItem('dtatools-theme');
+  if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    applyTheme(true);
+  }
+
+  themeToggle.addEventListener('click', () => {
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    applyTheme(!isDark);
+    localStorage.setItem('dtatools-theme', isDark ? 'light' : 'dark');
+  });
+
+  // ===== HAMBURGER MENU =====
+  const hamburger = document.getElementById('hamburger');
+  const sidebar   = document.getElementById('sidebar');
+  const overlay   = document.getElementById('overlay');
+
+  hamburger.addEventListener('click', () => {
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
+  });
+  overlay.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+  });
+
+  // ===== SIDEBAR ACTIVE SECTION (IntersectionObserver) =====
+  const navLinks = document.querySelectorAll('.nav-item');
+  const sections = [];
+
+  // Map nav links to their target sections
+  navLinks.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ id, el, link });
+  });
+
+  let activeId = null;
+
+  function setActive(id) {
+    if (id === activeId) return;
+    activeId = id;
+    navLinks.forEach(l => l.classList.remove('active'));
+    const found = sections.find(s => s.id === id);
+    if (found) found.link.classList.add('active');
+  }
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        setActive(entry.target.id);
+      }
+    });
+  }, { rootMargin: '-60px 0px -70% 0px', threshold: 0 });
+
+  sections.forEach(s => observer.observe(s.el));
+
+  // Close sidebar on nav click (mobile)
+  navLinks.forEach(link => {
+    link.addEventListener('click', () => {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('open');
+    });
+  });
+</script>
+</body>
+</html>

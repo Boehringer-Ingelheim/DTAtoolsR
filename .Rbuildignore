@@ -45,6 +45,11 @@ CHANGELOG.md
 # Performance benchmarks — developer tooling, not shipped
 ^benchmarks$
 
+# The GitHub Pages tutorial site. `^doc$` above is the vignette build output
+# and does not match this, so without its own entry the whole static site is
+# bundled into the package tarball.
+^docs$
+
 # AI assistant configuration — never part of the shipped package
 ^CLAUDE\.md$
 ^CLAUDE\.local\.md$

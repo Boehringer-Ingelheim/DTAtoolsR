@@ -34,14 +34,28 @@ Rewrites a delimited file as a Parquet dataset, once, so that repeated
 validations read a columnar format instead of re-parsing text. The
 conversion streams: the file is scanned in batches and written out, never
 materialised.
+}
+\section{Whether this is worth doing}{
 
-This is worth doing when a file is validated more than once. A single
-validation pays the conversion and gains nothing.
+Measured, on a 500,000-row file of 20 columns where the specs read every
+column: validating from the cache was \strong{0.95x the speed} of validating the
+text — that is, slightly slower — on top of a one-off conversion. On that
+shape the cache never repays itself, and \code{benchmarks/bench_parquet.R}
+reports exactly that.
+
+The reason is that parsing is not the bottleneck. Evaluating the constraints
+in R dominates, so a format that only makes reading cheaper cannot help.
+
+What that benchmark does \emph{not} test is the case Parquet is strongest at: a
+wide file where the specs and rules read only a few of its columns, so the
+rest need never be read at all. If your data looks like that, measure it.
+Otherwise, do not convert.
 
 The columns are typed by the specs during conversion, exactly as they would
 be when validating the text directly, so the cache preserves the declared
 types rather than Parquet's own inference of them.
 }
+
 \examples{
 specs <- DTAtools::DTAColumnSpecCollection(
   columns = list(

@@ -920,6 +920,89 @@ rules:
       - VISIT
 ```
 
+#### `group_condition` — Group-Level Constraints
+
+`group_condition` is distinct from the other rule types: instead of evaluating
+each row independently, it first groups rows by one or more columns and then
+applies constraint logic *across the whole group*. This makes it possible to
+express rules that span multiple rows for the same entity — for example, "if
+any row in this subject's group records consent, then every row in that group
+must supply a consent date."
+
+A `group_condition` rule has three required parts:
+
+- **`group_by`** — columns that define the group (e.g. `SUBJECT_ID`, or a
+  composite key like `[SUBJIDN, VISIT]`).
+- **`conditions`** — named Boolean flags. Each condition maps a name (e.g.
+  `c_consent_yes`) to a column test in the same operator syntax used by
+  `col_condition` (`equals`, `empty`, `in`, …). A condition evaluates to
+  `TRUE` for a row when all of its column tests pass.
+- **`constraints`** — rules over the named condition flags. Two constraint
+  types are supported:
+
+| Type | Aliases | Meaning |
+|------|---------|---------|
+| `requires` | `implies` | IF condition `if` holds (per `if_scope`), THEN condition `then` must hold (per `then_scope`) |
+| `mutually_exclusive` | `not_both` | conditions `left` and `right` cannot both be true within the same group |
+
+The `if_scope` / `then_scope` (or `left_scope` / `right_scope`) fields control
+how the condition is aggregated over the rows in a group:
+
+| Scope | Meaning |
+|-------|---------|
+| `any` (default) | At least one row in the group satisfies the condition |
+| `all` | Every row in the group satisfies the condition |
+
+```yaml
+rules:
+  # ── requires: IF any row in the group has CONSENT="YES",
+  #              THEN all rows in the group must have a CONSENT_DATE ──────────
+  - id: consent_requires_date_per_subject
+    type: group_condition
+    group_by:
+      - SUBJECT_ID
+    conditions:
+      c_consent_yes:
+        CONSENT:
+          equals: "YES"
+      c_consent_date_present:
+        CONSENT_DATE:
+          empty: false
+    constraints:
+      - id: consent_needs_date
+        type: requires          # alias: implies
+        if: c_consent_yes
+        then: c_consent_date_present
+        if_scope: any           # true when ANY row in the group matches
+        then_scope: all         # requires ALL rows in the group to match
+
+  # ── mutually_exclusive: failed QC and reported result are incompatible ─────
+  - id: failed_vs_reported
+    type: group_condition
+    group_by:
+      - SUBJIDN
+      - VISIT
+    conditions:
+      c_failed:
+        GFREASND:
+          empty: false          # a failure reason is present
+      c_reported:
+        GFREASND:
+          empty: true
+        GFORRES:
+          empty: false          # a numeric result is present and no failure reason
+    constraints:
+      - id: qc_fail_and_result_are_exclusive
+        type: mutually_exclusive    # alias: not_both
+        left: c_failed
+        right: c_reported
+```
+
+> **When to use `group_condition` vs `col_condition`:** `col_condition` checks
+> each row in isolation. Use `group_condition` when the rule depends on the
+> combination of rows that share the same grouping key — e.g. all rows for one
+> subject, or all rows for one sample-at-one-visit.
+
 ### Defining Rules in R
 
 Rules can also be constructed programmatically:
@@ -938,8 +1021,29 @@ condition_rule <- DTARuleColCondition(
   then      = list(CONSENT_DATE = list(empty = FALSE))
 )
 
+# group_condition rule: IF any row in the subject group has CONSENT="YES",
+#                       THEN all rows in the group must have a CONSENT_DATE
+group_rule <- DTARuleGroupCondition(
+  id = "consent_requires_date_per_subject",
+  group_by = "SUBJECT_ID",
+  conditions = list(
+    c_consent_yes          = list(CONSENT = list(equals = "YES")),
+    c_consent_date_present = list(CONSENT_DATE = list(empty = FALSE))
+  ),
+  constraints = list(
+    list(
+      id         = "consent_needs_date",
+      type       = "requires",
+      `if`       = "c_consent_yes",
+      `then`     = "c_consent_date_present",
+      if_scope   = "any",
+      then_scope = "all"
+    )
+  )
+)
+
 # Collect rules in a plain list
-rule_collection <- list(range_rule, unique_rule, condition_rule)
+rule_collection <- list(range_rule, unique_rule, condition_rule, group_rule)
 ```
 
 ```{r specs_with_rules}

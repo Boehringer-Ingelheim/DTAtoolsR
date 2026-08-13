@@ -29,7 +29,7 @@
 #'   ),
 #'   constraints = list(
 #'     list(type = "mutually_exclusive", left = "c1_failed", right = "c2_reported"),
-#'     list(type = "requires", `if` = "c1_failed", then = "c3_not_done")
+#'     list(type = "requires", `if` = "c1_failed", `then` = "c3_not_done")
 #'   )
 #' )
 #' @include DTARule-class.R
