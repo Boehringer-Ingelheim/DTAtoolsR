@@ -100,7 +100,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 ### Testing
 
 - **Every behaviour change:** Test in `tests/testthat/test-<Topic>.R`.
-- **Assert behaviour, not existence:** 
+- **Assert behaviour, not existence:**
   - ✓ `expect_error(fn(), class = "myError")` — check that it fails with the right error class.
   - ✗ `expect_true(file.exists("output.csv"))` — use file contents instead: `expect_true(readLines("output.csv") == expected)`.
 - **Language-aware testing:** R renders base errors and `%B` month names in the system language (German on primary dev machine). Never assert on translated text; match error classes or package-authored `cli` strings instead. Force `LC_TIME = "C"` if needed.
