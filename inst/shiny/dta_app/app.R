@@ -4303,7 +4303,7 @@ server <- function(input, output, session) {
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
         choices = c("Markdown" = "markdown", "Word Document" = "word"),
-        selected = "markdown"
+        selected = "word"
       ),
       # Markdown options
       conditionalPanel(
@@ -4334,7 +4334,7 @@ server <- function(input, output, session) {
             p("No custom templates available.", class = "text-muted")
           }
         ),
-        checkboxInput("export_include_yaml_word", "Embed YAML specification at end of document", value = FALSE)
+        checkboxInput("export_include_yaml_word", "Embed YAML specification at end of document", value = TRUE)
       ),
       hr(),
       h5("Output filename", class = "text-muted"),
@@ -4355,16 +4355,12 @@ server <- function(input, output, session) {
   # Export filename preview
   output$export_filename_preview <- renderText({
     req(rv$dta)
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-
     ext <- if (input$export_format == "markdown") {
       if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
     } else {
       ".docx"
     }
-    paste0(base, "_", Sys.Date(), ext)
+    paste0(dta_export_stem(rv$dta), ext)
   })
 
   # Cancel export
@@ -4376,16 +4372,14 @@ server <- function(input, output, session) {
   observeEvent(input$export_do, {
     req(rv$dta)
 
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+    stem <- dta_export_stem(rv$dta)
 
     tryCatch(
       {
         if (input$export_format == "markdown") {
           # Markdown export
           ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
-          filename <- paste0(base, "_", Sys.Date(), ext)
+          filename <- paste0(stem, ext)
           # The browser fetches the file on a LATER request, so the path it
           # waits on must be unique. Deriving it from title and date meant two
           # untitled exports on the same day shared one path, and whichever
@@ -4471,7 +4465,7 @@ server <- function(input, output, session) {
           export_state$file_name <- filename
         } else {
           # Word export
-          filename <- paste0(base, "_", Sys.Date(), ".docx")
+          filename <- paste0(stem, ".docx")
           # Unique for the same reason as the markdown branch above.
           output_file <- tempfile(pattern = "dta-export-", fileext = ".docx")
 
@@ -4929,7 +4923,7 @@ server <- function(input, output, session) {
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export PDF", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
+          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")

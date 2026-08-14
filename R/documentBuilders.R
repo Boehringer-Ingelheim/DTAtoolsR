@@ -12,47 +12,49 @@ NULL
   if (is.na(title_chr)) title_chr <- ""
   display_title <- if (nzchar(title_chr)) title_chr else "Data Transfer Agreement"
 
-  # Add title
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  for (i in seq_len(6)) {
+    doc <- .add_spacer(doc)
+  }
 
-  # Title with large font
-  doc <- officer::body_add_par(
-    doc,
-    display_title,
-    style = "Normal"
+  # Title. (Previously this reached the cursor back to the title via
+  # officer::cursor_reach(keyword = title) before inserting the blank line, but
+  # that matches the title as a regex and aborted the whole export when the
+  # title was empty/NULL or contained regex metacharacters. The cursor already
+  # sits on the freshly added paragraph, so a direct insert is equivalent and
+  # robust.)
+  doc <- .add_body_par(
+    doc, display_title,
+    size = FONT_SIZES$title, bold = TRUE, color = THEME_COLORS$primary_dark
   )
 
-  # Spacer paragraph after the title. (Previously this reached the cursor back
-  # to the title via officer::cursor_reach(keyword = title) before inserting the
-  # blank line, but that matches the title as a regex and aborted the whole
-  # export when the title was empty/NULL or contained regex metacharacters.
-  # The cursor already sits on the freshly added title paragraph, so a direct
-  # insert is equivalent and robust.)
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  # Hairline rule under the title, drawn as a bottom-bordered empty paragraph.
+  doc <- officer::body_add_fpar(
+    doc,
+    officer::fpar(
+      officer::ftext("", .house_fp_text(size = FONT_SIZES$body)),
+      fp_p = officer::fp_par(
+        border.bottom = officer::fp_border(color = THEME_COLORS$primary, width = 1.5),
+        padding.bottom = 6
+      )
+    )
+  )
 
-  # Subtitle
-  if (!is.null(subtitle)) {
-    doc <- officer::body_add_par(doc, subtitle, style = "Normal")
+  if (!is.null(subtitle) && nzchar(subtitle)) {
+    doc <- .add_body_par(
+      doc, subtitle,
+      size = FONT_SIZES$subtitle, color = THEME_COLORS$gray_mid
+    )
   }
 
-  # Spacing
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
 
-  # Date and version
   # ISO 8601 (YYYY-MM-DD): locale-independent, unlike "%B %d, %Y", whose month
   # name is taken from LC_TIME and differs per workstation.
-  doc <- officer::body_add_par(doc, paste("Date:", .format_document_date(date)), style = "Normal")
-
+  doc <- .add_body_par(doc, paste("Date:", .format_document_date(date)), color = THEME_COLORS$gray_mid)
   if (!is.null(version)) {
-    doc <- officer::body_add_par(doc, paste("Version:", version), style = "Normal")
+    doc <- .add_body_par(doc, paste("Version:", version), color = THEME_COLORS$gray_mid)
   }
 
-  # Page break
   doc <- officer::body_add_break(doc)
 
   doc
@@ -88,14 +90,13 @@ NULL
 #' @keywords internal
 .add_embedded_yaml_section <- function(doc, yaml_text) {
   doc <- .add_heading(doc, "Embedded Specification (YAML)", level = 2)
-  doc <- officer::body_add_par(
+  doc <- .add_body_par(
     doc,
-    "The machine-readable YAML specification is embedded below for reference.",
-    style = "Normal"
+    "The machine-readable YAML specification is embedded below for reference."
   )
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
 
-  fp <- officer::fp_text(font.size = 6, font.family = "Consolas")
+  fp <- .house_fp_text(size = FONT_SIZES$code, color = THEME_COLORS$gray_dark, font = FONTS$monospace)
   lines <- strsplit(gsub("\r\n", "\n", yaml_text, fixed = TRUE), "\n", fixed = TRUE)[[1]]
   if (length(lines) == 0) lines <- ""
   for (ln in lines) {
@@ -106,7 +107,7 @@ NULL
     if (!nzchar(disp)) disp <- "\u00a0"
     doc <- officer::body_add_fpar(doc, officer::fpar(officer::ftext(disp, fp)))
   }
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
   doc
 }
 
@@ -124,16 +125,15 @@ NULL
     # Create flextable
     ft <- flextable::flextable(pairs)
     ft <- flextable::set_header_labels(ft, key = "Item", value = "Details")
-    ft <- flextable::width(ft, j = 1, width = 1.5)
-    ft <- flextable::width(ft, j = 2, width = 4.0)
-    ft <- flextable::align(ft, align = "left", part = "all")
-    ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-    ft <- flextable::bold(ft, part = "header")
+    ft <- flextable::width(ft, j = 1, width = 1.6)
+    ft <- flextable::width(ft, j = 2, width = 4.7)
+    ft <- .style_table(ft)
+    ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
 
     doc <- flextable::body_add_flextable(doc, ft)
   }
 
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
   doc
 }
 
@@ -154,26 +154,22 @@ NULL
   ft <- flextable::width(ft, j = 6, width = 0.8)
   ft <- flextable::width(ft, j = 7, width = 0.8)
   ft <- flextable::width(ft, j = 8, width = 1.1)
-  ft <- flextable::align(ft, j = c(6, 7, 8), align = "center", part = "all")
-  ft <- flextable::align(ft, j = c(1, 2, 3, 4, 5), align = "left", part = "all")
-  ft <- flextable::valign(ft, valign = "top", part = "all")
-  ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-  ft <- flextable::bold(ft, part = "header")
-  ft <- flextable::fontsize(ft, size = 10, part = "body")
-  ft <- flextable::fontsize(ft, size = 10, part = "header")
-  ft <- flextable::padding(ft, padding = 3, part = "all")
+  ft <- .style_table(ft, center_cols = c(6, 7, 8))
 
   ft
 }
 
-#' Add a full organization section (affiliation + individual contact blocks)
-#' Signatories come first with a signature underline; backup-only contacts are grouped last.
+#' Add a full organization section (affiliation + individual contact blocks).
+#' Backup-only contacts are grouped last. Signature lines are NOT drawn here:
+#' authorised signatories are collected into the single "Approval & Signatures"
+#' table at the front of the document, so repeating an underline per contact
+#' would be a second, competing place to sign.
 #' @keywords internal
 .add_organization_section <- function(doc, title, org_list) {
   doc <- .add_heading(doc, title, level = 2)
 
   if (is.null(org_list) || length(org_list) == 0) {
-    doc <- officer::body_add_par(doc, "No information specified.", style = "Normal")
+    doc <- .add_body_par(doc, "No information specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     return(doc)
   }
 
@@ -183,13 +179,12 @@ NULL
     aff_df <- .format_metadata_pairs(pairs)
     ft <- flextable::flextable(aff_df)
     ft <- flextable::set_header_labels(ft, key = "Item", value = "Details")
-    ft <- flextable::width(ft, j = 1, width = 1.5)
-    ft <- flextable::width(ft, j = 2, width = 4.0)
-    ft <- flextable::align(ft, align = "left", part = "all")
-    ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-    ft <- flextable::bold(ft, part = "header")
+    ft <- flextable::width(ft, j = 1, width = 1.6)
+    ft <- flextable::width(ft, j = 2, width = 4.7)
+    ft <- .style_table(ft)
+    ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
     doc <- flextable::body_add_flextable(doc, ft)
-    doc <- officer::body_add_par(doc, "", style = "Normal")
+    doc <- .add_spacer(doc)
   }
 
   # Individual contacts - one block per contact
@@ -200,12 +195,9 @@ NULL
     backups <- Filter(function(ct) isTRUE(ct$backup) && !isTRUE(ct$signature), contacts)
     primaries <- Filter(function(ct) !isTRUE(ct$backup) || isTRUE(ct$signature), contacts)
 
-    .add_contact_block <- function(doc, ct, include_signature_line) {
+    .add_contact_block <- function(doc, ct) {
       nm <- if (!is.null(ct$name) && nzchar(ct$name)) ct$name else "(Unnamed)"
-
-      # Name as bold paragraph
-      fp_name <- officer::fp_text(bold = TRUE, font.size = FONT_SIZES$body + 1, color = THEME_COLORS$accent)
-      doc <- officer::body_add_fpar(doc, officer::fpar(officer::ftext(nm, fp_name)))
+      doc <- .add_body_par(doc, nm, bold = TRUE, color = THEME_COLORS$primary_dark)
 
       fields <- list()
       if (!is.null(ct$role) && nzchar(ct$role)) fields[["Role"]] <- ct$role
@@ -216,44 +208,37 @@ NULL
       flags <- character(0)
       if (isTRUE(ct$reviewer)) flags <- c(flags, "Reviewer")
       if (isTRUE(ct$backup)) flags <- c(flags, "Backup")
+      if (isTRUE(ct$signature)) flags <- c(flags, "Signatory")
       if (length(flags) > 0) fields[["Roles"]] <- paste(flags, collapse = ", ")
 
-      if (length(fields) > 0) {
-        for (nm_f in names(fields)) {
-          doc <- officer::body_add_par(
-            doc,
-            paste0(nm_f, ":  ", fields[[nm_f]]),
-            style = "Normal"
-          )
-        }
-      }
-
-      if (include_signature_line) {
-        doc <- officer::body_add_par(doc, "", style = "Normal")
-        doc <- officer::body_add_par(
+      for (nm_f in names(fields)) {
+        doc <- officer::body_add_fpar(
           doc,
-          "Signature: __________________________________     Date: ______________",
-          style = "Normal"
+          officer::fpar(
+            officer::ftext(paste0(nm_f, ": "), .house_fp_text(size = FONT_SIZES$small, color = THEME_COLORS$gray_mid)),
+            officer::ftext(fields[[nm_f]], .house_fp_text(size = FONT_SIZES$small)),
+            fp_p = officer::fp_par(text.align = "left", padding.bottom = 1)
+          )
         )
       }
 
-      doc <- officer::body_add_par(doc, "", style = "Normal")
+      doc <- .add_spacer(doc)
       doc
     }
 
     for (ct in primaries) {
-      doc <- .add_contact_block(doc, ct, include_signature_line = isTRUE(ct$signature))
+      doc <- .add_contact_block(doc, ct)
     }
 
     if (length(backups) > 0) {
       doc <- .add_bold_subheading(doc, "Backup Contacts")
-      doc <- officer::body_add_par(doc, "", style = "Normal")
+      doc <- .add_spacer(doc)
       for (ct in backups) {
-        doc <- .add_contact_block(doc, ct, include_signature_line = FALSE)
+        doc <- .add_contact_block(doc, ct)
       }
     }
   } else if (length(pairs) == 0) {
-    doc <- officer::body_add_par(doc, "No contacts specified.", style = "Normal")
+    doc <- .add_body_par(doc, "No contacts specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
 
   doc
@@ -269,61 +254,57 @@ NULL
 
   doc <- .add_heading(doc, "Authorized for Corrections", level = 2)
   for (nm in names_vec) {
-    doc <- officer::body_add_par(doc, paste0("\u2022  ", nm), style = "Normal")
+    doc <- .add_body_par(doc, paste0("\u2022  ", nm))
   }
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
   doc
 }
 
-#' Add signature approval section
+#' Add signature approval section.
 #' @description
 #' Accepts either a data.frame(Organization, Name, Role) (as returned by
 #' \code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
 #' records, or NULL. One signature row is rendered per authorized signatory.
+#'
+#' When no signatory is known the section is omitted entirely rather than
+#' padded with blank "Approved by / Signature" rules: an anonymous underline
+#' is not something a reader can act on, and it left the document with a
+#' heading whose content was pure filler.
+#' @return The document, unchanged when there is nothing to sign.
 #' @keywords internal
 .add_signature_section <- function(doc, signatories = NULL) {
-  doc <- .add_heading(doc, "Approval & Signatures", level = 2)
-
   sig_df <- .normalize_signatories(signatories)
-
-  if (!is.null(sig_df) && nrow(sig_df) > 0) {
-    sig_data <- data.frame(
-      Organization = sig_df$Organization,
-      Name = sig_df$Name,
-      Role = sig_df$Role,
-      Signature = "_________________",
-      Date = "____________",
-      stringsAsFactors = FALSE
-    )
-
-    ft <- flextable::flextable(sig_data)
-    ft <- flextable::width(ft, j = 1, width = 1.3)
-    ft <- flextable::width(ft, j = 2, width = 1.4)
-    ft <- flextable::width(ft, j = 3, width = 1.4)
-    ft <- flextable::width(ft, j = 4, width = 1.7)
-    ft <- flextable::width(ft, j = 5, width = 1.1)
-    ft <- flextable::align(ft, j = c(1, 2, 3), align = "left", part = "all")
-    ft <- flextable::align(ft, j = c(4, 5), align = "center", part = "all")
-    ft <- flextable::valign(ft, valign = "top", part = "all")
-    ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-    ft <- flextable::bold(ft, part = "header")
-
-    doc <- flextable::body_add_flextable(doc, ft)
-    doc <- officer::body_add_par(doc, "", style = "Normal")
-    doc <- officer::body_add_par(
-      doc,
-      "Note: signatories listed above are contacts marked as authorized signers (signature = TRUE).",
-      style = "Normal"
-    )
-  } else {
-    # Generic fallback signature fields (no contacts with signature = TRUE were found)
-    doc <- officer::body_add_par(doc, "", style = "Normal")
-    doc <- officer::body_add_par(doc, "Approved by: _____________________________     Date: ______________", style = "Normal")
-    doc <- officer::body_add_par(doc, "", style = "Normal")
-    doc <- officer::body_add_par(doc, "Signature:   _____________________________", style = "Normal")
+  if (is.null(sig_df) || nrow(sig_df) == 0) {
+    return(doc)
   }
 
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_heading(doc, "Approval & Signatures", level = 2)
+
+  sig_data <- data.frame(
+    Organization = sig_df$Organization,
+    Name = sig_df$Name,
+    Role = sig_df$Role,
+    Signature = "",
+    Date = "",
+    stringsAsFactors = FALSE
+  )
+
+  ft <- flextable::flextable(sig_data)
+  ft <- flextable::width(ft, j = 1, width = 1.3)
+  ft <- flextable::width(ft, j = 2, width = 1.3)
+  ft <- flextable::width(ft, j = 3, width = 1.5)
+  ft <- flextable::width(ft, j = 4, width = 1.4)
+  ft <- flextable::width(ft, j = 5, width = 0.8)
+  ft <- .style_table(ft)
+  ft <- flextable::bold(ft, j = 2, bold = TRUE, part = "body")
+  # Signature/Date are filled in by hand: give them room and a ruled baseline
+  # instead of a row of underscores.
+  ft <- flextable::height(ft, height = 0.42, part = "body")
+  ft <- flextable::hrule(ft, rule = "atleast", part = "body")
+  ft <- flextable::bg(ft, j = c(4, 5), bg = THEME_COLORS$white, part = "body")
+
+  doc <- flextable::body_add_flextable(doc, ft)
+  doc <- .add_spacer(doc)
   doc
 }
 
@@ -333,7 +314,7 @@ NULL
   doc <- if (is.null(heading_level)) .add_bold_subheading(doc, title) else .add_heading(doc, title, level = heading_level)
 
   if (is.null(files) || length(files) == 0) {
-    doc <- officer::body_add_par(doc, "No files specified.", style = "Normal")
+    doc <- .add_body_par(doc, "No files specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     return(doc)
   }
   total_min <- sum(sapply(files, function(f) {
@@ -350,16 +331,16 @@ NULL
   } else {
     as.character(total_min)
   }
-  doc <- officer::body_add_par(
+  doc <- .add_body_par(
     doc,
     paste0(
       "The following ", file_word, " are expected for this dataset (",
       count_txt, " in total). Each file name is given either as an exact ",
       "name or as a regular-expression pattern that a delivered file must ",
       "match; the expected count states how many files may match it."
-    ),
-    style = "Normal"
+    )
   )
+  doc <- .add_spacer(doc)
 
   # Create file listing table
   file_data <- data.frame(
@@ -407,14 +388,10 @@ NULL
   ft <- flextable::width(ft, j = 3, width = 0.9)
   ft <- flextable::width(ft, j = 4, width = 1.0)
   ft <- flextable::width(ft, j = 5, width = 2.5)
-  ft <- flextable::align(ft, j = c(2, 3, 4), align = "center", part = "all")
-  ft <- flextable::align(ft, j = c(1, 5), align = "left", part = "all")
-  ft <- flextable::valign(ft, valign = "top", part = "all")
-  ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-  ft <- flextable::bold(ft, part = "header")
+  ft <- .style_table(ft, center_cols = c(2, 3, 4))
 
   doc <- flextable::body_add_flextable(doc, ft)
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
 
   doc
 }
@@ -440,7 +417,7 @@ NULL
 #' template supports (it only defines "heading 1" through "heading 3").
 #' @keywords internal
 .add_bold_subheading <- function(doc, text) {
-  fp <- officer::fp_text(bold = TRUE, font.size = FONT_SIZES$body + 1, color = THEME_COLORS$accent)
+  fp <- .house_fp_text(size = FONT_SIZES$heading3, bold = TRUE, color = THEME_COLORS$primary_dark)
   officer::body_add_fpar(doc, officer::fpar(officer::ftext(text, fp)))
 }
 
@@ -474,10 +451,52 @@ NULL
   ft <- flextable::flextable(rule_data)
   ft <- flextable::width(ft, j = 1, width = 1.2)
   ft <- flextable::width(ft, j = 2, width = 5.0)
-  ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-  ft <- flextable::bold(ft, part = "header")
-  ft <- flextable::valign(ft, valign = "top", part = "all")
+  ft <- .style_table(ft)
   ft
+}
+
+#' Close the current document section with the given page orientation.
+#'
+#' officer's `body_end_section_*()` helpers terminate the content added *before*
+#' the call, so a landscape block is produced by ending the preceding content as
+#' portrait, adding the block, and only then ending that block as landscape.
+#' Page size and margins are read back from the document rather than hardcoded,
+#' so a Letter-based template is not silently forced onto A4, and the section
+#' type is `nextPage` rather than officer's `oddPage` default, which would pad
+#' the document with blank pages.
+#' @keywords internal
+.end_section_orientation <- function(doc, orient = c("portrait", "landscape")) {
+  orient <- match.arg(orient)
+
+  dims <- officer::docx_dim(doc)
+  short_side <- min(dims$page[["width"]], dims$page[["height"]])
+  long_side <- max(dims$page[["width"]], dims$page[["height"]])
+
+  size <- if (identical(orient, "landscape")) {
+    officer::page_size(width = long_side, height = short_side, orient = "landscape")
+  } else {
+    officer::page_size(width = short_side, height = long_side, orient = "portrait")
+  }
+
+  # docx_dim() reports top/bottom/left/right/header/footer only; gutter is absent.
+  gutter <- if ("gutter" %in% names(dims$margins)) dims$margins[["gutter"]] else 0
+
+  margins <- officer::page_mar(
+    top = dims$margins[["top"]],
+    bottom = dims$margins[["bottom"]],
+    left = dims$margins[["left"]],
+    right = dims$margins[["right"]],
+    header = dims$margins[["header"]],
+    footer = dims$margins[["footer"]],
+    gutter = gutter
+  )
+
+  officer::body_end_block_section(
+    doc,
+    officer::block_section(
+      officer::prop_section(page_size = size, page_margins = margins, type = "nextPage")
+    )
+  )
 }
 
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
@@ -495,14 +514,21 @@ NULL
     if (is.null(heading_level)) .add_bold_subheading(doc, text) else .add_heading(doc, text, level = heading_level)
   }
 
+  # The column specifications table is 8.4in wide and does not fit the ~6.3in
+  # text column of an A4 portrait page, so the table block gets landscape pages
+  # of its own. officer terminates a section for the content *already added*,
+  # hence: close the preceding portrait content first, add the tables, then
+  # close them as landscape.
+  doc <- .end_section_orientation(doc, "portrait")
+
   doc <- add_section_heading(doc, "Column Specifications")
   ft <- .build_column_specs_table(dataset@specs)
   if (!is.null(ft)) {
     doc <- flextable::body_add_flextable(doc, ft)
   } else {
-    doc <- officer::body_add_par(doc, "No column specifications available.", style = "Normal")
+    doc <- .add_body_par(doc, "No column specifications available.", italic = TRUE, color = THEME_COLORS$gray_mid)
   }
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
 
   if (include_rules) {
     doc <- add_section_heading(doc, "Validation Rules")
@@ -510,10 +536,12 @@ NULL
     if (!is.null(ft_rules)) {
       doc <- flextable::body_add_flextable(doc, ft_rules)
     } else {
-      doc <- officer::body_add_par(doc, "No validation rules specified.", style = "Normal")
+      doc <- .add_body_par(doc, "No validation rules specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     }
-    doc <- officer::body_add_par(doc, "", style = "Normal")
+    doc <- .add_spacer(doc)
   }
+
+  doc <- .end_section_orientation(doc, "landscape")
 
   doc
 }
@@ -593,15 +621,10 @@ NULL
   ft <- flextable::width(ft, j = 5, width = 2.0) # Values/Pattern
   ft <- flextable::width(ft, j = 6, width = 2.2) # Description
 
-  # Formatting
-  ft <- flextable::align(ft, j = 4, align = "center", part = "all")
-  ft <- flextable::align(ft, j = c(1, 2, 3, 5, 6), align = "left", part = "all")
-  ft <- flextable::valign(ft, valign = "top", part = "all")
-  ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-  ft <- flextable::bold(ft, part = "header")
-  ft <- flextable::fontsize(ft, size = 10, part = "body")
-  ft <- flextable::fontsize(ft, size = 11, part = "header")
-  ft <- flextable::padding(ft, padding = 3, part = "all")
+  # Formatting. Column specs are dense, so this table takes the compact variant
+  # of the house style: same palette and family, one point smaller.
+  ft <- .style_table(ft, center_cols = 4)
+  ft <- flextable::fontsize(ft, size = FONT_SIZES$table_body - 1, part = "body")
 
   ft
 }
@@ -610,7 +633,7 @@ NULL
 #' @keywords internal
 .build_validation_rules_section <- function(doc, rules_collection) {
   if (is.null(rules_collection) || length(rules_collection) == 0) {
-    doc <- officer::body_add_par(doc, "No validation rules specified.", style = "Normal")
+    doc <- .add_body_par(doc, "No validation rules specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
     return(doc)
   }
 
@@ -634,7 +657,7 @@ NULL
     )
   }
 
-  doc <- officer::body_add_par(doc, "", style = "Normal")
+  doc <- .add_spacer(doc)
   doc
 }
 
@@ -652,8 +675,8 @@ NULL
     sep = " "
   )
 
-  doc <- officer::body_add_par(doc, "", style = "Normal")
-  doc <- officer::body_add_par(doc, footer_text, style = "Normal")
+  doc <- .add_spacer(doc)
+  doc <- .add_body_par(doc, footer_text, size = FONT_SIZES$footer, color = THEME_COLORS$gray_mid)
 
   doc
 }

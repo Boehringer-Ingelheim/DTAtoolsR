@@ -192,3 +192,139 @@ test_that("an empty table renders as nothing at all", {
   expect_equal(.df_to_md_table(NULL), character(0))
   expect_equal(.df_to_md_table(data.frame()), character(0))
 })
+
+# ---- group_condition rule descriptions --------------------------------------
+# A group_condition rule used to fall through to the default formatter, which
+# printed either the bare author description or "no description available" --
+# none of the grouping columns, named conditions or constraints reached the
+# exported document.
+
+.gc_rule <- function(...) {
+  args <- list(...)
+  do.call(DTAtools::DTARuleGroupCondition, args)
+}
+
+test_that("translate_rule_to_human expands a group_condition into its parts", {
+  rule <- .gc_rule(
+    id = "visit_logic",
+    group_by = c("SUBJECT_ID", "VISIT"),
+    conditions = list(
+      c_failed = list(REASND = list(empty = FALSE)),
+      c_reported = list(REASND = list(empty = TRUE), ORRES = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "requires", `if` = "c_failed", `then` = "c_reported")
+    )
+  )
+
+  txt <- translate_rule_to_human(rule)
+
+  # Never the default fallback.
+  expect_false(grepl("no description available", txt, fixed = TRUE))
+  expect_false(grepl("Rule type", txt, fixed = TRUE))
+
+  # Grouping columns, named as such.
+  expect_match(txt, "grouped by 'SUBJECT_ID' and 'VISIT'", fixed = TRUE)
+
+  # Each named condition is spelled out in terms of its columns, not just named.
+  expect_match(txt, "\"c_failed\": a row where 'REASND' is present", fixed = TRUE)
+  expect_match(txt, "\"c_reported\": a row where 'REASND' is empty/absent AND 'ORRES' is present", fixed = TRUE)
+
+  # The constraint is stated as a requirement.
+  expect_match(txt, "If \"c_failed\" holds", fixed = TRUE)
+  expect_match(txt, "then \"c_reported\" must hold", fixed = TRUE)
+})
+
+test_that("group_condition descriptions distinguish the any and all scopes", {
+  # dta_group_scope_truth() reads "any" as at-least-one-row and "all" as
+  # every-row; the prose must not blur the two.
+  mk <- function(if_scope, then_scope) {
+    translate_rule_to_human(.gc_rule(
+      id = "scoped",
+      group_by = "G",
+      conditions = list(a = list(A = list(empty = FALSE)), b = list(B = list(empty = FALSE))),
+      constraints = list(list(
+        type = "requires", `if` = "a", `then` = "b",
+        if_scope = if_scope, then_scope = then_scope
+      ))
+    ))
+  }
+
+  any_any <- mk("any", "any")
+  expect_match(any_any, "If \"a\" holds for at least one row in the group", fixed = TRUE)
+  expect_match(any_any, "then \"b\" must hold for at least one row in the group", fixed = TRUE)
+
+  any_all <- mk("any", "all")
+  expect_match(any_all, "then \"b\" must hold for every row in the group", fixed = TRUE)
+  expect_false(grepl("then \"b\" must hold for at least one row", any_all, fixed = TRUE))
+
+  all_any <- mk("all", "any")
+  expect_match(all_any, "If \"a\" holds for every row in the group", fixed = TRUE)
+})
+
+test_that("group_condition descriptions state mutual exclusivity", {
+  txt <- translate_rule_to_human(.gc_rule(
+    id = "excl",
+    group_by = "G",
+    conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
+    constraints = list(list(type = "mutually_exclusive", left = "a", right = "b"))
+  ))
+
+  expect_match(txt, "must not both occur in the same group", fixed = TRUE)
+  expect_match(txt, "\"a\" (at least one row) and \"b\" (at least one row)", fixed = TRUE)
+  # The alias not_both normalises to the same wording.
+  txt_alias <- translate_rule_to_human(.gc_rule(
+    id = "excl2",
+    group_by = "G",
+    conditions = list(a = list(A = list(equals = "X")), b = list(B = list(equals = "Y"))),
+    constraints = list(list(type = "not_both", left = "a", right = "b"))
+  ))
+  expect_match(txt_alias, "must not both occur in the same group", fixed = TRUE)
+})
+
+test_that("group_condition descriptions keep the author summary and add the detail", {
+  rule <- .gc_rule(
+    id = "described",
+    description = "Consented records need a consent date",
+    group_by = "SUBJECT_ID",
+    conditions = list(
+      yes = list(CONSENT = list(equals = "YES")),
+      dated = list(CONSENT_DATE = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "requires", `if` = "yes", `then` = "dated"))
+  )
+
+  txt <- translate_rule_to_human(rule)
+  lines <- strsplit(txt, "\n", fixed = TRUE)[[1]]
+
+  # The author's own wording leads; the expansion follows it.
+  expect_identical(lines[[1]], "Consented records need a consent date")
+  expect_gt(length(lines), 1)
+  expect_match(txt, "grouped by 'SUBJECT_ID'", fixed = TRUE)
+  expect_match(txt, "'CONSENT' = 'YES'", fixed = TRUE)
+})
+
+test_that("all constraints of a multi-constraint group rule are described", {
+  txt <- translate_rule_to_human(.gc_rule(
+    id = "multi",
+    group_by = "G",
+    conditions = list(
+      a = list(A = list(empty = FALSE)),
+      b = list(B = list(empty = FALSE)),
+      c = list(C = list(equals = "NOT DONE"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "a", right = "b"),
+      list(type = "requires", `if` = "a", `then` = "c")
+    )
+  ))
+
+  expect_match(txt, "Requirements:", fixed = TRUE)
+  expect_match(txt, "must not both occur", fixed = TRUE)
+  expect_match(txt, "If \"a\" holds", fixed = TRUE)
+  # Every declared condition is defined, including the one only the second
+  # constraint refers to.
+  for (nm in c("a", "b", "c")) {
+    expect_match(txt, paste0("\"", nm, "\": a row where"), fixed = TRUE)
+  }
+})

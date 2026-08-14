@@ -752,7 +752,7 @@ dta_export <- function(dta, file, format, signature_list = NULL) {
 
 # Does `file` exist and begin with the %PDF- magic bytes? Used to VERIFY a
 # converter actually produced a genuine PDF (rather than a mislabelled DOCX or
-# an empty file, which is what made the Export PDF button appear to do nothing).
+# an empty file, which is what made the export button appear to do nothing).
 dta_is_pdf <- function(file) {
   if (is.null(file) || !file.exists(file)) {
     return(FALSE)
@@ -1167,10 +1167,11 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
   invisible()
 }
 
-# Robust "Export PDF": build the DOCX first (always works via officer), then
+# Robust PDF export (the "Export as PDF" option behind the "Export DTA" button):
+# build the DOCX first (always works via officer), then
 # convert with the best engine available and VERIFY a real PDF resulted. When no
 # external converter exists we still produce a valid PDF from the Markdown export
-# via R's own device -- so the button ALWAYS yields an openable PDF.
+# via R's own device -- so the export ALWAYS yields an openable PDF.
 dta_export_pdf <- function(dta, file, signature_list = NULL) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
@@ -2447,4 +2448,60 @@ dta_restore_session <- function(dump) {
     dta@datasets[[nm]] <- ds
   }
   dta
+}
+
+# Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".
+# Colons are illegal in Windows file names, so the clock uses a hyphen. A bare
+# Date carries no clock, so it renders as midnight rather than silently
+# borrowing the current time.
+.dta_export_stamp <- function(when = Sys.time()) {
+  if (inherits(when, "Date")) {
+    when <- as.POSIXct(as.character(when), tz = "UTC")
+  }
+  format(when, "%Y-%m-%d_%H-%M")
+}
+
+# Build the stem of an exported document's file name: the DTA title, then the
+# document version when one is set, then the date and time -- e.g.
+# "Clinical_Data_Transfer-v0.2-2026-08-14_14-07". Kept in one place because the
+# modal preview and the two export branches (markdown, Word) must agree -- the
+# preview is a promise about the file the user is about to download.
+dta_export_stem <- function(dta, when = Sys.time()) {
+  stamp <- .dta_export_stamp(when)
+
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  get_prop <- function(nm) {
+    tryCatch(
+      {
+        if (is.null(md)) {
+          return(NULL)
+        }
+        v <- as.character(S7::prop(md, nm))
+        if (length(v) == 0) NULL else v[1]
+      },
+      error = function(e) NULL
+    )
+  }
+
+  ttl <- get_prop("title")
+  base <- if (!is.null(ttl) && !is.na(ttl) && nzchar(ttl)) {
+    gsub("[^A-Za-z0-9]+", "_", ttl)
+  } else {
+    "DTA"
+  }
+
+  ver <- get_prop("version")
+  if (is.null(ver) || is.na(ver) || !nzchar(ver)) {
+    return(paste0(base, "_", stamp))
+  }
+
+  # Dots are kept so the version reads as authored ("v0.2", not "v0_2"); any
+  # other separator a version may legitimately carry ("1.0 draft") is folded to
+  # an underscore so the name stays file-system safe.
+  ver_safe <- gsub("(^_+|_+$)", "", gsub("[^A-Za-z0-9.]+", "_", ver))
+  if (!nzchar(ver_safe)) {
+    return(paste0(base, "_", stamp))
+  }
+
+  paste0(base, "-v", ver_safe, "-", stamp)
 }

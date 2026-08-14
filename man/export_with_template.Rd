@@ -65,7 +65,8 @@ and reported via a warning.
 \item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_NAMES}}, \code{{DATASET_TYPES}},
 \code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
 \item{Process}{\code{{ERROR_HANDLING}}, \code{{AUTHORIZED_CORRECTIONS}},
-\code{{VERSION_HISTORY}}, \code{{GENERATED_DATE}}}
+\code{{SIGNATORIES}}, \code{{PROCESS_INFORMATION}}, \code{{VERSION_HISTORY}},
+\code{{GENERATED_DATE}}}
 }
 
 Additional or overriding values can be supplied through \code{variables}; names may

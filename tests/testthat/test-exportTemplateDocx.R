@@ -21,11 +21,14 @@ test_that(".extract_template_variables maps DTA metadata to placeholders", {
   expect_equal(vars[["{SUPPLIER_COUNTRY}"]], "Germany")
   expect_equal(vars[["{SUPPLIER_ADDRESS}"]], "123 Data Street, City")
   expect_equal(vars[["{SUPPLIER_EMAIL}"]], "emily.turner@supplier.com")
-  expect_equal(vars[["{SUPPLIER_CONTACTS}"]], "Emily Turner")
+  expect_match(vars[["{SUPPLIER_CONTACTS}"]], "Emily Turner", fixed = TRUE)
+  expect_match(vars[["{SUPPLIER_CONTACTS}"]], "Signature:", fixed = TRUE)
 
   expect_equal(vars[["{RECEIVER_NAME}"]], "Test Company")
   expect_equal(vars[["{RECEIVER_COUNTRY}"]], "USA")
-  expect_equal(vars[["{RECEIVER_CONTACTS}"]], "Alice Smith, Bob Johnson")
+  expect_match(vars[["{RECEIVER_CONTACTS}"]], "Alice Smith", fixed = TRUE)
+  expect_match(vars[["{RECEIVER_CONTACTS}"]], "Bob Johnson", fixed = TRUE)
+  expect_match(vars[["{RECEIVER_CONTACTS}"]], "Role:", fixed = TRUE)
 
   expect_equal(vars[["{TRANSMISSION_TYPE}"]], "Secure SFTP server")
   expect_equal(vars[["{TRANSMISSION_FREQUENCY}"]], "One-time transfer")
@@ -36,6 +39,8 @@ test_that(".extract_template_variables maps DTA metadata to placeholders", {
   expect_equal(vars[["{DATASET_TYPES}"]], "tabular")
   expect_equal(vars[["{TOTAL_COLUMNS}"]], as.character(n_cols))
   expect_equal(vars[["{AUTHORIZED_CORRECTIONS}"]], "Alice Smith, Bob Johnson")
+  expect_match(vars[["{SIGNATORIES}"]], "Signature:", fixed = TRUE)
+  expect_match(vars[["{PROCESS_INFORMATION}"]], "Transmission", fixed = TRUE)
   expect_match(vars[["{VERSION_HISTORY}"]], "1.0 \\(2025-10-01\\)")
 })
 
@@ -50,6 +55,8 @@ test_that(".extract_template_variables is robust to empty metadata", {
   expect_equal(vars[["{RECEIVER_CONTACTS}"]], "")
   expect_equal(vars[["{DATASET_COUNT}"]], "1")
   expect_equal(vars[["{TEST_UPLOAD}"]], "No")
+  expect_equal(vars[["{SIGNATORIES}"]], "")
+  expect_equal(vars[["{PROCESS_INFORMATION}"]], "")
 })
 
 test_that("date placeholders render in ISO 8601, not a localized month name", {
@@ -187,7 +194,8 @@ test_that("export_with_template fills placeholders in a Word template", {
   expect_match(text, "Title: Clinical Data Transfer Agreement")
   expect_match(text, "Version: 2.0")
   expect_match(text, "Supplier: Supplier Company Inc.", fixed = TRUE)
-  expect_match(text, "Receiver contacts: Alice Smith, Bob Johnson")
+  expect_match(text, "Receiver contacts: - Alice Smith", fixed = TRUE)
+  expect_match(text, "Bob Johnson", fixed = TRUE)
   expect_match(text, "Datasets: 1 (tabular)", fixed = TRUE)
   # Placeholders must be gone
   expect_false(grepl("\\{DTA_TITLE\\}", text))
@@ -234,6 +242,291 @@ test_that("user variables override extracted values and add new placeholders", {
   text <- .docx_text(out)
   expect_match(text, "A: Overridden")
   expect_match(text, "B: Extra")
+})
+
+test_that("custom template variables preserve line breaks and tabs", {
+  template <- .make_template("Payload: {CUSTOM_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(CUSTOM_BLOCK = "Line one\n\tIndented line\nLine three"),
+    quiet = TRUE
+  )
+
+  xml <- .read_docx_body_xml(out)
+  expect_match(xml, "<w:br\\b")
+  expect_match(xml, "<w:tab\\b")
+
+  text <- .docx_text(out)
+  expect_match(text, "Payload: Line one", fixed = TRUE)
+  expect_match(text, "Indented line", fixed = TRUE)
+  expect_match(text, "Line three", fixed = TRUE)
+})
+
+test_that(".normalize_template_variables keeps multiline values intact", {
+  vars <- .normalize_template_variables(list(
+    CUSTOM = c("alpha", "beta"),
+    TABS = "x\ty"
+  ))
+
+  expect_equal(vars[["{CUSTOM}"]], "alpha\nbeta")
+  expect_equal(vars[["{TABS}"]], "x\ty")
+})
+
+test_that("markdown-like dataset blocks are de-marked in template values", {
+  template <- .make_template("{DATASET_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  md_block <- paste(
+    "## Dataset: clinical_data (tabular)",
+    "",
+    "**File Handlers:**",
+    "- clinical_data.*.csv$ (1 file) [regex]",
+    "",
+    "**Columns (2 total):**",
+    "- **STUDYID** [SAS Char, not null]",
+    sep = "\n"
+  )
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(DATASET_BLOCK = md_block),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_false(grepl("## Dataset:", text, fixed = TRUE))
+  expect_false(grepl("\\*\\*File Handlers:\\*\\*", text))
+  expect_match(text, "Dataset: clinical_data (tabular)", fixed = TRUE)
+  expect_match(text, "File Handlers:", fixed = TRUE)
+  expect_match(text, "STUDYID [SAS Char, not null]", fixed = TRUE)
+})
+
+test_that("dense column and rule bullets are expanded into readable lines", {
+  template <- .make_template("{DATASET_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  md_block <- paste(
+    "**Columns (1 total):**",
+    "- **STUDYID** [SAS Char, not null]: Unique study ID | values: 1234-5678",
+    "",
+    "**Rules (1 total):**",
+    "- **rule_equal_example:** IF VISIT equals V03 THEN STATUS equals COMPLETED",
+    sep = "\n"
+  )
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(DATASET_BLOCK = md_block),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_match(text, "• STUDYID", fixed = TRUE)
+  expect_match(text, "Description: Unique study ID", fixed = TRUE)
+  expect_match(text, "Type: SAS Char", fixed = TRUE)
+  expect_match(text, "Nullable: no", fixed = TRUE)
+  expect_match(text, "Values:", fixed = TRUE)
+  expect_match(text, "▪ 1234-5678", fixed = TRUE)
+  expect_match(text, "• rule_equal_example", fixed = TRUE)
+  expect_match(text, "◦ IF VISIT equals V03 THEN STATUS equals COMPLETED", fixed = TRUE)
+  expect_false(grepl("Description: IF VISIT equals V03 THEN STATUS equals COMPLETED", text, fixed = TRUE))
+})
+
+test_that("column bullets include parsed Length and exploded Values list", {
+  template <- .make_template("{DATASET_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  md_block <- "- **VISIT** [SAS Char, not null, length 12]: Visit code | values: V01, V02, V03, EOT"
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(DATASET_BLOCK = md_block),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_match(text, "• VISIT", fixed = TRUE)
+  expect_match(text, "Description: Visit code", fixed = TRUE)
+  expect_match(text, "Type: SAS Char", fixed = TRUE)
+  expect_match(text, "Nullable: no", fixed = TRUE)
+  expect_match(text, "Length: 12", fixed = TRUE)
+  expect_match(text, "▪ V01", fixed = TRUE)
+  expect_match(text, "▪ V02", fixed = TRUE)
+  expect_match(text, "▪ V03", fixed = TRUE)
+  expect_match(text, "▪ EOT", fixed = TRUE)
+})
+
+test_that("group_condition bullets are expanded with clear premises", {
+  template <- .make_template("{DATASET_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  md_block <- paste(
+    "**Rules (1 total):**",
+    "- **group_condition_fail_example:** group(SUBJECT_ID): 2 condition(s), 1 constraint(s) — Grouped fail showcase - consented records need a consent date",
+    sep = "\n"
+  )
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(DATASET_BLOCK = md_block),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_match(text, "• group_condition_fail_example", fixed = TRUE)
+  expect_match(text, "◦ Grouped by: SUBJECT_ID", fixed = TRUE)
+  expect_match(text, "◦ Conditions:", fixed = TRUE)
+  expect_match(text, "◦ Constraints:", fixed = TRUE)
+  expect_false(grepl("Conditions: 2", text, fixed = TRUE))
+  expect_false(grepl("Constraints: 1", text, fixed = TRUE))
+  expect_match(text, "◦ Premise:", fixed = TRUE)
+  expect_match(text, "▪ Rows are grouped by SUBJECT_ID.", fixed = TRUE)
+  expect_match(text, "▪ Condition checks are evaluated within each group.", fixed = TRUE)
+  expect_match(text, "▪ The listed constraints must hold for the same grouped rows.", fixed = TRUE)
+  expect_match(text, "◦ Context: Grouped fail showcase - consented records need a consent date", fixed = TRUE)
+})
+
+test_that("group_condition includes concrete conditions and constraints when available", {
+  template <- .make_template("{DATASET_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- list(
+    DTARuleGroupCondition(
+      id = "group_condition_fail_example",
+      group_by = "SUBJID",
+      conditions = list(
+        visit_v03 = list(VISIT = list(equals = "V03")),
+        adult = list(AGE = list(greater_equal = 18))
+      ),
+      constraints = list(
+        list(type = "requires", `if` = "visit_v03", `then` = "adult")
+      )
+    )
+  )
+  dta <- DTA(datasets = list(clinical_data = ds), metadata = DTAMetaData(title = "T", version = "1.0"))
+
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  md_block <- paste(
+    "**Rules (1 total):**",
+    "- **group_condition_fail_example:** group(SUBJID): 2 condition(s), 1 constraint(s) — demo",
+    sep = "\n"
+  )
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(DATASET_BLOCK = md_block),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_match(text, "◦ Detailed rule definition:", fixed = TRUE)
+  expect_match(text, "▪ Conditions:", fixed = TRUE)
+  expect_match(text, "▪ Constraints:", fixed = TRUE)
+  expect_match(text, "▪ visit_v03: VISIT equals V03", fixed = TRUE)
+  expect_match(text, "▪ adult: AGE greater_equal 18", fixed = TRUE)
+  expect_match(text, "▪ requires: if visit_v03 (scope=any) then adult (scope=any)", fixed = TRUE)
+})
+
+test_that("YAML placeholders are rendered in small monospace run style", {
+  template <- .make_template("{YAML_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(YAML_BLOCK = "a: 1\n  b: 2"),
+    quiet = TRUE
+  )
+
+  xml <- .read_docx_body_xml(out)
+  expect_match(xml, "Consolas", fixed = TRUE)
+  expect_match(xml, "<w:sz[^>]*w:val=\"12\"", perl = TRUE)
+  expect_match(xml, "<w:szCs[^>]*w:val=\"12\"", perl = TRUE)
+})
+
+test_that("YAML placeholders keep YAML list markers unchanged", {
+  template <- .make_template("{YAML_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(YAML_BLOCK = "items:\n  - one\n  - two"),
+    quiet = TRUE
+  )
+
+  text <- .docx_text(out)
+  expect_match(text, "items:", fixed = TRUE)
+  expect_match(text, "- one", fixed = TRUE)
+  expect_match(text, "- two", fixed = TRUE)
+  expect_false(grepl("\u2022 one", text, fixed = TRUE))
+})
+
+test_that("YAML placeholder styling does not restyle surrounding inline text", {
+  template <- .make_template("Header: {YAML_BLOCK}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(
+    dta,
+    template,
+    out,
+    variables = list(YAML_BLOCK = "a: 1\n  b: 2"),
+    quiet = TRUE
+  )
+
+  xml <- .read_docx_body_xml(out)
+  expect_false(grepl("Consolas", xml, fixed = TRUE))
 })
 
 test_that(".replace_placeholders_in_xml handles placeholders split across runs", {

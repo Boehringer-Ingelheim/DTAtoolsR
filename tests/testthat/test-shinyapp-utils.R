@@ -587,3 +587,50 @@ test_that("dta_build_validation_report reports a passed banner when every datase
   expect_true(grepl("VALIDATION PASSED", html, fixed = TRUE))
   expect_true(grepl("1 passed, 0 failed, 0 without data", html, fixed = TRUE))
 })
+
+test_that("dta_export_stem puts the version between the title and the date", {
+  stem_fn <- app_fn("dta_export_stem")
+  dta <- app_fixture_dta()
+  ver <- as.character(S7::prop(dta@metadata, "version"))[1]
+  expect_true(nzchar(ver))
+
+  stem <- stem_fn(dta, when = as.POSIXct("2024-03-07 14:07:00", tz = "UTC"))
+
+  # Title first, then "-v<version>-", then the date and time.
+  expect_true(endsWith(stem, paste0("-v", ver, "-2024-03-07_14-07")))
+  expect_gt(regexpr("-v", stem, fixed = TRUE), 1L)
+  # The version reads as authored: dots are not mangled into underscores.
+  expect_true(grepl(paste0("v", ver), stem, fixed = TRUE))
+})
+
+test_that("dta_export_stem omits the version segment when no version is set", {
+  stem_fn <- app_fn("dta_export_stem")
+  dta <- app_fixture_dta()
+
+  meta <- dta@metadata
+  S7::prop(meta, "version") <- NULL
+  dta@metadata <- meta
+
+  stem <- stem_fn(dta, when = as.POSIXct("2024-03-07 14:07:00", tz = "UTC"))
+  expect_match(stem, "_2024-03-07_14-07$")
+  expect_false(grepl("-v", stem, fixed = TRUE))
+  # No doubled separator left where the version segment would have been.
+  expect_false(grepl("__", stem, fixed = TRUE))
+})
+
+test_that("dta_export_stem falls back to DTA when there is no title", {
+  stem_fn <- app_fn("dta_export_stem")
+  dta <- app_fixture_dta()
+  meta <- dta@metadata
+  S7::prop(meta, "title") <- NULL
+  dta@metadata <- meta
+
+  expect_match(stem_fn(dta, when = as.POSIXct("2024-03-07 14:07:00", tz = "UTC")), "^DTA-v")
+})
+
+test_that("dta_export_stem renders a bare Date as midnight rather than now", {
+  stem_fn <- app_fn("dta_export_stem")
+  dta <- app_fixture_dta()
+
+  expect_true(endsWith(stem_fn(dta, when = as.Date("2024-03-07")), "-2024-03-07_00-00"))
+})
