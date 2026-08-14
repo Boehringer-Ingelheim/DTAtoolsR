@@ -4,7 +4,7 @@
 \alias{dta_group_stream_update}
 \title{Fold One Batch into a Grouped Rule's Accumulator}
 \usage{
-dta_group_stream_update(state, rule, df, row_offset = 0L)
+dta_group_stream_update(state, rule, df, row_offset = 0L, numeric_cache = NULL)
 }
 \arguments{
 \item{state}{An accumulator from \code{dta_group_stream_init()}.}
@@ -14,6 +14,9 @@ dta_group_stream_update(state, rule, df, row_offset = 0L)
 \item{df}{A data frame holding one batch.}
 
 \item{row_offset}{Integer. Rows already consumed, so row numbers are global.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}} built for
+this batch, or \code{NULL} to convert each column on demand.}
 }
 \value{
 The accumulator, updated in place.

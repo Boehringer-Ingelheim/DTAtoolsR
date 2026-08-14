@@ -4,12 +4,19 @@
 \alias{dta_rule_import_errors}
 \title{Import Errors Contributed by One Rule}
 \usage{
-dta_rule_import_errors(rule, df)
+dta_rule_import_errors(rule, df, numeric_cache = NULL, columns = NULL)
 }
 \arguments{
 \item{rule}{A \code{DTARule} object.}
 
 \item{df}{A data.frame to scan.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert each column on demand.}
+
+\item{columns}{Character vector of columns to scan, when already known
+(e.g. precomputed once per rule by the streaming driver), or \code{NULL} to
+recompute via \code{\link[=dta_rule_numeric_columns]{dta_rule_numeric_columns()}}.}
 }
 \value{
 A data.frame in the shape of \code{dta_empty_import_errors()}.

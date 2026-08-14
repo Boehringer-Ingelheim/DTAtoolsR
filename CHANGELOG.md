@@ -4,6 +4,116 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Oracle tests for `dta_count_duplicates()` pinning agreement with
+  `sum(duplicated())` for factor, logical, `Date`, and `POSIXct` key columns,
+  and a mixed character+integer multi-column key.
+- A regression test that `rule_check_range()` recomputes rather than reuses a
+  numeric cache whose cached column length no longer matches the frame being
+  checked (e.g. a cache built for a full table passed alongside a filtered
+  subset of it).
+- A test running `rule_check_unique()` with the opt-in Arrow duplicate-count
+  path both on and off, asserting identical `valid`/`message` in both cases.
+- A test that a `DTARuleGroupCondition` constraint referencing an unknown
+  condition name (only reachable by bypassing the constructor) is surfaced as
+  a FAILED rule via the narrowly classed `dta_rule_not_applicable` condition,
+  both through `rule_check_group_condition()`/`apply_rules()` and through the
+  streaming path (`dta_group_stream_finalise()`/`dta_rule_stream_finalise()`).
+
+- **Opt-in Arrow compute path for rule checking**, off by default
+  (`options(DTAtools.use_arrow_compute = TRUE)`). The R implementation
+  remains the reference behaviour for every rule check; Arrow is only ever
+  consulted when a user explicitly opts in, and any Arrow failure falls back
+  to the R path rather than aborting validation. The first (and so far only)
+  place this is wired up is `check_unique`'s duplicate count, and only for
+  tables at or above `getOption("DTAtools.arrow_min_rows", 100000L)` rows
+  with no key column stored as a double. Validation **results are unchanged**
+  by this option -- it is a performance path, not a behaviour change.
+- `set_dta_compute_threads()`: reports or sets the thread count used by
+  Arrow's own multi-threaded compute kernels (`arrow::cpu_count()` /
+  `arrow::set_cpu_count()`). `DTAtools` does not spawn its own R-level worker
+  processes, so this is the only parallelism knob the package exposes.
+- Rule-heavy benchmark script `benchmarks/bench_rules.R` (20,000 rows / 4,000
+  groups) used to measure the rule-checking changes below.
+- `benchmarks/bench_rules.R` gained a `--violation-rate` argument (default
+  `0.01`), and its grouped-rule fixture now constructs group-consistent
+  values for the columns the grouped rules read, then deliberately corrupts
+  only that fraction of groups -- matching how rarely real DTA/DTS transfer
+  data actually violates cross-row rules, instead of the previous uniform
+  per-row sampling that made 12-22% of groups violate. The console summary
+  now prints the actual measured violating-group fraction per grouped rule.
+
+### Changed
+
+- `set_dta_compute_threads()`'s roxygen documentation now describes both
+  `options(DTAtools.use_arrow_compute)` and
+  `options(DTAtools.arrow_min_rows)` under `@details` -- these were
+  previously only documented in this changelog and had no `?`-reachable
+  description.
+- **Performance: grouped-condition rules (`check_group_condition`) now
+  evaluate each condition once per table/batch and reduce per group**,
+  instead of copying/filtering the full data frame once for every group.
+  Measured on `benchmarks/bench_rules.R` (20,000 rows / 4,000 groups): 9.1x
+  faster on the grouped-condition rule alone, and 6.2x faster across the
+  full rule suite. Numeric conversions used during rule evaluation are now
+  cached once per table/batch and shared with the import-time numeric
+  conversion path, instead of being repeated per rule/per group. Uniqueness
+  checking (`check_unique`) now keys rows with a hashed key instead of
+  `data.frame`-level `duplicated()`. **Validation results are unchanged** --
+  these are performance-only changes, verified by the existing rule-checking
+  test suite.
+- **Performance: grouped-condition rules now do per-group work (building
+  group labels, row evidence, and messages) only for groups that actually
+  violate a constraint**, instead of for every group in the table/batch.
+  Each constraint's truth outcome (`mutually_exclusive`, `requires`) is now
+  evaluated as a vector across all groups at once, and only the resulting
+  violating group/constraint pairs are turned into messages, in the same
+  sorted-group / declared-constraint order as before. Measured on
+  `benchmarks/bench_rules.R` (50,000 rows / 20,000 groups): `check_group_condition`
+  drops from 31.6s to 5.2s (~6x) on a fixture where ~12-22% of groups violate;
+  real data, where violations are rare, benefits more. **Validation results
+  are unchanged** -- this is a performance-only change, verified by the
+  existing rule-checking test suite plus a new regression test pinning that
+  non-violating groups contribute nothing to the reported message.
+
+### Fixed
+
+- `dta_count_duplicates()`'s fast hashed-key path (`dta_unique_key()`, which
+  compares `as.character()` renderings) is now restricted to key column types
+  provably safe to render as character -- `character`, `factor`, `integer`,
+  `logical` -- instead of merely excluding `double`. Any other type (`Date`,
+  `POSIXt`, `complex`, `list`, or an unrecognised type) now falls back to
+  `duplicated(df[, cols, drop = FALSE])`, matching what was already done for
+  `double` columns, since those types can collide on the same rendered string
+  the same way doubles can.
+- `dta_numeric_cache_get()` now checks that a cached numeric conversion's
+  length matches the frame being checked before reusing it, falling back to a
+  fresh `dta_as_numeric_strict()` conversion otherwise. Previously a cache
+  built for one frame silently recycled against a shorter frame if ever
+  reused across a subset -- not reachable via any current caller, but latent.
+- `rule_check_group_condition()` no longer allocates the per-group row index
+  (`split(seq_len(nrow(df)), gid)`) unconditionally for every grouped rule; it
+  is now built lazily and only for the (usually rare) groups that violate a
+  `requires` constraint with `then_scope = "all"`, which is the only place it
+  is read.
+- A `DTARuleGroupCondition` constraint referencing a condition name that does
+  not exist (only reachable by bypassing the constructor, which already
+  rejects this) previously degraded to silently reporting **no violation**
+  in the vectorised constraint evaluation, in both
+  `rule_check_group_condition()` and the streaming path
+  (`dta_group_stream_finalise()`). Both now abort with the narrowly classed
+  `dta_rule_not_applicable` condition, which `apply_rules()` and
+  `dta_rule_stream_finalise()` already convert into a FAILED rule rather than
+  an aborted run -- silent no-violation is the worst failure mode for a
+  validation package, so this is now a loud, attributed failure instead.
+- The streaming path's `dta_rule_stream_finalise()` did not catch
+  `dta_rule_not_applicable` raised while finalising a grouped rule, unlike
+  every other rule kind; a rule failure there would have aborted the whole
+  streaming scan instead of being reported as a failed rule.
+
 ## [0.17.1] - 2026-08-14
 
 ### Added

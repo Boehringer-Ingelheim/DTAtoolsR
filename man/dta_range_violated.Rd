@@ -4,12 +4,15 @@
 \alias{dta_range_violated}
 \title{Rows a Range Rule Counts as Violations}
 \usage{
-dta_range_violated(rule, df)
+dta_range_violated(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A range rule.}
 
 \item{df}{A data.frame.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert the column on demand.}
 }
 \value{
 A logical vector with one element per row.

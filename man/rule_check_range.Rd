@@ -4,7 +4,7 @@
 \alias{rule_check_range}
 \title{Rule: check_range}
 \usage{
-rule_check_range(rule, df)
+rule_check_range(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A DTARule object of type \code{"check_range"}. Expected slots:
@@ -16,6 +16,10 @@ rule_check_range(rule, df)
 }}
 
 \item{df}{A data.frame to validate.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}} mapping
+column name to its cached numeric conversion, or \code{NULL} to convert on
+demand.}
 }
 \value{
 A list with elements \code{id}, \code{valid}, and \code{message}.

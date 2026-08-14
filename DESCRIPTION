@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
-Version: 0.17.1
+Version: 0.18.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -84,6 +84,7 @@ Collate:
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
     'DTARuleGroupCondition-class.R'
+    'arrowCompute.R'
     'columnSpecChecks.R'
     'documentBuilders.R'
     'evaluateRules.R'

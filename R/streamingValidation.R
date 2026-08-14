@@ -108,9 +108,11 @@ dta_rule_stream_init <- function(rule) {
 #' @param state An accumulator from `dta_rule_stream_init()`.
 #' @param rule The rule being accumulated.
 #' @param df A data frame holding one batch.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()] built for
+#'   this batch, or `NULL` to convert each column on demand.
 #' @return The accumulator, updated in place.
 #' @keywords internal
-dta_rule_stream_update <- function(state, rule, df) {
+dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
   if (!state$applicable || state$kind == "unsupported") {
     return(state)
   }
@@ -122,9 +124,9 @@ dta_rule_stream_update <- function(state, rule, df) {
       switch(state$kind,
         decomposable = {
           violated <- if (identical(normalize_rule_type(rule@type), "check_range")) {
-            dta_range_violated(rule, df)
+            dta_range_violated(rule, df, numeric_cache)
           } else {
-            dta_condition_violated(rule, df)
+            dta_condition_violated(rule, df, numeric_cache)
           }
           state$count <- state$count + sum(violated, na.rm = TRUE)
         },
@@ -147,7 +149,7 @@ dta_rule_stream_update <- function(state, rule, df) {
           }
         },
         grouped = {
-          dta_group_stream_update(state$grouped, rule, df, state$row_offset)
+          dta_group_stream_update(state$grouped, rule, df, state$row_offset, numeric_cache)
           state$row_offset <- state$row_offset + nrow(df)
         }
       )
@@ -194,7 +196,24 @@ dta_rule_stream_finalise <- function(state, rule) {
   }
 
   if (state$kind == "grouped") {
-    return(dta_group_stream_finalise(state$grouped, rule))
+    # Mirrors apply_rules()'s handling of rule_check_group_condition(): a
+    # constraint that references a condition name which does not exist (only
+    # reachable by bypassing the DTARuleGroupCondition constructor) is a rule
+    # FAILURE, not a reason to abort the whole streaming scan.
+    return(tryCatch(
+      dta_group_stream_finalise(state$grouped, rule),
+      dta_rule_not_applicable = function(cnd) {
+        list(
+          id = rule@id,
+          valid = FALSE,
+          message = sprintf(
+            "Rule '%s' could not be evaluated: %s",
+            rule@id,
+            conditionMessage(cnd)
+          )
+        )
+      }
+    ))
   }
 
   if (state$count == 0) {
@@ -360,6 +379,12 @@ dta_validate_table_stream <- function(specs,
   }
 
   states <- lapply(rules_list, dta_rule_stream_init)
+  # Which columns each rule reads numerically, computed once for the whole
+  # scan rather than re-derived (by re-parsing the rule's clause structure)
+  # on every batch.
+  rule_numeric_columns <- lapply(rules_list, function(r) {
+    tryCatch(dta_rule_numeric_columns(r), error = function(e) character(0))
+  })
 
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
@@ -411,14 +436,23 @@ dta_validate_table_stream <- function(specs,
       dta_error_sink_add(columnspec_sink, columnspec_errs)
     }
 
+    # Built once per batch rather than once per rule per batch: a column read
+    # numerically by several rules would otherwise be strict-converted once
+    # per rule that reads it, per batch.
+    numeric_cache <- dta_build_numeric_cache(df, rules_list)
+
     for (i in seq_along(rules_list)) {
-      dta_rule_stream_update(states[[i]], rules_list[[i]], df)
+      dta_rule_stream_update(states[[i]], rules_list[[i]], df, numeric_cache)
 
       # Sourced from the same columns the rule just read as numbers, so an
       # unrepresentable value is reported on both axes rather than moved
       # from one to the other.
       rule_errs <- tryCatch(
-        dta_rule_import_errors(rules_list[[i]], df),
+        dta_rule_import_errors(
+          rules_list[[i]], df,
+          numeric_cache = numeric_cache,
+          columns = rule_numeric_columns[[i]]
+        ),
         error = function(e) NULL
       )
       if (is.data.frame(rule_errs) && nrow(rule_errs) > 0) {
@@ -627,9 +661,11 @@ dta_group_stream_init <- function(rule) {
 #' @param rule The grouped rule.
 #' @param df A data frame holding one batch.
 #' @param row_offset Integer. Rows already consumed, so row numbers are global.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()] built for
+#'   this batch, or `NULL` to convert each column on demand.
 #' @return The accumulator, updated in place.
 #' @keywords internal
-dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
+dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_cache = NULL) {
   group_by <- rule_get_slot(rule, "group_by")
   conditions <- rule_get_slot(rule, "conditions")
 
@@ -650,13 +686,53 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
   }
 
   split_key <- dta_group_key(df, group_by)
-  local_groups <- split(seq_len(nrow(df)), split_key)
   grouped <- df[, group_by, drop = FALSE]
 
-  for (key in names(local_groups)) {
-    local_idx <- local_groups[[key]]
-    gdf <- df[local_idx, , drop = FALSE]
-    global_idx <- local_idx + row_offset
+  # Same reasoning as the materialising path: every condition operator is
+  # elementwise, so it is evaluated ONCE over the whole batch and folded into
+  # each group's accumulator by group id, instead of re-evaluated per group
+  # per condition against a `df[local_idx, , drop = FALSE]` copy.
+  #
+  # `factor(split_key)` sorts its levels the same way `split()` orders its
+  # groups, so `local_groups <- split(seq_len(nrow(df)), split_key)` and
+  # iterating group ids in level order visit groups identically.
+  kf <- factor(split_key)
+  gid <- as.integer(kf)
+  n_groups <- nlevels(kf)
+  first_row <- match(levels(kf), split_key)
+  n_seen_batch <- tabulate(gid, nbins = n_groups)
+
+  cond_hit <- lapply(state$condition_names, function(cond_name) {
+    spec <- conditions[[cond_name]]
+    mask <- tryCatch(
+      evaluate_conditions(spec, df, numeric_cache),
+      dta_rule_not_applicable = function(cnd) {
+        cli::cli_abort(
+          c(
+            "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
+            x = "{conditionMessage(cnd)}"
+          ),
+          class = "dta_rule_not_applicable"
+        )
+      }
+    )
+    mask %in% TRUE
+  })
+  names(cond_hit) <- state$condition_names
+
+  cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
+  # Rows matching / not matching, split by group -- with all `n_groups` levels
+  # represented (even when empty), so each is addressable by group position.
+  cond_true_rows <- lapply(cond_hit, function(hit) {
+    split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
+  })
+  cond_false_rows <- lapply(cond_hit, function(hit) {
+    split(which(!hit), factor(gid[!hit], levels = seq_len(n_groups)))
+  })
+
+  for (g in seq_len(n_groups)) {
+    key <- levels(kf)[g]
+    local_first <- first_row[g]
 
     entry <- state$groups[[key]]
     if (is.null(entry)) {
@@ -664,7 +740,7 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
       entry <- list(
         label = paste(
           vapply(group_by, function(col) {
-            paste0(col, "=", as.character(grouped[[col]][local_idx[1]]))
+            paste0(col, "=", as.character(grouped[[col]][local_first]))
           }, character(1)),
           collapse = ", "
         ),
@@ -676,33 +752,24 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
       )
     }
 
+    n_seen_g <- n_seen_batch[g]
+
     for (cond_name in state$condition_names) {
-      spec <- conditions[[cond_name]]
-      mask <- tryCatch(
-        evaluate_conditions(spec, gdf),
-        dta_rule_not_applicable = function(cnd) {
-          cli::cli_abort(
-            c(
-              "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
-              x = "{conditionMessage(cnd)}"
-            ),
-            class = "dta_rule_not_applicable"
-          )
-        }
-      )
-
-      hit <- mask %in% TRUE
       cond <- entry$conds[[cond_name]]
+      n_true_g <- cond_n_true[[cond_name]][g]
 
-      cond$any_true <- cond$any_true || any(hit)
-      cond$all_true <- cond$all_true && all(hit)
-      cond$n_seen <- cond$n_seen + length(hit)
+      cond$any_true <- cond$any_true || (n_true_g > 0)
+      cond$all_true <- cond$all_true && (n_seen_g > 0 && n_true_g == n_seen_g)
+      cond$n_seen <- cond$n_seen + n_seen_g
 
-      folded_true <- dta_group_fold_rows(cond$true_head, cond$true_n, global_idx[hit])
+      true_local <- cond_true_rows[[cond_name]][[g]]
+      false_local <- cond_false_rows[[cond_name]][[g]]
+
+      folded_true <- dta_group_fold_rows(cond$true_head, cond$true_n, true_local + row_offset)
       cond$true_head <- folded_true$head
       cond$true_n <- folded_true$count
 
-      folded_false <- dta_group_fold_rows(cond$false_head, cond$false_n, global_idx[!hit])
+      folded_false <- dta_group_fold_rows(cond$false_head, cond$false_n, false_local + row_offset)
       cond$false_head <- folded_false$head
       cond$false_n <- folded_false$count
 
@@ -768,77 +835,118 @@ dta_group_stream_finalise <- function(state, rule) {
   }
 
   # split() orders groups by sorted key, so the materialising path reports
-  # violations in that order. Sorting here keeps the assembled message identical.
-  for (key in sort(state$keys)) {
-    entry <- state$groups[[key]]
+  # violations in that order. Sorting here keeps the assembled message
+  # identical.
+  sorted_keys <- sort(state$keys)
+  n_groups <- length(sorted_keys)
+  entries <- mget(sorted_keys, envir = state$groups)
+
+  # Vectorised per-(condition, scope) truth across ALL groups at once -- one
+  # lookup per group, not the label/row-evidence assembly -- mirroring the
+  # materialising path's `cond_any_true`/`cond_all_true`. This is what lets
+  # the loop below only ever do per-group work (building labels, formatting
+  # row evidence, composing messages) for groups that actually violate
+  # something, instead of for every group seen in the stream.
+  scope_truth_vec <- function(cond_name, scope) {
+    if (!cond_name %in% state$condition_names) {
+      cli::cli_abort(
+        c(
+          "Rule {.val {rule@id}} references an unknown condition.",
+          x = "Constraint refers to condition {.field {cond_name}}, which is not defined.",
+          i = "Defined conditions: {.val {state$condition_names}}."
+        ),
+        class = "dta_rule_not_applicable"
+      )
+    }
+    vapply(entries, function(entry) {
+      dta_group_stream_truth(entry$conds[[cond_name]], scope)
+    }, logical(1))
+  }
+
+  constraint_viol <- vector("list", length(constraints))
+  for (ci in seq_along(constraints)) {
+    constraint <- constraints[[ci]]
+    ctype <- constraint$type
+
+    if (identical(ctype, "mutually_exclusive")) {
+      left_truth <- scope_truth_vec(constraint$left, constraint$left_scope %||% "any")
+      right_truth <- scope_truth_vec(constraint$right, constraint$right_scope %||% "any")
+      constraint_viol[[ci]] <- left_truth & right_truth
+    } else if (identical(ctype, "requires")) {
+      if_truth <- scope_truth_vec(constraint[["if"]], constraint$if_scope %||% "any")
+      then_truth <- scope_truth_vec(constraint[["then"]], constraint$then_scope %||% "any")
+      constraint_viol[[ci]] <- if_truth & !then_truth
+    } else {
+      constraint_viol[[ci]] <- logical(n_groups)
+    }
+  }
+
+  violating_groups <- sort(unique(unlist(lapply(constraint_viol, which), use.names = FALSE)))
+
+  for (g in violating_groups) {
+    entry <- entries[[g]]
     conds <- entry$conds
 
-    for (constraint in constraints) {
+    for (ci in seq_along(constraints)) {
+      if (!isTRUE(constraint_viol[[ci]][g])) {
+        next
+      }
+      constraint <- constraints[[ci]]
       ctype <- constraint$type
 
       if (identical(ctype, "mutually_exclusive")) {
         left <- constraint$left
         right <- constraint$right
-        left_scope <- constraint$left_scope %||% "any"
-        right_scope <- constraint$right_scope %||% "any"
-
-        if (dta_group_stream_truth(conds[[left]], left_scope) &&
-          dta_group_stream_truth(conds[[right]], right_scope)) {
-          message <- constraint$message %||%
-            sprintf(
-              "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
-              entry$label,
-              left,
-              right,
-              left, fmt(conds[[left]]),
-              right, fmt(conds[[right]])
-            )
-          violations[[length(violations) + 1L]] <- list(
-            constraint_id = constraint$id,
-            group = entry$label,
-            message = message,
-            rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head))),
-            rows_truncated = dta_group_head_truncated(conds[[left]], "true") ||
-              dta_group_head_truncated(conds[[right]], "true")
+        message <- constraint$message %||%
+          sprintf(
+            "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
+            entry$label,
+            left,
+            right,
+            left, fmt(conds[[left]]),
+            right, fmt(conds[[right]])
           )
-        }
+        violations[[length(violations) + 1L]] <- list(
+          constraint_id = constraint$id,
+          group = entry$label,
+          message = message,
+          rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head))),
+          rows_truncated = dta_group_head_truncated(conds[[left]], "true") ||
+            dta_group_head_truncated(conds[[right]], "true")
+        )
       } else if (identical(ctype, "requires")) {
         if_name <- constraint[["if"]]
         then_name <- constraint[["then"]]
-        if_scope <- constraint$if_scope %||% "any"
         then_scope <- constraint$then_scope %||% "any"
 
-        if (dta_group_stream_truth(conds[[if_name]], if_scope) &&
-          !dta_group_stream_truth(conds[[then_name]], then_scope)) {
-          then_scope_reason <- if (identical(then_scope, "all")) {
-            sprintf("rows %s do not satisfy \"%s\"", fmt(conds[[then_name]], "false"), then_name)
-          } else {
-            sprintf("no row in the group satisfies \"%s\"", then_name)
-          }
-          message <- constraint$message %||%
-            sprintf(
-              "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
-              entry$label,
-              if_name,
-              fmt(conds[[if_name]]),
-              then_name,
-              then_scope_reason
-            )
-          then_failed <- if (identical(then_scope, "all")) {
-            conds[[then_name]]$false_head
-          } else {
-            integer(0)
-          }
-          violations[[length(violations) + 1L]] <- list(
-            constraint_id = constraint$id,
-            group = entry$label,
-            message = message,
-            rows = sort(unique(c(conds[[if_name]]$true_head, then_failed))),
-            rows_truncated = dta_group_head_truncated(conds[[if_name]], "true") ||
-              (identical(then_scope, "all") &&
-                dta_group_head_truncated(conds[[then_name]], "false"))
-          )
+        then_scope_reason <- if (identical(then_scope, "all")) {
+          sprintf("rows %s do not satisfy \"%s\"", fmt(conds[[then_name]], "false"), then_name)
+        } else {
+          sprintf("no row in the group satisfies \"%s\"", then_name)
         }
+        message <- constraint$message %||%
+          sprintf(
+            "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
+            entry$label,
+            if_name,
+            fmt(conds[[if_name]]),
+            then_name,
+            then_scope_reason
+          )
+        then_failed <- if (identical(then_scope, "all")) {
+          conds[[then_name]]$false_head
+        } else {
+          integer(0)
+        }
+        violations[[length(violations) + 1L]] <- list(
+          constraint_id = constraint$id,
+          group = entry$label,
+          message = message,
+          rows = sort(unique(c(conds[[if_name]]$true_head, then_failed))),
+          rows_truncated = dta_group_head_truncated(conds[[if_name]], "true") ||
+            (identical(then_scope, "all") &&
+              dta_group_head_truncated(conds[[then_name]], "false"))
+        )
       }
     }
   }

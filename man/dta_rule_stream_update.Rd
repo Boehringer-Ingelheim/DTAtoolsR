@@ -4,7 +4,7 @@
 \alias{dta_rule_stream_update}
 \title{Fold One Batch into a Rule's Accumulator}
 \usage{
-dta_rule_stream_update(state, rule, df)
+dta_rule_stream_update(state, rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{state}{An accumulator from \code{dta_rule_stream_init()}.}
@@ -12,6 +12,9 @@ dta_rule_stream_update(state, rule, df)
 \item{rule}{The rule being accumulated.}
 
 \item{df}{A data frame holding one batch.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}} built for
+this batch, or \code{NULL} to convert each column on demand.}
 }
 \value{
 The accumulator, updated in place.
