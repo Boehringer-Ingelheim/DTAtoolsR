@@ -3375,6 +3375,45 @@ server <- function(input, output, session) {
       )
       actual_ui <- inspect_failing_rows_ui(d)
       actual_title <- "Offending row(s) \u2014 actual values"
+
+      # For group condition rules render an additional breakdown table showing
+      # each violation: group, constraint, message, and all row numbers involved.
+      gvcols <- grep("^group_violation_", names(d), value = TRUE)
+      if (length(gvcols) > 0) {
+        gv <- d[, gvcols, drop = FALSE]
+        gv <- gv[!is.na(gv[[gvcols[[1]]]], ), , drop = FALSE]
+        if (nrow(gv) > 0) {
+          names(gv) <- sub("^group_violation_", "", names(gv))
+          names(gv) <- tools::toTitleCase(names(gv))
+          actual_title <- "Group constraint violations \u2014 details"
+          actual_ui <- tagList(
+            tags$table(
+              class = "inspect-hl-table",
+              tags$thead(tags$tr(lapply(names(gv), tags$th))),
+              tags$tbody(
+                lapply(seq_len(nrow(gv)), function(i) {
+                  tags$tr(lapply(names(gv), function(k) {
+                    tags$td(
+                      class = "inspect-hl-val",
+                      as.character(gv[[k]][i])
+                    )
+                  }))
+                })
+              )
+            ),
+            if (length(failing_fcols <- grep("^failing_", names(d), value = TRUE)) > 0) {
+              tagList(
+                tags$p(
+                  class = "inspect-desc-note",
+                  style = "margin-top:1em;",
+                  "Rows involved (all values):"
+                ),
+                inspect_failing_rows_ui(d)
+              )
+            }
+          )
+        }
+      }
     } else if (identical(typ, "import")) {
       # Third validation axis: the value could not be represented in the type
       # the spec declares, so the typed column holds NA and the raw text was

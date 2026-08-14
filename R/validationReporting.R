@@ -618,6 +618,26 @@ dta_value_to_text <- function(x) {
 }
 
 #' @keywords internal
+dta_group_violations_to_df <- function(violations) {
+  if (is.null(violations) || length(violations) == 0) {
+    return(NULL)
+  }
+  data.frame(
+    group = vapply(violations, function(v) as.character(v$group %||% ""), character(1)),
+    constraint = vapply(violations, function(v) as.character(v$constraint_id %||% ""), character(1)),
+    message = vapply(violations, function(v) as.character(v$message %||% ""), character(1)),
+    rows = vapply(violations, function(v) {
+      r <- v$rows
+      if (length(r) == 0) {
+        return("")
+      }
+      dta_format_group_rows(sort(unique(as.integer(r))), length(r), 30L)
+    }, character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
 dta_simplify_df_columns <- function(df) {
   if (is.null(df) || !is.data.frame(df) || ncol(df) == 0) {
     return(df)
@@ -644,7 +664,8 @@ dta_flatten_inspect_record <- function(record) {
     columnspec = record$columnspec_matches,
     context = record$row_context,
     failing = record$failing_rows_preview,
-    import = record$import_matches
+    import = record$import_matches,
+    group_violation = dta_group_violations_to_df(record$group_violation_details)
   )
 
   detail_rows <- vapply(detail_sources, function(x) {
@@ -653,7 +674,7 @@ dta_flatten_inspect_record <- function(record) {
 
   out_n <- max(1L, detail_rows)
 
-  base_names <- setdiff(names(record), c("columnspec_matches", "row_context", "failing_rows_preview", "import_matches", "rule_definition", "details"))
+  base_names <- setdiff(names(record), c("columnspec_matches", "row_context", "failing_rows_preview", "import_matches", "rule_definition", "details", "group_violation_details"))
   base <- as.data.frame(lapply(record[base_names], function(x) {
     if (is.null(x)) NA else x
   }), stringsAsFactors = FALSE, optional = TRUE)
@@ -933,16 +954,28 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   failing_rows <- if (!is.null(rule_def)) dta_rule_failure_row_indices(rule_def, table_df) else integer(0)
 
   row_preview <- NULL
-  if (length(failing_rows) > 0) {
-    preview_rows <- utils::head(failing_rows, 10)
-    preview_cols <- c("SUBJECT_ID", "VISIT")
+  group_violation_details <- NULL
 
-    if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColRange")) {
-      preview_cols <- c(preview_cols, rule_def@columns[[1]])
-    } else if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColUnique")) {
-      preview_cols <- c(preview_cols, rule_def@columns)
-    } else if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColCondition")) {
-      preview_cols <- c(preview_cols, names(rule_def@condition), names(rule_def@then))
+  is_group_condition <- !is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleGroupCondition")
+
+  if (length(failing_rows) > 0) {
+    # Group condition rules show ALL failing rows and include all involved columns.
+    preview_rows <- if (is_group_condition) failing_rows else utils::head(failing_rows, 10)
+
+    if (is_group_condition) {
+      preview_cols <- rule_def@group_by %||% c("SUBJECT_ID", "VISIT")
+      # Add all columns referenced in any condition.
+      cond_cols <- unique(unlist(lapply(rule_def@conditions, names), use.names = FALSE))
+      preview_cols <- c(preview_cols, cond_cols)
+    } else {
+      preview_cols <- c("SUBJECT_ID", "VISIT")
+      if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColRange")) {
+        preview_cols <- c(preview_cols, rule_def@columns[[1]])
+      } else if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColUnique")) {
+        preview_cols <- c(preview_cols, rule_def@columns)
+      } else if (!is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleColCondition")) {
+        preview_cols <- c(preview_cols, names(rule_def@condition), names(rule_def@then))
+      }
     }
 
     preview_cols <- unique(preview_cols[preview_cols %in% names(table_df)])
@@ -955,12 +988,29 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
     row_preview <- row_preview[, c(".row", setdiff(names(row_preview), ".row")), drop = FALSE]
   }
 
+  # For group condition rules, also store per-violation structured detail so the
+  # Shiny inspect view can render a richer breakdown by group/constraint.
+  if (is_group_condition) {
+    gc_result <- tryCatch(
+      rule_check_group_condition(rule_def, table_df),
+      error = function(e) NULL
+    )
+    if (!is.null(gc_result) && !isTRUE(gc_result$valid)) {
+      group_violation_details <- gc_result$details
+    }
+  }
+
   out$type <- "rule"
-  out$why <- "Rule logic found rows that violate IF/THEN, range, or uniqueness constraints."
+  out$why <- if (is_group_condition) {
+    "A group-level constraint was violated: within one or more groups of rows, conditions that must be mutually exclusive co-occur, or a required follow-on condition is absent."
+  } else {
+    "Rule logic found rows that violate IF/THEN, range, or uniqueness constraints."
+  }
   out$rule_id <- rule_id
   out$rule_definition <- rule_def
   out$failing_row_count <- length(failing_rows)
   out$failing_rows_preview <- row_preview
+  out$group_violation_details <- group_violation_details
   out
 }
 

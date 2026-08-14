@@ -978,13 +978,13 @@ rule_check_group_condition <- function(rule, df) {
         if (isTRUE(left_truth) && isTRUE(right_truth)) {
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: '%s' (scope=%s; rows=%s) and '%s' (scope=%s; rows=%s) are both TRUE, but mutually_exclusive requires they cannot both hold.",
-              constraint$id,
+              "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
+              group_label,
               left,
-              constraint$left_scope %||% "any",
+              right,
+              left,
               format_rows(cond_rows[[left]]),
               right,
-              constraint$right_scope %||% "any",
               format_rows(cond_rows[[right]])
             )
           violations[[length(violations) + 1L]] <- list(
@@ -1016,23 +1016,17 @@ rule_check_group_condition <- function(rule, df) {
             integer(0)
           }
           then_scope_reason <- if (identical(then_scope, "all")) {
-            sprintf("failing rows=%s", format_rows(then_failed))
+            sprintf("rows %s do not satisfy \"%s\"", format_rows(then_failed), then_name)
           } else {
-            sprintf(
-              "no row in the group satisfied '%s' (rows with TRUE=%s)",
-              then_name,
-              format_rows(then_rows)
-            )
+            sprintf("no row in the group satisfies \"%s\"", then_name)
           }
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: IF condition '%s' (scope=%s; rows=%s) is TRUE, but THEN condition '%s' (scope=%s) is not satisfied (%s).",
-              constraint$id,
+              "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
+              group_label,
               if_name,
-              constraint$if_scope %||% "any",
               format_rows(if_rows),
               then_name,
-              then_scope,
               then_scope_reason
             )
           violations[[length(violations) + 1L]] <- list(
@@ -1052,15 +1046,15 @@ rule_check_group_condition <- function(rule, df) {
   }
 
   summary <- sprintf(
-    "Rule '%s' failed: %d grouped constraint violation%s detected.",
+    "Rule '%s': %d group constraint violation%s found across %d group%s.",
     rule@id,
     length(violations),
-    if (length(violations) == 1) "" else "s"
+    if (length(violations) == 1) "" else "s",
+    length(unique(vapply(violations, function(v) v$group, character(1)))),
+    if (length(unique(vapply(violations, function(v) v$group, character(1)))) == 1) "" else "s"
   )
 
-  details <- vapply(violations, function(v) {
-    sprintf("%s [%s]", v$message, v$group)
-  }, character(1))
+  details <- vapply(violations, function(v) v$message, character(1))
 
   list(
     id = rule@id,

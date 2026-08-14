@@ -786,10 +786,12 @@ dta_group_stream_finalise <- function(state, rule) {
           dta_group_stream_truth(conds[[right]], right_scope)) {
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: '%s' (scope=%s; rows=%s) and '%s' (scope=%s; rows=%s) are both TRUE, but mutually_exclusive requires they cannot both hold.",
-              constraint$id,
-              left, left_scope, fmt(conds[[left]]),
-              right, right_scope, fmt(conds[[right]])
+              "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
+              entry$label,
+              left,
+              right,
+              left, fmt(conds[[left]]),
+              right, fmt(conds[[right]])
             )
           violations[[length(violations) + 1L]] <- list(
             constraint_id = constraint$id,
@@ -809,20 +811,18 @@ dta_group_stream_finalise <- function(state, rule) {
         if (dta_group_stream_truth(conds[[if_name]], if_scope) &&
           !dta_group_stream_truth(conds[[then_name]], then_scope)) {
           then_scope_reason <- if (identical(then_scope, "all")) {
-            sprintf("failing rows=%s", fmt(conds[[then_name]], "false"))
+            sprintf("rows %s do not satisfy \"%s\"", fmt(conds[[then_name]], "false"), then_name)
           } else {
-            sprintf(
-              "no row in the group satisfied '%s' (rows with TRUE=%s)",
-              then_name,
-              fmt(conds[[then_name]])
-            )
+            sprintf("no row in the group satisfies \"%s\"", then_name)
           }
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: IF condition '%s' (scope=%s; rows=%s) is TRUE, but THEN condition '%s' (scope=%s) is not satisfied (%s).",
-              constraint$id,
-              if_name, if_scope, fmt(conds[[if_name]]),
-              then_name, then_scope, then_scope_reason
+              "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
+              entry$label,
+              if_name,
+              fmt(conds[[if_name]]),
+              then_name,
+              then_scope_reason
             )
           then_failed <- if (identical(then_scope, "all")) {
             conds[[then_name]]$false_head
@@ -848,14 +848,14 @@ dta_group_stream_finalise <- function(state, rule) {
   }
 
   summary <- sprintf(
-    "Rule '%s' failed: %d grouped constraint violation%s detected.",
+    "Rule '%s': %d group constraint violation%s found across %d group%s.",
     rule@id,
     length(violations),
-    if (length(violations) == 1) "" else "s"
+    if (length(violations) == 1) "" else "s",
+    length(unique(vapply(violations, function(v) v$group, character(1)))),
+    if (length(unique(vapply(violations, function(v) v$group, character(1)))) == 1) "" else "s"
   )
-  details <- vapply(violations, function(v) {
-    sprintf("%s [%s]", v$message, v$group)
-  }, character(1))
+  details <- vapply(violations, function(v) v$message, character(1))
 
   list(
     id = rule@id,

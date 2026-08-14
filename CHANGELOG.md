@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Group condition rule violation messages are now human-readable.**
+  The technical internal format (`"Constraint 'X' failed: ... scope=any; rows=..."`)
+  has been replaced with plain-English descriptions:
+  - `mutually_exclusive`: `In group [A=1, B=2]: "cond1" and "cond2" must not both occur, but both were found (rows matching "cond1": 1; rows matching "cond2": 3).`
+  - `requires`: `In group [A=1]: when "cond1" occurs (rows: 1), "cond2" must also hold, but it does not (no row in the group satisfies "cond2").`
+  The group key is now embedded directly in each violation message. Users see what the rule checks, which group failed, and which rows are involved — without needing to know about scopes or constraint IDs.
+
+- **Shiny app inspect view for group condition rules shows all values involved.**
+  The inspect modal now displays: (1) a violation breakdown table listing each
+  failing group, the constraint, the message, and all involved row numbers; and
+  (2) a second table with the actual data values for all offending rows (all
+  relevant columns: group-by columns plus all columns referenced in conditions).
+  Previously the modal showed at most 10 rows and only `SUBJECT_ID`/`VISIT`.
+
 ## [0.17.0] - 2026-08-14
 
 ### Changed

@@ -382,9 +382,9 @@ test_that("group_condition detects mutually exclusive and requires violations by
   expect_false(res$valid)
   expect_match(res$message, "sample_visit_status_logic", fixed = TRUE)
   expect_match(res$message, "SUBJIDN=S1", fixed = TRUE)
-  expect_match(res$message, "Constraint 'constraint_1' failed", fixed = TRUE)
-  expect_match(res$message, "scope=any", fixed = TRUE)
-  expect_match(res$message, "failing rows=", fixed = TRUE)
+  expect_match(res$message, "must not both occur", fixed = TRUE)
+  expect_match(res$message, "must also hold, but it does not", fixed = TRUE)
+  expect_match(res$message, "c1_failed", fixed = TRUE)
 
   passing <- df
   passing$GFSTAT[passing$SUBJIDN == "S1"] <- "NOT DONE"
