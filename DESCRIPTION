@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.17.0
+Version: 0.17.1
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -24,6 +24,7 @@ Imports:
 	cli,
 	utils,
 	tools,
+	stats,
 	glue,
 	methods,
 	R.utils,
@@ -90,7 +91,9 @@ Collate:
     'exportDocuments.R'
     'exportFunctions.R'
     'exportTemplateDocx.R'
+    'exportValidationReport.R'
     'formattingHelpers.R'
+    'reportRendering.R'
     'run_dta_app.R'
     'streamingValidation.R'
     'validationFunctions.R'

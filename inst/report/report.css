@@ -1,0 +1,509 @@
+/* DTAtools Validation Report Styles */
+
+:root {
+  --bi-green: #00625B;
+  --bi-green-dark: #003D38;
+  --bi-green-light: #E6F1EF;
+  --bi-accent: #00A886;
+  --bi-ink: #1A2B2A;
+  --bi-grey: #5B6B6A;
+  --bi-grey-light: #F4F7F6;
+  --bi-pass: #1E8E5A;
+  --bi-pass-bg: #E5F4EC;
+  --bi-pass-border: #9BD3B4;
+  --bi-fail: #C0392B;
+  --bi-fail-bg: #FBEAE7;
+  --bi-fail-border: #E9B4AC;
+  --bi-pending: #5B6B6A;
+  --bi-pending-bg: #EEF1F1;
+  --bi-pending-border: #CDD5D4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bi-grey-light);
+  color: var(--bi-ink);
+  margin: 0;
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.report-header {
+  background: linear-gradient(135deg, var(--bi-green-dark) 0%, var(--bi-green) 100%);
+  color: white;
+  padding: 1.5rem 2rem;
+  border-radius: 0.75rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.report-header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2rem;
+}
+
+.report-meta {
+  font-size: 0.875rem;
+  opacity: 0.95;
+  margin: 0;
+}
+
+.report-summary {
+  margin-bottom: 3rem;
+}
+
+.report-summary h2 {
+  font-size: 1.5rem;
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: var(--bi-ink);
+}
+
+.report-summary-cards {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.summary-card {
+  flex: 1;
+  min-width: 180px;
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  border: 2px solid;
+  text-align: center;
+  background-color: white;
+}
+
+.summary-card.pass {
+  background-color: var(--bi-pass-bg);
+  border-color: var(--bi-pass-border);
+  color: var(--bi-pass);
+}
+
+.summary-card.fail {
+  background-color: var(--bi-fail-bg);
+  border-color: var(--bi-fail-border);
+  color: var(--bi-fail);
+}
+
+.summary-card.pending {
+  background-color: var(--bi-pending-bg);
+  border-color: var(--bi-pending-border);
+  color: var(--bi-pending);
+}
+
+.summary-count {
+  display: block;
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.summary-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* `overflow-x: auto` alone lets a too-wide table scroll horizontally while
+   the table keeps its default `display: table`. Also setting `display:
+   block` (a pattern sometimes seen for "responsive tables") would break
+   column alignment across rows -- without a `display: table` ancestor,
+   `<tr>`/`<td>` no longer share a single column grid -- so it's deliberately
+   not used here. */
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow-x: auto;
+}
+
+.report-table thead th {
+  background-color: var(--bi-green-light);
+  color: var(--bi-green-dark);
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid var(--bi-green);
+}
+
+.report-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 1.5rem;
+}
+
+.report-table th.sortable::after {
+  content: '';
+  position: absolute;
+  right: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.report-table th.sortable.sort-asc::after {
+  content: ' \2191';
+}
+
+.report-table th.sortable.sort-desc::after {
+  content: ' \2193';
+}
+
+.report-table tbody td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--bi-grey-light);
+  color: var(--bi-ink);
+}
+
+.report-table tbody tr:nth-child(even) {
+  background-color: rgba(0, 98, 91, 0.02);
+}
+
+.report-summary-table {
+  margin-bottom: 2rem;
+}
+
+.report-messages {
+  margin-bottom: 2rem;
+}
+
+.report-messages h2 {
+  font-size: 1.5rem;
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: var(--bi-ink);
+}
+
+.report-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.report-filter-text,
+.report-filter-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--bi-grey-light);
+  border-radius: 0.5rem;
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--bi-ink);
+}
+
+.report-filter-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.report-filter-text:focus,
+.report-filter-select:focus {
+  outline: none;
+  border-color: var(--bi-accent);
+  box-shadow: 0 0 0 3px rgba(0, 168, 134, 0.1);
+}
+
+.report-messages-table {
+  margin-bottom: 2rem;
+}
+
+.msg-row {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.msg-row:hover {
+  background-color: var(--bi-green-light) !important;
+}
+
+.msg-more-row td {
+  text-align: center;
+  padding: 1rem !important;
+}
+
+.show-more-btn {
+  padding: 0.5rem 1rem;
+  background-color: white;
+  border: 1px solid var(--bi-accent);
+  color: var(--bi-accent);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.show-more-btn:hover {
+  background-color: var(--bi-accent);
+  color: white;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid;
+}
+
+.status-pass {
+  background-color: var(--bi-pass-bg);
+  border-color: var(--bi-pass-border);
+  color: var(--bi-pass);
+}
+
+.status-fail {
+  background-color: var(--bi-fail-bg);
+  border-color: var(--bi-fail-border);
+  color: var(--bi-fail);
+}
+
+.status-pending {
+  background-color: var(--bi-pending-bg);
+  border-color: var(--bi-pending-border);
+  color: var(--bi-pending);
+}
+
+/* Inspect panels and overlay */
+.inspect-panel {
+  display: none;
+}
+
+.inspect-summary {
+  margin-bottom: 1.5rem;
+}
+
+.inspect-badge {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 1rem;
+}
+
+.inspect-badge-columnspec {
+  background-color: rgba(184, 134, 11, 0.15);
+  color: #8b6914;
+  border: 1px solid #b8860b;
+}
+
+.inspect-badge-rule {
+  background-color: var(--bi-fail-bg);
+  color: var(--bi-fail);
+  border: 1px solid var(--bi-fail-border);
+}
+
+.inspect-badge-import {
+  background-color: rgba(31, 111, 235, 0.15);
+  color: #1f5caa;
+  border: 1px solid #1f6feb;
+}
+
+.inspect-msg {
+  font-size: 1rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.inspect-cmp {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 700px) {
+  .inspect-cmp {
+    grid-template-columns: 1fr;
+  }
+}
+
+.inspect-box {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  border-left: 4px solid;
+}
+
+.inspect-expected {
+  background-color: var(--bi-pass-bg);
+  border-left-color: var(--bi-pass);
+}
+
+.inspect-actual {
+  background-color: var(--bi-fail-bg);
+  border-left-color: var(--bi-fail);
+}
+
+.inspect-box-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.inspect-box-body {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.inspect-details {
+  margin-top: 1rem;
+}
+
+.inspect-details summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--bi-accent);
+  font-weight: 600;
+  user-select: none;
+}
+
+/* "What this rule checks" -- the rule/constraint definition itself, shown
+   above the should-be/actual comparison so a reader gets the rule's intent
+   before its failure. Neutral (not pass/fail-colored) since it describes the
+   rule, not the outcome. */
+.inspect-explain {
+  background-color: var(--bi-grey-light);
+  border-left: 4px solid var(--bi-grey);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.inspect-explain-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--bi-ink);
+}
+
+.inspect-explain dl {
+  margin: 0;
+}
+
+.inspect-explain dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.inspect-explain dt:first-child {
+  margin-top: 0;
+}
+
+.inspect-explain dd {
+  margin: 0 0 0 1rem;
+  color: var(--bi-grey);
+}
+
+/* Multi-row "actual" detail -- every failing/offending row captured for the
+   message, not just the first (a rule violation is often clearer across
+   several rows at once). */
+.inspect-rows-table {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.inspect-rows-table th,
+.inspect-rows-table td {
+  padding: 0.4rem 0.6rem;
+}
+
+.inspect-none {
+  color: var(--bi-grey);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+.inspect-actual-note {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--bi-grey);
+}
+
+.inspect-details summary:hover {
+  text-decoration: underline;
+}
+
+.inspect-kv-table {
+  margin-top: 1rem;
+}
+
+.inspect-kv-table tbody td:first-child {
+  font-weight: 600;
+  color: var(--bi-grey);
+  width: 30%;
+}
+
+.inspect-kv-table tbody td {
+  padding: 0.5rem 1rem;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.inspect-overlay:not([hidden]) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.inspect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.inspect-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.inspect-overlay-panel {
+  position: relative;
+  max-width: 800px;
+  margin-top: 4rem;
+  background-color: white;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.inspect-overlay-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  background-color: transparent;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--bi-grey);
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.inspect-overlay-close:hover {
+  color: var(--bi-ink);
+}

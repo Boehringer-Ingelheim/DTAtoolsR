@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Standalone HTML validation report.** `write_validation_report()` renders a
+  self-contained `.html` file (no external assets) summarizing validation
+  results for a `DTA` object: a pass/fail overview per dataset/target, and a
+  sortable, filterable table of every validation message with click-to-inspect
+  detail, matching the look of the Shiny app's validation-messages tab.
+  Repeated identical messages (e.g. the same `required property 'HEIGHT'`
+  violation on many rows) are capped at `max_repeats` (default `5`) in the
+  default view, with a "show all" toggle in the file itself so no data is
+  lost. The Shiny app's validation-messages dock gained a "Report" download
+  button alongside the existing CSV/TSV/XLSX exports.
+
 ## [0.17.0] - 2026-08-14
 
 ### Changed

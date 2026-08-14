@@ -3077,7 +3077,8 @@ server <- function(input, output, session) {
             class = "msgs-dock-dl", onclick = "event.stopPropagation();",
             downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
             downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary")
+            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary"),
+            downloadButton("dl_msgs_html", "Report", class = "btn btn-sm btn-outline-secondary")
           ),
           tags$span(class = "msgs-dock-chevron", HTML("&#x25BC;"))
         )
@@ -3205,6 +3206,34 @@ server <- function(input, output, session) {
         stop("writexl not available")
       }
       writexl::write_xlsx(msgs_dl_df(), file)
+    }
+  )
+
+  # Filename base for the whole-DTA HTML report (unlike msgs_dl_base(), which
+  # is scoped to the single active dataset). Timestamped so repeated
+  # downloads across a working session don't overwrite each other in the
+  # browser's downloads folder.
+  report_dl_base <- function() {
+    title <- tryCatch(DTAtools::metadata(rv$dta)@title, error = function(e) NULL)
+    nm <- if (!is.null(title) && length(title) == 1 && nzchar(title)) title else "dta"
+    paste0(
+      gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_report_",
+      format(Sys.time(), "%Y%m%d_%H%M%S")
+    )
+  }
+  output$dl_msgs_html <- downloadHandler(
+    filename = function() paste0(report_dl_base(), ".html"),
+    content = function(file) {
+      tryCatch(
+        DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+        error = function(e) {
+          showNotification(
+            paste("Could not build the validation report:", conditionMessage(e)),
+            type = "error", duration = 10
+          )
+          stop(e)
+        }
+      )
     }
   )
 
