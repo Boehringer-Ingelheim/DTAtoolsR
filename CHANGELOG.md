@@ -137,6 +137,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   first of them (`group_condition Rule`) and the streaming section could not be
   reached from the sidebar at all.
 
+- **The Shiny export dialog announced itself twice.** The modal's own title bar
+  and a heading at the top of its body both read "Export Document", one directly
+  above the other. The heading is gone; the dialog title stands alone, as it
+  does in every other modal in the app.
+
 - **`group_condition` rules are now described in full in the exported
   documents.** They fell through to the default rule formatter, which printed
   either the author's one-line description or

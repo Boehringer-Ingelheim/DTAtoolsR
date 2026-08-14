@@ -280,3 +280,26 @@ test_that("the export modal defaults to Word with the YAML specification embedde
   expect_length(yaml_box, 1)
   expect_match(yaml_box, "value = TRUE", fixed = TRUE)
 })
+
+test_that("the export modal names itself once", {
+  # modalDialog() renders `title` as the dialog's own header. The body used to
+  # open with an h4 carrying the same words, so the dialog read "Export
+  # Document" twice, one above the other.
+  app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+
+  # The observer that builds and shows the modal, from `modal_content <- div(`
+  # to the end of the showModal() call.
+  modal <- regmatches(
+    app_code,
+    regexpr("(?s)modal_content <- div\\(.*?size = \"m\"", app_code, perl = TRUE)
+  )
+  expect_length(modal, 1)
+
+  # One mention, and it is the modalDialog title rather than a heading.
+  expect_match(modal, 'title = "Export Document"', fixed = TRUE)
+  expect_false(grepl('h4("Export Document")', modal, fixed = TRUE))
+  expect_equal(
+    length(gregexpr('"Export Document"', modal, fixed = TRUE)[[1]]),
+    1L
+  )
+})

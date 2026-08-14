@@ -4298,7 +4298,10 @@ server <- function(input, output, session) {
     templates <- list_available_templates()
 
     modal_content <- div(
-      h4("Export Document"),
+      # No heading here: modalDialog() renders `title` as the dialog's own
+      # header, so an h4 repeating those words printed the dialog name twice,
+      # one line above the other. Every other modal here relies on `title`
+      # alone.
       p("Choose the format and options for your DTA export."),
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
