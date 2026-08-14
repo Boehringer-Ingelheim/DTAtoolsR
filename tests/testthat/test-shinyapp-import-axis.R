@@ -5,8 +5,8 @@
 # app.R itself calls Shiny at top level and cannot be evaluated outside a
 # running app; the few assertions about its wiring parse it instead.
 #
-# Focus: the three-axis validation contract (schema / rules / import). The app
-# was written against two axes, so anything reading only n_schema_errors and
+# Focus: the three-axis validation contract (column specs / rules / import). The app
+# was written against two axes, so anything reading only n_columnspec_errors and
 # n_rule_errors reports a table with an unrepresentable value as clean.
 
 # A tabular dataset with one character and one numeric column. `val` decides
@@ -36,14 +36,14 @@ app_test_dta <- function(val, name = "ds1") {
 }
 
 # One row of a validation_status() frame.
-app_status_row <- function(table = "t1", ok = TRUE, schema = 0L, rule = 0L,
+app_status_row <- function(table = "t1", ok = TRUE, columnspec = 0L, rule = 0L,
                            import = 0L) {
   data.frame(
     table = table,
     target_type = "table",
     status = if (is.na(ok)) "not_validated" else "validated",
     ok = ok,
-    n_schema_errors = schema,
+    n_columnspec_errors = columnspec,
     n_rule_errors = rule,
     n_import_errors = import,
     stringsAsFactors = FALSE
@@ -87,7 +87,7 @@ test_that("dta_table_status_from_status_df weighs all three axes", {
 
   # The other two axes keep working.
   expect_identical(
-    status_of(app_status_row(ok = FALSE, schema = 3L)),
+    status_of(app_status_row(ok = FALSE, columnspec = 3L)),
     c(t1 = "fail")
   )
   expect_identical(
@@ -110,7 +110,7 @@ test_that("an unknown import axis is neither pass nor fail", {
 
   # A definite defect outranks the unknown axis: still a plain failure.
   expect_identical(
-    status_of(app_status_row(ok = FALSE, schema = 2L, import = NA_integer_)),
+    status_of(app_status_row(ok = FALSE, columnspec = 2L, import = NA_integer_)),
     c(t1 = "fail")
   )
 
@@ -119,7 +119,7 @@ test_that("an unknown import axis is neither pass nor fail", {
   # more unknown than the other two.
   expect_identical(
     status_of(app_status_row(
-      ok = NA, schema = NA_integer_,
+      ok = NA, columnspec = NA_integer_,
       rule = NA_integer_, import = NA_integer_
     )),
     c(t1 = "pending")
@@ -156,9 +156,9 @@ test_that("dta_table_status_map reports a real import-only failure as fail", {
     DTAtools::datasets(dta, "ds1")
   ))
   # expect_equal, not expect_identical: validation_status() returns
-  # n_schema_errors as double and n_rule_errors as integer, so an identical
+  # n_columnspec_errors as double and n_rule_errors as integer, so an identical
   # check would pin that inconsistency rather than the counts being asserted.
-  expect_equal(vs$n_schema_errors, 0)
+  expect_equal(vs$n_columnspec_errors, 0)
   expect_equal(vs$n_rule_errors, 0)
   expect_equal(vs$n_import_errors, 1)
   expect_false(vs$ok)
@@ -230,7 +230,7 @@ test_that("the HTML validation report carries the import error count", {
   # Without the column the report shows two zero counts and no reason at all
   # for the failure it is reporting.
   expect_match(report, "<th>n_import_errors</th>", fixed = TRUE)
-  expect_match(report, "<th>n_schema_errors</th>", fixed = TRUE)
+  expect_match(report, "<th>n_columnspec_errors</th>", fixed = TRUE)
   expect_match(report, "<th>n_rule_errors</th>", fixed = TRUE)
 
   # And the count itself reaches the body, not just the header.
@@ -337,20 +337,20 @@ test_that("the inspect modal routes import records to their own branch", {
   # catches a syntax error in the branch that was added.
   expect_silent(parse(text = app_src))
 
-  # Before this branch existed an import record fell into the schema `else` and
+  # Before this branch existed an import record fell into the column spec `else` and
   # rendered two empty schema_* panels.
   expect_match(app_src, 'identical(typ, "import")', fixed = TRUE)
   expect_match(app_src, 'class = "inspect-badge import"', fixed = TRUE)
   # The axis is taken from `type`, with `source` -- not the rule_id guess -- as
-  # the fallback, so an import record can never be mistaken for a schema one.
+  # the fallback, so an import record can never be mistaken for a column spec one.
   expect_match(app_src, '.first_nonempty(r[["type"]], r[["source"]])', fixed = TRUE)
 
   testthat::skip_if_not_installed("shiny")
   css <- as.character(app_fn("bi_css")())
-  # Its own hue, so it never reads as a rule or schema failure.
+  # Its own hue, so it never reads as a rule or column spec failure.
   expect_match(css, ".inspect-badge.import", fixed = TRUE)
   expect_match(css, ".inspect-badge.rule", fixed = TRUE)
-  expect_match(css, ".inspect-badge.schema", fixed = TRUE)
+  expect_match(css, ".inspect-badge.columnspec", fixed = TRUE)
 })
 
 

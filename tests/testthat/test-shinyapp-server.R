@@ -29,17 +29,41 @@ app_file_input <- function(filename) {
   )
 }
 
-# The app autosaves to a fixed path in tempdir() on every state change, and
-# offers to restore it on start-up. A file left by an earlier test would put the
-# next server into "previous session available" state, so every test clears it
-# before starting. (Clearing up front, rather than after, is what actually
-# guarantees isolation — and it stays correct no matter what order testthat
-# runs these in. The file itself dies with tempdir() at the end of the session.)
+# The app autosaves on every state change and offers to restore it on start-up,
+# but only when `DTAtools.app.session_dir` says a single user is running it
+# locally — run_dta_app() sets that, a shared deployment does not. testServer()
+# is neither, so the tests opt in explicitly; without this the whole
+# autosave/restore surface would be switched off and silently untested.
+#
+# A file left by an earlier test would put the next server into "previous
+# session available" state, so every test clears it before starting. (Clearing
+# up front, rather than after, is what actually guarantees isolation — and it
+# stays correct no matter what order testthat runs these in. The directory dies
+# with tempdir() at the end of the session.)
+app_session_dir <- file.path(tempdir(), "dtatools-app-session-tests")
+dir.create(app_session_dir, showWarnings = FALSE, recursive = TRUE)
+options(DTAtools.app.session_dir = app_session_dir)
+
 clean_session_file <- function() {
-  f <- file.path(tempdir(), "dtatools_app_session.rds")
+  f <- file.path(app_session_dir, "dtatools_app_session.rds")
   unlink(f, force = TRUE)
   f
 }
+
+test_that("the app does not autosave when no session directory is configured", {
+  # The cross-session leak this guards: on a shared deployment, where nothing
+  # sets the option, no state may reach disk for the next visitor to restore.
+  marker <- clean_session_file()
+  options(DTAtools.app.session_dir = NULL)
+  on.exit(options(DTAtools.app.session_dir = app_session_dir), add = TRUE)
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(load_example = 1)
+    expect_false(file.exists(marker))
+  })
+
+  expect_false(file.exists(marker))
+})
 
 test_that("the server starts with an empty workspace", {
   clean_session_file()
@@ -144,7 +168,7 @@ test_that("check_all reports fail for data that violates the spec", {
     expect_gt(nrow(msgs), 0)
     # clinical_data_error_all.csv now also carries import errors (see
     # test-clinical-error-fixtures.R), so "import" joins the source set.
-    expect_setequal(unique(msgs$source), c("import", "rule", "schema"))
+    expect_setequal(unique(msgs$source), c("import", "rule", "columnspec"))
   })
 })
 

@@ -452,7 +452,7 @@ test_that("specs are ignored when the file has no header", {
   on.exit(unlink(path), add = TRUE)
 
   # Arrow generates positional names (f0, f1, ...) that cannot correspond to
-  # spec ids, so no schema is built and the header line becomes data.
+  # spec ids, so no column spec is built and the header line becomes data.
   x <- read_file(
     DTAFileCSV(basename(path), has_header = FALSE),
     path,

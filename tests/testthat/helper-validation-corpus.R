@@ -41,28 +41,28 @@ vc_corpus <- function() {
       )
     ),
 
-    # --- schema axis ---------------------------------------------------------
+    # --- column spec axis ---------------------------------------------------------
 
-    schema_required = vc_case(
+    columnspec_required = vc_case(
       "declared column absent from the table",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
         DTAColumnSpec(id = "MISSING", type = "SAS Char", length = 4, nullable = FALSE)
       )),
       data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
     ),
-    schema_type = vc_case(
+    columnspec_type = vc_case(
       "text where the spec declares a number",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = FALSE)
       )),
       data.frame(AGE = c("30", "not-a-number"), stringsAsFactors = FALSE)
     ),
-    schema_maxlength = vc_case(
+    columnspec_maxlength = vc_case(
       "string longer than the declared length",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
       )),
@@ -72,9 +72,9 @@ vc_corpus <- function() {
     # Pins the "maxLength counts characters, not bytes" decision. "aeiou" with
     # combining marks is 5 characters but more than 5 bytes in UTF-8, so a
     # byte-counting implementation would wrongly flag row 2.
-    schema_maxlength_unicode = vc_case(
+    columnspec_maxlength_unicode = vc_case(
       "multi-byte characters counted as characters, not bytes",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(id = "NAME", type = "SAS Char", length = 5, nullable = FALSE)
       )),
@@ -83,9 +83,9 @@ vc_corpus <- function() {
         stringsAsFactors = FALSE
       )
     ),
-    schema_enum = vc_case(
+    columnspec_enum = vc_case(
       "value outside the declared codelist",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(
           id = "SEX", type = "SAS Char", length = 1,
@@ -94,9 +94,9 @@ vc_corpus <- function() {
       )),
       data.frame(SEX = c("M", "X"), stringsAsFactors = FALSE)
     ),
-    schema_const = vc_case(
+    columnspec_const = vc_case(
       "value differs from the single permitted value",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(
           id = "DOMAIN", type = "SAS Char", length = 2,
@@ -105,9 +105,9 @@ vc_corpus <- function() {
       )),
       data.frame(DOMAIN = c("GF", "ZZ"), stringsAsFactors = FALSE)
     ),
-    schema_pattern = vc_case(
+    columnspec_pattern = vc_case(
       "value not matching the declared pattern",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(
           id = "CODE", type = "SAS Char", length = 6,
@@ -120,9 +120,9 @@ vc_corpus <- function() {
     # whose only value is NA serialises to a blank line, which every CSV parser
     # skips - so the round-trip layer would silently test blank-line handling
     # rather than nullability. SITE keeps the line populated.
-    schema_nullable = vc_case(
+    columnspec_nullable = vc_case(
       "missing value in a non-nullable column",
-      "schema",
+      "columnspec",
       vc_specs(list(
         DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
         DTAColumnSpec(id = "SITE", type = "SAS Char", length = 4, nullable = FALSE)
@@ -164,7 +164,7 @@ vc_corpus <- function() {
 
     # Pins duplicated()'s treatment of repeated NAs as duplicates. Arrow's
     # distinct counting does not agree by default, so this case is the tripwire.
-    # SITE exists for the same reason as in schema_nullable: without it the two
+    # SITE exists for the same reason as in columnspec_nullable: without it the two
     # NA rows are blank lines and never survive the round trip. The uniqueness
     # rule reads K only, so SITE does not affect the key.
     rule_unique_na = vc_case(
@@ -275,7 +275,7 @@ vc_corpus <- function() {
     # --- combined ------------------------------------------------------------
 
     all_axes = vc_case(
-      "schema, rule and import failures in one table",
+      "column spec, rule and import failures in one table",
       "all",
       vc_specs(
         list(

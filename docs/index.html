@@ -422,10 +422,10 @@
       border-left: 5px solid;
     }
     .error-card.import { background: #fef2f2; border-color: var(--danger); }
-    .error-card.schema { background: #fff7ed; border-color: var(--warning); }
+    .error-card.columnspec { background: #fff7ed; border-color: var(--warning); }
     .error-card.rule   { background: #fefce8; border-color: var(--yellow); }
     [data-theme="dark"] .error-card.import { background: #450a0a; }
-    [data-theme="dark"] .error-card.schema { background: #3d2a10; }
+    [data-theme="dark"] .error-card.columnspec { background: #3d2a10; }
     [data-theme="dark"] .error-card.rule   { background: #3d3200; }
     .error-card-title { font-weight: 700; font-size: 1rem; margin-bottom: .5rem; }
     .error-card ul { margin: .5rem 0 0 1rem; font-size: .88rem; }
@@ -664,7 +664,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">3</div>
-        <div class="step-body"><strong>Run validation</strong> — call <code>check()</code> to perform all import, schema, and rule checks</div>
+        <div class="step-body"><strong>Run validation</strong> — call <code>check()</code> to perform all import, column spec, and rule checks</div>
       </div>
       <div class="step-connector">↓</div>
       <div class="step">
@@ -743,7 +743,7 @@ messages(dta)</code></pre>
             <td><code>TRUE</code> / <code>FALSE</code></td>
           </tr>
           <tr>
-            <td><code>n_schema_errors</code></td>
+            <td><code>n_columnspec_errors</code></td>
             <td>Column rule violations — wrong type, invalid value, pattern mismatch, etc.</td>
             <td>Integer ≥ 0</td>
           </tr>
@@ -766,7 +766,7 @@ messages(dta)</code></pre>
       <div class="callout-body">
         <strong>Even one import error fails the table</strong>
         <p>A dataset with <code>n_import_errors = 1</code> will always have <code>ok = FALSE</code> (status: <code>"failed"</code>),
-        even if all schema and rule checks would otherwise pass.</p>
+        even if all column spec and rule checks would otherwise pass.</p>
       </div>
     </div>
 
@@ -805,7 +805,7 @@ messages(dta)</code></pre>
             <td>Value <code>"unknown"</code> cannot be read as <code>SAS Num</code></td>
           </tr>
           <tr>
-            <td><span style="color:var(--warning);font-weight:600">schema</span></td>
+            <td><span style="color:var(--warning);font-weight:600">columnspec</span></td>
             <td><span style="background:#fff7ed;color:var(--warning);padding:.1rem .5rem;border-radius:4px">🟠 orange</span></td>
             <td>Value <code>"V99"</code> not in allowed values list</td>
           </tr>
@@ -1010,8 +1010,8 @@ messages(dta)</code></pre>
           <li>See <code>import_raw</code> in <code>inspect()</code></li>
         </ul>
       </div>
-      <div class="error-card schema">
-        <div class="error-card-title">🟠 Schema Errors — "Readable, but breaks a column rule"</div>
+      <div class="error-card columnspec">
+        <div class="error-card-title">🟠 Column Spec Errors — "Readable, but breaks a column rule"</div>
         <p style="font-size:.88rem">The value was successfully parsed, but it violates a constraint on the column itself.</p>
         <ul>
           <li>Value not in <code>values</code> list</li>
@@ -1043,7 +1043,7 @@ messages(dta)</code></pre>
     <p>
       Rules check that columns make sense <em>together</em>, not just individually.
       They are defined under a <code>rules:</code> key inside your dataset spec and run
-      after all schema checks have passed.
+      after all column spec checks have passed.
     </p>
 
     <p>DTAtools supports three built-in rule types:</p>
@@ -1382,7 +1382,7 @@ specs_with_rules <- DTAColumnSpecCollection(
 
     <!-- ===== IMPORT ERRORS ===== -->
     <h3 id="section-4-4">⚠️ Import Errors in Detail</h3>
-    <p>Import errors are fundamentally different from schema and rule errors.
+    <p>Import errors are fundamentally different from column spec and rule errors.
     They happen <em>before</em> validation — during the read phase.</p>
 
     <div class="callout callout-error">
@@ -1390,7 +1390,7 @@ specs_with_rules <- DTAColumnSpecCollection(
       <div class="callout-body">
         <strong>Key distinction</strong>
         <p>A <code>SAS Num</code> column with cell <code>"unknown"</code> → import error (NA stored)
-        AND possibly a schema error if <code>nullable: false</code>.</p>
+        AND possibly a column spec error if <code>nullable: false</code>.</p>
         <p>Use <code>msgs &lt;- messages(ds); msgs[msgs$source == "import", ]</code> to filter to just import errors.</p>
         <p>Use <code>inspect(ds, id = N)</code> to see <code>import_raw</code> (original text),
         <code>import_declared_type</code>, and <code>import_reason</code>.</p>
@@ -1511,7 +1511,7 @@ export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
       <pre><code class="language-r">details &lt;- validate_file_stream(specs, "transfer.csv")
 
 details$ok                # TRUE / FALSE, the same three-axis verdict
-details$n_schema_errors   # per-axis counts, as check() reports them
+details$n_columnspec_errors   # per-axis counts, as check() reports them
 as.data.frame(details)    # one row per error: source, row, column, keyword, message
 
 # Stop at the first problem rather than scanning to the end.
@@ -1599,7 +1599,7 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
           </tr>
           <tr>
             <td class="cheat-fn">check(dta)</td>
-            <td>Run all validation (import + schema + rules)</td>
+            <td>Run all validation (import + column specs + rules)</td>
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>

@@ -207,8 +207,43 @@ method(max_number_of_files, DTAFile) <- function(x, ...) {
 }
 
 
+#' @title Compression Suffixes a Declared Filename Also Covers
+#' @description
+#' Compression is a transport detail, not part of the data's identity: a
+#' specification that declares `data.csv` is satisfied by `data.csv.gz`. Arrow
+#' decompresses these transparently on read, so the declaration never has to
+#' mention them.
+#'
+#' Only gzip is listed. Arrow can read other codecs, but claiming a suffix here
+#' that the reader then fails on trades a clear "no file matched" for an opaque
+#' Arrow error.
+#' @return A character vector of extensions, without the leading dot.
+#' @keywords internal
+dta_compression_extensions <- function() {
+  "gz"
+}
+
+#' @title Drop a Compression Suffix From a Filename
+#' @param file_name Character. A file's basename.
+#' @return The name with a trailing compression extension removed, unchanged
+#'   when it has none.
+#' @keywords internal
+dta_strip_compression_extension <- function(file_name) {
+  ext <- tolower(tools::file_ext(file_name))
+  if (ext %in% dta_compression_extensions()) {
+    tools::file_path_sans_ext(file_name)
+  } else {
+    file_name
+  }
+}
+
 #' @title Matches Filename
 #' @description Checks if a given filename matches the pattern in a `DTAFile` object.
+#'
+#' A compressed file matches the uncompressed name: `data.csv.gz` satisfies a
+#' handler declared as `data.csv`, and one declared with the pattern
+#' `^data\\.csv$`. The suffix is stripped from the candidate rather than
+#' appended to the declaration, so existing anchored patterns keep working.
 #'
 #' @param x A `DTAFile` object.
 #' @param file A character string representing the name of the file to check against
@@ -218,6 +253,9 @@ method(max_number_of_files, DTAFile) <- function(x, ...) {
 #' @examples
 #' file_info <- DTAFile("file.txt")
 #' matches_filename(file_info, "file.txt")
+#'
+#' # A gzipped file matches the name the specification declares.
+#' matches_filename(DTAFile("data.csv"), "data.csv.gz")
 #'
 #' @section Methods:
 #' \describe{
@@ -232,11 +270,16 @@ if (!exists("matches_filename", mode = "function")) {
 
 method(matches_filename, DTAFile) <- function(x, file) {
   file_name <- basename(file)
+  candidates <- unique(c(file_name, dta_strip_compression_extension(file_name)))
 
   if (x@pattern) {
-    stringr::str_detect(file_name, x@filename)
+    # `x@filename` may hold several patterns, and the result is one logical per
+    # pattern. Folding with OR over the candidates preserves that shape.
+    Reduce(`|`, lapply(candidates, function(nm) {
+      stringr::str_detect(nm, x@filename)
+    }))
   } else {
-    return(file_name %in% x@filename)
+    any(candidates %in% x@filename)
   }
 }
 

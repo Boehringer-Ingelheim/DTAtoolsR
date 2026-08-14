@@ -6,7 +6,7 @@
         "names": {
           "type": "character",
           "attributes": {},
-          "value": ["case", "ok", "schema_valid", "rules_valid", "import_valid", "n_schema_errors", "n_rule_errors", "n_import_errors"]
+          "value": ["case", "ok", "columnspec_valid", "rules_valid", "import_valid", "n_columnspec_errors", "n_rule_errors", "n_import_errors"]
         },
         "row.names": {
           "type": "integer",
@@ -23,7 +23,7 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["clean", "schema_required", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
+          "value": ["clean", "columnspec_required", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
         },
         {
           "type": "logical",
@@ -88,12 +88,12 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema_required", "schema_required", "schema_type", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
+          "value": ["columnspec_required", "columnspec_required", "columnspec_type", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
         },
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "rule", "rule", "rule", "rule", "schema", "schema", "schema", "rule", "import", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "import"]
+          "value": ["columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "rule", "rule", "rule", "rule", "columnspec", "columnspec", "columnspec", "rule", "import", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "import"]
         },
         {
           "type": "character",
@@ -143,12 +143,12 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema_required", "schema_required", "schema_type", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
+          "value": ["columnspec_required", "columnspec_required", "columnspec_type", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
         },
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "rule", "rule", "rule", "rule", "schema", "schema", "schema", "rule", "import", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "import"]
+          "value": ["columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "rule", "rule", "rule", "rule", "columnspec", "columnspec", "columnspec", "rule", "import", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "import"]
         },
         {
           "type": "character",
@@ -186,7 +186,7 @@
         "names": {
           "type": "character",
           "attributes": {},
-          "value": ["case", "read_ok", "ok", "schema_valid", "rules_valid", "import_valid", "n_schema_errors", "n_rule_errors", "n_import_errors"]
+          "value": ["case", "read_ok", "ok", "columnspec_valid", "rules_valid", "import_valid", "n_columnspec_errors", "n_rule_errors", "n_import_errors"]
         },
         "row.names": {
           "type": "integer",
@@ -203,7 +203,7 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["clean", "schema_required", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
+          "value": ["clean", "columnspec_required", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
         },
         {
           "type": "logical",

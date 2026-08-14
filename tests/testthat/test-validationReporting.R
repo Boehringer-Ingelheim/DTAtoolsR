@@ -36,9 +36,9 @@ test_that("message helpers produce empty and populated tables consistently", {
   expect_identical(dta_to_tibble_if_available(populated_df, FALSE), populated_df)
 })
 
-test_that("schema and rule message converters preserve expected columns", {
+test_that("column spec and rule message converters preserve expected columns", {
   details <- list(
-    schema_errors = list(
+    columnspec_errors = list(
       full_error = data.frame(
         row = c(0, 1),
         column = c("AGE", "WEIGHT"),
@@ -50,7 +50,7 @@ test_that("schema and rule message converters preserve expected columns", {
     rule_errors = list(list(id = "r1", message = "rule violated"))
   )
 
-  schema_msgs <- dta_schema_messages_to_df("ds", "tab", details)
+  schema_msgs <- dta_columnspec_messages_to_df("ds", "tab", details)
   rule_msgs <- dta_rule_messages_to_df("ds", "tab", details)
 
   expect_equal(nrow(schema_msgs), 2)
@@ -59,7 +59,7 @@ test_that("schema and rule message converters preserve expected columns", {
   expect_equal(schema_msgs$column, c("AGE", "WEIGHT"))
   expect_equal(schema_msgs$keyword, c("maximum", "required"))
   expect_equal(schema_msgs$message, c("too large", "missing"))
-  expect_equal(unique(schema_msgs$source), "schema")
+  expect_equal(unique(schema_msgs$source), "columnspec")
   expect_equal(unique(schema_msgs$severity), "error")
   expect_equal(unique(schema_msgs$dataset), "ds")
   expect_equal(unique(schema_msgs$target), "tab")
@@ -79,7 +79,7 @@ test_that("message collection handles dataset-level aggregation and ordering", {
   expect_equal(nrow(msgs), 7)
   expect_true(all(c("dataset", "target", "message") %in% names(msgs)))
   expect_equal(msgs$id, seq_len(nrow(msgs)))
-  expect_equal(unique(msgs$source), "schema")
+  expect_equal(unique(msgs$source), "columnspec")
   expect_equal(msgs$row, c(1, 1, 2, 2, 3, 3, 3))
   expect_equal(
     msgs$column,
@@ -103,9 +103,9 @@ test_that("validation summaries report target type and validation run metadata",
   expect_equal(status$target_type, "table")
   expect_equal(status$status, "validated")
   expect_false(is.na(status$validation_run))
-  # The example dataset carries 7 schema errors and no rule errors.
+  # The example dataset carries 7 column spec errors and no rule errors.
   expect_false(status$ok)
-  expect_equal(status$n_schema_errors, 7)
+  expect_equal(status$n_columnspec_errors, 7)
   expect_equal(status$n_rule_errors, 0)
 
   path <- tempfile(fileext = ".txt")
@@ -297,4 +297,28 @@ test_that("messages() violation count equals inspect() failing_row_count", {
 
   # The previewed rows are the ones the message counted.
   expect_equal(sort(unique(info$failing_.row)), c(2, 3))
+})
+
+test_that("the row lookup finds the rows a grouped rule failed on", {
+  df <- data.frame(
+    SUBJECT_ID = c("S1", "S1"),
+    STATUS = c("FAILED", "FAILED"),
+    RESULT = c(NA, 12)
+  )
+  rule <- DTARuleGroupCondition(
+    id = "group_example",
+    group_by = "SUBJECT_ID",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(
+      type = "mutually_exclusive", left = "c_failed", right = "c_reported"
+    ))
+  )
+
+  expect_false(rule_check_group_condition(rule, df)$valid)
+  # Reporting no rows here made inspect() show failing_row_count = 0 for a rule
+  # that unambiguously failed, because the lookup had no branch for this class.
+  expect_equal(dta_rule_failure_row_indices(rule, df), c(1L, 2L))
 })

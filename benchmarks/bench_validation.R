@@ -163,16 +163,16 @@ bench_one <- function(n_rows, n_cols) {
   stages[[length(stages) + 1]] <- materialise
   df <- materialise$value
 
-  # 4. schema axis ------------------------------------------------------------
-  # Now a direct call: the schema axis is a single function rather than a loop
+  # 4. column spec axis ------------------------------------------------------------
+  # Now a direct call: the column spec axis is a single function rather than a loop
   # inlined in validate_table_detailed(), so it needs no replication to be
   # timed. The stage keeps its name so runs before and after the rewrite line
   # up in baseline.csv.
-  schema <- timed("schema_json", dta_schema_errors(specs, df))
+  schema <- timed("columnspec", dta_columnspec_errors(specs, df))
   stages[[length(stages) + 1]] <- schema
 
   # 5. rules axis -------------------------------------------------------------
-  rules <- timed("rules", apply_schema_rules(specs@rules, df, verbose = FALSE))
+  rules <- timed("rules", apply_rules(specs@rules, df, verbose = FALSE))
   stages[[length(stages) + 1]] <- rules
 
   unlink(path)

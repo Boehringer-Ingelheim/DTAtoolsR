@@ -9,13 +9,13 @@ specs_from_list(columns, rules = list())
 \arguments{
 \item{columns}{A list of column specification lists. Each must contain at least an \code{id}.}
 
-\item{rules}{Optional list of schema rules.}
+\item{rules}{Optional list of rules.}
 }
 \value{
 An object of class DTAColumnSpecCollection.
 }
 \description{
-Constructs a DTAColumnSpecCollection object from separate components: columns and schema rules.
+Constructs a DTAColumnSpecCollection object from separate components: columns and rules.
 Supports both named and unnamed lists of column specifications.
 }
 \examples{

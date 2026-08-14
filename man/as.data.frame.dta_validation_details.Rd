@@ -17,7 +17,7 @@
 \item{...}{Ignored.}
 }
 \value{
-A data.frame with one row per schema error, followed by one row per
+A data.frame with one row per column spec error, followed by one row per
 rule failure, followed by one row per import error, and columns \code{source},
 \code{rule_id}, \code{row}, \code{column}, \code{keyword} and \code{message}.
 }
@@ -25,7 +25,7 @@ rule failure, followed by one row per import error, and columns \code{source},
 Flattens the detailed validation output for one table into one row per
 reported error.
 
-The raw list cannot be coerced by the default method: \code{schema_errors} bundles
+The raw list cannot be coerced by the default method: \code{columnspec_errors} bundles
 a \emph{grouped} summary table with the \emph{ungrouped} full error table, and those two
 have different row counts, so \code{as.data.frame()} failed with "arguments imply
 differing number of rows". This method flattens the errors themselves instead.

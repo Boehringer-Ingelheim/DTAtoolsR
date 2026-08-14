@@ -6,6 +6,106 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-14
+
+### Changed
+
+- **The validation axis formerly called "schema" is now called "columnspec".**
+  The name was inherited from the JSON Schema validator that used to evaluate
+  it. That validator is gone — the axis is evaluated directly against the
+  `DTAColumnSpec` objects a specification declares — so the name now says what
+  the axis actually checks. A violation is a *column spec* violation, and the
+  other axis is *rules*.
+
+  There is no compatibility shim; the old names are simply gone:
+
+  | was | is |
+  | --- | --- |
+  | `n_schema_errors` | `n_columnspec_errors` |
+  | `schema_valid` | `columnspec_valid` |
+  | `schema_errors` | `columnspec_errors` |
+  | `schema_version` | `result_version` |
+  | `source == "schema"` | `source == "columnspec"` |
+  | the `schema` column of an error frame | the `columnspec` column |
+  | `apply_schema_rules()` | `apply_rules()` |
+  | `get_arrow_schema_type()` | `get_arrow_type()` |
+
+  `as_json_schema()`, `as_json_schema_type()` and `as_json_schema_length()`
+  keep their names: they serialise to JSON Schema the standard, and still do.
+
+### Added
+
+- **Gzipped input files are supported and tested.** Arrow already decompressed
+  `.gz` transparently on read; what was missing is that a specification
+  declaring `data.csv` did not recognise `data.csv.gz` as the file it asked
+  for. Compression is a transport detail, not part of the data's identity, so
+  `matches_filename()` now accepts the compressed form — for literal filenames
+  and for anchored patterns alike. Validation results are identical either way,
+  including row numbers under batched streaming. `inst/extdata` ships
+  `clinical_data2.csv.gz` as a worked example.
+
+- `run_dta_app(restore_session = )` controls whether the app may autosave your
+  work and offer to restore it.
+
+### Fixed
+
+- **A conditional rule no longer waves through a row whose IF clause could not
+  be evaluated.** `AGE = "ninety-five"` under `condition: {AGE: {greater: 18}}`
+  made the IF mask `NA`, which `sum(na.rm = TRUE)` then discarded — so a row
+  whose THEN clause definitively failed was reported as passing. An
+  unconvertible value now keeps the row in scope; a *missing* one still means
+  the rule does not apply. The materialising path, the streaming path and
+  `inspect()`'s row lookup now share one definition of a violation.
+
+- **`inspect()` reports the rows a `group_condition` rule failed on.** The row
+  lookup had no branch for that class and returned nothing, so a rule that
+  unambiguously failed showed `failing_row_count = 0`.
+
+- **Streamed `n_import_errors` no longer double-counts.** A cell flagged both by
+  import typing and by a rule reading the column numerically is one error, not
+  two; the streaming path summed the raw per-axis totals and could report more
+  import errors than `import_errors` had rows, disagreeing with the
+  materialising path on the same input.
+
+- **`fail_fast` now stops on a grouped constraint.** Its decision read
+  `state$count`, which a grouped rule never increments, so a file whose first
+  rows already broke a `mutually_exclusive` constraint was still scanned to the
+  end. Unsupported and not-applicable rules trip it too. Constraints a later
+  batch could still rescue — `requires`, and any `all`-scoped side — are
+  deliberately left to the end of the scan.
+
+- **A truncated grouped-violation row list says so.** The streaming path caps
+  retained row numbers at ten to stay memory-bounded while the materialising
+  path keeps them all; both now carry `rows_truncated`, so ten rows can no
+  longer be mistaken for all of them.
+
+- **The Shiny app no longer offers one user's session to another.** The autosave
+  behind "Restore previous session" was written to a fixed path in `tempdir()`,
+  which belongs to the R process rather than to a browser session — so on a
+  shared deployment any visitor was offered a restore of whoever had used the
+  app last, uploaded data included. It is now written only when
+  `run_dta_app()` has enabled it for a local single-user run.
+
+- **A multi-line description no longer corrupts a Markdown report.** Pipe tables
+  are line-based, so a newline inside a cell split the row and the renderer read
+  the tail as a fabricated extra row, dropping the text after the last pipe.
+  Newlines are now folded to `<br>`.
+
+- **A duplicated column `id` in a specification is rejected.** It was accepted
+  silently, after which `colspec()` saw only the first definition while the
+  column spec axis evaluated the table column against both.
+
+- `DTAColumnSpecCollection`'s validator no longer computes an error message and
+  discards it, which made a bad `@columns` assignment fail with an unrelated
+  R-level error instead of the message the code appears to produce.
+
+- **Permitted values a YAML parser turned into numbers now warn.** `values:
+  [1.10, 2.00]` written unquoted arrives as `1.1` and `2`; a text column
+  compares them as text, so data written `1.10` failed the check for a reason
+  nothing in the output explained. The original spelling is gone by the time
+  the parser hands the list over and cannot be recovered, so importing such a
+  specification now says which column is affected and to quote the values.
+
 ## [0.16.0] - 2026-08-14
 
 ### Added
@@ -87,7 +187,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Schema validation no longer serialises the table to JSON and runs a JSON
+- Column spec validation no longer serialises the table to JSON and runs a JSON
   Schema validator over it. Each column's values are now checked directly
   against the constraints its spec declares. Validation output is unchanged:
   the same keywords (`type`, `maxLength`, `enum`, `const`, `pattern`,
@@ -95,7 +195,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   same summarised error frame. A golden-oracle test suite recorded against the
   previous implementation reports no differences.
 
-  On a 1,000,000-row table the schema axis went from being unmeasurably slow at
+  On a 1,000,000-row table the column spec axis went from being unmeasurably slow at
   that size to 8.7 seconds, and throughput rose from 4.5 MB/s to 17.6 MB/s.
   The axis is still the dominant cost of validation.
 
@@ -155,7 +255,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- New schema rule type `group_condition` for grouped cross-row validation.
+- New rule type `group_condition` for grouped cross-row validation.
   Rules define `group_by`, named `conditions`, and `constraints` so checks like
   mutually exclusive statuses or implication logic can be enforced within each
   group. Constraint aliases are supported: `not_both` maps to
@@ -313,7 +413,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Validation now has a third axis. Alongside schema and rule errors, an **import
+- Validation now has a third axis. Alongside column spec and rule errors, an **import
   error** records a value that cannot be represented in its declared type. The
   value becomes `NA`, the original text is retained, and any import error makes
   validation fail. Surfaced through `validation_status()`, `results()`,
@@ -347,7 +447,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   all five platforms and fails fast if no backend is present, so that test
   cannot silently start skipping.
 - `inst/extdata/clinical_data_error_import.csv`, an example file isolating the
-  import-error axis the way the existing fixtures isolate schema and rule
+  import-error axis the way the existing fixtures isolate column spec and rule
   errors. It deliberately includes a genuinely blank cell alongside the
   unconvertible ones, because missing and unconvertible are different defects
   and only the latter is an import error.
@@ -392,7 +492,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `"9" > 65` was `TRUE` and an underage subject passed an adults-only rule.
 - **Conditions written as a YAML sequence returned valid = TRUE**, silently
   passing every row rather than being evaluated.
-- **Rule violations were invisible whenever a schema error existed**, because
+- **Rule violations were invisible whenever a column spec error existed**, because
   validation returned early. Both axes are always evaluated now.
 - **A rule naming a column absent from the table aborted the entire run**
   instead of reporting a rule failure.
@@ -424,7 +524,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The Shiny app ignored import errors when colouring table status, showing a
   failing table as clean.
 - **`check()` claimed a table was valid and then failed it.** The console report
-  covered the schema and rule axes but not the import axis, so a table whose
+  covered the column spec and rule axes but not the import axis, so a table whose
   only defect was an unconvertible value printed
   `Table format, length, pattern, and values are valid` followed by
   `0 of 1 table valid`, with no stated cause. It now names the row, column, raw
@@ -513,7 +613,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - `max_number_of_files()` and `min_number_of_files()` generics on `DTADataSet`, aggregating counts across all files in the dataset
 - comprehensive test coverage for previously untested export APIs (`write_dta()`, `write_dataset_metadata()`, `write_file_specification()`, `export_specs_table()`, `export_column_value_table()`, `write_metadata()`)
-- direct unit tests for `validate_table()` / `validate_table_detailed()` behavior on valid input, schema violations, and rule violations
+- direct unit tests for `validate_table()` / `validate_table_detailed()` behavior on valid input, column spec violations, and rule violations
 - package architecture diagram (`img/DTAtools_architecture.svg`, also embedded in `vignettes/`) illustrating the `DTA`/`DTADataSet`/`DTAColumnSpecCollection`/`DTAFile` class hierarchy, referenced from both the vignette and a new `README.md` "Package Architecture" section
 
 ### Changed
@@ -562,7 +662,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - renamed DTAContainer to DTADataSet
 - improved GitHub Action workflows
 - reworked data backend to use arrow::Table for better performance and memory usage
-- completely reworked the package vignette (`vignettes/DTAtools.Rmd`) with a full walkthrough of architecture, column specs, validation, schema rules, `DTADataSetFile`, file-based workflows, the full `DTA` object, `inspect()`, and exporting — every code chunk verified to run against the installed package
+- completely reworked the package vignette (`vignettes/DTAtools.Rmd`) with a full walkthrough of architecture, column specs, validation, rules, `DTADataSetFile`, file-based workflows, the full `DTA` object, `inspect()`, and exporting — every code chunk verified to run against the installed package
 - completely reworked `README.md` to match the vignette: corrected terminology (Data Transmission Agreement/Specification instead of Data Transfer), fixed outdated/broken code examples, updated rule type names (`col_condition`/`col_range`/`col_unique`), and documented `DTADataSetFile` and `inspect()`
 - re-prioritized YAML import guidance in the vignette and `README.md`: `read_dta_from_yaml()` and `read_dataset_from_yaml()` are now presented as the primary entry points, with `import_specs_from_yaml()` documented as the third, most manual option; added a `read_dataset_from_yaml()` walkthrough to the Quickstart in both documents
 - fixed broken anchor links in `README.md` caused by unsupported Pandoc-style `{#custom-id}` heading syntax
@@ -689,7 +789,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 #### Core Classes
 
 - `DTAColumnSpec`: Defines metadata and validation rules for a single column.
-- `DTAColumnSpecCollection`: Manages a collection of `DTAColumnSpec` objects with optional metadata and schema rules.
+- `DTAColumnSpecCollection`: Manages a collection of `DTAColumnSpec` objects with optional metadata and rules.
 - `DTAContainer`: Encapsulates validated data tables and their associated column specifications.
 
 #### Import/Export
@@ -709,7 +809,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Table-level validation:
   - Ensures all required columns are present
   - Applies all column validations
-  - Applies schema rules if defined
+  - Applies rules if defined
 - JSON Schema generation and validation support
 
 #### Schema Rule Engine
@@ -722,12 +822,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `check_mutual_exclusive`
   - `check_unique`
   - `check_allowed_combinations`
-- `apply_schema_rules()` to evaluate all rules with CLI feedback
+- `apply_rules()` to evaluate all rules with CLI feedback
 
 #### Utilities
 
 - `checkFormat`, `checkType`, `checkNullable`, `checkValues`, `checkPattern`, `change_type`, `changeNAs`, `prepareTable`, `validateColumn`
-- `validateSchemaRulesFormat()` to validate schema rule structure before use
+- `validateSchemaRulesFormat()` to validate rule structure before use
 
 #### Output
 

@@ -21,7 +21,7 @@ Converts the import axis of one \code{validate_table_detailed()} result into
 message rows.
 
 The returned frame carries exactly the same nine columns, in the same order,
-as \code{dta_schema_messages_to_df()} and \code{dta_rule_messages_to_df()}. Two
+as \code{dta_columnspec_messages_to_df()} and \code{dta_rule_messages_to_df()}. Two
 populated frames with differing columns make the \code{rbind()} in
 \code{dta_collect_messages_for_dataset()} error, so the raw offending value is
 embedded in \code{message} rather than added as a column; the structured value

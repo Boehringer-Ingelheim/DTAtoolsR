@@ -84,19 +84,19 @@ test_that("DTAColumnSpec builds structure metadata from type and format", {
   expect_equal(spec_char@structure@length, 10)
 })
 
-test_that("get_arrow_schema_type maps supported column types", {
-  expect_equal(get_arrow_schema_type(create_example_DTAColumnSpec(1)), "utf8")
-  expect_equal(get_arrow_schema_type(create_example_DTAColumnSpec(4)), "int32")
+test_that("get_arrow_type maps supported column types", {
+  expect_equal(get_arrow_type(create_example_DTAColumnSpec(1)), "utf8")
+  expect_equal(get_arrow_type(create_example_DTAColumnSpec(4)), "int32")
   expect_equal(
-    get_arrow_schema_type(DTAColumnSpec(id = "AVAL", type = "SAS Num", format = "SAS 8.2")),
+    get_arrow_type(DTAColumnSpec(id = "AVAL", type = "SAS Num", format = "SAS 8.2")),
     "double"
   )
-  expect_error(get_arrow_schema_type(DTAColumnSpec(id = "FLAG", nullable = TRUE)), "Structure is not set")
-  expect_error(get_arrow_schema_type(structure(list(), class = "foo")), "must be a DTAColumnSpec")
+  expect_error(get_arrow_type(DTAColumnSpec(id = "FLAG", nullable = TRUE)), "Structure is not set")
+  expect_error(get_arrow_type(structure(list(), class = "foo")), "must be a DTAColumnSpec")
 })
 
-test_that("get_arrow_schema_type returns NA for SAS temporal types (documented gap)", {
-  # The switch() in get_arrow_schema_type() covers only Char/Num/Int/Bool, so
+test_that("get_arrow_type returns NA for SAS temporal types (documented gap)", {
+  # The switch() in get_arrow_type() covers only Char/Num/Int/Bool, so
   # Date, Time and DateTime fall through to the NA_character_ default. That is
   # inconsistent with as_json_schema_type(), which maps all three to "string"
   # (see test-DTAColumnSpecStructureSAS.R), and it means an Arrow schema built
@@ -113,7 +113,7 @@ test_that("get_arrow_schema_type returns NA for SAS temporal types (documented g
   for (case in cases) {
     spec <- DTAColumnSpec(id = "TEMPORAL", type = case$type, format = case$format)
     expect_identical(
-      get_arrow_schema_type(spec),
+      get_arrow_type(spec),
       NA_character_,
       info = paste0("type = ", case$type)
     )

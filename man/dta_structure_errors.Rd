@@ -2,7 +2,7 @@
 % Please edit documentation in R/streamingValidation.R
 \name{dta_structure_errors}
 \alias{dta_structure_errors}
-\title{Structural Findings as Schema Errors}
+\title{Structural Findings as Column Spec Errors}
 \usage{
 dta_structure_errors(findings)
 }
@@ -13,7 +13,7 @@ dta_structure_errors(findings)
 A data frame of errors, or \code{NULL} when the structure is sound.
 }
 \description{
-Renders structural findings in the same shape the per-row schema axis uses,
+Renders structural findings in the same shape the per-row column spec axis uses,
 so a caller that stopped early still receives a recognisable error frame.
 Row is \code{NA}: the finding is about the file, not about any row in it.
 }

@@ -717,7 +717,7 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
         validated_at = NA_character_,
         run_id = NA_character_,
         validation_run = NA_character_,
-        n_schema_errors = NA_integer_,
+        n_columnspec_errors = NA_integer_,
         n_rule_errors = NA_integer_,
         n_import_errors = NA_integer_,
         stringsAsFactors = FALSE
@@ -1014,7 +1014,7 @@ S7::method(check, DTADataSetTabular) <- function(
       ok = isTRUE(details$ok),
       table_hash = table_hash,
       specs_hash = specs_hash,
-      n_schema_errors = details$n_schema_errors,
+      n_columnspec_errors = details$n_columnspec_errors,
       n_rule_errors = details$n_rule_errors,
       n_import_errors = details$n_import_errors,
       run_id = run_id,

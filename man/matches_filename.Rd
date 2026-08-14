@@ -14,6 +14,11 @@ A logical value indicating whether the filename matches.
 }
 \description{
 Checks if a given filename matches the pattern in a \code{DTAFile} object.
+
+A compressed file matches the uncompressed name: \code{data.csv.gz} satisfies a
+handler declared as \code{data.csv}, and one declared with the pattern
+\verb{^data\\\\.csv$}. The suffix is stripped from the candidate rather than
+appended to the declaration, so existing anchored patterns keep working.
 }
 \section{Methods}{
 
@@ -25,5 +30,8 @@ Checks if a given filename matches the pattern in a \code{DTAFile} object.
 \examples{
 file_info <- DTAFile("file.txt")
 matches_filename(file_info, "file.txt")
+
+# A gzipped file matches the name the specification declares.
+matches_filename(DTAFile("data.csv"), "data.csv.gz")
 
 }

@@ -7,7 +7,7 @@
 dta_collect_import_errors(rule_results, specs = NULL)
 }
 \arguments{
-\item{rule_results}{A list of rule results from \code{apply_schema_rules()}.}
+\item{rule_results}{A list of rule results from \code{apply_rules()}.}
 
 \item{specs}{A \code{DTAColumnSpecCollection}, or \code{NULL}.}
 }

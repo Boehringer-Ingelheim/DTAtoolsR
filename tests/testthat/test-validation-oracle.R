@@ -10,7 +10,7 @@
 #                    diff here means a real regression.
 #
 #   2. Snapshots   - the full flattened error frame, message text included.
-#                    Message strings on the schema axis come from ajv, which
+#                    Message strings on the column spec axis come from ajv, which
 #                    the rewrite deletes, so these snapshots are EXPECTED to
 #                    change at P1. Keeping them separate means that churn is
 #                    visibly distinct from a behavioural drift.
@@ -34,10 +34,10 @@ vc_flat <- function(details) {
 vc_axis_facts <- function(details) {
   data.frame(
     ok = details$ok,
-    schema_valid = details$schema_valid,
+    columnspec_valid = details$columnspec_valid,
     rules_valid = details$rules_valid,
     import_valid = details$import_valid,
-    n_schema_errors = as.integer(details$n_schema_errors),
+    n_columnspec_errors = as.integer(details$n_columnspec_errors),
     n_rule_errors = as.integer(details$n_rule_errors),
     n_import_errors = as.integer(details$n_import_errors),
     stringsAsFactors = FALSE
@@ -59,10 +59,10 @@ test_that("a table satisfying every constraint reports no errors on any axis", {
   details <- vc_details(case)
 
   expect_true(details$ok)
-  expect_true(details$schema_valid)
+  expect_true(details$columnspec_valid)
   expect_true(details$rules_valid)
   expect_true(details$import_valid)
-  expect_equal(details$n_schema_errors, 0)
+  expect_equal(details$n_columnspec_errors, 0)
   expect_equal(details$n_rule_errors, 0)
   expect_equal(as.integer(details$n_import_errors), 0L)
   expect_equal(nrow(vc_flat(details)), 0)
@@ -170,7 +170,7 @@ test_that("dta_as_numeric_strict separates missing from unconvertible", {
 # `as.data.frame(details)` selects only source/rule_id/row/column/keyword/
 # message, so the snapshots above never see `summarised_error`. It is returned
 # to users by validate_table(), and its grouping was rewritten along with the
-# rest of the schema axis, so it needs assertions of its own.
+# rest of the column spec axis, so it needs assertions of its own.
 
 test_that("repeated identical violations collapse into one summarised row", {
   specs <- vc_specs(list(
@@ -182,7 +182,7 @@ test_that("repeated identical violations collapse into one summarised row", {
   )
 
   details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
-  summarised <- details$schema_errors$summarised_error
+  summarised <- details$columnspec_errors$summarised_error
 
   expect_equal(nrow(summarised), 1)
   expect_equal(summarised$keyword, "maxLength")
@@ -201,7 +201,7 @@ test_that("distinct offending values are summarised separately", {
   )
 
   details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
-  summarised <- details$schema_errors$summarised_error
+  summarised <- details$columnspec_errors$summarised_error
 
   # Same constraint, different values: two groups, each spanning one row.
   expect_equal(nrow(summarised), 2)
@@ -212,8 +212,8 @@ test_that("distinct offending values are summarised separately", {
 test_that("a missing column is summarised by constraint, not by row range", {
   # A column absent from every row gains nothing from a row range, so the
   # summary collapses to the distinct constraint and its message.
-  details <- vc_details(vc_corpus()$schema_required)
-  summarised <- details$schema_errors$summarised_error
+  details <- vc_details(vc_corpus()$columnspec_required)
+  summarised <- details$columnspec_errors$summarised_error
 
   expect_equal(nrow(summarised), 1)
   expect_equal(summarised$keyword, "required")
@@ -223,7 +223,7 @@ test_that("a missing column is summarised by constraint, not by row range", {
 
 # ---- the cost of a structural failure ---------------------------------------
 
-test_that("a missing column costs one schema error per row, not one per table", {
+test_that("a missing column costs one column spec error per row, not one per table", {
   # The generated schema is `type: array` with `items.required`, so the
   # validator reports the absent property once for EVERY row rather than once
   # for the table. At 400M rows a single missing column yields 400M error
@@ -232,12 +232,12 @@ test_that("a missing column costs one schema error per row, not one per table", 
   # This is the strongest argument for gating structural checks ahead of any
   # row scan: the answer "column MISSING is absent" is knowable from the header
   # alone, and discovering it per-row is both slower and less useful.
-  specs <- vc_corpus()$schema_required$specs
+  specs <- vc_corpus()$columnspec_required$specs
 
   for (n in c(2, 5, 9)) {
     tbl <- data.frame(ID = sprintf("A%03d", seq_len(n)), stringsAsFactors = FALSE)
     details <- validate_table_detailed(specs = specs, table = tbl, verbose = FALSE)
-    expect_equal(details$n_schema_errors, n)
+    expect_equal(details$n_columnspec_errors, n)
   }
 })
 
@@ -274,8 +274,8 @@ vc_roundtrip <- function(case) {
       # is itself a fact about the current pipeline worth pinning.
       data.frame(
         read_ok = FALSE,
-        ok = NA, schema_valid = NA, rules_valid = NA, import_valid = NA,
-        n_schema_errors = NA_integer_,
+        ok = NA, columnspec_valid = NA, rules_valid = NA, import_valid = NA,
+        n_columnspec_errors = NA_integer_,
         n_rule_errors = NA_integer_,
         n_import_errors = NA_integer_,
         stringsAsFactors = FALSE

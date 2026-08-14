@@ -10,7 +10,7 @@ dta_migrate_validation_details(details)
 \item{details}{A list as returned by \code{validate_table_detailed()}.}
 }
 \value{
-The same list, with the import fields and \code{schema_version} present.
+The same list, with the import fields and \code{result_version} present.
 }
 \description{
 Brings a \code{validate_table_detailed()} result recorded by an older version of

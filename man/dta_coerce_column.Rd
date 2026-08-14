@@ -30,7 +30,7 @@ inventing errors on a clean file.
 
 An \code{Int} target is narrowed to R \code{integer} only when every value is whole.
 Rounding a fractional value into an integer column would silently discard the
-fraction \emph{and} hide the \code{type: integer} schema error that exists to report
-it, so a fractional value stays a double and is left to the schema axis.
+fraction \emph{and} hide the \code{type: integer} column spec error that exists to report
+it, so a fractional value stays a double and is left to the column spec axis.
 }
 \keyword{internal}

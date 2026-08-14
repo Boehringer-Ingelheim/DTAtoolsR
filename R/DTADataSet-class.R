@@ -500,7 +500,7 @@ dta_validation_result_to_row <- function(table_name, status, index_entry, target
     validated_at = as.character(index_entry$validated_at),
     run_id = index_entry$run_id,
     validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,
-    n_schema_errors = index_entry$n_schema_errors,
+    n_columnspec_errors = index_entry$n_columnspec_errors,
     n_rule_errors = index_entry$n_rule_errors,
     # An index entry recorded before the import axis existed knows nothing
     # about it. NA ("unknown") is the honest value; 0 would claim a clean

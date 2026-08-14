@@ -507,13 +507,13 @@ dta_dataset_table_names <- function(ds) {
 # table -> "pass" | "fail" | "unknown" | "pending".
 #
 #   "pending" = not validated yet (no tick)
-#   "pass"    = validated, all THREE axes clean (schema, rules, import)
-#   "fail"    = validated with schema, rule OR import errors
+#   "pass"    = validated, all THREE axes clean (column spec, rules, import)
+#   "fail"    = validated with column spec, rule OR import errors
 #   "unknown" = validated, but the import axis was never checked
 #
-# Validation has three axes, and ok = schema_valid && rules_valid &&
+# Validation has three axes, and ok = columnspec_valid && rules_valid &&
 # import_valid. A table whose only defect is a value that could not be
-# represented in its declared type has zero schema and zero rule errors, so
+# represented in its declared type has zero column spec and zero rule errors, so
 # reading only those two axes paints it green while ok is FALSE. n_import_errors
 # is therefore weighed exactly like the other two counts.
 #
@@ -548,7 +548,7 @@ dta_table_status_from_status_df <- function(vs) {
   count <- function(col) {
     if (col %in% names(vs)) suppressWarnings(as.numeric(vs[[col]])) else rep(NA_real_, nrow(vs))
   }
-  nse <- count("n_schema_errors")
+  nse <- count("n_columnspec_errors")
   nre <- count("n_rule_errors")
   nie <- count("n_import_errors")
   positive <- function(n) !is.na(n) & n > 0
@@ -1277,7 +1277,7 @@ dta_build_validation_report <- function(dta, status = NULL) {
     # up in the report with two zero counts and no visible reason.
     want <- intersect(
       c(
-        "dataset", "target", "status", "n_schema_errors",
+        "dataset", "target", "status", "n_columnspec_errors",
         "n_rule_errors", "n_import_errors", "validated_at"
       ),
       names(rdf)
@@ -1363,7 +1363,7 @@ dta_supported_backends <- function() {
 # Bare (backend-less) SAS storage types offered in the column editor.
 dta_sas_types <- function() c("Char", "Num", "Int", "Date", "Time", "DateTime")
 
-# Condition operators offered in the rule editor (mirrors evaluateSchemaRules()).
+# Condition operators offered in the rule editor (mirrors evaluateRules()).
 # Operators offered by the conditional-rule builder (IF / THEN). Named vector:
 # names are the friendly labels shown in the UI, values are the keys the schema
 # engine (evaluate_condition) understands. "min_max" is a UI-only convenience

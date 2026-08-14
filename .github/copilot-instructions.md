@@ -63,7 +63,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 - **R/00_helpers.R** — Reusable S7 union types (`class_*_or_null`), global config (`__DTAtools_supported_*__`), utility functions. Do not redefine union types; reuse them.
 - **R/validationReporting.R** — Structured validation result objects and querying.
-- **R/evaluateSchemaRules.R** — JSON Schema compilation and row-level validation (performance-critical).
+- **R/evaluateRules.R** — JSON Schema compilation and row-level validation (performance-critical).
 - **R/exportDocuments.R** — Word document generation via `officer` + `flextable`.
 - **R/importConversion.R** — Type coercion and import error detection.
 
@@ -181,6 +181,6 @@ Located in `.github/workflows/`:
 
 - **Read the vignette** (`vignettes/DTAtools.Rmd`) for a comprehensive feature walkthrough and examples.
 - **Use `inst/extdata/` fixtures** in examples and tests — files like `clinical_dta.yaml` and `clinical_data.csv`.
-- **JSON Schema performance:** Validation is row-level and compiled from specs (see `evaluateSchemaRules.R`). Changes to schema logic may need profiling.
+- **JSON Schema performance:** Validation is row-level and compiled from specs (see `evaluateRules.R`). Changes to schema logic may need profiling.
 - **GitHub CLI (`gh`):** Use for all GitHub work (PRs, issues, logs). Never scrape the web UI.
 - **Avoid `air format`:** Posit Air (VS Code extension) disagrees with `styler` config. Use it for editor format-on-save only, not before commit.
