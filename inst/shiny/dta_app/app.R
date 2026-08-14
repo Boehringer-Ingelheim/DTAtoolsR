@@ -48,6 +48,16 @@ brandbar <- div(
 # The app bundle and installed package can differ on Posit Connect, so report
 # both when they do.
 dta_bundle_version <- function() {
+  app_version_file <- file.path(getwd(), "VERSION")
+  if (file.exists(app_version_file)) {
+    vv <- tryCatch(trimws(readLines(app_version_file, n = 1, warn = FALSE, encoding = "UTF-8")),
+      error = function(e) ""
+    )
+    if (length(vv) > 0 && nzchar(vv[[1]])) {
+      return(vv[[1]])
+    }
+  }
+
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),

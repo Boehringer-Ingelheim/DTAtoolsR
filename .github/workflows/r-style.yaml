@@ -79,6 +79,10 @@ jobs:
         shell: Rscript {0}
         run: source(".github/scripts/check_deps_in_desc.R")
 
+      - name: Check Shiny VERSION file matches DESCRIPTION Version
+        shell: Rscript {0}
+        run: source(".github/scripts/check_shiny_version_file.R")
+
       # Parity with style-files. Fails rather than auto-fixes: this workflow
       # has no write-back step (see the note on the roxygen step below for
       # why), so a fixable style diff and an unfixable one are treated the
