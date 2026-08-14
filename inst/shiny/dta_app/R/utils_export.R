@@ -134,9 +134,21 @@ list_available_templates <- function() {
   sort(files)
 }
 
-# Get full path to a template by name
+# Get full path to a template by name.
+# `template_name` arrives from a selectInput, but a Shiny client is not bound by
+# the offered choices and can send any string over the websocket, so the name is
+# checked for membership in the bundled set rather than pasted into a path. The
+# match is exact, not basename()-normalised: the client must echo one of the
+# offered names verbatim, so any string carrying a path separator fails outright
+# instead of being silently repaired into a hit. Without this, a traversal would
+# resolve to an arbitrary server-side file that export_with_template() then
+# renders and hands back as a download.
 get_template_path <- function(template_name) {
-  if (is.null(template_name) || !nzchar(template_name)) {
+  if (is.null(template_name) || length(template_name) != 1L ||
+    is.na(template_name) || !nzchar(template_name)) {
+    return(NULL)
+  }
+  if (!(template_name %in% list_available_templates())) {
     return(NULL)
   }
   templates_dir <- system.file("extdata", "templates", package = "DTAtools")
