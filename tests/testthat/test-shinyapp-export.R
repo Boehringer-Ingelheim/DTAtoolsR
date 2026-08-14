@@ -153,6 +153,27 @@ test_that("get_template_path returns NULL (not an error) for an unknown template
   expect_null(app_fn("get_template_path")(""))
 })
 
+test_that("get_template_path refuses a name that escapes the templates directory", {
+  # The name reaches this function from a selectInput, but a Shiny client is not
+  # bound by the offered choices and can put any string on the websocket. The
+  # name is therefore whitelisted against the bundled templates instead of being
+  # pasted into a path -- otherwise a traversal would resolve to an arbitrary
+  # server-side file, which export_with_template() would render and hand back as
+  # a download.
+  get_template_path <- app_fn("get_template_path")
+
+  expect_null(get_template_path("../../DESCRIPTION"))
+  expect_null(get_template_path("../../../../../../etc/passwd"))
+  expect_null(get_template_path("..\\..\\DESCRIPTION"))
+  expect_null(get_template_path(file.path(tempdir(), "planted.docx")))
+  expect_null(get_template_path(NA_character_))
+  expect_null(get_template_path(c("dta_numbered_template.docx", "other.docx")))
+
+  # A traversal that ends in a real bundled template name must not be repaired
+  # into a hit either -- it is simply not the offered name.
+  expect_null(get_template_path("../templates/dta_numbered_template.docx"))
+})
+
 test_that("the export modal is built by app.R, with no orphaned UI builder", {
   # export_modal_ui() used to live in utils_export.R but was never called: the
   # real modal is built inline in app.R (around the `input$export_modal_open`
@@ -235,3 +256,50 @@ test_that("find_chrome_binary ignores an override pointing at a missing file", {
 # out to a real Chrome/Edge binary via system2() to print a PDF, which is an
 # external-process integration concern outside the scope of these unit
 # tests (and not reliably available/deterministic in CI).
+
+test_that("the export modal defaults to Word with the YAML specification embedded", {
+  # Deliberate defaults: Word is the format users actually hand over, and the
+  # embedded YAML is what makes the document machine-readable, so neither
+  # should need a click. The modal is rebuilt on every open (it lives inside
+  # the input$export_modal_open observer), so these literals are what the user
+  # sees each time.
+  app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+
+  fmt <- regmatches(
+    app_code,
+    regexpr('(?s)radioButtons\\("export_format".{0,300}?selected = "[a-z]+"', app_code, perl = TRUE)
+  )
+  expect_length(fmt, 1)
+  expect_match(fmt, 'selected = "word"', fixed = TRUE)
+  expect_false(grepl('selected = "markdown"', fmt, fixed = TRUE))
+
+  yaml_box <- regmatches(
+    app_code,
+    regexpr('(?s)checkboxInput\\("export_include_yaml_word".*?\\)', app_code, perl = TRUE)
+  )
+  expect_length(yaml_box, 1)
+  expect_match(yaml_box, "value = TRUE", fixed = TRUE)
+})
+
+test_that("the export modal names itself once", {
+  # modalDialog() renders `title` as the dialog's own header. The body used to
+  # open with an h4 carrying the same words, so the dialog read "Export
+  # Document" twice, one above the other.
+  app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+
+  # The observer that builds and shows the modal, from `modal_content <- div(`
+  # to the end of the showModal() call.
+  modal <- regmatches(
+    app_code,
+    regexpr("(?s)modal_content <- div\\(.*?size = \"m\"", app_code, perl = TRUE)
+  )
+  expect_length(modal, 1)
+
+  # One mention, and it is the modalDialog title rather than a heading.
+  expect_match(modal, 'title = "Export Document"', fixed = TRUE)
+  expect_false(grepl('h4("Export Document")', modal, fixed = TRUE))
+  expect_equal(
+    length(gregexpr('"Export Document"', modal, fixed = TRUE)[[1]]),
+    1L
+  )
+})

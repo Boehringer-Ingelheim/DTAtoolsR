@@ -437,6 +437,76 @@ dta_numeric_condition_operators <- function() {
   c("greater", "less", "greater_equal", "less_equal", "min", "max", "range")
 }
 
+#' @title Rows Whose Condition Clause Cannot Be Decided
+#' @description
+#' Marks the rows for which a clause is `NA` because a value it compares
+#' numerically is **unconvertible** -- `AGE = "ninety-five"` under
+#' `greater: 18` -- as opposed to merely missing.
+#'
+#' The two look identical in the mask returned by `evaluate_conditions()` and
+#' must not be resolved the same way; see [dta_condition_in_scope()].
+#' @param conditions A clause, in either the named or the YAML sequence form.
+#' @param df A data.frame.
+#' @return A logical vector with one element per row of `df`, never `NA`.
+#' @keywords internal
+dta_condition_undecidable <- function(conditions, df) {
+  conditions <- dta_normalize_conditions(conditions)
+  out <- rep(FALSE, nrow(df))
+  numeric_operators <- dta_numeric_condition_operators()
+
+  for (column_name in names(conditions)) {
+    if (!column_name %in% names(df)) {
+      next
+    }
+    if (!any(names(conditions[[column_name]]) %in% numeric_operators)) {
+      next
+    }
+
+    x <- df[[column_name]]
+    # Dates and date-times bypass dta_as_numeric_strict() in
+    # dta_numeric_operands(), so they can never be unconvertible here either.
+    if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+      next
+    }
+
+    out <- out | dta_as_numeric_strict(x)$unconvertible
+  }
+
+  out
+}
+
+#' @title Rows a Conditional Rule's IF Clause Applies To
+#' @description
+#' Resolves the three-valued IF mask into the two-valued "is this row in scope"
+#' answer the rule needs.
+#' @details
+#' `NA` in the IF clause has two causes that must be resolved differently:
+#'
+#' * the value is **missing** -- nothing is known about the row, so the
+#'   condition genuinely does not apply and the row is out of scope.
+#' * the value is **unconvertible** -- the row stays in scope. Dropping it
+#'   would let a row whose THEN clause definitively fails escape the rule
+#'   altogether, which is exactly what [dta_as_numeric_strict()] forbids: an
+#'   unconvertible value must not be treated as passing.
+#'
+#' A row that fails some *other* predicate of the clause outright is out of
+#' scope regardless, because the clause is a conjunction and one determinate
+#' `FALSE` settles it.
+#' @param conditions The rule's IF clause.
+#' @param df A data.frame.
+#' @param if_rows The mask returned by `evaluate_conditions()` for `conditions`.
+#' @return A logical vector with one element per row of `df`, never `NA`.
+#' @keywords internal
+dta_condition_in_scope <- function(conditions, df, if_rows) {
+  undecided <- is.na(if_rows)
+  if (!any(undecided)) {
+    return(if_rows)
+  }
+
+  if_rows[undecided] <- dta_condition_undecidable(conditions, df)[undecided]
+  if_rows
+}
+
 #' @title Columns a Rule Compares Numerically
 #' @description
 #' Names the columns whose values this rule reads as numbers. These are the
@@ -648,6 +718,12 @@ evaluate_conditions <- function(conditions, df) {
 #'   predicates must also be TRUE. For rows where the IF holds, `NA` in THEN
 #'   is considered a **violation**.
 #' @details
+#' A row whose IF clause cannot be decided is in scope when the undecidable
+#' value is **unconvertible** (`AGE = "ninety-five"` under `greater: 18`) and
+#' out of scope when it is merely **missing**. An unconvertible value is a data
+#' error, and must not buy the row an exemption from the rule; a missing one
+#' says nothing about the row either way. See [dta_condition_in_scope()].
+#'
 #' A column may carry **several operators**; all of them must hold for the row
 #' to satisfy that column (they are combined with logical AND). `min` and `max`
 #' are the one exception: together they describe a single inclusive band rather
@@ -673,16 +749,8 @@ evaluate_conditions <- function(conditions, df) {
 #' @export
 rule_check_col_condition <- function(rule, df) {
   check_rule_class(rule)
-  if_conditions <- rule@condition
-  then_conditions <- rule@then
 
-  # Evaluate IF and THEN
-  if_rows <- evaluate_conditions(if_conditions, df)
-  then_rows <- evaluate_conditions(then_conditions, df)
-
-  # Violations: rows where IF is TRUE but THEN is FALSE or NA
-  violated_mask <- if_rows & (is.na(then_rows) | !then_rows)
-  violated_count <- sum(violated_mask, na.rm = TRUE)
+  violated_count <- sum(dta_condition_violated(rule, df))
 
   if (violated_count > 0) {
     list(
@@ -697,19 +765,22 @@ rule_check_col_condition <- function(rule, df) {
 
 #' @title Rows an IF/THEN Rule Counts as Violations
 #' @description
-#' The per-row violation mask for a conditional rule: the IF holds but the THEN
-#' does not, where a missing THEN counts against the row.
+#' The per-row violation mask for a conditional rule: the IF applies but the
+#' THEN does not hold, where a missing or unconvertible THEN counts against the
+#' row. Which rows the IF applies to is decided by [dta_condition_in_scope()].
 #'
-#' Shared with the streaming path so a batched scan and a whole-table pass
-#' cannot disagree about what a violation is.
+#' This is the single definition of a conditional violation. `rule_check_col_condition()`,
+#' the streaming scan and `inspect()`'s row lookup all call it, so a batched
+#' scan, a whole-table pass and the row preview cannot disagree.
 #' @param rule A conditional rule.
 #' @param df A data.frame.
-#' @return A logical vector with one element per row.
+#' @return A logical vector with one element per row, never `NA`.
 #' @keywords internal
 dta_condition_violated <- function(rule, df) {
   if_rows <- evaluate_conditions(rule@condition, df)
   then_rows <- evaluate_conditions(rule@then, df)
-  if_rows & (is.na(then_rows) | !then_rows)
+  dta_condition_in_scope(rule@condition, df, if_rows) &
+    (is.na(then_rows) | !then_rows)
 }
 
 #' @title Message for a Conditional Rule Violation
@@ -907,20 +978,22 @@ rule_check_group_condition <- function(rule, df) {
         if (isTRUE(left_truth) && isTRUE(right_truth)) {
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: '%s' (scope=%s; rows=%s) and '%s' (scope=%s; rows=%s) are both TRUE, but mutually_exclusive requires they cannot both hold.",
-              constraint$id,
+              "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
+              group_label,
               left,
-              constraint$left_scope %||% "any",
+              right,
+              left,
               format_rows(cond_rows[[left]]),
               right,
-              constraint$right_scope %||% "any",
               format_rows(cond_rows[[right]])
             )
           violations[[length(violations) + 1L]] <- list(
             constraint_id = constraint$id,
             group = group_label,
             message = message,
-            rows = sort(unique(c(cond_rows[[left]], cond_rows[[right]])))
+            rows = sort(unique(c(cond_rows[[left]], cond_rows[[right]]))),
+            # The whole table is in hand here, so `rows` is never a head.
+            rows_truncated = FALSE
           )
         }
       } else if (identical(ctype, "requires")) {
@@ -943,30 +1016,25 @@ rule_check_group_condition <- function(rule, df) {
             integer(0)
           }
           then_scope_reason <- if (identical(then_scope, "all")) {
-            sprintf("failing rows=%s", format_rows(then_failed))
+            sprintf("rows %s do not satisfy \"%s\"", format_rows(then_failed), then_name)
           } else {
-            sprintf(
-              "no row in the group satisfied '%s' (rows with TRUE=%s)",
-              then_name,
-              format_rows(then_rows)
-            )
+            sprintf("no row in the group satisfies \"%s\"", then_name)
           }
           message <- constraint$message %||%
             sprintf(
-              "Constraint '%s' failed: IF condition '%s' (scope=%s; rows=%s) is TRUE, but THEN condition '%s' (scope=%s) is not satisfied (%s).",
-              constraint$id,
+              "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
+              group_label,
               if_name,
-              constraint$if_scope %||% "any",
               format_rows(if_rows),
               then_name,
-              then_scope,
               then_scope_reason
             )
           violations[[length(violations) + 1L]] <- list(
             constraint_id = constraint$id,
             group = group_label,
             message = message,
-            rows = sort(unique(c(if_rows, then_failed)))
+            rows = sort(unique(c(if_rows, then_failed))),
+            rows_truncated = FALSE
           )
         }
       }
@@ -978,15 +1046,15 @@ rule_check_group_condition <- function(rule, df) {
   }
 
   summary <- sprintf(
-    "Rule '%s' failed: %d grouped constraint violation%s detected.",
+    "Rule '%s': %d group constraint violation%s found across %d group%s.",
     rule@id,
     length(violations),
-    if (length(violations) == 1) "" else "s"
+    if (length(violations) == 1) "" else "s",
+    length(unique(vapply(violations, function(v) v$group, character(1)))),
+    if (length(unique(vapply(violations, function(v) v$group, character(1)))) == 1) "" else "s"
   )
 
-  details <- vapply(violations, function(v) {
-    sprintf("%s [%s]", v$message, v$group)
-  }, character(1))
+  details <- vapply(violations, function(v) v$message, character(1))
 
   list(
     id = rule@id,
@@ -996,8 +1064,8 @@ rule_check_group_condition <- function(rule, df) {
   )
 }
 
-#' @title Apply Schema Rules
-#' @description Applies all schema rules to a data frame with CLI feedback.
+#' @title Apply Rules
+#' @description Applies all rules to a data frame with CLI feedback.
 #' @importFrom cli cli_alert_success cli_alert_danger cli_alert_info
 #' @param rules A list of DTARule objects, or NULL.
 #' @param df A data.frame to validate.
@@ -1005,7 +1073,7 @@ rule_check_group_condition <- function(rule, df) {
 #' @return (Invisibly) a list of rule validation results, each as a list with
 #'   elements `id`, `valid`, and `message`.
 #' @export
-apply_schema_rules <- function(rules, df, verbose = TRUE) {
+apply_rules <- function(rules, df, verbose = TRUE) {
   if (is.null(rules)) {
     rules <- list()
   }
@@ -1075,10 +1143,10 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
 
     n_failed <- length(failed)
     if (n_failed == 0) {
-      cli::cli_alert_success("All schema rules validated successfully")
+      cli::cli_alert_success("All rules validated successfully")
     } else {
       rule_word <- if (n_failed == 1) "rule" else "rules"
-      cli::cli_alert_danger("{n_failed} schema {rule_word} failed validation")
+      cli::cli_alert_danger("{n_failed} {rule_word} failed validation")
     }
   }
 
@@ -1095,14 +1163,14 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
 #' @export
 validate_rules <- function(DTAColumnSpecCollection, table) {
   rules <- rules(DTAColumnSpecCollection)
-  results <- apply_schema_rules(rules, table)
+  results <- apply_rules(rules, table)
 
   failed <- Filter(function(x) isFALSE(x$valid), results)
   if (length(failed) > 0) {
     messages <- vapply(failed, function(x) x$message, character(1))
     # Bulleted abort for nice CLI output
     bullets <- c(
-      "Schema rule violations:" = "!",
+      "Rule violations:" = "!",
       setNames(messages, rep("x", length(messages)))
     )
     cli::cli_abort(bullets)

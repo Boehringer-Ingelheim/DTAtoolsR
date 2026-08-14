@@ -469,7 +469,7 @@ bi_css <- function() {
       font-size: .72rem; font-weight: 600; color: #fff; letter-spacing: .02em;
     }
     .inspect-badge.rule { background: var(--bi-fail); }
-    .inspect-badge.schema { background: #b8860b; }
+    .inspect-badge.columnspec { background: #b8860b; }
     /* Third validation axis (a value unrepresentable in its declared type).
        Its own hue so it is never mistaken for a rule or schema failure. */
     .inspect-badge.import { background: #1f6feb; }

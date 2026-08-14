@@ -2,13 +2,19 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.add_organization_section}
 \alias{.add_organization_section}
-\title{Add a full organization section (affiliation + individual contact blocks)
-Signatories come first with a signature underline; backup-only contacts are grouped last.}
+\title{Add a full organization section (affiliation + individual contact blocks).
+Backup-only contacts are grouped last. Signature lines are NOT drawn here:
+authorised signatories are collected into the single "Approval & Signatures"
+table at the front of the document, so repeating an underline per contact
+would be a second, competing place to sign.}
 \usage{
 .add_organization_section(doc, title, org_list)
 }
 \description{
-Add a full organization section (affiliation + individual contact blocks)
-Signatories come first with a signature underline; backup-only contacts are grouped last.
+Add a full organization section (affiliation + individual contact blocks).
+Backup-only contacts are grouped last. Signature lines are NOT drawn here:
+authorised signatories are collected into the single "Approval & Signatures"
+table at the front of the document, so repeating an underline per contact
+would be a second, competing place to sign.
 }
 \keyword{internal}

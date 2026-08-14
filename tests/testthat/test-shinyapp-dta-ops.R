@@ -107,7 +107,7 @@ test_that("dta_check marks a cleanly loaded dataset as passing", {
   expect_equal(unname(status_fn(checked$value)["clinical_data"]), "pass")
 })
 
-test_that("dta_check marks a dataset with schema/rule errors as failing", {
+test_that("dta_check marks a dataset with column spec/rule errors as failing", {
   load_fn <- app_fn("dta_load_file")
   check_fn <- app_fn("dta_check")
   status_fn <- app_fn("dta_status_map")
@@ -172,7 +172,7 @@ test_that("dta_dataset_messages is empty before checking and populated with expe
   expect_true(all(c("source", "column", "message", "severity") %in% names(after)))
   # clinical_data_error_all.csv now also carries import errors (see
   # test-clinical-error-fixtures.R), so "import" joins the source set.
-  expect_setequal(unique(after$source), c("schema", "rule", "import"))
+  expect_setequal(unique(after$source), c("columnspec", "rule", "import"))
 })
 
 test_that("dta_dataset_messages returns an empty data.frame for a nonexistent dataset", {

@@ -43,6 +43,88 @@ class_character_or_numeric_or_null_or_list <- S7::class_character |
 
 `__DTAtools_supported_backends__` <- c("SAS")
 `__DTAtools_supported_dataset_types__` <- c("tabular", "file")
+`__DTAtools_stream_modes__` <- c("auto", "always", "never")
+
+# The size above which `stream = "auto"` keeps a file lazy rather than reading
+# it into memory. 512 MB is chosen to sit well below the point where an R
+# session on a typical analyst machine starts to struggle: an Arrow table is
+# several times its on-disk size once strings are materialised, so a 512 MB CSV
+# is already a multi-gigabyte object.
+`__DTAtools_stream_threshold_default__` <- 512 * 1024^2
+
+#' @title Decide Whether to Stream a File
+#' @description
+#' Turns the user-facing `stream` argument into the single yes/no the readers
+#' need. `"auto"` is the only mode that looks at the file at all; the other two
+#' are the user overriding the guess in either direction.
+#'
+#' `TRUE` and `FALSE` are accepted as aliases for `"always"` and `"never"`,
+#' because a logical is the first thing most callers will try.
+#'
+#' @param stream One of `"auto"`, `"always"`, `"never"`, or a single logical.
+#'   Defaults to `getOption("DTAtools.stream")`, itself defaulting to `"auto"`.
+#' @param file Path to the file about to be read. Only consulted for `"auto"`.
+#' @return A single `TRUE` (keep it lazy) or `FALSE` (read it into memory).
+#' @details
+#' The `"auto"` threshold is `getOption("DTAtools.stream_threshold")`, in bytes.
+#'
+#' Note that the size compared is the size *on disk*. For a compressed file --
+#' `.csv.gz` -- that is the compressed size, which can be several times smaller
+#' than what materialising it would cost, so `"auto"` under-triggers there. Pass
+#' `stream = "always"` for a large compressed input.
+#' @keywords internal
+dta_resolve_stream_mode <- function(
+  stream = getOption("DTAtools.stream", "auto"),
+  file = NULL
+) {
+  # A logical is what most people reach for first, so it is accepted rather than
+  # rejected on a technicality. NA is not: it is not a decision.
+  if (is.logical(stream)) {
+    if (length(stream) != 1 || is.na(stream)) {
+      cli_abort(
+        "{.arg stream} must be a single non-missing value, not {.val {stream}}."
+      )
+    }
+    return(stream)
+  }
+
+  if (!is.character(stream) || length(stream) != 1 || is.na(stream)) {
+    cli_abort(
+      "{.arg stream} must be one of {.val {`__DTAtools_stream_modes__`}}, or a single logical."
+    )
+  }
+
+  if (!stream %in% `__DTAtools_stream_modes__`) {
+    cli_abort(
+      "{.arg stream} must be one of {.val {`__DTAtools_stream_modes__`}}, not {.val {stream}}."
+    )
+  }
+
+  if (identical(stream, "always")) {
+    return(TRUE)
+  }
+  if (identical(stream, "never")) {
+    return(FALSE)
+  }
+
+  # "auto" from here. A file that cannot be sized cannot be judged too big, so
+  # the safe answer is the historical one: read it into memory.
+  if (is.null(file) || length(file) != 1 || is.na(file) || !file.exists(file)) {
+    return(FALSE)
+  }
+
+  threshold <- getOption(
+    "DTAtools.stream_threshold",
+    `__DTAtools_stream_threshold_default__`
+  )
+
+  size <- file.size(file)
+  if (is.na(size)) {
+    return(FALSE)
+  }
+
+  size > threshold
+}
 `__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
 
 #' @title Check Generic

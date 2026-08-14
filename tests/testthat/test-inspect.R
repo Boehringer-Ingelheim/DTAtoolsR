@@ -23,31 +23,31 @@ test_that("messages() provides sequential numeric ids", {
 })
 
 test_that("inspect() gives detailed schema context", {
-  dta <- load_clinical_fixture_for_inspect("clinical_data_error_schema.csv")
+  dta <- load_clinical_fixture_for_inspect("clinical_data_error_columnspec.csv")
 
   msgs <- messages(dta, as_tibble = FALSE)
-  schema_id <- msgs$id[msgs$source == "schema"][1]
-  expect_false(is.na(schema_id))
+  columnspec_id <- msgs$id[msgs$source == "columnspec"][1]
+  expect_false(is.na(columnspec_id))
 
-  info <- inspect(dta, id = schema_id, as_tibble = FALSE)
+  info <- inspect(dta, id = columnspec_id, as_tibble = FALSE)
 
   expect_true(is.data.frame(info))
   expect_gt(nrow(info), 0)
-  expect_true(all(info$id == schema_id))
-  expect_true(all(info$type == "schema"))
+  expect_true(all(info$id == columnspec_id))
+  expect_true(all(info$type == "columnspec"))
   expect_true(is.character(info$headline[[1]]) && nzchar(info$headline[[1]]))
   expect_true(is.character(info$why[[1]]) && nzchar(info$why[[1]]))
-  expect_true("schema_keyword" %in% names(info))
-  expect_true("schema_message" %in% names(info))
-  expect_true(any(grepl("required|type|length|range|pattern", info$schema_keyword, ignore.case = TRUE), na.rm = TRUE))
+  expect_true("columnspec_keyword" %in% names(info))
+  expect_true("columnspec_message" %in% names(info))
+  expect_true(any(grepl("required|type|length|range|pattern", info$columnspec_keyword, ignore.case = TRUE), na.rm = TRUE))
 })
 
 test_that("inspect() schema matches stay specific to required HEIGHT message", {
-  dta <- load_clinical_fixture_for_inspect("clinical_data_error_schema.csv")
+  dta <- load_clinical_fixture_for_inspect("clinical_data_error_columnspec.csv")
 
   msgs <- messages(dta, as_tibble = FALSE)
   target <- msgs[
-    msgs$source == "schema" &
+    msgs$source == "columnspec" &
       msgs$keyword == "required" &
       grepl("required property 'HEIGHT'", msgs$message, fixed = TRUE), ,
     drop = FALSE
@@ -58,9 +58,9 @@ test_that("inspect() schema matches stay specific to required HEIGHT message", {
 
   expect_true(is.data.frame(info))
   expect_gt(nrow(info), 0)
-  expect_true(all(info$schema_keyword == "required"))
-  expect_true(all(grepl("required property 'HEIGHT'", info$schema_message, fixed = TRUE)))
-  expect_false(any(info$schema_column %in% c("BMI", "GENDER"), na.rm = TRUE))
+  expect_true(all(info$columnspec_keyword == "required"))
+  expect_true(all(grepl("required property 'HEIGHT'", info$columnspec_message, fixed = TRUE)))
+  expect_false(any(info$columnspec_column %in% c("BMI", "GENDER"), na.rm = TRUE))
 })
 
 test_that("inspect() gives detailed rule context with failing rows", {

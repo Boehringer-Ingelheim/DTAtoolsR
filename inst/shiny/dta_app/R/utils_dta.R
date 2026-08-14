@@ -253,14 +253,23 @@ dta_example_yaml_path <- function(filename) {
 
 # Load a file into a dataset via the package. Returns dta_try() result whose
 # value (on success) is the UPDATED dta object.
-dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
+#
+# `stream` is passed straight through to load_file(): "never" reads the file
+# into memory, "always" keeps it lazy and scans it at check time. The app
+# defaults to "never" rather than "auto" because an upload has already been
+# written to disk and read once by Shiny, so the size guess "auto" makes would
+# be second-guessing a file the user has already handed over -- the checkbox is
+# how they say otherwise.
+dta_load_file <- function(dta, dataset, file, handler_index, name = NULL,
+                          stream = "never") {
   nm <- name %||% tools::file_path_sans_ext(basename(file))
   dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
     file = file,
     handler_index = handler_index,
-    name = nm
+    name = nm,
+    stream = stream
   ))
 }
 
@@ -507,13 +516,13 @@ dta_dataset_table_names <- function(ds) {
 # table -> "pass" | "fail" | "unknown" | "pending".
 #
 #   "pending" = not validated yet (no tick)
-#   "pass"    = validated, all THREE axes clean (schema, rules, import)
-#   "fail"    = validated with schema, rule OR import errors
+#   "pass"    = validated, all THREE axes clean (column spec, rules, import)
+#   "fail"    = validated with column spec, rule OR import errors
 #   "unknown" = validated, but the import axis was never checked
 #
-# Validation has three axes, and ok = schema_valid && rules_valid &&
+# Validation has three axes, and ok = columnspec_valid && rules_valid &&
 # import_valid. A table whose only defect is a value that could not be
-# represented in its declared type has zero schema and zero rule errors, so
+# represented in its declared type has zero column spec and zero rule errors, so
 # reading only those two axes paints it green while ok is FALSE. n_import_errors
 # is therefore weighed exactly like the other two counts.
 #
@@ -548,7 +557,7 @@ dta_table_status_from_status_df <- function(vs) {
   count <- function(col) {
     if (col %in% names(vs)) suppressWarnings(as.numeric(vs[[col]])) else rep(NA_real_, nrow(vs))
   }
-  nse <- count("n_schema_errors")
+  nse <- count("n_columnspec_errors")
   nre <- count("n_rule_errors")
   nie <- count("n_import_errors")
   positive <- function(n) !is.na(n) & n > 0
@@ -743,7 +752,7 @@ dta_export <- function(dta, file, format, signature_list = NULL) {
 
 # Does `file` exist and begin with the %PDF- magic bytes? Used to VERIFY a
 # converter actually produced a genuine PDF (rather than a mislabelled DOCX or
-# an empty file, which is what made the Export PDF button appear to do nothing).
+# an empty file, which is what made the export button appear to do nothing).
 dta_is_pdf <- function(file) {
   if (is.null(file) || !file.exists(file)) {
     return(FALSE)
@@ -1158,10 +1167,11 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
   invisible()
 }
 
-# Robust "Export PDF": build the DOCX first (always works via officer), then
+# Robust PDF export (the "Export as PDF" option behind the "Export DTA" button):
+# build the DOCX first (always works via officer), then
 # convert with the best engine available and VERIFY a real PDF resulted. When no
 # external converter exists we still produce a valid PDF from the Markdown export
-# via R's own device -- so the button ALWAYS yields an openable PDF.
+# via R's own device -- so the export ALWAYS yields an openable PDF.
 dta_export_pdf <- function(dta, file, signature_list = NULL) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
@@ -1277,7 +1287,7 @@ dta_build_validation_report <- function(dta, status = NULL) {
     # up in the report with two zero counts and no visible reason.
     want <- intersect(
       c(
-        "dataset", "target", "status", "n_schema_errors",
+        "dataset", "target", "status", "n_columnspec_errors",
         "n_rule_errors", "n_import_errors", "validated_at"
       ),
       names(rdf)
@@ -1363,7 +1373,7 @@ dta_supported_backends <- function() {
 # Bare (backend-less) SAS storage types offered in the column editor.
 dta_sas_types <- function() c("Char", "Num", "Int", "Date", "Time", "DateTime")
 
-# Condition operators offered in the rule editor (mirrors evaluateSchemaRules()).
+# Condition operators offered in the rule editor (mirrors evaluateRules()).
 # Operators offered by the conditional-rule builder (IF / THEN). Named vector:
 # names are the friendly labels shown in the UI, values are the keys the schema
 # engine (evaluate_condition) understands. "min_max" is a UI-only convenience
@@ -2438,4 +2448,60 @@ dta_restore_session <- function(dump) {
     dta@datasets[[nm]] <- ds
   }
   dta
+}
+
+# Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".
+# Colons are illegal in Windows file names, so the clock uses a hyphen. A bare
+# Date carries no clock, so it renders as midnight rather than silently
+# borrowing the current time.
+.dta_export_stamp <- function(when = Sys.time()) {
+  if (inherits(when, "Date")) {
+    when <- as.POSIXct(as.character(when), tz = "UTC")
+  }
+  format(when, "%Y-%m-%d_%H-%M")
+}
+
+# Build the stem of an exported document's file name: the DTA title, then the
+# document version when one is set, then the date and time -- e.g.
+# "Clinical_Data_Transfer-v0.2-2026-08-14_14-07". Kept in one place because the
+# modal preview and the two export branches (markdown, Word) must agree -- the
+# preview is a promise about the file the user is about to download.
+dta_export_stem <- function(dta, when = Sys.time()) {
+  stamp <- .dta_export_stamp(when)
+
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  get_prop <- function(nm) {
+    tryCatch(
+      {
+        if (is.null(md)) {
+          return(NULL)
+        }
+        v <- as.character(S7::prop(md, nm))
+        if (length(v) == 0) NULL else v[1]
+      },
+      error = function(e) NULL
+    )
+  }
+
+  ttl <- get_prop("title")
+  base <- if (!is.null(ttl) && !is.na(ttl) && nzchar(ttl)) {
+    gsub("[^A-Za-z0-9]+", "_", ttl)
+  } else {
+    "DTA"
+  }
+
+  ver <- get_prop("version")
+  if (is.null(ver) || is.na(ver) || !nzchar(ver)) {
+    return(paste0(base, "_", stamp))
+  }
+
+  # Dots are kept so the version reads as authored ("v0.2", not "v0_2"); any
+  # other separator a version may legitimately carry ("1.0 draft") is folded to
+  # an underscore so the name stays file-system safe.
+  ver_safe <- gsub("(^_+|_+$)", "", gsub("[^A-Za-z0-9.]+", "_", ver))
+  if (!nzchar(ver_safe)) {
+    return(paste0(base, "_", stamp))
+  }
+
+  paste0(base, "-v", ver_safe, "-", stamp)
 }

@@ -422,10 +422,10 @@
       border-left: 5px solid;
     }
     .error-card.import { background: #fef2f2; border-color: var(--danger); }
-    .error-card.schema { background: #fff7ed; border-color: var(--warning); }
+    .error-card.columnspec { background: #fff7ed; border-color: var(--warning); }
     .error-card.rule   { background: #fefce8; border-color: var(--yellow); }
     [data-theme="dark"] .error-card.import { background: #450a0a; }
-    [data-theme="dark"] .error-card.schema { background: #3d2a10; }
+    [data-theme="dark"] .error-card.columnspec { background: #3d2a10; }
     [data-theme="dark"] .error-card.rule   { background: #3d3200; }
     .error-card-title { font-weight: 700; font-size: 1rem; margin-bottom: .5rem; }
     .error-card ul { margin: .5rem 0 0 1rem; font-size: .88rem; }
@@ -523,7 +523,7 @@
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.16.0</span>
+  <span class="version-badge">v0.17.1</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -564,7 +564,8 @@
     <a class="nav-item" href="#section-4-4">Import Errors Detail</a>
     <a class="nav-item" href="#section-4-5">Exporting Data</a>
     <a class="nav-item" href="#section-4-6">Word Documentation</a>
-    <a class="nav-item" href="#section-4-7">Large Files</a>
+    <a class="nav-item" href="#section-4-6b">HTML Validation Report</a>
+    <a class="nav-item" href="#section-4-8">Large Files</a>
 
     <div class="nav-part">Part 5 — Quick Reference</div>
     <a class="nav-item" href="#section-5-1">Function Cheat Sheet</a>
@@ -664,7 +665,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">3</div>
-        <div class="step-body"><strong>Run validation</strong> — call <code>check()</code> to perform all import, schema, and rule checks</div>
+        <div class="step-body"><strong>Run validation</strong> — call <code>check()</code> to perform all import, column spec, and rule checks</div>
       </div>
       <div class="step-connector">↓</div>
       <div class="step">
@@ -743,7 +744,7 @@ messages(dta)</code></pre>
             <td><code>TRUE</code> / <code>FALSE</code></td>
           </tr>
           <tr>
-            <td><code>n_schema_errors</code></td>
+            <td><code>n_columnspec_errors</code></td>
             <td>Column rule violations — wrong type, invalid value, pattern mismatch, etc.</td>
             <td>Integer ≥ 0</td>
           </tr>
@@ -766,7 +767,7 @@ messages(dta)</code></pre>
       <div class="callout-body">
         <strong>Even one import error fails the table</strong>
         <p>A dataset with <code>n_import_errors = 1</code> will always have <code>ok = FALSE</code> (status: <code>"failed"</code>),
-        even if all schema and rule checks would otherwise pass.</p>
+        even if all column spec and rule checks would otherwise pass.</p>
       </div>
     </div>
 
@@ -805,7 +806,7 @@ messages(dta)</code></pre>
             <td>Value <code>"unknown"</code> cannot be read as <code>SAS Num</code></td>
           </tr>
           <tr>
-            <td><span style="color:var(--warning);font-weight:600">schema</span></td>
+            <td><span style="color:var(--warning);font-weight:600">columnspec</span></td>
             <td><span style="background:#fff7ed;color:var(--warning);padding:.1rem .5rem;border-radius:4px">🟠 orange</span></td>
             <td>Value <code>"V99"</code> not in allowed values list</td>
           </tr>
@@ -1010,8 +1011,8 @@ messages(dta)</code></pre>
           <li>See <code>import_raw</code> in <code>inspect()</code></li>
         </ul>
       </div>
-      <div class="error-card schema">
-        <div class="error-card-title">🟠 Schema Errors — "Readable, but breaks a column rule"</div>
+      <div class="error-card columnspec">
+        <div class="error-card-title">🟠 Column Spec Errors — "Readable, but breaks a column rule"</div>
         <p style="font-size:.88rem">The value was successfully parsed, but it violates a constraint on the column itself.</p>
         <ul>
           <li>Value not in <code>values</code> list</li>
@@ -1043,7 +1044,7 @@ messages(dta)</code></pre>
     <p>
       Rules check that columns make sense <em>together</em>, not just individually.
       They are defined under a <code>rules:</code> key inside your dataset spec and run
-      after all schema checks have passed.
+      after all column spec checks have passed.
     </p>
 
     <p>DTAtools supports three built-in rule types:</p>
@@ -1382,7 +1383,7 @@ specs_with_rules <- DTAColumnSpecCollection(
 
     <!-- ===== IMPORT ERRORS ===== -->
     <h3 id="section-4-4">⚠️ Import Errors in Detail</h3>
-    <p>Import errors are fundamentally different from schema and rule errors.
+    <p>Import errors are fundamentally different from column spec and rule errors.
     They happen <em>before</em> validation — during the read phase.</p>
 
     <div class="callout callout-error">
@@ -1390,7 +1391,7 @@ specs_with_rules <- DTAColumnSpecCollection(
       <div class="callout-body">
         <strong>Key distinction</strong>
         <p>A <code>SAS Num</code> column with cell <code>"unknown"</code> → import error (NA stored)
-        AND possibly a schema error if <code>nullable: false</code>.</p>
+        AND possibly a column spec error if <code>nullable: false</code>.</p>
         <p>Use <code>msgs &lt;- messages(ds); msgs[msgs$source == "import", ]</code> to filter to just import errors.</p>
         <p>Use <code>inspect(ds, id = N)</code> to see <code>import_raw</code> (original text),
         <code>import_declared_type</code>, and <code>import_reason</code>.</p>
@@ -1457,6 +1458,40 @@ ds <- datasets(dta, "clinical_data")
 export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
     </div>
 
+    <!-- ===== HTML VALIDATION REPORT ===== -->
+    <h3 id="section-4-6b">📋 Generating an HTML Validation Report</h3>
+    <p>
+      <code>write_validation_report()</code> renders a self-contained HTML file —
+      no external assets, opens straight from disk — summarizing validation
+      results: a pass/fail overview per dataset/target, and a sortable,
+      filterable table of every validation message with click-to-inspect
+      detail. Clicking a message shows what the constraint actually requires
+      (the allowed values for an <code>enum</code> violation, the declared
+      type for an import error, a plain-language description of a failed
+      rule) and the offending value — for <code>group_condition</code> rules,
+      a full breakdown of the group, its conditions and constraints, and the
+      affected rows.
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">write_validation_report(dta, file = "validation_report.html")
+
+# Repeated identical messages are capped at max_repeats (default 5) with a
+# "show all" toggle in the file itself -- raise or disable the cap:
+write_validation_report(dta, file = "validation_report.html", max_repeats = Inf)</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Also in the Shiny app:</strong>
+        <p>The same report is one click away from <code>run_dta_app()</code> — a
+        "Report" download button sits next to the CSV/TSV/XLSX exports in the
+        validation-messages dock.</p>
+      </div>
+    </div>
+
     <!-- ===== GROUP_CONDITION ===== -->
     <h3 id="section-4-7">🧩 group_condition Rule (Advanced)</h3>
     <p>
@@ -1499,19 +1534,104 @@ export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
     </div>
 
     <!-- ===== LARGE FILES ===== -->
-    <h3 id="section-4-7">🌊 Validating a File Too Large to Load</h3>
+    <h3 id="section-4-8">🌊 Validating a File Too Large to Load</h3>
     <p>Everything so far reads the data into memory before checking it. For a file
     larger than the memory available that is not merely slow — it is impossible,
     because the table has to exist as an R object before a single row can be validated.</p>
-    <p><code>validate_file_stream()</code> scans the file in batches instead, and never
-    holds more than one batch at a time.</p>
+    <p>The answer is to scan the file in batches, holding one batch at a time. The
+    ordinary way to ask for that is the <code>stream</code> argument on
+    <code>load_file()</code>, which decides how the table is <em>held</em> once loaded.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Read it into memory as an Arrow Table — the usual case.
+dta &lt;- load_file(dta, 1, file = "transfer.csv", stream = "never")
+
+# Keep it lazy as an Arrow Dataset; check() scans it in batches.
+dta &lt;- load_file(dta, 1, file = "transfer.csv", stream = "always")
+
+# Default "auto": "never" below 512 MB on disk, "always" above it.
+dta &lt;- load_file(dta, 1, file = "transfer.csv")
+
+dta &lt;- check(dta, quiet = TRUE)   # same verdict either way</code></pre>
+    </div>
+
+    <p><code>TRUE</code> and <code>FALSE</code> work as aliases for <code>"always"</code>
+    and <code>"never"</code>. Set the default and the threshold once per session:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">options(DTAtools.stream = "always")              # or "never" / "auto"
+options(DTAtools.stream_threshold = 2 * 1024^3)  # bytes; default 512 MB
+
+# Tune the scan itself. Neither changes the counts or the verdict.
+dta &lt;- check(dta, batch_rows = 262144L, max_errors = 1000L)</code></pre>
+    </div>
+
+    <h4>Which one should you use?</h4>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Situation</th><th>Use</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>The file fits in memory comfortably</td>
+            <td><code>"never"</code> (or just the default)</td>
+            <td>Roughly twice as fast, and import errors are reported immediately at load.</td>
+          </tr>
+          <tr>
+            <td>The file is larger than memory, or close to it</td>
+            <td><code>"always"</code></td>
+            <td>The only option that works at all. Memory stays flat regardless of row count.</td>
+          </tr>
+          <tr>
+            <td>You will validate the same table many times</td>
+            <td><code>"never"</code></td>
+            <td>Every scan re-parses the file from disk; an in-memory table is parsed once.</td>
+          </tr>
+          <tr>
+            <td>A large <em>compressed</em> file (<code>.csv.gz</code>)</td>
+            <td><code>"always"</code>, explicitly</td>
+            <td><code>"auto"</code> compares the size <em>on disk</em>, which is far smaller than the materialised size — so it under-triggers here.</td>
+          </tr>
+          <tr>
+            <td>You just want a verdict, with no <code>DTA</code> object</td>
+            <td><code>validate_file_stream()</code></td>
+            <td>Same scan, same result shape, without building the object model.</td>
+          </tr>
+          <tr>
+            <td>You do not know, and sizes vary</td>
+            <td><code>"auto"</code> (the default)</td>
+            <td>Small files stay fast; a file that would not fit switches by itself.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Streaming finds import errors later, not fewer.</strong>
+        <p>Both paths reach the same verdict and the same error counts. They differ in
+        <em>when</em>: reading into memory coerces the columns during
+        <code>load_file()</code> and records the issues there and then, while a lazy table
+        has no rows yet — so its issues surface during <code>check()</code>. After a
+        streaming load the dataset's <code>@import_issues</code> is empty until the check
+        has run.</p>
+      </div>
+    </div>
+
+    <p>Without a <code>DTA</code> object at all, <code>validate_file_stream()</code> runs
+    the same scan from specs and a path, returning the details list directly:</p>
 
     <div class="code-wrap">
       <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
       <pre><code class="language-r">details &lt;- validate_file_stream(specs, "transfer.csv")
 
 details$ok                # TRUE / FALSE, the same three-axis verdict
-details$n_schema_errors   # per-axis counts, as check() reports them
+details$n_columnspec_errors   # per-axis counts, as check() reports them
 as.data.frame(details)    # one row per error: source, row, column, keyword, message
 
 # Stop at the first problem rather than scanning to the end.
@@ -1593,13 +1713,18 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
             <td>DTADataSetTabular</td>
           </tr>
           <tr>
-            <td class="cheat-fn">load_file(dta, dataset, file)</td>
-            <td>Load a data file into a dataset</td>
+            <td class="cheat-fn">load_file(dta, dataset, file, stream)</td>
+            <td>Load a data file into a dataset; <code>stream</code> keeps it lazy instead of reading it into memory</td>
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>
-            <td class="cheat-fn">check(dta)</td>
-            <td>Run all validation (import + schema + rules)</td>
+            <td class="cheat-fn">open_file(handler, file)</td>
+            <td>Open a file lazily as an Arrow Dataset (counterpart of <code>read_file()</code>)</td>
+            <td>arrow Dataset</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">check(dta, batch_rows, max_errors)</td>
+            <td>Run all validation (import + column specs + rules); the two knobs tune a streamed scan</td>
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>
@@ -1635,6 +1760,11 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
           <tr>
             <td class="cheat-fn">write_dta(dta, file)</td>
             <td>Export DTA as Word document</td>
+            <td>(file written)</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">write_validation_report(dta, file)</td>
+            <td>Export a standalone, self-contained HTML validation report</td>
             <td>(file written)</td>
           </tr>
           <tr>
@@ -1701,7 +1831,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.16.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.17.1 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>

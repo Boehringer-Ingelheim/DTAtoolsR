@@ -53,26 +53,47 @@ DTAColumnSpecCollection <- S7::new_class(
     rules = class_list_or_null
   ),
   validator = function(self) {
-    # Ensure columns is a list of DTAColumnSpec objects
+    # Every branch here must `return()`. A bare string is the value of an `if`
+    # that nothing reads, so the check it looks like it performs does not
+    # happen: the class check below used to fall through to `col@id` on a plain
+    # list and surface "no applicable method for `@`" instead of its own
+    # message.
     if (!all(sapply(self@columns, inherits, "DTAtools::DTAColumnSpec"))) {
-      "All elements in 'columns' must be of class 'DTAColumnSpec'"
+      return("All elements in 'columns' must be of class 'DTAColumnSpec'")
     }
 
     columns_ids <- sapply(self@columns, function(col) col@id)
+
+    # A duplicated id is a specification error, and a silent one: `colspec()`
+    # looks a column up with `[[`, which returns the FIRST match, so the second
+    # definition is invisible to every consumer that goes by id -- while the
+    # column spec axis, which iterates the list, evaluates the same table column
+    # twice against two possibly contradictory specs.
+    duplicated_ids <- unique(columns_ids[duplicated(columns_ids)])
+    if (length(duplicated_ids) > 0) {
+      return(paste0(
+        "Column 'id' must be unique. Duplicated: ",
+        paste(duplicated_ids, collapse = ", ")
+      ))
+    }
 
     if (is.null(names(self@columns))) {
       names(self@columns) <- columns_ids
     }
 
     if (!all(names(self@columns) == columns_ids)) {
-      cli_abort(
-        "Names of 'columns' must match the 'id' of each DTAColumnSpec:\n\n ids: {str_flatten_comma(columns_names)} \n\n names: {str_flatten_comma(names(self@columns))}"
-      )
+      return(paste0(
+        "Names of 'columns' must match the 'id' of each DTAColumnSpec.\n",
+        "  ids:   ", paste(columns_ids, collapse = ", "), "\n",
+        "  names: ", paste(names(self@columns), collapse = ", ")
+      ))
     }
 
     if (!is.null(self@rules) && !all(sapply(self@rules, inherits, "DTAtools::DTARule"))) {
-      "All elements in 'rules' must be of class 'DTARule'"
+      return("All elements in 'rules' must be of class 'DTARule'")
     }
+
+    NULL
   }
 )
 
@@ -305,12 +326,12 @@ import_specs_from_yaml <- function(file) {
 
 #' @title Create DTAColumnSpecCollection from Components
 #' @description
-#' Constructs a DTAColumnSpecCollection object from separate components: columns and schema rules.
+#' Constructs a DTAColumnSpecCollection object from separate components: columns and rules.
 #' Supports both named and unnamed lists of column specifications.
 #'
 #' @importFrom cli cli_abort
 #' @param columns A list of column specification lists. Each must contain at least an `id`.
-#' @param rules Optional list of schema rules.
+#' @param rules Optional list of rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
 #' @export
@@ -347,12 +368,51 @@ specs_from_list <- function(
     dta_columns <- lapply(columns, function(x) {
       do.call(DTAColumnSpec, x)
     })
+    lapply(dta_columns, dta_warn_numeric_values_on_text_column)
   }
 
   return(DTAColumnSpecCollection(
     columns = dta_columns,
     rules = dta_rules
   ))
+}
+
+#' @title Warn About Permitted Values YAML Read as Numbers
+#' @description
+#' YAML applies implicit typing to unquoted scalars, so `values: [1.10, 2.00]`
+#' arrives as the numbers `1.1` and `2`. For a text column the permitted values
+#' are compared as text, and `as.character(1.1)` is `"1.1"` -- so the data the
+#' author meant to allow, `"1.10"`, fails the check with no hint as to why.
+#'
+#' The original spelling is gone by the time the parser hands the list over, so
+#' this cannot be repaired here. It can only be pointed at.
+#' @param spec A `DTAColumnSpec`.
+#' @return `invisible(NULL)`, called for the warning.
+#' @keywords internal
+dta_warn_numeric_values_on_text_column <- function(spec) {
+  values <- spec@values
+  if (is.null(values) || length(values) == 0) {
+    return(invisible(NULL))
+  }
+
+  flat <- unlist(values, use.names = FALSE)
+  if (!is.numeric(flat)) {
+    return(invisible(NULL))
+  }
+
+  types <- tryCatch(as_json_schema_type(spec), error = function(e) NULL)
+  if (!"string" %in% types) {
+    return(invisible(NULL))
+  }
+
+  cli::cli_warn(c(
+    "Column {.field {spec@id}} holds text, but its permitted {.field values} \\
+     were read as numbers.",
+    x = "YAML reads an unquoted {.code 1.10} as the number {.val {1.1}}, so a \\
+         value written {.val 1.10} in the data will not match.",
+    i = "Quote them in the specification: {.code values: [\"1.10\", \"2.00\"]}."
+  ))
+  invisible(NULL)
 }
 
 
@@ -549,7 +609,7 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
 
   # This previously compiled a JSON Schema validator here and discarded it --
   # a full schema compile on every call, for nothing. Validation no longer runs
-  # through a JSON Schema validator at all (see R/schemaChecks.R); this
+  # through a JSON Schema validator at all (see R/columnSpecChecks.R); this
   # function's job is serialising a spec collection to JSON Schema for other
   # tools to consume, which is useful in its own right.
   return(json_schema)

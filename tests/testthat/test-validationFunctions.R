@@ -8,31 +8,31 @@ test_that("validate_table and validate_table_detailed pass for valid input", {
 
   details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
   expect_true(details$ok)
-  expect_true(details$schema_valid)
+  expect_true(details$columnspec_valid)
   expect_true(details$rules_valid)
   expect_length(details$rule_errors, 0)
-  expect_equal(details$n_schema_errors, 0)
+  expect_equal(details$n_columnspec_errors, 0)
   expect_equal(details$n_rule_errors, 0)
 
   validated <- validate_table(specs = specs, table = table, verbose = FALSE)
   expect_identical(validated, table)
 })
 
-test_that("validate_table returns schema errors and aborts on rule errors", {
-  specs_schema <- DTAColumnSpecCollection(
+test_that("validate_table returns column spec errors and aborts on rule errors", {
+  specs_columnspec <- DTAColumnSpecCollection(
     columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
     )
   )
   invalid_table <- data.frame(ID = c("A001", NA), stringsAsFactors = FALSE)
-  schema_errors <- validate_table(specs = specs_schema, table = invalid_table, verbose = FALSE)
+  columnspec_errors <- validate_table(specs = specs_columnspec, table = invalid_table, verbose = FALSE)
 
-  expect_true(is.list(schema_errors))
-  expect_true(all(c("summarised_error", "full_error") %in% names(schema_errors)))
-  expect_true(is.data.frame(schema_errors$full_error))
+  expect_true(is.list(columnspec_errors))
+  expect_true(all(c("summarised_error", "full_error") %in% names(columnspec_errors)))
+  expect_true(is.data.frame(columnspec_errors$full_error))
 
   # The NA in row 2 is the only violation: a non-nullable SAS Char column.
-  full_error <- as.data.frame(schema_errors$full_error)
+  full_error <- as.data.frame(columnspec_errors$full_error)
   expect_equal(nrow(full_error), 1)
   expect_equal(full_error$row, 2)
   expect_equal(full_error$column, "ID")
@@ -48,11 +48,11 @@ test_that("validate_table returns schema errors and aborts on rule errors", {
 
   expect_error(
     validate_table(specs = specs_rules, table = duplicated_table, verbose = FALSE),
-    "Schema rule violations"
+    "Rule violations"
   )
 })
 
-test_that("Schema errors pin the offending row, column and keyword", {
+test_that("Column spec errors pin the offending row, column and keyword", {
   specs <- DTAColumnSpecCollection(
     columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 3, nullable = FALSE)
@@ -60,8 +60,8 @@ test_that("Schema errors pin the offending row, column and keyword", {
   )
   table <- data.frame(ID = c("AAA", "BBB", "TOOLONG"), stringsAsFactors = FALSE)
 
-  schema_errors <- validate_table(specs = specs, table = table, verbose = FALSE)
-  full_error <- as.data.frame(schema_errors$full_error)
+  columnspec_errors <- validate_table(specs = specs, table = table, verbose = FALSE)
+  full_error <- as.data.frame(columnspec_errors$full_error)
 
   expect_equal(nrow(full_error), 1)
   expect_equal(full_error$row, 3)
@@ -70,8 +70,8 @@ test_that("Schema errors pin the offending row, column and keyword", {
   expect_match(full_error$message, "must NOT have more than 3 characters")
 })
 
-test_that("validate_table reports schema errors and rule violations in one pass", {
-  # Previously validate_table() return()ed on the first schema failure, so the
+test_that("validate_table reports column spec errors and rule violations in one pass", {
+  # Previously validate_table() return()ed on the first column spec failure, so the
   # rules branch never ran: a user fixed the length error, re-ran, and only then
   # discovered the duplicate.
   specs <- DTAColumnSpecCollection(
@@ -83,14 +83,14 @@ test_that("validate_table reports schema errors and rule violations in one pass"
   table <- data.frame(ID = c("TOOLONG", "TOOLONG"), stringsAsFactors = FALSE)
 
   details <- validate_table_detailed(specs = specs, table = table, verbose = FALSE)
-  expect_false(details$schema_valid)
+  expect_false(details$columnspec_valid)
   expect_false(details$rules_valid)
 
   result <- suppressWarnings(
     validate_table(specs = specs, table = table, verbose = FALSE)
   )
 
-  # The documented schema-error contract is unchanged ...
+  # The documented column-spec-error contract is unchanged ...
   expect_true(all(c("summarised_error", "full_error") %in% names(result)))
   expect_equal(nrow(as.data.frame(result$full_error)), 2)
 
@@ -107,7 +107,7 @@ test_that("validate_table reports schema errors and rule violations in one pass"
   )
 })
 
-test_that("A schema-only failure still records that the rules were checked", {
+test_that("A column-spec-only failure still records that the rules were checked", {
   specs <- DTAColumnSpecCollection(
     columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 3, nullable = FALSE)
@@ -137,7 +137,7 @@ test_that("Multi-operator THEN conditions are enforced end to end", {
 
   expect_error(
     validate_table(specs = specs, table = data.frame(AGE = c(200, 999)), verbose = FALSE),
-    "Schema rule violations"
+    "Rule violations"
   )
 
   expect_no_error(
@@ -155,7 +155,7 @@ test_that("validate_table does not abort when a rule names an absent column", {
 
   err <- expect_error(
     validate_table(specs = specs, table = data.frame(ID = "A"), verbose = FALSE),
-    "Schema rule violations"
+    "Rule violations"
   )
   expect_match(conditionMessage(err), "stale_age_rule")
   expect_match(conditionMessage(err), "AGE")
@@ -172,8 +172,8 @@ test_that("Row numbers stay correct for errors past the first 5000-row chunk", {
   )
   table <- data.frame(ID = c(rep("AAA", 5000), "TOOLONG"), stringsAsFactors = FALSE)
 
-  schema_errors <- validate_table(specs = specs, table = table, verbose = FALSE)
-  full_error <- as.data.frame(schema_errors$full_error)
+  columnspec_errors <- validate_table(specs = specs, table = table, verbose = FALSE)
+  full_error <- as.data.frame(columnspec_errors$full_error)
 
   expect_equal(nrow(full_error), 1)
   expect_equal(full_error$row, 5001)

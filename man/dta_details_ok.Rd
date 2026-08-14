@@ -7,7 +7,7 @@
 dta_details_ok(details)
 }
 \arguments{
-\item{details}{A list carrying \code{schema_valid}, \code{rules_valid} and
+\item{details}{A list carrying \code{columnspec_valid}, \code{rules_valid} and
 \code{import_valid}.}
 }
 \value{
@@ -15,9 +15,9 @@ dta_details_ok(details)
 }
 \description{
 A table is valid only when all three independent axes pass: the column specs
-(schema), the schema rules, and the import axis. A value that could not be
+(schema), the rules, and the import axis. A value that could not be
 represented in its declared type fails the run on its own, regardless of what
-schema and rules report about the coerced column.
+column spec and rules report about the coerced column.
 
 \code{NA} on any axis ("unknown", e.g. an artifact written before the import axis
 existed) is not a pass.

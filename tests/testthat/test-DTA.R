@@ -227,7 +227,7 @@ test_that("check() method validates all datasets in DTA", {
     "validated_at",
     "run_id",
     "validation_run",
-    "n_schema_errors",
+    "n_columnspec_errors",
     "n_rule_errors",
     "n_targets",
     "n_validated",

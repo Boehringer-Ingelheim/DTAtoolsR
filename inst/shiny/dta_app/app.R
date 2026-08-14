@@ -45,9 +45,19 @@ brandbar <- div(
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-# Prefer a nearby DESCRIPTION (deployed app bundle/source of truth), then fall
-# back to the installed package version.
-dta_package_version <- function() {
+# The app bundle and installed package can differ on Posit Connect, so report
+# both when they do.
+dta_bundle_version <- function() {
+  app_version_file <- file.path(getwd(), "VERSION")
+  if (file.exists(app_version_file)) {
+    vv <- tryCatch(trimws(readLines(app_version_file, n = 1, warn = FALSE, encoding = "UTF-8")),
+      error = function(e) ""
+    )
+    if (length(vv) > 0 && nzchar(vv[[1]])) {
+      return(vv[[1]])
+    }
+  }
+
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),
@@ -73,6 +83,10 @@ dta_package_version <- function() {
     }
   }
 
+  ""
+}
+
+dta_runtime_package_version <- function() {
   v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
     error = function(e) ""
   )
@@ -83,11 +97,30 @@ dta_package_version <- function() {
   ""
 }
 
-dta_pkg_version <- dta_package_version()
+dta_version_label <- function() {
+  bundle_version <- dta_bundle_version()
+  runtime_version <- dta_runtime_package_version()
+
+  if (nzchar(bundle_version) && nzchar(runtime_version) && bundle_version != runtime_version) {
+    return(paste0("app v", bundle_version, " (pkg v", runtime_version, ")"))
+  }
+
+  if (nzchar(bundle_version)) {
+    return(paste0("v", bundle_version))
+  }
+
+  if (nzchar(runtime_version)) {
+    return(paste0("v", runtime_version))
+  }
+
+  ""
+}
+
+dta_pkg_version <- dta_version_label()
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
-  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", paste0("v", dta_pkg_version)),
+  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
   tags$span(class = "foot-sep", "\u2022"),
   tags$span("Boehringer Ingelheim"),
   tags$span(class = "foot-sep", "\u2022"),
@@ -149,6 +182,40 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 });
 "
 
+# Per-browser secret backing 'Restore previous session'. The autosaved session
+# must outlive the Shiny session (the whole point is recovering after a reload
+# or a crash), so it cannot be keyed to session$token, which is regenerated on
+# every page load. It is keyed instead to a 128-bit random id held in the
+# browser's localStorage: stable across reloads for one browser profile,
+# unguessable by, and never shared with, any other visitor of the same app.
+# If localStorage is unavailable (private mode) a fresh id is minted per load,
+# so the feature degrades to "no session found" rather than leaking one.
+client_id_js <- "
+(function(){
+  function dtaClientId(){
+    var KEY = 'dtatools_client_id';
+    var id = null;
+    try { id = window.localStorage.getItem(KEY); } catch (e) { id = null; }
+    if (!id || !/^[a-f0-9]{32}$/.test(id)) {
+      var buf = new Uint8Array(16);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(buf);
+      } else {
+        for (var i = 0; i < buf.length; i++) { buf[i] = Math.floor(Math.random() * 256); }
+      }
+      id = Array.prototype.map.call(buf, function(b){
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+      try { window.localStorage.setItem(KEY, id); } catch (e) {}
+    }
+    return id;
+  }
+  $(document).on('shiny:connected', function(){
+    Shiny.setInputValue('dta_client_id', dtaClientId());
+  });
+})();
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
   shinyjs::useShinyjs(),
@@ -156,7 +223,8 @@ ui <- bslib::page_fluid(
     tags$style(bi_css()),
     tags$script(shiny::HTML(reset_fileinput_js)),
     tags$script(shiny::HTML(msgs_dock_js)),
-    tags$script(shiny::HTML(download_trigger_js))
+    tags$script(shiny::HTML(download_trigger_js)),
+    tags$script(shiny::HTML(client_id_js))
   ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),
@@ -221,7 +289,27 @@ server <- function(input, output, session) {
   )
 
   upload_registry <- new.env(parent = emptyenv())
-  session_file <- file.path(tempdir(), "dtatools_app_session.rds")
+
+  # Autosave slot for 'Restore previous session', keyed to the browser's
+  # localStorage id (see client_id_js) rather than to session$token: the file
+  # has to survive the Shiny session to be restorable after a reload, but must
+  # still be reachable only by the browser that wrote it. The id is re-validated
+  # here because an input value is client-supplied and could be anything; only a
+  # 32-char lowercase hex string is accepted, which also makes it path-safe.
+  client_id <- function() {
+    id <- isolate(input$dta_client_id)
+    if (is.null(id) || length(id) != 1L || is.na(id) || !grepl("^[a-f0-9]{32}$", id)) {
+      return(NULL)
+    }
+    id
+  }
+  session_file <- function() {
+    id <- client_id()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    file.path(tempdir(), paste0("dtatools_app_session_", id, ".rds"))
+  }
 
   # Stable id per bound file so its trash button keeps working across renders.
   file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
@@ -270,8 +358,13 @@ server <- function(input, output, session) {
   }
 
   autosave <- function() {
+    target <- session_file()
+    if (is.null(target)) {
+      return(invisible(NULL))
+    }
     try(saveRDS(
       list(
+        client_id = client_id(),
         dump = dta_dump_session(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
@@ -281,7 +374,7 @@ server <- function(input, output, session) {
         dataset_only = isolate(rv$dataset_only),
         is_example = isolate(rv$is_example)
       ),
-      session_file
+      target
     ), silent = TRUE)
   }
 
@@ -796,7 +889,8 @@ server <- function(input, output, session) {
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
-        dataset = dsname, file = staged, handler_index = hi, name = tbl
+        dataset = dsname, file = staged, handler_index = hi, name = tbl,
+        stream = if (isTRUE(input$load_stream)) "always" else "never"
       )
       if (!res$ok) {
         rejected <- c(rejected, sprintf("'%s' (%s)", nm, res$error))
@@ -2984,7 +3078,8 @@ server <- function(input, output, session) {
             class = "msgs-dock-dl", onclick = "event.stopPropagation();",
             downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
             downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary")
+            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary"),
+            downloadButton("dl_msgs_html", "Report", class = "btn btn-sm btn-outline-secondary")
           ),
           tags$span(class = "msgs-dock-chevron", HTML("&#x25BC;"))
         )
@@ -3115,6 +3210,34 @@ server <- function(input, output, session) {
     }
   )
 
+  # Filename base for the whole-DTA HTML report (unlike msgs_dl_base(), which
+  # is scoped to the single active dataset). Timestamped so repeated
+  # downloads across a working session don't overwrite each other in the
+  # browser's downloads folder.
+  report_dl_base <- function() {
+    title <- tryCatch(DTAtools::metadata(rv$dta)@title, error = function(e) NULL)
+    nm <- if (!is.null(title) && length(title) == 1 && nzchar(title)) title else "dta"
+    paste0(
+      gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_report_",
+      format(Sys.time(), "%Y%m%d_%H%M%S")
+    )
+  }
+  output$dl_msgs_html <- downloadHandler(
+    filename = function() paste0(report_dl_base(), ".html"),
+    content = function(file) {
+      tryCatch(
+        DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+        error = function(e) {
+          showNotification(
+            paste("Could not build the validation report:", conditionMessage(e)),
+            type = "error", duration = 10
+          )
+          stop(e)
+        }
+      )
+    }
+  )
+
   df_to_kv <- function(d) {
     # single-row -> transposed Field/Value (drop NA/empty)
     row <- d[1, , drop = FALSE]
@@ -3165,42 +3288,42 @@ server <- function(input, output, session) {
     ""
   }
 
-  # Human "should be" text for a schema violation, derived from its keyword.
-  schema_expected_text <- function(r) {
-    kw <- as.character(r[["schema_keyword"]] %||% "")
+  # Human "should be" text for a column spec violation, derived from its keyword.
+  columnspec_expected_text <- function(r) {
+    kw <- as.character(r[["columnspec_keyword"]] %||% "")
     switch(kw,
       enum = paste0("one of: ", .first_nonempty(
-        r[["schema_params.allowedValues"]],
-        r[["schema_parentSchema.enum"]],
-        r[["schema_schema"]]
+        r[["columnspec_params.allowedValues"]],
+        r[["columnspec_parent.enum"]],
+        r[["columnspec_columnspec"]]
       )),
       const = paste0("exactly: ", .first_nonempty(
-        r[["schema_parentSchema.const"]],
-        r[["schema_schema"]]
+        r[["columnspec_parent.const"]],
+        r[["columnspec_columnspec"]]
       )),
       maxLength = paste0(
         "at most ", .first_nonempty(
-          r[["schema_params.limit"]],
-          r[["schema_parentSchema.maxLength"]]
+          r[["columnspec_params.limit"]],
+          r[["columnspec_parent.maxLength"]]
         ),
         " character(s)"
       ),
       minLength = paste0(
         "at least ", .first_nonempty(
-          r[["schema_params.limit"]],
-          r[["schema_parentSchema.minLength"]]
+          r[["columnspec_params.limit"]],
+          r[["columnspec_parent.minLength"]]
         ),
         " character(s)"
       ),
-      maximum = paste0("at most ", .first_nonempty(r[["schema_params.limit"]])),
-      minimum = paste0("at least ", .first_nonempty(r[["schema_params.limit"]])),
-      type = paste0("type: ", .first_nonempty(r[["schema_parentSchema.type"]])),
+      maximum = paste0("at most ", .first_nonempty(r[["columnspec_params.limit"]])),
+      minimum = paste0("at least ", .first_nonempty(r[["columnspec_params.limit"]])),
+      type = paste0("type: ", .first_nonempty(r[["columnspec_parent.type"]])),
       pattern = paste0("match pattern ", .first_nonempty(
-        r[["schema_params.pattern"]],
-        r[["schema_schema"]]
+        r[["columnspec_params.pattern"]],
+        r[["columnspec_columnspec"]]
       )),
       required = "the value must be present (not missing)",
-      .first_nonempty(r[["schema_message"]], r[["message"]], "(see message)")
+      .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
     )
   }
 
@@ -3239,12 +3362,12 @@ server <- function(input, output, session) {
   # actual split, and the raw technical detail in a collapsible section.
   render_inspect_body <- function(d, dataset) {
     r <- as.list(d[1, , drop = FALSE])
-    # `source` is the fallback for `type`: both name the axis ("schema", "rule",
+    # `source` is the fallback for `type`: both name the axis ("columnspec", "rule",
     # "import"), and falling back on the rule_id guess alone would route an
-    # import record into the schema branch.
+    # import record into the column spec branch.
     typ <- .first_nonempty(r[["type"]], r[["source"]])
     if (!nzchar(typ)) {
-      typ <- if ("rule_id" %in% names(d)) "rule" else "schema"
+      typ <- if ("rule_id" %in% names(d)) "rule" else "columnspec"
     }
     msg <- .first_nonempty(r$message, r$headline)
 
@@ -3282,12 +3405,59 @@ server <- function(input, output, session) {
       )
       actual_ui <- inspect_failing_rows_ui(d)
       actual_title <- "Offending row(s) \u2014 actual values"
+
+      # For group condition rules render an additional breakdown table showing
+      # each violation: group, constraint, message, and all row numbers involved.
+      gvcols <- grep("^group_violation_", names(d), value = TRUE)
+      if (length(gvcols) > 0) {
+        gv <- d[, gvcols, drop = FALSE]
+        # dta_flatten_inspect_record recycles the violation rows to match the
+        # number of failing_rows_preview rows, so we de-duplicate on content.
+        gv <- unique(gv)
+        # Drop fully-empty rows (all empty strings) that may arise from padding.
+        has_content <- vapply(seq_len(nrow(gv)), function(i) {
+          any(nzchar(as.character(gv[i, , drop = TRUE])))
+        }, logical(1))
+        gv <- gv[has_content, , drop = FALSE]
+        if (nrow(gv) > 0) {
+          names(gv) <- sub("^group_violation_", "", names(gv))
+          names(gv) <- tools::toTitleCase(names(gv))
+          actual_title <- "Group constraint violations \u2014 details"
+          failing_fcols <- grep("^failing_", names(d), value = TRUE)
+          actual_ui <- tagList(
+            tags$table(
+              class = "inspect-hl-table",
+              tags$thead(tags$tr(lapply(names(gv), tags$th))),
+              tags$tbody(
+                lapply(seq_len(nrow(gv)), function(i) {
+                  tags$tr(lapply(names(gv), function(k) {
+                    tags$td(
+                      class = "inspect-hl-val",
+                      as.character(gv[[k]][i])
+                    )
+                  }))
+                })
+              )
+            ),
+            if (length(failing_fcols) > 0) {
+              tagList(
+                tags$p(
+                  class = "inspect-desc-note",
+                  style = "margin-top:1em;",
+                  "Rows involved (all values):"
+                ),
+                inspect_failing_rows_ui(d)
+              )
+            }
+          )
+        }
+      }
     } else if (identical(typ, "import")) {
       # Third validation axis: the value could not be represented in the type
       # the spec declares, so the typed column holds NA and the raw text was
       # kept. inspect() supplies it as import_* columns (from import_matches).
-      # Without this branch the record fell into the schema branch below and
-      # rendered two empty schema_* panels.
+      # Without this branch the record fell into the column spec branch below and
+      # rendered two empty columnspec_* panels.
       f <- dta_inspect_import_fields(r)
       col <- f$column
       raw <- f$raw
@@ -3326,10 +3496,10 @@ server <- function(input, output, session) {
       )
       actual_title <- "Raw value that could not be imported"
     } else {
-      col <- .first_nonempty(r[["schema_column"]], r[["column"]])
-      kw <- .first_nonempty(r[["schema_keyword"]], r[["keyword"]])
-      smsg <- .first_nonempty(r[["schema_message"]], msg)
-      badge <- tags$span(class = "inspect-badge schema", "Schema violation")
+      col <- .first_nonempty(r[["columnspec_column"]], r[["column"]])
+      kw <- .first_nonempty(r[["columnspec_keyword"]], r[["keyword"]])
+      smsg <- .first_nonempty(r[["columnspec_message"]], msg)
+      badge <- tags$span(class = "inspect-badge columnspec", "Column spec violation")
       desc <- div(
         class = "inspect-desc",
         div(
@@ -3339,12 +3509,12 @@ server <- function(input, output, session) {
         ),
         if (nzchar(smsg)) div(class = "inspect-desc-detail", smsg)
       )
-      expected_ui <- div(class = "inspect-should", schema_expected_text(r))
+      expected_ui <- div(class = "inspect-should", columnspec_expected_text(r))
       aval <- .first_nonempty(
-        r[["schema_data"]],
+        r[["columnspec_data"]],
         if (nzchar(col)) r[[paste0("context_", col)]] else NULL
       )
-      arow <- .first_nonempty(r[["schema_row"]], r[["context_.row"]])
+      arow <- .first_nonempty(r[["columnspec_row"]], r[["context_.row"]])
       loc <- paste0(
         if (nzchar(col)) paste0("column ", col) else "",
         if (nzchar(arow)) paste0(if (nzchar(col)) ", " else "", "row ", arow) else ""
@@ -4128,12 +4298,15 @@ server <- function(input, output, session) {
     templates <- list_available_templates()
 
     modal_content <- div(
-      h4("Export Document"),
+      # No heading here: modalDialog() renders `title` as the dialog's own
+      # header, so an h4 repeating those words printed the dialog name twice,
+      # one line above the other. Every other modal here relies on `title`
+      # alone.
       p("Choose the format and options for your DTA export."),
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
         choices = c("Markdown" = "markdown", "Word Document" = "word"),
-        selected = "markdown"
+        selected = "word"
       ),
       # Markdown options
       conditionalPanel(
@@ -4164,7 +4337,7 @@ server <- function(input, output, session) {
             p("No custom templates available.", class = "text-muted")
           }
         ),
-        checkboxInput("export_include_yaml_word", "Embed YAML specification at end of document", value = FALSE)
+        checkboxInput("export_include_yaml_word", "Embed YAML specification at end of document", value = TRUE)
       ),
       hr(),
       h5("Output filename", class = "text-muted"),
@@ -4185,16 +4358,12 @@ server <- function(input, output, session) {
   # Export filename preview
   output$export_filename_preview <- renderText({
     req(rv$dta)
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-
     ext <- if (input$export_format == "markdown") {
       if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
     } else {
       ".docx"
     }
-    paste0(base, "_", Sys.Date(), ext)
+    paste0(dta_export_stem(rv$dta), ext)
   })
 
   # Cancel export
@@ -4206,17 +4375,20 @@ server <- function(input, output, session) {
   observeEvent(input$export_do, {
     req(rv$dta)
 
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(if (!is.null(md)) as.character(S7::prop(md, "title"))[1] else NULL, error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+    stem <- dta_export_stem(rv$dta)
 
     tryCatch(
       {
         if (input$export_format == "markdown") {
           # Markdown export
           ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
-          filename <- paste0(base, "_", Sys.Date(), ext)
-          output_file <- file.path(tempdir(), filename)
+          filename <- paste0(stem, ext)
+          # The browser fetches the file on a LATER request, so the path it
+          # waits on must be unique. Deriving it from title and date meant two
+          # untitled exports on the same day shared one path, and whichever
+          # session wrote last was the one both downloads received.
+          # `filename` still decides what the browser saves it as.
+          output_file <- tempfile(pattern = "dta-export-", fileext = ext)
 
           # write_dta() throws on error (caught below); it does not return $ok.
           DTAtools::write_dta(rv$dta, output_file, format = "md", overwrite = TRUE, quiet = TRUE)
@@ -4296,8 +4468,9 @@ server <- function(input, output, session) {
           export_state$file_name <- filename
         } else {
           # Word export
-          filename <- paste0(base, "_", Sys.Date(), ".docx")
-          output_file <- file.path(tempdir(), filename)
+          filename <- paste0(stem, ".docx")
+          # Unique for the same reason as the markdown branch above.
+          output_file <- tempfile(pattern = "dta-export-", fileext = ".docx")
 
           if (input$export_word_mode == "custom") {
             template_name <- input$export_template_select
@@ -4431,7 +4604,7 @@ server <- function(input, output, session) {
     rv$status <- list()
     rv$is_example <- FALSE
     rv$example_target <- NULL
-    try(unlink(session_file), silent = TRUE)
+    try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
 
@@ -4658,6 +4831,25 @@ server <- function(input, output, session) {
         class = "msg-hint", style = "margin:-4px 0 10px;",
         "Drop each required file below. Loaded files appear underneath."
       ),
+      # Streaming is a property of how a file is HELD, not of which slot it
+      # went into, so this is one control for the page rather than one per
+      # dropzone. It is read at upload time by the handler below.
+      div(
+        style = "margin:-4px 0 10px;",
+        checkboxInput(
+          "load_stream",
+          label = "Load large files without reading them into memory",
+          value = FALSE
+        ),
+        div(
+          class = "msg-hint", style = "margin:-10px 0 0 24px;",
+          paste(
+            "Scans the file in batches when you check it, so a file bigger than",
+            "memory can still be validated. Import errors are then reported by",
+            "the check rather than at upload."
+          )
+        )
+      ),
       slots,
       card(
         card_header(
@@ -4684,8 +4876,13 @@ server <- function(input, output, session) {
     # uploads -- which mutate rv$dta -- do not rebuild the whole workspace or
     # reset the active tab / file inputs. Live bits live in their own outputs.
     if (is.null(rv$structure)) {
-      # Landing
-      restore_available <- file.exists(session_file)
+      # Landing. Reference input$dta_client_id directly so this re-renders once
+      # the browser reports its id and the restore button can appear.
+      restore_available <- {
+        input$dta_client_id
+        sf <- session_file()
+        !is.null(sf) && file.exists(sf)
+      }
       card(
         max_height = "620px",
         card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
@@ -4729,7 +4926,7 @@ server <- function(input, output, session) {
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export PDF", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
+          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
@@ -4783,10 +4980,22 @@ server <- function(input, output, session) {
 
   # --- restore previous session ------------------------------------------
   observeEvent(input$restore_session, {
-    if (!file.exists(session_file)) {
+    sf <- session_file()
+    if (is.null(sf) || !file.exists(sf)) {
       return()
     }
-    saved <- tryCatch(readRDS(session_file), error = function(e) NULL)
+    saved <- tryCatch(readRDS(sf), error = function(e) NULL)
+    if (is.null(saved)) {
+      showNotification("Could not restore the previous session.", type = "error")
+      return()
+    }
+    # Defence in depth behind the per-browser filename: refuse a payload that
+    # does not carry this browser's own id, so a stale or planted file under a
+    # guessed name cannot be loaded into someone else's session.
+    if (!identical(saved$client_id, client_id())) {
+      showNotification("Cannot restore a session saved by a different browser.", type = "error")
+      return()
+    }
     # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
     # fall back to a legacy `dta` field for older session files.
     restored <- if (!is.null(saved$dump)) {
@@ -4794,7 +5003,7 @@ server <- function(input, output, session) {
     } else {
       saved$dta
     }
-    if (is.null(saved) || is.null(restored)) {
+    if (is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }

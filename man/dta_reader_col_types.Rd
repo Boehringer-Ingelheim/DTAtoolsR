@@ -13,7 +13,7 @@ every column exactly as it did before.}
 
 \item{has_header}{Logical. When the file has no header, Arrow generates
 positional names (\code{f0}, \code{f1}, ...) that cannot correspond to spec ids, so
-no schema is built.}
+no column spec is built.}
 }
 \value{
 An \code{arrow::schema()} naming the textual columns, or \code{NULL} when there

@@ -176,7 +176,7 @@ DTAColumnSpec <- S7::new_class(
 )
 
 
-#' @title Get Arrow Schema Type
+#' @title Get Arrow Type
 #' @description
 #' Returns the corresponding Arrow schema type for a given DTAColumnSpec
 #' object based on its `type` property.
@@ -185,9 +185,9 @@ DTAColumnSpec <- S7::new_class(
 #' @return A character string representing the Arrow schema type.
 #' @examples
 #' col <- DTAColumnSpec(id = "AGE", type = "SAS Char")
-#' get_arrow_schema_type(col)
+#' get_arrow_type(col)
 #' @export
-get_arrow_schema_type <- function(x) {
+get_arrow_type <- function(x) {
   if (!inherits(x, "DTAtools::DTAColumnSpec")) {
     stop("Input must be a DTAColumnSpec object.")
   }

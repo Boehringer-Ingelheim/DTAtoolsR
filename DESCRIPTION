@@ -1,19 +1,18 @@
 Package: DTAtools
-Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.16.0
+Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
+Version: 0.17.1
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
 	person("Daniel", "Schreyer",
 		email = "daniel.schreyer.ext@boehringer-ingelheim.com", role = c("aut", "ctb")))
 Maintainer: Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>
-Description: Provides a comprehensive set of tools for importing, validating,
-	transforming, and exporting data governed by data transfer agreements (DTAs)
-	or data transfer specifications (DTS). The package supports workflows for
-	handling structured data, ensuring compliance with agreement requirements,
-	and facilitating reproducible data processing. Key features include flexible
-	data import/export, schema validation, metadata management, and integration
-	with common R data analysis pipelines.
+Description: Tools for defining, validating, and processing data transfer
+	agreements (DTAs) and data transfer specifications (DTS). The package supports
+	importing, checking, transforming, and exporting structured data while
+	ensuring compliance with predefined contract and specification rules. It is
+	designed for reproducible data workflows and integrates with common R-based
+	analysis pipelines for metadata handling, data validation, and reporting.
 License: LGPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -24,6 +23,7 @@ Imports:
 	cli,
 	utils,
 	tools,
+	stats,
 	glue,
 	methods,
 	R.utils,
@@ -84,14 +84,16 @@ Collate:
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
     'DTARuleGroupCondition-class.R'
+    'columnSpecChecks.R'
     'documentBuilders.R'
-    'evaluateSchemaRules.R'
+    'evaluateRules.R'
     'exportDocuments.R'
     'exportFunctions.R'
     'exportTemplateDocx.R'
+    'exportValidationReport.R'
     'formattingHelpers.R'
+    'reportRendering.R'
     'run_dta_app.R'
-    'schemaChecks.R'
     'streamingValidation.R'
     'validationFunctions.R'
     'zzz.R'

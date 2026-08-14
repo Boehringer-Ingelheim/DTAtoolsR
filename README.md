@@ -38,7 +38,7 @@ once installed).
   `"007"` in a text column stays `"007"`
 - Comprehensive validation of tabular data: type, format, nullability,
   allowed values, and regex patterns
-- Cross-column schema rule validation (`col_condition`, `col_range`,
+- Cross-column rule validation (`col_condition`, `col_range`,
   `col_unique`, `group_condition`)
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
@@ -47,6 +47,9 @@ once installed).
   checksums
 - Generate Word documentation tables directly from specifications, or the
   whole agreement as a document (`write_dta()`)
+- Generate a standalone, self-contained HTML validation report
+  (`write_validation_report()`) with a sortable, filterable, click-to-inspect
+  message table
 - An interactive Shiny application over the same objects (`run_dta_app()`)
 
 ## Installation
@@ -71,7 +74,7 @@ dta <- read_dta_from_yaml(dta_file)
 csv_path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 dta <- load_file(dta, dataset = "clinical_data", file = csv_path)
 
-# 3. Validate — check() runs import, schema and rule validation for all datasets
+# 3. Validate — check() runs import, column spec and rule validation for all datasets
 dta <- check(dta)
 
 # 4. Summarise results (one row per table)
@@ -100,7 +103,7 @@ fails the table, and `results()` counts each separately:
 
 | Axis                     | Column            | What it means                                                      |
 |--------------------------|-------------------|--------------------------------------------------------------------|
-| **Schema** errors        | `n_schema_errors` | A value breaks a column constraint: type, `nullable`, `values`, `pattern`, `length` |
+| **Schema** errors        | `n_columnspec_errors` | A value breaks a column constraint: type, `nullable`, `values`, `pattern`, `length` |
 | **Rule** errors          | `n_rule_errors`   | A row breaks an inter-column rule: `col_condition`, `col_range`, `col_unique`, `group_condition` |
 | **Import** errors        | `n_import_errors` | A value cannot be represented in the type its column declares      |
 
@@ -108,12 +111,12 @@ An **import error** is raised when a value is present in the source but does
 not fit its declared type — the text `"unknown"` in a `SAS Num` column, for
 example. The stored value becomes `NA`, the column keeps its declared type,
 and the original text is retained and reported. **Any import error makes
-validation fail**, on its own, even when every schema constraint and every
+validation fail**, on its own, even when every column spec constraint and every
 rule passes.
 
 ```r
 # AGE is declared numeric and permits missing values, so nothing here breaks
-# the schema and there are no rules at all — yet the table fails.
+# the column spec and there are no rules at all — yet the table fails.
 specs_imp <- DTAColumnSpecCollection(columns = list(
   SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", nullable = FALSE),
   AGE        = DTAColumnSpec(id = "AGE",        type = "SAS Num",  nullable = TRUE)
@@ -127,9 +130,9 @@ ds_imp <- DTADataSetTabular(
 )
 ds_imp <- check(ds_imp, quiet = TRUE)
 
-validation_status(ds_imp)[, c("ok", "n_schema_errors",
+validation_status(ds_imp)[, c("ok", "n_columnspec_errors",
                               "n_rule_errors", "n_import_errors")]
-#>      ok n_schema_errors n_rule_errors n_import_errors
+#>      ok n_columnspec_errors n_rule_errors n_import_errors
 #> 1 FALSE               0             0               1
 
 msgs <- messages(ds_imp)
@@ -141,7 +144,7 @@ inspect(ds_imp, id = msgs$id[msgs$source == "import"][1])
 as.data.frame(get_table(ds_imp, "demo"))   # the offending cell is now NA
 ```
 
-> `check()` prints a per-axis console report for the schema and rule passes
+> `check()` prints a per-axis console report for the column spec and rule passes
 > but not for the import pass. When a table fails with no visible reason,
 > read `n_import_errors` from `results()` or filter `messages()` on
 > `source == "import"`.
@@ -161,7 +164,7 @@ axis above did not exist at all. In particular:
 - `col_range` on a factor column compared level codes rather than values.
 - Numeric comparisons on character columns used locale collation, so
   `"9" > 65` was `TRUE`.
-- Rule violations were invisible whenever the table also had a schema error.
+- Rule violations were invisible whenever the table also had a column spec error.
 - Metadata is now validated: a transmission date that had to be coerced to
   fit its declared type fails the whole `DTA`.
 
@@ -175,7 +178,7 @@ dta <- check(dta, force = TRUE)
 ```
 
 `force = TRUE` bypasses the skip-if-unchanged shortcut, so every table is
-validated again on the current schema version.
+validated again on the current result version.
 
 ## Package Architecture
 
@@ -208,7 +211,7 @@ DTA                              ← top-level agreement container
     |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
     |   |
-    │   ├── specs (DTAColumnSpecCollection)  ← column-level schema +
+    │   ├── specs (DTAColumnSpecCollection)  ← column-level specs +
     |   |   |                                   cross-column rules
     │   │   |
     │   │   ├── columns (named list of DTAColumnSpec)
@@ -234,7 +237,7 @@ DTA                              ← top-level agreement container
 
 1. `load_file(dta, dataset, file)` — reads a file into the dataset using its
    file handler, typing each column as the specification declares it
-2. `check(dta)` / `check(ds)` — runs the import, schema and rule checks; always
+2. `check(dta)` / `check(ds)` — runs the import, column spec and rule checks; always
    returns the updated object
 3. `results(x)` — one-row-per-table summary (pass/fail, per-axis error counts)
 4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule,
@@ -254,7 +257,7 @@ specification contains definitions of:
   values. See [YAML Column Format](#yaml-column-format).
 - **rules:** cross-column logic, e.g. "if column A is empty, column B must
   contain a value". See
-  [YAML Schema Rule Specification](#yaml-schema-rule-specification).
+  [YAML Schema Rule Specification](#yaml-rule-specification).
 - **metadata:** DTA/DTS metadata — title, version, contacts, transmission
   schedule. See [YAML Metadata](#yaml-metadata).
 
@@ -302,17 +305,91 @@ messages(data_obj)  # one row per error: source, column, row, rule, message, id
 written), `quiet`, and `tables` (restrict to named or indexed tables;
 `datasets` on a `DTA`).
 
+### Compressed input
+
+A gzipped data file is read exactly like an uncompressed one. Arrow
+decompresses `.gz` on the fly, and a specification that declares `data.csv` is
+satisfied by `data.csv.gz` — compression is a transport detail, so the YAML
+never has to mention it:
+
+```r
+# The handler declared in the YAML is `clinical_data.csv`.
+dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+dta <- load_file(dta, 1, file = "clinical_data.csv.gz")   # accepted
+dta <- check(dta, quiet = TRUE)
+```
+
+The results are identical to validating the uncompressed file, including row
+numbers, and `validate_file_stream()` still reads a compressed file in batches
+rather than expanding it into memory. An anchored filename pattern such as
+`^clinical_data\.csv$` matches the gzipped form too.
+
 ### Validating a file too large to load
 
 The workflow above reads the file into memory first. For a file larger than
-the memory available, that is not slow but impossible — so `validate_file_stream()`
-scans the file in batches instead, and never holds more than one batch:
+the memory available, that is not slow but impossible — so the file can be
+scanned in batches instead, never holding more than one batch.
+
+The ordinary way in is the `stream` argument on `load_file()`, which decides
+how the table is *held* once loaded:
+
+```r
+# Read it into memory (an Arrow Table) — the usual case.
+dta <- load_file(dta, 1, file = "transfer.csv", stream = "never")
+
+# Keep it lazy (an Arrow Dataset); check() scans it in batches.
+dta <- load_file(dta, 1, file = "transfer.csv", stream = "always")
+
+# Default: "never" below 512 MB on disk, "always" above it.
+dta <- load_file(dta, 1, file = "transfer.csv")
+
+dta <- check(dta, quiet = TRUE)   # same verdict either way
+```
+
+Set the threshold, or the default itself, once per session:
+
+```r
+options(DTAtools.stream = "always")             # or "never" / "auto"
+options(DTAtools.stream_threshold = 2 * 1024^3) # bytes; default 512 MB
+```
+
+Both paths find the same errors and reach the same verdict. They differ in
+*when* import errors are found: reading into memory reports them during
+`load_file()`, while streaming finds them during `check()` — so after a
+streaming load the dataset's `@import_issues` is empty until `check()` has run.
+
+#### Which one should you use?
+
+| Situation | Use | Why |
+|---|---|---|
+| The file fits in memory comfortably | `"never"`, or just the default | About twice as fast, and import errors are reported immediately at load |
+| The file is larger than memory, or close to it | `"always"` | The only option that works at all; memory stays flat regardless of row count |
+| You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
+| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` compares the size *on disk*, which is far smaller than the materialised size, so it under-triggers |
+| You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan and same result shape, without building the object model |
+| You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
+
+The short version: **stream when *holding* the file is the problem.** It buys
+feasibility, not speed — scanning runs roughly twice as slow as validating a
+table already in memory, because every batch pays its own overhead.
+
+When tuning matters, `check()` takes the scan knobs:
+
+```r
+# Rows per batch (default getOption("DTAtools.stream_batch_rows", 131072L)),
+# and a cap on how much per-cell failure detail is retained. Neither changes
+# the counts or the verdict.
+dta <- check(dta, batch_rows = 262144L, max_errors = 1000L)
+```
+
+`validate_file_stream()` does the same scan without a `DTA` object at all,
+returning the details list directly:
 
 ```r
 details <- validate_file_stream(specs, "transfer.csv")
 
 details$ok                # TRUE / FALSE, the same three-axis verdict
-details$n_schema_errors   # per-axis counts, as check() reports them
+details$n_columnspec_errors   # per-axis counts, as check() reports them
 as.data.frame(details)    # one row per error: source, row, column, keyword, message
 ```
 
@@ -368,7 +445,7 @@ dta_err <- read_dta_from_yaml(
 )
 dta_err <- load_file(
   dta_err, "clinical_data",
-  file = system.file("extdata", "clinical_data_error_schema.csv",
+  file = system.file("extdata", "clinical_data_error_columnspec.csv",
                      package = "DTAtools")
 )
 dta_err <- check(dta_err, quiet = TRUE)
@@ -378,8 +455,8 @@ results(dta_err)             # per-table pass/fail summary
 validation_status(ds_err)    # compact status data frame
 
 msgs <- messages(ds_err)     # per-error table — note the `id` and `source`
-inspect(ds_err, id = msgs$id[msgs$source == "schema"][1])
-# schema errors add context_* (the row values), schema_keyword, schema_message
+inspect(ds_err, id = msgs$id[msgs$source == "columnspec"][1])
+# column spec errors add context_* (the row values), columnspec_keyword, columnspec_message
 # rule errors add rule_id, failing_row_count, failing_*
 # import errors add import_raw (the original text), import_declared_type,
 #   import_reason
@@ -506,12 +583,28 @@ and aborts, naming that command, rather than writing a DOCX under a `.pdf` name.
 dta_pdf_backend()   # NULL, or a list naming the backend and engine
 ```
 
+### Export a Standalone HTML Validation Report
+
+`write_validation_report()` renders a self-contained HTML file — no external
+assets, opens straight from disk — summarizing validation results for a `DTA`
+object: a pass/fail overview per dataset/target, and a sortable, filterable
+table of every validation message with click-to-inspect detail (what the
+constraint requires, the actual offending value, and — for `group_condition`
+rules — a full breakdown of the group, its conditions and constraints, and
+the affected rows). Repeated identical messages are capped at `max_repeats`
+(default `5`) with a "show all" toggle in the file itself, so nothing is lost.
+
+```r
+write_validation_report(dta, "validation_report.html")
+```
+
 ### Interactive Shiny application
 
 `run_dta_app()` starts a browser interface over the same objects: load a DTA
 YAML, upload a data file per dataset, run validation, browse the errors, edit
-the metadata and export the document. It needs the suggested packages
-**shiny**, **bslib** and **DT**.
+the metadata and export the document — including the HTML validation report,
+via a "Report" download button alongside the CSV/TSV/XLSX exports. It needs
+the suggested packages **shiny**, **bslib** and **DT**.
 
 ```r
 run_dta_app()
@@ -831,9 +924,10 @@ row-level validation.
 | `read_dataset_from_yaml(file)` | Load a single, self-contained dataset definition from YAML |
 | `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
-| `load_file(dta, dataset, file)`| Read a data file into a dataset using its YAML-defined handler |
+| `load_file(dta, dataset, file, stream)`| Read a data file into a dataset using its YAML-defined handler; `stream` keeps it lazy instead |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
-| `check(x, force, persist, quiet, …)` | Validate all datasets/tables; returns the updated object |
+| `open_file(handler, file)`     | Open a file lazily as an Arrow `Dataset` (the counterpart of `read_file()`) |
+| `check(x, force, persist, quiet, batch_rows, max_errors, …)` | Validate all datasets/tables; returns the updated object |
 | `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it into memory |
 | `cache_as_parquet(specs, path, …)` | Rewrite a delimited file as Parquet for repeated validation (measure first) |
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |
@@ -855,6 +949,7 @@ row-level validation.
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                                    |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                                    |
 | `write_dta(x, file, format)`   | Write the whole DTA as a document (docx, pdf, md)            |
+| `write_validation_report(x, file, max_repeats, …)` | Write a standalone, self-contained HTML validation report |
 | `dta_pdf_backend()`            | Report the DOCX-to-PDF backend this machine will use, or NULL |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA     |
 | `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |

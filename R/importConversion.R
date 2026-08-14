@@ -111,7 +111,7 @@ dta_spec_r_type <- function(specs, column) {
 #'   every column exactly as it did before.
 #' @param has_header Logical. When the file has no header, Arrow generates
 #'   positional names (`f0`, `f1`, ...) that cannot correspond to spec ids, so
-#'   no schema is built.
+#'   no column spec is built.
 #' @return An `arrow::schema()` naming the textual columns, or `NULL` when there
 #'   is nothing to pin.
 #' @keywords internal
@@ -153,7 +153,7 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 
   # A schema entry for a column the file does not contain is ignored by Arrow,
   # so a spec that declares more columns than the file carries is not an error
-  # here. Whether the column is missing is the schema axis's question.
+  # here. Whether the column is missing is the column spec axis's question.
   types <- rep(list(arrow::utf8()), length(textual))
   names(types) <- textual
 
@@ -176,8 +176,8 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 #'
 #' An `Int` target is narrowed to R `integer` only when every value is whole.
 #' Rounding a fractional value into an integer column would silently discard the
-#' fraction *and* hide the `type: integer` schema error that exists to report
-#' it, so a fractional value stays a double and is left to the schema axis.
+#' fraction *and* hide the `type: integer` column spec error that exists to report
+#' it, so a fractional value stays a double and is left to the column spec axis.
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the

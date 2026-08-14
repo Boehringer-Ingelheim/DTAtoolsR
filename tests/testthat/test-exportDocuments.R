@@ -149,6 +149,150 @@ test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
   expect_true("Data Transfer Agreement" %in% summary$text)
 })
 
+test_that("write_dta docx places Process Information before Datasets", {
+  # create_example_DTA() carries no transmission/error-handling/corrections
+  # metadata, so it produces no Process Information chapter at all. The rich
+  # clinical fixture is the one that exercises the ordering.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+  heading2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
+  idx_process <- heading2$doc_index[which(heading2$text == "Process Information")[1]]
+  idx_datasets <- heading2$doc_index[which(heading2$text == "Datasets")[1]]
+  expect_true(length(idx_process) == 1 && length(idx_datasets) == 1)
+  expect_true(idx_process < idx_datasets)
+})
+
+test_that("write_dta docx puts ONLY the specs and rules tables in landscape", {
+  # A bare list of section orientations is not enough: officer ends the section
+  # for content added BEFORE the call, so putting the break on the wrong side
+  # produces the identical orientation sequence with the wrong pages rotated.
+  # Every assertion below is therefore text-anchored.
+  dta <- create_example_DTA()
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  # The two table headings and the tables themselves are landscape.
+  expect_identical(.docx_orientation_of(out_docx, "Column Specifications"), "landscape")
+  expect_identical(.docx_orientation_of(out_docx, "Validation Rules"), "landscape")
+  # "Variable Name" is a header cell of the column-spec flextable, so this pins
+  # the table and not merely its heading.
+  expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
+
+  # Everything around them stays portrait: the title page, the metadata
+  # narrative, the dataset heading, and the trailing footer.
+  expect_identical(.docx_orientation_of(out_docx, "Data Transfer Agreement"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "Document Information"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "Datasets"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "Dataset Specifications"), "portrait")
+
+  blocks <- .docx_blocks_with_orientation(out_docx)
+  expect_identical(blocks$orientation[nrow(blocks)], "portrait")
+
+  # A landscape run must not swallow the rest of the document.
+  expect_true(any(blocks$orientation == "landscape"))
+  expect_true(sum(blocks$orientation == "portrait") > sum(blocks$orientation == "landscape"))
+})
+
+test_that("write_dta docx puts a real validation rules table in landscape", {
+  # create_example_DTA() declares no rules, so the assertion above can only
+  # reach the "Validation Rules" heading. This fixture has actual rules, which
+  # is what puts a rules flextable on the page.
+  yaml_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+  skip_if(!nzchar(yaml_path) || !file.exists(yaml_path), "clinical_dta.yaml fixture missing")
+
+  dta <- read_dta_from_yaml(yaml_path)
+  has_rules <- any(vapply(dta@datasets, function(ds) {
+    inherits(ds, "DTAtools::DTADataSetTabular") && length(ds@specs@rules) > 0
+  }, logical(1)))
+  expect_true(has_rules)
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  # "Rule ID" is a header cell of the rules flextable.
+  expect_identical(.docx_orientation_of(out_docx, "Rule ID"), "landscape")
+  expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
+  expect_identical(.docx_orientation_of(out_docx, "Datasets"), "portrait")
+})
+
+test_that("landscape sections are really rotated, keep page size, add no blank pages", {
+  # The orient ATTRIBUTE alone proves nothing: a section tagged landscape but
+  # carrying portrait w/h renders as a portrait page, and the wide table still
+  # overflows. The w > h assertion is what pins the actual rotation.
+  # officer's own body_end_section_landscape() also hardcodes A4 and uses
+  # type="oddPage", which pads the document with blank pages;
+  # .end_section_orientation() reads the dimensions back from the document and
+  # uses nextPage instead.
+  dta <- create_example_DTA()
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  geom <- .docx_section_geometry(out_docx)
+  expect_true(nrow(geom) > 1)
+  expect_true(any(geom$orientation == "landscape"))
+  expect_true(any(geom$orientation == "portrait"))
+
+  # Rotation, not just a label.
+  landscape <- geom[geom$orientation == "landscape", ]
+  portrait <- geom[geom$orientation == "portrait", ]
+  expect_true(all(landscape$width > landscape$height))
+  expect_true(all(portrait$width < portrait$height))
+
+  # No blank filler pages.
+  expect_false(any(stats::na.omit(geom$type) == "oddPage"))
+
+  # Landscape pages are the portrait page turned on its side, not a new format.
+  expect_equal(unique(pmin(geom$width, geom$height)), min(portrait$width), tolerance = 1)
+  expect_equal(unique(pmax(geom$width, geom$height)), max(portrait$height), tolerance = 1)
+})
+
+test_that("write_dataset_metadata also lands its specs table in landscape", {
+  # The second caller of .add_dataset_specs_section(): heading_level = 2 and an
+  # optional rules block, followed by a footer that must stay portrait.
+  ds <- create_example_DTADataSetTabular(2)
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  expect_identical(.docx_orientation_of(out_docx, "Column Specifications"), "landscape")
+  expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
+  expect_identical(.docx_orientation_of(out_docx, "Dataset Information"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "Generated:"), "portrait")
+
+  blocks <- .docx_blocks_with_orientation(out_docx)
+  expect_identical(blocks$orientation[nrow(blocks)], "portrait")
+
+  # include_rules = FALSE leaves a landscape section holding only the column
+  # table; the surrounding document must still return to portrait.
+  no_rules <- tempfile(fileext = ".docx")
+  on.exit(unlink(no_rules, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds,
+    file = no_rules, format = "docx", overwrite = TRUE, quiet = TRUE,
+    include_rules = FALSE
+  )
+  expect_identical(.docx_orientation_of(no_rules, "Column Specifications"), "landscape")
+  expect_length(.docx_orientation_of(no_rules, "Validation Rules"), 0L)
+  expect_identical(
+    .docx_blocks_with_orientation(no_rules)$orientation[
+      nrow(.docx_blocks_with_orientation(no_rules))
+    ],
+    "portrait"
+  )
+
+  geom <- .docx_section_geometry(no_rules)
+  landscape <- geom[geom$orientation == "landscape", ]
+  expect_true(nrow(landscape) > 0)
+  expect_true(all(landscape$width > landscape$height))
+})
+
 test_that("write_dta docx embeds a small-font YAML section only when requested", {
   dta <- create_example_DTA()
   yaml_text <- "datasets:\n  clinical_data:\n    columns:\n      SUBJID:\n        type: string"
@@ -576,4 +720,203 @@ test_that("exported document dates are ISO 8601 under any LC_TIME", {
   expect_true("Date: 2026-01-15" %in% paragraphs)
   # No localized month name may survive anywhere in the document.
   expect_false(any(grepl("Januar|January|janvier", paragraphs)))
+})
+
+test_that("write_dta docx opens with the signature block, before any other chapter", {
+  # The approval table is what a reader must act on, so it precedes Document
+  # Information, the party sections and the datasets.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
+  idx <- function(txt) h2$doc_index[which(h2$text == txt)[1]]
+
+  expect_false(is.na(idx("Approval & Signatures")))
+  for (later in c("Document Information", "Receiver Information", "Supplier Information", "Datasets")) {
+    expect_lt(idx("Approval & Signatures"), idx(later))
+  }
+
+  # Each authorized signatory of the fixture gets exactly one row.
+  sig <- .extract_signatories(dta@metadata)
+  expect_gt(nrow(sig), 0)
+  for (nm in sig$Name) {
+    expect_true(any(grepl(nm, summary$text, fixed = TRUE)))
+  }
+})
+
+test_that("write_dta docx carries no filler signature lines and no meta explanation", {
+  for (dta in list(
+    create_example_DTA(),
+    read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  )) {
+    out_docx <- tempfile(fileext = ".docx")
+    on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+    write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+    txt <- officer::docx_summary(officer::read_docx(out_docx))$text
+    txt <- txt[!is.na(txt)]
+
+    expect_false(any(grepl("Approved by", txt, fixed = TRUE)))
+    expect_false(any(grepl("Note: signatories listed above", txt, fixed = TRUE)))
+    # No row of underscores anywhere: signature/date cells are left blank and
+    # sized instead.
+    expect_false(any(grepl("_____", txt, fixed = TRUE)))
+  }
+})
+
+test_that("write_dta docx omits the signature chapter when nobody is authorized to sign", {
+  dta <- create_example_DTA()
+  expect_equal(NROW(.extract_signatories(dta@metadata)), 0)
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  txt <- officer::docx_summary(officer::read_docx(out_docx))$text
+  expect_false("Approval & Signatures" %in% txt)
+})
+
+test_that("write_dta docx uses one font family and one table header fill throughout", {
+  # The untidy look came from three families (template Cambria body, Calibri
+  # headings, flextable's Arial default) and unrelated blues. Everything the
+  # package emits explicitly must now name the house family and palette.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  yaml_text <- paste(
+    readLines(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"), warn = FALSE),
+    collapse = "\n"
+  )
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  # include_yaml = TRUE so the monospace block is present too: it is the only
+  # place a second family is allowed, and it must be the declared one.
+  write_dta(dta,
+    file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE,
+    include_yaml = TRUE, yaml_text = yaml_text
+  )
+
+  xml <- .read_docx_body_xml(out_docx)
+
+  fonts <- unique(unlist(regmatches(
+    xml, gregexpr('(?<=w:ascii=")[^"]+', xml, perl = TRUE)
+  )))
+  expect_setequal(fonts, c(FONTS$primary, FONTS$monospace))
+
+  # Every table header cell is filled with the single house navy.
+  fills <- unique(unlist(regmatches(
+    xml, gregexpr('(?<=<w:shd )[^>]*w:fill="[^"]+', xml, perl = TRUE)
+  )))
+  fills <- toupper(sub('.*w:fill="', "", fills))
+  fills <- setdiff(fills, c("AUTO", "FFFFFF"))
+  expect_setequal(
+    fills,
+    toupper(sub("^#", "", c(THEME_COLORS$primary_dark, THEME_COLORS$gray_light)))
+  )
+})
+
+test_that("write_dta docx introduces the supplier before the receiver", {
+  # Data flows supplier -> receiver, so that is the order the parties appear in,
+  # in both the Word and the Markdown rendering.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
+  idx_sup <- h2$doc_index[which(h2$text == "Supplier Information")[1]]
+  idx_rec <- h2$doc_index[which(h2$text == "Receiver Information")[1]]
+  expect_false(is.na(idx_sup))
+  expect_false(is.na(idx_rec))
+  expect_lt(idx_sup, idx_rec)
+
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+  expect_lt(
+    grep("Supplier Information", md)[1],
+    grep("Receiver Information", md)[1]
+  )
+})
+
+test_that("the built-in docx export uses the Boehringer brand palette", {
+  # The document palette must match the Shiny app's brand theme; a drift here is
+  # exactly the "different colours" problem the redesign removed.
+  expect_identical(THEME_COLORS$primary_dark, "#00625B")
+  expect_identical(THEME_COLORS$primary, "#00A886")
+
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  xml <- .read_docx_body_xml(out_docx)
+  expect_false(grepl("1F497D", xml, fixed = TRUE)) # the old template blue
+  expect_false(grepl("4F81BD", xml, fixed = TRUE))
+  expect_true(grepl(sub("^#", "", THEME_COLORS$primary_dark), xml, fixed = TRUE))
+})
+
+test_that("the bundled template renders headings in the brand green", {
+  # Heading colour comes from the template's own styles, not from anything the
+  # package writes per paragraph, so it has to be pinned on the asset itself --
+  # otherwise Word draws black headings above brand-green tables.
+  tmpl <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  expect_true(nzchar(tmpl))
+
+  ex <- tempfile()
+  dir.create(ex)
+  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+  utils::unzip(tmpl, files = "word/styles.xml", exdir = ex)
+  styles <- paste(readLines(file.path(ex, "word", "styles.xml"), warn = FALSE), collapse = "")
+
+  green <- sub("^#", "", THEME_COLORS$primary_dark)
+  for (id in paste0("Titre", 1:4)) {
+    block <- regmatches(
+      styles,
+      regexpr(sprintf('<w:style [^>]*w:styleId="%s".*?</w:style>', id), styles, perl = TRUE)
+    )
+    expect_length(block, 1)
+    expect_true(grepl(sprintf('<w:color w:val="%s"/>', green), block, fixed = TRUE))
+  }
+})
+
+test_that("group_condition rules reach the exported documents fully described", {
+  # The formatter is only useful if the rules table actually carries it: the
+  # clinical fixture's group rules previously showed a one-line summary with no
+  # grouping, condition or constraint detail at all.
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+
+  txt <- officer::docx_summary(officer::read_docx(out_docx))$text
+  txt <- paste(txt[!is.na(txt)], collapse = "\n")
+
+  expect_match(txt, "group_condition_pass_example", fixed = TRUE)
+  expect_match(txt, "Rows are grouped by 'SUBJECT_ID'", fixed = TRUE)
+  expect_match(txt, "\"c_has_visit\": a row where 'VISIT' is present", fixed = TRUE)
+  expect_match(txt, "must hold for every row in the group", fixed = TRUE)
+  expect_false(grepl("no description available", txt, fixed = TRUE))
+
+  # The multi-line description becomes real Word line breaks, not a lost newline.
+  xml <- .read_docx_body_xml(out_docx)
+  expect_true(grepl("<w:br/>", xml, fixed = TRUE))
+
+  # Markdown: newlines must not break the pipe table, so they become <br> and
+  # every rule still occupies exactly one table row.
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+
+  rule_rows <- grep("^\\| group_condition_pass_example ", md, value = TRUE)
+  expect_length(rule_rows, 1)
+  expect_match(rule_rows, "Rows are grouped by 'SUBJECT_ID'", fixed = TRUE)
+  expect_match(rule_rows, "<br>", fixed = TRUE)
+  # A well-formed pipe row: no stray newline split it into a headless fragment.
+  expect_match(rule_rows, "\\|$")
 })

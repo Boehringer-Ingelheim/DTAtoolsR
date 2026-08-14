@@ -4,22 +4,27 @@
 \alias{dta_reader_args}
 \title{Reader Arguments Passed Through \code{...}}
 \usage{
-dta_reader_args(...)
+dta_reader_args(..., .caller = "read_file_execution")
 }
 \arguments{
-\item{...}{The arguments \code{read_file_execution()} was called with.}
+\item{...}{The arguments the calling method was called with.}
+
+\item{.caller}{Name of the generic to blame in the error message. Both
+\code{read_file_execution()} and \code{open_file_execution()} are exported, so a
+caller can reach this failure through either -- and naming the wrong one
+sends them looking in the wrong place.}
 }
 \value{
 A list with \code{file} (the path) and \code{specs} (a
 \code{DTAColumnSpecCollection}, or \code{NULL} when the caller supplied none).
 }
 \description{
-\code{read_file_execution()} dispatches on \code{x} alone and takes everything else
-through \code{...}, so each concrete method has to pull its arguments back out.
-Doing that as \code{list(...)[[1]]} makes the file the \emph{first} argument by
-position, which silently picks up \code{specs} if a caller ever names its
-arguments in the other order. Removing the named entries first leaves the
-file as the only positional one, so the three readers agree on what they were
+\code{read_file_execution()} and \code{open_file_execution()} dispatch on \code{x} alone and
+take everything else through \code{...}, so each concrete method has to pull its
+arguments back out. Doing that as \code{list(...)[[1]]} makes the file the \emph{first}
+argument by position, which silently picks up \code{specs} if a caller ever names
+its arguments in the other order. Removing the named entries first leaves the
+file as the only positional one, so all six methods agree on what they were
 given however the call was written.
 }
 \keyword{internal}

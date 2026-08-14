@@ -29,16 +29,24 @@ app_file_input <- function(filename) {
   )
 }
 
-# The app autosaves to a fixed path in tempdir() on every state change, and
-# offers to restore it on start-up. A file left by an earlier test would put the
-# next server into "previous session available" state, so every test clears it
-# before starting. (Clearing up front, rather than after, is what actually
-# guarantees isolation — and it stays correct no matter what order testthat
-# runs these in. The file itself dies with tempdir() at the end of the session.)
+# The app autosaves to a path in tempdir() keyed to the browser id reported by
+# the client (input$dta_client_id), and offers to restore it on start-up. A file
+# left by an earlier test would put the next server into "previous session
+# available" state, so every test clears them before starting. (Clearing up
+# front, rather than after, is what actually guarantees isolation — and it stays
+# correct no matter what order testthat runs these in. The files themselves die
+# with tempdir() at the end of the session.)
+#
+# testServer() reports no browser id unless a test sets one, so a server under
+# test writes nothing at all by default; this sweep covers the tests that do set
+# one, and any file left by an older build under the pre-2.x fixed name.
 clean_session_file <- function() {
-  f <- file.path(tempdir(), "dtatools_app_session.rds")
+  f <- list.files(tempdir(),
+    pattern = "^dtatools_app_session.*\\.rds$",
+    full.names = TRUE
+  )
   unlink(f, force = TRUE)
-  f
+  invisible(f)
 }
 
 test_that("the server starts with an empty workspace", {
@@ -54,6 +62,109 @@ test_that("the server starts with an empty workspace", {
     expect_false(rv$is_example)
     expect_equal(rv$col_view, "list")
     expect_equal(rv$rule_view, "list")
+  })
+})
+
+# --- autosave slot isolation ------------------------------------------------
+#
+# "Restore previous session" has to outlive the Shiny session to be worth
+# anything (it exists to recover a reload or a crash), so the autosave cannot be
+# keyed to session$token, which is minted afresh on every page load. It is keyed
+# instead to a random id the browser keeps in localStorage. These tests pin the
+# two properties that keying buys: the id is validated before it is allowed near
+# a path, and a payload written by one browser is not loadable by another.
+
+test_that("nothing is autosaved until the browser reports an id", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    expect_null(client_id())
+    expect_null(session_file())
+
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    # State loaded, but with nowhere to persist it there must be no slot on disk.
+    expect_s3_class(rv$dta, "DTAtools::DTA")
+    expect_length(list.files(tempdir(), pattern = "^dtatools_app_session"), 0)
+  })
+})
+
+test_that("a malformed browser id is refused instead of reaching the filesystem", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # input$dta_client_id is client-supplied and can be any string, so it is
+    # re-validated server-side; only 32 lowercase hex chars are accepted, which
+    # also makes it path-safe by construction.
+    for (bad in list(
+      "../../../../etc/passwd",
+      "..\\..\\windows\\win.ini",
+      "a/b",
+      "ABCDEF0123456789abcdef0123456789", # uppercase
+      strrep("a", 31),
+      strrep("a", 33),
+      "",
+      NA_character_
+    )) {
+      session$setInputs(dta_client_id = bad)
+      expect_null(client_id())
+      expect_null(session_file())
+    }
+
+    good <- strrep("a", 32)
+    session$setInputs(dta_client_id = good)
+    expect_equal(client_id(), good)
+    expect_equal(
+      basename(session_file()),
+      paste0("dtatools_app_session_", good, ".rds")
+    )
+    expect_equal(
+      normalizePath(dirname(session_file()), winslash = "/", mustWork = FALSE),
+      normalizePath(tempdir(), winslash = "/", mustWork = FALSE)
+    )
+  })
+})
+
+test_that("a browser restores the workspace from its own autosave", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("b", 32))
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    expect_true(file.exists(session_file()))
+
+    # Simulate the reload: the slot on disk is all that survives.
+    rv$dta <- NULL
+    rv$structure <- NULL
+    rv$active <- NULL
+    session$setInputs(restore_session = 1)
+
+    expect_s3_class(rv$dta, "DTAtools::DTA")
+    expect_equal(names(DTAtools::datasets(rv$dta)), "clinical_data")
+    expect_equal(rv$active, "clinical_data")
+  })
+})
+
+test_that("an autosave carrying a different browser id is not restored", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("c", 32))
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    # Re-stamp this browser's slot as though another browser had written it,
+    # which is what an attacker who guessed the filename would be doing.
+    payload <- readRDS(session_file())
+    payload$client_id <- strrep("d", 32)
+    saveRDS(payload, session_file())
+
+    rv$dta <- NULL
+    rv$structure <- NULL
+    rv$active <- NULL
+    session$setInputs(restore_session = 2)
+
+    expect_null(rv$dta)
+    expect_null(rv$structure)
   })
 })
 
@@ -144,7 +255,7 @@ test_that("check_all reports fail for data that violates the spec", {
     expect_gt(nrow(msgs), 0)
     # clinical_data_error_all.csv now also carries import errors (see
     # test-clinical-error-fixtures.R), so "import" joins the source set.
-    expect_setequal(unique(msgs$source), c("import", "rule", "schema"))
+    expect_setequal(unique(msgs$source), c("import", "rule", "columnspec"))
   })
 })
 
@@ -771,5 +882,55 @@ test_that("raw YAML that removes every file handler unloads that dataset's data"
     expect_length(rv$uploads, 0)
     expect_length(DTAtools::tables(DTAtools::datasets(rv$dta, "clinical_data")), 0)
     expect_equal(unname(rv$status[["clinical_data"]]), "nodata")
+  })
+})
+
+test_that("HTML validation report download handler produces parseable HTML", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # Load a DTA the same way other tests do
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    # Bind valid data to the dataset so that results() and messages() work
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    # Check the dataset to populate validation results
+    session$setInputs(check_all = 1)
+
+    # Verify that the exact object rv$dta produces a valid report by calling
+    # the same function the handler uses. This tests that the object state
+    # and function integration work correctly.
+    report_file <- tempfile(fileext = ".html")
+    on.exit(unlink(report_file, force = TRUE), add = TRUE)
+
+    # This is the same call the downloadHandler uses.
+    expect_no_error(
+      DTAtools::write_validation_report(
+        rv$dta,
+        report_file,
+        overwrite = TRUE,
+        quiet = TRUE
+      )
+    )
+
+    # Verify the file is valid HTML
+    doc <- xml2::read_html(report_file)
+    expect_true(!is.na(doc))
+
+    # Verify wiring exists by reading app.R source and confirming both
+    # downloadButton and downloadHandler are present
+    app_source <- readLines(
+      file.path(app_server_dir(), "app.R"),
+      warn = FALSE
+    )
+    app_source_str <- paste(app_source, collapse = "\n")
+    expect_true(
+      grepl('downloadButton("dl_msgs_html"', app_source_str, fixed = TRUE),
+      info = "downloadButton wiring for dl_msgs_html not found in app.R"
+    )
+    expect_true(
+      grepl("output$dl_msgs_html <- downloadHandler", app_source_str, fixed = TRUE),
+      info = "downloadHandler wiring for dl_msgs_html not found in app.R"
+    )
   })
 })

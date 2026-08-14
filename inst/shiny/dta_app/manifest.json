@@ -43,36 +43,34 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Tools for Handling Data from Data Transfer Agreements (DTAs) /\nData Transfer Specifications (DTS)",
-        "Version": "0.12.1",
+        "Version": "0.17.0",
         "Authors@R": "c(\n\tperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\n\t\trole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\n\tperson(\"Daniel\", \"Schreyer\",\n\t\temail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
-        "Description": "Provides a comprehensive set of tools for importing, validating,\n\ttransforming, and exporting data governed by data transfer agreements (DTAs)\n\tor data transfer specifications (DTS). The package supports workflows for\n\thandling structured data, ensuring compliance with agreement requirements,\n\tand facilitating reproducible data processing. Key features include flexible\n\tdata import/export, schema validation, metadata management, and integration\n\twith common R data analysis pipelines.",
+        "Description": "Provides a comprehensive set of tools for importing, validating,\n\ttransforming, and exporting data governed by data transfer agreements (DTAs)\n\tor data transfer specifications (DTS). The package supports workflows for\n\thandling structured data, ensuring compliance with agreement requirements,\n\tand facilitating reproducible data processing. Key features include flexible\n\tdata import/export, column spec validation, metadata management, and integration\n\twith common R data analysis pipelines.",
         "License": "LGPL (>= 3)",
         "Encoding": "UTF-8",
         "Roxygen": "list(markdown = TRUE)",
         "RoxygenNote": "7.3.3",
-        "Imports": "yaml, dplyr, cli, utils, tools, tidyr, glue, methods, R.utils,\nrlang, docxtractr, purrr, magrittr, jsonlite, jsonvalidate,\nflextable, arrow, stringr, tibble, officer, xml2, zip",
+        "Imports": "yaml, dplyr, cli, utils, tools, glue, methods, R.utils, rlang,\ndocxtractr, purrr, magrittr, jsonlite, flextable, arrow,\nstringr, tibble, officer, xml2, zip",
         "Depends": "R (>= 4.1.0), S7 (>= 0.2.2)",
-        "Suggests": "knitr, rmarkdown, testthat (>= 3.0.0), shiny, bslib, shinyjs,\nDT, writexl, shinyAce, doconv, remotes",
+        "Suggests": "knitr, rmarkdown, testthat (>= 3.0.0), shiny, bslib, shinyjs,\nDT, writexl, shinyAce, htmltools, tinytex, doconv, remotes,\npkgload",
         "Config/testthat/edition": "3",
         "VignetteBuilder": "knitr",
         "URL": "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-        "Collate": "'00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R' 'DTADataSet-class.R'\n'DTADataSetTabular-class.R' 'validationReporting.R'\n'DTADataSetFile-class.R' 'DTAFile-class.R'\n'DTAFileTabular-class.R' 'DTAFileCSV-class.R'\n'DTAFileDelim-class.R' 'DTAFileTSV-class.R'\n'DTAMetaData-class.R' 'DTAMetaData-helpers.R' 'DTARule-class.R'\n'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R' 'documentBuilders.R'\n'evaluateSchemaRules.R' 'exportDocuments.R' 'exportFunctions.R'\n'exportTemplateDocx.R' 'formattingHelpers.R' 'run_dta_app.R'\n'validationFunctions.R' 'zzz.R'",
+        "Collate": "'00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R' 'importConversion.R'\n'DTADataSet-class.R' 'DTADataSetTabular-class.R'\n'validationReporting.R' 'DTADataSetFile-class.R'\n'DTAFile-class.R' 'DTAFileTabular-class.R'\n'DTAFileCSV-class.R' 'DTAFileDelim-class.R'\n'DTAFileTSV-class.R' 'DTAMetaData-class.R'\n'DTAMetaData-helpers.R' 'DTARule-class.R'\n'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R' 'DTARuleGroupCondition-class.R'\n'columnSpecChecks.R' 'documentBuilders.R' 'evaluateRules.R'\n'exportDocuments.R' 'exportFunctions.R' 'exportTemplateDocx.R'\n'formattingHelpers.R' 'run_dta_app.R' 'streamingValidation.R'\n'validationFunctions.R' 'zzz.R'",
         "Config/roxygen2/version": "8.0.0",
         "RemoteType": "github",
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "v0.12.1",
-        "RemoteSha": "12535ab40151251ccf84d0524c4c432e8826c062",
+        "RemoteRef": "v0.17.0",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "v0.12.1",
-        "GithubSHA1": "12535ab40151251ccf84d0524c4c432e8826c062",
+        "GithubRef": "v0.17.0",
         "NeedsCompilation": "no",
-        "Packaged": "2026-08-03 12:37:01 UTC; schwarz8",
+        "Packaged": "2026-08-14 12:37:01 UTC; schwarz8",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]",
-        "Built": "R 4.5.1; ; 2026-08-03 12:37:06 UTC; windows"
+        "Built": "R 4.5.1; ; 2026-08-14 12:37:06 UTC; windows"
       }
     },
     "R.methodsS3": {
@@ -3113,20 +3111,26 @@
     }
   },
   "files": {
-    "app.R": {
-      "checksum": "df2b7079ec4febea7dce495ad78f3717"
-    },
     "R/template_core.R": {
-      "checksum": "32a44cc1edb577776f45561231cd3f24"
+      "checksum": "996c47f79864e81826bc57b3402c1ae4"
     },
     "R/theme.R": {
-      "checksum": "53cad38311478db800db5b49a952b7c9"
+      "checksum": "ded005836ea1dc832791b67486c3a5e7"
+    },
+    "R/ui_components.R": {
+      "checksum": "755a98abcfecb3b29179d03285da7d91"
     },
     "R/utils_dta.R": {
-      "checksum": "3e62c47d5d0372f45e3cdd57bd74a134"
+      "checksum": "71274bcc345b2c365a395927a979223b"
     },
     "R/utils_export.R": {
-      "checksum": "499b14632d243e934887112dce691920"
+      "checksum": "cb019d396e88a149968e9ec549bea956"
+    },
+    "VERSION": {
+      "checksum": "07de42e32bc52bd26c47f87d1122bf76"
+    },
+    "app.R": {
+      "checksum": "293849fee4d657366056ad66b22d11e0"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

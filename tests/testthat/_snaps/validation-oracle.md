@@ -6,7 +6,7 @@
         "names": {
           "type": "character",
           "attributes": {},
-          "value": ["case", "ok", "schema_valid", "rules_valid", "import_valid", "n_schema_errors", "n_rule_errors", "n_import_errors"]
+          "value": ["case", "ok", "columnspec_valid", "rules_valid", "import_valid", "n_columnspec_errors", "n_rule_errors", "n_import_errors"]
         },
         "row.names": {
           "type": "integer",
@@ -23,7 +23,7 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["clean", "schema_required", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
+          "value": ["clean", "columnspec_required", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
         },
         {
           "type": "logical",
@@ -88,12 +88,12 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema_required", "schema_required", "schema_type", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
+          "value": ["columnspec_required", "columnspec_required", "columnspec_type", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
         },
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "rule", "rule", "rule", "rule", "schema", "schema", "schema", "rule", "import", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "import"]
+          "value": ["columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "rule", "rule", "rule", "rule", "columnspec", "columnspec", "columnspec", "rule", "import", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "import"]
         },
         {
           "type": "character",
@@ -143,12 +143,12 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema_required", "schema_required", "schema_type", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
+          "value": ["columnspec_required", "columnspec_required", "columnspec_type", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "import_unconvertible", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes", "all_axes"]
         },
         {
           "type": "character",
           "attributes": {},
-          "value": ["schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "rule", "rule", "rule", "rule", "schema", "schema", "schema", "rule", "import", "schema", "schema", "schema", "schema", "schema", "rule", "rule", "import"]
+          "value": ["columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "rule", "rule", "rule", "rule", "columnspec", "columnspec", "columnspec", "rule", "import", "columnspec", "columnspec", "columnspec", "columnspec", "columnspec", "rule", "rule", "import"]
         },
         {
           "type": "character",
@@ -173,7 +173,7 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["must have required property 'MISSING'", "must have required property 'MISSING'", "must be number", "must be number", "must NOT have more than 4 characters", "must NOT have more than 5 characters", "must be equal to one of the allowed values", "must be equal to constant", "must match pattern \"^[A-Z]{3}[0-9]{3}$\"", "must be string", "Rule 'age_range' violated: 2 rows where AGE not in range [18, 70]", "Rule 'subj_visit' violated: 1 duplicate row found when selecting column(s): SUBJ, VISIT", "Rule 'k_unique' violated: 1 duplicate row found when selecting column(s): K", "Rule 'adult_status' violated: 1 rows failed the THEN conditions after meeting the IF conditions.", "Rule 'grp_exclusive' failed: 1 grouped constraint violation detected. Constraint 'constraint_1' failed: 'failed' (scope=any; rows=1) and 'reported' (scope=any; rows=2) are both TRUE, but mutually_exclusive requires they cannot both hold. [SUBJ=A]", "Rule 'grp_requires' failed: 1 grouped constraint violation detected. Constraint 'constraint_1' failed: IF condition 'failed' (scope=any; rows=1) is TRUE, but THEN condition 'not_done' (scope=any) is not satisfied (no row in the group satisfied 'not_done' (rows with TRUE=none)). [SUBJ=A]", "must be number,null", "must be number,null", "must be number,null", "Rule 'val_range' violated: 1 rows where VAL not in range [0, 100]", "value 'abc' in column 'VAL' cannot be represented as declared type 'SAS Num' (not_convertible); imported as NA", "must be number,null", "must be equal to one of the allowed values", "must be number,null", "must NOT have more than 4 characters", "must be number,null", "Rule 'age_range' violated: 2 rows where AGE not in range [18, 70]", "Rule 'id_unique' violated: 1 duplicate row found when selecting column(s): ID", "value 'abc' in column 'AGE' cannot be represented as declared type 'SAS Num' (not_convertible); imported as NA"]
+          "value": ["must have required property 'MISSING'", "must have required property 'MISSING'", "must be number", "must be number", "must NOT have more than 4 characters", "must NOT have more than 5 characters", "must be equal to one of the allowed values", "must be equal to constant", "must match pattern \"^[A-Z]{3}[0-9]{3}$\"", "must be string", "Rule 'age_range' violated: 2 rows where AGE not in range [18, 70]", "Rule 'subj_visit' violated: 1 duplicate row found when selecting column(s): SUBJ, VISIT", "Rule 'k_unique' violated: 1 duplicate row found when selecting column(s): K", "Rule 'adult_status' violated: 1 rows failed the THEN conditions after meeting the IF conditions.", "Rule 'grp_exclusive': 1 group constraint violation found across 1 group. In group [SUBJ=A]: \"failed\" and \"reported\" must not both occur, but both were found (rows matching \"failed\": 1; rows matching \"reported\": 2).", "Rule 'grp_requires': 1 group constraint violation found across 1 group. In group [SUBJ=A]: when \"failed\" occurs (rows: 1), \"not_done\" must also hold, but it does not (no row in the group satisfies \"not_done\").", "must be number,null", "must be number,null", "must be number,null", "Rule 'val_range' violated: 1 rows where VAL not in range [0, 100]", "value 'abc' in column 'VAL' cannot be represented as declared type 'SAS Num' (not_convertible); imported as NA", "must be number,null", "must be equal to one of the allowed values", "must be number,null", "must NOT have more than 4 characters", "must be number,null", "Rule 'age_range' violated: 2 rows where AGE not in range [18, 70]", "Rule 'id_unique' violated: 1 duplicate row found when selecting column(s): ID", "value 'abc' in column 'AGE' cannot be represented as declared type 'SAS Num' (not_convertible); imported as NA"]
         }
       ]
     }
@@ -186,7 +186,7 @@
         "names": {
           "type": "character",
           "attributes": {},
-          "value": ["case", "read_ok", "ok", "schema_valid", "rules_valid", "import_valid", "n_schema_errors", "n_rule_errors", "n_import_errors"]
+          "value": ["case", "read_ok", "ok", "columnspec_valid", "rules_valid", "import_valid", "n_columnspec_errors", "n_rule_errors", "n_import_errors"]
         },
         "row.names": {
           "type": "integer",
@@ -203,7 +203,7 @@
         {
           "type": "character",
           "attributes": {},
-          "value": ["clean", "schema_required", "schema_type", "schema_maxlength", "schema_maxlength_unicode", "schema_enum", "schema_const", "schema_pattern", "schema_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
+          "value": ["clean", "columnspec_required", "columnspec_type", "columnspec_maxlength", "columnspec_maxlength_unicode", "columnspec_enum", "columnspec_const", "columnspec_pattern", "columnspec_nullable", "rule_range", "rule_unique", "rule_unique_na", "rule_condition", "rule_group_exclusive", "rule_group_requires", "import_unconvertible", "all_axes"]
         },
         {
           "type": "logical",

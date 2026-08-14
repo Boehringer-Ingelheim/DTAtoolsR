@@ -3,33 +3,143 @@
 #' @keywords internal
 #' @importFrom officer fp_border fp_par fp_text
 
-# Color scheme constants
+# Color scheme constants.
+#
+# These are the Boehringer Ingelheim brand palette, kept deliberately in step
+# with the Shiny app's own theme (inst/shiny/dta_app/R/theme.R, the `BI` list),
+# so a DTA exported from the app looks like the app it came from. The bundled
+# reference template (inst/extdata/templates/dta_numbered_template.docx) is
+# themed to match: its heading styles carry the same deep green, so Word's
+# own heading colour cannot reintroduce a second, unrelated hue.
 THEME_COLORS <- list(
-  primary_dark = "#0066CC", # Professional dark blue
-  primary_light = "#E6F0FF", # Light blue background
-  accent = "#003366", # Darker blue for emphasis
-  gray_dark = "#333333", # Dark gray for text
-  gray_light = "#F5F5F5", # Light gray for alternating rows
-  gray_border = "#CCCCCC", # Border gray
+  primary_dark = "#00625B", # BI deep green - headings, title, table header fill
+  primary = "#00A886", # BI accent green - rules, secondary emphasis
+  primary_light = "#E6F1EF", # Tint of the brand green - subtle fills
+  accent = "#00625B", # Emphasis text (kept == primary_dark for congruence)
+  gray_dark = "#1A2B2A", # BI ink - body text
+  gray_mid = "#5B6B6A", # BI grey - secondary/muted text
+  gray_light = "#F4F7F6", # Zebra striping
+  gray_border = "#CDD5D4", # Hairline rules
   white = "#FFFFFF",
-  red_error = "#CC0000" # For attention items
+  red_error = "#C0392B" # BI status red, for attention items
 )
 
-# Font configuration
+# Font configuration.
+#
+# The template's theme sets majorFont (headings) to Calibri and minorFont
+# (body) to Cambria, and flextable defaults to Arial -- three families in one
+# document. We standardise on the heading family so headings, body text and
+# tables agree.
 FONTS <- list(
   primary = "Calibri",
-  monospace = "Courier New"
+  monospace = "Consolas"
 )
 
 FONT_SIZES <- list(
-  title = 28,
-  heading1 = 18,
-  heading2 = 14,
+  title = 26,
+  subtitle = 13,
+  heading1 = 16,
+  heading2 = 13,
   heading3 = 12,
-  body = 11,
-  small = 10,
-  footer = 9
+  body = 10,
+  table_header = 9,
+  table_body = 9,
+  small = 9,
+  footer = 8,
+  code = 6
 )
+
+#' A run format in the house style. Single source of truth for every explicitly
+#' formatted run the built-in export draws, so font family and colour cannot
+#' drift between call sites.
+#' @keywords internal
+.house_fp_text <- function(size = FONT_SIZES$body,
+                           bold = FALSE,
+                           italic = FALSE,
+                           color = THEME_COLORS$gray_dark,
+                           font = FONTS$primary) {
+  officer::fp_text(
+    font.family = font,
+    font.size = size,
+    bold = bold,
+    italic = italic,
+    color = color
+  )
+}
+
+#' Add a body paragraph in the house style.
+#'
+#' `officer::body_add_par(style = "Normal")` inherits the template's Normal
+#' style, which resolves to the theme's minorFont (Cambria) -- a serif face that
+#' clashes with the Calibri headings and the tables. Routing body text through
+#' here keeps one family throughout.
+#' @keywords internal
+.add_body_par <- function(doc, text,
+                          size = FONT_SIZES$body,
+                          bold = FALSE,
+                          italic = FALSE,
+                          color = THEME_COLORS$gray_dark,
+                          align = "left") {
+  text <- if (is.null(text) || length(text) == 0) "" else as.character(text)[1]
+  if (is.na(text)) text <- ""
+
+  officer::body_add_fpar(
+    doc,
+    officer::fpar(
+      officer::ftext(text, .house_fp_text(size = size, bold = bold, italic = italic, color = color)),
+      fp_p = officer::fp_par(text.align = align, padding.bottom = 2)
+    )
+  )
+}
+
+#' Add an empty spacer paragraph.
+#' @keywords internal
+.add_spacer <- function(doc) {
+  officer::body_add_par(doc, "", style = "Normal")
+}
+
+#' The house style for every flextable in the built-in export.
+#'
+#' Applying one function to all of them is the point: before this, each table
+#' set its own font size, header fill and padding, so the document showed
+#' several table designs at once.
+#' @param ft A flextable.
+#' @param center_cols Integer column indices to centre; all others are left
+#'   aligned.
+#' @keywords internal
+.style_table <- function(ft, center_cols = integer(0)) {
+  hairline <- officer::fp_border(color = THEME_COLORS$gray_border, width = 0.5)
+
+  ft <- flextable::font(ft, fontname = FONTS$primary, part = "all")
+  ft <- flextable::fontsize(ft, size = FONT_SIZES$table_body, part = "body")
+  ft <- flextable::fontsize(ft, size = FONT_SIZES$table_header, part = "header")
+  ft <- flextable::color(ft, color = THEME_COLORS$gray_dark, part = "body")
+  ft <- flextable::bg(ft, bg = THEME_COLORS$white, part = "body")
+  ft <- flextable::bg(ft, bg = THEME_COLORS$primary_dark, part = "header")
+  ft <- flextable::color(ft, color = THEME_COLORS$white, part = "header")
+  ft <- flextable::bold(ft, bold = TRUE, part = "header")
+
+  # Zebra striping on even body rows, for legibility on the wide tables.
+  body_rows <- nrow(ft$body$dataset)
+  if (!is.null(body_rows) && body_rows >= 2) {
+    even <- seq(2, body_rows, by = 2)
+    ft <- flextable::bg(ft, i = even, bg = THEME_COLORS$gray_light, part = "body")
+  }
+
+  ft <- flextable::border_remove(ft)
+  ft <- flextable::hline(ft, border = hairline, part = "body")
+  ft <- flextable::valign(ft, valign = "top", part = "all")
+  ft <- flextable::align(ft, align = "left", part = "all")
+  if (length(center_cols) > 0) {
+    ft <- flextable::align(ft, j = center_cols, align = "center", part = "all")
+  }
+  ft <- flextable::padding(ft,
+    padding.top = 3, padding.bottom = 3,
+    padding.left = 5, padding.right = 5, part = "all"
+  )
+
+  ft
+}
 
 #' @keywords internal
 .create_heading_style <- function(level = 1, color = THEME_COLORS$primary_dark) {
@@ -149,65 +259,162 @@ FONT_SIZES <- list(
   desc
 }
 
+#' Render one column's constraint sub-list ("COL = 'X'", "COL is empty/absent",
+#' ...) in plain language.
+#'
+#' Shared by every rule formatter that has to describe a condition, so a
+#' condition reads the same whether it appears in a `DTARuleColCondition` or as
+#' a named condition of a `DTARuleGroupCondition`.
+#' @keywords internal
+.format_column_constraint <- function(col, constraint) {
+  if (!is.list(constraint)) {
+    return(paste0("'", col, "' = '", constraint, "'"))
+  }
+  parts <- character(0)
+  for (op in names(constraint)) {
+    val <- constraint[[op]]
+    val_str <- if (is.logical(val)) {
+      if (isTRUE(val)) "(is present / non-empty)" else "(is absent / empty)"
+    } else if (is.character(val) || is.numeric(val)) {
+      if (length(val) > 1) {
+        paste0("one of (", paste(paste0("'", val, "'"), collapse = ", "), ")")
+      } else {
+        paste0("'", val, "'")
+      }
+    } else {
+      as.character(val)
+    }
+    part <- switch(op,
+      equals          = paste0("'", col, "' = ", val_str),
+      not_equals      = paste0("'", col, "' \u2260 ", val_str),
+      `in`            = paste0("'", col, "' is ", val_str),
+      not_in          = paste0("'", col, "' is NOT ", val_str),
+      empty           = if (isTRUE(val)) paste0("'", col, "' is empty/absent") else paste0("'", col, "' is present"),
+      greater_than    = paste0("'", col, "' > ", val_str),
+      less_than       = paste0("'", col, "' < ", val_str),
+      greater_equal   = paste0("'", col, "' \u2265 ", val_str),
+      less_equal      = paste0("'", col, "' \u2264 ", val_str),
+      min             = paste0("'", col, "' \u2265 ", val_str),
+      max             = paste0("'", col, "' \u2264 ", val_str),
+      paste0("'", col, "' ", op, " ", val_str)
+    )
+    parts <- c(parts, part)
+  }
+  paste(parts, collapse = " AND ")
+}
+
+#' Render a whole condition map (column -> constraint) as one clause.
+#' @keywords internal
+.format_condition_map <- function(map) {
+  if (is.null(map) || length(map) == 0) {
+    return("(no condition)")
+  }
+  paste(
+    vapply(
+      names(map),
+      function(col) .format_column_constraint(col, map[[col]]),
+      character(1)
+    ),
+    collapse = " AND "
+  )
+}
+
 #' @keywords internal
 .format_rule_description.DTARuleColCondition <- function(rule) {
   if (!is.null(rule@description) && nzchar(rule@description)) {
     return(rule@description)
   }
 
-  # Format a single condition element (column + constraint sub-list)
-  .fmt_constraint <- function(col, constraint) {
-    if (!is.list(constraint)) {
-      return(paste0("'", col, "' = '", constraint, "'"))
-    }
-    parts <- character(0)
-    for (op in names(constraint)) {
-      val <- constraint[[op]]
-      val_str <- if (is.logical(val)) {
-        if (isTRUE(val)) "(is present / non-empty)" else "(is absent / empty)"
-      } else if (is.character(val) || is.numeric(val)) {
-        if (length(val) > 1) {
-          paste0("one of (", paste(paste0("'", val, "'"), collapse = ", "), ")")
-        } else {
-          paste0("'", val, "'")
-        }
-      } else {
-        as.character(val)
-      }
-      part <- switch(op,
-        equals          = paste0("'", col, "' = ", val_str),
-        not_equals      = paste0("'", col, "' \u2260 ", val_str),
-        `in`            = paste0("'", col, "' is ", val_str),
-        not_in          = paste0("'", col, "' is NOT ", val_str),
-        empty           = if (isTRUE(val)) paste0("'", col, "' is empty/absent") else paste0("'", col, "' is present"),
-        greater_than    = paste0("'", col, "' > ", val_str),
-        less_than       = paste0("'", col, "' < ", val_str),
-        greater_equal   = paste0("'", col, "' \u2265 ", val_str),
-        less_equal      = paste0("'", col, "' \u2264 ", val_str),
-        min             = paste0("'", col, "' \u2265 ", val_str),
-        max             = paste0("'", col, "' \u2264 ", val_str),
-        paste0("'", col, "' ", op, " ", val_str)
-      )
-      parts <- c(parts, part)
-    }
-    paste(parts, collapse = " AND ")
-  }
-
-  # Build IF clause
-  if_parts <- character(0)
-  for (col in names(rule@condition)) {
-    if_parts <- c(if_parts, .fmt_constraint(col, rule@condition[[col]]))
-  }
-  if_str <- paste(if_parts, collapse = " AND ")
-
-  # Build THEN clause
-  then_parts <- character(0)
-  for (col in names(rule@then)) {
-    then_parts <- c(then_parts, .fmt_constraint(col, rule@then[[col]]))
-  }
-  then_str <- paste(then_parts, collapse = " AND ")
+  if_str <- .format_condition_map(rule@condition)
+  then_str <- .format_condition_map(rule@then)
 
   paste0("IF ", if_str, " \u2192 THEN ", then_str)
+}
+
+#' Describe a group-condition scope ("any"/"all") in words.
+#'
+#' The evaluator treats `any` as "at least one row of the group satisfies the
+#' condition" and `all` as "every row of the group satisfies it" (see
+#' `dta_group_scope_truth()`); the wording here has to match that, because a
+#' reader who mistakes one for the other misreads the whole rule.
+#' @keywords internal
+.format_group_scope <- function(scope, qualify = TRUE) {
+  base <- if (identical(scope, "all")) "every row" else "at least one row"
+  if (qualify) paste0("for ", base, " in the group") else base
+}
+
+#' Describe one group-condition constraint in plain language.
+#' @keywords internal
+.format_group_constraint <- function(constraint) {
+  ctype <- constraint$type %||% ""
+
+  if (identical(ctype, "mutually_exclusive")) {
+    return(paste0(
+      "\"", constraint$left, "\" (", .format_group_scope(constraint$left_scope %||% "any", qualify = FALSE),
+      ") and \"", constraint$right, "\" (", .format_group_scope(constraint$right_scope %||% "any", qualify = FALSE),
+      ") must not both occur in the same group."
+    ))
+  }
+
+  if (identical(ctype, "requires")) {
+    return(paste0(
+      "If \"", constraint[["if"]], "\" holds ",
+      .format_group_scope(constraint$if_scope %||% "any"),
+      ", then \"", constraint[["then"]], "\" must hold ",
+      .format_group_scope(constraint$then_scope %||% "any"), "."
+    ))
+  }
+
+  paste0("Constraint of type '", ctype, "'.")
+}
+
+#' @keywords internal
+.format_rule_description.DTARuleGroupCondition <- function(rule) {
+  quoted_cols <- paste0("'", rule@group_by, "'")
+  group_str <- if (length(quoted_cols) > 1) {
+    paste0(
+      paste(utils::head(quoted_cols, -1), collapse = ", "),
+      " and ", utils::tail(quoted_cols, 1)
+    )
+  } else {
+    quoted_cols
+  }
+
+  lines <- character(0)
+
+  # An author-written description is the summary a reader wants first; the
+  # mechanical expansion below it is what was missing.
+  if (!is.null(rule@description) && nzchar(rule@description)) {
+    lines <- c(lines, rule@description)
+  }
+
+  lines <- c(lines, paste0(
+    "Rows are grouped by ", group_str,
+    ", and the following is checked within each group."
+  ))
+
+  cond_names <- names(rule@conditions)
+  if (length(cond_names) > 0) {
+    lines <- c(lines, "Conditions:")
+    for (nm in cond_names) {
+      lines <- c(lines, paste0(
+        "  \u2022 \"", nm, "\": a row where ", .format_condition_map(rule@conditions[[nm]]), "."
+      ))
+    }
+  }
+
+  constraints <- rule@constraints %||% list()
+  if (length(constraints) > 0) {
+    lines <- c(lines, if (length(constraints) > 1) "Requirements:" else "Requirement:")
+    for (cst in constraints) {
+      lines <- c(lines, paste0("  \u2022 ", .format_group_constraint(cst)))
+    }
+  }
+
+  # Newlines are safe in both exports: flextable turns them into Word line
+  # breaks, and .df_to_md_table() rewrites them to <br> before building the
+  # pipe table.
+  paste(lines, collapse = "\n")
 }
 
 #' @keywords internal
@@ -231,6 +438,11 @@ translate_rule_to_human <- function(rule) {
         .format_rule_description.DTARuleColRange(rule)
       } else if (inherits(rule, "DTAtools::DTARuleColUnique")) {
         .format_rule_description.DTARuleColUnique(rule)
+      } else if (inherits(rule, "DTAtools::DTARuleGroupCondition")) {
+        # Must be tested before DTARuleColCondition: the two are unrelated
+        # classes, but keeping the group check first documents that a group
+        # rule is never to fall through to the single-row wording.
+        .format_rule_description.DTARuleGroupCondition(rule)
       } else if (inherits(rule, "DTAtools::DTARuleColCondition")) {
         .format_rule_description.DTARuleColCondition(rule)
       } else {
@@ -588,8 +800,18 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     return(character(0))
   }
 
-  # Escape pipe characters so they don't break the table layout
-  df[] <- lapply(df, function(col) gsub("|", "\\|", as.character(col), fixed = TRUE))
+  # A pipe table is line-based, so a cell must survive as one line. Escaping the
+  # pipe alone was not enough: a description written as a YAML block scalar
+  # carries real newlines, and each one split the row in two -- the renderer
+  # then read the tail as a fresh table row, misattributing its text to the
+  # first column and dropping whatever followed the last pipe. Newlines become
+  # <br>, which GFM renders as a line break inside the cell.
+  df[] <- lapply(df, function(col) {
+    text <- as.character(col)
+    text <- gsub("|", "\\|", text, fixed = TRUE)
+    text <- gsub("\r\n|\r|\n", "<br>", text)
+    text
+  })
 
   header <- paste0("| ", paste(names(df), collapse = " | "), " |")
   sep <- paste0("|", paste(rep("---", ncol(df)), collapse = "|"), "|")

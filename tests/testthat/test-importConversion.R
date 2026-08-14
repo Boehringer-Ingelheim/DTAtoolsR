@@ -144,8 +144,8 @@ test_that("an Int column narrows to integer only when that is lossless", {
   expect_equal(whole$table$N, c(1L, 2L, NA))
 
   # Rounding a fractional value into an integer column would discard the
-  # fraction and hide the `type: integer` schema error that reports it, so the
-  # value stays a double and the schema axis keeps its job.
+  # fraction and hide the `type: integer` column spec error that reports it, so the
+  # value stays a double and the column spec axis keeps its job.
   fractional <- dta_coerce_table_to_specs(
     data.frame(N = c("1", "2.5"), stringsAsFactors = FALSE),
     specs
@@ -417,7 +417,7 @@ test_that("a declared Char id keeps its leading zeros through load_file (CSV)", 
   out <- dta_load_id_fixture(DTAFileCSV("char_ids.csv"), "char_ids.csv", ",")
 
   expect_identical(out$table$SUBJID, c("007", "008"))
-  # A declared numeric column is still a number, so range rules and schema
+  # A declared numeric column is still a number, so range rules and column specs
   # validation see what they saw before.
   expect_true(is.numeric(out$table$AGE))
   expect_equal(out$table$AGE, c(30L, 41L))

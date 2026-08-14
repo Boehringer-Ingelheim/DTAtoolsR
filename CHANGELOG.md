@@ -4,7 +4,324 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.1] - 2026-08-14
+
+### Added
+
+- **`load_file()` can now keep a file lazy instead of reading it into memory.**
+  A new `stream` argument decides how the table is held: `"never"` reads the
+  whole file as an Arrow `Table` (the previous, and still the usual, behaviour),
+  `"always"` keeps it as an Arrow `Dataset` that `check()` scans in batches, and
+  `"auto"` (the default) picks `"always"` only for files above
+  `getOption("DTAtools.stream_threshold")`, 512 MB by default. `TRUE`/`FALSE`
+  work as aliases for `"always"`/`"never"`, and the session-wide default can be
+  set with `options(DTAtools.stream = ...)`.
+
+  This makes a file larger than memory validatable through the ordinary object
+  model. Previously the streaming validator was reachable only via
+  `validate_file_stream()`, which bypasses the `DTA` object entirely.
+
+  Both paths produce the same verdict and the same error counts. They differ in
+  *when* import errors are found: the in-memory path reports them during
+  `load_file()`, the streaming path during `check()`. After a streaming load,
+  the dataset's `@import_issues` is therefore empty until `check()` has run.
+
+- **`open_file()`**, the lazy counterpart of `read_file()`, opening a file as an
+  Arrow `Dataset` using the same name checks and the same spec-driven column
+  typing. Implemented for `DTAFileCSV`, `DTAFileTSV` and `DTAFileDelim`; a
+  handler without a lazy opener aborts with a message pointing at
+  `stream = "never"`.
+
+- **`check()` gained `batch_rows` and `max_errors`**, tuning the batch size and
+  the cap on retained per-cell error detail when scanning a streamed table.
+  These reach the scanner for the first time -- previously the streaming
+  validator's own defaults were unreachable from `check()`. Counts and the
+  verdict are unaffected by `max_errors`; only how much failure detail is kept
+  is. `batch_rows` defaults to
+  `getOption("DTAtools.stream_batch_rows", 131072L)`.
+
+- **Shiny app: a "Load large files without reading them into memory" toggle** on
+  the Datasets page, applying to subsequent uploads in that dataset.
+
+- **Standalone HTML validation report.** `write_validation_report()` renders a
+  self-contained `.html` file (no external assets) summarizing validation
+  results for a `DTA` object: a pass/fail overview per dataset/target, and a
+  sortable, filterable table of every validation message with click-to-inspect
+  detail, matching the look of the Shiny app's validation-messages tab.
+  Repeated identical messages (e.g. the same `required property 'HEIGHT'`
+  violation on many rows) are capped at `max_repeats` (default `5`) in the
+  default view, with a "show all" toggle in the file itself so no data is
+  lost. The Shiny app's validation-messages dock gained a "Report" download
+  button alongside the existing CSV/TSV/XLSX exports.
+
+### Changed
+
+- **The Shiny export dialog now defaults to "Word Document" with "Embed YAML
+  specification at end of document" ticked**, the combination that produces the
+  hand-over document most users want without any extra clicks.
+
+- **The built-in DOCX export was redesigned to a single, congruent house
+  style.** The document previously mixed three font families (the template's
+  Cambria body style, Calibri headings, and flextable's Arial default) and
+  several unrelated blues. All package-emitted text and every table now uses
+  one family and the Boehringer Ingelheim brand palette — the same green family
+  the Shiny app is themed with — with a single brand-green table header,
+  zebra-striped body rows and hairline rules instead of per-table ad-hoc
+  colours, sizes and padding. The bundled reference template
+  (`inst/extdata/templates/dta_numbered_template.docx`) was re-themed to match,
+  so Word's own heading styles render in the brand green rather than black.
+
+- **The supplier is now introduced before the receiver** in both the Word and
+  the Markdown export, following the direction the data actually flows.
+
+- **Exported document file names now carry the document version and the export
+  time**, between the title and the timestamp
+  (`Clinical_Data_Specification-v0.2-2026-08-14_14-07.docx`). The version
+  segment is omitted when the DTA has no version set. The Shiny export modal's
+  filename preview and the two export branches share one helper, so the preview
+  cannot disagree with the file that is downloaded.
+
+- **Signatures now open the DOCX export.** "Approval & Signatures" is the first
+  chapter after the top-level heading in `write_dta()`, and comes directly
+  after the title in `write_dataset_metadata()`, rather than being buried at
+  the end of the "Process Information" chapter. Consequently "Process
+  Information" is rendered only when there is genuine process content
+  (transmission details, error handling, or authorized-for-corrections
+  entries).
+
+- **The Shiny app's "Export PDF" button is now called "Export DTA".** The button
+  opens an "Export Document" modal whose formats are Markdown and Word, with
+  PDF only an option within the Markdown branch, so the old label named the one
+  thing the button does not do directly.
+
+- **Built-in DOCX export puts the dataset column and validation rules tables on
+  landscape pages.** The "Column Specifications" table is 8.4 in wide and did
+  not fit the ~6.3 in text column of an A4 portrait page, so each dataset's
+  table block — the column table together with the validation rules table that
+  follows it — is now emitted in its own landscape section. The rest of the
+  document (title page, metadata, dataset headings, embedded YAML, signatures
+  and footer) stays portrait. This applies to both `write_dta()` and
+  `write_dataset_metadata()`. The landscape pages reuse the page size and
+  margins of the document itself rather than being forced to A4, and the
+  section break is `nextPage`, so no blank filler pages are inserted.
+
+### Removed
+
+- **Filler signature lines and the signatory footnote in the DOCX export.** The
+  per-contact "Signature: ____ Date: ____" underlines in the receiver/supplier
+  sections, the generic "Approved by: / Signature: ____" fallback shown when no
+  signatory was defined, and the "Note: signatories listed above are contacts
+  marked as authorized signers" explanation have all been dropped. The single
+  approval table is the one place to sign; when no contact is marked
+  `signature = TRUE` the chapter is omitted entirely rather than padded with an
+  anonymous underline.
+
+### Fixed
+
+- **`n_columnspec_errors` is now always an integer.** In-memory validation
+  reported it as a double when the count was zero and an integer otherwise,
+  because one branch used a bare `0` where the other used `nrow()`. Every other
+  count in the package is an integer, and the streaming path already reported
+  one, so `identical()` comparisons between the two paths' results failed on
+  storage type alone.
+
+- **Column names are now normalized identically on the eager and lazy read
+  paths.** A header with surrounding quotes or whitespace (`" AGE "`) was
+  trimmed when the file was read into memory but left as-is when opened as a
+  lazy dataset, so the same file could match the column specification on one
+  path and fail on the other. The lazy opener supplies cleaned names when the
+  dataset is opened, since an Arrow `Dataset` has no `names<-`.
+
+- **Documentation site: the "Large Files" navigation link went to the wrong
+  section.** Two sections shared `id="section-4-7"`, so the link resolved to the
+  first of them (`group_condition Rule`) and the streaming section could not be
+  reached from the sidebar at all.
+
+- **The Shiny export dialog announced itself twice.** The modal's own title bar
+  and a heading at the top of its body both read "Export Document", one directly
+  above the other. The heading is gone; the dialog title stands alone, as it
+  does in every other modal in the app.
+
+- **`group_condition` rules are now described in full in the exported
+  documents.** They fell through to the default rule formatter, which printed
+  either the author's one-line description or
+  `"Rule type 'group_condition' ... no description available"` — the grouping
+  columns, the named conditions and the constraints between them never reached
+  the document at all. The rules table now spells out which columns rows are
+  grouped by, what each named condition means in terms of its columns, and what
+  each constraint requires, including the difference between the `any` and
+  `all` scopes ("for at least one row in the group" vs "for every row in the
+  group"). An author-written description is kept as the leading summary rather
+  than replaced.
+
+## [0.17.0] - 2026-08-14
+
+### Changed
+
+- **Group condition rule violation messages are now human-readable.**
+  The technical internal format (`"Constraint 'X' failed: ... scope=any; rows=..."`)
+  has been replaced with plain-English descriptions:
+  - `mutually_exclusive`: `In group [A=1, B=2]: "cond1" and "cond2" must not both occur, but both were found (rows matching "cond1": 1; rows matching "cond2": 3).`
+  - `requires`: `In group [A=1]: when "cond1" occurs (rows: 1), "cond2" must also hold, but it does not (no row in the group satisfies "cond2").`
+  The group key is now embedded directly in each violation message. Users see what the rule checks, which group failed, and which rows are involved — without needing to know about scopes or constraint IDs.
+
+- **Shiny app inspect view for group condition rules shows all values involved.**
+  The inspect modal now displays: (1) a violation breakdown table listing each
+  failing group, the constraint, the message, and all involved row numbers; and
+  (2) a second table with the actual data values for all offending rows (all
+  relevant columns: group-by columns plus all columns referenced in conditions).
+  Previously the modal showed at most 10 rows and only `SUBJECT_ID`/`VISIT`.
+
+- **The validation axis formerly called "schema" is now called "columnspec".**
+  The name was inherited from the JSON Schema validator that used to evaluate
+  it. That validator is gone — the axis is evaluated directly against the
+  `DTAColumnSpec` objects a specification declares — so the name now says what
+  the axis actually checks. A violation is a *column spec* violation, and the
+  other axis is *rules*.
+
+  There is no compatibility shim; the old names are simply gone:
+
+  | was | is |
+  | --- | --- |
+  | `n_schema_errors` | `n_columnspec_errors` |
+  | `schema_valid` | `columnspec_valid` |
+  | `schema_errors` | `columnspec_errors` |
+  | `schema_version` | `result_version` |
+  | `source == "schema"` | `source == "columnspec"` |
+  | the `schema` column of an error frame | the `columnspec` column |
+  | `apply_schema_rules()` | `apply_rules()` |
+  | `get_arrow_schema_type()` | `get_arrow_type()` |
+
+  `as_json_schema()`, `as_json_schema_type()` and `as_json_schema_length()`
+  keep their names: they serialise to JSON Schema the standard, and still do.
+
+### Added
+
+- **Gzipped input files are supported and tested.** Arrow already decompressed
+  `.gz` transparently on read; what was missing is that a specification
+  declaring `data.csv` did not recognise `data.csv.gz` as the file it asked
+  for. Compression is a transport detail, not part of the data's identity, so
+  `matches_filename()` now accepts the compressed form — for literal filenames
+  and for anchored patterns alike. Validation results are identical either way,
+  including row numbers under batched streaming. `inst/extdata` ships
+  `clinical_data2.csv.gz` as a worked example.
+
+### Fixed
+
+- **A conditional rule no longer waves through a row whose IF clause could not
+  be evaluated.** `AGE = "ninety-five"` under `condition: {AGE: {greater: 18}}`
+  made the IF mask `NA`, which `sum(na.rm = TRUE)` then discarded — so a row
+  whose THEN clause definitively failed was reported as passing. An
+  unconvertible value now keeps the row in scope; a *missing* one still means
+  the rule does not apply. The materialising path, the streaming path and
+  `inspect()`'s row lookup now share one definition of a violation.
+
+- **`inspect()` reports the rows a `group_condition` rule failed on.** The row
+  lookup had no branch for that class and returned nothing, so a rule that
+  unambiguously failed showed `failing_row_count = 0`.
+
+- **Streamed `n_import_errors` no longer double-counts.** A cell flagged both by
+  import typing and by a rule reading the column numerically is one error, not
+  two; the streaming path summed the raw per-axis totals and could report more
+  import errors than `import_errors` had rows, disagreeing with the
+  materialising path on the same input.
+
+- **`fail_fast` now stops on a grouped constraint.** Its decision read
+  `state$count`, which a grouped rule never increments, so a file whose first
+  rows already broke a `mutually_exclusive` constraint was still scanned to the
+  end. Unsupported and not-applicable rules trip it too. Constraints a later
+  batch could still rescue — `requires`, and any `all`-scoped side — are
+  deliberately left to the end of the scan.
+
+- **A truncated grouped-violation row list says so.** The streaming path caps
+  retained row numbers at ten to stay memory-bounded while the materialising
+  path keeps them all; both now carry `rows_truncated`, so ten rows can no
+  longer be mistaken for all of them.
+
+- **The Shiny app's document export no longer collides between sessions.** The
+  export wrote to a path built from the document title and the date, so two
+  untitled exports on the same day shared one file — and because the browser
+  fetches it on a later request, whichever session wrote last was the one both
+  downloads received. Each export now writes to its own `tempfile()`; the name
+  the browser saves it under is unchanged.
+
+- **A multi-line description no longer corrupts a Markdown report.** Pipe tables
+  are line-based, so a newline inside a cell split the row and the renderer read
+  the tail as a fabricated extra row, dropping the text after the last pipe.
+  Newlines are now folded to `<br>`.
+
+- **A duplicated column `id` in a specification is rejected.** It was accepted
+  silently, after which `colspec()` saw only the first definition while the
+  column spec axis evaluated the table column against both.
+
+- `DTAColumnSpecCollection`'s validator no longer computes an error message and
+  discards it, which made a bad `@columns` assignment fail with an unrelated
+  R-level error instead of the message the code appears to produce.
+
+- **Permitted values a YAML parser turned into numbers now warn.** `values:
+  [1.10, 2.00]` written unquoted arrives as `1.1` and `2`; a text column
+  compares them as text, so data written `1.10` failed the check for a reason
+  nothing in the output explained. The original spelling is gone by the time
+  the parser hands the list over and cannot be recovered, so importing such a
+  specification now says which column is affected and to quote the values.
+
+- **Template-based Word export now preserves multiline placeholder formatting.**
+  User-supplied template variables can now carry line breaks and tabs into the
+  generated `.docx` as real Word line/tab elements instead of collapsed
+  one-line text. Markdown-like placeholder content is now de-marked on insert
+  (for example `##` headings, `**bold**`, and `-` list markers), so dataset
+  blocks no longer render with raw markdown syntax in Word templates. Dense
+  one-line column/rule bullets are expanded into structured multi-line fields
+  (`Description`, `Type`, `Nullable`, `Length`, `Values`) for easier reading in
+  custom templates, rendered as nested list items instead of literal markdown
+  markers. Nested lists now use depth-specific symbols and stronger indentation
+  (top-level `•`, sub-level `◦`, sub-sub-level `▪`) for visual clarity. Rules
+  now render as list items without a `Description` label, and
+  `group_condition` rules are expanded with an explicit premise-oriented
+  breakdown (`Grouped by`, `Conditions`, `Constraints`, `Premise`, `Context`).
+  When the referenced `group_condition` rule object is present in the DTA, the
+  custom-template output now also includes explicit condition and constraint
+  definitions (condition expressions and requires/mutually-exclusive links with
+  scopes), so readers can see how the grouped rule works. Count-only lines for
+  conditions/constraints are no longer shown. Template metadata placeholders now
+  include richer contact/signatory/process details (full contact fields and
+  signature lines) instead of names-only contact strings.
+  YAML
+  placeholders intentionally keep raw YAML content unchanged (including `-`
+  list markers), and pure YAML placeholder runs (for example a paragraph
+  containing only `{YAML_BLOCK}`) are rendered in a small monospace run style
+  (Consolas, 6pt), matching the built-in embedded YAML section appearance.
+
+## [0.16.1] - 2026-08-14
+
+### Security
+
+- **The Shiny app's "Restore previous session" no longer exposes one user's
+  work to another.** The autosaved workspace was written to a single fixed path
+  in `tempdir()`. `tempdir()` is per R *process*, not per Shiny session, so
+  every browser session served by the same worker — the normal arrangement
+  under Shiny Server, Posit Connect, or a shared `runApp()` — read and wrote
+  the same file. One user's spec, metadata, upload paths and collected table
+  contents were offered to the next visitor behind the restore button, and each
+  session silently clobbered the other's saved state.
+
+  The slot is now keyed to a 128-bit random id the browser keeps in
+  `localStorage`, and the payload carries that id and is rejected on restore if
+  it does not match. The id is re-validated server-side as 32 lowercase hex
+  characters before it is used to build a path, so a hostile value on the
+  websocket cannot steer the write. Recovery after a reload or a crash still
+  works, because the id is stable for a browser profile — unlike `session$token`,
+  which is minted afresh on every page load and would have made the feature
+  unreachable.
+
+- **The Shiny app's custom Word template picker no longer resolves a name
+  outside the bundled templates directory.** `get_template_path()` pasted
+  `input$export_template_select` straight into a path. A Shiny client is not
+  bound by the choices offered in a `selectInput` and can put any string on the
+  websocket, so `"../.."` or an absolute path escaped
+  `inst/extdata/templates`; the file was then rendered by
+  `export_with_template()` and returned to the client as a download. The name
+  must now match one of the bundled templates exactly.
 
 ## [0.16.0] - 2026-08-14
 
@@ -87,7 +404,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Schema validation no longer serialises the table to JSON and runs a JSON
+- Column spec validation no longer serialises the table to JSON and runs a JSON
   Schema validator over it. Each column's values are now checked directly
   against the constraints its spec declares. Validation output is unchanged:
   the same keywords (`type`, `maxLength`, `enum`, `const`, `pattern`,
@@ -95,7 +412,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   same summarised error frame. A golden-oracle test suite recorded against the
   previous implementation reports no differences.
 
-  On a 1,000,000-row table the schema axis went from being unmeasurably slow at
+  On a 1,000,000-row table the column spec axis went from being unmeasurably slow at
   that size to 8.7 seconds, and throughput rose from 4.5 MB/s to 17.6 MB/s.
   The axis is still the dominant cost of validation.
 
@@ -155,7 +472,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- New schema rule type `group_condition` for grouped cross-row validation.
+- New rule type `group_condition` for grouped cross-row validation.
   Rules define `group_by`, named `conditions`, and `constraints` so checks like
   mutually exclusive statuses or implication logic can be enforced within each
   group. Constraint aliases are supported: `not_both` maps to
@@ -313,7 +630,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- Validation now has a third axis. Alongside schema and rule errors, an **import
+- Validation now has a third axis. Alongside column spec and rule errors, an **import
   error** records a value that cannot be represented in its declared type. The
   value becomes `NA`, the original text is retained, and any import error makes
   validation fail. Surfaced through `validation_status()`, `results()`,
@@ -347,7 +664,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   all five platforms and fails fast if no backend is present, so that test
   cannot silently start skipping.
 - `inst/extdata/clinical_data_error_import.csv`, an example file isolating the
-  import-error axis the way the existing fixtures isolate schema and rule
+  import-error axis the way the existing fixtures isolate column spec and rule
   errors. It deliberately includes a genuinely blank cell alongside the
   unconvertible ones, because missing and unconvertible are different defects
   and only the latter is an import error.
@@ -392,7 +709,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `"9" > 65` was `TRUE` and an underage subject passed an adults-only rule.
 - **Conditions written as a YAML sequence returned valid = TRUE**, silently
   passing every row rather than being evaluated.
-- **Rule violations were invisible whenever a schema error existed**, because
+- **Rule violations were invisible whenever a column spec error existed**, because
   validation returned early. Both axes are always evaluated now.
 - **A rule naming a column absent from the table aborted the entire run**
   instead of reporting a rule failure.
@@ -424,7 +741,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The Shiny app ignored import errors when colouring table status, showing a
   failing table as clean.
 - **`check()` claimed a table was valid and then failed it.** The console report
-  covered the schema and rule axes but not the import axis, so a table whose
+  covered the column spec and rule axes but not the import axis, so a table whose
   only defect was an unconvertible value printed
   `Table format, length, pattern, and values are valid` followed by
   `0 of 1 table valid`, with no stated cause. It now names the row, column, raw
@@ -513,7 +830,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - `max_number_of_files()` and `min_number_of_files()` generics on `DTADataSet`, aggregating counts across all files in the dataset
 - comprehensive test coverage for previously untested export APIs (`write_dta()`, `write_dataset_metadata()`, `write_file_specification()`, `export_specs_table()`, `export_column_value_table()`, `write_metadata()`)
-- direct unit tests for `validate_table()` / `validate_table_detailed()` behavior on valid input, schema violations, and rule violations
+- direct unit tests for `validate_table()` / `validate_table_detailed()` behavior on valid input, column spec violations, and rule violations
 - package architecture diagram (`img/DTAtools_architecture.svg`, also embedded in `vignettes/`) illustrating the `DTA`/`DTADataSet`/`DTAColumnSpecCollection`/`DTAFile` class hierarchy, referenced from both the vignette and a new `README.md` "Package Architecture" section
 
 ### Changed
@@ -562,7 +879,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - renamed DTAContainer to DTADataSet
 - improved GitHub Action workflows
 - reworked data backend to use arrow::Table for better performance and memory usage
-- completely reworked the package vignette (`vignettes/DTAtools.Rmd`) with a full walkthrough of architecture, column specs, validation, schema rules, `DTADataSetFile`, file-based workflows, the full `DTA` object, `inspect()`, and exporting — every code chunk verified to run against the installed package
+- completely reworked the package vignette (`vignettes/DTAtools.Rmd`) with a full walkthrough of architecture, column specs, validation, rules, `DTADataSetFile`, file-based workflows, the full `DTA` object, `inspect()`, and exporting — every code chunk verified to run against the installed package
 - completely reworked `README.md` to match the vignette: corrected terminology (Data Transmission Agreement/Specification instead of Data Transfer), fixed outdated/broken code examples, updated rule type names (`col_condition`/`col_range`/`col_unique`), and documented `DTADataSetFile` and `inspect()`
 - re-prioritized YAML import guidance in the vignette and `README.md`: `read_dta_from_yaml()` and `read_dataset_from_yaml()` are now presented as the primary entry points, with `import_specs_from_yaml()` documented as the third, most manual option; added a `read_dataset_from_yaml()` walkthrough to the Quickstart in both documents
 - fixed broken anchor links in `README.md` caused by unsupported Pandoc-style `{#custom-id}` heading syntax
@@ -689,7 +1006,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 #### Core Classes
 
 - `DTAColumnSpec`: Defines metadata and validation rules for a single column.
-- `DTAColumnSpecCollection`: Manages a collection of `DTAColumnSpec` objects with optional metadata and schema rules.
+- `DTAColumnSpecCollection`: Manages a collection of `DTAColumnSpec` objects with optional metadata and rules.
 - `DTAContainer`: Encapsulates validated data tables and their associated column specifications.
 
 #### Import/Export
@@ -709,7 +1026,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Table-level validation:
   - Ensures all required columns are present
   - Applies all column validations
-  - Applies schema rules if defined
+  - Applies rules if defined
 - JSON Schema generation and validation support
 
 #### Schema Rule Engine
@@ -722,12 +1039,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `check_mutual_exclusive`
   - `check_unique`
   - `check_allowed_combinations`
-- `apply_schema_rules()` to evaluate all rules with CLI feedback
+- `apply_rules()` to evaluate all rules with CLI feedback
 
 #### Utilities
 
 - `checkFormat`, `checkType`, `checkNullable`, `checkValues`, `checkPattern`, `change_type`, `changeNAs`, `prepareTable`, `validateColumn`
-- `validateSchemaRulesFormat()` to validate schema rule structure before use
+- `validateSchemaRulesFormat()` to validate rule structure before use
 
 #### Output
 

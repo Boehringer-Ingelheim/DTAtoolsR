@@ -23,6 +23,8 @@ load_file(x, ...)
 \item{handler_index}{of the filehandler in the files list}
 \item{name}{file name, base name per default. is used to store the
 table under this name}
+\item{stream}{whether to keep the file lazy rather than reading it into
+memory. See \code{\link{load_file}}.}
 }}
 }
 \value{
@@ -47,6 +49,39 @@ Convenience wrapper that dispatches to \code{load_file()} for a dataset.
 
 Load the content of the file into dataset
 }
+\section{Reading into memory, or scanning in batches}{
+
+The \code{stream} argument decides how the file is held once loaded.
+
+\describe{
+\item{\code{"never"}}{Read the whole file into memory as an Arrow
+\code{Table}. Fastest to validate repeatedly, and the only option that
+reports import errors at load time -- but it needs the file to fit in
+memory, several times over once strings are materialised.}
+\item{\code{"always"}}{Keep the file lazy as an Arrow \code{Dataset}.
+Nothing is read until \code{\link{check}()} scans it in batches, so a
+file far larger than memory can be validated.}
+\item{\code{"auto"} (default)}{\code{"never"} for a file at or below
+\code{getOption("DTAtools.stream_threshold")} bytes (512 MB by default),
+\code{"always"} above it.}
+}
+
+\code{TRUE} and \code{FALSE} are accepted as aliases for \code{"always"} and
+\code{"never"}. The session-wide default is
+\code{getOption("DTAtools.stream")}.
+
+Both paths find the same errors and produce the same verdict. They differ in
+\emph{when}: the in-memory path computes import errors during
+\code{load_file()}, while the streaming path finds them per batch during
+\code{\link{check}()}. So after a streaming load, the dataset's
+\code{@import_issues} is empty until \code{check()} has run.
+
+Note that \code{"auto"} compares the size of the file \emph{on disk}. A
+compressed input (\code{.csv.gz}) is much smaller on disk than in memory, so
+\code{"auto"} under-triggers there; pass \code{stream = "always"} for a large
+compressed file.
+}
+
 \examples{
 file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 ds <- DTADataSetTabular(
@@ -57,4 +92,15 @@ ds <- DTADataSetTabular(
 file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
 names(tables(ds))
+
+# The same file kept lazy: nothing is read until check() scans it.
+ds_lazy <- DTAtools:::load_file(
+  ds,
+  file = file, handler_index = 1, stream = "always"
+)
+names(tables(ds_lazy))
+}
+\seealso{
+\code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
+arguments tune the scan of a streamed table.
 }

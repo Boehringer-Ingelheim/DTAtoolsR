@@ -78,3 +78,109 @@
 .docx_paragraphs <- function(path) {
   officer::docx_summary(officer::read_docx(path))$text
 }
+
+# Page geometry of every <w:sectPr> that carries one, in document order, as a
+# data frame of orient/width/height in twips. Word stores orientation as an
+# attribute AND as the w/h pair, and only the pair decides how the page really
+# renders, so a test that wants to prove a page is landscape must check both.
+.docx_section_geometry <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
+  sects <- xml2::xml_find_all(doc, ".//*[local-name()='sectPr']")
+
+  rows <- lapply(seq_along(sects), function(i) {
+    pg <- xml2::xml_find_first(sects[[i]], "./*[local-name()='pgSz']")
+    if (inherits(pg, "xml_missing")) {
+      return(NULL)
+    }
+    type <- xml2::xml_find_first(sects[[i]], "./*[local-name()='type']")
+    data.frame(
+      orientation = .sectpr_orientation(sects[[i]]),
+      width = as.numeric(xml2::xml_attr(pg, "w")),
+      height = as.numeric(xml2::xml_attr(pg, "h")),
+      type = if (inherits(type, "xml_missing")) NA_character_ else xml2::xml_attr(type, "val"),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, Filter(Negate(is.null), rows))
+}
+
+# Orientation of a single <w:sectPr>; an absent orient attribute is portrait,
+# which is also Word's default for a section that declares no page size at all.
+.sectpr_orientation <- function(node) {
+  if (is.null(node) || inherits(node, "xml_missing")) {
+    return("portrait")
+  }
+  pg <- xml2::xml_find_first(node, "./*[local-name()='pgSz']")
+  if (inherits(pg, "xml_missing")) {
+    return("portrait")
+  }
+  orient <- xml2::xml_attr(pg, "orient")
+  if (is.na(orient) || !nzchar(orient)) "portrait" else orient
+}
+
+# Map every body-level block (paragraph or table) to the orientation of the
+# section it is rendered in. A bare list of section orientations is not enough
+# to pin the layout: officer terminates the section for the content added
+# BEFORE the call, so a document whose landscape/portrait blocks are inverted
+# has exactly the same orientation sequence as a correct one. Tying the
+# orientation to the visible text is what makes the distinction.
+.docx_blocks_with_orientation <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
+  body <- xml2::xml_find_first(doc, ".//*[local-name()='body']")
+  children <- xml2::xml_children(body)
+
+  # Content after the last section break falls under the body-level sectPr.
+  final_orient <- .sectpr_orientation(
+    xml2::xml_find_first(body, "./*[local-name()='sectPr']")
+  )
+
+  texts <- character(0)
+  orientations <- character(0)
+  sections <- integer(0)
+  buffer <- character(0)
+  section_index <- 1L
+
+  for (i in seq_along(children)) {
+    child <- children[[i]]
+    if (identical(xml2::xml_name(child), "sectPr")) next
+
+    buffer <- c(buffer, paste0(
+      xml2::xml_text(xml2::xml_find_all(child, ".//*[local-name()='t']")),
+      collapse = ""
+    ))
+
+    # A section break lives in the pPr of the last paragraph of that section.
+    sect <- xml2::xml_find_first(
+      child,
+      "./*[local-name()='pPr']/*[local-name()='sectPr']"
+    )
+    if (!inherits(sect, "xml_missing")) {
+      texts <- c(texts, buffer)
+      orientations <- c(orientations, rep(.sectpr_orientation(sect), length(buffer)))
+      sections <- c(sections, rep(section_index, length(buffer)))
+      buffer <- character(0)
+      section_index <- section_index + 1L
+    }
+  }
+
+  if (length(buffer) > 0) {
+    texts <- c(texts, buffer)
+    orientations <- c(orientations, rep(final_orient, length(buffer)))
+    sections <- c(sections, rep(section_index, length(buffer)))
+  }
+
+  data.frame(
+    text = texts,
+    orientation = orientations,
+    section = sections,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Orientation(s) of the section(s) in which a given block text is rendered.
+.docx_orientation_of <- function(path, text, fixed = TRUE) {
+  blocks <- .docx_blocks_with_orientation(path)
+  hit <- grepl(text, blocks$text, fixed = fixed)
+  unique(blocks$orientation[hit])
+}

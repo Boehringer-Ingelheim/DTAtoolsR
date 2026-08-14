@@ -314,7 +314,7 @@ test_that("Conditional empty=false handles Date columns", {
   expect_null(passing_result$message)
 })
 
-test_that("apply_schema_rules handles canonical and legacy rule types", {
+test_that("apply_rules handles canonical and legacy rule types", {
   df <- data.frame(AGE = c(20, 30), SUBJECT_ID = c("A", "B"), stringsAsFactors = FALSE)
 
   canonical_rules <- list(
@@ -322,7 +322,7 @@ test_that("apply_schema_rules handles canonical and legacy rule types", {
     DTARuleColUnique(id = "u1", columns = "SUBJECT_ID")
   )
 
-  result <- apply_schema_rules(canonical_rules, df, verbose = FALSE)
+  result <- apply_rules(canonical_rules, df, verbose = FALSE)
   expect_true(all(vapply(result, function(x) isTRUE(x$valid), logical(1))))
 
   mixed_rule <- DTARuleColCondition(
@@ -330,12 +330,12 @@ test_that("apply_schema_rules handles canonical and legacy rule types", {
     condition = list(AGE = list(greater_equal = 20)),
     then = list(SUBJECT_ID = list(not_equals = ""))
   )
-  result <- apply_schema_rules(list(mixed_rule), df, verbose = FALSE)
+  result <- apply_rules(list(mixed_rule), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
 
   legacy_rule <- DTARuleColRange(id = "legacy", columns = "AGE", min = 18, max = 65)
   legacy_rule@type <- "col_range"
-  result <- apply_schema_rules(list(legacy_rule), df, verbose = FALSE)
+  result <- apply_rules(list(legacy_rule), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
 
   grouped <- DTARuleGroupCondition(
@@ -344,12 +344,12 @@ test_that("apply_schema_rules handles canonical and legacy rule types", {
     conditions = list(ok = list(AGE = list(greater_equal = 18))),
     constraints = list(list(type = "requires", `if` = "ok", then = "ok"))
   )
-  result <- apply_schema_rules(list(grouped), df, verbose = FALSE)
+  result <- apply_rules(list(grouped), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
 
   grouped_legacy <- grouped
   grouped_legacy@type <- "group_condition"
-  result <- apply_schema_rules(list(grouped_legacy), df, verbose = FALSE)
+  result <- apply_rules(list(grouped_legacy), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
 })
 
@@ -382,9 +382,9 @@ test_that("group_condition detects mutually exclusive and requires violations by
   expect_false(res$valid)
   expect_match(res$message, "sample_visit_status_logic", fixed = TRUE)
   expect_match(res$message, "SUBJIDN=S1", fixed = TRUE)
-  expect_match(res$message, "Constraint 'constraint_1' failed", fixed = TRUE)
-  expect_match(res$message, "scope=any", fixed = TRUE)
-  expect_match(res$message, "failing rows=", fixed = TRUE)
+  expect_match(res$message, "must not both occur", fixed = TRUE)
+  expect_match(res$message, "must also hold, but it does not", fixed = TRUE)
+  expect_match(res$message, "c1_failed", fixed = TRUE)
 
   passing <- df
   passing$GFSTAT[passing$SUBJIDN == "S1"] <- "NOT DONE"
@@ -472,7 +472,7 @@ test_that("group_condition missing group_by columns explains available columns",
     "Available columns"
   )
 
-  wrapped <- apply_schema_rules(list(rule), df, verbose = FALSE)
+  wrapped <- apply_rules(list(rule), df, verbose = FALSE)
   expect_false(wrapped[[1]]$valid)
   expect_match(wrapped[[1]]$message, "could not be evaluated", fixed = TRUE)
   expect_match(wrapped[[1]]$message, "Available columns", fixed = TRUE)
@@ -765,10 +765,10 @@ test_that("dta_rule_numeric_columns names only the numerically compared columns"
   )
 })
 
-test_that("apply_schema_rules reports import errors alongside the rule verdict", {
+test_that("apply_rules reports import errors alongside the rule verdict", {
   df <- data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE)
 
-  results <- apply_schema_rules(
+  results <- apply_rules(
     list(DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65)),
     df,
     verbose = FALSE
@@ -783,7 +783,7 @@ test_that("apply_schema_rules reports import errors alongside the rule verdict",
   expect_equal(results[[1]]$import_errors$raw, "ninety")
 
   # A rule that cannot be evaluated contributes no import errors.
-  absent <- apply_schema_rules(
+  absent <- apply_rules(
     list(DTARuleColRange(id = "absent", columns = "MISSING", min = 0, max = 1)),
     df,
     verbose = FALSE
@@ -944,8 +944,8 @@ test_that("Unique rules treat repeated NA combinations as duplicates", {
   expect_match(result$message, "violated: 1 duplicate")
 })
 
-test_that("apply_schema_rules returns empty list for empty rule set", {
-  result <- apply_schema_rules(list(), data.frame(A = 1), verbose = FALSE)
+test_that("apply_rules returns empty list for empty rule set", {
+  result <- apply_rules(list(), data.frame(A = 1), verbose = FALSE)
   expect_type(result, "list")
   expect_length(result, 0)
 })
@@ -1254,7 +1254,7 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
 test_that("A rule naming an absent column fails the rule instead of aborting the run", {
   df <- data.frame(ID = "A", stringsAsFactors = FALSE)
 
-  range_results <- apply_schema_rules(
+  range_results <- apply_rules(
     list(DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120)),
     df,
     verbose = FALSE
@@ -1265,7 +1265,7 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
   expect_match(range_results[[1]]$message, "age_range")
   expect_match(range_results[[1]]$message, "AGE")
 
-  unique_results <- apply_schema_rules(
+  unique_results <- apply_rules(
     list(DTARuleColUnique(id = "unique_subjid", columns = "SUBJID")),
     df,
     verbose = FALSE
@@ -1274,7 +1274,7 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
   expect_match(unique_results[[1]]$message, "unique_subjid")
   expect_match(unique_results[[1]]$message, "SUBJID")
 
-  condition_results <- apply_schema_rules(
+  condition_results <- apply_rules(
     list(DTARuleColCondition(
       id = "visit_rule",
       condition = list(VISIT = list(equals = "V03")),
@@ -1288,7 +1288,7 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
   expect_match(condition_results[[1]]$message, "VISIT")
 
   # One unevaluable rule must not hide the verdict of the others.
-  mixed <- apply_schema_rules(
+  mixed <- apply_rules(
     list(
       DTARuleColRange(id = "age_range", columns = "AGE", min = 0, max = 120),
       DTARuleColUnique(id = "unique_id", columns = "ID")
@@ -1303,11 +1303,58 @@ test_that("A rule naming an absent column fails the rule instead of aborting the
   # Precision check: a malformed rule is a specification error, not an
   # unevaluable one, and must still abort rather than be reported as a failure.
   expect_error(
-    apply_schema_rules(
+    apply_rules(
       list(DTARuleColRange(id = "multi_col", columns = c("A", "B"), min = 0, max = 1)),
       data.frame(A = 1, B = 2),
       verbose = FALSE
     ),
     "exactly one"
   )
+})
+
+test_that("an unconvertible IF operand keeps the row in scope", {
+  rule <- DTARuleColCondition(
+    id = "age_status",
+    condition = list(AGE = list(greater = 18)),
+    then = list(STATUS = list(equals = "adult"))
+  )
+
+  # "ninety-five" is a data error, not an exemption. The THEN clause
+  # definitively fails, so this row is a violation rather than a row the rule
+  # quietly skipped because it could not evaluate the IF.
+  unconvertible <- data.frame(
+    AGE = "ninety-five", STATUS = "minor", stringsAsFactors = FALSE
+  )
+  expect_false(rule_check_col_condition(rule, unconvertible)$valid)
+
+  # An unconvertible IF whose THEN does hold is still not a violation: the
+  # row is in scope, and it passes.
+  passing <- data.frame(
+    AGE = "ninety-five", STATUS = "adult", stringsAsFactors = FALSE
+  )
+  expect_true(rule_check_col_condition(rule, passing)$valid)
+
+  # A MISSING IF operand says nothing about the row, so the rule does not
+  # apply to it and a failing THEN is not reported.
+  for (empty in list(NA_character_, "", "  ")) {
+    df <- data.frame(AGE = empty, STATUS = "minor", stringsAsFactors = FALSE)
+    expect_true(rule_check_col_condition(rule, df)$valid)
+  }
+})
+
+test_that("the streaming and materialising conditional paths agree on scope", {
+  rule <- DTARuleColCondition(
+    id = "age_status",
+    condition = list(AGE = list(greater = 18)),
+    then = list(STATUS = list(equals = "adult"))
+  )
+  df <- data.frame(
+    AGE = c("ninety-five", "20", NA, "5"),
+    STATUS = c("minor", "minor", "minor", "minor"),
+    stringsAsFactors = FALSE
+  )
+
+  violated <- dta_condition_violated(rule, df)
+  expect_false(anyNA(violated))
+  expect_equal(which(violated), c(1L, 2L))
 })

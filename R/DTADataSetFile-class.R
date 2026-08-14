@@ -206,13 +206,13 @@ dta_file_validation_details <- function(validation_result) {
 
   list(
     ok = ok,
-    schema_valid = TRUE,
+    columnspec_valid = TRUE,
     rules_valid = ok,
     import_valid = TRUE,
-    n_schema_errors = 0L,
+    n_columnspec_errors = 0L,
     n_rule_errors = if (ok) 0L else 1L,
     n_import_errors = 0L,
-    schema_errors = list(summarised_error = NULL, full_error = NULL),
+    columnspec_errors = list(summarised_error = NULL, full_error = NULL),
     rule_results = if (ok) {
       list(list(id = "file_presence", valid = TRUE, message = NULL))
     } else {
@@ -220,7 +220,7 @@ dta_file_validation_details <- function(validation_result) {
     },
     rule_errors = if (ok) list() else failure,
     import_errors = NULL,
-    schema_version = 2L
+    result_version = 2L
   )
 }
 
@@ -251,7 +251,12 @@ S7::method(check, DTADataSetFile) <- function(
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE,
-  validation_run = NULL
+  validation_run = NULL,
+  # Accepted and ignored. A file dataset checks files, not tables, so there is
+  # nothing to scan in batches -- but `check()` on a DTA calls every dataset the
+  # same way, and it should not have to branch on the dataset's class to do it.
+  batch_rows = NULL,
+  max_errors = NULL
 ) {
   if (is.null(validation_run)) {
     validation_run <- dta_new_validation_run_id()
@@ -334,7 +339,7 @@ S7::method(check, DTADataSetFile) <- function(
       run_id = run_id,
       validation_run = validation_run,
       file_hash = file_hash,
-      n_schema_errors = 0L,
+      n_columnspec_errors = 0L,
       n_rule_errors = details$n_rule_errors,
       n_import_errors = 0L,
       artifact_path = artifact_path,
@@ -522,7 +527,7 @@ S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
         validated_at = NA_character_,
         run_id = NA_character_,
         validation_run = NA_character_,
-        n_schema_errors = NA_integer_,
+        n_columnspec_errors = NA_integer_,
         n_rule_errors = NA_integer_,
         n_import_errors = NA_integer_,
         stringsAsFactors = FALSE

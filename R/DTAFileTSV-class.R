@@ -95,6 +95,29 @@ method(read_file_execution, DTAFileTSV) <- function(x, ...) {
   dta_normalize_column_names(table_obj)
 }
 
+#' @title Open File Lazily for DTAFileTSV Objects
+##' @name open_file_execution
+#' @description
+#' Opens a TSV file as a lazy \code{arrow::Dataset} using the parameters
+#' specified in a \code{DTAFileTSV} object. The tab is fixed, matching this
+#' handler's eager reader.
+#' @param x A \code{DTAFileTSV} object containing file reading parameters.
+#' @param ... A `file` argument giving the path to the file, and an optional
+#'   `specs` argument: a `DTAColumnSpecCollection` whose declared types decide
+#'   how the columns are parsed.
+#' @return An \code{arrow::Dataset}.
+#' @usage open_file_execution(x, ...)
+method(open_file_execution, DTAFileTSV) <- function(x, ...) {
+  args <- dta_reader_args(..., .caller = "open_file_execution")
+  dta_open_normalized_dataset(
+    args$file,
+    specs = args$specs,
+    delim = "\t",
+    quote = x@quote,
+    has_header = x@has_header
+  )
+}
+
 #' @title Create Example DTAFileTSV Object
 #' @description
 #' Creates an example \code{DTAFileTSV} object using example files.

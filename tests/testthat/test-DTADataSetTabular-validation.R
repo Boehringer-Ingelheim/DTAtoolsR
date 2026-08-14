@@ -7,22 +7,22 @@ test_that("DTADataSetTabular stores validation state per table", {
   expect_equal(nrow(status), 1)
   expect_equal(status$table, "tab1")
   # `status` records that a run happened, NOT that the data passed. The example
-  # fixture deliberately carries 7 schema errors, so `ok` is FALSE while
+  # fixture deliberately carries 7 column spec errors, so `ok` is FALSE while
   # `status` is "validated" — assert both so the two can never be conflated.
   expect_equal(status$status, "validated")
   expect_false(status$ok)
-  expect_equal(status$n_schema_errors, 7)
+  expect_equal(status$n_columnspec_errors, 7)
   expect_equal(status$n_rule_errors, 0)
 
   details <- validation_errors(ds, table = "tab1", source = "memory")
   expect_true(is.list(details))
   expect_true(all(c(
     "ok",
-    "schema_valid",
+    "columnspec_valid",
     "rules_valid",
-    "n_schema_errors",
+    "n_columnspec_errors",
     "n_rule_errors",
-    "schema_errors",
+    "columnspec_errors",
     "rule_results",
     "rule_errors"
   ) %in% names(details)))
@@ -42,7 +42,7 @@ test_that("DTADataSetTabular stores validation state per table", {
 
 test_that("validation_errors() output coerces to a data frame", {
   # Previously the returned list mixed a 5-row summary with a 7-row full error
-  # table inside `schema_errors`, so as.data.frame() died with
+  # table inside `columnspec_errors`, so as.data.frame() died with
   # "arguments imply differing number of rows: 5, 7".
   ds <- check(
     create_example_DTADataSetTabular(2),
@@ -54,30 +54,30 @@ test_that("validation_errors() output coerces to a data frame", {
 
   errors_df <- as.data.frame(details)
   expect_s3_class(errors_df, "data.frame")
-  expect_equal(nrow(errors_df), details$n_schema_errors)
+  expect_equal(nrow(errors_df), details$n_columnspec_errors)
   expect_true(all(
     c("source", "rule_id", "row", "column", "keyword", "message") %in%
       names(errors_df)
   ))
-  expect_true(all(errors_df$source == "schema"))
+  expect_true(all(errors_df$source == "columnspec"))
   expect_false(any(is.na(errors_df$message)))
 
   # The list interface callers already rely on is untouched.
   expect_true(is.list(details))
   expect_true(all(c(
     "ok",
-    "schema_valid",
+    "columnspec_valid",
     "rules_valid",
-    "n_schema_errors",
+    "n_columnspec_errors",
     "n_rule_errors",
-    "schema_errors",
+    "columnspec_errors",
     "rule_results",
     "rule_errors"
   ) %in% names(details)))
-  expect_equal(nrow(as.data.frame(details$schema_errors$full_error)), 7)
+  expect_equal(nrow(as.data.frame(details$columnspec_errors$full_error)), 7)
 })
 
-test_that("validation_errors() data frame carries rule failures alongside schema ones", {
+test_that("validation_errors() data frame carries rule failures alongside column spec ones", {
   ds <- create_example_DTADataSetTabular(2)
   ds@specs@rules <- list(create_example_DTARuleColUnique())
 
@@ -91,7 +91,7 @@ test_that("validation_errors() data frame carries rule failures alongside schema
   errors_df <- as.data.frame(details)
   expect_equal(
     nrow(errors_df),
-    details$n_schema_errors + details$n_rule_errors
+    details$n_columnspec_errors + details$n_rule_errors
   )
 
   rule_rows <- errors_df[errors_df$source == "rule", ]
@@ -156,7 +156,7 @@ test_that("check() validates a single table by name", {
   result <- attr(ds, "last_validation_details")
 
   expect_true(is.list(result))
-  expect_true(all(c("ok", "schema_valid", "rules_valid") %in% names(result)))
+  expect_true(all(c("ok", "columnspec_valid", "rules_valid") %in% names(result)))
 
   status <- validation_status(ds, tables = "tab1")
   expect_equal(nrow(status), 1)
@@ -296,12 +296,12 @@ test_that("messages() returns flattened rule failures", {
 
   # A duplicated SUBJID was injected at row 3, so the unique rule must fire
   # exactly once. `nrow(msgs) >= 1` would also pass if the rule never ran and
-  # only pre-existing schema errors were reported.
+  # only pre-existing column spec errors were reported.
   expect_s3_class(msgs, "data.frame")
   rule_msgs <- msgs[msgs$source == "rule", ]
   expect_equal(nrow(rule_msgs), 1)
   expect_match(rule_msgs$message, "violated")
-  expect_true(all(unique(msgs$source) %in% c("schema", "rule")))
+  expect_true(all(unique(msgs$source) %in% c("columnspec", "rule")))
 })
 
 test_that("manually added table can be validated without errors", {
@@ -320,10 +320,10 @@ test_that("manually added table can be validated without errors", {
 
   # The old test was named "without errors" and used expect_no_error() as its
   # only assertion, which said nothing about what validation actually found.
-  # The manual table copies tab1 (7 schema errors) and suffixes SUBJID with
+  # The manual table copies tab1 (7 column spec errors) and suffixes SUBJID with
   # "_MANUAL", which adds 2 more SUBJID violations -- 9 in total.
   expect_false(status$ok)
-  expect_equal(status$n_schema_errors, 9)
+  expect_equal(status$n_columnspec_errors, 9)
   expect_equal(status$n_rule_errors, 0)
 
   msgs <- messages(ds, tables = "manual_tab", as_tibble = FALSE)
