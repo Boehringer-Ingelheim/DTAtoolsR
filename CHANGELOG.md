@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.1] - 2026-08-14
 
 ### Added
 
@@ -18,6 +18,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   default view, with a "show all" toggle in the file itself so no data is
   lost. The Shiny app's validation-messages dock gained a "Report" download
   button alongside the existing CSV/TSV/XLSX exports.
+
+### Changed
+
+- **The Shiny export dialog now defaults to "Word Document" with "Embed YAML
+  specification at end of document" ticked**, the combination that produces the
+  hand-over document most users want without any extra clicks.
+
+- **The built-in DOCX export was redesigned to a single, congruent house
+  style.** The document previously mixed three font families (the template's
+  Cambria body style, Calibri headings, and flextable's Arial default) and
+  several unrelated blues. All package-emitted text and every table now uses
+  one family and the Boehringer Ingelheim brand palette — the same green family
+  the Shiny app is themed with — with a single brand-green table header,
+  zebra-striped body rows and hairline rules instead of per-table ad-hoc
+  colours, sizes and padding. The bundled reference template
+  (`inst/extdata/templates/dta_numbered_template.docx`) was re-themed to match,
+  so Word's own heading styles render in the brand green rather than black.
+
+- **The supplier is now introduced before the receiver** in both the Word and
+  the Markdown export, following the direction the data actually flows.
+
+- **Exported document file names now carry the document version and the export
+  time**, between the title and the timestamp
+  (`Clinical_Data_Specification-v0.2-2026-08-14_14-07.docx`). The version
+  segment is omitted when the DTA has no version set. The Shiny export modal's
+  filename preview and the two export branches share one helper, so the preview
+  cannot disagree with the file that is downloaded.
+
+- **Signatures now open the DOCX export.** "Approval & Signatures" is the first
+  chapter after the top-level heading in `write_dta()`, and comes directly
+  after the title in `write_dataset_metadata()`, rather than being buried at
+  the end of the "Process Information" chapter. Consequently "Process
+  Information" is rendered only when there is genuine process content
+  (transmission details, error handling, or authorized-for-corrections
+  entries).
+
+- **The Shiny app's "Export PDF" button is now called "Export DTA".** The button
+  opens an "Export Document" modal whose formats are Markdown and Word, with
+  PDF only an option within the Markdown branch, so the old label named the one
+  thing the button does not do directly.
+
+- **Built-in DOCX export puts the dataset column and validation rules tables on
+  landscape pages.** The "Column Specifications" table is 8.4 in wide and did
+  not fit the ~6.3 in text column of an A4 portrait page, so each dataset's
+  table block — the column table together with the validation rules table that
+  follows it — is now emitted in its own landscape section. The rest of the
+  document (title page, metadata, dataset headings, embedded YAML, signatures
+  and footer) stays portrait. This applies to both `write_dta()` and
+  `write_dataset_metadata()`. The landscape pages reuse the page size and
+  margins of the document itself rather than being forced to A4, and the
+  section break is `nextPage`, so no blank filler pages are inserted.
+
+### Removed
+
+- **Filler signature lines and the signatory footnote in the DOCX export.** The
+  per-contact "Signature: ____ Date: ____" underlines in the receiver/supplier
+  sections, the generic "Approved by: / Signature: ____" fallback shown when no
+  signatory was defined, and the "Note: signatories listed above are contacts
+  marked as authorized signers" explanation have all been dropped. The single
+  approval table is the one place to sign; when no contact is marked
+  `signature = TRUE` the chapter is omitted entirely rather than padded with an
+  anonymous underline.
+
+### Fixed
+
+- **`group_condition` rules are now described in full in the exported
+  documents.** They fell through to the default rule formatter, which printed
+  either the author's one-line description or
+  `"Rule type 'group_condition' ... no description available"` — the grouping
+  columns, the named conditions and the constraints between them never reached
+  the document at all. The rules table now spells out which columns rows are
+  grouped by, what each named condition means in terms of its columns, and what
+  each constraint requires, including the difference between the `any` and
+  `all` scopes ("for at least one row in the group" vs "for every row in the
+  group"). An author-written description is kept as the leading summary rather
+  than replaced.
 
 ## [0.17.0] - 2026-08-14
 
@@ -129,6 +205,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   nothing in the output explained. The original spelling is gone by the time
   the parser hands the list over and cannot be recovered, so importing such a
   specification now says which column is affected and to quote the values.
+
+- **Template-based Word export now preserves multiline placeholder formatting.**
+  User-supplied template variables can now carry line breaks and tabs into the
+  generated `.docx` as real Word line/tab elements instead of collapsed
+  one-line text. Markdown-like placeholder content is now de-marked on insert
+  (for example `##` headings, `**bold**`, and `-` list markers), so dataset
+  blocks no longer render with raw markdown syntax in Word templates. Dense
+  one-line column/rule bullets are expanded into structured multi-line fields
+  (`Description`, `Type`, `Nullable`, `Length`, `Values`) for easier reading in
+  custom templates, rendered as nested list items instead of literal markdown
+  markers. Nested lists now use depth-specific symbols and stronger indentation
+  (top-level `•`, sub-level `◦`, sub-sub-level `▪`) for visual clarity. Rules
+  now render as list items without a `Description` label, and
+  `group_condition` rules are expanded with an explicit premise-oriented
+  breakdown (`Grouped by`, `Conditions`, `Constraints`, `Premise`, `Context`).
+  When the referenced `group_condition` rule object is present in the DTA, the
+  custom-template output now also includes explicit condition and constraint
+  definitions (condition expressions and requires/mutually-exclusive links with
+  scopes), so readers can see how the grouped rule works. Count-only lines for
+  conditions/constraints are no longer shown. Template metadata placeholders now
+  include richer contact/signatory/process details (full contact fields and
+  signature lines) instead of names-only contact strings.
+  YAML
+  placeholders intentionally keep raw YAML content unchanged (including `-`
+  list markers), and pure YAML placeholder runs (for example a paragraph
+  containing only `{YAML_BLOCK}`) are rendered in a small monospace run style
+  (Consolas, 6pt), matching the built-in embedded YAML section appearance.
 
 ## [0.16.1] - 2026-08-14
 

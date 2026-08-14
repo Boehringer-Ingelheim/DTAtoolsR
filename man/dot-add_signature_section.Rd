@@ -2,13 +2,21 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.add_signature_section}
 \alias{.add_signature_section}
-\title{Add signature approval section}
+\title{Add signature approval section.}
 \usage{
 .add_signature_section(doc, signatories = NULL)
+}
+\value{
+The document, unchanged when there is nothing to sign.
 }
 \description{
 Accepts either a data.frame(Organization, Name, Role) (as returned by
 \code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
 records, or NULL. One signature row is rendered per authorized signatory.
+
+When no signatory is known the section is omitted entirely rather than
+padded with blank "Approved by / Signature" rules: an anonymous underline
+is not something a reader can act on, and it left the document with a
+heading whose content was pure filler.
 }
 \keyword{internal}
