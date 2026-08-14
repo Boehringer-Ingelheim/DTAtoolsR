@@ -3210,11 +3210,16 @@ server <- function(input, output, session) {
   )
 
   # Filename base for the whole-DTA HTML report (unlike msgs_dl_base(), which
-  # is scoped to the single active dataset).
+  # is scoped to the single active dataset). Timestamped so repeated
+  # downloads across a working session don't overwrite each other in the
+  # browser's downloads folder.
   report_dl_base <- function() {
     title <- tryCatch(DTAtools::metadata(rv$dta)@title, error = function(e) NULL)
     nm <- if (!is.null(title) && length(title) == 1 && nzchar(title)) title else "dta"
-    paste0(gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_report")
+    paste0(
+      gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_report_",
+      format(Sys.time(), "%Y%m%d_%H%M%S")
+    )
   }
   output$dl_msgs_html <- downloadHandler(
     filename = function() paste0(report_dl_base(), ".html"),

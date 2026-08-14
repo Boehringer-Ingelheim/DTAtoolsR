@@ -104,11 +104,13 @@ write_validation_report <- function(
     source_type <- as.character(msg_row$source)
 
     # inspect() can legitimately return more than one row for a single id
-    # (e.g. multiple matching JSON-schema constraints); as before, only the
-    # first is rendered.
+    # (e.g. a rule's failing-row preview, or several group_condition
+    # violations for the same message) -- ALL of them are passed through so
+    # .report_inspect_panel_html() can show every captured row, not just the
+    # first.
     rows_for_id <- if (!is.null(inspect_index)) inspect_index$by_id[[as.character(msg_id)]] else NULL
-    inspect_row <- if (!is.null(rows_for_id)) {
-      inspect_index$df[rows_for_id[1], , drop = FALSE]
+    inspect_rows <- if (!is.null(rows_for_id)) {
+      inspect_index$df[rows_for_id, , drop = FALSE]
     } else {
       msg_row
     }
@@ -135,7 +137,7 @@ write_validation_report <- function(
     }
 
     # Build inspect panel
-    inspect_panels[i] <- .report_inspect_panel_html(inspect_row, rule_def = rule_def)
+    inspect_panels[i] <- .report_inspect_panel_html(inspect_rows, rule_def = rule_def)
   }
 
   inspect_panels_html <- paste0(inspect_panels, collapse = "\n")
@@ -170,6 +172,7 @@ write_validation_report <- function(
   summary_html <- .report_summary_html(res)
   messages_html <- .report_messages_table_html(msgs, max_repeats = max_repeats)
   timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  pkg_version <- as.character(utils::packageVersion("DTAtools"))
   escaped_title <- .report_html_escape(title)
 
   html_doc <- glue::glue(
@@ -185,7 +188,7 @@ write_validation_report <- function(
 <body>
 <header class="report-header">
   <h1>{escaped_title}</h1>
-  <div class="report-meta">Generated {timestamp}</div>
+  <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version}</div>
 </header>
 {summary_html}
 {messages_html}

@@ -375,6 +375,70 @@ body {
   user-select: none;
 }
 
+/* "What this rule checks" -- the rule/constraint definition itself, shown
+   above the should-be/actual comparison so a reader gets the rule's intent
+   before its failure. Neutral (not pass/fail-colored) since it describes the
+   rule, not the outcome. */
+.inspect-explain {
+  background-color: var(--bi-grey-light);
+  border-left: 4px solid var(--bi-grey);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.inspect-explain-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--bi-ink);
+}
+
+.inspect-explain dl {
+  margin: 0;
+}
+
+.inspect-explain dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.inspect-explain dt:first-child {
+  margin-top: 0;
+}
+
+.inspect-explain dd {
+  margin: 0 0 0 1rem;
+  color: var(--bi-grey);
+}
+
+/* Multi-row "actual" detail -- every failing/offending row captured for the
+   message, not just the first (a rule violation is often clearer across
+   several rows at once). */
+.inspect-rows-table {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.inspect-rows-table th,
+.inspect-rows-table td {
+  padding: 0.4rem 0.6rem;
+}
+
+.inspect-none {
+  color: var(--bi-grey);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+.inspect-actual-note {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--bi-grey);
+}
+
 .inspect-details summary:hover {
   text-decoration: underline;
 }
