@@ -631,7 +631,13 @@ dta_group_violations_to_df <- function(violations) {
       if (length(r) == 0) {
         return("")
       }
-      dta_format_group_rows(sort(unique(as.integer(r))), length(r), 30L)
+      formatted <- dta_format_group_rows(sort(unique(as.integer(r))), length(r), 30L)
+      # For streaming results, v$rows holds only a head; flag truncated output.
+      if (isTRUE(v$rows_truncated)) {
+        paste0(formatted, " (+more)")
+      } else {
+        formatted
+      }
     }, character(1)),
     stringsAsFactors = FALSE
   )

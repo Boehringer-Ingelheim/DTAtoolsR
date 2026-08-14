@@ -3381,11 +3381,19 @@ server <- function(input, output, session) {
       gvcols <- grep("^group_violation_", names(d), value = TRUE)
       if (length(gvcols) > 0) {
         gv <- d[, gvcols, drop = FALSE]
-        gv <- gv[!is.na(gv[[gvcols[[1]]]], ), , drop = FALSE]
+        # dta_flatten_inspect_record recycles the violation rows to match the
+        # number of failing_rows_preview rows, so we de-duplicate on content.
+        gv <- unique(gv)
+        # Drop fully-empty rows (all empty strings) that may arise from padding.
+        has_content <- vapply(seq_len(nrow(gv)), function(i) {
+          any(nzchar(as.character(gv[i, , drop = TRUE])))
+        }, logical(1))
+        gv <- gv[has_content, , drop = FALSE]
         if (nrow(gv) > 0) {
           names(gv) <- sub("^group_violation_", "", names(gv))
           names(gv) <- tools::toTitleCase(names(gv))
           actual_title <- "Group constraint violations \u2014 details"
+          failing_fcols <- grep("^failing_", names(d), value = TRUE)
           actual_ui <- tagList(
             tags$table(
               class = "inspect-hl-table",
@@ -3401,7 +3409,7 @@ server <- function(input, output, session) {
                 })
               )
             ),
-            if (length(failing_fcols <- grep("^failing_", names(d), value = TRUE)) > 0) {
+            if (length(failing_fcols) > 0) {
               tagList(
                 tags$p(
                   class = "inspect-desc-note",
