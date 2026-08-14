@@ -771,7 +771,7 @@ dta_template_placeholders <- function(dta = NULL) {
 #' @keywords internal
 .tv_expand_group_condition_summary <- function(text, dta = NULL, rule_id = "") {
   m <- regexec(
-    "^group\\(([^\\)]+)\\):\\s*([0-9]+)\\s*condition\\(s\\),\\s*([0-9]+)\\s*constraint\\(s\\)\\s*[—-]?\\s*(.*)$",
+    "^group\\(([^\\)]+)\\):\\s*([0-9]+)\\s*condition\\(s\\),\\s*([0-9]+)\\s*constraint\\(s\\)\\s*[\u2014-]?\\s*(.*)$",
     text,
     perl = TRUE
   )
@@ -925,7 +925,7 @@ dta_template_placeholders <- function(dta = NULL) {
     core <- paste0("constraint type ", ctype)
   }
   if (!is.null(cst$message) && nzchar(cst$message)) {
-    paste0(core, " — ", cst$message)
+    paste0(core, " \u2014 ", cst$message)
   } else {
     core
   }
