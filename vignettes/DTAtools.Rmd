@@ -1136,8 +1136,89 @@ larger than the memory available that is not merely slow — it is impossible,
 because the table has to exist as an R object before a single row can be
 validated.
 
-`validate_file_stream()` scans the file in batches instead. It opens the file
-as a lazy Arrow dataset and never holds more than one batch at a time.
+The answer is to scan the file in batches, holding one batch at a time. There
+are two ways to ask for that: through the object model, or standalone.
+
+### Choosing at load time
+
+`load_file()` takes a `stream` argument that decides how the table is *held*
+once loaded. `"never"` reads it into memory as an Arrow `Table`, `"always"`
+keeps it as a lazy Arrow `Dataset` that `check()` scans in batches, and the
+default `"auto"` picks between them on the file's size on disk:
+
+```{r stream-load-file}
+stream_dta_path <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+stream_csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+eager_dta <- load_file(read_dta_from_yaml(stream_dta_path), 1,
+  file = stream_csv, stream = "never"
+)
+lazy_dta <- load_file(read_dta_from_yaml(stream_dta_path), 1,
+  file = stream_csv, stream = "always"
+)
+
+# The same file, held two different ways.
+c(
+  eager = class(tables(eager_dta@datasets[[1]])[["clinical_data"]])[[1]],
+  lazy  = class(tables(lazy_dta@datasets[[1]])[["clinical_data"]])[[1]]
+)
+```
+
+Both reach the same verdict — `check()` scans the lazy one and materialises
+nothing:
+
+```{r stream-load-file-check}
+eager_res <- results(check(eager_dta, quiet = TRUE, persist = FALSE))
+lazy_res <- results(check(lazy_dta, quiet = TRUE, persist = FALSE))
+
+identical(
+  eager_res[, c("status", "n_columnspec_errors", "n_rule_errors", "n_import_errors")],
+  lazy_res[, c("status", "n_columnspec_errors", "n_rule_errors", "n_import_errors")]
+)
+```
+
+What differs is *when* import errors are found. Reading into memory coerces the
+columns during `load_file()` and records the issues there and then; the lazy
+path has no rows yet, so its issues appear during `check()`. After a streaming
+load the dataset's `@import_issues` is empty until the check has run — the same
+issues, found later.
+
+`TRUE` and `FALSE` work as aliases for `"always"` and `"never"`, and the
+session-wide default and threshold are options:
+
+```{r stream-options, eval = FALSE}
+options(DTAtools.stream = "always") # or "never" / "auto"
+options(DTAtools.stream_threshold = 2 * 1024^3) # bytes; default 512 MB
+```
+
+One caveat on `"auto"`: it compares the size of the file *on disk*. A `.csv.gz`
+is much smaller compressed than materialised, so `"auto"` under-triggers on
+compressed input — pass `stream = "always"` explicitly there.
+
+`check()` takes the two scan knobs, both ignored for a table already in memory:
+`batch_rows` (rows per batch, default
+`getOption("DTAtools.stream_batch_rows", 131072L)`) and `max_errors` (a cap on
+retained per-cell detail, which changes neither the counts nor the verdict).
+
+### Choosing between them
+
+| Situation | Use | Why |
+|---|---|---|
+| The file fits in memory comfortably | `"never"`, or the default | About twice as fast, and import errors are reported at load |
+| The file is larger than memory, or close to it | `"always"` | The only option that works at all |
+| You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
+| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` reads the *on-disk* size and under-triggers |
+| You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan, without the object model |
+| You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
+
+The short version: stream when *holding* the file is the problem. What follows
+makes that concrete — what the scan bounds, and what it costs.
+
+### Scanning without a DTA object
+
+`validate_file_stream()` does the same scan given only the specs and a path,
+returning the details list directly. It opens the file as a lazy Arrow dataset
+and never holds more than one batch at a time.
 
 ```{r stream-basic}
 stream_specs <- DTAColumnSpecCollection(

@@ -199,9 +199,43 @@ method(`[`, DTA) <- function(x, i) {
 #' Use the \code{DTA} method to load a file into a named dataset within a full
 #' DTA object; use the \code{DTADataSetTabular} method to load directly into a
 #' standalone dataset.
+#'
+#' @section Reading into memory, or scanning in batches:
+#' The \code{stream} argument decides how the file is held once loaded.
+#'
+#' \describe{
+#'   \item{\code{"never"}}{Read the whole file into memory as an Arrow
+#'     \code{Table}. Fastest to validate repeatedly, and the only option that
+#'     reports import errors at load time -- but it needs the file to fit in
+#'     memory, several times over once strings are materialised.}
+#'   \item{\code{"always"}}{Keep the file lazy as an Arrow \code{Dataset}.
+#'     Nothing is read until \code{\link{check}()} scans it in batches, so a
+#'     file far larger than memory can be validated.}
+#'   \item{\code{"auto"} (default)}{\code{"never"} for a file at or below
+#'     \code{getOption("DTAtools.stream_threshold")} bytes (512 MB by default),
+#'     \code{"always"} above it.}
+#' }
+#'
+#' \code{TRUE} and \code{FALSE} are accepted as aliases for \code{"always"} and
+#' \code{"never"}. The session-wide default is
+#' \code{getOption("DTAtools.stream")}.
+#'
+#' Both paths find the same errors and produce the same verdict. They differ in
+#' \emph{when}: the in-memory path computes import errors during
+#' \code{load_file()}, while the streaming path finds them per batch during
+#' \code{\link{check}()}. So after a streaming load, the dataset's
+#' \code{@import_issues} is empty until \code{check()} has run.
+#'
+#' Note that \code{"auto"} compares the size of the file \emph{on disk}. A
+#' compressed input (\code{.csv.gz}) is much smaller on disk than in memory, so
+#' \code{"auto"} under-triggers there; pass \code{stream = "always"} for a large
+#' compressed file.
+#'
 #' @param x A \code{DTA} or \code{DTADataSetTabular} object.
 #' @param ... Additional arguments passed to the method.
 #' @return The updated object.
+#' @seealso \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
+#'   arguments tune the scan of a streamed table.
 #' @name load_file
 #' @export
 load_file <- new_generic("load_file", "x")
@@ -220,6 +254,10 @@ load_file <- new_generic("load_file", "x")
 #'       handler within the dataset. Defaults to \code{1}.}
 #'     \item{name}{Optional name under which the loaded table should be stored.
 #'       Defaults to \code{basename(file)}.}
+#'     \item{stream}{One of \code{"auto"} (the default), \code{"always"} or
+#'       \code{"never"}, or a single logical. Decides whether the table is read
+#'       into memory or kept lazy and scanned in batches -- see the generic's
+#'       documentation above.}
 #'   }
 #' @return The updated \code{DTA} object.
 #' @usage load_file(x, ...)
@@ -231,6 +269,7 @@ method(load_file, DTA) <- function(
   file,
   handler_index = 1,
   name = tools::file_path_sans_ext(basename(file)),
+  stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
   dataset_object <- datasets(x, dataset)
@@ -239,6 +278,7 @@ method(load_file, DTA) <- function(
     handler_index = handler_index,
     file = file,
     name = name,
+    stream = stream,
     ...
   )
 
@@ -268,6 +308,13 @@ method(load_file, DTA) <- function(
 #'     \item{artifact_dir}{Character or NULL. Directory for persisted artifacts.
 #'       If NULL, uses default validation artifact directory per dataset.}
 #'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'     \item{batch_rows}{Integer. Rows per batch when scanning a table that was
+#'       loaded with \code{stream = "always"} (see \code{\link{load_file}}).
+#'       Ignored for tables held in memory. Defaults to
+#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}.}
+#'     \item{max_errors}{Integer or NULL (default). Cap on the number of
+#'       per-cell errors whose detail is retained while scanning. Counts and the
+#'       verdict are unaffected. Ignored for tables held in memory.}
 #'   }
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
@@ -311,7 +358,9 @@ method(check, DTA) <- function(
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE,
-  validation_run = NULL
+  validation_run = NULL,
+  batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
+  max_errors = NULL
 ) {
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
@@ -375,7 +424,11 @@ method(check, DTA) <- function(
       persist = persist,
       artifact_dir = artifact_dir,
       quiet = quiet,
-      validation_run = validation_run
+      validation_run = validation_run,
+      # Only meaningful for a table that was loaded lazily; both dataset
+      # methods accept them so this call does not have to know which it has.
+      batch_rows = batch_rows,
+      max_errors = max_errors
     )
     x@datasets[[ds_name]] <- ds
 

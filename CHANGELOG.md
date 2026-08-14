@@ -8,6 +8,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **`load_file()` can now keep a file lazy instead of reading it into memory.**
+  A new `stream` argument decides how the table is held: `"never"` reads the
+  whole file as an Arrow `Table` (the previous, and still the usual, behaviour),
+  `"always"` keeps it as an Arrow `Dataset` that `check()` scans in batches, and
+  `"auto"` (the default) picks `"always"` only for files above
+  `getOption("DTAtools.stream_threshold")`, 512 MB by default. `TRUE`/`FALSE`
+  work as aliases for `"always"`/`"never"`, and the session-wide default can be
+  set with `options(DTAtools.stream = ...)`.
+
+  This makes a file larger than memory validatable through the ordinary object
+  model. Previously the streaming validator was reachable only via
+  `validate_file_stream()`, which bypasses the `DTA` object entirely.
+
+  Both paths produce the same verdict and the same error counts. They differ in
+  *when* import errors are found: the in-memory path reports them during
+  `load_file()`, the streaming path during `check()`. After a streaming load,
+  the dataset's `@import_issues` is therefore empty until `check()` has run.
+
+- **`open_file()`**, the lazy counterpart of `read_file()`, opening a file as an
+  Arrow `Dataset` using the same name checks and the same spec-driven column
+  typing. Implemented for `DTAFileCSV`, `DTAFileTSV` and `DTAFileDelim`; a
+  handler without a lazy opener aborts with a message pointing at
+  `stream = "never"`.
+
+- **`check()` gained `batch_rows` and `max_errors`**, tuning the batch size and
+  the cap on retained per-cell error detail when scanning a streamed table.
+  These reach the scanner for the first time -- previously the streaming
+  validator's own defaults were unreachable from `check()`. Counts and the
+  verdict are unaffected by `max_errors`; only how much failure detail is kept
+  is. `batch_rows` defaults to
+  `getOption("DTAtools.stream_batch_rows", 131072L)`.
+
+- **Shiny app: a "Load large files without reading them into memory" toggle** on
+  the Datasets page, applying to subsequent uploads in that dataset.
+
 - **Standalone HTML validation report.** `write_validation_report()` renders a
   self-contained `.html` file (no external assets) summarizing validation
   results for a `DTA` object: a pass/fail overview per dataset/target, and a
@@ -82,6 +117,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   anonymous underline.
 
 ### Fixed
+
+- **`n_columnspec_errors` is now always an integer.** In-memory validation
+  reported it as a double when the count was zero and an integer otherwise,
+  because one branch used a bare `0` where the other used `nrow()`. Every other
+  count in the package is an integer, and the streaming path already reported
+  one, so `identical()` comparisons between the two paths' results failed on
+  storage type alone.
+
+- **Column names are now normalized identically on the eager and lazy read
+  paths.** A header with surrounding quotes or whitespace (`" AGE "`) was
+  trimmed when the file was read into memory but left as-is when opened as a
+  lazy dataset, so the same file could match the column specification on one
+  path and fail on the other. The lazy opener supplies cleaned names when the
+  dataset is opened, since an Arrow `Dataset` has no `names<-`.
+
+- **Documentation site: the "Large Files" navigation link went to the wrong
+  section.** Two sections shared `id="section-4-7"`, so the link resolved to the
+  first of them (`group_condition Rule`) and the streaming section could not be
+  reached from the sidebar at all.
 
 - **`group_condition` rules are now described in full in the exported
   documents.** They fell through to the default rule formatter, which printed

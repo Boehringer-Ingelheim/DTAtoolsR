@@ -327,8 +327,63 @@ rather than expanding it into memory. An anchored filename pattern such as
 ### Validating a file too large to load
 
 The workflow above reads the file into memory first. For a file larger than
-the memory available, that is not slow but impossible — so `validate_file_stream()`
-scans the file in batches instead, and never holds more than one batch:
+the memory available, that is not slow but impossible — so the file can be
+scanned in batches instead, never holding more than one batch.
+
+The ordinary way in is the `stream` argument on `load_file()`, which decides
+how the table is *held* once loaded:
+
+```r
+# Read it into memory (an Arrow Table) — the usual case.
+dta <- load_file(dta, 1, file = "transfer.csv", stream = "never")
+
+# Keep it lazy (an Arrow Dataset); check() scans it in batches.
+dta <- load_file(dta, 1, file = "transfer.csv", stream = "always")
+
+# Default: "never" below 512 MB on disk, "always" above it.
+dta <- load_file(dta, 1, file = "transfer.csv")
+
+dta <- check(dta, quiet = TRUE)   # same verdict either way
+```
+
+Set the threshold, or the default itself, once per session:
+
+```r
+options(DTAtools.stream = "always")             # or "never" / "auto"
+options(DTAtools.stream_threshold = 2 * 1024^3) # bytes; default 512 MB
+```
+
+Both paths find the same errors and reach the same verdict. They differ in
+*when* import errors are found: reading into memory reports them during
+`load_file()`, while streaming finds them during `check()` — so after a
+streaming load the dataset's `@import_issues` is empty until `check()` has run.
+
+#### Which one should you use?
+
+| Situation | Use | Why |
+|---|---|---|
+| The file fits in memory comfortably | `"never"`, or just the default | About twice as fast, and import errors are reported immediately at load |
+| The file is larger than memory, or close to it | `"always"` | The only option that works at all; memory stays flat regardless of row count |
+| You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
+| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` compares the size *on disk*, which is far smaller than the materialised size, so it under-triggers |
+| You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan and same result shape, without building the object model |
+| You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
+
+The short version: **stream when *holding* the file is the problem.** It buys
+feasibility, not speed — scanning runs roughly twice as slow as validating a
+table already in memory, because every batch pays its own overhead.
+
+When tuning matters, `check()` takes the scan knobs:
+
+```r
+# Rows per batch (default getOption("DTAtools.stream_batch_rows", 131072L)),
+# and a cap on how much per-cell failure detail is retained. Neither changes
+# the counts or the verdict.
+dta <- check(dta, batch_rows = 262144L, max_errors = 1000L)
+```
+
+`validate_file_stream()` does the same scan without a `DTA` object at all,
+returning the details list directly:
 
 ```r
 details <- validate_file_stream(specs, "transfer.csv")
@@ -869,9 +924,10 @@ row-level validation.
 | `read_dataset_from_yaml(file)` | Load a single, self-contained dataset definition from YAML |
 | `import_specs_from_yaml(file)`| Load bare column specs + rules from a standalone YAML      |
 | `columns_specs_from_word(file)`| Import column specs from a Word table                     |
-| `load_file(dta, dataset, file)`| Read a data file into a dataset using its YAML-defined handler |
+| `load_file(dta, dataset, file, stream)`| Read a data file into a dataset using its YAML-defined handler; `stream` keeps it lazy instead |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
-| `check(x, force, persist, quiet, …)` | Validate all datasets/tables; returns the updated object |
+| `open_file(handler, file)`     | Open a file lazily as an Arrow `Dataset` (the counterpart of `read_file()`) |
+| `check(x, force, persist, quiet, batch_rows, max_errors, …)` | Validate all datasets/tables; returns the updated object |
 | `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it into memory |
 | `cache_as_parquet(specs, path, …)` | Rewrite a delimited file as Parquet for repeated validation (measure first) |
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |

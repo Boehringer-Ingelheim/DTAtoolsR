@@ -523,7 +523,7 @@
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.16.0</span>
+  <span class="version-badge">v0.17.1</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -565,7 +565,7 @@
     <a class="nav-item" href="#section-4-5">Exporting Data</a>
     <a class="nav-item" href="#section-4-6">Word Documentation</a>
     <a class="nav-item" href="#section-4-6b">HTML Validation Report</a>
-    <a class="nav-item" href="#section-4-7">Large Files</a>
+    <a class="nav-item" href="#section-4-8">Large Files</a>
 
     <div class="nav-part">Part 5 — Quick Reference</div>
     <a class="nav-item" href="#section-5-1">Function Cheat Sheet</a>
@@ -1534,12 +1534,97 @@ write_validation_report(dta, file = "validation_report.html", max_repeats = Inf)
     </div>
 
     <!-- ===== LARGE FILES ===== -->
-    <h3 id="section-4-7">🌊 Validating a File Too Large to Load</h3>
+    <h3 id="section-4-8">🌊 Validating a File Too Large to Load</h3>
     <p>Everything so far reads the data into memory before checking it. For a file
     larger than the memory available that is not merely slow — it is impossible,
     because the table has to exist as an R object before a single row can be validated.</p>
-    <p><code>validate_file_stream()</code> scans the file in batches instead, and never
-    holds more than one batch at a time.</p>
+    <p>The answer is to scan the file in batches, holding one batch at a time. The
+    ordinary way to ask for that is the <code>stream</code> argument on
+    <code>load_file()</code>, which decides how the table is <em>held</em> once loaded.</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r"># Read it into memory as an Arrow Table — the usual case.
+dta &lt;- load_file(dta, 1, file = "transfer.csv", stream = "never")
+
+# Keep it lazy as an Arrow Dataset; check() scans it in batches.
+dta &lt;- load_file(dta, 1, file = "transfer.csv", stream = "always")
+
+# Default "auto": "never" below 512 MB on disk, "always" above it.
+dta &lt;- load_file(dta, 1, file = "transfer.csv")
+
+dta &lt;- check(dta, quiet = TRUE)   # same verdict either way</code></pre>
+    </div>
+
+    <p><code>TRUE</code> and <code>FALSE</code> work as aliases for <code>"always"</code>
+    and <code>"never"</code>. Set the default and the threshold once per session:</p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">options(DTAtools.stream = "always")              # or "never" / "auto"
+options(DTAtools.stream_threshold = 2 * 1024^3)  # bytes; default 512 MB
+
+# Tune the scan itself. Neither changes the counts or the verdict.
+dta &lt;- check(dta, batch_rows = 262144L, max_errors = 1000L)</code></pre>
+    </div>
+
+    <h4>Which one should you use?</h4>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Situation</th><th>Use</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>The file fits in memory comfortably</td>
+            <td><code>"never"</code> (or just the default)</td>
+            <td>Roughly twice as fast, and import errors are reported immediately at load.</td>
+          </tr>
+          <tr>
+            <td>The file is larger than memory, or close to it</td>
+            <td><code>"always"</code></td>
+            <td>The only option that works at all. Memory stays flat regardless of row count.</td>
+          </tr>
+          <tr>
+            <td>You will validate the same table many times</td>
+            <td><code>"never"</code></td>
+            <td>Every scan re-parses the file from disk; an in-memory table is parsed once.</td>
+          </tr>
+          <tr>
+            <td>A large <em>compressed</em> file (<code>.csv.gz</code>)</td>
+            <td><code>"always"</code>, explicitly</td>
+            <td><code>"auto"</code> compares the size <em>on disk</em>, which is far smaller than the materialised size — so it under-triggers here.</td>
+          </tr>
+          <tr>
+            <td>You just want a verdict, with no <code>DTA</code> object</td>
+            <td><code>validate_file_stream()</code></td>
+            <td>Same scan, same result shape, without building the object model.</td>
+          </tr>
+          <tr>
+            <td>You do not know, and sizes vary</td>
+            <td><code>"auto"</code> (the default)</td>
+            <td>Small files stay fast; a file that would not fit switches by itself.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Streaming finds import errors later, not fewer.</strong>
+        <p>Both paths reach the same verdict and the same error counts. They differ in
+        <em>when</em>: reading into memory coerces the columns during
+        <code>load_file()</code> and records the issues there and then, while a lazy table
+        has no rows yet — so its issues surface during <code>check()</code>. After a
+        streaming load the dataset's <code>@import_issues</code> is empty until the check
+        has run.</p>
+      </div>
+    </div>
+
+    <p>Without a <code>DTA</code> object at all, <code>validate_file_stream()</code> runs
+    the same scan from specs and a path, returning the details list directly:</p>
 
     <div class="code-wrap">
       <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
@@ -1628,13 +1713,18 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
             <td>DTADataSetTabular</td>
           </tr>
           <tr>
-            <td class="cheat-fn">load_file(dta, dataset, file)</td>
-            <td>Load a data file into a dataset</td>
+            <td class="cheat-fn">load_file(dta, dataset, file, stream)</td>
+            <td>Load a data file into a dataset; <code>stream</code> keeps it lazy instead of reading it into memory</td>
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>
-            <td class="cheat-fn">check(dta)</td>
-            <td>Run all validation (import + column specs + rules)</td>
+            <td class="cheat-fn">open_file(handler, file)</td>
+            <td>Open a file lazily as an Arrow Dataset (counterpart of <code>read_file()</code>)</td>
+            <td>arrow Dataset</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">check(dta, batch_rows, max_errors)</td>
+            <td>Run all validation (import + column specs + rules); the two knobs tune a streamed scan</td>
             <td>Updated DTA / dataset</td>
           </tr>
           <tr>
@@ -1741,7 +1831,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.16.0 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.17.1 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>

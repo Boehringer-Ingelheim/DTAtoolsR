@@ -125,20 +125,44 @@ method(read_file_execution, DTAFileTabular) <- function(x, ...) {
   )
 }
 
+#' @title Open File Lazily for DTAFileTabular Objects
+#' @name open_file_execution
+#' @description
+#' \code{DTAFileTabular} is a virtual class. This method needs to be
+#' implemented in derived classes like \code{DTAFileTSV},
+#' \code{DTAFileCSV} or \code{DTAFileDelim}, each of which knows its own
+#' delimiter.
+#' @importFrom cli cli_abort
+#' @param x A \code{DTAFileTabular} object containing file reading parameters.
+#' @param ... A single `file` argument: character string specifying the path
+#'   to the file to be opened.
+#' @return An \code{arrow::Dataset}.
+#' @usage open_file_execution(x, ...)
+method(open_file_execution, DTAFileTabular) <- function(x, ...) {
+  cli::cli_abort(
+    "This method is not implemented. You need to
+  use an object of a class which is derived from DTAFileTabular class."
+  )
+}
+
 #' @title Reader Arguments Passed Through `...`
 #' @description
-#' `read_file_execution()` dispatches on `x` alone and takes everything else
-#' through `...`, so each concrete method has to pull its arguments back out.
-#' Doing that as `list(...)[[1]]` makes the file the *first* argument by
-#' position, which silently picks up `specs` if a caller ever names its
-#' arguments in the other order. Removing the named entries first leaves the
-#' file as the only positional one, so the three readers agree on what they were
+#' `read_file_execution()` and `open_file_execution()` dispatch on `x` alone and
+#' take everything else through `...`, so each concrete method has to pull its
+#' arguments back out. Doing that as `list(...)[[1]]` makes the file the *first*
+#' argument by position, which silently picks up `specs` if a caller ever names
+#' its arguments in the other order. Removing the named entries first leaves the
+#' file as the only positional one, so all six methods agree on what they were
 #' given however the call was written.
-#' @param ... The arguments `read_file_execution()` was called with.
+#' @param ... The arguments the calling method was called with.
+#' @param .caller Name of the generic to blame in the error message. Both
+#'   `read_file_execution()` and `open_file_execution()` are exported, so a
+#'   caller can reach this failure through either -- and naming the wrong one
+#'   sends them looking in the wrong place.
 #' @return A list with `file` (the path) and `specs` (a
 #'   `DTAColumnSpecCollection`, or `NULL` when the caller supplied none).
 #' @keywords internal
-dta_reader_args <- function(...) {
+dta_reader_args <- function(..., .caller = "read_file_execution") {
   args <- list(...)
   nms <- names(args)
 
@@ -160,7 +184,11 @@ dta_reader_args <- function(...) {
     positional <- args[!nzchar(nms)]
 
     if (length(positional) == 0) {
-      cli::cli_abort("{.fn read_file_execution} requires a {.arg file} argument.")
+      # `{(.caller)}`, not `{.caller}`: cli >= 3.4 reads a `{}` expression
+      # starting with a dot as a style name, not a variable. The parentheses
+      # say this is the variable. The dot on the parameter itself stays, so it
+      # cannot collide with a `...` argument of the same name.
+      cli::cli_abort("{.fn {(.caller)}} requires a {.arg file} argument.")
     }
 
     file <- positional[[1]]
@@ -172,13 +200,93 @@ dta_reader_args <- function(...) {
 #' @keywords internal
 dta_normalize_column_names <- function(table_obj) {
   current_names <- names(table_obj)
-  cleaned_names <- trimws(gsub('^\\s*"|"\\s*$', "", current_names))
+  cleaned_names <- dta_clean_column_names(current_names)
 
   if (!identical(current_names, cleaned_names)) {
     names(table_obj) <- cleaned_names
   }
 
   table_obj
+}
+
+#' @title The Column-Name Cleaning Rule
+#' @description
+#' Strips surrounding quotes and whitespace from header names. Factored out of
+#' `dta_normalize_column_names()` so the eager and lazy readers apply the *same*
+#' rule -- they cannot apply it the same way, but they must reach the same
+#' answer, or the identical file would present different column names depending
+#' on how it happened to be loaded and would match the specs on only one path.
+#' @param x Character vector of raw column names.
+#' @return The cleaned character vector.
+#' @keywords internal
+dta_clean_column_names <- function(x) {
+  trimws(gsub('^\\s*"|"\\s*$', "", x))
+}
+
+#' @title Open a Delimited File Lazily, With Clean Column Names
+#' @description
+#' The lazy counterpart of `dta_normalize_column_names()`, and the reason it
+#' cannot simply be reused: an Arrow `Dataset` has no `names<-` method, so the
+#' cleaned names have to be supplied when the dataset is *opened* rather than
+#' assigned afterwards.
+#'
+#' The file is opened twice in the rare case that cleaning changes something.
+#' That is cheap -- opening a dataset reads the header, not the data -- and it
+#' buys the thing the alternative loses: renaming through `dplyr` would return
+#' an `arrow_dplyr_query`, which has no `$files`, so
+#' `dta_table_change_signal()` could not fingerprint it and `check()` would
+#' revalidate the table on every run. Re-opening keeps a true `Dataset`.
+#'
+#' @param path Character path to the delimited file.
+#' @param specs A `DTAColumnSpecCollection` or `NULL`, used to pin declared
+#'   column types at parse time exactly as the eager reader does.
+#' @param delim,quote,has_header Delimited-text parse options.
+#' @return An `arrow::Dataset`.
+#' @keywords internal
+dta_open_normalized_dataset <- function(
+  path,
+  specs = NULL,
+  delim = ",",
+  quote = '"',
+  has_header = TRUE
+) {
+  dataset <- dta_open_delimited_dataset(
+    path,
+    specs = specs,
+    delim = delim,
+    quote = quote,
+    has_header = has_header
+  )
+
+  # With no header Arrow generates the names itself (f0, f1, ...), so there is
+  # nothing to clean and nothing to skip.
+  if (!isTRUE(has_header)) {
+    return(dataset)
+  }
+
+  raw_names <- names(dataset)
+  cleaned_names <- dta_clean_column_names(raw_names)
+
+  if (identical(raw_names, cleaned_names)) {
+    return(dataset)
+  }
+
+  # Past here the header needed cleaning, which means the open above matched no
+  # column types at all: `col_types` is keyed by the clean spec ids, and the
+  # names it was matching against still carried their quotes and padding. That
+  # first open is therefore only good for reading the header, which is all it is
+  # used for -- the re-open below is where the declared types actually land.
+
+  # `skip = 1` discards the header row, which the explicit `col_names` has now
+  # replaced. Without it the header would be returned as a data row.
+  arrow::open_delim_dataset(
+    path,
+    delim = delim,
+    quote = quote,
+    col_names = cleaned_names,
+    skip = 1,
+    col_types = dta_reader_col_types(specs, has_header)
+  )
 }
 
 

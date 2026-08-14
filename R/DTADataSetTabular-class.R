@@ -633,6 +633,8 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'     \item{handler_index}{of the filehandler in the files list}
 #'     \item{name}{file name, base name per default. is used to store the
 #'       table under this name}
+#'     \item{stream}{whether to keep the file lazy rather than reading it into
+#'       memory. See \code{\link{load_file}}.}
 #'   }
 #' @return object of class DTADataSet with loaded data
 #' @examples
@@ -645,14 +647,29 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 #' ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
 #' names(tables(ds))
+#'
+#' # The same file kept lazy: nothing is read until check() scans it.
+#' ds_lazy <- DTAtools:::load_file(
+#'   ds,
+#'   file = file, handler_index = 1, stream = "always"
+#' )
+#' names(tables(ds_lazy))
 #' @usage load_file(x, ...)
 #' @rdname load_file
 #' @export
-method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = tools::file_path_sans_ext(basename(file))) {
+method(load_file, DTADataSetTabular) <- function(
+  x,
+  file,
+  handler_index,
+  name = tools::file_path_sans_ext(basename(file)),
+  stream = getOption("DTAtools.stream", "auto")
+) {
   # check if handler_index is valid and if the file exists in the files list
   if (handler_index < 1 || handler_index > length(x@files)) {
     cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
   }
+
+  handler <- files(x, handler_index)
 
   # This is where a dataset's specs and its file handler meet, so it is the only
   # place that can tell the reader what the columns are: `read_file()` dispatches
@@ -670,8 +687,20 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
   #   unparseable cell turns a whole declared-numeric column into text. Applying
   #   the declared type makes the column a number, that one cell NA, and that one
   #   cell an import error.
+  if (dta_resolve_stream_mode(stream, file)) {
+    # Lazy: the table is a scan plan, not data. The second half of the read --
+    # coercion, and the import issues it finds -- cannot happen here, because
+    # there are no rows yet. It happens per batch inside check(), which is the
+    # only thing that ever pulls rows through. So import_issues stays empty
+    # until check() has run; the issues are the same ones, found later.
+    x@tables[[name]] <- open_file(handler, file, specs = x@specs)
+    x@import_issues[[name]] <- NULL
+
+    return(x)
+  }
+
   coerced <- dta_coerce_table_to_specs(
-    files(x, handler_index) |> read_file(file, specs = x@specs),
+    handler |> read_file(file, specs = x@specs),
     x@specs
   )
 
@@ -879,6 +908,16 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'     \item{artifact_dir}{Character or NULL. Optional output directory for
 #'       persisted validation artifacts.}
 #'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'     \item{batch_rows}{Integer. Rows per batch when scanning a table that was
+#'       loaded with \code{stream = "always"}. Ignored for a table held in
+#'       memory. Defaults to
+#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. Larger batches
+#'       are faster but hold more rows in memory at once.}
+#'     \item{max_errors}{Integer or NULL (default). Cap on the number of
+#'       per-cell errors whose detail is retained while scanning. The reported
+#'       \emph{counts} and the verdict are unaffected; only how many individual
+#'       failures are kept for inspection is. Ignored for a table held in
+#'       memory.}
 #'   }
 #' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
 #'   with \code{validation_index}/\code{validation_store} updated and a
@@ -903,7 +942,9 @@ S7::method(check, DTADataSetTabular) <- function(
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE,
-  validation_run = NULL
+  validation_run = NULL,
+  batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
+  max_errors = NULL
 ) {
   # Handle single table vs multiple tables
   if (!is.null(tab) && !is.null(tables)) {
@@ -995,7 +1036,9 @@ S7::method(check, DTADataSetTabular) <- function(
     details <- dta_validate_any_table(
       x@specs,
       current_table,
-      verbose = !isTRUE(quiet)
+      verbose = !isTRUE(quiet),
+      batch_rows = batch_rows,
+      max_errors = max_errors
     )
     artifact_path <- NULL
     validated_at <- Sys.time()
