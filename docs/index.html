@@ -564,6 +564,7 @@
     <a class="nav-item" href="#section-4-4">Import Errors Detail</a>
     <a class="nav-item" href="#section-4-5">Exporting Data</a>
     <a class="nav-item" href="#section-4-6">Word Documentation</a>
+    <a class="nav-item" href="#section-4-6b">HTML Validation Report</a>
     <a class="nav-item" href="#section-4-7">Large Files</a>
 
     <div class="nav-part">Part 5 — Quick Reference</div>
@@ -1457,6 +1458,40 @@ ds <- datasets(dta, "clinical_data")
 export_specs_table(specs(ds), file = "spec_table.docx")</code></pre>
     </div>
 
+    <!-- ===== HTML VALIDATION REPORT ===== -->
+    <h3 id="section-4-6b">📋 Generating an HTML Validation Report</h3>
+    <p>
+      <code>write_validation_report()</code> renders a self-contained HTML file —
+      no external assets, opens straight from disk — summarizing validation
+      results: a pass/fail overview per dataset/target, and a sortable,
+      filterable table of every validation message with click-to-inspect
+      detail. Clicking a message shows what the constraint actually requires
+      (the allowed values for an <code>enum</code> violation, the declared
+      type for an import error, a plain-language description of a failed
+      rule) and the offending value — for <code>group_condition</code> rules,
+      a full breakdown of the group, its conditions and constraints, and the
+      affected rows.
+    </p>
+
+    <div class="code-wrap">
+      <div class="code-label"><span>R</span><button class="copy-btn" onclick="copyCode(this)">📋 Copy</button></div>
+      <pre><code class="language-r">write_validation_report(dta, file = "validation_report.html")
+
+# Repeated identical messages are capped at max_repeats (default 5) with a
+# "show all" toggle in the file itself -- raise or disable the cap:
+write_validation_report(dta, file = "validation_report.html", max_repeats = Inf)</code></pre>
+    </div>
+
+    <div class="callout callout-tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Also in the Shiny app:</strong>
+        <p>The same report is one click away from <code>run_dta_app()</code> — a
+        "Report" download button sits next to the CSV/TSV/XLSX exports in the
+        validation-messages dock.</p>
+      </div>
+    </div>
+
     <!-- ===== GROUP_CONDITION ===== -->
     <h3 id="section-4-7">🧩 group_condition Rule (Advanced)</h3>
     <p>
@@ -1635,6 +1670,11 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
           <tr>
             <td class="cheat-fn">write_dta(dta, file)</td>
             <td>Export DTA as Word document</td>
+            <td>(file written)</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">write_validation_report(dta, file)</td>
+            <td>Export a standalone, self-contained HTML validation report</td>
             <td>(file written)</td>
           </tr>
           <tr>

@@ -47,6 +47,9 @@ once installed).
   checksums
 - Generate Word documentation tables directly from specifications, or the
   whole agreement as a document (`write_dta()`)
+- Generate a standalone, self-contained HTML validation report
+  (`write_validation_report()`) with a sortable, filterable, click-to-inspect
+  message table
 - An interactive Shiny application over the same objects (`run_dta_app()`)
 
 ## Installation
@@ -525,12 +528,28 @@ and aborts, naming that command, rather than writing a DOCX under a `.pdf` name.
 dta_pdf_backend()   # NULL, or a list naming the backend and engine
 ```
 
+### Export a Standalone HTML Validation Report
+
+`write_validation_report()` renders a self-contained HTML file — no external
+assets, opens straight from disk — summarizing validation results for a `DTA`
+object: a pass/fail overview per dataset/target, and a sortable, filterable
+table of every validation message with click-to-inspect detail (what the
+constraint requires, the actual offending value, and — for `group_condition`
+rules — a full breakdown of the group, its conditions and constraints, and
+the affected rows). Repeated identical messages are capped at `max_repeats`
+(default `5`) with a "show all" toggle in the file itself, so nothing is lost.
+
+```r
+write_validation_report(dta, "validation_report.html")
+```
+
 ### Interactive Shiny application
 
 `run_dta_app()` starts a browser interface over the same objects: load a DTA
 YAML, upload a data file per dataset, run validation, browse the errors, edit
-the metadata and export the document. It needs the suggested packages
-**shiny**, **bslib** and **DT**.
+the metadata and export the document — including the HTML validation report,
+via a "Report" download button alongside the CSV/TSV/XLSX exports. It needs
+the suggested packages **shiny**, **bslib** and **DT**.
 
 ```r
 run_dta_app()
@@ -874,6 +893,7 @@ row-level validation.
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                                    |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                                    |
 | `write_dta(x, file, format)`   | Write the whole DTA as a document (docx, pdf, md)            |
+| `write_validation_report(x, file, max_repeats, …)` | Write a standalone, self-contained HTML validation report |
 | `dta_pdf_backend()`            | Report the DOCX-to-PDF backend this machine will use, or NULL |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA     |
 | `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |
