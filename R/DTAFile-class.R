@@ -378,6 +378,101 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
   }
 }
 
+
+#' @title Open a File Lazily for a DTAFile
+#' @description
+#' The per-subclass half of \code{\link{open_file}()}, mirroring
+#' \code{\link{read_file_execution}()}: it does the actual opening, having been
+#' handed a file whose name has already been checked.
+#'
+#' Each concrete handler supplies its own delimiter, exactly as its
+#' \code{read_file_execution()} method does, so a handler reads and opens the
+#' same file the same way.
+#'
+#' @param x A \code{DTAFile} object (or subclass).
+#' @param ... A \code{file} argument giving the path, and an optional
+#'   \code{specs} argument (a \code{DTAColumnSpecCollection}) whose declared
+#'   types pin the columns at parse time.
+#' @return An \code{arrow::Dataset}.
+#'
+#' @section Methods:
+#' \describe{
+#'   \item{\code{DTAFile}}{Base implementation; aborts, because a handler that
+#'   has not declared how it is delimited cannot be scanned.}
+#' }
+#' @name open_file_execution
+#' @rdname open_file_execution
+#' @export
+if (!exists("open_file_execution", mode = "function")) {
+  open_file_execution <- new_generic("open_file_execution", "x")
+}
+
+#' @export
+method(open_file_execution, DTAFile) <- function(x, ...) {
+  # Reached by a handler subclass that has not implemented lazy opening -- a
+  # user-defined non-delimited format, say. The eager path is always available,
+  # so the message names it rather than leaving the caller stuck.
+  cli::cli_abort(c(
+    "Streaming is not supported for {.cls {class(x)[[1]]}} file handlers.",
+    "i" = "Load this file with {.code stream = \"never\"} to read it into memory instead."
+  ))
+}
+
+
+#' @title Open a file lazily based on DTAFile
+#' @description
+#' The lazy counterpart of \code{\link{read_file}()}. Where \code{read_file()}
+#' returns an Arrow \code{Table} holding the whole file in memory, this returns
+#' an Arrow \code{Dataset} that is scanned in batches when it is used --
+#' which is what lets a file larger than memory be validated at all.
+#'
+#' Both apply the same name checks and the same column-type pinning, so the two
+#' differ in when the data is read, not in what it is read as.
+#'
+#' @param x A \code{DTAFile} object (or subclass) containing file reading
+#'   parameters.
+#' @param file A character string specifying the path to the file to be opened.
+#' @param namecheck Logical; when \code{TRUE} (the default) the file name must
+#'   match the object's filename or pattern.
+#' @param specs A \code{DTAColumnSpecCollection} declaring the columns, or
+#'   \code{NULL} (the default). Passed to the reader so that a column the
+#'   specification declares as text is parsed as text rather than inferred --
+#'   see \code{\link{read_file}()} for why that matters.
+#' @return An \code{arrow::Dataset}.
+#' @seealso \code{\link{read_file}()} for the materialising counterpart, and
+#'   \code{\link{load_file}()}, whose \code{stream} argument chooses between
+#'   them.
+#' @examples
+#' handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#' ds <- open_file(handler, file)
+#' # Nothing has been read yet; the columns are known from the header alone.
+#' names(ds)
+#' @importFrom stringr str_glue
+#' @importFrom cli cli_abort
+#' @name open_file
+#' @rdname open_file
+#' @export
+if (!exists("open_file", mode = "function")) {
+  open_file <- new_generic("open_file", "x")
+}
+
+#' @export
+method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+  if (namecheck && !DTAtools::matches_filename(x, basename(file))) {
+    cli::cli_abort(
+      stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
+    )
+  }
+
+  if (!file.exists(file)) {
+    cli::cli_abort(stringr::str_glue("File '{file}' cannot be found."))
+  }
+
+  open_file_execution(x, file, specs = specs)
+}
+
+
 #' @title Print DTAFile Object
 #' @description
 #' Print method for DTAFile objects.

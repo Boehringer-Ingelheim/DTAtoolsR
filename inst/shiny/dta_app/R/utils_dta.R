@@ -253,14 +253,23 @@ dta_example_yaml_path <- function(filename) {
 
 # Load a file into a dataset via the package. Returns dta_try() result whose
 # value (on success) is the UPDATED dta object.
-dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
+#
+# `stream` is passed straight through to load_file(): "never" reads the file
+# into memory, "always" keeps it lazy and scans it at check time. The app
+# defaults to "never" rather than "auto" because an upload has already been
+# written to disk and read once by Shiny, so the size guess "auto" makes would
+# be second-guessing a file the user has already handed over -- the checkbox is
+# how they say otherwise.
+dta_load_file <- function(dta, dataset, file, handler_index, name = NULL,
+                          stream = "never") {
   nm <- name %||% tools::file_path_sans_ext(basename(file))
   dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
     file = file,
     handler_index = handler_index,
-    name = nm
+    name = nm,
+    stream = stream
   ))
 }
 

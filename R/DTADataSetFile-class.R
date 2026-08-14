@@ -251,7 +251,12 @@ S7::method(check, DTADataSetFile) <- function(
   persist = TRUE,
   artifact_dir = NULL,
   quiet = FALSE,
-  validation_run = NULL
+  validation_run = NULL,
+  # Accepted and ignored. A file dataset checks files, not tables, so there is
+  # nothing to scan in batches -- but `check()` on a DTA calls every dataset the
+  # same way, and it should not have to branch on the dataset's class to do it.
+  batch_rows = NULL,
+  max_errors = NULL
 ) {
   if (is.null(validation_run)) {
     validation_run <- dta_new_validation_run_id()

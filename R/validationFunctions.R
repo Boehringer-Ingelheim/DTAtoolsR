@@ -195,7 +195,12 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     columnspec_valid = !has_columnspec_errors,
     rules_valid = isTRUE(rules_valid),
     import_valid = isTRUE(import_valid),
-    n_columnspec_errors = if (is.null(full_error)) 0 else nrow(full_error),
+    # 0L, not 0: `nrow()` on the other branch is an integer, so a bare `0` made
+    # this field a double exactly when the count was zero and an integer
+    # otherwise. Every other count in the package is an integer, and the
+    # streaming path reports one here too, so the type must not depend on
+    # whether anything failed.
+    n_columnspec_errors = if (is.null(full_error)) 0L else nrow(full_error),
     n_rule_errors = length(rule_errors),
     n_import_errors = n_import_errors,
     columnspec_errors = list(

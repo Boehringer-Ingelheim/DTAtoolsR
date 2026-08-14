@@ -889,7 +889,8 @@ server <- function(input, output, session) {
       before <- dta_dataset_content_count(dta_get_dataset(rv$dta, dsname))
       res <- dta_load_file(
         rv$dta,
-        dataset = dsname, file = staged, handler_index = hi, name = tbl
+        dataset = dsname, file = staged, handler_index = hi, name = tbl,
+        stream = if (isTRUE(input$load_stream)) "always" else "never"
       )
       if (!res$ok) {
         rejected <- c(rejected, sprintf("'%s' (%s)", nm, res$error))
@@ -4832,6 +4833,25 @@ server <- function(input, output, session) {
       div(
         class = "msg-hint", style = "margin:-4px 0 10px;",
         "Drop each required file below. Loaded files appear underneath."
+      ),
+      # Streaming is a property of how a file is HELD, not of which slot it
+      # went into, so this is one control for the page rather than one per
+      # dropzone. It is read at upload time by the handler below.
+      div(
+        style = "margin:-4px 0 10px;",
+        checkboxInput(
+          "load_stream",
+          label = "Load large files without reading them into memory",
+          value = FALSE
+        ),
+        div(
+          class = "msg-hint", style = "margin:-10px 0 0 24px;",
+          paste(
+            "Scans the file in batches when you check it, so a file bigger than",
+            "memory can still be validated. Import errors are then reported by",
+            "the check rather than at upload."
+          )
+        )
       ),
       slots,
       card(
