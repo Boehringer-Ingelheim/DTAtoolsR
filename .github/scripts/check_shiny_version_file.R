@@ -1,6 +1,9 @@
 #!/usr/bin/env Rscript
 
-desc_version <- trimws(read.dcf("DESCRIPTION", fields = "Version")[1, 1])
+# unname(): read.dcf() returns a matrix whose single cell keeps the field name,
+# and identical() compares attributes -- so without this the comparison below is
+# FALSE even when the two version strings agree character for character.
+desc_version <- unname(trimws(read.dcf("DESCRIPTION", fields = "Version")[1, 1]))
 version_file <- "inst/shiny/dta_app/VERSION"
 
 if (!file.exists(version_file)) {
