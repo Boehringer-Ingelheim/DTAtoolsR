@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-14
+
 ### Changed
 
 - **Group condition rule violation messages are now human-readable.**
@@ -21,10 +23,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   (2) a second table with the actual data values for all offending rows (all
   relevant columns: group-by columns plus all columns referenced in conditions).
   Previously the modal showed at most 10 rows and only `SUBJECT_ID`/`VISIT`.
-
-## [0.17.0] - 2026-08-14
-
-### Changed
 
 - **The validation axis formerly called "schema" is now called "columnspec".**
   The name was inherited from the JSON Schema validator that used to evaluate
