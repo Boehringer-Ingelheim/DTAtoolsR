@@ -45,9 +45,9 @@ brandbar <- div(
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-# Prefer a nearby DESCRIPTION (deployed app bundle/source of truth), then fall
-# back to the installed package version.
-dta_package_version <- function() {
+# The app bundle and installed package can differ on Posit Connect, so report
+# both when they do.
+dta_bundle_version <- function() {
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),
@@ -73,6 +73,10 @@ dta_package_version <- function() {
     }
   }
 
+  ""
+}
+
+dta_runtime_package_version <- function() {
   v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
     error = function(e) ""
   )
@@ -83,11 +87,30 @@ dta_package_version <- function() {
   ""
 }
 
-dta_pkg_version <- dta_package_version()
+dta_version_label <- function() {
+  bundle_version <- dta_bundle_version()
+  runtime_version <- dta_runtime_package_version()
+
+  if (nzchar(bundle_version) && nzchar(runtime_version) && bundle_version != runtime_version) {
+    return(paste0("app v", bundle_version, " (pkg v", runtime_version, ")"))
+  }
+
+  if (nzchar(bundle_version)) {
+    return(paste0("v", bundle_version))
+  }
+
+  if (nzchar(runtime_version)) {
+    return(paste0("v", runtime_version))
+  }
+
+  ""
+}
+
+dta_pkg_version <- dta_version_label()
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
-  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", paste0("v", dta_pkg_version)),
+  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
   tags$span(class = "foot-sep", "\u2022"),
   tags$span("Boehringer Ingelheim"),
   tags$span(class = "foot-sep", "\u2022"),
