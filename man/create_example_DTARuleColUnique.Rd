@@ -13,6 +13,6 @@ create_example_DTARuleColUnique(index = 1)
 create example for DTARuleColUnique
 }
 \examples{
- library(DTAtools)
- create_example_DTARuleColUnique()
+library(DTAtools)
+create_example_DTARuleColUnique()
 }

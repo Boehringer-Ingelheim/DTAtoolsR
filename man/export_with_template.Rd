@@ -74,21 +74,21 @@ be given with or without the surrounding braces (\code{"DTA_TITLE"} and
 automatically extracted ones and may introduce entirely new placeholders.
 }
 \examples{
-\dontrun{
 # Build a minimal template with officer, then fill it from a DTA.
-library(officer)
 template <- tempfile(fileext = ".docx")
-doc <- read_docx()
-doc <- body_add_par(doc, "Title: {DTA_TITLE}")
-doc <- body_add_par(doc, "Version: {DTA_VERSION}")
-doc <- body_add_par(doc, "Supplier: {SUPPLIER_NAME}")
+doc <- officer::read_docx()
+doc <- officer::body_add_par(doc, "Title: {DTA_TITLE}")
+doc <- officer::body_add_par(doc, "Version: {DTA_VERSION}")
+doc <- officer::body_add_par(doc, "Supplier: {SUPPLIER_NAME}")
 print(doc, target = template)
 
 dta <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
-export_with_template(dta, template, tempfile(fileext = ".docx"))
-}
+out <- tempfile(fileext = ".docx")
+export_with_template(dta, template, out)
+
+unlink(c(template, out), force = TRUE)
 }
 \seealso{
 \code{\link[=write_dta]{write_dta()}}, which accepts a \code{template} argument to route through

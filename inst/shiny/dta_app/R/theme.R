@@ -6,22 +6,22 @@
 # family chosen to look on-brand and modern.
 
 BI <- list(
-  green       = "#00625B", # primary brand green/teal (deep)
-  green_dark  = "#003D38",
+  green = "#00625B", # primary brand green/teal (deep)
+  green_dark = "#003D38",
   green_light = "#E6F1EF",
-  accent      = "#00A886", # brighter accent green
-  ink         = "#1A2B2A", # near-black text
-  grey        = "#5B6B6A",
-  grey_light  = "#F4F7F6",
+  accent = "#00A886", # brighter accent green
+  ink = "#1A2B2A", # near-black text
+  grey = "#5B6B6A",
+  grey_light = "#F4F7F6",
   # Semantic status colors (harmonized with the BI green family)
-  pass        = "#1E8E5A",
-  pass_bg     = "#E5F4EC",
+  pass = "#1E8E5A",
+  pass_bg = "#E5F4EC",
   pass_border = "#9BD3B4",
-  fail        = "#C0392B",
-  fail_bg     = "#FBEAE7",
+  fail = "#C0392B",
+  fail_bg = "#FBEAE7",
   fail_border = "#E9B4AC",
-  pending     = "#5B6B6A",
-  pending_bg  = "#EEF1F1",
+  pending = "#5B6B6A",
+  pending_bg = "#EEF1F1",
   pending_border = "#CDD5D4"
 )
 
@@ -303,6 +303,53 @@ bi_css <- function() {
     }
     .ds-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
 
+    /* Dataset Edit menu: one entry point for the three specification editors.
+       The rows are icon + title + one line of explanation, so the menu says
+       what each editor changes instead of relying on a tooltip the three
+       separate buttons used to carry. */
+    /* No pseudo-element rules here. test-run-dta-app.R scans every app file
+       for namespaced package calls to catch undeclared dependencies, and a CSS
+       double-colon pseudo-element reads to that scanner as a package named
+       after the selector it follows. */
+    .ds-edit-toggle { font-weight: 500; }
+    .ds-edit-menu {
+      min-width: 19rem;
+      padding: 6px;
+      margin-top: 6px;
+      border: 1px solid var(--bi-pending-border);
+      border-radius: 12px;
+      box-shadow: 0 12px 28px rgba(26, 43, 42, .16);
+    }
+    .ds-edit-menu .dropdown-header {
+      padding: 6px 10px 4px;
+      font-size: .7rem; font-weight: 700; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--bi-grey);
+    }
+    /* white-space:normal so the description wraps instead of stretching the
+       menu; Bootstrap sets nowrap on .dropdown-item. */
+    .ds-edit-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 9px 10px; border-radius: 9px;
+      white-space: normal; text-decoration: none;
+    }
+    .ds-edit-item:hover, .ds-edit-item:focus, .ds-edit-item:active {
+      background: var(--bi-green-light);
+    }
+    .ds-edit-item:focus-visible { outline: 2px solid var(--bi-accent); outline-offset: -2px; }
+    .ds-edit-icon {
+      flex: 0 0 auto;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: 8px;
+      background: var(--bi-grey-light); font-size: 15px; line-height: 1;
+    }
+    .ds-edit-item:hover .ds-edit-icon, .ds-edit-item:focus .ds-edit-icon { background: #fff; }
+    .ds-edit-text { display: flex; flex-direction: column; min-width: 0; }
+    .ds-edit-title { font-weight: 600; color: var(--bi-ink); line-height: 1.25; }
+    .ds-edit-item:hover .ds-edit-title, .ds-edit-item:focus .ds-edit-title {
+      color: var(--bi-green-dark);
+    }
+    .ds-edit-desc { font-size: .78rem; color: var(--bi-grey); line-height: 1.3; }
+
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }
     .dta-inspect-wrap { overflow-x: auto; max-height: 68vh; }
@@ -478,11 +525,15 @@ status_chip <- function(status) {
 # Accessible icon + label for a slot's state (not color-only)
 slot_state_label <- function(state, detail = NULL) {
   icon <- switch(state,
-    ok = "\u2714",      # check mark
-    warn = "\u26A0",    # warning
-    empty = "\u2014"    # em dash
+    ok = "\u2714", # check mark
+    warn = "\u26A0", # warning
+    empty = "\u2014" # em dash
   )
-  cls <- switch(state, ok = "slot-ok", warn = "slot-warn", empty = "slot-meta")
+  cls <- switch(state,
+    ok = "slot-ok",
+    warn = "slot-warn",
+    empty = "slot-meta"
+  )
   shiny::span(class = cls, paste0(icon, " ", detail %||% ""))
 }
 
@@ -499,7 +550,9 @@ yaml_highlight_html <- function(text) {
   hl_value <- function(v) {
     lead <- sub("^([[:space:]]*).*$", "\\1", v)
     tv <- substring(v, nchar(lead) + 1L)
-    if (!nzchar(tv)) return(v)
+    if (!nzchar(tv)) {
+      return(v)
+    }
     cls <- if (grepl('^".*"$', tv) || grepl("^'.*'$", tv)) {
       "yml-str"
     } else if (grepl("^(true|false|yes|no|on|off|null|~)$", tv, ignore.case = TRUE)) {
@@ -512,9 +565,13 @@ yaml_highlight_html <- function(text) {
     paste0(lead, sprintf('<span class="%s">%s</span>', cls, tv))
   }
   lines <- strsplit(text %||% "", "\n", fixed = TRUE)[[1]]
-  if (length(lines) == 0) return("")
+  if (length(lines) == 0) {
+    return("")
+  }
   out <- vapply(lines, function(line) {
-    if (!nzchar(line)) return("")
+    if (!nzchar(line)) {
+      return("")
+    }
     e <- esc(line)
     # Whole-line comment.
     if (grepl("^[[:space:]]*#", e)) {

@@ -5,7 +5,8 @@
 %   R/DTADataSetTabular-class.R, R/DTAFile-class.R, R/DTAFileCSV-class.R,
 %   R/DTAFileDelim-class.R, R/DTAFileTSV-class.R, R/DTAMetaData-class.R,
 %   R/DTARule-class.R, R/DTARuleColCondition-class.R,
-%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R
+%   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
+%   R/DTARuleGroupCondition-class.R
 \name{print}
 \alias{print}
 \title{Print DTA Object}
@@ -51,9 +52,12 @@ print(x, ...)
 
 ## S7 method for class <DTAtools::DTARuleColUnique>
 print(x, ...)
+
+## S7 method for class <DTAtools::DTARuleGroupCondition>
+print(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTARuleColUnique}
+\item{x}{An object of class DTARuleGroupCondition}
 
 \item{...}{Additional arguments (not used)}
 }
@@ -102,19 +106,21 @@ Print overview for DTADTARuleColConditionRule
 Print overview for DTARuleColRange
 
 Print overview for DTARuleColUnique
+
+Print overview for DTARuleGroupCondition.
 }
 \examples{
-  dta_obj <- create_example_DTA()
-  print(dta_obj)
+dta_obj <- create_example_DTA()
+print(dta_obj)
 x <- create_example_DTAColumnSpecCollection()
 print(x)
 library(DTAtools)
 print(create_example_DTADataSetTabular())
 library(DTAtools)
 print(create_example_DTADataSetTabular())
- # do not use this, use derived classes instead, e.g.
- # DTAFileCSV or DTAFileTSV
- print(DTAFileCSV("example.csv"))
+# do not use this, use derived classes instead, e.g.
+# DTAFileCSV or DTAFileTSV
+print(DTAFileCSV("example.csv"))
 library(DTAtools)
 print(create_example_DTAFileCSV())
 

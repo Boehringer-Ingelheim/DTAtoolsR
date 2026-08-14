@@ -114,6 +114,7 @@ test_that("dta_rule_type_label maps known type tokens and falls back for unknown
   expect_equal(label("col_condition"), "Conditional (IF/THEN)")
   expect_equal(label("col_range"), "Range")
   expect_equal(label("col_unique"), "Unique")
+  expect_equal(label("group_condition"), "Grouped condition")
   expect_equal(label("some_future_type"), "some_future_type")
   expect_equal(label(""), "—")
   expect_equal(label(NULL), "—")
@@ -341,6 +342,26 @@ test_that("dta_rule_to_list normalizes a col_range rule's columns/min/max", {
   expect_equal(l$max, 65)
 })
 
+test_that("dta_rule_to_list normalizes a group_condition rule", {
+  rule <- DTARuleGroupCondition(
+    id = "g_rule",
+    group_by = c("SUBJECT_ID", "VISIT"),
+    conditions = list(
+      c1 = list(STATUS = list(equals = "FAILED")),
+      c2 = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "requires", `if` = "c1", then = "c2"))
+  )
+
+  l <- app_fn("dta_rule_to_list")(rule)
+
+  expect_equal(l$id, "g_rule")
+  expect_equal(l$type, "group_condition")
+  expect_equal(l$group_by, c("SUBJECT_ID", "VISIT"))
+  expect_equal(names(l$conditions), c("c1", "c2"))
+  expect_equal(l$constraints[[1]]$type, "requires")
+})
+
 test_that("dta_dataset_to_list builds the standalone-dataset shape with all columns and rules", {
   dta <- app_fixture_dta()
   ds <- app_fn("dta_get_dataset")(dta, "clinical_data")
@@ -350,7 +371,7 @@ test_that("dta_dataset_to_list builds the standalone-dataset shape with all colu
   expect_equal(l$name, "clinical_data")
   expect_equal(l$type, "tabular")
   expect_length(l$columns, 14)
-  expect_length(l$rules, 6)
+  expect_length(l$rules, 8)
 })
 
 test_that("dta_to_list builds metadata + datasets top-level keys", {
@@ -500,7 +521,7 @@ test_that("dta_column_fields splits backend/type/format for one column, NULL whe
 test_that("dta_rules_overview builds one row per rule with a human-readable detail", {
   overview <- app_fn("dta_rules_overview")(app_fixture_dta(), "clinical_data")
 
-  expect_equal(nrow(overview), 6)
+  expect_equal(nrow(overview), 8)
   expect_equal(overview$id[3], "rule_range_example")
   expect_equal(overview$detail[3], "AGE in [18, 65]")
   expect_equal(overview$id[5], "rule_unique_example")

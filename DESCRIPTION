@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Tools for Handling Data from Data Transfer Agreements (DTAs) / Data Transfer Specifications (DTS)
-Version: 0.13.0
+Version: 0.16.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -24,7 +24,6 @@ Imports:
 	cli,
 	utils,
 	tools,
-	tidyr,
 	glue,
 	methods,
 	R.utils,
@@ -33,7 +32,6 @@ Imports:
 	purrr,
 	magrittr,
 	jsonlite,
-	jsonvalidate,
 	flextable,
 	arrow,
 	stringr,
@@ -85,6 +83,7 @@ Collate:
     'DTARuleColCondition-class.R'
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
+    'DTARuleGroupCondition-class.R'
     'documentBuilders.R'
     'evaluateSchemaRules.R'
     'exportDocuments.R'
@@ -92,6 +91,8 @@ Collate:
     'exportTemplateDocx.R'
     'formattingHelpers.R'
     'run_dta_app.R'
+    'schemaChecks.R'
+    'streamingValidation.R'
     'validationFunctions.R'
     'zzz.R'
 Config/roxygen2/version: 8.0.0

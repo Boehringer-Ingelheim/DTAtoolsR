@@ -9,6 +9,8 @@
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
 #'   pattern. Default is \code{FALSE}.
+#' @param pattern_description Character or \code{NULL}; human-readable
+#'   description of the \code{filename} pattern.
 #' @param number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected. Default is \code{1}.
 #' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
@@ -33,6 +35,7 @@ DTAFileCSV <- S7::new_class(
   constructor = function(
     filename,
     pattern = FALSE,
+    pattern_description = NULL,
     number_of_files = NULL,
     min_number_of_files = NULL,
     max_number_of_files = NULL,
@@ -48,6 +51,7 @@ DTAFileCSV <- S7::new_class(
         max_number_of_files = max_number_of_files,
         info = info,
         pattern = pattern,
+        pattern_description = pattern_description,
         sep = ",",
         has_header = has_header,
         quote = quote

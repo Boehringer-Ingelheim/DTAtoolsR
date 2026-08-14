@@ -65,7 +65,6 @@ test_that("datasets() does not enforce a single 'name' argument (documented gap)
 })
 
 
-
 test_that("DTA() names datasets from the DTADataSet it is given", {
   ds <- DTADataSetTabular(
     name = "demographics",
@@ -190,7 +189,7 @@ test_that("Load data from file via file handler from DTA object", {
   dta1 <- load_file(dta, "clinical_data", file = system.file("extdata", "clinical_data.csv", package = "DTAtools"))
 
   dta2 <- load_file(dta, 1, file = system.file("extdata", "clinical_data.csv", package = "DTAtools"))
-  
+
   expect_type(dta1[["clinical_data"]]@tables, "list")
   expect_equal(1, length(dta1[["clinical_data"]]@tables))
   expect_equal(500, nrow(dta1[["clinical_data"]]@tables[[1]]))
@@ -204,7 +203,6 @@ test_that("Load data from file via file handler from DTA object", {
   expect_equal(14, ncol(dta2[["clinical_data"]]@tables[[1]]))
   expect_s3_class(dta2[["clinical_data"]]@tables[[1]], "Table")
   expect_s3_class(dta2[["clinical_data"]]@tables[[1]], "ArrowTabular")
-
 })
 
 test_that("check() method validates all datasets in DTA", {
@@ -279,7 +277,7 @@ test_that("check() method validates by dataset index", {
   # Check by index
   dta <- check(dta, datasets = 1, persist = FALSE, quiet = TRUE)
   result <- results(dta, datasets = 1)
-  
+
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_equal(result$dataset, "clinical_data")

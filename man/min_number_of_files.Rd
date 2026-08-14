@@ -48,7 +48,7 @@ ds <- DTADataSet(
   files = list(create_example_DTAFileCSV())
 )
 min_number_of_files(ds)
-  file_info <- DTAFile("file.txt", number_of_files = 1)
-  min_number_of_files(file_info)
+file_info <- DTAFile("file.txt", number_of_files = 1)
+min_number_of_files(file_info)
 
 }

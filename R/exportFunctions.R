@@ -315,4 +315,3 @@ write_metadata <- function(file, table, write_to_file, quiet = FALSE) {
     n_cols = n_cols
   ))
 }
-

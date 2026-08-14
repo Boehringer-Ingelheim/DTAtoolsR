@@ -14,9 +14,18 @@ double quotes. If `Rscript` is not on `PATH`, use the absolute path from
 
 - Tests: `Rscript -e "devtools::test()"`, or `devtools::test(filter='<Topic>')`
   when the caller names a scope.
-- Docs: `Rscript -e "roxygen2::roxygenise()"`
+- Style: `Rscript -e "styler::style_pkg(dry = \"fail\")"`. This checks only —
+  `dry = "fail"` refrains from writing and errors if any file is not already
+  styled. Never run `style_pkg()` without `dry`; rewriting R sources is the
+  main thread's job, not yours.
+- Docs: `Rscript -e "roxygen2::roxygenise()"`, then
+  `git status --porcelain man NAMESPACE` — report the paths if it is non-empty,
+  since CI fails on stale generated docs.
 - Full check: `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"`
-- Style/hooks: `pre-commit run --all-files`
+- Fast hooks: `pre-commit run --all-files`. These are whitespace, merge
+  conflicts, private keys and the forbidden-artifact check only — they do
+  **not** style or roxygenise, so passing hooks says nothing about the two
+  stages above.
 
 Report format:
 
@@ -25,4 +34,6 @@ Report format:
 3. Nothing else — no passing-test lists, no suggested fixes, no console noise.
 
 If a command cannot run (missing package, R not on PATH), say exactly that and
-stop. Do not install packages, edit files, or modify `renv.lock`.
+stop. Do not install packages, edit anything under `R/` or `tests/`, or modify
+`renv.lock`. Regenerating `man/`/`NAMESPACE` via `roxygenise()` is the one
+write you are allowed, and only when the caller asks for the docs stage.

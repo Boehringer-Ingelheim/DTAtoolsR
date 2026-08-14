@@ -44,7 +44,7 @@ DTADataSetTabular <- S7::new_class(
     template_date = NULL
   ) {
     if (inherits(files, "DTAtools::DTAFile")) {
-      files = list(files)
+      files <- list(files)
     }
 
     # Type every table by its column specs before it is stored, so the declared
@@ -77,7 +77,6 @@ DTADataSetTabular <- S7::new_class(
         template_date = template_date,
         description = description
       ),
-
       specs = specs,
       tables = tables,
       validation_index = list(),
@@ -99,27 +98,47 @@ DTADataSetTabular <- S7::new_class(
     # check if all elements of list self@tables inherit from "Table"
     if (!inherits(self@specs, "DTAtools::DTAColumnSpecCollection")) {
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
-    } 
-
-    if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "Table")))) {
-      cli_abort("All elements of 'tables' must be of class 'Table'")
     }
 
-    #if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "arrow::ArrowTabular")))) {
+    # A table may be materialised (an Arrow Table) or lazy (a Dataset, a query
+    # over one, or a batch reader). The lazy forms exist so a file larger than
+    # memory can be validated by scanning it, which an in-memory Table forbids
+    # by construction. Everything downstream either scans batches or converts,
+    # so both are usable; what is rejected is a plain data frame or a list,
+    # which would silently skip Arrow entirely.
+    if (length(self@tables) > 0) {
+      acceptable <- vapply(
+        self@tables,
+        function(x) {
+          inherits(x, "Table") ||
+            inherits(x, "Dataset") ||
+            inherits(x, "arrow_dplyr_query") ||
+            inherits(x, "RecordBatchReader")
+        },
+        logical(1)
+      )
+      if (!all(acceptable)) {
+        cli_abort(
+          "All elements of 'tables' must be an Arrow {.cls Table}, {.cls Dataset}, {.cls arrow_dplyr_query} or {.cls RecordBatchReader}."
+        )
+      }
+    }
+
+    # if(length(self@tables) > 0 && !all(sapply(self@tables, function(x) inherits(x, "arrow::ArrowTabular")))) {
     #  cli_abort("All elements of 'tables' must be of class 'arrow::ArrowTabular'")
-    #}
+    # }
 
     # check if list holding the validation index and validation store are of the same length
-    #if(length(self@validation_index) != length(self@validation_store)) {
+    # if(length(self@validation_index) != length(self@validation_store)) {
     #  cli_abort("Properties 'validation_index' and 'validation_store' must be of the same length")
-    #}
+    # }
 
-    if(!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
+    if (!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
       cli_abort("Property 'validation_artifact_dir' must be a valid directory path or NULL")
     }
 
     # if tables are present, check if the column names of the tables match the column names in the specs if specs are present
-    #if(length(self@tables) > 0 && !is.null(self@specs)) {
+    # if(length(self@tables) > 0 && !is.null(self@specs)) {
     #  spec_column_names <- sapply(self@specs@columns, function(x) x@name)
     #  for(table in self@tables) {
     #    table_column_names <- colnames(table)
@@ -127,13 +146,12 @@ DTADataSetTabular <- S7::new_class(
     #      cli_abort("Column names in 'specs' do not match column names in 'tables'")
     #    }
     #  }
-    #}
+    # }
 
     # if list of tables is present then list of validation index and store cannot be larger than the list of tables
-    if(length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables) || length(self@import_issues) > length(self@tables))) {
+    if (length(self@tables) > 0 && (length(self@validation_index) > length(self@tables) || length(self@validation_store) > length(self@tables) || length(self@import_issues) > length(self@tables))) {
       cli_abort("Properties 'validation_index', 'validation_store' and 'import_issues' cannot be larger than the number of tables in 'tables'")
     }
-
   }
 )
 
@@ -482,8 +500,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
     AVAL = c(175.2, 68.5, 22.3)
   ))
 
-  switch(
-    index,
+  switch(index,
     `1` = {
       DTADataSetTabular(
         name = "example_container_specs_without_data",
@@ -584,7 +601,7 @@ method(print, DTADataSetTabular) <- function(x, ...) {
 #' @name print_short_info
 #' @export
 method(print_short_info, DTADataSetTabular) <- function(x, ...) {
-  #super(print_short_info, x)
+  # super(print_short_info, x)
   method(print_short_info, DTADataSet)(x)
   if (!is.null(x@specs)) {
     cli_alert(
@@ -632,7 +649,6 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #' @rdname load_file
 #' @export
 method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = tools::file_path_sans_ext(basename(file))) {
-
   # check if handler_index is valid and if the file exists in the files list
   if (handler_index < 1 || handler_index > length(x@files)) {
     cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
@@ -659,15 +675,15 @@ method(load_file, DTADataSetTabular) <- function(x, file, handler_index, name = 
     x@specs
   )
 
-  x@tables[[ name ]] <- coerced$table
+  x@tables[[name]] <- coerced$table
 
   # Canonical copy on the dataset, keyed by table name. The same frame also
   # rides on the table itself, so a change in the issues changes the table hash
   # and check() cannot skip revalidation with a stale result.
   if (nrow(coerced$issues) > 0) {
-    x@import_issues[[ name ]] <- coerced$issues
+    x@import_issues[[name]] <- coerced$issues
   } else {
-    x@import_issues[[ name ]] <- NULL
+    x@import_issues[[name]] <- NULL
   }
 
   x
@@ -816,7 +832,6 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 }
 
 
-
 #' @title Invalidate Validation Due to Spec Changes
 #' @description
 #' Marks validation as outdated for specified tables when specs are changed.
@@ -872,11 +887,11 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'   validation summary data.frame.
 #' @importFrom cli cli_h3 cli_alert_info cli_alert_success cli_alert_danger
 #' @examples
-#'   ds <- create_example_DTADataSetTabular(2)
-#'   # Check all tables
-#'   ds <- check(ds)
-#'   # Check specific table
-#'   ds <- check(ds, tables = "tab1")
+#' ds <- create_example_DTADataSetTabular(2)
+#' # Check all tables
+#' ds <- check(ds)
+#' # Check specific table
+#' ds <- check(ds, tables = "tab1")
 #' @usage check(x, ...)
 #' @name check
 #' @export
@@ -894,7 +909,7 @@ S7::method(check, DTADataSetTabular) <- function(
   if (!is.null(tab) && !is.null(tables)) {
     cli::cli_abort("Cannot specify both 'tab' and 'tables' parameters. Use 'tab' for single table, 'tables' for multiple.")
   }
-  
+
   # If single table is specified, use it; otherwise use tables parameter
   if (!is.null(tab)) {
     target_table_indices <- dta_table_id_to_names(x, tab)
@@ -904,7 +919,7 @@ S7::method(check, DTADataSetTabular) <- function(
     tables_to_check <- tables
     single_table_mode <- FALSE
   }
-  
+
   # Validate structure (from parent class)
   x <- S7::method(check, DTADataSet)(
     x,
@@ -939,11 +954,18 @@ S7::method(check, DTADataSetTabular) <- function(
   for (idx in seq_along(target_tables)) {
     table_name <- target_tables[idx]
     current_table <- x@tables[[table_name]]
-    current_df <- as.data.frame(current_table)
-    table_hash <- dta_hash_object(current_df)
+
+    # Deliberately NOT as.data.frame() here. A lazy table is lazy precisely
+    # because materialising it is not affordable, and hashing it to decide
+    # whether to skip it would spend more than validating it costs.
+    table_hash <- dta_table_change_signal(current_table)
 
     previous <- x@validation_index[[table_name]]
+    # A NULL signal means identity could not be established, so the table is
+    # assumed changed. Without the explicit NULL guard two unidentifiable
+    # tables would compare equal and the second would be skipped.
     unchanged <- !is.null(previous) &&
+      !is.null(table_hash) &&
       identical(previous$table_hash, table_hash) &&
       identical(previous$specs_hash, specs_hash)
 
@@ -970,7 +992,11 @@ S7::method(check, DTADataSetTabular) <- function(
       }
     }
 
-    details <- validate_table_detailed(x@specs, current_df, verbose = !isTRUE(quiet))
+    details <- dta_validate_any_table(
+      x@specs,
+      current_table,
+      verbose = !isTRUE(quiet)
+    )
     artifact_path <- NULL
     validated_at <- Sys.time()
     run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")
@@ -998,10 +1024,15 @@ S7::method(check, DTADataSetTabular) <- function(
 
     x@validation_index[[table_name]] <- index_entry
     x@validation_store[[table_name]] <- details
-    
-    # Attach details for single table mode
+
+    # Attach details for single table mode.
+    #
+    # Tagged on the way out. `dta_validate_any_table()` returns a tagged result
+    # for a lazy table and an untagged one for a materialised table, so without
+    # this the attribute's class would depend on how the table happened to be
+    # held -- and `as.data.frame()` would work on one and fail on the other.
     if (single_table_mode) {
-      attr(x, "last_validation_details") <- details
+      attr(x, "last_validation_details") <- dta_as_validation_details(details)
     }
 
     output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
@@ -1023,11 +1054,11 @@ S7::method(check, DTADataSetTabular) <- function(
       n_valid <- sum(val_status$ok == TRUE, na.rm = TRUE)
       n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
       n_total <- nrow(val_status)
-      
+
       if (!single_table_mode) {
         cli::cli_text()
       }
-      
+
       if (n_invalid > 0) {
         table_word <- if (n_total == 1) "table" else "tables"
         cli::cli_alert_danger(
@@ -1045,4 +1076,3 @@ S7::method(check, DTADataSetTabular) <- function(
   # Return the updated dataset so validation state is not lost
   invisible(x)
 }
-

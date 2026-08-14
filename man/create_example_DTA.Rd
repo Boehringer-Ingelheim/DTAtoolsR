@@ -16,6 +16,6 @@ An object of class DTA with example data
 Creates an example DTA object for demonstration purposes.
 }
 \examples{
-  example_dta <- create_example_DTA()
-  print(example_dta)
+example_dta <- create_example_DTA()
+print(example_dta)
 }

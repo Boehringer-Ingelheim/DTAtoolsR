@@ -24,23 +24,38 @@ jobs:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ github.head_ref }}
 
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          use-public-rspm: true
+          python-version: "3.x"
 
-      - name: Install dependencies
-        uses: r-lib/actions/setup-r-dependencies@v2
+      # No R setup here: every remaining hook is pure Python. The R-specific
+      # checks (styler, roxygen2/NAMESPACE, deps-in-desc, ...) run in the
+      # separate r-style workflow, against the project's own R library
+      # instead of a second one built just for this job.
+
+      # Not pre-commit/action@vN: that composite action bakes its own
+      # actions/cache step in with no continue-on-error, so a cache-service
+      # outage (as happened here) fails the job before a single hook runs. A
+      # cache miss/outage must only make the run slower, never fail it, so the
+      # cache step is inlined here where we control that.
+      - name: Cache pre-commit envs
+        uses: actions/cache@v4
+        continue-on-error: true
         with:
-          extra-packages: any::roxygen2
-          needs: roxygen2
+          path: ~/.cache/pre-commit
+          key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
 
-      - uses: pre-commit/action@v2.0.3
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+
+      - name: Run pre-commit
+        run: pre-commit run --show-diff-on-failure --color=always --all-files
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         if: '!cancelled()'

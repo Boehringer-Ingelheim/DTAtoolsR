@@ -23,6 +23,48 @@
   path
 }
 
+# Build a Word template whose single paragraph is made of SEVERAL runs with
+# different formatting. `parts` is a list of list(text = , bold = ) entries.
+# .make_template() emits one plain run per paragraph, so it cannot express the
+# case that matters here: a placeholder sitting in a formatted run next to
+# differently-formatted text.
+.make_template_rich <- function(parts) {
+  path <- tempfile(fileext = ".docx")
+  chunks <- lapply(parts, function(p) {
+    officer::ftext(p$text, officer::fp_text(bold = isTRUE(p$bold)))
+  })
+  doc <- officer::read_docx()
+  doc <- officer::body_add_fpar(doc, do.call(officer::fpar, chunks))
+  print(doc, target = path)
+  path
+}
+
+# Text of every run that carries bold, in document order. Used to assert that
+# per-run formatting survived a substitution. Tolerates either spelling of "not
+# bold": an absent <w:b/> or an explicit <w:b w:val="false"/>.
+.docx_bold_run_texts <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
+  runs <- xml2::xml_find_all(doc, ".//*[local-name()='r']")
+  bold <- vapply(seq_along(runs), function(i) {
+    b <- xml2::xml_find_all(
+      runs[[i]],
+      "./*[local-name()='rPr']/*[local-name()='b']"
+    )
+    if (length(b) == 0) {
+      return(FALSE)
+    }
+    val <- xml2::xml_attr(b[[1]], "val")
+    is.na(val) || !(val %in% c("false", "0"))
+  }, logical(1))
+  texts <- vapply(seq_along(runs), function(i) {
+    paste0(
+      xml2::xml_text(xml2::xml_find_all(runs[[i]], "./*[local-name()='t']")),
+      collapse = ""
+    )
+  }, character(1))
+  texts[bold]
+}
+
 # Return the concatenated visible text of a Word document.
 .docx_text <- function(path) {
   summary <- officer::docx_summary(officer::read_docx(path))

@@ -25,7 +25,6 @@
 DTARuleColUnique <- S7::new_class(
   "DTARuleColUnique",
   parent = DTARule,
-
   constructor = function(
     id,
     type = NULL,
@@ -40,13 +39,13 @@ DTARuleColUnique <- S7::new_class(
       cli_abort("'type' must be NULL, 'check_unique', or 'col_unique'.")
     }
 
-    if(is.list(columns)) {
+    if (is.list(columns)) {
       columns <- unlist(columns)
     }
-    if(!is.character(columns)) {
+    if (!is.character(columns)) {
       cli_abort("'columns' must be a character vector or list of column names.")
     }
-    
+
     # Create the class object
     new_object(
       .parent = DTAtools::DTARule(
@@ -93,7 +92,7 @@ DTARuleColUnique <- S7::new_class(
 method(print, DTARuleColUnique) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
-  if(!is.null(x@description)) cli_text("{x@description}")
+  if (!is.null(x@description)) cli_text("{x@description}")
 
   message <- paste0(
     "column(s): ",
@@ -108,8 +107,8 @@ method(print, DTARuleColUnique) <- function(x, ...) {
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#'  library(DTAtools)
-#'  create_example_DTARuleColUnique()
+#' library(DTAtools)
+#' create_example_DTARuleColUnique()
 #' @name create_example_DTARuleColUnique
 #' @export
 create_example_DTARuleColUnique <- function(index = 1) {

@@ -39,7 +39,7 @@ once installed).
 - Comprehensive validation of tabular data: type, format, nullability,
   allowed values, and regex patterns
 - Cross-column schema rule validation (`col_condition`, `col_range`,
-  `col_unique`)
+  `col_unique`, `group_condition`)
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
   `inspect()`)
@@ -101,7 +101,7 @@ fails the table, and `results()` counts each separately:
 | Axis                     | Column            | What it means                                                      |
 |--------------------------|-------------------|--------------------------------------------------------------------|
 | **Schema** errors        | `n_schema_errors` | A value breaks a column constraint: type, `nullable`, `values`, `pattern`, `length` |
-| **Rule** errors          | `n_rule_errors`   | A row breaks an inter-column rule: `col_condition`, `col_range`, `col_unique` |
+| **Rule** errors          | `n_rule_errors`   | A row breaks an inter-column rule: `col_condition`, `col_range`, `col_unique`, `group_condition` |
 | **Import** errors        | `n_import_errors` | A value cannot be represented in the type its column declares      |
 
 An **import error** is raised when a value is present in the source but does
@@ -196,14 +196,14 @@ tabular data (`DTADataSetTabular`) or a simple file-presence check
 DTA                              ← top-level agreement container
 ├── metadata                     ← title, version, receiver/supplier
 |   (DTAMetaData)                     contacts, transmission schedule, ..
-│                                     
+│
 └── datasets (named list of DTADataSet)  ← one or more datasets per DTS
     │
     ├── DTADataSetTabular        ← tabular data: for tables with
     |   |                            full column-spec + rule validation
-    │   ├── files (list)         ← expected file handlers for various  
-    |   |   |                        input types, manage file names, 
-    │   │   ├── DTAFileCSV           which can have patterns, 
+    │   ├── files (list)         ← expected file handlers for various
+    |   |   |                        input types, manage file names,
+    │   │   ├── DTAFileCSV           which can have patterns,
     |   |   ├── DTAFileTSV           number of files, etc ..
     |   |   └── DTAFileDelim
     │   │       └── read_file()  → Arrow Table
@@ -217,7 +217,7 @@ DTA                              ← top-level agreement container
     |   |   └── rules (list of DTARule)
     │   │       ├── DTARuleColCondition × N  ← if/then cross-column logic
     │   │       ├── DTARuleColRange × N      ← numeric range constraint
-    │   │       └── DTARuleColUnique × N     ← uniqueness (single or 
+    │   │       └── DTARuleColUnique × N     ← uniqueness (single or
     |   |                                              composite key)
     |   |
     │   └── tables (named list)  ← actual data as Arrow Tables
@@ -301,6 +301,52 @@ messages(data_obj)  # one row per error: source, column, row, rule, message, id
 `persist` and `artifact_dir` (where per-table validation artifacts are
 written), `quiet`, and `tables` (restrict to named or indexed tables;
 `datasets` on a `DTA`).
+
+### Validating a file too large to load
+
+The workflow above reads the file into memory first. For a file larger than
+the memory available, that is not slow but impossible — so `validate_file_stream()`
+scans the file in batches instead, and never holds more than one batch:
+
+```r
+details <- validate_file_stream(specs, "transfer.csv")
+
+details$ok                # TRUE / FALSE, the same three-axis verdict
+details$n_schema_errors   # per-axis counts, as check() reports them
+as.data.frame(details)    # one row per error: source, row, column, keyword, message
+```
+
+Nothing in the scan grows with the number of rows. Memory is bounded by the
+batch size for the column checks, by the number of distinct keys for
+uniqueness rules, by the number of distinct groups for grouped rules, and by
+`max_errors` for how much per-cell detail is kept. Measured across a 16-fold
+increase in input, the working set stayed flat at ~19 MB while the in-memory
+path grew from 51 MB to 272 MB.
+
+**This buys feasibility, not speed.** Scanning runs about twice as slow as
+validating a table already in memory, because every batch pays its own
+overhead. Use it when *holding* the file is the problem; otherwise `check()`
+is the faster choice.
+
+Two options are worth knowing:
+
+```r
+# Stop at the first problem instead of scanning to the end.
+validate_file_stream(specs, "transfer.csv", fail_fast = TRUE)
+
+# A missing column is decidable from the header. "stop" says so without
+# reading the file; the default "scan" reports it once per row.
+validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")
+```
+
+A `fail_fast` result is explicitly incomplete: it carries a `partial_scan`
+attribute and reports `NA` — not `TRUE` — for any axis it could not settle. A
+rule that has not failed yet has not passed.
+
+`cache_as_parquet()` rewrites a delimited file as Parquet so repeated
+validations skip re-parsing text. Measure before using it: on a file whose
+specs read every column it was **not** faster, because evaluating the
+constraints dominates and parsing is not the bottleneck.
 
 ### Inspecting results in depth
 
@@ -635,6 +681,83 @@ rules:
       - VISIT
 ```
 
+#### `group_condition`
+
+Unlike `col_condition`, which evaluates each row in isolation, `group_condition`
+first groups rows by one or more columns and then applies constraint logic
+*across the whole group*. Use it when a rule depends on what happened across
+multiple rows for the same entity — for example, "if any row in this subject's
+group records consent, then every row in that group must supply a consent date."
+
+A `group_condition` rule has three parts:
+
+- **`group_by`** — columns that define the group (e.g. `SUBJECT_ID`, or a
+  composite key like `[SUBJIDN, VISIT]`).
+- **`conditions`** — named Boolean flags, each a column test in the same
+  operator syntax used by `col_condition` (`equals`, `empty`, `in`, …).
+- **`constraints`** — rules over those flags. Two types are supported:
+  - `requires` (alias `implies`): IF condition `if` holds, THEN condition
+    `then` must hold.
+  - `mutually_exclusive` (alias `not_both`): `left` and `right` cannot both
+    be true in the same group.
+
+The `if_scope` / `then_scope` (or `left_scope` / `right_scope`) fields specify
+how a condition is aggregated across the rows of a group: `any` (default, at
+least one row matches) or `all` (every row must match).
+
+```yaml
+rules:
+  # requires: IF any row for the subject has CONSENT="YES",
+  #           THEN all rows for that subject must have a CONSENT_DATE
+  - id: consent_requires_date_per_subject
+    type: group_condition
+    group_by: [SUBJECT_ID]
+    conditions:
+      c_consent_yes:
+        CONSENT:
+          equals: "YES"
+      c_consent_date_present:
+        CONSENT_DATE:
+          empty: false
+    constraints:
+      - id: consent_needs_date
+        type: requires        # alias: implies
+        if: c_consent_yes
+        then: c_consent_date_present
+        if_scope: any         # true when ANY row in the group matches
+        then_scope: all       # requires ALL rows in the group to match
+
+  # mutually_exclusive: failed QC and a reported result cannot coexist
+  - id: sample_visit_status_logic
+    type: group_condition
+    group_by: [SUBJIDN, GFREFID, VISIT]
+    conditions:
+      c1_failed:
+        GFREASND:
+          empty: false
+      c2_reported:
+        GFREASND:
+          empty: true
+        GFORRES:
+          empty: false
+      c3_not_done:
+        GFSTAT:
+          equals: NOT DONE
+    constraints:
+      - id: no_failed_and_reported
+        type: mutually_exclusive    # alias: not_both
+        left: c1_failed
+        right: c2_reported
+        left_scope: any
+        right_scope: any
+      - id: failed_requires_not_done
+        type: requires
+        if: c1_failed
+        then: c3_not_done
+        if_scope: any
+        then_scope: all
+```
+
 ## YAML Metadata
 
 `metadata:` captures the administrative information of a DTA/DTS: title,
@@ -695,6 +818,7 @@ row-level validation.
 | `DTARuleColCondition`     | If/then cross-column rule                                     |
 | `DTARuleColRange`         | Numeric range constraint for a column                        |
 | `DTARuleColUnique`        | Uniqueness constraint (single or composite key)               |
+| `DTARuleGroupCondition`   | Grouped cross-row condition + constraint logic                |
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
@@ -710,6 +834,8 @@ row-level validation.
 | `load_file(dta, dataset, file)`| Read a data file into a dataset using its YAML-defined handler |
 | `read_file(handler, file)`     | Read a file using a file handler (`DTAFileCSV`, etc.)       |
 | `check(x, force, persist, quiet, …)` | Validate all datasets/tables; returns the updated object |
+| `validate_file_stream(specs, path, …)` | Validate a delimited file by scanning it, without loading it into memory |
+| `cache_as_parquet(specs, path, …)` | Rewrite a delimited file as Parquet for repeated validation (measure first) |
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |
 | `messages(x)`                  | Detailed error table: id, source, row, column, rule, message |
 | `inspect(x, id)`               | Deep detail for a specific error: row context, failing rows, original imported text |
@@ -731,6 +857,7 @@ row-level validation.
 | `write_dta(x, file, format)`   | Write the whole DTA as a document (docx, pdf, md)            |
 | `dta_pdf_backend()`            | Report the DOCX-to-PDF backend this machine will use, or NULL |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA     |
+| `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |
 | `export_specs_table(x, file)`  | Export spec table to Word                                    |
 | `export_column_value_table(x, file, id)` | Export a column's allowed values to Word           |
 | `as_json_schema(x)`            | Convert specs to a JSON Schema string                        |

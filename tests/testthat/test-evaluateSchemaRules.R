@@ -337,6 +337,169 @@ test_that("apply_schema_rules handles canonical and legacy rule types", {
   legacy_rule@type <- "col_range"
   result <- apply_schema_rules(list(legacy_rule), df, verbose = FALSE)
   expect_true(isTRUE(result[[1]]$valid))
+
+  grouped <- DTARuleGroupCondition(
+    id = "g1",
+    group_by = "SUBJECT_ID",
+    conditions = list(ok = list(AGE = list(greater_equal = 18))),
+    constraints = list(list(type = "requires", `if` = "ok", then = "ok"))
+  )
+  result <- apply_schema_rules(list(grouped), df, verbose = FALSE)
+  expect_true(isTRUE(result[[1]]$valid))
+
+  grouped_legacy <- grouped
+  grouped_legacy@type <- "group_condition"
+  result <- apply_schema_rules(list(grouped_legacy), df, verbose = FALSE)
+  expect_true(isTRUE(result[[1]]$valid))
+})
+
+test_that("group_condition detects mutually exclusive and requires violations by group", {
+  df <- data.frame(
+    SUBJIDN = c("S1", "S1", "S2", "S2"),
+    GFREFID = c("R1", "R1", "R1", "R1"),
+    VISIT = c("V1", "V1", "V1", "V1"),
+    GFREASND = c("FAILED", "", "FAILED", ""),
+    GFORRES = c(NA, 12, NA, NA),
+    GFSTAT = c("DONE", "DONE", "NOT DONE", "NOT DONE"),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "sample_visit_status_logic",
+    group_by = c("SUBJIDN", "GFREFID", "VISIT"),
+    conditions = list(
+      c1_failed = list(GFREASND = list(empty = FALSE)),
+      c2_reported = list(GFREASND = list(empty = TRUE), GFORRES = list(empty = FALSE)),
+      c3_not_done = list(GFSTAT = list(equals = "NOT DONE"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "c1_failed", right = "c2_reported"),
+      list(type = "requires", `if` = "c1_failed", then = "c3_not_done", then_scope = "all")
+    )
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_match(res$message, "sample_visit_status_logic", fixed = TRUE)
+  expect_match(res$message, "SUBJIDN=S1", fixed = TRUE)
+  expect_match(res$message, "Constraint 'constraint_1' failed", fixed = TRUE)
+  expect_match(res$message, "scope=any", fixed = TRUE)
+  expect_match(res$message, "failing rows=", fixed = TRUE)
+
+  passing <- df
+  passing$GFSTAT[passing$SUBJIDN == "S1"] <- "NOT DONE"
+  passing$GFORRES[passing$SUBJIDN == "S1"] <- NA
+
+  ok <- rule_check_group_condition(rule, passing)
+  expect_true(ok$valid)
+  expect_null(ok$message)
+})
+
+test_that("group_condition evaluates rows where group_by contains NA", {
+  df <- data.frame(
+    SUBJIDN = c("S1", "S1"),
+    VISIT = c(NA, NA),
+    GFREASND = c("FAILED", ""),
+    GFORRES = c(NA, 10),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "na_group_key_rule",
+    group_by = c("SUBJIDN", "VISIT"),
+    conditions = list(
+      c1 = list(GFREASND = list(empty = FALSE)),
+      c2 = list(GFREASND = list(empty = TRUE), GFORRES = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_match(res$message, "VISIT=NA", fixed = TRUE)
+})
+
+test_that("group_condition accepts alias constraint names", {
+  rule <- DTARuleGroupCondition(
+    id = "alias_constraints",
+    group_by = "SUBJECT_ID",
+    conditions = list(
+      c1 = list(STATUS = list(equals = "FAILED")),
+      c2 = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "not_both", left = "c1", right = "c2"),
+      list(type = "implies", `if` = "c1", then = "c2")
+    )
+  )
+
+  expect_equal(rule@constraints[[1]]$type, "mutually_exclusive")
+  expect_equal(rule@constraints[[2]]$type, "requires")
+})
+
+test_that("group_condition reports unknown condition references with context", {
+  expect_error(
+    DTARuleGroupCondition(
+      id = "group_condition_unknown_condition",
+      group_by = "SUBJECT_ID",
+      conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c_missing"))
+    ),
+    "unknown condition"
+  )
+  expect_error(
+    DTARuleGroupCondition(
+      id = "group_condition_unknown_condition",
+      group_by = "SUBJECT_ID",
+      conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c_missing"))
+    ),
+    "Defined condition"
+  )
+})
+
+test_that("group_condition missing group_by columns explains available columns", {
+  df <- data.frame(SUBJECT_ID = "S1", STATUS = "FAILED", stringsAsFactors = FALSE)
+  rule <- DTARuleGroupCondition(
+    id = "group_missing_group_col",
+    group_by = c("SUBJECT_ID", "VISIT"),
+    conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
+    constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
+  )
+
+  expect_error(
+    rule_check_group_condition(rule, df),
+    "Available columns"
+  )
+
+  wrapped <- apply_schema_rules(list(rule), df, verbose = FALSE)
+  expect_false(wrapped[[1]]$valid)
+  expect_match(wrapped[[1]]$message, "could not be evaluated", fixed = TRUE)
+  expect_match(wrapped[[1]]$message, "Available columns", fixed = TRUE)
+})
+
+test_that("group_condition grouping key does not collide on separator-like values", {
+  sep_like <- "\u001f"
+  df <- data.frame(
+    A = c(paste0("x", sep_like, "y"), paste0("x", sep_like, "y"), "x", "x"),
+    B = c("z", "z", paste0("y", sep_like, "z"), paste0("y", sep_like, "z")),
+    FLAG = c(1, 1, 2, 2),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "group_key_collision_guard",
+    group_by = c("A", "B"),
+    conditions = list(
+      c1 = list(FLAG = list(equals = 1)),
+      c2 = list(FLAG = list(equals = 2))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_true(res$valid)
+  expect_null(res$message)
 })
 
 test_that("Range rules support min/max slots and reject multi-column usage", {

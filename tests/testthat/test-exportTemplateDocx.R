@@ -275,23 +275,19 @@ test_that("export_with_template warns about unresolved placeholders", {
   expect_match(.docx_text(out), "Unknown: \\{NOT_A_FIELD\\}")
 })
 
-test_that("unresolved detection misreads braces coming from substituted values", {
-  # KNOWN DEFECT, pinned rather than endorsed: .substitute_placeholder_text()
-  # scans for leftover tokens in the POST-substitution text, so any brace that
-  # arrived as part of a substituted VALUE is reported as an unresolved
-  # placeholder the template never contained. When
-  # R/exportTemplateDocx.R:485-488 is fixed this SHOULD fail -- change it to
-  # expect_length(res$unresolved, 0).
+test_that("braces arriving from a substituted value are left alone", {
+  # Substitution is a single pass over the original text, so a value that
+  # legitimately contains braces is emitted verbatim: never re-substituted, and
+  # never reported as a placeholder the template did not contain.
   res <- .substitute_placeholder_text(
     "T: {DTA_TITLE}",
     list("{DTA_TITLE}" = "Study {ARM_A}")
   )
   expect_equal(res$text, "T: Study {ARM_A}")
-  expect_equal(res$unresolved, "{ARM_A}")
+  expect_length(res$unresolved, 0)
 
-  # The same defect surfaces end to end: a DTA whose title legitimately
-  # contains braces exports correctly, yet the user is warned about tokens they
-  # never wrote.
+  # The same end to end: a DTA whose title contains braces exports cleanly and
+  # warns about nothing.
   template <- .make_template("Title: {DTA_TITLE}")
   on.exit(unlink(template, force = TRUE), add = TRUE)
   dta <- DTA(
@@ -301,16 +297,126 @@ test_that("unresolved detection misreads braces coming from substituted values",
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
-  # KNOWN DEFECT, pinned rather than endorsed: this export is correct yet emits
-  # a false "unresolved placeholders" warning naming {A} and {B}. When
-  # R/exportTemplateDocx.R:485-488 is fixed this SHOULD fail -- change it to
-  # expect_no_warning(export_with_template(dta, template, out, quiet = TRUE)).
-  expect_warning(
-    export_with_template(dta, template, out, quiet = TRUE),
-    "placeholders"
-  )
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
   # The document itself is fine: the title is rendered verbatim.
   expect_match(.docx_text(out), "Title: Study {A} vs {B}", fixed = TRUE)
+})
+
+test_that("the placeholder catalogue and the extracted variables cannot drift", {
+  # The catalogue is what dta_template_placeholders() and the roxygen advertise;
+  # .extract_template_variables() is what actually gets substituted. If the two
+  # disagree, the package documents a placeholder it never fills, or fills one
+  # nobody can discover.
+  dta <- create_example_DTA()
+  expect_setequal(
+    names(.tv_placeholder_catalog()),
+    names(.extract_template_variables(dta))
+  )
+})
+
+test_that("dta_template_placeholders reports tokens and resolves them", {
+  tokens <- dta_template_placeholders()
+  expect_true("{DTA_TITLE}" %in% names(tokens))
+  # With no DTA the values are descriptions, not resolved text.
+  expect_false(any(grepl("^\\{", unname(tokens))))
+
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = DTAMetaData(
+      title = "A Study",
+      version = "2.0",
+      supplier = list(affiliation = list(name = "Acme Labs"))
+    )
+  )
+  resolved <- dta_template_placeholders(dta)
+  expect_equal(unname(resolved[["{DTA_TITLE}"]]), "A Study")
+  expect_equal(unname(resolved[["{SUPPLIER_NAME}"]]), "Acme Labs")
+  expect_setequal(names(resolved), names(tokens))
+
+  expect_error(dta_template_placeholders("not a dta"), "must be a DTA object")
+})
+
+test_that("run formatting survives a placeholder that sits inside one run", {
+  # "Vendor: " (plain) + "{SUPPLIER_NAME}" (bold) + " (confidential)" (plain).
+  # The placeholder is wholly inside the bold run, so substitution must happen
+  # run by run and every run must keep its own formatting. The old
+  # implementation joined the paragraph, wrote the result into run 1 and blanked
+  # the rest, which silently discarded the bold and the trailing plain run.
+  template <- .make_template_rich(list(
+    list(text = "Vendor: ", bold = FALSE),
+    list(text = "{SUPPLIER_NAME}", bold = TRUE),
+    list(text = " (confidential)", bold = FALSE)
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2)),
+    metadata = DTAMetaData(
+      title = "T",
+      version = "1.0",
+      supplier = list(affiliation = list(name = "Acme Labs"))
+    )
+  )
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  expect_match(.docx_text(out), "Vendor: Acme Labs (confidential)", fixed = TRUE)
+  # The substituted value is still the bold run -- and the only bold run.
+  expect_equal(.docx_bold_run_texts(out), "Acme Labs")
+})
+
+test_that("a value containing another key's token is not re-substituted", {
+  # The old implementation mutated `text` in place while looping over keys, so
+  # a value that happened to contain another key's token was substituted again
+  # on a later iteration. Here the literal {DTA_VERSION} inside the title value
+  # must survive, while the real {DTA_VERSION} in the template is filled.
+  res <- .substitute_placeholder_text(
+    "T: {DTA_TITLE} V: {DTA_VERSION}",
+    list(
+      "{DTA_TITLE}" = "Report referencing {DTA_VERSION}",
+      "{DTA_VERSION}" = "3.0"
+    )
+  )
+  expect_equal(res$text, "T: Report referencing {DTA_VERSION} V: 3.0")
+  expect_length(res$unresolved, 0)
+})
+
+test_that(".tv_escape_regex escapes every metacharacter it claims to", {
+  # REGRESSION: the first attempt at this was a gsub whose own pattern put {}
+  # inside a character class, which TRE rejects with "Invalid contents of {}",
+  # taking out every template substitution test in the suite.
+  escaped <- .tv_escape_regex("a.b{c}d[e]f(g)h|i^j$k*l+m?n\\o")
+  expect_match(escaped, "a\\.b", fixed = TRUE)
+  # The escaped form must compile AND match the original literally.
+  expect_true(grepl(escaped, "a.b{c}d[e]f(g)h|i^j$k*l+m?n\\o", perl = TRUE))
+  expect_false(grepl(escaped, "aXbXcXd", perl = TRUE))
+  expect_equal(.tv_escape_regex(character(0)), character(0))
+})
+
+test_that("a variable name containing regex metacharacters is still substituted", {
+  # `variables` names are caller-supplied and arbitrary. \Q...\E quoting stops
+  # at a literal \E, which dropped such a key from the match set and then
+  # reported it as an unresolved placeholder instead of substituting it.
+  res <- .substitute_placeholder_text(
+    "A: {A\\Eb} B: {C.D}",
+    list("{A\\Eb}" = "one", "{C.D}" = "two")
+  )
+  expect_equal(res$text, "A: one B: two")
+  expect_length(res$unresolved, 0)
+})
+
+test_that("mixed-case placeholders with no value are reported as unresolved", {
+  # The paragraph gate and the leftover scan used to use different character
+  # classes, so a lower- or mixed-case token was left untouched AND never
+  # warned about, contradicting the documented warning contract.
+  res <- .substitute_placeholder_text(
+    "Hello {customField} and {DTA_TITLE}",
+    list("{DTA_TITLE}" = "X")
+  )
+  expect_equal(res$text, "Hello {customField} and X")
+  expect_equal(res$unresolved, "{customField}")
 })
 
 test_that("export_with_template validates its inputs", {
@@ -483,6 +589,6 @@ test_that("template variables are extracted from a bundled YAML fixture", {
     vars[["{TOTAL_RULES}"]],
     as.character(sum(vapply(dta@datasets, function(d) length(d@specs@rules), integer(1))))
   )
-  expect_equal(vars[["{TOTAL_RULES}"]], "6")
+  expect_equal(vars[["{TOTAL_RULES}"]], "8")
   expect_equal(vars[["{TOTAL_COLUMNS}"]], "14")
 })

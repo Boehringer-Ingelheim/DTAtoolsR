@@ -9,11 +9,11 @@ rule_get_slot <- function(rule, name) {
 
 #' @keywords internal
 normalize_rule_type <- function(type) {
-  switch(
-    as.character(type),
+  switch(as.character(type),
     col_range = "check_range",
     col_unique = "check_unique",
     col_condition = "check_col_condition",
+    group_condition = "check_group_condition",
     as.character(type)
   )
 }
@@ -125,6 +125,31 @@ dta_numeric_operands <- function(x, value) {
 #' @export
 rule_check_range <- function(rule, df) {
   check_rule_class(rule)
+  target <- dta_range_target(rule)
+  violated <- dta_range_violated(rule, df)
+
+  if (any(violated)) {
+    list(
+      id = rule@id,
+      valid = FALSE,
+      message = dta_range_violation_message(
+        rule@id, sum(violated), target$col, target$range
+      )
+    )
+  } else {
+    list(id = rule@id, valid = TRUE, message = NULL)
+  }
+}
+
+#' @title Resolved Column and Bounds of a Range Rule
+#' @description
+#' A range rule may state its bounds as `range` or as `min`/`max`, and its
+#' target as `column` or `columns`. Resolving that once, here, keeps every
+#' caller agreeing about what the rule actually says.
+#' @param rule A range rule.
+#' @return A list with `col` and `range`.
+#' @keywords internal
+dta_range_target <- function(rule) {
   col <- rule_get_slot(rule, "column")
   if (is.null(col)) {
     col <- rule_get_slot(rule, "columns")
@@ -147,6 +172,25 @@ rule_check_range <- function(rule, df) {
     cli::cli_abort("Range rules require numeric bounds via 'range' or 'min'/'max'.")
   }
 
+  list(col = col, range = range)
+}
+
+#' @title Rows a Range Rule Counts as Violations
+#' @description
+#' The per-row violation mask for a range rule.
+#'
+#' This exists so that evaluating a whole table and evaluating one batch of it
+#' cannot drift apart: both go through this function, and a violation is
+#' whatever this says it is. A count is an associative reduction over the mask,
+#' which is what lets a batched scan reproduce a whole-table answer exactly.
+#' @param rule A range rule.
+#' @param df A data.frame.
+#' @return A logical vector with one element per row.
+#' @keywords internal
+dta_range_violated <- function(rule, df) {
+  target <- dta_range_target(rule)
+  col <- target$col
+
   if (!col %in% names(df)) {
     cli::cli_abort(
       "Column '{col}' not found in table.",
@@ -155,30 +199,27 @@ rule_check_range <- function(rule, df) {
   }
 
   converted <- dta_as_numeric_strict(df[[col]])
-  in_range <- converted$values >= range[1] & converted$values <= range[2]
+  in_range <- converted$values >= target$range[1] & converted$values <= target$range[2]
 
   # A genuinely missing value is ignored: it neither passes nor violates.
   # A value that is present but not representable as a number is a violation,
   # not a pass -- `any(!in_range, na.rm = TRUE)` used to drop it silently, so
   # c("ninety", "N/A", ">65") reported a clean 18..65 range.
-  violated <- (in_range %in% FALSE) | converted$unconvertible
+  (in_range %in% FALSE) | converted$unconvertible
+}
 
-  if (any(violated)) {
-    list(
-      id = rule@id,
-      valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
-        rule@id,
-        sum(violated),
-        col,
-        range[1],
-        range[2]
-      )
-    )
-  } else {
-    list(id = rule@id, valid = TRUE, message = NULL)
-  }
+#' @title Message for a Range Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of violating rows.
+#' @param col Character. The column checked.
+#' @param range Numeric. The inclusive bounds.
+#' @return A single string.
+#' @keywords internal
+dta_range_violation_message <- function(id, n, col, range) {
+  sprintf(
+    "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
+    id, n, col, range[1], range[2]
+  )
 }
 
 #' @title Rule: check_unique
@@ -215,11 +256,8 @@ rule_check_unique <- function(rule, df) {
     list(
       id = rule@id,
       valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
-        rule@id,
-        sum(duplicated_rows, na.rm = TRUE),
-        paste(cols, collapse = ", ")
+      message = dta_unique_violation_message(
+        rule@id, sum(duplicated_rows, na.rm = TRUE), cols
       )
     )
   } else {
@@ -344,8 +382,7 @@ dta_condition_mask <- function(column_name, operator, value, x) {
     value <- operands$value
   }
 
-  switch(
-    operator,
+  switch(operator,
     equals = ,
     equal = x == value,
     not_equals = ,
@@ -442,6 +479,34 @@ dta_rule_numeric_columns <- function(rule) {
     )
 
     return(unique(as.character(names(clauses)[is_numeric_clause])))
+  }
+
+  if (identical(type, "check_group_condition")) {
+    groups <- rule_get_slot(rule, "conditions")
+    if (is.null(groups) || length(groups) == 0) {
+      return(character(0))
+    }
+
+    all_clauses <- list()
+    for (cond_name in names(groups)) {
+      normalized <- dta_normalize_conditions(groups[[cond_name]], arg = cond_name)
+      all_clauses <- c(all_clauses, normalized)
+    }
+
+    if (length(all_clauses) == 0) {
+      return(character(0))
+    }
+
+    numeric_ops <- dta_numeric_condition_operators()
+    is_numeric_clause <- vapply(
+      all_clauses,
+      function(condition) {
+        is.list(condition) && any(names(condition) %in% numeric_ops)
+      },
+      logical(1)
+    )
+
+    return(unique(as.character(names(all_clauses)[is_numeric_clause])))
   }
 
   character(0)
@@ -623,15 +688,312 @@ rule_check_col_condition <- function(rule, df) {
     list(
       id = rule@id,
       valid = FALSE,
-      message = sprintf(
-        "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
-        rule@id,
-        violated_count
-      )
+      message = dta_condition_violation_message(rule@id, violated_count)
     )
   } else {
     list(id = rule@id, valid = TRUE, message = NULL)
   }
+}
+
+#' @title Rows an IF/THEN Rule Counts as Violations
+#' @description
+#' The per-row violation mask for a conditional rule: the IF holds but the THEN
+#' does not, where a missing THEN counts against the row.
+#'
+#' Shared with the streaming path so a batched scan and a whole-table pass
+#' cannot disagree about what a violation is.
+#' @param rule A conditional rule.
+#' @param df A data.frame.
+#' @return A logical vector with one element per row.
+#' @keywords internal
+dta_condition_violated <- function(rule, df) {
+  if_rows <- evaluate_conditions(rule@condition, df)
+  then_rows <- evaluate_conditions(rule@then, df)
+  if_rows & (is.na(then_rows) | !then_rows)
+}
+
+#' @title Message for a Conditional Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of violating rows.
+#' @return A single string.
+#' @keywords internal
+dta_condition_violation_message <- function(id, n) {
+  sprintf(
+    "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
+    id, n
+  )
+}
+
+#' @title Message for a Uniqueness Rule Violation
+#' @param id Character. The rule id.
+#' @param n Integer. Number of duplicate rows.
+#' @param cols Character. The columns forming the key.
+#' @return A single string.
+#' @keywords internal
+dta_unique_violation_message <- function(id, n, cols) {
+  sprintf(
+    "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
+    id, n, paste(cols, collapse = ", ")
+  )
+}
+
+#' @title Render Row Numbers for a Grouped Constraint Message
+#' @description
+#' Shows the first `max_show` rows and, beyond that, how many more there were.
+#'
+#' Takes the leading rows and the total separately rather than the whole vector,
+#' because a streaming evaluation never holds the whole vector: it keeps the
+#' first few row numbers it sees and counts the rest. Passing both makes the
+#' streamed and materialised messages identical by construction.
+#' @param head_rows Integer. The leading row numbers, already sorted and unique.
+#' @param total Integer. How many rows there were in total.
+#' @param max_show Integer. How many to name before summarising the remainder.
+#' @return A single string.
+#' @keywords internal
+dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
+  if (total == 0) {
+    return("none")
+  }
+  head_rows <- sort(unique(as.integer(head_rows)))
+  if (total > max_show) {
+    paste0(
+      paste(head_rows[seq_len(min(max_show, length(head_rows)))], collapse = ","),
+      " (+",
+      total - max_show,
+      " more)"
+    )
+  } else {
+    paste(head_rows, collapse = ",")
+  }
+}
+
+#' @title Group Key for a Set of Grouping Columns
+#' @description
+#' The key by which rows are grouped. Shared between the materialising and
+#' streaming paths so a group is the same group in both: a separator appearing
+#' in the data is escaped, and a missing value groups with other missing values
+#' rather than forming its own.
+#' @param df A data frame.
+#' @param group_by Character. The grouping columns.
+#' @return A character vector, one key per row.
+#' @keywords internal
+dta_group_key <- function(df, group_by) {
+  # ASCII unit separator. Written as a code point rather than an escape so the
+  # source carries no raw control byte for tooling to mangle.
+  group_sep <- intToUtf8(31L)
+  key_parts <- lapply(df[, group_by, drop = FALSE], function(x) {
+    chr <- as.character(x)
+    chr[is.na(chr)] <- "<NA>"
+    gsub(group_sep, paste0(group_sep, group_sep), chr, fixed = TRUE)
+  })
+  do.call(paste, c(key_parts, sep = group_sep))
+}
+
+#' @keywords internal
+dta_group_scope_truth <- function(mask, scope) {
+  hit <- mask %in% TRUE
+  if (identical(scope, "all")) {
+    length(hit) > 0 && all(hit)
+  } else {
+    any(hit)
+  }
+}
+
+#' @title Rule: check_group_condition
+#' @description
+#' Evaluates named conditions per group and applies constraints between those
+#' condition outcomes.
+#' @param rule A `DTARuleGroupCondition` object.
+#' @param df A data.frame to validate.
+#' @return A list with elements `id`, `valid`, and `message`.
+#' @examples
+#' df <- data.frame(
+#'   SUBJECT_ID = c("S1", "S1", "S2"),
+#'   STATUS = c("FAILED", "FAILED", "DONE"),
+#'   RESULT = c(NA, 12, NA),
+#'   stringsAsFactors = FALSE
+#' )
+#' rule <- DTARuleGroupCondition(
+#'   id = "group_example",
+#'   group_by = "SUBJECT_ID",
+#'   conditions = list(
+#'     c_failed = list(STATUS = list(equals = "FAILED")),
+#'     c_reported = list(RESULT = list(empty = FALSE))
+#'   ),
+#'   constraints = list(
+#'     list(type = "mutually_exclusive", left = "c_failed", right = "c_reported")
+#'   )
+#' )
+#' rule_check_group_condition(rule, df)
+#' @export
+rule_check_group_condition <- function(rule, df) {
+  check_rule_class(rule)
+
+  format_rows <- function(rows, max_show = 10L) {
+    rows <- sort(unique(as.integer(rows)))
+    dta_format_group_rows(rows, length(rows), max_show)
+  }
+
+  group_by <- rule_get_slot(rule, "group_by")
+  conditions <- rule_get_slot(rule, "conditions")
+  constraints <- rule_get_slot(rule, "constraints")
+
+  missing_group_cols <- setdiff(group_by, names(df))
+  if (length(missing_group_cols) > 0) {
+    cli::cli_abort(
+      c(
+        "Rule {.val {rule@id}} cannot be evaluated as group_condition.",
+        x = "Grouping column{?s} missing in input data: {.val {missing_group_cols}}.",
+        i = "Available columns: {.val {names(df)}}."
+      ),
+      class = "dta_rule_not_applicable"
+    )
+  }
+
+  if (nrow(df) == 0) {
+    return(list(id = rule@id, valid = TRUE, message = NULL))
+  }
+
+  grouped <- df[, group_by, drop = FALSE]
+  split_key <- dta_group_key(df, group_by)
+  groups <- split(seq_len(nrow(df)), split_key)
+
+  violations <- list()
+
+  for (group_index in seq_along(groups)) {
+    row_idx <- groups[[group_index]]
+    gdf <- df[row_idx, , drop = FALSE]
+
+    cond_hits <- lapply(names(conditions), function(cond_name) {
+      spec <- conditions[[cond_name]]
+      tryCatch(
+        evaluate_conditions(spec, gdf),
+        dta_rule_not_applicable = function(cnd) {
+          cli::cli_abort(c(
+            "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
+            x = "{conditionMessage(cnd)}",
+            i = "Condition {.field {cond_name}} is defined as: {.val {paste(capture.output(str(spec, give.attr = FALSE)), collapse = ' ')}}"
+          ), class = "dta_rule_not_applicable")
+        }
+      )
+    })
+    names(cond_hits) <- names(conditions)
+    cond_rows <- lapply(cond_hits, function(mask) row_idx[mask %in% TRUE])
+
+    group_values <- grouped[row_idx[1], , drop = FALSE]
+    group_label <- paste(
+      vapply(group_by, function(col) {
+        paste0(col, "=", as.character(group_values[[col]][1]))
+      }, character(1)),
+      collapse = ", "
+    )
+
+    for (constraint in constraints) {
+      ctype <- constraint$type
+
+      if (identical(ctype, "mutually_exclusive")) {
+        left <- constraint$left
+        right <- constraint$right
+
+        left_truth <- dta_group_scope_truth(
+          cond_hits[[left]],
+          constraint$left_scope %||% "any"
+        )
+        right_truth <- dta_group_scope_truth(
+          cond_hits[[right]],
+          constraint$right_scope %||% "any"
+        )
+
+        if (isTRUE(left_truth) && isTRUE(right_truth)) {
+          message <- constraint$message %||%
+            sprintf(
+              "Constraint '%s' failed: '%s' (scope=%s; rows=%s) and '%s' (scope=%s; rows=%s) are both TRUE, but mutually_exclusive requires they cannot both hold.",
+              constraint$id,
+              left,
+              constraint$left_scope %||% "any",
+              format_rows(cond_rows[[left]]),
+              right,
+              constraint$right_scope %||% "any",
+              format_rows(cond_rows[[right]])
+            )
+          violations[[length(violations) + 1L]] <- list(
+            constraint_id = constraint$id,
+            group = group_label,
+            message = message,
+            rows = sort(unique(c(cond_rows[[left]], cond_rows[[right]])))
+          )
+        }
+      } else if (identical(ctype, "requires")) {
+        if_name <- constraint[["if"]]
+        then_name <- constraint[["then"]]
+
+        if_truth <- dta_group_scope_truth(
+          cond_hits[[if_name]],
+          constraint$if_scope %||% "any"
+        )
+        then_scope <- constraint$then_scope %||% "any"
+        then_truth <- dta_group_scope_truth(cond_hits[[then_name]], then_scope)
+
+        if (isTRUE(if_truth) && !isTRUE(then_truth)) {
+          if_rows <- cond_rows[[if_name]]
+          then_rows <- cond_rows[[then_name]]
+          then_failed <- if (identical(then_scope, "all")) {
+            row_idx[!(cond_hits[[then_name]] %in% TRUE)]
+          } else {
+            integer(0)
+          }
+          then_scope_reason <- if (identical(then_scope, "all")) {
+            sprintf("failing rows=%s", format_rows(then_failed))
+          } else {
+            sprintf(
+              "no row in the group satisfied '%s' (rows with TRUE=%s)",
+              then_name,
+              format_rows(then_rows)
+            )
+          }
+          message <- constraint$message %||%
+            sprintf(
+              "Constraint '%s' failed: IF condition '%s' (scope=%s; rows=%s) is TRUE, but THEN condition '%s' (scope=%s) is not satisfied (%s).",
+              constraint$id,
+              if_name,
+              constraint$if_scope %||% "any",
+              format_rows(if_rows),
+              then_name,
+              then_scope,
+              then_scope_reason
+            )
+          violations[[length(violations) + 1L]] <- list(
+            constraint_id = constraint$id,
+            group = group_label,
+            message = message,
+            rows = sort(unique(c(if_rows, then_failed)))
+          )
+        }
+      }
+    }
+  }
+
+  if (length(violations) == 0) {
+    return(list(id = rule@id, valid = TRUE, message = NULL))
+  }
+
+  summary <- sprintf(
+    "Rule '%s' failed: %d grouped constraint violation%s detected.",
+    rule@id,
+    length(violations),
+    if (length(violations) == 1) "" else "s"
+  )
+
+  details <- vapply(violations, function(v) {
+    sprintf("%s [%s]", v$message, v$group)
+  }, character(1))
+
+  list(
+    id = rule@id,
+    valid = FALSE,
+    message = paste(c(summary, details), collapse = " "),
+    details = violations
+  )
 }
 
 #' @title Apply Schema Rules
@@ -651,7 +1013,8 @@ apply_schema_rules <- function(rules, df, verbose = TRUE) {
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
-    check_col_condition = rule_check_col_condition
+    check_col_condition = rule_check_col_condition,
+    check_group_condition = rule_check_group_condition
   )
 
   results <- lapply(rules, function(rule) {

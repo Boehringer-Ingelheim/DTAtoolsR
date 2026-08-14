@@ -18,25 +18,59 @@ dta_creation_templates_dir <- function() {
   system.file("extdata", "templates", package = "DTAtools")
 }
 
-# List available creation-template files by basename.
-# Custom templates can be added to the same folder, as long as they end in
-# ".dta-template.yaml" or ".dta-template.yml".
-list_dta_creation_templates <- function() {
-  dir <- dta_creation_templates_dir()
-  if (!nzchar(dir) || !dir.exists(dir)) return(character(0))
-  files <- list.files(dir,
-    pattern = "\\.dta-template\\.ya?ml$",
-    ignore.case = TRUE,
-    full.names = FALSE
+# Every directory searched for creation templates, in precedence order:
+#
+# 1. getOption("DTAtools.template_dir") -- one or more directories, so a site
+#    or a project can ship its own template family
+# 2. ./dta-templates, for a template kept next to the data it describes
+# 3. the packaged directory
+#
+# The packaged directory sits inside the installed library, which users cannot
+# write to and which a reinstall wipes, so it cannot be the only place a
+# template may live. Earlier directories win a basename collision.
+dta_creation_template_dirs <- function() {
+  dirs <- c(
+    as.character(getOption("DTAtools.template_dir") %||% character(0)),
+    "dta-templates",
+    dta_creation_templates_dir()
   )
-  sort(files)
+  dirs <- dirs[nzchar(dirs)]
+  dirs[dir.exists(dirs)]
 }
 
-# Resolve creation-template file path by basename.
+# List available creation-template files by basename, across every search
+# directory. Templates end in ".dta-template.yaml" or ".dta-template.yml". A
+# basename present in more than one directory is listed once and resolves to
+# the earliest.
+list_dta_creation_templates <- function() {
+  files <- unlist(
+    lapply(
+      dta_creation_template_dirs(),
+      list.files,
+      pattern = "\\.dta-template\\.ya?ml$",
+      ignore.case = TRUE,
+      full.names = FALSE
+    ),
+    use.names = FALSE
+  )
+  sort(unique(files %||% character(0)))
+}
+
+# Resolve creation-template file path by basename, searching in precedence
+# order. basename() stays as a path-traversal guard: a template name can never
+# escape the directory it was found in.
 get_dta_creation_template_path <- function(template_name) {
-  if (is.null(template_name) || !nzchar(template_name)) return(NULL)
-  full <- file.path(dta_creation_templates_dir(), basename(template_name))
-  if (file.exists(full)) full else NULL
+  if (is.null(template_name) || !nzchar(template_name)) {
+    return(NULL)
+  }
+  nm <- basename(template_name)
+  for (dir in dta_creation_template_dirs()) {
+    full <- file.path(dir, nm)
+    if (file.exists(full)) {
+      return(full)
+    }
+  }
+  NULL
 }
 
 # Read and minimally validate a creation template YAML.
@@ -69,13 +103,41 @@ read_dta_creation_template <- function(template_path) {
   })
 }
 
+# The DTAMetaData S7 property definitions, keyed by property name.
+dta_metadata_properties <- function() {
+  attr(DTAtools::DTAMetaData, "properties") %||% list()
+}
+
 # Allowed top-level fields of DTAMetaData for template metadata payloads.
+#
+# Derived from the S7 class rather than mirrored by hand, so a new DTAMetaData
+# property cannot silently become un-settable from a template. `import_issues`
+# is excluded deliberately: it records how a file was read, not something a
+# template author writes.
 dta_template_metadata_fields <- function() {
-  c(
-    "title", "version", "date", "header",
-    "version_history", "receiver", "supplier", "transmission",
-    "error_handling", "authorized_for_corrections"
-  )
+  setdiff(names(dta_metadata_properties()), "import_issues")
+}
+
+# Which of those fields hold a container, and so accept a nested key path.
+#
+# Decided from the value a freshly constructed DTAMetaData carries: the
+# container properties default to list(), the scalar ones to NULL. Deliberately
+# NOT decided by comparing the declared property class against S7::class_list --
+# that compares S7 class OBJECTS by identity, which holds under
+# pkgload::load_all() (same in-memory instance) but fails once the class comes
+# back from an installed package's lazy-load database. The suite passed and
+# R CMD check did not, until this stopped touching S7 internals.
+#
+# authorized_for_corrections defaults to NULL -- it is a union of character,
+# list and NULL -- so it is correctly treated as a scalar field.
+dta_template_list_fields <- function() {
+  md <- DTAtools::DTAMetaData()
+  nms <- dta_template_metadata_fields()
+  nms[vapply(
+    nms,
+    function(nm) is.list(tryCatch(S7::prop(md, nm), error = function(e) NULL)),
+    logical(1)
+  )]
 }
 
 # Resolve a dataset reference from template YAML.
@@ -84,20 +146,33 @@ dta_template_metadata_fields <- function() {
 # 2) relative to template file directory
 # 3) package extdata root
 resolve_template_dataset_path <- function(ref, template_path) {
-  if (is.null(ref) || !nzchar(ref)) return("")
-  # 1) absolute/direct
-  if (file.exists(ref)) return(normalizePath(ref, winslash = "/", mustWork = TRUE))
+  if (is.null(ref) || !nzchar(ref)) {
+    return("")
+  }
+  # 1) absolute only. A bare relative name must NOT be resolved against the
+  # process working directory: the app's cwd is wherever it happened to be
+  # launched from, so a packaged template asking for "gf_dataset.yaml" could
+  # otherwise silently pick up an unrelated file of that name and quietly build
+  # a different DTA. R.utils::isAbsolutePath() gets Windows drive letters and
+  # UNC paths right, which a hand-rolled regex does not.
+  if (R.utils::isAbsolutePath(ref) && file.exists(ref)) {
+    return(normalizePath(ref, winslash = "/", mustWork = TRUE))
+  }
 
   # 2) relative to template file
   td <- dirname(template_path %||% "")
   if (nzchar(td)) {
     p2 <- file.path(td, ref)
-    if (file.exists(p2)) return(normalizePath(p2, winslash = "/", mustWork = TRUE))
+    if (file.exists(p2)) {
+      return(normalizePath(p2, winslash = "/", mustWork = TRUE))
+    }
   }
 
   # 3) package extdata root
   p3 <- system.file("extdata", ref, package = "DTAtools")
-  if (nzchar(p3) && file.exists(p3)) return(normalizePath(p3, winslash = "/", mustWork = TRUE))
+  if (nzchar(p3) && file.exists(p3)) {
+    return(normalizePath(p3, winslash = "/", mustWork = TRUE))
+  }
 
   ""
 }
@@ -112,8 +187,12 @@ resolve_template_dataset_path <- function(ref, template_path) {
 #     label: "No"
 dta_template_choices <- function(opt) {
   ch <- opt$choices %||% list()
-  if (length(ch) == 0) return(character(0))
-  if (is.character(ch)) return(stats::setNames(ch, ch))
+  if (length(ch) == 0) {
+    return(character(0))
+  }
+  if (is.character(ch)) {
+    return(stats::setNames(ch, ch))
+  }
   # list entries
   vals <- vapply(ch, function(x) as.character(x$value %||% ""), character(1))
   labs <- vapply(ch, function(x) as.character(x$label %||% x$value %||% ""), character(1))
@@ -121,24 +200,78 @@ dta_template_choices <- function(opt) {
   stats::setNames(vals[ok], labs[ok])
 }
 
+# The single metadata path an option writes to, if it has exactly one.
+# Returns "" for an option that fans out to several paths -- there is no one
+# value for such an option to inherit.
+dta_template_option_path <- function(opt) {
+  eff <- opt$effects %||% list()
+  if (length(eff) > 0) {
+    # An explicit effects block wins over `target:` in collect_option_effects(),
+    # so the inherited default has to follow the same precedence -- otherwise an
+    # option could show a default read from one field while writing another.
+    sel <- eff[["__selection__"]]
+    if (is.list(sel) && length(sel) == 1L && !is.null(sel[[1]]$path)) {
+      return(as.character(sel[[1]]$path))
+    }
+    # A block that fans out to several paths has no single value to inherit.
+    return("")
+  }
+  as.character(opt[["target"]] %||% "")
+}
+
 # Default value for one option.
-dta_template_default <- function(opt) {
+#
+# An option that omits `default:` inherits whatever already sits at its target
+# path in `base.metadata`, so a template states each value once instead of
+# duplicating it between `base` and the option -- a duplication nothing enforced
+# and which the option silently won whenever the two drifted apart.
+# `base_metadata` is optional so existing callers keep working.
+dta_template_default <- function(opt, base_metadata = NULL) {
   d <- opt$default
-  if (is.null(d) || length(d) == 0) return(NULL)
-  d[[1]]
+  if (!is.null(d) && length(d) > 0) {
+    return(d[[1]])
+  }
+  if (is.null(base_metadata) || length(base_metadata) == 0) {
+    return(NULL)
+  }
+  keys <- strsplit(dta_template_option_path(opt), "\\.")[[1]]
+  if (length(keys) < 2 || !identical(keys[[1]], "metadata")) {
+    return(NULL)
+  }
+  v <- list_get_path(base_metadata, keys[-1])
+  if (is.null(v) || length(v) == 0) NULL else v[[1]]
 }
 
 # Should a choice-like option allow custom user entries?
 dta_template_allow_custom <- function(opt, default = FALSE) {
   v <- opt$allow_custom
-  if (is.null(v) || length(v) == 0) return(default)
+  if (is.null(v) || length(v) == 0) {
+    return(default)
+  }
   isTRUE(v)
+}
+
+# Read a nested value from a list by key path; NULL if any level is missing.
+list_get_path <- function(x, keys) {
+  cur <- x
+  for (k in keys) {
+    if (!is.list(cur)) {
+      return(NULL)
+    }
+    cur <- cur[[k]]
+    if (is.null(cur)) {
+      return(NULL)
+    }
+  }
+  cur
 }
 
 # Set nested value in list by key path. If value is NULL, key is removed.
 list_set_path <- function(x, keys, value) {
   if (!is.list(x)) x <- list()
-  if (length(keys) == 0) return(x)
+  if (length(keys) == 0) {
+    return(x)
+  }
   k <- keys[[1]]
   if (length(keys) == 1) {
     if (is.null(value)) {
@@ -166,7 +299,24 @@ apply_template_metadata_path <- function(dta, path, value) {
   top <- parts[[2]]
   tail_keys <- parts[-c(1, 2)]
 
-  if (top %in% c("title", "version", "date", "header", "error_handling", "authorized_for_corrections")) {
+  if (!(top %in% dta_template_metadata_fields())) {
+    stop(sprintf("Unsupported metadata top-level field '%s' in effect path '%s'.", top, path))
+  }
+
+  # The branch turns on the PATH, not on the property's declared type: a nested
+  # path is a merge into a container, a bare one is an assignment. That is the
+  # distinction that actually matters here, and unlike class introspection it
+  # behaves the same under load_all() and under an installed package.
+  if (length(tail_keys) > 0) {
+    if (!(top %in% dta_template_list_fields())) {
+      stop(sprintf(
+        "Metadata field '%s' holds a single value, not a nested path ('%s').",
+        top, path
+      ))
+    }
+    current <- tryCatch(S7::prop(md, top), error = function(e) NULL) %||% list()
+    S7::prop(md, top) <- list_set_path(current, tail_keys, value)
+  } else {
     val <- value
     if (identical(top, "date") && !is.null(val) && is.character(val)) {
       parsed <- tryCatch(as.Date(val), error = function(e) as.Date(NA))
@@ -176,20 +326,34 @@ apply_template_metadata_path <- function(dta, path, value) {
       val <- parsed
     }
     S7::prop(md, top) <- val
-  } else if (top %in% c("transmission", "receiver", "supplier", "version_history")) {
-    current <- tryCatch(S7::prop(md, top), error = function(e) NULL) %||% list()
-    if (length(tail_keys) == 0) {
-      current <- value
-    } else {
-      current <- list_set_path(current, tail_keys, value)
-    }
-    S7::prop(md, top) <- current
-  } else {
-    stop(sprintf("Unsupported metadata top-level field '%s' in effect path '%s'.", top, path))
   }
 
   dta@metadata <- md
   dta
+}
+
+# Candidate `effects` keys for one selected value, in match order.
+#
+# YAML 1.1 parses an unquoted `yes:` / `no:` key as a boolean, and R then names
+# the resulting list element "TRUE" / "FALSE"; a quoted `"yes":` key stays
+# "yes". The app's boolean control hands us a real logical either way, so both
+# spellings have to resolve. Building the candidates here keeps the lookup in
+# collect_option_effects() a single first-hit-wins scan, rather than the chain
+# of fallback branches it used to be -- that chain worked only because
+# as.character(TRUE) and the YAML-coerced name happened to agree.
+effect_key_candidates <- function(selected_value) {
+  if (is.null(selected_value) || length(selected_value) == 0) {
+    return(character(0))
+  }
+  v <- selected_value[[1]]
+  keys <- if (isTRUE(v)) {
+    c("TRUE", "yes", "true", "1")
+  } else if (identical(v, FALSE)) {
+    c("FALSE", "no", "false", "0")
+  } else {
+    as.character(v)
+  }
+  keys[!is.na(keys) & nzchar(keys)]
 }
 
 # Extract operations for one selected option value.
@@ -205,23 +369,37 @@ collect_option_effects <- function(opt, selected_value) {
   out <- list()
 
   eff <- opt$effects %||% list()
-  key <- as.character(selected_value %||% "")
-  if (identical(key, "") && !is.null(eff[["__selection__"]])) {
-    key <- "__selection__"
+  target <- as.character(opt[["target"]] %||% "")
+  if (length(eff) == 0 && nzchar(target)) {
+    # `target:` is shorthand for what almost every option actually wants --
+    # "write my selected value to this one metadata field" -- which otherwise
+    # costs a four-line effects/__selection__ block per option. It also works
+    # for boolean options, because the __selection__ value path passes the
+    # logical straight through, which keeps templates clear of the YAML 1.1
+    # yes/no key trap entirely. An explicit `effects:` block wins: `target:` is
+    # sugar, not an extra layer.
+    eff <- list("__selection__" = list(
+      list(path = target, value = "__selection__")
+    ))
   }
   if (length(eff) > 0) {
-    if (!is.null(eff[[key]])) {
-      out <- c(out, eff[[key]])
-    } else if (!is.null(eff[["__selection__"]])) {
-      # Fallback for custom/unlisted values in text/select inputs.
-      out <- c(out, eff[["__selection__"]])
-    } else if (isTRUE(selected_value)) {
-      for (k in c("yes", "true", "1")) if (!is.null(eff[[k]])) out <- c(out, eff[[k]])
-    } else if (identical(selected_value, FALSE)) {
-      for (k in c("no", "false", "0")) if (!is.null(eff[[k]])) out <- c(out, eff[[k]])
-    } else if (is.list(eff) && !is.null(eff$path)) {
-      # direct single operation map
-      out <- c(out, list(eff))
+    hit <- NULL
+    for (k in effect_key_candidates(selected_value)) {
+      if (!is.null(eff[[k]])) {
+        hit <- eff[[k]]
+        break
+      }
+    }
+    if (is.null(hit) && !is.null(eff[["__selection__"]])) {
+      # Custom or unlisted values from text and select inputs.
+      hit <- eff[["__selection__"]]
+    }
+    if (is.null(hit) && !is.null(eff[["path"]])) {
+      # A single operation written directly as a map, not keyed by value.
+      hit <- list(eff)
+    }
+    if (!is.null(hit)) {
+      out <- c(out, hit)
     }
   }
 
@@ -232,12 +410,65 @@ collect_option_effects <- function(opt, selected_value) {
   out
 }
 
+# The expression environment that is knowable before a DTA is built. ${version}
+# is deliberately absent: it is not settled until the options have been applied,
+# so it is resolved afterwards by apply_template_expressions().
+dta_template_today_env <- function() {
+  list("${today}" = format(Sys.Date(), "%Y-%m-%d"))
+}
+
+# Recursively substitute ${...} tokens through a nested list / character value.
+# Anything that is neither a string nor a list (a Date, a logical) is returned
+# untouched.
+resolve_template_expressions <- function(x, env) {
+  if (is.character(x)) {
+    for (k in names(env)) {
+      x <- gsub(k, env[[k]], x, fixed = TRUE)
+    }
+    return(x)
+  }
+  if (is.list(x)) {
+    return(lapply(x, resolve_template_expressions, env = env))
+  }
+  x
+}
+
+# Resolve ${version} across the metadata of a freshly built DTA.
+#
+# This runs as a post-pass because ${version} is not knowable while base
+# metadata is being written -- an option may still change it. ${today} is
+# handled earlier, before base metadata is applied, since metadata.date is a
+# Date property and would reject an unresolved token outright.
+apply_template_expressions <- function(dta) {
+  md <- DTAtools::metadata(dta)
+  version <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
+  env <- list("${version}" = as.character(version %||% ""))
+
+  for (nm in dta_template_metadata_fields()) {
+    cur <- tryCatch(S7::prop(md, nm), error = function(e) NULL)
+    if (is.null(cur)) {
+      next
+    }
+    new <- resolve_template_expressions(cur, env)
+    if (!identical(new, cur)) {
+      S7::prop(md, nm) <- new
+    }
+  }
+
+  dta@metadata <- md
+  dta
+}
+
 # Build a new DTA object from a creation template + selected option values.
 # `selections` is a named list keyed by option id.
 create_dta_from_template <- function(template_def, template_path, selections = list()) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
-    base <- template_def$base %||% list()
+    # ${today} is known upfront and has to be resolved BEFORE base metadata is
+    # applied: metadata.date is a Date property, so an unresolved token would be
+    # rejected as an invalid date long before any post-pass could see it.
+    today_env <- dta_template_today_env()
+    base <- resolve_template_expressions(template_def$base %||% list(), today_env)
 
     # 1) Build datasets from the template datasets section.
     ds_refs <- template_def$datasets %||% base$datasets %||% list()
@@ -300,11 +531,18 @@ create_dta_from_template <- function(template_def, template_path, selections = l
     }
 
     # 3) Apply option-driven effects.
-    opts <- template_def$options %||% list()
+    opts <- resolve_template_expressions(
+      template_def$options %||% list(),
+      today_env
+    )
     for (opt in opts) {
       oid <- as.character(opt$id %||% "")
       if (!nzchar(oid)) next
-      chosen <- if (!is.null(selections[[oid]])) selections[[oid]] else dta_template_default(opt)
+      chosen <- if (!is.null(selections[[oid]])) {
+        selections[[oid]]
+      } else {
+        dta_template_default(opt, md_base)
+      }
       effects <- collect_option_effects(opt, chosen)
       if (length(effects) == 0) next
 
@@ -327,6 +565,9 @@ create_dta_from_template <- function(template_def, template_path, selections = l
         }
       }
     }
+
+    # 4) Resolve ${version} now that the options have settled what it is.
+    dta <- apply_template_expressions(dta)
 
     dta
   })

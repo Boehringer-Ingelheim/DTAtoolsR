@@ -25,5 +25,4 @@ yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 input_list <- yaml::read_yaml(yaml_file)
 specs <- specs_from_list(input_list$columns, input_list$rules)
 
-
 }

@@ -23,7 +23,7 @@ Checks if a given filename matches the pattern in a \code{DTAFile} object.
 }
 
 \examples{
-  file_info <- DTAFile("file.txt")
-  matches_filename(file_info, "file.txt")
+file_info <- DTAFile("file.txt")
+matches_filename(file_info, "file.txt")
 
 }

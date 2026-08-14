@@ -32,8 +32,8 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   tab <- read_file(ds@files[[1]], table_path)
 
-  expect_error(read_file(ds@files[[1]], "blala.tsv"),  "does not match the filename")
-  
+  expect_error(read_file(ds@files[[1]], "blala.tsv"), "does not match the filename")
+
   expect_s3_class(tab, c("R6", "Table", "ArrowTabular", "ArrowObject"))
   expect_equal(nrow(tab), 490)
   expect_equal(ncol(tab), 33)
@@ -43,7 +43,7 @@ test_that("DTADataSet object is created and table can be loaded", {
 
   expect_s3_class(specs(ds), "DTAtools::DTAColumnSpecCollection")
 
-  expect_true(is.list(tables(ds)))    
+  expect_true(is.list(tables(ds)))
 
   expect_s3_class(colspec(ds, 1), "DTAtools::DTAColumnSpec")
   expect_s3_class(colspec(ds, "STUDYID"), "DTAtools::DTAColumnSpec")
@@ -168,4 +168,114 @@ test_that("labels() is exported, not left to base::labels' silent fallback", {
   expect_identical(labels, base::labels)
   m <- lm(mpg ~ wt, data = mtcars)
   expect_equal(labels(m), "wt")
+})
+
+
+# ---- Multiple file handlers per dataset -------------------------------------
+# A DTADataSet has always been able to hold several DTAFile handlers in memory,
+# but the reader could only ever build ONE: DTADataSetFactory() called
+# do.call(DTAFileFactory, files), which requires `files` to be a single mapping.
+# A `files:` SEQUENCE -- the shape a multi-handler document has, and the shape
+# the Shiny app already serialises to -- passed the whole sequence as `type` and
+# died in base R's coercion, so a two-handler specification could be written but
+# never read back.
+
+test_that("a files: sequence builds one handler per entry, in order", {
+  ds <- dta_dataset_from_list(list(
+    name = "two_handlers",
+    type = "tabular",
+    files = list(
+      list(type = "csv", filename = "a.csv"),
+      list(type = "tsv", filename = "b.tsv")
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_length(ds@files, 2)
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileCSV")
+  expect_s3_class(ds@files[[2]], "DTAtools::DTAFileTSV")
+  expect_identical(ds@files[[1]]@filename, "a.csv")
+  expect_identical(ds@files[[2]]@filename, "b.tsv")
+})
+
+test_that("a one-element files: sequence is a sequence, not a mapping", {
+  # The regression that hid the defect: even a single-entry sequence failed,
+  # because the failure was in how `files` was passed on, not in how many
+  # handlers were asked for.
+  ds <- dta_dataset_from_list(list(
+    name = "one_in_a_sequence",
+    type = "tabular",
+    files = list(list(type = "csv", filename = "a.csv")),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_length(ds@files, 1)
+  expect_identical(ds@files[[1]]@filename, "a.csv")
+})
+
+test_that("a files: mapping still builds exactly one handler", {
+  # gf_dataset.yaml is the guard for the discriminator: its `files:` mapping
+  # CONTAINS a sequence (info:), so anything that decided "sequence" by looking
+  # for a nested list rather than for names would split it into bogus handlers.
+  ds <- read_dataset_from_yaml(
+    system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
+  )
+
+  expect_length(ds@files, 1)
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileTSV")
+  expect_identical(ds@files[[1]]@filename, "gf_data_small_smirna.tsv")
+})
+
+test_that("a dataset without a files: block has no handlers", {
+  # Removing the last file handler is reachable from the app's file editor, and
+  # the resulting document must round-trip rather than abort in do.call().
+  ds <- dta_dataset_from_list(list(
+    name = "no_handlers",
+    type = "tabular",
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_length(ds@files, 0)
+  expect_equal(min_number_of_files(ds), 0)
+  expect_equal(max_number_of_files(ds), 0)
+})
+
+test_that("dta_file_handlers_from_list() rejects a malformed sequence entry", {
+  expect_error(
+    dta_file_handlers_from_list(list(list(type = "csv", filename = "a.csv"), "b.csv")),
+    "must be a named list"
+  )
+  expect_error(
+    dta_file_handlers_from_list("clinical_data.csv"),
+    "must be a list describing one file handler"
+  )
+})
+
+test_that("min/max number of files sum across several handlers", {
+  ds <- dta_dataset_from_list(list(
+    name = "counts",
+    type = "tabular",
+    files = list(
+      list(type = "csv", filename = "a.csv"),
+      list(
+        type = "csv", filename = "extra.*[.]csv$", pattern = TRUE,
+        min_number_of_files = 1, max_number_of_files = 3
+      )
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_equal(min_number_of_files(ds), 2)
+  expect_equal(max_number_of_files(ds), 4)
+})
+
+
+test_that("dta_file_handlers_from_list rejects a half-named files: block", {
+  # A fully named list is one handler, a fully unnamed one is a list of
+  # handlers. A mix is neither, and forwarding it whole to DTAFileFactory would
+  # fail further in with a message about the wrong thing.
+  expect_error(
+    dta_file_handlers_from_list(list(type = "csv", "clinical_data.csv")),
+    "not a mix of named and unnamed entries"
+  )
 })

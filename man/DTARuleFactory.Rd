@@ -10,12 +10,15 @@ DTARuleFactory(id, type, ...)
 \item{id}{A character string specifying the rule identifier.}
 
 \item{type}{A character string specifying the type of rule to create.
-Supported types are \code{"col_condition"}, \code{"col_range"}, and \code{"col_unique"}.}
+Supported types are \code{"col_condition"}, \code{"col_range"},
+\code{"col_unique"}, and \code{"group_condition"}.}
 
 \item{...}{Additional arguments passed to the specific DTARule constructor.}
 }
 \value{
-An object of class \code{DTARuleColCondition}, \code{DTARuleColRange}, or \code{DTARuleColUnique}, depending on \code{type}.
+An object of class \code{DTARuleColCondition}, \code{DTARuleColRange},
+\code{DTARuleColUnique}, or \code{DTARuleGroupCondition}, depending on
+\code{type}.
 }
 \description{
 Factory function to create a DTARule object of a specified type.

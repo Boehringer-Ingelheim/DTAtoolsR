@@ -6,11 +6,302 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
 ### Added
+
+- **`validate_file_stream()` validates a delimited file without loading it.**
+  The file is opened as a lazy Arrow dataset and scanned in batches, so peak
+  memory is governed by the batch size rather than by the size of the file.
+  This is what makes a file larger than memory checkable at all: the existing
+  path has to hold the whole table as an R data frame before it can validate a
+  single row.
+
+  It returns the same validation details the in-memory path returns, so
+  `results()`, `messages()` and `inspect()` accept the result unchanged.
+
+  `max_errors` caps how much per-cell error detail is retained. Counting is
+  unaffected, so totals and the pass/fail verdict stay exact even when the
+  retained detail is truncated — a report says "20 problems, here are 5", never
+  "5 problems".
+
+  Nothing in the validation path now scales with the number of rows. Memory is
+  bounded by the batch size for the column-spec checks, by the number of
+  distinct keys for uniqueness rules, by the number of distinct groups for
+  grouped rules, and by `max_errors` for retained error detail.
+
+  **This buys feasibility, not speed.** Measured across a 16-fold increase in
+  input, the working set held by the scan stayed flat at ~19 MB while the
+  in-memory path's grew from 51 MB to 272 MB — but scanning ran about twice as
+  slow, since every batch pays its own dispatch and typing overhead. Use it
+  when holding the file is the problem; for a file that fits in memory
+  comfortably, `validate_table()` remains the faster choice.
+
+- A `DTADataSetTabular`'s `tables` may now hold a lazy Arrow `Dataset`,
+  `arrow_dplyr_query` or `RecordBatchReader` as well as a materialised `Table`.
+
+- **`validate_file_stream(fail_fast = TRUE)` stops at the first problem.**
+  Answers "is this file valid?" without paying for a full pass, which on a
+  large file that fails early is the difference between seconds and hours.
+
+  The resulting report is explicitly incomplete rather than quietly so. It
+  carries a `partial_scan` attribute, lists only rules that actually failed,
+  and reports `NA` — not `TRUE` — for any axis that could not be settled. A
+  rule that has not failed yet has not passed: a duplicate further into the
+  file was simply never read. The overall `ok` verdict is unaffected, since it
+  requires all three axes to be `TRUE`.
+
+- **A structural gate, via `validate_file_stream(on_missing_column = "stop")`.**
+  A column the specs require but the file lacks is decidable from the header
+  alone. Scanning reports that absence once per *row* — faithful to what the
+  generated schema meant, but useless at scale, since a 400-million-row file
+  restates the same fact 400 million times. `"stop"` reports it once, having
+  read nothing.
+
+  The default is `"scan"`, so existing behaviour is unchanged unless you ask
+  for the gate.
+
+  A result produced this way carries a `structural_only` attribute. Its
+  `rules_valid` and `import_valid` read `TRUE` because those axes were never
+  evaluated, not because they passed — the attribute exists so that cannot be
+  misread.
+
+- **Columns present in the file but absent from the specs are now reported.**
+  Previously invisible: the per-row checks have no way to notice a column no
+  spec describes.
+
+- **`check()` validates a lazy table by scanning it.** A dataset held in
+  `tables` is no longer converted to a data frame first, so the streaming path
+  is reachable from the ordinary workflow rather than only through
+  `validate_file_stream()`.
+
+  Cached validation results are keyed differently for lazy tables. A
+  materialised table is still identified by hashing its contents; a dataset is
+  identified by the files behind it — names, sizes, modification times — plus
+  its column names, because hashing the contents would mean serialising the
+  whole table to decide whether to skip validating it. The trade: file metadata
+  can in principle miss an edit that preserves both size and timestamp. Where
+  no identity can be established the table is treated as changed, so the
+  failure direction is revalidating unnecessarily rather than skipping a table
+  that needed checking.
 
 ### Changed
 
+- Schema validation no longer serialises the table to JSON and runs a JSON
+  Schema validator over it. Each column's values are now checked directly
+  against the constraints its spec declares. Validation output is unchanged:
+  the same keywords (`type`, `maxLength`, `enum`, `const`, `pattern`,
+  `required`), the same messages, the same row and column attribution, and the
+  same summarised error frame. A golden-oracle test suite recorded against the
+  previous implementation reports no differences.
+
+  On a 1,000,000-row table the schema axis went from being unmeasurably slow at
+  that size to 8.7 seconds, and throughput rose from 4.5 MB/s to 17.6 MB/s.
+  The axis is still the dominant cost of validation.
+
+### Removed
+
+- **`jsonvalidate` and `tidyr` are no longer dependencies.** `jsonvalidate`
+  brought **V8** with it, a heavy system dependency that slowed installation
+  and CI everywhere, not just validation. `tidyr` was used only to parse the
+  validator's error paths back into row and column numbers, which is no longer
+  necessary.
+
+  `as_json_schema()` remains exported and unchanged. Serialising a spec
+  collection to JSON Schema for other tools is useful in its own right; it is
+  simply no longer how this package validates. It also no longer compiles a
+  validator on every call and throws it away.
+
+## [0.15.1] - 2026-08-13
+
 ### Fixed
+
+- The `DTARuleGroupCondition()` documentation example could not be parsed, so
+  `R CMD check` failed on it. The `requires` constraint was written as
+  `list(type = "requires", if = "c1_failed", ...)`, but `if` is a reserved word
+  and cannot be an unquoted argument name; it is now `` `if` = ``. The example
+  runs. The test suite could not have caught this — examples are executed by
+  `R CMD check`, not by `devtools::test()`.
+
+- **Shiny app shows correct version on Posit Connect.** The footer's version
+  lookup previously preferred the *installed* package version, which on Connect
+  is the server-side library version rather than the deployed app's version. The
+  lookup order is now reversed: a nearby `DESCRIPTION` file (the app bundle) is
+  checked first, and the installed package is only the fallback. The displayed
+  version now matches the running app on Connect and during local source
+  development.
+
+### Added
+
+- GitHub Pages tutorial site (`docs/`): a self-contained, five-part static HTML
+  tutorial covering installation, the beginner validation workflow, column
+  specifications, all four rule types (`col_condition`, `col_range`,
+  `col_unique`, `group_condition`), advanced API usage, and a quick-reference
+  cheat sheet. Deployed automatically via `.github/workflows/pages.yml`.
+- `.github/workflows/pages.yml`: GitHub Actions workflow that deploys `docs/`
+  to GitHub Pages on every push to `dev` that touches the folder.
+- `.github/copilot-instructions.md`: repository-level instructions for GitHub
+  Copilot covering commands, S7 architecture, conventions, and subagent
+  workflow.
+
+### Changed
+
+- `README.md` and `vignettes/DTAtools.Rmd`: expanded `group_condition`
+  documentation with full prose, constraint-type and scope-value reference
+  tables, two annotated YAML examples (`requires` and `mutually_exclusive`),
+  and a programmatic `DTARuleGroupCondition()` constructor example.
+
+## [0.15.0] - 2026-08-13
+
+### Added
+
+- New schema rule type `group_condition` for grouped cross-row validation.
+  Rules define `group_by`, named `conditions`, and `constraints` so checks like
+  mutually exclusive statuses or implication logic can be enforced within each
+  group. Constraint aliases are supported: `not_both` maps to
+  `mutually_exclusive`, and `implies` maps to `requires`.
+- The Shiny app's *Edit rules* dialog now supports full GUI authoring of
+  `group_condition` rules, including grouped condition rows, grouped
+  constraints, and round-trip serialization to YAML.
+
+- `dta_template_placeholders()` is exported. It lists the `{PLACEHOLDER}`
+  tokens a Word export template may use, and given a `DTA` resolves each one, so
+  a template author can discover the set without exporting a document to find
+  out or reading it out of the documentation by hand.
+- Creation templates accept a **`target:` shorthand**. `target: metadata.title`
+  replaces the four-line `effects: / __selection__: / path: / value:` block that
+  every option previously needed to say "write my value to this field".
+  `effects:` still works, and is still the way to have one choice set several
+  fields at once.
+- Creation-template values may use **`${today}` and `${version}`**, resolved
+  when the DTA is created.
+- Creation templates are searched for in more than one place:
+  `getOption("DTAtools.template_dir")`, then a project-local `./dta-templates`,
+  then the packaged directory. The packaged directory sits inside the installed
+  library, which users cannot write to and a reinstall wipes, so it could not
+  remain the only place a template was allowed to live.
+- A dataset's **file handlers can be edited in the Shiny app**. A third button,
+  *Edit files*, sits next to *Edit columns* and *Edit rules* and opens the same
+  kind of list/form dialog: add, edit, remove and reorder the expected files
+  (name or pattern, type, how many files may match, description). Each entry is
+  one upload slot, so adding one adds a slot and removing one removes it.
+- `pattern_description` reaches the concrete file classes. `DTAFile` has always
+  had the property and the app has always written it into `files:`, but no
+  `DTAFileCSV`/`DTAFileTSV`/`DTAFileDelim`/`DTAFileTabular` constructor accepted
+  one, so a handler that described its own pattern in words could be written and
+  never read back.
+- A dataset may declare **more than one file handler in YAML**. `files:` is now
+  read as either a single mapping (one handler, unchanged) or a sequence of
+  mappings (one per handler). A dataset with no `files:` block at all is read as
+  a dataset with no handlers instead of aborting. `dta_file_handlers_from_list()`
+  is exported for the conversion.
+
+### Changed
+
+- **Unresolved placeholders in a Word template are now reported whatever their
+  case.** Detection and reporting previously used different patterns, so a
+  lower- or mixed-case token such as `{customField}` was left untouched *and*
+  never warned about, contradicting the documented contract that every
+  placeholder without a value is reported. Both now read one shared grammar.
+  Note the consequence: braces used as prose in a template, such as `{n}`, will
+  now produce a warning. The text is still left exactly as written.
+- A creation-template option that omits `default:` inherits the value from
+  `base.metadata`, so a template states each value once. Previously the two
+  duplicated each other with nothing enforcing agreement, and the option
+  silently won whenever they drifted apart.
+- The metadata fields a creation template may write are derived from the
+  `DTAMetaData` S7 class instead of being mirrored by hand in three places, so a
+  new property cannot silently become un-settable from a template.
+- The three *Edit files* / *Edit columns* / *Edit rules* buttons are now one
+  **Edit** menu. They all act on the same object — this dataset's specification
+  — so they read as one entry point instead of three siblings competing with
+  *Check this dataset* and the export. Each row names what it changes
+  (*Columns*, *Rules*, *Files*, in that order) with a one-line description.
+- Removing a file handler in the app also unloads the files that were loaded
+  through it, after a confirmation listing them by name. The specification and
+  the loaded data are kept in step: a slot that no longer exists can no longer
+  hide bound data from the *Loaded files* list.
+- Applying edited **Raw YAML** is less destructive. Editing a dataset's `files:`
+  block used to discard every file loaded into that dataset; loaded files are
+  now kept as long as their own slot is still in the document, and follow it if
+  the entries were reordered. A file whose slot was deleted or rewritten is
+  unloaded with it, rather than left bound to the dataset under a slot that asks
+  for something else. Validation is still cleared whenever files, columns or
+  rules changed.
+- The `pre-commit` hooks run for the first time. The R hooks could not build
+  their environment on R 4.5 (the pinned revision installed a `digest` that no
+  longer compiles), so `styler` and `roxygen` had never been applied; the
+  source is reformatted accordingly. Hook revisions are updated, `roxygenize`
+  declares the dependencies it needs to load the package, and the vendored
+  `renv/staging_excluded/` tree is excluded so hooks stop trying to lint other
+  packages' sources.
+- The `pre-commit` CI job no longer fails when GitHub's cache service is
+  unavailable. `pre-commit/action@v2.0.3` bundled its own cache step with no
+  error tolerance, so an outage failed the job before a single hook ran. The
+  cache is now inlined with `continue-on-error`, and a cache problem only makes
+  the run slower.
+- The R-specific `pre-commit` hooks (`lorenzwalthert/precommit`) are removed.
+  They built a second, isolated ~40-package `renv` library on every run,
+  separate from the one CI already installs, and that duplication broke three
+  times in a row: a `digest` that will not compile on R 4.5, a cache outage
+  with no error tolerance, and finally the two `renv` caches colliding on the
+  same runner path. `styler`, `roxygen2`/`NAMESPACE` and a
+  dependency-declaration check now run in a new `r-style` workflow against the
+  project's own installed library. `pre-commit` keeps only the fast,
+  language-agnostic hooks. Note that `styler::style_pkg()` and
+  `roxygen2::roxygenise()` are no longer run for you locally — see the Commands
+  table in `CLAUDE.md`. CI fails on a diff rather than auto-fixing, so stale
+  `man/`/`NAMESPACE` cannot be silently committed on your behalf.
+
+### Fixed
+
+- **A Word template no longer loses its formatting where a placeholder sits.**
+  Any placeholder in a paragraph caused the whole paragraph's text to be written
+  into its first run with every other run blanked, so
+  `Vendor: **{SUPPLIER_NAME}** (confidential)` came back with the bold and the
+  trailing run's styling gone. Substitution is now run-local, and falls back to
+  joining the paragraph only when a placeholder genuinely straddles a run
+  boundary — which Word does routinely, and which is the only case where
+  joining is the sole way to match the placeholder at all.
+- **A placeholder value containing another placeholder's token is no longer
+  re-substituted.** Substitution looped `gsub()` over the variable names,
+  mutating the text each pass, so a title such as `"See {DTA_VERSION} below"`
+  had the version interpolated into it. Substitution is now a single pass over
+  the original text and a value is never rescanned. This also removes the
+  mirror-image defect where braces arriving from a value were reported as
+  unresolved placeholders the template never contained.
+- A creation template's dataset reference is no longer resolved against the
+  process working directory. A packaged template asking for `gf_dataset.yaml`
+  could silently pick up an unrelated file of that name from wherever the app
+  happened to be launched; a bare relative name is now resolved against the
+  template's own directory, then the package, and only a genuinely absolute
+  path is taken as given.
+- A DTA created from the bundled GF template is dated the day it was created,
+  and its first version-history entry records the version the user actually
+  chose. Both were frozen at the template author's values, so every DTA claimed
+  to be dated 2026-07-29 and at version 1.0 regardless.
+- `export_with_template()`'s example is no longer wrapped in `\dontrun{}`. It
+  writes only to `tempdir()`, so it now runs under `R CMD check` like every
+  other example instead of being documentation nobody executes.
+- A handler that is not a pattern now rejects any file count other than 1
+  whichever way it is declared. The guard only ever looked at
+  `number_of_files`, so a `min_number_of_files`/`max_number_of_files` pair went
+  unchecked, and declaring only a minimum compared against a zero-length value
+  and failed with a message about something else.
+- A file handler could not carry more than one file name. `filename` is
+  documented as a character vector and `matches_filename()` implements the
+  several-names case, but the validator tested `filename == ""` — a length-1
+  test that made the condition length 2 and errored — and a YAML `filename:`
+  sequence arrived as a list the character property refused. Both now work.
+- A specification with more than one file handler could be written but never
+  read back. The app already serialised such a dataset as a `files:` sequence,
+  while the reader passed the whole sequence where a single handler was
+  expected and died inside a base-R coercion, so exporting a two-handler DTA
+  produced a document the app itself rejected on load.
+- The whitespace hooks no longer rewrite files under `inst/extdata`. In a
+  delimited file trailing whitespace is data: `trailing-whitespace` stripped
+  the trailing tabs from the one row of `gf_data_small_smirna.tsv` whose last
+  columns are legitimately empty, turning a 33-field row into a 27-field one.
 
 ## [0.13.0] - 2026-08-12
 
@@ -260,7 +551,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - functions to access slots
 - S7 validators for all classes
 - introduced `DTAColumnSpecStructure` and `DTAColumnSpecStructureSAS` for handling `type`, `format`, `length` of a column spec
-- info variables to `DTADataSet` and `DTADataSetTabular` 
+- info variables to `DTADataSet` and `DTADataSetTabular`
 - example factory functions: `create_example_DTA()`, `create_example_DTAColumnSpec()`, `create_example_DTAColumnSpecCollection()`, `create_example_DTADataSetTabular()`, `create_example_DTAFileCSV()`, `create_example_DTAFileTSV()`, `create_example_DTAMetaData()`, `create_example_DTARuleColCondition()`, `create_example_DTARuleColUnique()`, `create_example_DTARuleColRange()`
 - `as.list` methods for `DTAColumnSpecCollection`, `DTAColumnSpec`, and `DTARule` derivatives
 
@@ -281,10 +572,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - moved rules to `DTARule` and derivative classes
 - renamed getter functions to shorter names
 - renamed constructor variables
-- DTA-class constructor to handle DTAMetaData  
+- DTA-class constructor to handle DTAMetaData
 - changed `container` to `datasets` in class DTA
 - moved json schema generation to classes
-- removed stored `json_schema` as it can be dynamically generated 
+- removed stored `json_schema` as it can be dynamically generated
 
 ## [0.9.0] - 2025-09-11
 

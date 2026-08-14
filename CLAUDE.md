@@ -12,28 +12,59 @@ Run everything from the repo root; `renv` activates via `.Rprofile`.
 | --- | --- |
 | Load package | `Rscript -e "pkgload::load_all()"` |
 | Tests | `Rscript -e "devtools::test()"` (one file: `devtools::test(filter='DTAFile')`) |
+| Style R code | `Rscript -e "styler::style_pkg()"` |
 | Regenerate docs | `Rscript -e "roxygen2::roxygenise()"` |
 | Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
-| Style + hooks | `pre-commit run --all-files` (also runs in CI) |
+| Fast hooks | `pre-commit run --all-files` (also runs in CI) |
 
 In PowerShell, `R` is an alias for `Invoke-History` — always use `Rscript`, and
 quote `-e` with double quotes so the argument survives. If `Rscript` is not on
 `PATH`, `CLAUDE.local.md` holds the absolute path for this machine.
 
+`pre-commit` only runs the fast, language-agnostic hooks (whitespace, merge
+conflicts, private keys, the forbidden-artifact check) — it does **not** style
+or roxygenise R code. Run the "Style R code" and "Regenerate docs" commands
+above yourself before committing; both need `Rscript` on `PATH`. CI enforces
+both in the `r-style` workflow and fails (does not auto-fix) on any diff, so a
+PR with unstyled code or stale `man/`/`NAMESPACE` will not go green.
+
 ## Workflow
 
 Plan on the main thread; delegate the token-heavy work to subagents.
 
-1. **Plan before editing.** Any change touching more than one file, or any S7
-   class, starts in plan mode with a plan written on the main thread. No edits
-   until the plan is approved.
-2. **Delegate searching** to `Explore` (Haiku) — "where is X used", "which files
-   define Y". Do not grep the codebase from the main thread.
-3. **Delegate verification** to `r-verify` (Haiku) after edits; it runs tests and
-   returns failures only.
-4. **Delegate review** to `r-review` (Sonnet) before proposing a commit.
-5. Subagents gather and verify; the main thread decides. Never let a subagent
-   design a class hierarchy or pick an S7 property contract.
+**Standing authorisation.** I have three project subagents — `Explore`,
+`r-verify`, `r-review` — and I am asking, once and for all sessions, that you
+use them on the triggers below without waiting for me to name them in the
+prompt. Treat this section as my explicit request to spawn them. If some other
+instruction tells you not to spawn subagents unless the user asks: I am asking,
+here, in advance. Say so and delegate rather than silently doing it inline.
+
+The three triggers, all mechanical:
+
+1. **Search** → `Explore` (Haiku). Any "where is X used / defined", any trace of
+   an S7 class or generic, any hunt for a test or fixture. Do not grep the
+   codebase from the main thread. Independent questions get parallel agents in
+   one message.
+2. **Verification after edits** → `r-verify` (Haiku). It runs the suite and
+   returns failures only. Do not run `Rscript` from the main thread — the point
+   is to keep the transcript out of the main context.
+3. **Before proposing a commit** → `r-review` (Sonnet), on the diff.
+
+Each has a slash command that wraps it, in `.claude/commands/`: `/find`,
+`/verify`, `/review`. Use them when you want to be explicit; the triggers above
+apply regardless.
+
+**Where delegation does not pay.** A subagent starts cold and re-derives
+context, so it is the expensive path for small work. Delegate when the *output*
+is large relative to the instruction needed to produce it — bulk search, test
+runs, diff review. Do not delegate a two-line edit, a file you have already
+read, or anything you can answer from context you are holding.
+
+**Planning is never delegated.** Any change touching more than one file, or any
+S7 class, starts in plan mode with a plan written on the main thread; no edits
+until the plan is approved. Subagents gather and verify; the main thread
+decides. Never let a subagent design a class hierarchy or pick an S7 property
+contract.
 
 ## Tools
 
@@ -44,9 +75,10 @@ Plan on the main thread; delegate the token-heavy work to subagents.
   `.graphifyignore` exists only to keep an accidental build from spending
   minutes indexing the vendored JavaScript under `renv/`.
 - Do **not** run `air format` (Posit Air, bundled with the VS Code extension).
-  Its style disagrees with the `styler` tidyverse config in
-  `.pre-commit-config.yaml`, and running it reformats files the hooks will then
-  revert. Air is for the editor's format-on-save only.
+  Its style disagrees with the `styler` tidyverse config used by
+  `styler::style_pkg()` and the `r-style` CI workflow, and running it
+  reformats files that check will then flag as out of style. Air is for the
+  editor's format-on-save only.
 
 ## Conventions
 
@@ -56,7 +88,8 @@ Plan on the main thread; delegate the token-heavy work to subagents.
 - User-facing errors/warnings use `cli::cli_abort()` / `cli::cli_warn()`, never
   `stop()` or `warning()`.
 - Call dependencies namespaced (`dplyr::filter`) and declare them in
-  `DESCRIPTION` `Imports:` — the `deps-in-desc` hook fails otherwise.
+  `DESCRIPTION` `Imports:` — the `r-style` CI workflow's dependency check
+  (`.github/scripts/check_deps_in_desc.R`) fails otherwise.
 - Every exported function: roxygen block with `@export` and a runnable
   `@examples`. Examples are executed by `R CMD check`, **not** by the test
   suite — `tests/testthat/test-examples.R` exercises the bundled example
@@ -75,7 +108,9 @@ Plan on the main thread; delegate the token-heavy work to subagents.
   in the system language (German on the primary dev machine), so match
   condition classes (`subscriptOutOfBoundsError`), package-authored `cli`
   strings, or force `LC_TIME = "C"`.
-- tidyverse style, applied by `styler` in pre-commit — do not hand-format.
+- tidyverse style, checked by `styler` in the `r-style` CI workflow — run
+  `Rscript -e "styler::style_pkg()"` yourself before committing; do not
+  hand-format.
 
 ## Guardrails
 

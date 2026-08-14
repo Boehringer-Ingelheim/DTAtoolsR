@@ -49,8 +49,7 @@ test_that("inspect() schema matches stay specific to required HEIGHT message", {
   target <- msgs[
     msgs$source == "schema" &
       msgs$keyword == "required" &
-      grepl("required property 'HEIGHT'", msgs$message, fixed = TRUE),
-    ,
+      grepl("required property 'HEIGHT'", msgs$message, fixed = TRUE), ,
     drop = FALSE
   ]
   expect_gt(nrow(target), 0)

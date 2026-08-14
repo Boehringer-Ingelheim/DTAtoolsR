@@ -73,7 +73,7 @@ test_that("clinical_data_error_rules.csv triggers representative rule failures o
   expect_equal(nrow(res), 1)
   expect_equal(res$status, "failed")
   expect_equal(res$n_schema_errors, 0)
-  expect_equal(res$n_rule_errors, 6)
+  expect_equal(res$n_rule_errors, 7)
   # Every value in this fixture is representable in its declared type; the
   # failures are all on the rule axis. The typed import must not add to them.
   expect_equal(res$n_import_errors, 0L)
@@ -86,6 +86,7 @@ test_that("clinical_data_error_rules.csv triggers representative rule failures o
     sort(rule_ids),
     sort(c(
       "check_col_condition_example",
+      "group_condition_fail_example",
       "rule_dependency_example",
       "rule_equal_example",
       "rule_range_example",
@@ -139,6 +140,7 @@ test_that("clinical_data_error_all.csv combines schema, rule and import failures
     sort(rule_ids),
     sort(c(
       "check_col_condition_example",
+      "group_condition_fail_example",
       "rule_dependency_example",
       "rule_equal_example",
       "rule_unequal_example",

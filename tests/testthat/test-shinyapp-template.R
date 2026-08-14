@@ -155,6 +155,182 @@ test_that("dta_template_metadata_fields() lists the exact allowed DTAMetaData fi
   )
 })
 
+test_that("dta_template_metadata_fields() is derived from the S7 class, not mirrored", {
+  fields <- app_fn("dta_template_metadata_fields")
+  props <- app_fn("dta_metadata_properties")
+  # The point of deriving: a new DTAMetaData property becomes settable from a
+  # template automatically, instead of silently being rejected until someone
+  # remembers to update a hand-written vector.
+  expect_equal(fields(), setdiff(names(props()), "import_issues"))
+  # import_issues records how a file was read; it is not template-settable.
+  expect_false("import_issues" %in% fields())
+})
+
+test_that("dta_template_list_fields() names the container metadata fields", {
+  list_fields <- app_fn("dta_template_list_fields")
+  expect_setequal(
+    list_fields(),
+    c("version_history", "receiver", "supplier", "transmission")
+  )
+  # authorized_for_corrections is a union of character, list and NULL, and
+  # defaults to NULL, so it must stay a scalar field. Getting this wrong turns a
+  # scalar assignment into a nested-path merge.
+  expect_false("authorized_for_corrections" %in% list_fields())
+
+  # REGRESSION: this used to be decided by identical(prop$class, S7::class_list),
+  # which compares S7 class OBJECTS by identity. That holds under
+  # pkgload::load_all() but not once the class is restored from an installed
+  # package, so devtools::test() passed while R CMD check failed with
+  # "@transmission must be <list>, not <character>". The set must be non-empty
+  # under both, which is what actually catches a regression here.
+  expect_gt(length(list_fields()), 0)
+})
+
+test_that("a nested path into a scalar metadata field is rejected", {
+  fn <- app_fn("apply_template_metadata_path")
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)))
+  expect_error(
+    fn(dta, "metadata.title.nested", "x"),
+    "holds a single value, not a nested path"
+  )
+})
+
+# ---- template expressions ($ {today} / $ {version}) -------------------------
+
+test_that("resolve_template_expressions() substitutes without losing names or types", {
+  fn <- app_fn("resolve_template_expressions")
+  out <- fn(
+    list(version = "${version}", nested = list(date = "${today}", keep = 1L)),
+    list("${version}" = "9.9", "${today}" = "2026-01-02")
+  )
+  expect_equal(out$version, "9.9")
+  expect_equal(out$nested$date, "2026-01-02")
+  # The lapply() recursion must not drop names or coerce non-character leaves.
+  expect_equal(names(out), c("version", "nested"))
+  expect_equal(out$nested$keep, 1L)
+})
+
+test_that("${version} reaches version_history after the options are applied", {
+  # REGRESSION: apply_template_expressions() was written, documented and then
+  # never called, so metadata.version took the chosen value while
+  # version_history[[1]]$version kept the literal "${version}". Nothing caught
+  # it because no test overrode version and then read the history back.
+  create <- app_fn("create_dta_from_template")
+  read_tpl <- app_fn("read_dta_creation_template")
+  path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
+  expect_false(is.null(path))
+
+  def <- read_tpl(path)
+  expect_true(def$ok)
+
+  res <- create(def$value, path, list(version = "3.7"))
+  expect_true(res$ok)
+  md <- DTAtools::metadata(res$value)
+  expect_equal(S7::prop(md, "version"), "3.7")
+
+  hist <- S7::prop(md, "version_history")
+  expect_gt(length(hist), 0)
+  expect_equal(hist[[1]]$version, "3.7")
+})
+
+test_that("${today} resolves to the creation date, not a literal token", {
+  create <- app_fn("create_dta_from_template")
+  read_tpl <- app_fn("read_dta_creation_template")
+  path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
+  expect_false(is.null(path))
+
+  res <- create(read_tpl(path)$value, path, list())
+  expect_true(res$ok)
+  md <- DTAtools::metadata(res$value)
+  expect_s3_class(S7::prop(md, "date"), "Date")
+  expect_equal(S7::prop(md, "date"), Sys.Date())
+  expect_equal(
+    S7::prop(md, "version_history")[[1]]$date,
+    format(Sys.Date(), "%Y-%m-%d")
+  )
+})
+
+# ---- target: shorthand and inherited defaults -------------------------------
+
+test_that("target: is shorthand for a __selection__ effect", {
+  fn <- app_fn("collect_option_effects")
+  eff <- fn(list(id = "x", target = "metadata.title"), "New Title")
+  expect_length(eff, 1)
+  expect_equal(eff[[1]]$path, "metadata.title")
+  expect_equal(eff[[1]]$value, "__selection__")
+})
+
+test_that("an explicit effects block wins over target:", {
+  fn <- app_fn("collect_option_effects")
+  opt <- list(
+    id = "x",
+    target = "metadata.title",
+    effects = list(
+      "__selection__" = list(list(path = "metadata.header", value = "__selection__"))
+    )
+  )
+  eff <- fn(opt, "v")
+  expect_length(eff, 1)
+  expect_equal(eff[[1]]$path, "metadata.header")
+})
+
+test_that("an option with no default inherits it from base.metadata", {
+  fn <- app_fn("dta_template_default")
+  base <- list(title = "From Base", transmission = list(test_upload = TRUE))
+  expect_equal(fn(list(id = "t", target = "metadata.title"), base), "From Base")
+  expect_true(fn(list(id = "u", target = "metadata.transmission.test_upload"), base))
+  # An explicit default still wins over the base value.
+  expect_equal(
+    fn(list(id = "t", target = "metadata.title", default = "Own"), base),
+    "Own"
+  )
+  # A target with nothing at that path inherits nothing.
+  expect_null(fn(list(id = "z", target = "metadata.header"), base))
+})
+
+test_that("effect_key_candidates() covers both YAML spellings of a boolean", {
+  fn <- app_fn("effect_key_candidates")
+  # An unquoted `yes:` key becomes the name "TRUE"; a quoted one stays "yes".
+  expect_true(all(c("TRUE", "yes") %in% fn(TRUE)))
+  expect_true(all(c("FALSE", "no") %in% fn(FALSE)))
+  expect_equal(fn("plain"), "plain")
+  expect_length(fn(NULL), 0)
+  expect_length(fn(""), 0)
+})
+
+# ---- template search path ---------------------------------------------------
+
+test_that("dta_creation_template_dirs() puts DTAtools.template_dir first", {
+  fn <- app_fn("dta_creation_template_dirs")
+  tmp <- tempfile()
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
+
+  old <- options(DTAtools.template_dir = tmp)
+  on.exit(options(old), add = TRUE)
+  dirs <- fn()
+  expect_equal(normalizePath(dirs[[1]]), normalizePath(tmp))
+  expect_gt(length(dirs), 1)
+})
+
+test_that("get_dta_creation_template_path() prefers an earlier directory and cannot escape", {
+  fn <- app_fn("get_dta_creation_template_path")
+  tmp <- tempfile()
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
+  shadow <- file.path(tmp, "biomarker_gf.dta-template.yaml")
+  writeLines("kind: dta_creation_template", shadow)
+
+  old <- options(DTAtools.template_dir = tmp)
+  on.exit(options(old), add = TRUE)
+  expect_equal(
+    normalizePath(fn("biomarker_gf.dta-template.yaml")),
+    normalizePath(shadow)
+  )
+  # basename() guard: a traversal attempt resolves to a bare name, not a path.
+  expect_null(fn("../../etc/passwd"))
+})
+
 # ---- resolve_template_dataset_path -----------------------------------------
 
 test_that("resolve_template_dataset_path() resolves an absolute path directly", {

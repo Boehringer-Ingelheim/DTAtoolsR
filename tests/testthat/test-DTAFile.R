@@ -54,7 +54,6 @@ test_that("dta_normalize_column_names leaves already-clean names untouched", {
 
 
 test_that("DTAFileTSV object is created from reading in tsv and table is accessible", {
-
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
   file_info <- DTAFileTSV("gf_data_small_smirna.tsv")
@@ -75,7 +74,6 @@ test_that("DTAFileTSV object is created from reading in tsv and table is accessi
 
 
 test_that("Testing pattern with DTAFileTSV", {
-
   path <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
   file_info <- DTAFileTSV("gf_data_.*\\.tsv", pattern = TRUE, number_of_files = 1)
@@ -466,3 +464,192 @@ test_that("specs are ignored when the file has no header", {
   expect_false("SUBJID" %in% names(x))
 })
 
+
+# ---- pattern_description reaches the concrete subclasses ---------------------
+# DTAFile has carried a `pattern_description` property from the start, and the
+# app serialises it into `files:`, but none of the concrete constructors took
+# one: DTAFileFactory(type = "csv", pattern_description = ...) failed on an
+# unused argument. A specification that described its own pattern in words could
+# therefore be written and never read back.
+
+test_that("a csv handler keeps the pattern description it was given", {
+  f <- DTAFileCSV(
+    filename = "clinical_data.*[.]csv$",
+    pattern = TRUE,
+    number_of_files = 2,
+    pattern_description = "one file per site"
+  )
+
+  expect_equal(f@pattern_description, "one file per site")
+})
+
+test_that("every tabular file type accepts a pattern description", {
+  for (ctor in list(DTAFileCSV, DTAFileTSV, DTAFileDelim, DTAFileTabular)) {
+    f <- ctor(
+      filename = "a.*[.]txt$", pattern = TRUE, number_of_files = 1,
+      pattern_description = "described"
+    )
+    expect_equal(f@pattern_description, "described")
+  }
+})
+
+test_that("a pattern description survives the factory and a YAML round trip", {
+  f <- DTAFileFactory(
+    type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
+    min_number_of_files = 1, max_number_of_files = 4,
+    pattern_description = "one file per batch"
+  )
+  expect_equal(f@pattern_description, "one file per batch")
+
+  ds <- dta_dataset_from_list(list(
+    name = "described",
+    type = "tabular",
+    files = list(
+      type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
+      min_number_of_files = 1, max_number_of_files = 4,
+      pattern_description = "one file per batch"
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_equal(ds@files[[1]]@pattern_description, "one file per batch")
+})
+
+test_that("a handler without a pattern description still has none", {
+  f <- DTAFileCSV(filename = "clinical_data.csv")
+
+  expect_null(f@pattern_description)
+})
+
+
+# ---- Several file names on one handler --------------------------------------
+# `filename` is documented as a character VECTOR and matches_filename() has a
+# `%in%` branch for exactly that case, but the validator tested
+# `self@filename == ""` -- a length-1 test. Two names made the `if` condition
+# length 2, which R rejects outright, so the documented case could never be
+# built. A YAML `filename:` sequence hit it from the other side: it parses to a
+# list, which the character property refused.
+
+test_that("a handler can carry several file names", {
+  f <- DTAFileCSV(
+    filename = c("site_a.csv", "site_b.csv"),
+    pattern = TRUE, number_of_files = 2
+  )
+
+  expect_equal(f@filename, c("site_a.csv", "site_b.csv"))
+})
+
+test_that("a filename sequence from YAML becomes a character vector", {
+  ds <- dta_dataset_from_list(list(
+    name = "multi_name",
+    type = "tabular",
+    files = list(
+      type = "csv", filename = list("site_a.csv", "site_b.csv"),
+      pattern = TRUE, number_of_files = 2
+    ),
+    columns = list(list(id = "STUDYID", type = "SAS Char"))
+  ))
+
+  expect_equal(ds@files[[1]]@filename, c("site_a.csv", "site_b.csv"))
+})
+
+test_that("matches_filename accepts any of a handler's names and nothing else", {
+  f <- DTAFileCSV(
+    filename = c("site_a.csv", "site_b.csv"),
+    pattern = TRUE, number_of_files = 2
+  )
+
+  # A non-pattern check over several names is the `%in%` branch; with pattern
+  # TRUE each name is a regex, so both still match themselves and a stranger
+  # matches neither.
+  expect_true(any(matches_filename(f, "site_a.csv")))
+  expect_true(any(matches_filename(f, "site_b.csv")))
+  expect_false(any(matches_filename(f, "site_c.csv")))
+})
+
+test_that("an empty name is still rejected, in any position", {
+  expect_error(
+    DTAFileCSV(filename = ""),
+    "must be a non-empty character vector"
+  )
+  expect_error(
+    DTAFileCSV(filename = c("a.csv", ""), pattern = TRUE, number_of_files = 2),
+    "must be a non-empty character vector"
+  )
+  expect_error(
+    DTAFileCSV(filename = character(0)),
+    "must be a non-empty character vector"
+  )
+})
+
+
+# ---- A non-pattern handler expects exactly one file -------------------------
+# The guard used to test `number_of_files != 1` only. A handler declaring its
+# count as a min/max pair was never checked, and with only a min/max set
+# `number_of_files` is NULL, so the comparison ran on a zero-length value: the
+# object either failed with a message about the wrong thing or -- worse -- was
+# built inconsistent and crashed later, in print_info(), where min and max are
+# compared directly.
+
+test_that("a non-pattern handler rejects a count other than 1, however it is declared", {
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, number_of_files = 2),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, min_number_of_files = 2),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, max_number_of_files = 3),
+    "number_of_files must be 1"
+  )
+  expect_error(
+    DTAFile("file.txt", pattern = FALSE, min_number_of_files = 1, max_number_of_files = 2),
+    "number_of_files must be 1"
+  )
+})
+
+test_that("a non-pattern handler accepts the counts that do mean one file", {
+  # Whatever is accepted must be complete enough to print: min and max are
+  # compared to each other there, so a half-built object surfaces as a crash.
+  implicit <- DTAFile("file.txt", pattern = FALSE)
+  expect_equal(min_number_of_files(implicit), 1)
+  expect_equal(max_number_of_files(implicit), 1)
+  # print_info() reports through cli, i.e. on the message stream. It compares
+  # min to max directly, so a half-built object surfaces here as an error.
+  expect_match(
+    paste(capture_messages(print_info(implicit)), collapse = ""),
+    "Number of files"
+  )
+
+  explicit <- DTAFile("file.txt", pattern = FALSE, number_of_files = 1)
+  expect_equal(min_number_of_files(explicit), 1)
+  expect_equal(max_number_of_files(explicit), 1)
+
+  as_range <- DTAFile(
+    "file.txt",
+    pattern = FALSE, min_number_of_files = 1, max_number_of_files = 1
+  )
+  expect_equal(min_number_of_files(as_range), 1)
+  expect_equal(max_number_of_files(as_range), 1)
+  expect_match(
+    paste(capture_messages(print_info(as_range)), collapse = ""),
+    "Number of files"
+  )
+})
+
+test_that("a pattern handler may still declare a range", {
+  ranged <- DTAFile(
+    "data.*[.]csv$",
+    pattern = TRUE, min_number_of_files = 1, max_number_of_files = 4
+  )
+
+  expect_equal(min_number_of_files(ranged), 1)
+  expect_equal(max_number_of_files(ranged), 4)
+  # A genuine range reports both bounds, not the single-count line.
+  expect_match(
+    paste(capture_messages(print_info(ranged)), collapse = ""),
+    "Min number of files"
+  )
+})

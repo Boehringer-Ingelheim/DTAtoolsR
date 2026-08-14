@@ -34,27 +34,20 @@ brandbar <- div(
       href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
       target = "_blank", rel = "noopener noreferrer",
       "About"
-    )#,
-    #tags$a(
+    ) # ,
+    # tags$a(
     #  class = "brand-link",
     #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
     #  target = "_blank", rel = "noopener noreferrer",
     #  "Documentation"
-    #)
+    # )
   )
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-# Prefer the installed package version; fall back to a nearby DESCRIPTION when
-# the app is launched from source during development.
+# Prefer a nearby DESCRIPTION (deployed app bundle/source of truth), then fall
+# back to the installed package version.
 dta_package_version <- function() {
-  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
-    error = function(e) ""
-  )
-  if (nzchar(v)) {
-    return(v)
-  }
-
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),
@@ -78,6 +71,13 @@ dta_package_version <- function() {
         return(vv)
       }
     }
+  }
+
+  v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
+    error = function(e) ""
+  )
+  if (nzchar(v)) {
+    return(v)
   }
 
   ""
@@ -195,7 +195,13 @@ server <- function(input, output, session) {
     contacts_token = 0, # bump to re-render contacts list
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
-    editor_dataset = NULL, # dataset name the column/rule editor modal targets
+    editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
+    file_view = "list", # file-handler editor view: "list" | "form"
+    file_token = 0, # bump to re-render the file-handler editor body
+    file_edit_index = NULL, # index of the handler being edited (NULL = adding new)
+    file_prefill = NULL, # list() of the handler fields currently loaded in the form
+    file_msg = NULL, # inline file-handler-editor result: NULL | list(ok, error)
+    pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
     col_view = "list", # column editor view: "list" | "form"
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
@@ -208,6 +214,8 @@ server <- function(input, output, session) {
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
     then_n = 1L, # condition-builder row count (THEN ...)
+    gcond_n = 1L, # grouped condition row count
+    gconstr_n = 1L, # grouped constraint row count
     template_def = NULL, # active creation-template definition (modal flow)
     template_path = NULL # source path of active creation-template
   )
@@ -219,6 +227,8 @@ server <- function(input, output, session) {
   file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
   file_id_meta <- new.env(parent = emptyenv()) # id (as chr) -> list(dataset, hi, table)
   file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
+  gcond_rm_registry <- new.env(parent = emptyenv()) # grouped-condition remove observers
+  gconstr_rm_registry <- new.env(parent = emptyenv()) # grouped-constraint remove observers
   file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
@@ -303,13 +313,15 @@ server <- function(input, output, session) {
   # "(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals
   # a companion text field next to the dropdown for a free-typed value, so any
   # option can be a suggestion, blank, or custom text.
-  render_template_option_input <- function(opt) {
+  render_template_option_input <- function(opt, base_metadata = list()) {
     oid <- as.character(opt$id %||% "")
-    if (!nzchar(oid)) return(NULL)
+    if (!nzchar(oid)) {
+      return(NULL)
+    }
     iid <- paste0("tmpl_opt_", oid)
     label <- as.character(opt$label %||% oid)
     typ <- tolower(as.character(opt$type %||% "text"))
-    def <- dta_template_default(opt)
+    def <- dta_template_default(opt, base_metadata)
     help <- as.character(opt$help %||% "")
 
     # Sentinel values for the extra dropdown entries.
@@ -356,7 +368,8 @@ server <- function(input, output, session) {
       select = dropdown_with_custom(dta_template_choices(opt)),
       boolean = {
         ch <- c("Yes" = "yes", "No" = "no")
-        selectInput(iid, label, choices = ch,
+        selectInput(iid, label,
+          choices = ch,
           selected = if (identical(def, TRUE) || identical(def, "yes")) "yes" else "no"
         )
       },
@@ -424,7 +437,16 @@ server <- function(input, output, session) {
       if (length(opts) == 0) {
         p("This template has no configurable options. Click 'Create DTA' to continue.")
       } else {
-        tagList(lapply(opts, render_template_option_input))
+        tagList(lapply(
+          opts,
+          render_template_option_input,
+          # Resolve ${today} for the preview as well, so the modal never offers
+          # a raw token as a default where the created DTA would carry a date.
+          base_metadata = resolve_template_expressions(
+            def$base$metadata %||% list(),
+            dta_template_today_env()
+          )
+        ))
       },
       footer = tagList(
         modalButton("Cancel"),
@@ -516,7 +538,11 @@ server <- function(input, output, session) {
     files <- list_dta_creation_templates()
     if (length(files) == 0) {
       showNotification(
-        "No creation templates found. Add *.dta-template.yaml files to inst/extdata/templates.",
+        paste(
+          "No creation templates found. Add *.dta-template.yaml files to a",
+          "./dta-templates folder, or point options(DTAtools.template_dir=) at",
+          "a directory of your own."
+        ),
         type = "warning", duration = 8
       )
       return()
@@ -563,7 +589,8 @@ server <- function(input, output, session) {
     created <- create_dta_from_template(rv$template_def, rv$template_path, sels)
     if (!created$ok) {
       showNotification(paste("Could not create DTA from template:", created$error),
-                       type = "error", duration = 10)
+        type = "error", duration = 10
+      )
       return()
     }
 
@@ -1160,6 +1187,168 @@ server <- function(input, output, session) {
     rv$status <- st
   }
 
+  # Re-key a dataset's upload records after its file handlers were added,
+  # removed or reordered.
+  #
+  # Uploads are keyed by handler POSITION ("<dataset>||<hi>"), and so are the
+  # per-slot file inputs and the stable ids behind the per-file trash buttons.
+  # Removing handler 1 of 3 therefore shifts 2 -> 1 and 3 -> 2 while the records
+  # still sit under the old keys: the files vanish from "Loaded files" but stay
+  # bound inside the dataset, counting towards validation and export with no way
+  # to reach them. `map` (from dta_handler_index_map()) says where each old index
+  # went; NA means the handler is gone and its records go with it.
+  remap_uploads <- function(dsname, map) {
+    up <- rv$uploads
+    prefix <- paste0(dsname, "||")
+    # names() of an empty list is NULL, which startsWith() rejects outright.
+    keys <- names(up) %||% character(0)
+    kept <- up[!startsWith(keys, prefix)]
+    for (old in seq_along(map)) {
+      new <- map[[old]]
+      if (is.na(new)) next
+      recs <- up[[paste0(prefix, old)]]
+      if (is.null(recs) || length(recs) == 0) next
+      kept[[paste0(prefix, new)]] <- recs
+    }
+    rv$uploads <- kept
+
+    purge_file_ids(dsname)
+  }
+
+  # Forget the stable per-file ids of one dataset (or of every dataset when
+  # `dsname` is NULL). Those ids encode the handler index they were minted at,
+  # so after a shift a trash button would remove from the wrong key;
+  # get_file_id() mints them again against the new positions on the next render.
+  # Selected via file_id_meta, which records the dataset outright, rather than
+  # by parsing file_id_env's composite keys.
+  purge_file_ids <- function(dsname = NULL) {
+    stale <- Filter(
+      function(id) {
+        is.null(dsname) || identical(file_id_meta[[id]]$dataset, dsname)
+      },
+      ls(file_id_meta)
+    )
+    if (length(stale) == 0) {
+      return(invisible(NULL))
+    }
+    rm(list = stale, envir = file_id_meta)
+    for (key in ls(file_id_env)) {
+      if (as.character(file_id_env[[key]]) %in% stale) {
+        rm(list = key, envir = file_id_env)
+      }
+    }
+    invisible(NULL)
+  }
+
+  # Clear every file input of a dataset's slots. The controls are position-based,
+  # so after a shift a slot would keep showing the file name dropped on whatever
+  # handler used to occupy that position.
+  reset_dataset_fileinputs <- function(dsname) {
+    s <- rv$structure[[dsname]]
+    if (is.null(s)) {
+      return(invisible(NULL))
+    }
+    # One past the current count as well: the input of a just-removed slot is
+    # still in the DOM until the re-render lands.
+    for (hi in seq_len(length(s$handlers) + 1L)) {
+      session$sendCustomMessage(
+        "dta_reset_fileinput", sprintf("up_%d_%d", s$index, hi)
+      )
+    }
+    invisible(NULL)
+  }
+
+  # The four things every file-handler mutation must do: clear this dataset's
+  # validation, rebuild the slot structure (which is what registers the upload
+  # observers for a new slot), re-render the editor, and re-serialise the YAML.
+  after_handler_change <- function(ed, map = NULL) {
+    if (!is.null(map)) remap_uploads(ed, map)
+    invalidate_dataset(ed)
+    rv$structure <- build_structure(rv$dta)
+    reset_dataset_fileinputs(ed)
+    rv$file_token <- rv$file_token + 1
+    sync_yaml_text()
+  }
+
+  # Remove handler `idx` of `ed`, unloading the tables bound through it first.
+  # Unloading before removing keeps every intermediate object valid, the same
+  # ordering dta_unload_table() itself relies on.
+  do_remove_handler <- function(ed, idx, tables) {
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    for (tbl in tables) {
+      r <- dta_unload_table(rv$dta, ed, tbl)
+      if (isTRUE(r$ok)) {
+        rv$dta <- r$value
+      } else {
+        showNotification(paste("Could not unload file:", r$error), type = "error")
+        return(invisible(NULL))
+      }
+    }
+    r <- dta_remove_handler(rv$dta, ed, idx)
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return(invisible(NULL))
+    }
+    rv$dta <- r$value
+    after_handler_change(
+      ed,
+      map = dta_handler_index_map(n, "remove", index = idx)
+    )
+    showNotification(
+      if (length(tables) > 0) {
+        sprintf("File removed, along with %d loaded file(s).", length(tables))
+      } else {
+        "File removed."
+      },
+      type = "message"
+    )
+    invisible(NULL)
+  }
+
+  move_handler <- function(idx, direction) {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > n) {
+      return(invisible(NULL))
+    }
+    r <- dta_move_handler(isolate(rv$dta), ed, idx, direction)
+    if (!isTRUE(r$ok)) {
+      showNotification(r$error, type = "error")
+      return(invisible(NULL))
+    }
+    rv$dta <- r$value
+    after_handler_change(
+      ed,
+      map = dta_handler_index_map(n, "move", index = idx, direction = direction)
+    )
+    invisible(NULL)
+  }
+
+  show_file_editor_modal <- function(ed) {
+    showModal(modalDialog(
+      title = paste("Edit files —", ed),
+      size = "xl", easyClose = FALSE,
+      uiOutput("file_modal_body"),
+      footer = NULL
+    ))
+  }
+
+  # The remove-confirmation dialog replaces the editor modal (Shiny shows one at
+  # a time), so the editor is re-opened afterwards rather than leaving the user
+  # back at the dataset view mid-edit.
+  reopen_file_editor <- function() {
+    ed <- isolate(rv$editor_dataset)
+    if (is.null(ed)) {
+      return(invisible(NULL))
+    }
+    rv$file_view <- "list"
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+    show_file_editor_modal(ed)
+    invisible(NULL)
+  }
+
   # Per-row edit (pencil) + delete (bin) buttons for the editor DT tables.
   # Clicking sets a Shiny input to the 1-based data-row index (priority=event
   # so re-clicking the same row still fires). Render the column with escape=FALSE.
@@ -1199,6 +1388,312 @@ server <- function(input, output, session) {
       )
     }, character(1))
   }
+
+  # ========================= Edit file handlers ===========================
+  # Same single-modal, two-view (list <-> form) shape as the column and rule
+  # editors. What is different here is the blast radius: a file handler IS an
+  # upload slot, and the app keys uploads, file inputs and per-file trash
+  # buttons by the handler's POSITION -- so every mutation goes through
+  # after_handler_change(), which re-keys that state before anything re-renders.
+  observeEvent(input$edit_files, {
+    req(rv$active)
+    rv$editor_dataset <- rv$active
+    rv$file_view <- "list"
+    rv$file_edit_index <- NULL
+    rv$file_prefill <- list()
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+    show_file_editor_modal(rv$active)
+  })
+
+  output$file_modal_body <- renderUI({
+    rv$file_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    if (identical(isolate(rv$file_view), "list")) {
+      n_handlers <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+      tagList(
+        div(
+          class = "spec-toolbar",
+          actionButton("file_add", HTML("&#x2795; Add file"),
+            class = "btn btn-sm btn-outline-primary"
+          ),
+          span(
+            class = "spec-hint",
+            paste(
+              "Each entry is one expected file (or pattern) and becomes an upload slot.",
+              "Any change resets this dataset's validation; removing an entry also",
+              "unloads the files that were loaded into it."
+            )
+          )
+        ),
+        DT::dataTableOutput("file_tbl"),
+        if (n_handlers == 0) {
+          div(
+            class = "yaml-valid err", style = "margin-top:8px;",
+            HTML("&#x2716;"),
+            paste(
+              " This dataset expects no files at all, so nothing can be loaded",
+              "into it. Add at least one entry."
+            )
+          )
+        },
+        tags$hr(),
+        div(style = "text-align:right;", modalButton("Close"))
+      )
+    } else {
+      pf <- isolate(rv$file_prefill) %||% list()
+      g <- function(k, d = "") pf[[k]] %||% d
+      is_pattern <- isTRUE(pf$pattern)
+      tagList(
+        div(
+          class = "spec-form",
+          layout_columns(
+            col_widths = c(8, 4),
+            textAreaInput("file_filename", "File name or pattern",
+              value = g("filename"), width = "100%", rows = 2,
+              placeholder = "clinical_data.csv   |   clinical_data.*[.]csv$"
+            ),
+            selectInput("file_type", "File type",
+              choices = dta_handler_types(),
+              selected = g("type", dta_handler_types()[1]), width = "100%"
+            )
+          ),
+          checkboxInput("file_pattern",
+            "Filename is a regular-expression pattern (matches several files)",
+            value = is_pattern
+          ),
+          div(
+            class = "msg-hint", style = "margin:-8px 0 10px;",
+            paste(
+              "Without a pattern the entry matches one exact file name and",
+              "expects exactly 1 file. One name or pattern per line."
+            )
+          ),
+          conditionalPanel(
+            condition = "input.file_pattern == true",
+            radioButtons("file_count_mode", "How many files may match?",
+              choices = c(
+                "An exact number" = "exact",
+                "A range (min to max)" = "range"
+              ),
+              selected = g("count_mode", "exact"), inline = TRUE
+            ),
+            layout_columns(
+              col_widths = c(4, 4, 4),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'exact'",
+                numericInput("file_number_of_files", "Number of files",
+                  value = as.integer(g("number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              ),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'range'",
+                numericInput("file_min_number_of_files", "Minimum",
+                  value = as.integer(g("min_number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              ),
+              conditionalPanel(
+                condition = "input.file_count_mode == 'range'",
+                numericInput("file_max_number_of_files", "Maximum",
+                  value = as.integer(g("max_number_of_files", 1L)), min = 0, step = 1,
+                  width = "100%"
+                )
+              )
+            )
+          ),
+          textInput("file_pattern_description", "Pattern description",
+            value = g("pattern_description"), width = "100%",
+            placeholder = "What the pattern means, in words"
+          ),
+          textAreaInput("file_info", "Info (one entry per line)",
+            value = g("info"), width = "100%", rows = 2
+          )
+        ),
+        uiOutput("file_editor_msg"),
+        div(
+          style = "display:flex; justify-content:space-between; margin-top:8px;",
+          actionButton("file_back", HTML("&#x2190; Back to list"),
+            class = "btn btn-outline-secondary"
+          ),
+          actionButton("file_save", "Save file", class = "btn btn-primary")
+        )
+      )
+    }
+  })
+
+  output$file_tbl <- DT::renderDataTable({
+    rv$file_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    ov <- dta_handlers_overview(isolate(rv$dta), ed)
+    if (is.null(ov) || nrow(ov) == 0) {
+      ov <- data.frame(
+        filename = character(0), type = character(0), pattern = character(0),
+        files = character(0), description = character(0),
+        stringsAsFactors = FALSE
+      )
+    }
+    ov$Actions <- if (nrow(ov) > 0) {
+      row_action_buttons(
+        "file_edit_click", "file_del_click", nrow(ov),
+        "file_up_click", "file_down_click"
+      )
+    } else {
+      character(0)
+    }
+    DT::datatable(
+      ov,
+      rownames = FALSE, selection = "none", escape = FALSE,
+      class = "display compact", width = "100%",
+      options = list(
+        pageLength = 8, dom = "tp", scrollX = TRUE,
+        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+      )
+    )
+  })
+
+  output$file_editor_msg <- renderUI({
+    m <- rv$file_msg
+    if (is.null(m)) {
+      return(NULL)
+    }
+    if (isTRUE(m$ok)) {
+      div(class = "yaml-valid ok", HTML("&#x2714;"), " File saved.")
+    } else {
+      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+    }
+  })
+
+  observeEvent(input$file_add, {
+    rv$file_edit_index <- NULL
+    rv$file_prefill <- list()
+    rv$file_msg <- NULL
+    rv$file_view <- "form"
+    rv$file_token <- rv$file_token + 1
+  })
+
+  observeEvent(input$file_back, {
+    rv$file_view <- "list"
+    rv$file_msg <- NULL
+    rv$file_token <- rv$file_token + 1
+  })
+
+  observeEvent(input$file_edit_click, {
+    idx <- as.integer(input$file_edit_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    f <- dta_handler_fields(isolate(rv$dta), ed, idx)
+    if (is.null(f)) {
+      return()
+    }
+    rv$file_edit_index <- idx
+    rv$file_prefill <- f
+    rv$file_msg <- NULL
+    rv$file_view <- "form"
+    rv$file_token <- rv$file_token + 1
+  })
+
+  # Removing a handler removes an upload slot. Anything loaded through it would
+  # otherwise stay bound to the dataset with no slot to show it under, so the
+  # files go too -- and the user is told which ones before it happens.
+  observeEvent(input$file_del_click, {
+    idx <- as.integer(input$file_del_click)
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
+    if (length(idx) != 1 || is.na(idx) || idx < 1 || idx > n) {
+      return()
+    }
+    recs <- isolate(rv$uploads)[[paste0(ed, "||", idx)]] %||% list()
+    tbls <- vapply(recs, function(r) r$table %||% "", character(1))
+    tbls <- tbls[nzchar(tbls)]
+    if (length(tbls) == 0) {
+      do_remove_handler(ed, idx, character(0))
+      return()
+    }
+    rv$pending_handler_removal <- list(dataset = ed, index = idx, tables = tbls)
+    showModal(modalDialog(
+      title = "Remove this file and its loaded data?",
+      tags$p(sprintf(
+        "Removing this entry also unloads %d loaded file(s) from '%s':",
+        length(tbls), ed
+      )),
+      tags$ul(lapply(tbls, function(t) tags$li(tags$code(t)))),
+      tags$p("The specification and the loaded data are kept in step; you can load them again afterwards."),
+      footer = tagList(
+        actionButton("cancel_remove_handler", "Cancel"),
+        actionButton("confirm_remove_handler", "Remove", class = "btn btn-danger")
+      ),
+      easyClose = TRUE
+    ))
+  })
+
+  observeEvent(input$cancel_remove_handler, {
+    rv$pending_handler_removal <- NULL
+    removeModal()
+    # The removal modal replaced the editor modal; bring the editor back.
+    reopen_file_editor()
+  })
+
+  observeEvent(input$confirm_remove_handler, {
+    pending <- rv$pending_handler_removal
+    rv$pending_handler_removal <- NULL
+    removeModal()
+    if (is.null(pending)) {
+      return()
+    }
+    do_remove_handler(pending$dataset, pending$index, pending$tables)
+    reopen_file_editor()
+  })
+
+  observeEvent(input$file_up_click, {
+    move_handler(as.integer(input$file_up_click), "up")
+  })
+
+  observeEvent(input$file_down_click, {
+    move_handler(as.integer(input$file_down_click), "down")
+  })
+
+  observeEvent(input$file_save, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    # Both text areas are one entry per line; dta_set_handler() does the split.
+    pattern <- isTRUE(input$file_pattern)
+    # The count controls only exist while `pattern` is ticked; without it the
+    # class contract fixes the count at exactly 1.
+    r <- dta_set_handler(
+      isolate(rv$dta), ed,
+      index = isolate(rv$file_edit_index),
+      filename = input$file_filename,
+      type = input$file_type,
+      pattern = pattern,
+      count_mode = if (pattern) (input$file_count_mode %||% "exact") else "exact",
+      number_of_files = if (pattern) (input$file_number_of_files %||% 1) else 1,
+      min_number_of_files = input$file_min_number_of_files %||% 1,
+      max_number_of_files = input$file_max_number_of_files %||% 1,
+      pattern_description = input$file_pattern_description,
+      info = input$file_info
+    )
+    if (!isTRUE(r$ok)) {
+      rv$file_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    adding <- is.null(isolate(rv$file_edit_index))
+    rv$dta <- r$value
+    # An edit in place and an append both leave every existing handler at its
+    # own index, so no upload record has to move.
+    after_handler_change(ed, map = NULL)
+    rv$file_msg <- NULL
+    rv$file_view <- "list"
+    rv$file_token <- rv$file_token + 1
+    showNotification(
+      if (adding) "File added." else "File updated.",
+      type = "message"
+    )
+  })
 
   # ============================ Edit columns ==============================
   # A single modal with two swappable views (list <-> form) so only ONE popup
@@ -1578,6 +2073,326 @@ server <- function(input, output, session) {
     out
   }
 
+  one_group_cond_row <- function(i, cols, pf = list(name = "", col = "", op = "equals", val = "")) {
+    rid <- paste0("gcond_row_", i)
+    nid <- paste0("gcond_name_", i)
+    cid <- paste0("gcond_col_", i)
+    oid <- paste0("gcond_op_", i)
+    vid <- paste0("gcond_val_", i)
+    bid <- paste0("gcond_remove_", i)
+    div(
+      id = rid,
+      class = "cond-row",
+      textInput(nid, if (i == 1) "Condition name" else NULL,
+        value = pf$name %||% "", width = "100%",
+        placeholder = "c1_failed"
+      ),
+      selectInput(cid, if (i == 1) "Column" else NULL,
+        choices = c("(select)" = "", cols),
+        selected = pf$col %||% "", width = "100%"
+      ),
+      selectInput(oid, if (i == 1) "Operator" else NULL,
+        choices = dta_condition_operators(),
+        selected = pf$op %||% "equals", width = "100%"
+      ),
+      textInput(vid, if (i == 1) "Value" else NULL,
+        value = pf$val %||% "", width = "100%",
+        placeholder = "5 | a, b | 0, 99 | true"
+      ),
+      actionButton(
+        bid,
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger"
+      )
+    )
+  }
+
+  flatten_group_conditions <- function(conditions) {
+    if (is.null(conditions) || length(conditions) == 0) {
+      return(list())
+    }
+    rows <- list()
+    for (nm in names(conditions)) {
+      spec <- conditions[[nm]]
+      converted <- cond_to_rows(spec)
+      if (length(converted) == 0) {
+        rows[[length(rows) + 1L]] <- list(name = nm, col = "", op = "equals", val = "")
+      } else {
+        for (entry in converted) {
+          rows[[length(rows) + 1L]] <- c(list(name = nm), entry)
+        }
+      }
+    }
+    rows
+  }
+
+  build_group_cond_rows <- function(n, cols, prefill) {
+    lapply(seq_len(max(1L, n)), function(i) {
+      pf <- if (i <= length(prefill)) prefill[[i]] else list(name = "", col = "", op = "equals", val = "")
+      one_group_cond_row(i, cols, pf)
+    })
+  }
+
+  collect_group_conditions <- function(n) {
+    out <- list()
+    for (i in seq_len(max(1L, n))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      col <- trimws(input[[paste0("gcond_col_", i)]] %||% "")
+      if (!nzchar(nm) || !nzchar(col)) next
+
+      op <- input[[paste0("gcond_op_", i)]] %||% "equals"
+      txt <- input[[paste0("gcond_val_", i)]]
+
+      if (is.null(out[[nm]])) {
+        out[[nm]] <- list()
+      }
+
+      if (is.null(out[[nm]][[col]])) {
+        out[[nm]][[col]] <- list()
+      }
+
+      if (identical(op, "min_max")) {
+        parts <- trimws(strsplit(txt %||% "", ",", fixed = TRUE)[[1]])
+        mn <- if (length(parts) >= 1 && nzchar(parts[1])) suppressWarnings(as.numeric(parts[1])) else NA_real_
+        mx <- if (length(parts) >= 2 && nzchar(parts[2])) suppressWarnings(as.numeric(parts[2])) else NA_real_
+        if (!is.na(mn)) out[[nm]][[col]]$min <- mn
+        if (!is.na(mx)) out[[nm]][[col]]$max <- mx
+      } else {
+        out[[nm]][[col]][[op]] <- parse_cond_value(op, txt)
+      }
+    }
+    out
+  }
+
+  one_group_constraint_row <- function(i, cond_names, pf = list()) {
+    rowid <- paste0("gconstr_row_", i)
+    cid <- paste0("gconstr_id_", i)
+    tid <- paste0("gconstr_type_", i)
+    lid <- paste0("gconstr_left_", i)
+    rid <- paste0("gconstr_right_", i)
+    lsid <- paste0("gconstr_lscope_", i)
+    rsid <- paste0("gconstr_rscope_", i)
+    mid <- paste0("gconstr_msg_", i)
+    bid <- paste0("gconstr_remove_", i)
+
+    ctype <- pf$type %||% "mutually_exclusive"
+    left_name <- pf$left %||% pf[["if"]] %||% ""
+    right_name <- pf$right %||% pf$then %||% ""
+
+    div(
+      id = rowid,
+      class = "cond-row",
+      textInput(cid, if (i == 1) "Constraint id" else NULL,
+        value = pf$id %||% "", width = "100%",
+        placeholder = paste0("constraint_", i)
+      ),
+      selectInput(tid, if (i == 1) "Type" else NULL,
+        choices = c("mutually_exclusive", "requires"),
+        selected = ctype,
+        width = "100%"
+      ),
+      selectInput(lid, if (i == 1) "Left / IF" else NULL,
+        choices = c("(select)" = "", cond_names),
+        selected = left_name,
+        width = "100%"
+      ),
+      selectInput(rid, if (i == 1) "Right / THEN" else NULL,
+        choices = c("(select)" = "", cond_names),
+        selected = right_name,
+        width = "100%"
+      ),
+      selectInput(lsid, if (i == 1) "Left/IF scope" else NULL,
+        choices = c("any", "all"),
+        selected = pf$left_scope %||% pf$if_scope %||% "any",
+        width = "100%"
+      ),
+      selectInput(rsid, if (i == 1) "Right/THEN scope" else NULL,
+        choices = c("any", "all"),
+        selected = pf$right_scope %||% pf$then_scope %||% "any",
+        width = "100%"
+      ),
+      textInput(mid, if (i == 1) "Message" else NULL,
+        value = pf$message %||% "", width = "100%"
+      ),
+      actionButton(
+        bid,
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger"
+      )
+    )
+  }
+
+  visible_group_condition_rows <- function() {
+    out <- integer(0)
+    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      if (!is.null(input[[paste0("gcond_name_", i)]])) {
+        out <- c(out, i)
+      }
+    }
+    out
+  }
+
+  visible_group_constraint_rows <- function() {
+    out <- integer(0)
+    for (i in seq_len(max(1L, isolate(rv$gconstr_n)))) {
+      if (!is.null(input[[paste0("gconstr_type_", i)]])) {
+        out <- c(out, i)
+      }
+    }
+    out
+  }
+
+  find_condition_dependencies <- function(condition_name, excluding_row) {
+    if (!nzchar(condition_name)) {
+      return(character(0))
+    }
+
+    # If another condition row with the same name remains, constraints still
+    # have a valid target and this row can be removed safely.
+    has_other_named_row <- FALSE
+    for (k in visible_group_condition_rows()) {
+      if (k == excluding_row) next
+      nm <- trimws(input[[paste0("gcond_name_", k)]] %||% "")
+      if (identical(nm, condition_name)) {
+        has_other_named_row <- TRUE
+        break
+      }
+    }
+    if (has_other_named_row) {
+      return(character(0))
+    }
+
+    deps <- character(0)
+    for (j in visible_group_constraint_rows()) {
+      left <- trimws(input[[paste0("gconstr_left_", j)]] %||% "")
+      right <- trimws(input[[paste0("gconstr_right_", j)]] %||% "")
+      if (identical(left, condition_name) || identical(right, condition_name)) {
+        cid <- trimws(input[[paste0("gconstr_id_", j)]] %||% "")
+        deps <- c(deps, if (nzchar(cid)) cid else paste0("constraint_", j))
+      }
+    }
+
+    unique(deps)
+  }
+
+  clear_group_condition_row <- function(i) {
+    updateTextInput(session, paste0("gcond_name_", i), value = "")
+    updateSelectInput(session, paste0("gcond_col_", i), selected = "")
+    updateSelectInput(session, paste0("gcond_op_", i), selected = "equals")
+    updateTextInput(session, paste0("gcond_val_", i), value = "")
+  }
+
+  clear_group_constraint_row <- function(i) {
+    updateTextInput(session, paste0("gconstr_id_", i), value = "")
+    updateSelectInput(session, paste0("gconstr_type_", i), selected = "mutually_exclusive")
+    updateSelectInput(session, paste0("gconstr_left_", i), selected = "")
+    updateSelectInput(session, paste0("gconstr_right_", i), selected = "")
+    updateSelectInput(session, paste0("gconstr_lscope_", i), selected = "any")
+    updateSelectInput(session, paste0("gconstr_rscope_", i), selected = "any")
+    updateTextInput(session, paste0("gconstr_msg_", i), value = "")
+  }
+
+  ensure_gcond_remove_observer <- function(i) {
+    bid <- paste0("gcond_remove_", i)
+    if (isTRUE(gcond_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    gcond_rm_registry[[bid]] <- TRUE
+
+    observeEvent(input[[bid]], {
+      row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      deps <- find_condition_dependencies(row_name, excluding_row = i)
+
+      if (length(deps) > 0) {
+        rv$rule_msg <- list(
+          ok = FALSE,
+          error = paste0(
+            "Cannot remove condition '", row_name,
+            "' because it is referenced by: ",
+            paste(deps, collapse = ", "),
+            ". Remove dependent constraints first."
+          )
+        )
+        return()
+      }
+
+      vis <- visible_group_condition_rows()
+      if (length(vis) <= 1) {
+        clear_group_condition_row(i)
+      } else {
+        removeUI(selector = paste0("#gcond_row_", i))
+      }
+      rv$rule_msg <- NULL
+    }, ignoreInit = TRUE)
+  }
+
+  ensure_gconstr_remove_observer <- function(i) {
+    bid <- paste0("gconstr_remove_", i)
+    if (isTRUE(gconstr_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    gconstr_rm_registry[[bid]] <- TRUE
+
+    observeEvent(input[[bid]], {
+      vis <- visible_group_constraint_rows()
+      if (length(vis) <= 1) {
+        clear_group_constraint_row(i)
+      } else {
+        removeUI(selector = paste0("#gconstr_row_", i))
+      }
+      rv$rule_msg <- NULL
+    }, ignoreInit = TRUE)
+  }
+
+  flatten_group_constraints <- function(constraints) {
+    if (is.null(constraints) || length(constraints) == 0) {
+      return(list())
+    }
+    lapply(constraints, function(cst) {
+      if (identical(cst$type %||% "", "not_both")) cst$type <- "mutually_exclusive"
+      if (identical(cst$type %||% "", "implies")) cst$type <- "requires"
+      cst
+    })
+  }
+
+  collect_group_constraints <- function(n) {
+    out <- list()
+    for (i in seq_len(max(1L, n))) {
+      ctype <- trimws(input[[paste0("gconstr_type_", i)]] %||% "")
+      left <- trimws(input[[paste0("gconstr_left_", i)]] %||% "")
+      right <- trimws(input[[paste0("gconstr_right_", i)]] %||% "")
+      if (!nzchar(ctype) || !nzchar(left) || !nzchar(right)) next
+
+      cid <- trimws(input[[paste0("gconstr_id_", i)]] %||% "")
+      msg <- trimws(input[[paste0("gconstr_msg_", i)]] %||% "")
+      left_scope <- trimws(input[[paste0("gconstr_lscope_", i)]] %||% "any")
+      right_scope <- trimws(input[[paste0("gconstr_rscope_", i)]] %||% "any")
+
+      if (identical(ctype, "requires")) {
+        out[[length(out) + 1L]] <- list(
+          id = if (nzchar(cid)) cid else paste0("constraint_", i),
+          type = "requires",
+          `if` = left,
+          then = right,
+          if_scope = left_scope,
+          then_scope = right_scope,
+          message = if (nzchar(msg)) msg else NULL
+        )
+      } else {
+        out[[length(out) + 1L]] <- list(
+          id = if (nzchar(cid)) cid else paste0("constraint_", i),
+          type = "mutually_exclusive",
+          left = left,
+          right = right,
+          left_scope = left_scope,
+          right_scope = right_scope,
+          message = if (nzchar(msg)) msg else NULL
+        )
+      }
+    }
+    out
+  }
+
   # A single modal with two swappable views (list <-> form) so only ONE popup is
   # ever open. rv$rule_view drives the view; rv$rule_token forces re-renders.
   observeEvent(input$edit_rules, {
@@ -1589,6 +2404,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- 1L
     rv$then_n <- 1L
+    rv$gcond_n <- 1L
+    rv$gconstr_n <- 1L
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
       title = paste("Edit rules \u2014", rv$active),
@@ -1681,6 +2498,52 @@ server <- function(input, output, session) {
           "Rows must be unique across the selected column(s) taken together."
         )
       )
+    } else if (identical(rt, "group_condition")) {
+      group_rows <- flatten_group_conditions(pf$conditions)
+      constraint_rows <- flatten_group_constraints(pf$constraints)
+      cond_names <- unique(vapply(group_rows, function(x) trimws(x$name %||% ""), character(1)))
+      cond_names <- cond_names[nzchar(cond_names)]
+      tagList(
+        selectizeInput("rule_group_by", "Group by column(s)",
+          choices = cols,
+          selected = pf$group_by %||% character(0),
+          multiple = TRUE,
+          width = "100%"
+        ),
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "Conditions (named):"),
+          div(
+            id = "gcond_rows",
+            build_group_cond_rows(
+              isolate(rv$gcond_n),
+              cols,
+              if (length(group_rows) > 0) group_rows else list()
+            )
+          ),
+          actionButton("gcond_add", HTML("&#x2795; Add condition row"),
+            class = "btn btn-sm btn-outline-secondary"
+          )
+        ),
+        div(
+          class = "cond-builder",
+          div(class = "cond-title", "Constraints:"),
+          div(
+            id = "gconstr_rows",
+            lapply(seq_len(max(1L, isolate(rv$gconstr_n))), function(i) {
+              pf_row <- if (i <= length(constraint_rows)) constraint_rows[[i]] else list()
+              one_group_constraint_row(i, cond_names, pf_row)
+            })
+          ),
+          actionButton("gconstr_add", HTML("&#x2795; Add constraint"),
+            class = "btn btn-sm btn-outline-secondary"
+          )
+        ),
+        div(
+          class = "cond-hint",
+          "Use one condition name across multiple rows to build compound conditions."
+        )
+      )
     } else {
       div(
         class = "cond-hint",
@@ -1701,7 +2564,8 @@ server <- function(input, output, session) {
           "\u2014 select a rule type \u2014" = "",
           "Conditional (IF/THEN)" = "col_condition",
           "Range" = "col_range",
-          "Unique" = "col_unique"
+          "Unique" = "col_unique",
+          "Grouped condition" = "group_condition"
         ),
         selected = rt, width = "100%"
       )
@@ -1779,6 +2643,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- 1L
     rv$then_n <- 1L
+    rv$gcond_n <- 1L
+    rv$gconstr_n <- 1L
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -1805,6 +2671,8 @@ server <- function(input, output, session) {
     rv$rule_msg <- NULL
     rv$cond_n <- max(1L, length(cond_to_rows(f$condition)))
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
+    rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
+    rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -1886,6 +2754,70 @@ server <- function(input, output, session) {
     )
   })
 
+  observeEvent(input$gcond_add, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    cols <- dta_column_ids(isolate(rv$dta), ed)
+    rv$gcond_n <- isolate(rv$gcond_n) + 1L
+    insertUI("#gcond_rows",
+      where = "beforeEnd",
+      ui = one_group_cond_row(isolate(rv$gcond_n), cols)
+    )
+  })
+
+  observeEvent(input$gconstr_add, {
+    cond_names <- character(0)
+    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      if (nzchar(nm)) cond_names <- c(cond_names, nm)
+    }
+    cond_names <- unique(cond_names)
+    rv$gconstr_n <- isolate(rv$gconstr_n) + 1L
+    insertUI("#gconstr_rows",
+      where = "beforeEnd",
+      ui = one_group_constraint_row(isolate(rv$gconstr_n), cond_names)
+    )
+  })
+
+  observe({
+    req(identical(rv$rule_view, "form"))
+    req(rv$gconstr_n >= 1)
+
+    for (i in seq_len(max(1L, rv$gcond_n))) {
+      ensure_gcond_remove_observer(i)
+    }
+    for (i in seq_len(max(1L, rv$gconstr_n))) {
+      ensure_gconstr_remove_observer(i)
+    }
+
+    cond_names <- character(0)
+    for (i in seq_len(max(1L, rv$gcond_n))) {
+      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+      if (nzchar(nm)) cond_names <- c(cond_names, nm)
+    }
+    cond_names <- unique(cond_names)
+
+    for (i in seq_len(max(1L, rv$gconstr_n))) {
+      left_id <- paste0("gconstr_left_", i)
+      right_id <- paste0("gconstr_right_", i)
+      left_selected <- input[[left_id]]
+      right_selected <- input[[right_id]]
+
+      updateSelectInput(
+        session,
+        left_id,
+        choices = c("(select)" = "", cond_names),
+        selected = if (!is.null(left_selected) && nzchar(left_selected)) left_selected else ""
+      )
+      updateSelectInput(
+        session,
+        right_id,
+        choices = c("(select)" = "", cond_names),
+        selected = if (!is.null(right_selected) && nzchar(right_selected)) right_selected else ""
+      )
+    }
+  })
+
   # When the user switches the rule type, reset the type-specific part but keep
   # the id/description they typed. A programmatic sync (the select rendering with
   # its prefilled value) is ignored by comparing against the prefill's type.
@@ -1910,9 +2842,14 @@ server <- function(input, output, session) {
       pf$columns <- NULL
       pf$min <- NULL
       pf$max <- NULL
+      pf$group_by <- NULL
+      pf$conditions <- NULL
+      pf$constraints <- NULL
       rv$rule_prefill <- pf
       rv$cond_n <- 1L
       rv$then_n <- 1L
+      rv$gcond_n <- 1L
+      rv$gconstr_n <- 1L
       rv$rule_msg <- NULL
       rv$rule_token <- rv$rule_token + 1
     },
@@ -1969,13 +2906,41 @@ server <- function(input, output, session) {
         rv$rule_msg <- list(ok = FALSE, error = "A range rule needs a minimum and/or maximum.")
         return()
       }
-    } else {
+    } else if (identical(rt, "col_unique")) {
       cols <- input$rule_cols
       if (length(cols) == 0) {
         rv$rule_msg <- list(ok = FALSE, error = "Select at least one column.")
         return()
       }
       args$columns <- cols
+    } else if (identical(rt, "group_condition")) {
+      gby <- input$rule_group_by %||% character(0)
+      if (length(gby) == 0) {
+        rv$rule_msg <- list(ok = FALSE, error = "Select at least one grouping column.")
+        return()
+      }
+
+      gconds <- collect_group_conditions(isolate(rv$gcond_n))
+      if (length(gconds) == 0) {
+        rv$rule_msg <- list(
+          ok = FALSE,
+          error = "Define at least one named grouped condition with a column and operator."
+        )
+        return()
+      }
+
+      gconstraints <- collect_group_constraints(isolate(rv$gconstr_n))
+      if (length(gconstraints) == 0) {
+        rv$rule_msg <- list(ok = FALSE, error = "Define at least one grouped constraint.")
+        return()
+      }
+
+      args$group_by <- gby
+      args$conditions <- gconds
+      args$constraints <- gconstraints
+    } else {
+      rv$rule_msg <- list(ok = FALSE, error = sprintf("Unsupported rule type: %s", rt))
+      return()
     }
     r <- do.call(dta_set_rule, args)
     if (!isTRUE(r$ok)) {
@@ -3013,23 +3978,60 @@ server <- function(input, output, session) {
         dta_specs_signature(old_ds),
         dta_specs_signature(new_ds)
       )
-      if (handlers_same && dta_dataset_content_count(old_ds) > 0) {
-        tr <- dta_transfer_bound_data(new_dta, nm, old_ds, keep_validation = specs_same)
-        if (isTRUE(tr$ok)) {
-          new_dta <- tr$value
-          for (k in names(old_uploads)) {
-            if (startsWith(k, paste0(nm, "||"))) new_uploads[[k]] <- old_uploads[[k]]
-          }
-          new_status[[nm]] <- if (specs_same) (old_status[[nm]] %||% "pending") else "pending"
+      if (dta_dataset_content_count(old_ds) == 0) next # nothing to carry over
+
+      # A dataset that still declares at least one file handler keeps its bound
+      # data even when the handlers changed -- the same bargain the file editor
+      # offers, so editing `files:` here is not silently more destructive than
+      # editing it in the Edit-files dialog. Validation survives only when the
+      # columns and rules are untouched.
+      n_new_handlers <- length(dta_handlers(new_ds))
+      if (!handlers_same && n_new_handlers == 0) next # no slot left to show data in
+
+      tr <- dta_transfer_bound_data(
+        new_dta, nm, old_ds,
+        keep_validation = specs_same && handlers_same
+      )
+      if (!isTRUE(tr$ok)) next
+      new_dta <- tr$value
+
+      # Upload records are keyed by handler POSITION, and a re-parsed document
+      # may have reordered or replaced entries as easily as appended one. Match
+      # the old handlers to the new ones by identity and move each record to
+      # where ITS handler went; a record whose handler is gone has no slot left
+      # to appear under, so that file is unloaded rather than left bound to the
+      # dataset and unreachable.
+      hmap <- dta_match_handlers(old_ds, new_ds)
+      for (k in names(old_uploads)) {
+        if (!startsWith(k, paste0(nm, "||"))) next
+        hi <- suppressWarnings(as.integer(sub(".*\\|\\|", "", k)))
+        target <- if (!is.na(hi) && hi >= 1 && hi <= length(hmap)) hmap[[hi]] else NA_integer_
+        if (!is.na(target)) {
+          new_uploads[[paste0(nm, "||", target)]] <- old_uploads[[k]]
+          next
+        }
+        for (rec in (old_uploads[[k]] %||% list())) {
+          uv <- dta_unload_table(new_dta, nm, rec$table)
+          if (isTRUE(uv$ok)) new_dta <- uv$value
         }
       }
-      # handlers changed OR no bound data -> fresh (uploads dropped, pending)
+      new_status[[nm]] <- if (specs_same && handlers_same) {
+        old_status[[nm]] %||% "pending"
+      } else {
+        "pending"
+      }
     }
 
     rv$dta <- new_dta
     rv$yaml_text <- txt
     rv$structure <- build_structure(new_dta)
     rv$uploads <- new_uploads
+    # A re-parsed document can move any dataset's handlers, so the same
+    # position-keyed state the Edit-files dialog resets has to be reset here:
+    # stale per-file ids, and file inputs still displaying the name dropped on
+    # whatever handler used to occupy that position.
+    purge_file_ids()
+    for (nm in new_names) reset_dataset_fileinputs(nm)
     for (nm in new_names) {
       if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
         identical(new_status[[nm]], "pending")) {
@@ -3051,9 +4053,9 @@ server <- function(input, output, session) {
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset YAML wrapped into a new DTA (uploads kept where handlers are unchanged)."
+        "Dataset YAML wrapped into a new DTA (loaded files kept where a slot remains for them)."
       } else {
-        "DTA YAML applied (uploads kept where handlers are unchanged)."
+        "DTA YAML applied (loaded files kept where a slot remains for them)."
       },
       type = "message"
     )
@@ -3641,16 +4643,7 @@ server <- function(input, output, session) {
         actionButton("check_one", "Check this dataset",
           class = "btn btn-primary"
         ),
-        actionButton("edit_cols",
-          label = HTML("&#x1F4D0; Edit columns"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit column specifications"
-        ),
-        actionButton("edit_rules",
-          label = HTML("&#x2696;&#xFE0F; Edit rules"),
-          class = "btn btn-outline-secondary",
-          title = "Add, remove or edit validation rules"
-        ),
+        ds_edit_menu(),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
           class = "btn btn-outline-primary",
           title = "Download this dataset's specification as YAML"
@@ -3753,7 +4746,7 @@ server <- function(input, output, session) {
                 class = "yaml-edit-bar",
                 div(
                   class = "msg-hint",
-                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Uploaded files are kept for datasets whose file handlers are unchanged; a dataset's validation is cleared only if its columns or rules changed, and deleted datasets drop their uploads.")
+                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Loaded files are kept, including when you edit <code>files:</code>, as long as the dataset still has a slot to show them under; files belonging to a slot you deleted are unloaded with it. A dataset's validation is cleared whenever its files, columns or rules changed, and deleted datasets drop everything.")
                 ),
                 div(
                   class = "yaml-edit-actions",
