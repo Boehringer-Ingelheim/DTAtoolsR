@@ -153,6 +153,27 @@ test_that("get_template_path returns NULL (not an error) for an unknown template
   expect_null(app_fn("get_template_path")(""))
 })
 
+test_that("get_template_path refuses a name that escapes the templates directory", {
+  # The name reaches this function from a selectInput, but a Shiny client is not
+  # bound by the offered choices and can put any string on the websocket. The
+  # name is therefore whitelisted against the bundled templates instead of being
+  # pasted into a path -- otherwise a traversal would resolve to an arbitrary
+  # server-side file, which export_with_template() would render and hand back as
+  # a download.
+  get_template_path <- app_fn("get_template_path")
+
+  expect_null(get_template_path("../../DESCRIPTION"))
+  expect_null(get_template_path("../../../../../../etc/passwd"))
+  expect_null(get_template_path("..\\..\\DESCRIPTION"))
+  expect_null(get_template_path(file.path(tempdir(), "planted.docx")))
+  expect_null(get_template_path(NA_character_))
+  expect_null(get_template_path(c("dta_numbered_template.docx", "other.docx")))
+
+  # A traversal that ends in a real bundled template name must not be repaired
+  # into a hit either -- it is simply not the offered name.
+  expect_null(get_template_path("../templates/dta_numbered_template.docx"))
+})
+
 test_that("the export modal is built by app.R, with no orphaned UI builder", {
   # export_modal_ui() used to live in utils_export.R but was never called: the
   # real modal is built inline in app.R (around the `input$export_modal_open`

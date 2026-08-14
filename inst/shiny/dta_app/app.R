@@ -149,6 +149,40 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 });
 "
 
+# Per-browser secret backing 'Restore previous session'. The autosaved session
+# must outlive the Shiny session (the whole point is recovering after a reload
+# or a crash), so it cannot be keyed to session$token, which is regenerated on
+# every page load. It is keyed instead to a 128-bit random id held in the
+# browser's localStorage: stable across reloads for one browser profile,
+# unguessable by, and never shared with, any other visitor of the same app.
+# If localStorage is unavailable (private mode) a fresh id is minted per load,
+# so the feature degrades to "no session found" rather than leaking one.
+client_id_js <- "
+(function(){
+  function dtaClientId(){
+    var KEY = 'dtatools_client_id';
+    var id = null;
+    try { id = window.localStorage.getItem(KEY); } catch (e) { id = null; }
+    if (!id || !/^[a-f0-9]{32}$/.test(id)) {
+      var buf = new Uint8Array(16);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(buf);
+      } else {
+        for (var i = 0; i < buf.length; i++) { buf[i] = Math.floor(Math.random() * 256); }
+      }
+      id = Array.prototype.map.call(buf, function(b){
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+      try { window.localStorage.setItem(KEY, id); } catch (e) {}
+    }
+    return id;
+  }
+  $(document).on('shiny:connected', function(){
+    Shiny.setInputValue('dta_client_id', dtaClientId());
+  });
+})();
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
   shinyjs::useShinyjs(),
@@ -156,7 +190,8 @@ ui <- bslib::page_fluid(
     tags$style(bi_css()),
     tags$script(shiny::HTML(reset_fileinput_js)),
     tags$script(shiny::HTML(msgs_dock_js)),
-    tags$script(shiny::HTML(download_trigger_js))
+    tags$script(shiny::HTML(download_trigger_js)),
+    tags$script(shiny::HTML(client_id_js))
   ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),
@@ -221,7 +256,27 @@ server <- function(input, output, session) {
   )
 
   upload_registry <- new.env(parent = emptyenv())
-  session_file <- file.path(tempdir(), "dtatools_app_session.rds")
+
+  # Autosave slot for 'Restore previous session', keyed to the browser's
+  # localStorage id (see client_id_js) rather than to session$token: the file
+  # has to survive the Shiny session to be restorable after a reload, but must
+  # still be reachable only by the browser that wrote it. The id is re-validated
+  # here because an input value is client-supplied and could be anything; only a
+  # 32-char lowercase hex string is accepted, which also makes it path-safe.
+  client_id <- function() {
+    id <- isolate(input$dta_client_id)
+    if (is.null(id) || length(id) != 1L || is.na(id) || !grepl("^[a-f0-9]{32}$", id)) {
+      return(NULL)
+    }
+    id
+  }
+  session_file <- function() {
+    id <- client_id()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    file.path(tempdir(), paste0("dtatools_app_session_", id, ".rds"))
+  }
 
   # Stable id per bound file so its trash button keeps working across renders.
   file_id_env <- new.env(parent = emptyenv()) # "ds\u0001hi\u0001table" -> integer id
@@ -270,8 +325,13 @@ server <- function(input, output, session) {
   }
 
   autosave <- function() {
+    target <- session_file()
+    if (is.null(target)) {
+      return(invisible(NULL))
+    }
     try(saveRDS(
       list(
+        client_id = client_id(),
         dump = dta_dump_session(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
@@ -281,7 +341,7 @@ server <- function(input, output, session) {
         dataset_only = isolate(rv$dataset_only),
         is_example = isolate(rv$is_example)
       ),
-      session_file
+      target
     ), silent = TRUE)
   }
 
@@ -4431,7 +4491,7 @@ server <- function(input, output, session) {
     rv$status <- list()
     rv$is_example <- FALSE
     rv$example_target <- NULL
-    try(unlink(session_file), silent = TRUE)
+    try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
 
@@ -4684,8 +4744,13 @@ server <- function(input, output, session) {
     # uploads -- which mutate rv$dta -- do not rebuild the whole workspace or
     # reset the active tab / file inputs. Live bits live in their own outputs.
     if (is.null(rv$structure)) {
-      # Landing
-      restore_available <- file.exists(session_file)
+      # Landing. Reference input$dta_client_id directly so this re-renders once
+      # the browser reports its id and the restore button can appear.
+      restore_available <- {
+        input$dta_client_id
+        sf <- session_file()
+        !is.null(sf) && file.exists(sf)
+      }
       card(
         max_height = "620px",
         card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
@@ -4783,10 +4848,22 @@ server <- function(input, output, session) {
 
   # --- restore previous session ------------------------------------------
   observeEvent(input$restore_session, {
-    if (!file.exists(session_file)) {
+    sf <- session_file()
+    if (is.null(sf) || !file.exists(sf)) {
       return()
     }
-    saved <- tryCatch(readRDS(session_file), error = function(e) NULL)
+    saved <- tryCatch(readRDS(sf), error = function(e) NULL)
+    if (is.null(saved)) {
+      showNotification("Could not restore the previous session.", type = "error")
+      return()
+    }
+    # Defence in depth behind the per-browser filename: refuse a payload that
+    # does not carry this browser's own id, so a stale or planted file under a
+    # guessed name cannot be loaded into someone else's session.
+    if (!identical(saved$client_id, client_id())) {
+      showNotification("Cannot restore a session saved by a different browser.", type = "error")
+      return()
+    }
     # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
     # fall back to a legacy `dta` field for older session files.
     restored <- if (!is.null(saved$dump)) {
@@ -4794,7 +4871,7 @@ server <- function(input, output, session) {
     } else {
       saved$dta
     }
-    if (is.null(saved) || is.null(restored)) {
+    if (is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }
