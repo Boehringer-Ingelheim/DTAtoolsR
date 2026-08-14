@@ -23,6 +23,7 @@ Imports:
 	cli,
 	utils,
 	tools,
+	stats,
 	glue,
 	methods,
 	R.utils,
@@ -89,7 +90,9 @@ Collate:
     'exportDocuments.R'
     'exportFunctions.R'
     'exportTemplateDocx.R'
+    'exportValidationReport.R'
     'formattingHelpers.R'
+    'reportRendering.R'
     'run_dta_app.R'
     'streamingValidation.R'
     'validationFunctions.R'

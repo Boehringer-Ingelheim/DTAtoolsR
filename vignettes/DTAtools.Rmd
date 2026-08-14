@@ -1661,13 +1661,46 @@ DOCX under a `.pdf` name. The output is verified to start with the `%PDF`
 signature before it is handed back, so a failed conversion never leaves a
 mislabelled file behind.
 
+### Export a Standalone HTML Validation Report
+
+`write_validation_report()` renders a self-contained HTML file — no external
+assets, opens straight from disk — summarizing validation results for a `DTA`
+object: a pass/fail overview per dataset/target, and a sortable, filterable
+table of every validation message with click-to-inspect detail matching the
+Shiny app's own validation-messages view.
+
+```{r write_validation_report_example, eval=FALSE}
+write_validation_report(dta_from_file, "validation_report.html")
+```
+
+Clicking a message row shows what the violated constraint actually requires
+and the offending value — the allowed values for an `enum` violation, the
+declared type and raw value for an import error, a plain-language description
+of a failed rule (built from the rule's own definition), and for
+`group_condition` rules, a full breakdown of the group, its conditions and
+constraints, and the affected rows' values.
+
+Repeated identical messages (the same violation on many rows) are capped at
+`max_repeats` (default `5`) in the default view, with a "show all" toggle in
+the file itself so no data is lost:
+
+```{r write_validation_report_max_repeats, eval=FALSE}
+# Show at most 10 instances of any repeated message before collapsing
+write_validation_report(dta_from_file, "validation_report.html", max_repeats = 10)
+
+# Never collapse repeated messages
+write_validation_report(dta_from_file, "validation_report.html", max_repeats = Inf)
+```
+
 ---
 
 ## The Shiny Application
 
 `run_dta_app()` starts a browser interface over the same objects: load a DTA
 YAML, upload a data file per dataset, run `check()`, browse the errors, edit the
-metadata and export the document. Table status in the app reflects all three
+metadata and export the document — including the HTML validation report above,
+via a "Report" download button next to the CSV/TSV/XLSX exports in the
+validation-messages dock. Table status in the app reflects all three
 validation axes, import errors included.
 
 ```{r shiny_app, eval=FALSE}
@@ -2005,6 +2038,7 @@ datasets:
 | `write_columns_to_yaml(x, file)` | Serialise specs to YAML                               |
 | `write_columns_to_json(x, file)` | Serialise specs to JSON                               |
 | `write_dta(x, file, format)` | Write the whole DTA as a document (`docx`, `pdf`, `md`)     |
+| `write_validation_report(x, file, max_repeats, …)` | Write a standalone, self-contained HTML validation report |
 | `dta_pdf_backend()` | Report the DOCX-to-PDF backend this machine will use, or `NULL` |
 | `export_with_template(x, template, file)` | Fill a user-authored Word template from a DTA  |
 | `dta_template_placeholders(x)` | List the `{PLACEHOLDER}` tokens a Word template can use, or resolve them for a DTA |

@@ -73,6 +73,23 @@ test_that("every package the app calls is available at run time", {
   expect_equal(missing, character(0))
 })
 
+test_that("the app bundle VERSION file matches the package version", {
+  # app.R (dta_bundle_version(), around line 50) reports the "app bundle
+  # version" from this file alongside the installed package's DESCRIPTION
+  # version on the footer, specifically so a deploy where they've drifted is
+  # visible on Posit Connect. That only works if a release actually keeps
+  # them in lockstep -- this guards against forgetting to bump this file
+  # alongside DESCRIPTION (caught manually once already: VERSION was left at
+  # 0.17.0 after DESCRIPTION moved to 0.17.1).
+  version_file <- file.path(.shiny_app_dir(), "VERSION")
+  expect_true(file.exists(version_file))
+
+  bundle_version <- trimws(readLines(version_file, n = 1, warn = FALSE))
+  pkg_version <- as.character(utils::packageVersion("DTAtools"))
+
+  expect_equal(bundle_version, pkg_version)
+})
+
 test_that("every non-base package the app calls is declared or guarded", {
   info <- app_packages_used()
 

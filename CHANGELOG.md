@@ -4,21 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.1] - 2026-08-14
 
-### Fixed
+### Added
 
-- **`group_condition` rules are now described in full in the exported
-  documents.** They fell through to the default rule formatter, which printed
-  either the author's one-line description or
-  `"Rule type 'group_condition' ... no description available"` — the grouping
-  columns, the named conditions and the constraints between them never reached
-  the document at all. The rules table now spells out which columns rows are
-  grouped by, what each named condition means in terms of its columns, and what
-  each constraint requires, including the difference between the `any` and
-  `all` scopes ("for at least one row in the group" vs "for every row in the
-  group"). An author-written description is kept as the leading summary rather
-  than replaced.
+- **Standalone HTML validation report.** `write_validation_report()` renders a
+  self-contained `.html` file (no external assets) summarizing validation
+  results for a `DTA` object: a pass/fail overview per dataset/target, and a
+  sortable, filterable table of every validation message with click-to-inspect
+  detail, matching the look of the Shiny app's validation-messages tab.
+  Repeated identical messages (e.g. the same `required property 'HEIGHT'`
+  violation on many rows) are capped at `max_repeats` (default `5`) in the
+  default view, with a "show all" toggle in the file itself so no data is
+  lost. The Shiny app's validation-messages dock gained a "Report" download
+  button alongside the existing CSV/TSV/XLSX exports.
 
 ### Changed
 
@@ -81,6 +80,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   approval table is the one place to sign; when no contact is marked
   `signature = TRUE` the chapter is omitted entirely rather than padded with an
   anonymous underline.
+
+### Fixed
+
+- **`group_condition` rules are now described in full in the exported
+  documents.** They fell through to the default rule formatter, which printed
+  either the author's one-line description or
+  `"Rule type 'group_condition' ... no description available"` — the grouping
+  columns, the named conditions and the constraints between them never reached
+  the document at all. The rules table now spells out which columns rows are
+  grouped by, what each named condition means in terms of its columns, and what
+  each constraint requires, including the difference between the `any` and
+  `all` scopes ("for at least one row in the group" vs "for every row in the
+  group"). An author-written description is kept as the leading summary rather
+  than replaced.
 
 ## [0.17.0] - 2026-08-14
 

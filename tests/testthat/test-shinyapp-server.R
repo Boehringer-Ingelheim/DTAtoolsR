@@ -884,3 +884,53 @@ test_that("raw YAML that removes every file handler unloads that dataset's data"
     expect_equal(unname(rv$status[["clinical_data"]]), "nodata")
   })
 })
+
+test_that("HTML validation report download handler produces parseable HTML", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # Load a DTA the same way other tests do
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    # Bind valid data to the dataset so that results() and messages() work
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    # Check the dataset to populate validation results
+    session$setInputs(check_all = 1)
+
+    # Verify that the exact object rv$dta produces a valid report by calling
+    # the same function the handler uses. This tests that the object state
+    # and function integration work correctly.
+    report_file <- tempfile(fileext = ".html")
+    on.exit(unlink(report_file, force = TRUE), add = TRUE)
+
+    # This is the same call the downloadHandler uses.
+    expect_no_error(
+      DTAtools::write_validation_report(
+        rv$dta,
+        report_file,
+        overwrite = TRUE,
+        quiet = TRUE
+      )
+    )
+
+    # Verify the file is valid HTML
+    doc <- xml2::read_html(report_file)
+    expect_true(!is.na(doc))
+
+    # Verify wiring exists by reading app.R source and confirming both
+    # downloadButton and downloadHandler are present
+    app_source <- readLines(
+      file.path(app_server_dir(), "app.R"),
+      warn = FALSE
+    )
+    app_source_str <- paste(app_source, collapse = "\n")
+    expect_true(
+      grepl('downloadButton("dl_msgs_html"', app_source_str, fixed = TRUE),
+      info = "downloadButton wiring for dl_msgs_html not found in app.R"
+    )
+    expect_true(
+      grepl("output$dl_msgs_html <- downloadHandler", app_source_str, fixed = TRUE),
+      info = "downloadHandler wiring for dl_msgs_html not found in app.R"
+    )
+  })
+})
