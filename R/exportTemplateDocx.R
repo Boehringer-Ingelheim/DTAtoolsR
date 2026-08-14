@@ -30,7 +30,8 @@
 #'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_NAMES}`, `{DATASET_TYPES}`,
 #'     `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
 #'   \item{Process}{`{ERROR_HANDLING}`, `{AUTHORIZED_CORRECTIONS}`,
-#'     `{VERSION_HISTORY}`, `{GENERATED_DATE}`}
+#'     `{SIGNATORIES}`, `{PROCESS_INFORMATION}`, `{VERSION_HISTORY}`,
+#'     `{GENERATED_DATE}`}
 #' }
 #'
 #' Additional or overriding values can be supplied through `variables`; names may
@@ -104,7 +105,7 @@ export_with_template <- function(
   }
 
   dta_vars <- .extract_template_variables(dta)
-  user_vars <- .normalize_template_variables(variables)
+  user_vars <- .normalize_template_variables(variables, dta = dta)
   all_vars <- utils::modifyList(dta_vars, user_vars)
 
   tryCatch(
@@ -155,13 +156,13 @@ export_with_template <- function(
     "{SUPPLIER_ADDRESS}" = "Supplier address",
     "{SUPPLIER_EMAIL}" = "Email of the first supplier contact",
     "{SUPPLIER_PHONE}" = "Phone of the first supplier contact",
-    "{SUPPLIER_CONTACTS}" = "Names of all supplier contacts",
+    "{SUPPLIER_CONTACTS}" = "Detailed supplier contact block",
     "{RECEIVER_NAME}" = "Receiver organisation name",
     "{RECEIVER_COUNTRY}" = "Receiver country",
     "{RECEIVER_ADDRESS}" = "Receiver address",
     "{RECEIVER_EMAIL}" = "Email of the first receiver contact",
     "{RECEIVER_PHONE}" = "Phone of the first receiver contact",
-    "{RECEIVER_CONTACTS}" = "Names of all receiver contacts",
+    "{RECEIVER_CONTACTS}" = "Detailed receiver contact block",
     "{TRANSMISSION_TYPE}" = "How the data is transferred",
     "{TRANSMISSION_FREQUENCY}" = "How often data is transferred",
     "{TRANSMISSION_NOTIFICATION}" = "How a transfer is notified",
@@ -176,6 +177,8 @@ export_with_template <- function(
     "{TOTAL_RULES}" = "Total validation-rule count across tabular datasets",
     "{ERROR_HANDLING}" = "Agreed error-handling procedure",
     "{AUTHORIZED_CORRECTIONS}" = "Who may authorise corrections",
+    "{SIGNATORIES}" = "Detailed signatory block with signature lines",
+    "{PROCESS_INFORMATION}" = "Combined process-information block",
     "{VERSION_HISTORY}" = "Version history as a single line",
     "{GENERATED_DATE}" = "Date this document was generated (ISO 8601)"
   )
@@ -297,13 +300,13 @@ dta_template_placeholders <- function(dta = NULL) {
     "{SUPPLIER_ADDRESS}" = .tv_scalar(.tv_get(supplier, "affiliation", "address")),
     "{SUPPLIER_EMAIL}" = .tv_scalar(.tv_first_contact_field(supplier, "email")),
     "{SUPPLIER_PHONE}" = .tv_scalar(.tv_first_contact_field(supplier, "phone")),
-    "{SUPPLIER_CONTACTS}" = .tv_contact_names(supplier),
+    "{SUPPLIER_CONTACTS}" = .tv_contacts_block(supplier),
     "{RECEIVER_NAME}" = .tv_scalar(.tv_get(receiver, "affiliation", "name")),
     "{RECEIVER_COUNTRY}" = .tv_scalar(.tv_get(receiver, "affiliation", "country")),
     "{RECEIVER_ADDRESS}" = .tv_scalar(.tv_get(receiver, "affiliation", "address")),
     "{RECEIVER_EMAIL}" = .tv_scalar(.tv_first_contact_field(receiver, "email")),
     "{RECEIVER_PHONE}" = .tv_scalar(.tv_first_contact_field(receiver, "phone")),
-    "{RECEIVER_CONTACTS}" = .tv_contact_names(receiver),
+    "{RECEIVER_CONTACTS}" = .tv_contacts_block(receiver),
     "{TRANSMISSION_TYPE}" = .tv_scalar(.tv_get(trans, "type")),
     "{TRANSMISSION_FREQUENCY}" = .tv_scalar(.tv_get(trans, "frequency")),
     "{TRANSMISSION_NOTIFICATION}" = .tv_scalar(.tv_get(trans, "notification")),
@@ -318,6 +321,8 @@ dta_template_placeholders <- function(dta = NULL) {
     "{TOTAL_RULES}" = as.character(total_rules),
     "{ERROR_HANDLING}" = .tv_scalar(meta@error_handling),
     "{AUTHORIZED_CORRECTIONS}" = auth_str,
+    "{SIGNATORIES}" = .tv_signatories_block(meta),
+    "{PROCESS_INFORMATION}" = .tv_process_information_block(meta),
     "{VERSION_HISTORY}" = version_history_str,
     "{GENERATED_DATE}" = .format_document_date(Sys.Date())
   )
@@ -399,6 +404,105 @@ dta_template_placeholders <- function(dta = NULL) {
 }
 
 
+#' Render a detailed contact block with signature lines for signers
+#' @keywords internal
+.tv_contacts_block <- function(org) {
+  contacts <- .tv_get(org, "contacts")
+  if (is.null(contacts) || length(contacts) == 0) {
+    return("")
+  }
+  lines <- character(0)
+  for (ct in contacts) {
+    if (!is.list(ct)) {
+      next
+    }
+    nm <- if (!is.null(ct$name) && nzchar(ct$name)) as.character(ct$name)[[1]] else "(Unnamed)"
+    lines <- c(lines, paste0("- ", nm))
+    if (!is.null(ct$role) && nzchar(ct$role)) lines <- c(lines, paste0("  - Role: ", ct$role))
+    if (!is.null(ct$department) && nzchar(ct$department)) lines <- c(lines, paste0("  - Department: ", ct$department))
+    if (!is.null(ct$email) && nzchar(ct$email)) lines <- c(lines, paste0("  - Email: ", ct$email))
+    if (!is.null(ct$phone) && nzchar(ct$phone)) lines <- c(lines, paste0("  - Phone: ", ct$phone))
+    if (isTRUE(ct$reviewer)) lines <- c(lines, "  - Reviewer: yes")
+    if (isTRUE(ct$backup)) lines <- c(lines, "  - Backup: yes")
+    if (isTRUE(ct$signature)) {
+      lines <- c(lines, "  - Signature: ______________________________   Date: ______________")
+    }
+  }
+  paste(lines, collapse = "\n")
+}
+
+
+#' Render signatories as a detailed block with signature lines
+#' @keywords internal
+.tv_signatories_block <- function(meta) {
+  sig <- .extract_signatories(meta, signature_list = NULL)
+  if (is.null(sig) || nrow(sig) == 0) {
+    return("")
+  }
+  lines <- character(0)
+  for (i in seq_len(nrow(sig))) {
+    nm <- as.character(sig$Name[[i]])
+    lines <- c(lines, paste0("- ", nm))
+    if ("Organization" %in% names(sig) && nzchar(as.character(sig$Organization[[i]]))) {
+      lines <- c(lines, paste0("  - Organization: ", as.character(sig$Organization[[i]])))
+    }
+    if ("Role" %in% names(sig) && nzchar(as.character(sig$Role[[i]]))) {
+      lines <- c(lines, paste0("  - Role: ", as.character(sig$Role[[i]])))
+    }
+    if ("Department" %in% names(sig) && nzchar(as.character(sig$Department[[i]]))) {
+      lines <- c(lines, paste0("  - Department: ", as.character(sig$Department[[i]])))
+    }
+    if ("Email" %in% names(sig) && nzchar(as.character(sig$Email[[i]]))) {
+      lines <- c(lines, paste0("  - Email: ", as.character(sig$Email[[i]])))
+    }
+    if ("Phone" %in% names(sig) && nzchar(as.character(sig$Phone[[i]]))) {
+      lines <- c(lines, paste0("  - Phone: ", as.character(sig$Phone[[i]])))
+    }
+    lines <- c(lines, "  - Signature: ______________________________   Date: ______________")
+  }
+  paste(lines, collapse = "\n")
+}
+
+
+#' Render process information block (transmission, handling, corrections)
+#' @keywords internal
+.tv_process_information_block <- function(meta) {
+  lines <- character(0)
+  trans <- meta@transmission
+  if (!is.null(trans) && length(trans) > 0) {
+    lines <- c(lines, "- Transmission")
+    if (!is.null(trans$type) && nzchar(as.character(trans$type))) {
+      lines <- c(lines, paste0("  - Type: ", as.character(trans$type)))
+    }
+    if (!is.null(trans$frequency) && nzchar(as.character(trans$frequency))) {
+      lines <- c(lines, paste0("  - Frequency: ", as.character(trans$frequency)))
+    }
+    if (!is.null(trans$notification) && nzchar(as.character(trans$notification))) {
+      lines <- c(lines, paste0("  - Notification: ", as.character(trans$notification)))
+    }
+    if (!is.null(trans$date_first_transfer) && nzchar(as.character(trans$date_first_transfer))) {
+      lines <- c(lines, paste0("  - First transfer: ", as.character(trans$date_first_transfer)))
+    }
+    if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
+      lines <- c(lines, paste0("  - Last transfer: ", as.character(trans$date_last_transfer)))
+    }
+  }
+  if (!is.null(meta@error_handling) && nzchar(as.character(meta@error_handling))) {
+    lines <- c(lines, "- Error handling", paste0("  - ", as.character(meta@error_handling)))
+  }
+  auth <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
+  if (length(auth) > 0) {
+    lines <- c(lines, "- Authorized for corrections")
+    lines <- c(lines, paste0("  - ", auth))
+  }
+  sig <- .tv_signatories_block(meta)
+  if (nzchar(sig)) {
+    lines <- c(lines, "- Signatories", strsplit(sig, "\n", fixed = TRUE)[[1]])
+  }
+  paste(lines, collapse = "\n")
+}
+
+
 #' Summarize a version-history list as a single line
 #' @keywords internal
 .tv_version_history <- function(version_history) {
@@ -421,7 +525,7 @@ dta_template_placeholders <- function(dta = NULL) {
 
 #' Normalize a user-supplied variable list to brace-delimited character values
 #' @keywords internal
-.normalize_template_variables <- function(variables) {
+.normalize_template_variables <- function(variables, dta = NULL) {
   if (is.null(variables) || length(variables) == 0) {
     return(list())
   }
@@ -431,9 +535,400 @@ dta_template_placeholders <- function(dta = NULL) {
     function(k) if (grepl("^\\{.*\\}$", k)) k else paste0("{", k, "}"),
     character(1)
   )
-  vals <- lapply(variables, function(v) .tv_scalar(v))
+  vals <- lapply(seq_along(variables), function(i) {
+    .tv_template_value(
+      variables[[i]],
+      dta = dta,
+      markdown_cleanup = !.tv_needs_yaml_style(keys[[i]])
+    )
+  })
   names(vals) <- keys
   vals
+}
+
+#' Coerce a user-supplied template value while preserving line structure
+#'
+#' Unlike [.tv_scalar()], this keeps caller-provided line breaks and tabs so a
+#' custom placeholder can intentionally render as a multi-line block.
+#' @keywords internal
+.tv_template_value <- function(x, default = "", markdown_cleanup = TRUE, dta = NULL) {
+  if (is.null(x) || length(x) == 0) {
+    return(default)
+  }
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    out <- .format_document_date(x)
+    return(if (nzchar(out)) out else default)
+  }
+  if (is.logical(x)) {
+    return(if (isTRUE(x)) "Yes" else "No")
+  }
+  vals <- as.character(x)
+  vals <- vals[!is.na(vals)]
+  if (length(vals) == 0) {
+    return(default)
+  }
+  vals <- gsub("\r\n", "\n", vals, fixed = TRUE)
+  vals <- gsub("\r", "\n", vals, fixed = TRUE)
+  if (isTRUE(markdown_cleanup)) {
+    vals <- vapply(
+      vals,
+      function(v) .tv_template_markdown_to_text(v, dta = dta),
+      character(1)
+    )
+  }
+  if (length(vals) == 1) {
+    return(vals[[1]])
+  }
+  paste(vals, collapse = "\n")
+}
+
+
+#' Convert markdown-like placeholder text to Word-friendly plain text
+#'
+#' Template placeholders are inserted as Word text runs, not a markdown parser.
+#' Strip common markdown markers so headings/bold/lists do not render literally.
+#' @keywords internal
+.tv_template_markdown_to_text <- function(text, dta = NULL) {
+  if (!.tv_looks_markdown(text)) {
+    return(text)
+  }
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  out <- vapply(
+    lines,
+    function(ln) {
+      x <- gsub("^\\s{0,3}#{1,6}\\s+", "", ln, perl = TRUE)
+      x <- .tv_reformat_dataset_bullet(x, dta = dta)
+      x <- .tv_markdown_bullet_to_word_bullet(x)
+      x <- gsub("\\*\\*([^*]+)\\*\\*", "\\1", x, perl = TRUE)
+      x <- gsub("`([^`]+)`", "\\1", x, perl = TRUE)
+      x
+    },
+    character(1)
+  )
+  paste(out, collapse = "\n")
+}
+
+
+#' Heuristic: does text look like markdown syntax?
+#' @keywords internal
+.tv_looks_markdown <- function(text) {
+  grepl("(?m)^\\s{0,3}#{1,6}\\s+|\\*\\*[^*]+\\*\\*|(?m)^\\s*[-*+]\\s+", text, perl = TRUE)
+}
+
+
+#' Convert markdown list markers to visible Word bullet glyphs
+#' @keywords internal
+.tv_markdown_bullet_to_word_bullet <- function(line) {
+  parts <- strsplit(line, "\n", fixed = TRUE)[[1]]
+  parts <- vapply(
+    parts,
+    function(ln) {
+      m <- regexec("^([ \t]*)([-*+])[ ]+(.*)$", ln, perl = TRUE)
+      hit <- regmatches(ln, m)[[1]]
+      if (length(hit) == 0) {
+        return(ln)
+      }
+
+      indent_raw <- gsub("\t", "  ", hit[[2]], fixed = TRUE)
+      indent_n <- nchar(indent_raw)
+      level <- floor(indent_n / 2)
+      symbol <- .tv_list_symbol_for_level(level)
+      lead <- strrep(" ", level * 4)
+      paste0(lead, symbol, " ", hit[[4]])
+    },
+    character(1)
+  )
+  paste(parts, collapse = "\n")
+}
+
+
+#' Bullet symbol by nesting level for Word-friendly visual hierarchy
+#' @keywords internal
+.tv_list_symbol_for_level <- function(level) {
+  if (level <= 0) {
+    return("\u2022")
+  }
+  if (level == 1) {
+    return("\u25e6")
+  }
+  "\u25aa"
+}
+
+
+#' Expand dense dataset/rule bullets into a readable multiline block
+#' @keywords internal
+.tv_reformat_dataset_bullet <- function(line, dta = NULL) {
+  body <- sub("^\\s*[-*+]\\s+", "", line, perl = TRUE)
+  m <- regexec("^\\*\\*([^*]+)\\*\\*(.*)$", body, perl = TRUE)
+  hits <- regmatches(body, m)[[1]]
+  if (length(hits) == 0) {
+    return(line)
+  }
+  if (length(hits) < 3) {
+    return(line)
+  }
+
+  name <- sub(":\\s*$", "", trimws(hits[[2]]))
+  tail <- trimws(hits[[3]])
+  meta <- ""
+  if (grepl("^\\[[^\\]]+\\]", tail, perl = TRUE)) {
+    meta <- regmatches(tail, regexec("^(\\[[^\\]]+\\])", tail, perl = TRUE))[[1]][[2]]
+    tail <- trimws(sub("^\\[[^\\]]+\\]", "", tail, perl = TRUE))
+  }
+  detail <- sub("^:\\s*", "", tail, perl = TRUE)
+  if (length(detail) == 0) {
+    return(line)
+  }
+
+  vals <- strsplit(detail, "\\|\\s*values\\s*:", perl = TRUE)[[1]]
+  if (length(vals) == 0) {
+    return(line)
+  }
+  desc <- trimws(vals[[1]])
+  values <- if (length(vals) > 1) trimws(paste(vals[-1], collapse = "| values: ")) else ""
+
+  header <- paste0("- ", name)
+  extra <- character(0)
+  if (nzchar(meta)) {
+    if (nzchar(desc)) {
+      extra <- c(extra, paste0("  - Description: ", desc))
+    }
+    meta_info <- .tv_parse_column_meta(meta)
+    if (nzchar(meta_info$type)) {
+      extra <- c(extra, paste0("  - Type: ", meta_info$type))
+    }
+    if (nzchar(meta_info$nullable)) {
+      extra <- c(extra, paste0("  - Nullable: ", meta_info$nullable))
+    }
+    if (nzchar(meta_info$length)) {
+      extra <- c(extra, paste0("  - Length: ", meta_info$length))
+    }
+    if (nzchar(values)) {
+      value_items <- trimws(unlist(strsplit(values, ",", fixed = TRUE)))
+      value_items <- value_items[nzchar(value_items)]
+      if (length(value_items) > 0) {
+        extra <- c(extra, "  - Values:")
+        extra <- c(extra, paste0("    - ", value_items))
+      } else {
+        extra <- c(extra, paste0("  - Values: ", values))
+      }
+    }
+    return(paste(c(header, extra), collapse = "\n"))
+  }
+
+  if (.tv_is_group_condition_summary(desc)) {
+    extra <- .tv_expand_group_condition_summary(desc, dta = dta, rule_id = name)
+  } else if (nzchar(desc)) {
+    extra <- c(extra, paste0("  - ", desc))
+  }
+
+  paste(c(header, extra), collapse = "\n")
+}
+
+
+#' Parse the bracket metadata of a column bullet into named fields
+#' @keywords internal
+.tv_parse_column_meta <- function(meta) {
+  raw <- gsub("^\\[|\\]$", "", trimws(meta))
+  parts <- trimws(unlist(strsplit(raw, ",", fixed = TRUE)))
+  parts <- parts[nzchar(parts)]
+
+  out <- list(type = "", nullable = "", length = "")
+  if (length(parts) == 0) {
+    return(out)
+  }
+
+  is_nullable <- grepl("^(nullable|not null)$", parts, ignore.case = TRUE)
+  is_length <- grepl("^length\\s+", parts, ignore.case = TRUE)
+  type_parts <- parts[!(is_nullable | is_length)]
+  if (length(type_parts) > 0) {
+    out$type <- paste(type_parts, collapse = ", ")
+  }
+
+  nullable_part <- parts[is_nullable]
+  if (length(nullable_part) > 0) {
+    tok <- tolower(nullable_part[[1]])
+    out$nullable <- if (identical(tok, "not null")) "no" else "yes"
+  }
+
+  length_part <- parts[is_length]
+  if (length(length_part) > 0) {
+    out$length <- trimws(sub("^length\\s+", "", length_part[[1]], ignore.case = TRUE))
+  }
+
+  out
+}
+
+
+#' Does a rule description look like group_condition summary output?
+#' @keywords internal
+.tv_is_group_condition_summary <- function(text) {
+  grepl("^group\\([^\\)]+\\):\\s*[0-9]+\\s*condition\\(s\\),\\s*[0-9]+\\s*constraint\\(s\\)", text)
+}
+
+
+#' Expand group_condition summary into a clearer premise-oriented outline
+#' @keywords internal
+.tv_expand_group_condition_summary <- function(text, dta = NULL, rule_id = "") {
+  m <- regexec(
+    "^group\\(([^\\)]+)\\):\\s*([0-9]+)\\s*condition\\(s\\),\\s*([0-9]+)\\s*constraint\\(s\\)\\s*[—-]?\\s*(.*)$",
+    text,
+    perl = TRUE
+  )
+  hits <- regmatches(text, m)[[1]]
+  if (length(hits) == 0) {
+    return(paste0("  - ", text))
+  }
+
+  group_by <- trimws(hits[[2]])
+  n_cond <- trimws(hits[[3]])
+  n_constr <- trimws(hits[[4]])
+  note <- trimws(hits[[5]])
+
+  out <- c(
+    paste0("  - Grouped by: ", group_by),
+    "  - Conditions:",
+    "    - See detailed condition definitions below.",
+    "  - Constraints:",
+    "    - See detailed constraint definitions below.",
+    "  - Premise:",
+    paste0("    - Rows are grouped by ", group_by, "."),
+    "    - Condition checks are evaluated within each group.",
+    "    - The listed constraints must hold for the same grouped rows."
+  )
+  if (nzchar(note)) {
+    out <- c(out, paste0("  - Context: ", note))
+  }
+  detailed <- .tv_expand_group_condition_from_dta(dta, rule_id)
+  if (length(detailed) > 0) {
+    out <- c(out, detailed)
+  }
+  out
+}
+
+
+#' Build detailed group_condition rule breakdown from the DTA rule object
+#' @keywords internal
+.tv_expand_group_condition_from_dta <- function(dta, rule_id) {
+  if (is.null(dta) || !inherits(dta, "DTAtools::DTA") || !nzchar(rule_id)) {
+    return(character(0))
+  }
+  rule <- .tv_find_group_rule(dta, rule_id)
+  if (is.null(rule)) {
+    return(character(0))
+  }
+
+  out <- "  - Detailed rule definition:"
+
+  conds <- rule@conditions
+  out <- c(out, "    - Conditions:")
+  for (nm in names(conds)) {
+    out <- c(out, paste0("      - ", nm, ": ", .tv_condition_to_text(conds[[nm]])))
+  }
+
+  csts <- rule@constraints
+  out <- c(out, "    - Constraints:")
+  for (cst in csts) {
+    out <- c(out, paste0("      - ", .tv_constraint_to_text(cst)))
+  }
+
+  out
+}
+
+
+#' Find a group_condition rule object by id within a DTA
+#' @keywords internal
+.tv_find_group_rule <- function(dta, rule_id) {
+  for (ds in dta@datasets) {
+    if (!inherits(ds, "DTAtools::DTADataSetTabular")) {
+      next
+    }
+    rules <- ds@specs@rules
+    if (is.null(rules) || length(rules) == 0) {
+      next
+    }
+    for (r in rules) {
+      if (is.null(r)) {
+        next
+      }
+      rid <- tryCatch(as.character(r@id), error = function(e) "")
+      rtype <- tryCatch(as.character(r@type), error = function(e) "")
+      if (identical(rid, rule_id) && rtype %in% c("check_group_condition", "group_condition")) {
+        return(r)
+      }
+    }
+  }
+  NULL
+}
+
+
+#' Render one named condition map to plain text
+#' @keywords internal
+.tv_condition_to_text <- function(cond) {
+  if (is.null(cond) || !is.list(cond) || length(cond) == 0) {
+    return("no condition details")
+  }
+  col_parts <- vapply(
+    names(cond),
+    function(col) {
+      checks <- cond[[col]]
+      if (!is.list(checks) || length(checks) == 0) {
+        return(col)
+      }
+      check_parts <- vapply(
+        names(checks),
+        function(op) {
+          val <- checks[[op]]
+          val_txt <- if (length(val) > 1) {
+            paste(as.character(val), collapse = ", ")
+          } else {
+            as.character(val)[[1]]
+          }
+          paste(col, op, val_txt)
+        },
+        character(1)
+      )
+      paste(check_parts, collapse = " AND ")
+    },
+    character(1)
+  )
+  paste(col_parts, collapse = " AND ")
+}
+
+
+#' Render one group_condition constraint to plain text
+#' @keywords internal
+.tv_constraint_to_text <- function(cst) {
+  if (!is.list(cst) || is.null(cst$type)) {
+    return("unknown constraint")
+  }
+  ctype <- as.character(cst$type)
+  if (identical(ctype, "mutually_exclusive")) {
+    left <- cst$left %||% "?"
+    right <- cst$right %||% "?"
+    ls <- cst$left_scope %||% "any"
+    rs <- cst$right_scope %||% "any"
+    core <- paste0(
+      "mutually_exclusive: ", left, " (scope=", ls, ") and ",
+      right, " (scope=", rs, ") must not both hold"
+    )
+  } else if (identical(ctype, "requires")) {
+    ifn <- cst[["if"]] %||% "?"
+    thn <- cst[["then"]] %||% "?"
+    ifs <- cst$if_scope %||% "any"
+    ths <- cst$then_scope %||% "any"
+    core <- paste0(
+      "requires: if ", ifn, " (scope=", ifs, ") then ",
+      thn, " (scope=", ths, ")"
+    )
+  } else {
+    core <- paste0("constraint type ", ctype)
+  }
+  if (!is.null(cst$message) && nzchar(cst$message)) {
+    paste0(core, " — ", cst$message)
+  } else {
+    core
+  }
 }
 
 
@@ -565,10 +1060,13 @@ dta_template_placeholders <- function(dta = NULL) {
       if (identical(res$text, combined)) {
         next
       }
-      xml2::xml_text(t_nodes[[1]]) <- res$text
-      .tv_set_preserve_space(t_nodes[[1]])
+      run_node <- xml2::xml_parent(t_nodes[[1]])
+      .tv_set_run_text(t_nodes[[1]], res$text)
+      if (.tv_should_apply_yaml_style(combined, res$replaced_keys)) {
+        .tv_set_yaml_run_style(run_node)
+      }
       for (i in seq_along(t_nodes)[-1]) {
-        xml2::xml_text(t_nodes[[i]]) <- ""
+        .tv_set_run_text(t_nodes[[i]], "")
       }
       next
     }
@@ -581,8 +1079,11 @@ dta_template_placeholders <- function(dta = NULL) {
       if (identical(res$text, texts[[i]])) {
         next
       }
-      xml2::xml_text(t_nodes[[i]]) <- res$text
-      .tv_set_preserve_space(t_nodes[[i]])
+      run_node <- xml2::xml_parent(t_nodes[[i]])
+      .tv_set_run_text(t_nodes[[i]], res$text)
+      if (.tv_should_apply_yaml_style(texts[[i]], res$replaced_keys)) {
+        .tv_set_yaml_run_style(run_node)
+      }
     }
   }
 
@@ -733,13 +1234,18 @@ dta_template_placeholders <- function(dta = NULL) {
   keys <- names(variables)
   m <- .tv_placeholder_matches(text, variables)
   if (length(m$start) == 0) {
-    return(list(text = text, unresolved = character(0)))
+    return(list(
+      text = text,
+      unresolved = character(0),
+      replaced_keys = character(0)
+    ))
   }
   starts <- m$start
   lens <- m$length
 
   out <- character(0)
   unresolved <- character(0)
+  replaced_keys <- character(0)
   pos <- 1L
   for (i in seq_along(starts)) {
     start <- starts[[i]]
@@ -751,6 +1257,7 @@ dta_template_placeholders <- function(dta = NULL) {
     if (token %in% keys) {
       value <- variables[[token]]
       out <- c(out, if (length(value) == 0) "" else as.character(value)[[1]])
+      replaced_keys <- c(replaced_keys, token)
     } else {
       out <- c(out, token)
       unresolved <- c(unresolved, token)
@@ -761,7 +1268,11 @@ dta_template_placeholders <- function(dta = NULL) {
     out <- c(out, substr(text, pos, nchar(text)))
   }
 
-  list(text = paste0(out, collapse = ""), unresolved = unique(unresolved))
+  list(
+    text = paste0(out, collapse = ""),
+    unresolved = unique(unresolved),
+    replaced_keys = unique(replaced_keys)
+  )
 }
 
 
@@ -772,6 +1283,172 @@ dta_template_placeholders <- function(dta = NULL) {
     xml2::xml_set_attr(node, "xml:space", "preserve"),
     error = function(e) NULL
   )
+  invisible(node)
+}
+
+
+#' Set run content from text, preserving tabs/newlines as Word elements
+#' @keywords internal
+.tv_set_run_text <- function(t_node, text) {
+  run <- xml2::xml_parent(t_node)
+  if (is.null(run)) {
+    return(invisible(NULL))
+  }
+
+  kids <- xml2::xml_children(run)
+  rpr_idx <- which(vapply(
+    kids,
+    function(ch) grepl("(^|:)rPr$", xml2::xml_name(ch)),
+    logical(1)
+  ))
+  if (length(kids) > 0) {
+    if (length(rpr_idx) > 0) {
+      drop_idx <- setdiff(seq_along(kids), rpr_idx[[1]])
+      if (length(drop_idx) > 0) {
+        xml2::xml_remove(kids[drop_idx])
+      }
+    } else {
+      xml2::xml_remove(kids)
+    }
+  }
+
+  chunks <- .tv_split_word_chunks(text)
+  if (length(chunks) == 0) {
+    chunks <- list(list(type = "text", value = ""))
+  }
+
+  for (chunk in chunks) {
+    if (identical(chunk$type, "break")) {
+      xml2::xml_add_child(run, "w:br")
+      next
+    }
+    if (identical(chunk$type, "tab")) {
+      xml2::xml_add_child(run, "w:tab")
+      next
+    }
+    t_new <- xml2::xml_add_child(run, "w:t", chunk$value)
+    .tv_set_preserve_space(t_new)
+  }
+
+  invisible(run)
+}
+
+
+#' Split text into WordprocessingML chunks (text, line break, tab)
+#' @keywords internal
+.tv_split_word_chunks <- function(text) {
+  if (length(text) == 0 || is.null(text) || is.na(text)) {
+    return(list(list(type = "text", value = "")))
+  }
+  text <- as.character(text)[[1]]
+  text <- gsub("\r\n", "\n", text, fixed = TRUE)
+  text <- gsub("\r", "\n", text, fixed = TRUE)
+
+  marks <- gregexpr("[\n\t]", text, perl = TRUE)[[1]]
+  if (length(marks) == 1L && marks[[1]] == -1L) {
+    return(list(list(type = "text", value = text)))
+  }
+
+  chunks <- list()
+  pos <- 1L
+  for (idx in seq_along(marks)) {
+    at <- marks[[idx]]
+    if (at > pos) {
+      chunks <- c(chunks, list(list(
+        type = "text",
+        value = substr(text, pos, at - 1L)
+      )))
+    }
+    marker <- substr(text, at, at)
+    if (identical(marker, "\n")) {
+      chunks <- c(chunks, list(list(type = "break", value = "")))
+    } else {
+      chunks <- c(chunks, list(list(type = "tab", value = "")))
+    }
+    pos <- at + 1L
+  }
+
+  if (pos <= nchar(text)) {
+    chunks <- c(chunks, list(list(
+      type = "text",
+      value = substr(text, pos, nchar(text))
+    )))
+  }
+
+  chunks
+}
+
+
+#' Should a substituted placeholder be styled as embedded YAML code?
+#' @keywords internal
+.tv_needs_yaml_style <- function(keys) {
+  if (length(keys) == 0) {
+    return(FALSE)
+  }
+  any(grepl("yaml", keys, ignore.case = TRUE))
+}
+
+
+#' Apply YAML style only when the whole source run was the YAML placeholder
+#' @keywords internal
+.tv_should_apply_yaml_style <- function(source_text, keys) {
+  if (length(keys) != 1) {
+    return(FALSE)
+  }
+  key <- keys[[1]]
+  .tv_needs_yaml_style(key) && identical(trimws(source_text), key)
+}
+
+
+#' Force small monospace style on a run (for embedded YAML placeholders)
+#'
+#' Matches the built-in embedded YAML section styling (small, monospace).
+#' @keywords internal
+.tv_set_yaml_run_style <- function(run_node) {
+  if (is.null(run_node) || length(run_node) == 0) {
+    return(invisible(NULL))
+  }
+  rpr <- .tv_ensure_run_props(run_node)
+  .tv_set_or_add_rpr_child(rpr, "w:rFonts", c(
+    "w:ascii" = "Consolas",
+    "w:hAnsi" = "Consolas",
+    "w:cs" = "Consolas"
+  ))
+  .tv_set_or_add_rpr_child(rpr, "w:sz", c("w:val" = "12"))
+  .tv_set_or_add_rpr_child(rpr, "w:szCs", c("w:val" = "12"))
+  invisible(run_node)
+}
+
+
+#' Ensure a run has a rPr child and return it
+#' @keywords internal
+.tv_ensure_run_props <- function(run_node) {
+  kids <- xml2::xml_children(run_node)
+  rpr_idx <- which(vapply(
+    kids,
+    function(ch) grepl("(^|:)rPr$", xml2::xml_name(ch)),
+    logical(1)
+  ))
+  if (length(rpr_idx) > 0) {
+    return(kids[[rpr_idx[[1]]]])
+  }
+  xml2::xml_add_child(run_node, "w:rPr", .where = 0)
+}
+
+
+#' Upsert a single run-property child element with attributes
+#' @keywords internal
+.tv_set_or_add_rpr_child <- function(rpr_node, child_name, attrs) {
+  kids <- xml2::xml_children(rpr_node)
+  idx <- which(vapply(
+    kids,
+    function(ch) grepl(paste0("(^|:)", sub("^w:", "", child_name), "$"), xml2::xml_name(ch)),
+    logical(1)
+  ))
+  node <- if (length(idx) > 0) kids[[idx[[1]]]] else xml2::xml_add_child(rpr_node, child_name)
+  for (nm in names(attrs)) {
+    xml2::xml_set_attr(node, nm, attrs[[nm]])
+  }
   invisible(node)
 }
 

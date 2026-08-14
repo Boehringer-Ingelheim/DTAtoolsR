@@ -256,3 +256,27 @@ test_that("find_chrome_binary ignores an override pointing at a missing file", {
 # out to a real Chrome/Edge binary via system2() to print a PDF, which is an
 # external-process integration concern outside the scope of these unit
 # tests (and not reliably available/deterministic in CI).
+
+test_that("the export modal defaults to Word with the YAML specification embedded", {
+  # Deliberate defaults: Word is the format users actually hand over, and the
+  # embedded YAML is what makes the document machine-readable, so neither
+  # should need a click. The modal is rebuilt on every open (it lives inside
+  # the input$export_modal_open observer), so these literals are what the user
+  # sees each time.
+  app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
+
+  fmt <- regmatches(
+    app_code,
+    regexpr('(?s)radioButtons\\("export_format".{0,300}?selected = "[a-z]+"', app_code, perl = TRUE)
+  )
+  expect_length(fmt, 1)
+  expect_match(fmt, 'selected = "word"', fixed = TRUE)
+  expect_false(grepl('selected = "markdown"', fmt, fixed = TRUE))
+
+  yaml_box <- regmatches(
+    app_code,
+    regexpr('(?s)checkboxInput\\("export_include_yaml_word".*?\\)', app_code, perl = TRUE)
+  )
+  expect_length(yaml_box, 1)
+  expect_match(yaml_box, "value = TRUE", fixed = TRUE)
+})

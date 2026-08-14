@@ -170,6 +170,16 @@ write_dta <- function(
   # every section below renders as 1.x (and datasets as 1.x.y.z).
   doc <- .add_heading(doc, "Data Transfer Agreement", level = 1)
 
+  # Approval comes first: the signature block is what a reader has to act on,
+  # so it is the opening chapter rather than an appendix buried behind the
+  # process description.
+  if (isTRUE(include_signatures)) {
+    doc <- .add_signature_section(
+      doc,
+      signatories = .extract_signatories(meta, signature_list = signature_list)
+    )
+  }
+
   # Metadata overview
   metadata <- list()
   if (!is.null(meta@header)) metadata[["Header"]] <- meta@header
@@ -202,38 +212,47 @@ write_dta <- function(
     ft <- flextable::width(ft, j = 1, width = 1.0)
     ft <- flextable::width(ft, j = 2, width = 1.2)
     ft <- flextable::width(ft, j = 3, width = 4.0)
-    ft <- flextable::bg(ft, i = 1, bg = THEME_COLORS$primary_light, part = "header")
-    ft <- flextable::bold(ft, part = "header")
+    ft <- .style_table(ft, center_cols = c(1, 2))
 
     doc <- flextable::body_add_flextable(doc, ft)
-    doc <- officer::body_add_par(doc, "", style = "Normal")
+    doc <- .add_spacer(doc)
   }
 
-  # Transmission details
-  if (length(meta@transmission) > 0) {
-    doc <- .add_heading(doc, "Transmission Details", level = 2)
-    trans_meta <- as.list(meta@transmission)
-    doc <- .add_metadata_section(doc, "", trans_meta)
-  }
-
-  # Error handling
-  if (!is.null(meta@error_handling)) {
-    doc <- .add_heading(doc, "Error Handling", level = 2)
-    doc <- officer::body_add_par(doc, meta@error_handling, style = "Normal")
-    doc <- officer::body_add_par(doc, "", style = "Normal")
-  }
-
-  # Receiver and Supplier information (affiliation + individually listed contacts)
-  if (length(meta@receiver) > 0) {
-    doc <- .add_organization_section(doc, "Receiver Information", meta@receiver)
-  }
-
+  # Supplier and Receiver information (affiliation + individually listed
+  # contacts). Supplier comes first: the data flows supplier -> receiver, so
+  # that is the order the parties are introduced in.
   if (length(meta@supplier) > 0) {
     doc <- .add_organization_section(doc, "Supplier Information", meta@supplier)
   }
 
-  # Authorized for corrections
-  doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections)
+  if (length(meta@receiver) > 0) {
+    doc <- .add_organization_section(doc, "Receiver Information", meta@receiver)
+  }
+
+  # Process Information: keep this chapter immediately before Datasets.
+  # Signatures are no longer part of it (they open the document), so this
+  # chapter appears only when there is genuine process content to show.
+  has_process_information <- length(meta@transmission) > 0 ||
+    !is.null(meta@error_handling) ||
+    length(.format_authorized_for_corrections_lines(meta@authorized_for_corrections)) > 0
+
+  if (has_process_information) {
+    doc <- .add_heading(doc, "Process Information", level = 2)
+
+    if (length(meta@transmission) > 0) {
+      doc <- .add_heading(doc, "Transmission Details", level = 3)
+      trans_meta <- as.list(meta@transmission)
+      doc <- .add_metadata_section(doc, "", trans_meta)
+    }
+
+    if (!is.null(meta@error_handling)) {
+      doc <- .add_heading(doc, "Error Handling", level = 3)
+      doc <- .add_body_par(doc, meta@error_handling)
+      doc <- .add_spacer(doc)
+    }
+
+    doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections)
+  }
 
   # Datasets: file specifications, column specifications, and validation rules per dataset
   if (length(dta@datasets) > 0) {
@@ -244,8 +263,8 @@ write_dta <- function(
 
       doc <- .add_heading(doc, ds_name, level = 3)
       if (!is.null(dataset@description) && nzchar(dataset@description)) {
-        doc <- officer::body_add_par(doc, dataset@description, style = "Normal")
-        doc <- officer::body_add_par(doc, "", style = "Normal")
+        doc <- .add_body_par(doc, dataset@description)
+        doc <- .add_spacer(doc)
       }
 
       # <chapter>.<section>.<dataset>.1 Files
@@ -329,9 +348,9 @@ write_dta <- function(
     lines <- c(lines, "## Error Handling", "", meta@error_handling, "")
   }
 
-  # Receiver and Supplier information (affiliation + individually listed contacts)
-  lines <- c(lines, .organization_to_md_lines("Receiver Information", meta@receiver))
+  # Supplier and Receiver information, in data-flow order (see the docx export).
   lines <- c(lines, .organization_to_md_lines("Supplier Information", meta@supplier))
+  lines <- c(lines, .organization_to_md_lines("Receiver Information", meta@receiver))
 
   # Authorized for corrections
   auth_names <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
@@ -903,6 +922,11 @@ write_dataset_metadata <- function(
     version = dataset@template_version
   )
 
+  # Approval signatures come before the descriptive content, matching write_dta().
+  if (include_signatures) {
+    doc <- .add_signature_section(doc, signature_list)
+  }
+
   # Basic metadata
   metadata <- list()
   if (!is.null(dataset@description)) metadata[["Description"]] <- dataset@description
@@ -920,11 +944,6 @@ write_dataset_metadata <- function(
   # Column specifications (DTADataSetTabular only)
   if (inherits(dataset, "DTAtools::DTADataSetTabular")) {
     doc <- .add_dataset_specs_section(doc, dataset, include_rules = include_rules, heading_level = 2)
-  }
-
-  # Approval signatures
-  if (include_signatures) {
-    doc <- .add_signature_section(doc, signature_list)
   }
 
   # Footer
