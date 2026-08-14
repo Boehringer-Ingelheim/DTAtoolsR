@@ -588,8 +588,18 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     return(character(0))
   }
 
-  # Escape pipe characters so they don't break the table layout
-  df[] <- lapply(df, function(col) gsub("|", "\\|", as.character(col), fixed = TRUE))
+  # A pipe table is line-based, so a cell must survive as one line. Escaping the
+  # pipe alone was not enough: a description written as a YAML block scalar
+  # carries real newlines, and each one split the row in two -- the renderer
+  # then read the tail as a fresh table row, misattributing its text to the
+  # first column and dropping whatever followed the last pipe. Newlines become
+  # <br>, which GFM renders as a line break inside the cell.
+  df[] <- lapply(df, function(col) {
+    text <- as.character(col)
+    text <- gsub("|", "\\|", text, fixed = TRUE)
+    text <- gsub("\r\n|\r|\n", "<br>", text)
+    text
+  })
 
   header <- paste0("| ", paste(names(df), collapse = " | "), " |")
   sep <- paste0("|", paste(rep("---", ncol(df)), collapse = "|"), "|")

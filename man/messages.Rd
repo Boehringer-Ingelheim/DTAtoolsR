@@ -19,7 +19,7 @@ is installed) with columns:
 }
 \description{
 Returns one row per validation message to support debugging workflows.
-The output combines schema and rule failures into a single flat table.
+The output combines column spec and rule failures into a single flat table.
 
 Methods are available for \code{DTA}, \code{DTADataSet}, and \code{DTADataSetTabular}.
 }

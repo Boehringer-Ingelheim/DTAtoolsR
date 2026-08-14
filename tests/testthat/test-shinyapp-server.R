@@ -255,7 +255,7 @@ test_that("check_all reports fail for data that violates the spec", {
     expect_gt(nrow(msgs), 0)
     # clinical_data_error_all.csv now also carries import errors (see
     # test-clinical-error-fixtures.R), so "import" joins the source set.
-    expect_setequal(unique(msgs$source), c("import", "rule", "schema"))
+    expect_setequal(unique(msgs$source), c("import", "rule", "columnspec"))
   })
 })
 

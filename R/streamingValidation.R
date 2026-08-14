@@ -4,7 +4,7 @@
 # sizes this package is meant to reach: an 80 GB file cannot be an R data frame
 # at all, whatever the validation costs once it is one.
 #
-# What makes streaming safe rather than merely possible is that the schema axis
+# What makes streaming safe rather than merely possible is that the column spec axis
 # is purely per-row. No constraint it evaluates -- type, maxLength, enum, const,
 # pattern -- consults another row, so a batch can be checked in isolation and
 # the results concatenated. The only cross-batch state is the row offset, so
@@ -180,7 +180,7 @@ dta_rule_stream_finalise <- function(state, rule) {
   }
 
   if (!state$applicable) {
-    # Matches apply_schema_rules(): a rule that cannot be evaluated against this
+    # Matches apply_rules(): a rule that cannot be evaluated against this
     # table is a rule FAILURE, not a reason to abandon the rest of validation.
     return(list(
       id = rule@id,
@@ -211,6 +211,30 @@ dta_rule_stream_finalise <- function(state, rule) {
   }
 
   list(id = rule@id, valid = FALSE, message = message)
+}
+
+#' @title Whether a Partial Scan Can Already Call a Rule Failed
+#' @description
+#' The predicate behind `fail_fast`. A rule counts as failed only when no later
+#' batch could overturn the verdict.
+#'
+#' `state$count` alone is not that predicate. A grouped rule never increments
+#' it -- its verdict is reached in `dta_group_stream_finalise()`, after the
+#' scan -- so reading `count` left `fail_fast` scanning a whole file whose very
+#' first rows already broke a grouped constraint. Unsupported and
+#' not-applicable rules are failures the moment they are discovered, and are
+#' likewise invisible in `count`.
+#' @param state An accumulator from `dta_rule_stream_init()`.
+#' @return A single logical.
+#' @keywords internal
+dta_rule_stream_failing <- function(state) {
+  if (state$kind == "unsupported" || !state$applicable) {
+    return(TRUE)
+  }
+  if (state$kind == "grouped") {
+    return(state$grouped$certain > 0L)
+  }
+  state$count > 0L
 }
 
 #' @title Columns Forming a Uniqueness Key
@@ -307,7 +331,7 @@ dta_error_sink_collect <- function(sink) {
 #' (`results()`, `messages()`, `inspect()`, the Shiny app) works unchanged.
 #'
 #' Nothing here scales with the number of rows. Peak memory is bounded by the
-#' batch size for the schema axis, by the number of distinct keys for uniqueness
+#' batch size for the column spec axis, by the number of distinct keys for uniqueness
 #' rules, by the number of distinct groups for grouped rules, and by the
 #' retained-error cap.
 #'
@@ -337,7 +361,7 @@ dta_validate_table_stream <- function(specs,
 
   states <- lapply(rules_list, dta_rule_stream_init)
 
-  schema_sink <- dta_error_sink(max_errors)
+  columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
   row_offset <- 0L
@@ -380,11 +404,11 @@ dta_validate_table_stream <- function(specs,
       }
     }
 
-    schema_result <- dta_schema_errors(specs, df)
-    schema_errs <- schema_result$full_error
-    if (!is.null(schema_errs) && nrow(schema_errs) > 0) {
-      schema_errs$row <- schema_errs$row + row_offset
-      dta_error_sink_add(schema_sink, schema_errs)
+    schema_result <- dta_columnspec_errors(specs, df)
+    columnspec_errs <- schema_result$full_error
+    if (!is.null(columnspec_errs) && nrow(columnspec_errs) > 0) {
+      columnspec_errs$row <- columnspec_errs$row + row_offset
+      dta_error_sink_add(columnspec_sink, columnspec_errs)
     }
 
     for (i in seq_along(rules_list)) {
@@ -406,18 +430,18 @@ dta_validate_table_stream <- function(specs,
     row_offset <- row_offset + n_batch_rows
 
     if (isTRUE(fail_fast) &&
-      (schema_sink$total > 0 ||
+      (columnspec_sink$total > 0 ||
         carried_sink$total > 0 ||
         rule_import_sink$total > 0 ||
-        any(vapply(states, function(s) s$count > 0, logical(1))))) {
+        any(vapply(states, dta_rule_stream_failing, logical(1))))) {
       partial_scan <- TRUE
       break
     }
   }
 
-  full_error <- dta_error_sink_collect(schema_sink)
-  summarised_error <- dta_summarise_schema_errors(full_error)
-  has_schema_errors <- schema_sink$total > 0
+  full_error <- dta_error_sink_collect(columnspec_sink)
+  summarised_error <- dta_summarise_columnspec_errors(full_error)
+  has_columnspec_errors <- columnspec_sink$total > 0
 
   rule_results <- lapply(seq_along(rules_list), function(i) {
     dta_rule_stream_finalise(states[[i]], rules_list[[i]])
@@ -426,7 +450,22 @@ dta_validate_table_stream <- function(specs,
   rules_valid <- length(rule_errors) == 0
 
   carried <- dta_error_sink_collect(carried_sink)
+  if (!is.null(carried)) {
+    # The sink is the authority on how many import-typing errors there were.
+    # Whatever `n_import_errors` attribute survived the rbind belongs to one
+    # batch's frame, and letting dta_merge_import_errors() read that instead
+    # would count the capped rows on top of the sink total.
+    attr(carried, "n_import_errors") <- carried_sink$total
+  }
   rule_import <- dta_error_sink_collect(rule_import_sink)
+
+  # Rows the retained-error cap threw away, counted before any deduplication so
+  # the two are not confused: a duplicate is one error counted once, a capped
+  # row is one error whose identity is gone. The carried axis needs this only
+  # when the cap left nothing at all for the merge to count.
+  carried_capped <- if (is.null(carried)) carried_sink$total else 0L
+  rule_capped <- rule_import_sink$total - NROW(rule_import)
+
   if (!is.null(rule_import)) {
     rule_import <- rule_import[
       !duplicated(rule_import[, c("row", "column"), drop = FALSE]), ,
@@ -436,7 +475,15 @@ dta_validate_table_stream <- function(specs,
   }
 
   import_errors <- dta_merge_import_errors(carried, rule_import)
-  n_import_errors <- carried_sink$total + rule_import_sink$total
+  # dta_merge_import_errors() is the only place that knows a cell flagged on
+  # both the import-typing axis and the rule-reading axis is one error, not
+  # two. Summing the raw sink totals bypassed it, and could report more import
+  # errors than `import_errors` had rows -- while the materialising path, which
+  # counts the merged frame, reported the right number for the same input.
+  # Capped rows were never available to deduplicate, so they are added back
+  # unreduced: a truncated scan over-reports rather than under-reports.
+  n_import_errors <- dta_import_error_count(import_errors) +
+    carried_capped + rule_capped
   import_valid <- n_import_errors == 0L
   if (n_import_errors == 0L) {
     import_errors <- NULL
@@ -444,20 +491,20 @@ dta_validate_table_stream <- function(specs,
 
   details <- list(
     ok = NA,
-    schema_valid = !has_schema_errors,
+    columnspec_valid = !has_columnspec_errors,
     rules_valid = isTRUE(rules_valid),
     import_valid = isTRUE(import_valid),
-    n_schema_errors = schema_sink$total,
+    n_columnspec_errors = columnspec_sink$total,
     n_rule_errors = length(rule_errors),
     n_import_errors = as.integer(n_import_errors),
-    schema_errors = list(
+    columnspec_errors = list(
       summarised_error = summarised_error,
       full_error = full_error
     ),
     rule_results = rule_results,
     rule_errors = rule_errors,
     import_errors = import_errors,
-    schema_version = 2L
+    result_version = 2L
   )
 
   if (partial_scan) {
@@ -556,6 +603,22 @@ dta_group_stream_init <- function(rule) {
   state$groups <- new.env(hash = TRUE, parent = emptyenv())
   state$keys <- character(0)
   state$condition_names <- names(rule_get_slot(rule, "conditions"))
+
+  # `fail_fast` needs to know mid-scan that a group has already lost, which is
+  # only sound for a constraint no later batch can rescue. `mutually_exclusive`
+  # under ANY/ANY is that constraint: once a row has made each side true,
+  # neither can go back to false. Every other shape can flip -- an `all` scope
+  # falls over on a later row, and a `requires` THEN can still be satisfied by
+  # one -- so those are decided at finalise, as before.
+  state$monotone <- Filter(
+    function(constraint) {
+      identical(constraint$type, "mutually_exclusive") &&
+        identical(constraint$left_scope %||% "any", "any") &&
+        identical(constraint$right_scope %||% "any", "any")
+    },
+    rule_get_slot(rule, "constraints")
+  )
+  state$certain <- 0L
   state
 }
 
@@ -608,7 +671,8 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
         conds = stats::setNames(
           lapply(state$condition_names, function(...) dta_group_cond_state()),
           state$condition_names
-        )
+        ),
+        certain = FALSE
       )
     }
 
@@ -645,10 +709,33 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L) {
       entry$conds[[cond_name]] <- cond
     }
 
+    if (!isTRUE(entry$certain) && length(state$monotone) > 0) {
+      lost <- vapply(state$monotone, function(constraint) {
+        isTRUE(entry$conds[[constraint$left]]$any_true) &&
+          isTRUE(entry$conds[[constraint$right]]$any_true)
+      }, logical(1))
+      if (any(lost)) {
+        entry$certain <- TRUE
+        state$certain <- state$certain + 1L
+      }
+    }
+
     assign(key, entry, envir = state$groups)
   }
 
   state
+}
+
+# Whether a violation's `rows` are only the head of a longer list. The capped
+# head is what keeps memory proportional to groups rather than to rows, so the
+# streamed `rows` can be shorter than the materialising path's -- but silently
+# shorter is a trap, and both paths therefore carry this flag.
+dta_group_head_truncated <- function(cond, which = "true") {
+  if (identical(which, "true")) {
+    length(cond$true_head) < cond$true_n
+  } else {
+    length(cond$false_head) < cond$false_n
+  }
 }
 
 # Whether a condition holds for a group under the given scope. "all" requires
@@ -708,7 +795,9 @@ dta_group_stream_finalise <- function(state, rule) {
             constraint_id = constraint$id,
             group = entry$label,
             message = message,
-            rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head)))
+            rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head))),
+            rows_truncated = dta_group_head_truncated(conds[[left]], "true") ||
+              dta_group_head_truncated(conds[[right]], "true")
           )
         }
       } else if (identical(ctype, "requires")) {
@@ -744,7 +833,10 @@ dta_group_stream_finalise <- function(state, rule) {
             constraint_id = constraint$id,
             group = entry$label,
             message = message,
-            rows = sort(unique(c(conds[[if_name]]$true_head, then_failed)))
+            rows = sort(unique(c(conds[[if_name]]$true_head, then_failed))),
+            rows_truncated = dta_group_head_truncated(conds[[if_name]], "true") ||
+              (identical(then_scope, "all") &&
+                dta_group_head_truncated(conds[[then_name]], "false"))
           )
         }
       }
@@ -909,9 +1001,9 @@ dta_structure_findings <- function(specs, column_names) {
   )
 }
 
-#' @title Structural Findings as Schema Errors
+#' @title Structural Findings as Column Spec Errors
 #' @description
-#' Renders structural findings in the same shape the per-row schema axis uses,
+#' Renders structural findings in the same shape the per-row column spec axis uses,
 #' so a caller that stopped early still receives a recognisable error frame.
 #' Row is `NA`: the finding is about the file, not about any row in it.
 #' @param findings A list from `dta_structure_findings()`.
@@ -927,7 +1019,7 @@ dta_structure_errors <- function(findings) {
     column = NA_character_,
     keyword = "required",
     message = paste0("must have required property '", findings$missing, "'"),
-    schema = findings$missing,
+    columnspec = findings$missing,
     data = NA_character_,
     stringsAsFactors = FALSE
   )
@@ -1155,7 +1247,7 @@ cache_as_parquet <- function(specs,
 #' )
 #'
 #' details <- validate_file_stream(specs, path, verbose = FALSE)
-#' details$n_schema_errors
+#' details$n_columnspec_errors
 #'
 #' unlink(path)
 #' @export
@@ -1227,20 +1319,20 @@ dta_structural_failure_details <- function(findings) {
 
   details <- list(
     ok = FALSE,
-    schema_valid = FALSE,
+    columnspec_valid = FALSE,
     rules_valid = TRUE,
     import_valid = TRUE,
-    n_schema_errors = nrow(full_error),
+    n_columnspec_errors = nrow(full_error),
     n_rule_errors = 0L,
     n_import_errors = 0L,
-    schema_errors = list(
+    columnspec_errors = list(
       summarised_error = unique(full_error[, c("keyword", "message"), drop = FALSE]),
       full_error = full_error
     ),
     rule_results = list(),
     rule_errors = list(),
     import_errors = NULL,
-    schema_version = 2L
+    result_version = 2L
   )
 
   # Flags that this verdict rests on the header alone, so a reader is never

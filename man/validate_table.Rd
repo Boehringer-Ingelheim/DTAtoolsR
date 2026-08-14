@@ -15,7 +15,7 @@ validate_table(specs, table, verbose = TRUE)
 }
 \value{
 Transformed and checked table (a data.frame) if valid. If the table
-has schema errors, returns a list with \code{summarised_error}, \code{full_error},
+has column spec errors, returns a list with \code{summarised_error}, \code{full_error},
 \code{rules_valid} and \code{rule_errors}. If the schema is valid but rules are
 violated, aborts.
 }
@@ -25,9 +25,9 @@ column specs, evaluating each column's values directly rather than
 serialising the table and running a JSON Schema validator over it.
 }
 \details{
-Both axes -- the column specs and the schema rules -- are always evaluated,
-and both are reported in a single pass. When the table has schema errors, the
+Both axes -- the column specs and the rules -- are always evaluated,
+and both are reported in a single pass. When the table has column spec errors, the
 returned error list additionally carries \code{rules_valid} and \code{rule_errors}, and
 any rule violations are raised as a warning so they cannot go unnoticed while
-the schema errors are being fixed.
+the column spec errors are being fixed.
 }

@@ -90,7 +90,7 @@
   <!-- n6 specs -->
   <rect x="200" y="673" width="470" height="55" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
   <text x="212" y="685.5" font-size="18" font-weight="bold">specs</text>
-  <text x="212" y="703.5" font-size="15" fill="#666666"><tspan font-style="italic">DTAColumnSpecCollection </tspan>&#8212; column schema +</text>
+  <text x="212" y="703.5" font-size="15" fill="#666666"><tspan font-style="italic">DTAColumnSpecCollection </tspan>&#8212; column specs +</text>
   <text x="212" y="721.5" font-size="15" fill="#666666">cross-column rules</text>
 
   <!-- n11 columns -->

@@ -11,7 +11,7 @@
 #'
 #' For `DTADataSetTabular`, columns are:
 #' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
-#' `n_schema_errors`, `n_rule_errors`, `n_import_errors`.
+#' `n_columnspec_errors`, `n_rule_errors`, `n_import_errors`.
 #'
 #' For `DTA`, the summary is aggregated per dataset and includes:
 #' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
@@ -44,7 +44,7 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
       validated_at = character(0),
       run_id = character(0),
       validation_run = character(0),
-      n_schema_errors = integer(0),
+      n_columnspec_errors = integer(0),
       n_rule_errors = integer(0),
       n_import_errors = integer(0),
       n_targets = integer(0),
@@ -71,7 +71,7 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
     validated_at = status_df$validated_at,
     run_id = status_df$run_id,
     validation_run = status_df$validation_run,
-    n_schema_errors = status_df$n_schema_errors,
+    n_columnspec_errors = status_df$n_columnspec_errors,
     n_rule_errors = status_df$n_rule_errors,
     n_import_errors = if (is.null(status_df$n_import_errors)) {
       NA_integer_
@@ -146,7 +146,7 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
         validated_at = NA_character_,
         run_id = NA_character_,
         validation_run = NA_character_,
-        n_schema_errors = NA_integer_,
+        n_columnspec_errors = NA_integer_,
         n_rule_errors = NA_integer_,
         n_import_errors = NA_integer_,
         n_targets = NA_integer_,
@@ -171,7 +171,7 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' @title Retrieve Check Messages
 #' @description
 #' Returns one row per validation message to support debugging workflows.
-#' The output combines schema and rule failures into a single flat table.
+#' The output combines column spec and rule failures into a single flat table.
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
@@ -231,8 +231,8 @@ dta_to_tibble_if_available <- function(df, as_tibble = TRUE) {
 }
 
 #' @keywords internal
-dta_schema_messages_to_df <- function(dataset_name, table_name, details) {
-  full_error <- details$schema_errors$full_error
+dta_columnspec_messages_to_df <- function(dataset_name, table_name, details) {
+  full_error <- details$columnspec_errors$full_error
 
   if (is.null(full_error) || nrow(full_error) == 0) {
     return(dta_empty_messages())
@@ -241,13 +241,13 @@ dta_schema_messages_to_df <- function(dataset_name, table_name, details) {
   row_values <- if ("row" %in% names(full_error)) full_error$row else rep(NA_real_, nrow(full_error))
   col_values <- if ("column" %in% names(full_error)) full_error$column else rep(NA_character_, nrow(full_error))
   key_values <- if ("keyword" %in% names(full_error)) full_error$keyword else rep(NA_character_, nrow(full_error))
-  msg_values <- if ("message" %in% names(full_error)) full_error$message else rep("schema validation error", nrow(full_error))
+  msg_values <- if ("message" %in% names(full_error)) full_error$message else rep("column spec validation error", nrow(full_error))
 
   data.frame(
     dataset = rep(dataset_name, nrow(full_error)),
     target = rep(table_name, nrow(full_error)),
     severity = rep("error", nrow(full_error)),
-    source = rep("schema", nrow(full_error)),
+    source = rep("columnspec", nrow(full_error)),
     rule_id = rep(NA_character_, nrow(full_error)),
     row = suppressWarnings(as.numeric(row_values)),
     column = as.character(col_values),
@@ -302,7 +302,7 @@ dta_import_error_messages <- function(import_errors) {
 #' message rows.
 #'
 #' The returned frame carries exactly the same nine columns, in the same order,
-#' as `dta_schema_messages_to_df()` and `dta_rule_messages_to_df()`. Two
+#' as `dta_columnspec_messages_to_df()` and `dta_rule_messages_to_df()`. Two
 #' populated frames with differing columns make the `rbind()` in
 #' `dta_collect_messages_for_dataset()` error, so the raw offending value is
 #' embedded in `message` rather than added as a column; the structured value
@@ -328,7 +328,7 @@ dta_import_messages_to_df <- function(dataset_name, table_name, details) {
       column = NA_character_,
       keyword = NA_character_,
       message = paste0(
-        "validation artifact predates import checking (schema_version 1); ",
+        "validation artifact predates import checking (result_version 1); ",
         "re-run check(force = TRUE)"
       ),
       stringsAsFactors = FALSE
@@ -370,7 +370,7 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
     dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
 
-    schema_df <- dta_schema_messages_to_df(dataset_name, table_name, details)
+    schema_df <- dta_columnspec_messages_to_df(dataset_name, table_name, details)
     rule_df <- dta_rule_messages_to_df(dataset_name, table_name, details)
     import_df <- dta_import_messages_to_df(dataset_name, table_name, details)
 
@@ -641,7 +641,7 @@ dta_simplify_df_columns <- function(df) {
 #' @keywords internal
 dta_flatten_inspect_record <- function(record) {
   detail_sources <- list(
-    schema = record$schema_matches,
+    columnspec = record$columnspec_matches,
     context = record$row_context,
     failing = record$failing_rows_preview,
     import = record$import_matches
@@ -653,7 +653,7 @@ dta_flatten_inspect_record <- function(record) {
 
   out_n <- max(1L, detail_rows)
 
-  base_names <- setdiff(names(record), c("schema_matches", "row_context", "failing_rows_preview", "import_matches", "rule_definition", "details"))
+  base_names <- setdiff(names(record), c("columnspec_matches", "row_context", "failing_rows_preview", "import_matches", "rule_definition", "details"))
   base <- as.data.frame(lapply(record[base_names], function(x) {
     if (is.null(x)) NA else x
   }), stringsAsFactors = FALSE, optional = TRUE)
@@ -679,14 +679,14 @@ dta_flatten_inspect_record <- function(record) {
   if (is.list(record$details)) {
     details <- record$details
     if (!is.null(details$ok)) extra$details_ok <- isTRUE(details$ok)
-    if (!is.null(details$schema_valid)) extra$details_schema_valid <- isTRUE(details$schema_valid)
+    if (!is.null(details$columnspec_valid)) extra$details_columnspec_valid <- isTRUE(details$columnspec_valid)
     if (!is.null(details$rules_valid)) extra$details_rules_valid <- isTRUE(details$rules_valid)
     # NA ("unknown", a pre-import-axis artifact) must stay NA here: isTRUE()
     # would report it as FALSE and invent a failure that was never observed.
     if (!is.null(details$import_valid)) {
       extra$details_import_valid <- if (is.na(details$import_valid)) NA else isTRUE(details$import_valid)
     }
-    if (!is.null(details$n_schema_errors)) extra$details_n_schema_errors <- as.integer(details$n_schema_errors)
+    if (!is.null(details$n_columnspec_errors)) extra$details_n_columnspec_errors <- as.integer(details$n_columnspec_errors)
     if (!is.null(details$n_rule_errors)) extra$details_n_rule_errors <- as.integer(details$n_rule_errors)
     if (!is.null(details$n_import_errors)) extra$details_n_import_errors <- as.integer(details$n_import_errors)
   }
@@ -741,10 +741,25 @@ dta_rule_failure_row_indices <- function(rule, df) {
   }
 
   if (inherits(rule, "DTAtools::DTARuleColCondition")) {
-    if_rows <- evaluate_conditions(rule@condition, df)
-    then_rows <- evaluate_conditions(rule@then, df)
-    violated_mask <- if_rows & (is.na(then_rows) | !then_rows)
-    return(which(violated_mask %in% TRUE))
+    # Deliberately the same call rule_check_col_condition() makes, so the row
+    # preview and the reported violation count can never disagree.
+    return(which(dta_condition_violated(rule, df) %in% TRUE))
+  }
+
+  if (inherits(rule, "DTAtools::DTARuleGroupCondition")) {
+    # A grouped constraint fails for a *group*, not for a row, so the rows come
+    # from the violation records the check itself built. Re-running the check is
+    # what keeps the two in step; there is no cheaper mask to reproduce.
+    result <- tryCatch(
+      rule_check_group_condition(rule, df),
+      dta_rule_not_applicable = function(cnd) NULL
+    )
+    if (is.null(result) || isTRUE(result$valid)) {
+      return(integer(0))
+    }
+
+    rows <- unlist(lapply(result$details, function(v) v$rows), use.names = FALSE)
+    return(sort(unique(as.integer(rows))))
   }
 
   integer(0)
@@ -768,13 +783,13 @@ dta_build_inspect_row_context <- function(table_df, msg_row) {
 }
 
 #' @keywords internal
-dta_filter_schema_matches <- function(schema_full, msg_row) {
-  if (is.null(schema_full) || nrow(schema_full) == 0) {
-    return(schema_full)
+dta_filter_columnspec_matches <- function(columnspec_full, msg_row) {
+  if (is.null(columnspec_full) || nrow(columnspec_full) == 0) {
+    return(columnspec_full)
   }
 
-  schema_full <- as.data.frame(schema_full)
-  work <- schema_full
+  columnspec_full <- as.data.frame(columnspec_full)
+  work <- columnspec_full
 
   apply_filter <- function(df, field, value) {
     if (is.null(df) || nrow(df) == 0 || !field %in% names(df)) {
@@ -812,7 +827,7 @@ dta_filter_schema_matches <- function(schema_full, msg_row) {
     return(work)
   }
 
-  key_work <- schema_full
+  key_work <- columnspec_full
   key_candidates <- list(
     list(field = "keyword", value = msg_row$keyword),
     list(field = "message", value = msg_row$message)
@@ -828,12 +843,12 @@ dta_filter_schema_matches <- function(schema_full, msg_row) {
     return(key_work)
   }
 
-  row_work <- apply_filter(schema_full, "row", suppressWarnings(as.numeric(msg_row$row)))
+  row_work <- apply_filter(columnspec_full, "row", suppressWarnings(as.numeric(msg_row$row)))
   if (nrow(row_work) > 0) {
     return(row_work)
   }
 
-  schema_full
+  columnspec_full
 }
 
 #' @keywords internal
@@ -881,14 +896,14 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
     message = as.character(msg_row$message)
   )
 
-  if (identical(as.character(msg_row$source), "schema")) {
-    schema_full <- details$schema_errors$full_error
-    schema_match <- dta_filter_schema_matches(schema_full, msg_row)
+  if (identical(as.character(msg_row$source), "columnspec")) {
+    columnspec_full <- details$columnspec_errors$full_error
+    schema_match <- dta_filter_columnspec_matches(columnspec_full, msg_row)
 
-    out$type <- "schema"
+    out$type <- "columnspec"
     out$why <- "Column values violate JSON schema constraints (type/value/length/required)."
     out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
-    out$schema_matches <- utils::head(schema_match, 20)
+    out$columnspec_matches <- utils::head(schema_match, 20)
     return(out)
   }
 

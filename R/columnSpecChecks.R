@@ -1,4 +1,4 @@
-# Schema-axis validation without a JSON Schema validator.
+# Column-spec-axis validation without a JSON Schema validator.
 #
 # This replaces the chunk -> jsonlite::toJSON -> ajv-on-V8 loop that previously
 # dominated validation cost (~95% of total runtime, measured; see
@@ -67,19 +67,19 @@ dta_base_type_ok <- function(base_type, allowed) {
 
 # ---- error frame construction -----------------------------------------------
 
-dta_empty_schema_errors <- function() {
+dta_empty_columnspec_errors <- function() {
   data.frame(
     row = integer(0),
     column = character(0),
     keyword = character(0),
     message = character(0),
-    schema = character(0),
+    columnspec = character(0),
     data = character(0),
     stringsAsFactors = FALSE
   )
 }
 
-dta_schema_error_rows <- function(rows, column, keyword, message, schema, values) {
+dta_columnspec_error_rows <- function(rows, column, keyword, message, columnspec, values) {
   if (length(rows) == 0) {
     return(NULL)
   }
@@ -88,7 +88,7 @@ dta_schema_error_rows <- function(rows, column, keyword, message, schema, values
     column = column,
     keyword = keyword,
     message = message,
-    schema = schema,
+    columnspec = columnspec,
     data = as.character(values),
     stringsAsFactors = FALSE
   )
@@ -96,18 +96,18 @@ dta_schema_error_rows <- function(rows, column, keyword, message, schema, values
 
 # ---- per-column evaluation --------------------------------------------------
 
-#' @title Schema Violations for One Column
+#' @title Column Spec Violations for One Column
 #' @description
 #' Evaluates every constraint `as_json_schema()` emitted for a single column
 #' against that column's values, returning one row per violated constraint per
 #' value. All constraints are evaluated independently, so one value can produce
 #' several errors -- matching the previous validator's greedy behaviour.
 #' @param column_name Character. Name of the column.
-#' @param col_schema List. The column's schema, from `as_json_schema()`.
+#' @param col_spec List. The column's schema, from `as_json_schema()`.
 #' @param x The column's values.
 #' @return A data frame of violations, or `NULL` when there are none.
 #' @keywords internal
-dta_column_schema_errors <- function(column_name, col_schema, x) {
+dta_check_column_spec <- function(column_name, col_spec, x) {
   n <- length(x)
   has_na <- anyNA(x)
   base_type <- dta_base_json_type(x)
@@ -136,7 +136,7 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
   }
 
   # type ----------------------------------------------------------------------
-  allowed <- col_schema$type
+  allowed <- col_spec$type
   if (!is.null(allowed)) {
     type_ok <- dta_base_type_ok(base_type, allowed)
     null_ok <- "null" %in% allowed
@@ -161,7 +161,7 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
       which(!ok)
     }
 
-    parts[[length(parts) + 1]] <- dta_schema_error_rows(
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "type",
       paste0("must be ", paste(allowed, collapse = ",")),
       paste(allowed, collapse = ","),
@@ -171,7 +171,7 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
 
   # maxLength -----------------------------------------------------------------
   # Applies to strings only, and counts characters rather than bytes.
-  max_length <- col_schema$maxLength
+  max_length <- col_spec$maxLength
   if (!is.null(max_length) && !is.na(max_length) && base_type == "string") {
     txt <- string_text()
 
@@ -195,7 +195,7 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
       candidates[nchar(txt[candidates], type = "chars") > max_length]
     }
 
-    parts[[length(parts) + 1]] <- dta_schema_error_rows(
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "maxLength",
       paste0("must NOT have more than ", max_length, " characters"),
       as.character(max_length),
@@ -204,21 +204,21 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
   }
 
   # enum / const --------------------------------------------------------------
-  if (!is.null(col_schema$enum)) {
-    allowed_values <- col_schema$enum
+  if (!is.null(col_spec$enum)) {
+    allowed_values <- col_spec$enum
     # `%in%` matches NA against NA, which is what the generated schema relies on
     # when it appends NA to a nullable column's permitted values.
     bad <- which(!(x %in% allowed_values))
-    parts[[length(parts) + 1]] <- dta_schema_error_rows(
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "enum",
       "must be equal to one of the allowed values",
       paste(allowed_values, collapse = "; "),
       as_text(bad)
     )
-  } else if (!is.null(col_schema$const)) {
-    const_value <- col_schema$const
+  } else if (!is.null(col_spec$const)) {
+    const_value <- col_spec$const
     bad <- which(!(x %in% const_value))
-    parts[[length(parts) + 1]] <- dta_schema_error_rows(
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "const",
       "must be equal to constant",
       as.character(const_value),
@@ -230,13 +230,13 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
   # Applies to strings only. The generated schema's patterns were previously
   # evaluated as ECMAScript regex; PCRE is used here, which agrees for the
   # character-class and anchor constructs these specs use.
-  pattern <- col_schema$pattern
+  pattern <- col_spec$pattern
   if (!is.null(pattern) && !is.na(pattern) && base_type == "string") {
     present <- if (has_na) !na_mask() else rep(TRUE, n)
     matched <- rep(FALSE, n)
     matched[present] <- grepl(pattern, string_text()[present], perl = TRUE)
     bad <- which(present & !matched)
-    parts[[length(parts) + 1]] <- dta_schema_error_rows(
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "pattern",
       paste0("must match pattern \"", pattern, "\""),
       pattern,
@@ -268,7 +268,7 @@ dta_column_schema_errors <- function(column_name, col_schema, x) {
 #' @return A list with `summarised_error` and `full_error`, each `NULL` when the
 #'   table is valid.
 #' @keywords internal
-dta_schema_errors <- function(specs, table) {
+dta_columnspec_errors <- function(specs, table) {
   columns <- tryCatch(specs@columns, error = function(e) NULL)
   n_rows <- nrow(table)
 
@@ -293,22 +293,22 @@ dta_schema_errors <- function(specs, table) {
         column = NA_character_,
         keyword = "required",
         message = paste0("must have required property '", column_name, "'"),
-        schema = column_name,
+        columnspec = column_name,
         data = NA_character_,
         stringsAsFactors = FALSE
       )
       next
     }
 
-    col_schema <- tryCatch(
+    col_spec <- tryCatch(
       as_json_schema(columns[[i]]),
       error = function(e) NULL
     )
-    if (is.null(col_schema)) {
+    if (is.null(col_spec)) {
       next
     }
 
-    errs <- dta_column_schema_errors(column_name, col_schema, table[[column_name]])
+    errs <- dta_check_column_spec(column_name, col_spec, table[[column_name]])
     if (!is.null(errs)) {
       # Preserve the spec's column order within a row.
       errs$.col_order <- i
@@ -334,7 +334,7 @@ dta_schema_errors <- function(specs, table) {
   rownames(full_error) <- NULL
 
   list(
-    summarised_error = dta_summarise_schema_errors(full_error),
+    summarised_error = dta_summarise_columnspec_errors(full_error),
     full_error = full_error
   )
 }
@@ -349,7 +349,7 @@ dta_schema_errors <- function(specs, table) {
 #' @return A summarised data frame.
 #' @importFrom rlang .data
 #' @keywords internal
-dta_summarise_schema_errors <- function(full_error) {
+dta_summarise_columnspec_errors <- function(full_error) {
   if (is.null(full_error) || nrow(full_error) == 0) {
     return(NULL)
   }

@@ -56,7 +56,7 @@ checks, docs) says it's done.
   `export_column_value_table()`. Keep new functionality consistent with this
   "immutable object, explicit reassignment" idiom used throughout.
 - Validation is JSON-Schema-backed (`jsonvalidate`) for fast row-level schema
-  checks, with a separate rule engine (`evaluateSchemaRules.R`,
+  checks, with a separate rule engine (`evaluateRules.R`,
   `validationFunctions.R`, `validationReporting.R`) for cross-column logic.
   `values` and `pattern` on a `DTAColumnSpec` are mutually exclusive — enforce
   and test this invariant if you touch column specs.

@@ -9,7 +9,7 @@ import_detail_fields <- c(
   "import_valid",
   "n_import_errors",
   "import_errors",
-  "schema_version"
+  "result_version"
 )
 
 example_import_errors <- function() {
@@ -23,16 +23,16 @@ example_import_errors <- function() {
   )
 }
 
-legacy_details <- function(ok = TRUE, schema_valid = TRUE) {
+legacy_details <- function(ok = TRUE, columnspec_valid = TRUE) {
   # Exactly the shape validate_table_detailed() returned before the import axis
-  # existed: no import_valid, no n_import_errors, no schema_version.
+  # existed: no import_valid, no n_import_errors, no result_version.
   list(
     ok = ok,
-    schema_valid = schema_valid,
+    columnspec_valid = columnspec_valid,
     rules_valid = TRUE,
-    n_schema_errors = 0,
+    n_columnspec_errors = 0,
     n_rule_errors = 0,
-    schema_errors = list(summarised_error = NULL, full_error = NULL),
+    columnspec_errors = list(summarised_error = NULL, full_error = NULL),
     rule_results = list(),
     rule_errors = list()
   )
@@ -51,15 +51,15 @@ test_that("validate_table_detailed() reports a clean import axis", {
   expect_true(details$import_valid)
   expect_identical(details$n_import_errors, 0L)
   expect_null(details$import_errors)
-  expect_identical(details$schema_version, 2L)
+  expect_identical(details$result_version, 2L)
 })
 
 
 test_that("ok is the conjunction of three independent axes", {
-  clean <- list(schema_valid = TRUE, rules_valid = TRUE, import_valid = TRUE)
+  clean <- list(columnspec_valid = TRUE, rules_valid = TRUE, import_valid = TRUE)
   expect_true(dta_details_ok(clean))
 
-  # The point of the axis: schema and rules are clean, and the table still
+  # The point of the axis: column spec and rules are clean, and the table still
   # fails because a value could not be represented in its declared type.
   import_broken <- clean
   import_broken$import_valid <- FALSE
@@ -71,7 +71,7 @@ test_that("ok is the conjunction of three independent axes", {
   expect_false(dta_details_ok(import_unknown))
 
   schema_broken <- clean
-  schema_broken$schema_valid <- FALSE
+  schema_broken$columnspec_valid <- FALSE
   expect_false(dta_details_ok(schema_broken))
 
   rules_broken <- clean
@@ -90,13 +90,13 @@ test_that("pre-v2 details migrate to unknown, never to clean", {
   expect_identical(migrated$n_import_errors, NA_integer_)
   expect_true("import_errors" %in% names(migrated))
   expect_null(migrated$import_errors)
-  expect_identical(migrated$schema_version, 1L)
+  expect_identical(migrated$result_version, 1L)
 
   # The recorded ok is left exactly as recorded, never recomputed from
   # incomplete data.
   expect_true(migrated$ok)
   expect_false(
-    dta_migrate_validation_details(legacy_details(ok = FALSE, schema_valid = FALSE))$ok
+    dta_migrate_validation_details(legacy_details(ok = FALSE, columnspec_valid = FALSE))$ok
   )
 
   # A current result is returned untouched.
@@ -130,14 +130,14 @@ test_that("a pre-v2 artifact is migrated on read and reported as unknown", {
   stored$import_valid <- NULL
   stored$n_import_errors <- NULL
   stored$import_errors <- NULL
-  stored$schema_version <- NULL
+  stored$result_version <- NULL
   stored$ok <- TRUE
   saveRDS(stored, path)
 
   details <- validation_errors(ds, table = "tab1", source = "artifact")
   expect_true(is.na(details$import_valid))
   expect_identical(details$n_import_errors, NA_integer_)
-  expect_identical(details$schema_version, 1L)
+  expect_identical(details$result_version, 1L)
   expect_true(details$ok)
 
   msgs <- messages(ds, source = "artifact", as_tibble = FALSE)
@@ -152,7 +152,7 @@ test_that("a pre-v2 artifact is migrated on read and reported as unknown", {
   expect_equal(import_rows$severity, "warning")
   expect_equal(
     import_rows$message,
-    "validation artifact predates import checking (schema_version 1); re-run check(force = TRUE)"
+    "validation artifact predates import checking (result_version 1); re-run check(force = TRUE)"
   )
 })
 
@@ -162,7 +162,7 @@ test_that("import messages match the rule message column contract exactly", {
     import_valid = FALSE,
     n_import_errors = 2L,
     import_errors = example_import_errors(),
-    schema_version = 2L
+    result_version = 2L
   )
   rule_details <- list(rule_errors = list(list(id = "r1", message = "rule violated")))
 
@@ -187,7 +187,7 @@ test_that("import messages match the rule message column contract exactly", {
   expect_true(grepl("SAS Num", import_df$message[1], fixed = TRUE))
 
   # No issues -> the shared empty frame.
-  clean <- list(import_valid = TRUE, n_import_errors = 0L, import_errors = NULL, schema_version = 2L)
+  clean <- list(import_valid = TRUE, n_import_errors = 0L, import_errors = NULL, result_version = 2L)
   expect_identical(dta_import_messages_to_df("ds", "tab", clean), dta_empty_messages())
 
   # Unknown -> exactly one warning row.
@@ -201,17 +201,17 @@ test_that("import messages match the rule message column contract exactly", {
 test_that("as.data.frame() on details flattens import errors", {
   details <- dta_as_validation_details(list(
     ok = FALSE,
-    schema_valid = TRUE,
+    columnspec_valid = TRUE,
     rules_valid = TRUE,
     import_valid = FALSE,
-    n_schema_errors = 0,
+    n_columnspec_errors = 0,
     n_rule_errors = 0,
     n_import_errors = 2L,
-    schema_errors = list(summarised_error = NULL, full_error = NULL),
+    columnspec_errors = list(summarised_error = NULL, full_error = NULL),
     rule_results = list(),
     rule_errors = list(),
     import_errors = example_import_errors(),
-    schema_version = 2L
+    result_version = 2L
   ))
 
   df <- as.data.frame(details)
@@ -259,7 +259,7 @@ test_that("validation_status() and results() carry n_import_errors", {
     ok = TRUE,
     run_id = "run",
     validation_run = "run",
-    n_schema_errors = 0L,
+    n_columnspec_errors = 0L,
     n_rule_errors = 0L
   )
   row <- dta_validation_result_to_row("tab1", "validated", legacy_entry)
@@ -344,7 +344,7 @@ test_that("DTADataSetFile check() records the import axis", {
   expect_true(all(import_detail_fields %in% names(details)))
   expect_true(details$import_valid)
   expect_identical(details$n_import_errors, 0L)
-  expect_identical(details$schema_version, 2L)
+  expect_identical(details$result_version, 2L)
 
   status <- validation_status(ds)
   expect_equal(status$n_import_errors, 0L)
@@ -372,7 +372,7 @@ test_that("failing DTADataSetFile details also carry the import axis", {
   expect_false(details$ok)
   expect_true(details$import_valid)
   expect_identical(details$n_import_errors, 0L)
-  expect_identical(details$schema_version, 2L)
+  expect_identical(details$result_version, 2L)
 })
 
 
@@ -496,7 +496,7 @@ test_that("stage 0 regression canaries: no behaviour changed", {
   )
   ds_status <- validation_status(ds)
   expect_false(ds_status$ok)
-  expect_equal(ds_status$n_schema_errors, 7)
+  expect_equal(ds_status$n_columnspec_errors, 7)
   expect_equal(ds_status$n_import_errors, 0L)
 })
 
@@ -508,7 +508,7 @@ test_that("stage 0 regression canaries: no behaviour changed", {
 import_only_specs <- function() {
   # An unconvertible value in the IF column leaves the row's IF condition NA, so
   # the row is not counted as a rule violation. That isolates the import axis:
-  # schema and rules are clean and the table still fails.
+  # column spec and rules are clean and the table still fails.
   DTAColumnSpecCollection(
     columns = list(
       AGE = DTAColumnSpec(id = "AGE", type = "SAS Char", length = 10, nullable = TRUE),
@@ -539,7 +539,7 @@ test_that("an unconvertible value fails the run on the import axis alone", {
     verbose = FALSE
   )
 
-  expect_true(details$schema_valid)
+  expect_true(details$columnspec_valid)
   expect_true(details$rules_valid)
   expect_equal(details$n_rule_errors, 0)
 
@@ -686,15 +686,15 @@ test_that("check() console output states the import failure instead of only clai
     tables = list(tab1 = data.frame(BMI = c("20.5", "heavy"), stringsAsFactors = FALSE))
   )
 
-  # Confirm this is exactly the reported scenario: schema and rules are both
+  # Confirm this is exactly the reported scenario: column spec and rules are both
   # clean (the column is nullable, so the NA left by the failed conversion is
-  # not itself a schema error), and the ONLY defect is on the import axis.
+  # not itself a column spec error), and the ONLY defect is on the import axis.
   details <- validate_table_detailed(
     specs,
     as.data.frame(ds@tables[["tab1"]]),
     verbose = FALSE
   )
-  expect_true(details$schema_valid)
+  expect_true(details$columnspec_valid)
   expect_true(details$rules_valid)
   expect_false(details$import_valid)
   expect_false(details$ok)
@@ -711,7 +711,7 @@ test_that("check() console output states the import failure instead of only clai
 
   # The console report must name the actual cause of failure: the import
   # axis, the offending column, and the raw text that could not be
-  # represented -- not merely assert schema/rule success and then fail
+  # represented -- not merely assert column spec/rule success and then fail
   # silently.
   expect_true(grepl("import", output, ignore.case = TRUE))
   expect_true(grepl("BMI", output, fixed = TRUE))

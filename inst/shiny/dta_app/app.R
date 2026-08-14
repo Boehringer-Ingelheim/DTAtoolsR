@@ -3258,42 +3258,42 @@ server <- function(input, output, session) {
     ""
   }
 
-  # Human "should be" text for a schema violation, derived from its keyword.
-  schema_expected_text <- function(r) {
-    kw <- as.character(r[["schema_keyword"]] %||% "")
+  # Human "should be" text for a column spec violation, derived from its keyword.
+  columnspec_expected_text <- function(r) {
+    kw <- as.character(r[["columnspec_keyword"]] %||% "")
     switch(kw,
       enum = paste0("one of: ", .first_nonempty(
-        r[["schema_params.allowedValues"]],
-        r[["schema_parentSchema.enum"]],
-        r[["schema_schema"]]
+        r[["columnspec_params.allowedValues"]],
+        r[["columnspec_parent.enum"]],
+        r[["columnspec_columnspec"]]
       )),
       const = paste0("exactly: ", .first_nonempty(
-        r[["schema_parentSchema.const"]],
-        r[["schema_schema"]]
+        r[["columnspec_parent.const"]],
+        r[["columnspec_columnspec"]]
       )),
       maxLength = paste0(
         "at most ", .first_nonempty(
-          r[["schema_params.limit"]],
-          r[["schema_parentSchema.maxLength"]]
+          r[["columnspec_params.limit"]],
+          r[["columnspec_parent.maxLength"]]
         ),
         " character(s)"
       ),
       minLength = paste0(
         "at least ", .first_nonempty(
-          r[["schema_params.limit"]],
-          r[["schema_parentSchema.minLength"]]
+          r[["columnspec_params.limit"]],
+          r[["columnspec_parent.minLength"]]
         ),
         " character(s)"
       ),
-      maximum = paste0("at most ", .first_nonempty(r[["schema_params.limit"]])),
-      minimum = paste0("at least ", .first_nonempty(r[["schema_params.limit"]])),
-      type = paste0("type: ", .first_nonempty(r[["schema_parentSchema.type"]])),
+      maximum = paste0("at most ", .first_nonempty(r[["columnspec_params.limit"]])),
+      minimum = paste0("at least ", .first_nonempty(r[["columnspec_params.limit"]])),
+      type = paste0("type: ", .first_nonempty(r[["columnspec_parent.type"]])),
       pattern = paste0("match pattern ", .first_nonempty(
-        r[["schema_params.pattern"]],
-        r[["schema_schema"]]
+        r[["columnspec_params.pattern"]],
+        r[["columnspec_columnspec"]]
       )),
       required = "the value must be present (not missing)",
-      .first_nonempty(r[["schema_message"]], r[["message"]], "(see message)")
+      .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
     )
   }
 
@@ -3332,12 +3332,12 @@ server <- function(input, output, session) {
   # actual split, and the raw technical detail in a collapsible section.
   render_inspect_body <- function(d, dataset) {
     r <- as.list(d[1, , drop = FALSE])
-    # `source` is the fallback for `type`: both name the axis ("schema", "rule",
+    # `source` is the fallback for `type`: both name the axis ("columnspec", "rule",
     # "import"), and falling back on the rule_id guess alone would route an
-    # import record into the schema branch.
+    # import record into the column spec branch.
     typ <- .first_nonempty(r[["type"]], r[["source"]])
     if (!nzchar(typ)) {
-      typ <- if ("rule_id" %in% names(d)) "rule" else "schema"
+      typ <- if ("rule_id" %in% names(d)) "rule" else "columnspec"
     }
     msg <- .first_nonempty(r$message, r$headline)
 
@@ -3379,8 +3379,8 @@ server <- function(input, output, session) {
       # Third validation axis: the value could not be represented in the type
       # the spec declares, so the typed column holds NA and the raw text was
       # kept. inspect() supplies it as import_* columns (from import_matches).
-      # Without this branch the record fell into the schema branch below and
-      # rendered two empty schema_* panels.
+      # Without this branch the record fell into the column spec branch below and
+      # rendered two empty columnspec_* panels.
       f <- dta_inspect_import_fields(r)
       col <- f$column
       raw <- f$raw
@@ -3419,10 +3419,10 @@ server <- function(input, output, session) {
       )
       actual_title <- "Raw value that could not be imported"
     } else {
-      col <- .first_nonempty(r[["schema_column"]], r[["column"]])
-      kw <- .first_nonempty(r[["schema_keyword"]], r[["keyword"]])
-      smsg <- .first_nonempty(r[["schema_message"]], msg)
-      badge <- tags$span(class = "inspect-badge schema", "Schema violation")
+      col <- .first_nonempty(r[["columnspec_column"]], r[["column"]])
+      kw <- .first_nonempty(r[["columnspec_keyword"]], r[["keyword"]])
+      smsg <- .first_nonempty(r[["columnspec_message"]], msg)
+      badge <- tags$span(class = "inspect-badge columnspec", "Column spec violation")
       desc <- div(
         class = "inspect-desc",
         div(
@@ -3432,12 +3432,12 @@ server <- function(input, output, session) {
         ),
         if (nzchar(smsg)) div(class = "inspect-desc-detail", smsg)
       )
-      expected_ui <- div(class = "inspect-should", schema_expected_text(r))
+      expected_ui <- div(class = "inspect-should", columnspec_expected_text(r))
       aval <- .first_nonempty(
-        r[["schema_data"]],
+        r[["columnspec_data"]],
         if (nzchar(col)) r[[paste0("context_", col)]] else NULL
       )
-      arow <- .first_nonempty(r[["schema_row"]], r[["context_.row"]])
+      arow <- .first_nonempty(r[["columnspec_row"]], r[["context_.row"]])
       loc <- paste0(
         if (nzchar(col)) paste0("column ", col) else "",
         if (nzchar(arow)) paste0(if (nzchar(col)) ", " else "", "row ", arow) else ""
@@ -4309,7 +4309,12 @@ server <- function(input, output, session) {
           # Markdown export
           ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
           filename <- paste0(base, "_", Sys.Date(), ext)
-          output_file <- file.path(tempdir(), filename)
+          # The browser fetches the file on a LATER request, so the path it
+          # waits on must be unique. Deriving it from title and date meant two
+          # untitled exports on the same day shared one path, and whichever
+          # session wrote last was the one both downloads received.
+          # `filename` still decides what the browser saves it as.
+          output_file <- tempfile(pattern = "dta-export-", fileext = ext)
 
           # write_dta() throws on error (caught below); it does not return $ok.
           DTAtools::write_dta(rv$dta, output_file, format = "md", overwrite = TRUE, quiet = TRUE)
@@ -4390,7 +4395,8 @@ server <- function(input, output, session) {
         } else {
           # Word export
           filename <- paste0(base, "_", Sys.Date(), ".docx")
-          output_file <- file.path(tempdir(), filename)
+          # Unique for the same reason as the markdown branch above.
+          output_file <- tempfile(pattern = "dta-export-", fileext = ".docx")
 
           if (input$export_word_mode == "custom") {
             template_name <- input$export_template_select

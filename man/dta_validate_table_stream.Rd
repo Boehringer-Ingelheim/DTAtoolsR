@@ -38,7 +38,7 @@ time, and returns the same \code{details} structure, so every existing consumer
 (\code{results()}, \code{messages()}, \code{inspect()}, the Shiny app) works unchanged.
 
 Nothing here scales with the number of rows. Peak memory is bounded by the
-batch size for the schema axis, by the number of distinct keys for uniqueness
+batch size for the column spec axis, by the number of distinct keys for uniqueness
 rules, by the number of distinct groups for grouped rules, and by the
 retained-error cap.
 

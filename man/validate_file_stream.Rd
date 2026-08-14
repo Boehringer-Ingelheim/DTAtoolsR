@@ -103,7 +103,7 @@ utils::write.csv(
 )
 
 details <- validate_file_stream(specs, path, verbose = FALSE)
-details$n_schema_errors
+details$n_columnspec_errors
 
 unlink(path)
 }

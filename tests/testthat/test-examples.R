@@ -63,7 +63,7 @@ test_that("Examples can be built with current constructors", {
       verbose = FALSE
     )
     expect_true(res$ok)
-    expect_equal(res$n_schema_errors, 0)
+    expect_equal(res$n_columnspec_errors, 0)
     expect_equal(res$n_rule_errors, 0)
   }
 

@@ -17,14 +17,14 @@ load_clinical_multi_dta <- function(filenames) {
   check(dta, persist = FALSE, quiet = TRUE)
 }
 
-test_that("clinical multi-file clean fixtures validate without schema or rule errors", {
+test_that("clinical multi-file clean fixtures validate without column spec or rule errors", {
   dta <- load_clinical_multi_dta(c("clinical_data.csv", "clinical_data2.csv"))
 
   res <- results(dta)
   expect_true(is.data.frame(res))
   expect_equal(sort(res$target), c("clinical_data", "clinical_data2"))
   expect_true(all(res$status == "validated"))
-  expect_true(all(res$n_schema_errors == 0L))
+  expect_true(all(res$n_columnspec_errors == 0L))
   expect_true(all(res$n_rule_errors == 0L))
 
   ds <- dta[["clinical_data"]]
@@ -38,9 +38,9 @@ test_that("clinical multi-file clean fixtures validate without schema or rule er
     details <- validation_errors(ds, table = table_name, source = "memory")
     expect_true(is.list(details))
     expect_true(isTRUE(details$ok))
-    expect_true(isTRUE(details$schema_valid))
+    expect_true(isTRUE(details$columnspec_valid))
     expect_true(isTRUE(details$rules_valid))
-    expect_equal(details$n_schema_errors, 0L)
+    expect_equal(details$n_columnspec_errors, 0L)
     expect_equal(details$n_rule_errors, 0L)
   }
 
@@ -59,18 +59,18 @@ test_that("clinical multi-file clean fixtures validate without schema or rule er
 })
 
 test_that("clinical multi-file mixed error fixtures support reporting and inspect end-to-end", {
-  dta <- load_clinical_multi_dta(c("clinical_data_error_all.csv", "clinical_data2_error_schema.csv"))
+  dta <- load_clinical_multi_dta(c("clinical_data_error_all.csv", "clinical_data2_error_columnspec.csv"))
 
   res <- results(dta)
   expect_true(is.data.frame(res))
-  expect_equal(sort(res$target), c("clinical_data2_error_schema", "clinical_data_error_all"))
+  expect_equal(sort(res$target), c("clinical_data2_error_columnspec", "clinical_data_error_all"))
   expect_true(all(res$status == "failed"))
 
   row_all <- res[res$target == "clinical_data_error_all", , drop = FALSE]
-  row_schema2 <- res[res$target == "clinical_data2_error_schema", , drop = FALSE]
-  expect_gt(row_all$n_schema_errors[[1]], 0)
+  row_schema2 <- res[res$target == "clinical_data2_error_columnspec", , drop = FALSE]
+  expect_gt(row_all$n_columnspec_errors[[1]], 0)
   expect_gt(row_all$n_rule_errors[[1]], 0)
-  expect_gt(row_schema2$n_schema_errors[[1]], 0)
+  expect_gt(row_schema2$n_columnspec_errors[[1]], 0)
   expect_equal(row_schema2$n_rule_errors[[1]], 0)
 
   ds <- dta[["clinical_data"]]
@@ -80,40 +80,40 @@ test_that("clinical multi-file mixed error fixtures support reporting and inspec
   expect_true(all(status$ok %in% FALSE))
 
   details_all <- validation_errors(ds, table = "clinical_data_error_all", source = "memory")
-  expect_false(details_all$schema_valid)
+  expect_false(details_all$columnspec_valid)
   expect_false(details_all$rules_valid)
-  expect_gt(details_all$n_schema_errors, 0)
+  expect_gt(details_all$n_columnspec_errors, 0)
   expect_gt(details_all$n_rule_errors, 0)
 
-  details_schema2 <- validation_errors(ds, table = "clinical_data2_error_schema", source = "memory")
-  expect_false(details_schema2$schema_valid)
+  details_schema2 <- validation_errors(ds, table = "clinical_data2_error_columnspec", source = "memory")
+  expect_false(details_schema2$columnspec_valid)
   expect_true(details_schema2$rules_valid)
-  expect_gt(details_schema2$n_schema_errors, 0)
+  expect_gt(details_schema2$n_columnspec_errors, 0)
   expect_equal(details_schema2$n_rule_errors, 0)
 
   msgs <- messages(dta, as_tibble = FALSE)
   expect_true(is.data.frame(msgs))
   expect_gt(nrow(msgs), 0)
   expect_equal(msgs$id, seq_len(nrow(msgs)))
-  expect_equal(sort(unique(msgs$target)), c("clinical_data2_error_schema", "clinical_data_error_all"))
+  expect_equal(sort(unique(msgs$target)), c("clinical_data2_error_columnspec", "clinical_data_error_all"))
   # clinical_data_error_all.csv now also carries import errors (see
   # test-clinical-error-fixtures.R), so the combined source set gains "import".
-  expect_equal(sort(unique(msgs$source)), c("import", "rule", "schema"))
+  expect_equal(sort(unique(msgs$source)), c("columnspec", "import", "rule"))
 
-  schema_msgs_target2 <- msgs[msgs$target == "clinical_data2_error_schema", , drop = FALSE]
+  schema_msgs_target2 <- msgs[msgs$target == "clinical_data2_error_columnspec", , drop = FALSE]
   expect_gt(nrow(schema_msgs_target2), 0)
-  expect_true(all(schema_msgs_target2$source == "schema"))
+  expect_true(all(schema_msgs_target2$source == "columnspec"))
 
-  schema_id_target2 <- schema_msgs_target2$id[[1]]
-  info_schema <- inspect(dta, id = schema_id_target2, as_tibble = FALSE)
-  expect_true(is.data.frame(info_schema))
-  expect_gt(nrow(info_schema), 0)
-  expect_true(all(info_schema$id == schema_id_target2))
-  expect_true(all(info_schema$target == "clinical_data2_error_schema"))
-  expect_true(all(info_schema$type == "schema"))
-  expect_true(any(grepl("^schema_", names(info_schema))))
+  columnspec_id_target2 <- schema_msgs_target2$id[[1]]
+  info_columnspec <- inspect(dta, id = columnspec_id_target2, as_tibble = FALSE)
+  expect_true(is.data.frame(info_columnspec))
+  expect_gt(nrow(info_columnspec), 0)
+  expect_true(all(info_columnspec$id == columnspec_id_target2))
+  expect_true(all(info_columnspec$target == "clinical_data2_error_columnspec"))
+  expect_true(all(info_columnspec$type == "columnspec"))
+  expect_true(any(grepl("^columnspec_", names(info_columnspec))))
 
-  id_pair <- unique(c(msgs$id[[1]], schema_id_target2))
+  id_pair <- unique(c(msgs$id[[1]], columnspec_id_target2))
   info_pair <- inspect(dta, id = id_pair, as_tibble = FALSE)
   expect_true(is.data.frame(info_pair))
   expect_equal(sort(unique(info_pair$id)), sort(id_pair))

@@ -1,4 +1,4 @@
-# Equivalence of the streaming and non-streaming schema axes (P3).
+# Equivalence of the streaming and non-streaming column spec axes (P3).
 #
 # The claim the streaming path has to earn is not "it works" but "it produces
 # exactly what the materialising path produced". These tests assert that
@@ -14,8 +14,8 @@ vs_reader <- function(table, batch_rows) {
   dta_as_batch_reader(arrow::as_arrow_table(table), batch_rows = batch_rows)
 }
 
-# The schema axis as the production driver evaluates it. These tests used to
-# call a separate schema-only streamer, which was a second hand-maintained copy
+# The column spec axis as the production driver evaluates it. These tests used to
+# call a separate column-spec-only streamer, which was a second hand-maintained copy
 # of the batch loop that nothing in the package actually used. Going through the
 # real driver means these assertions constrain the code that ships.
 vs_schema_stream <- function(specs, reader, max_errors = NULL) {
@@ -24,9 +24,9 @@ vs_schema_stream <- function(specs, reader, max_errors = NULL) {
     verbose = FALSE, coerce = FALSE, max_errors = max_errors
   )
   list(
-    full_error = details$schema_errors$full_error,
-    summarised_error = details$schema_errors$summarised_error,
-    n_errors = details$n_schema_errors
+    full_error = details$columnspec_errors$full_error,
+    summarised_error = details$columnspec_errors$summarised_error,
+    n_errors = details$n_columnspec_errors
   )
 }
 
@@ -45,12 +45,12 @@ test_that("the batch reader actually yields more than one batch", {
   expect_gt(n_batches, 1L)
 })
 
-test_that("streaming reproduces the materialised schema axis for every corpus case", {
+test_that("streaming reproduces the materialised column spec axis for every corpus case", {
   corpus <- vc_corpus()
 
   for (name in names(corpus)) {
     case <- corpus[[name]]
-    expected <- dta_schema_errors(case$specs, case$table)
+    expected <- dta_columnspec_errors(case$specs, case$table)
 
     for (batch_rows in c(1L, 2L)) {
       streamed <- vs_schema_stream(
@@ -108,7 +108,7 @@ test_that("violations spread across batches are all reported, in row order", {
 test_that("a missing column is reported for every row across every batch", {
   # The per-row cost of a structural failure, pinned in the streaming path too:
   # the count must not depend on how the scan happened to be divided.
-  specs <- vc_corpus()$schema_required$specs
+  specs <- vc_corpus()$columnspec_required$specs
   table <- data.frame(ID = sprintf("A%03d", 1:7), stringsAsFactors = FALSE)
 
   for (batch_rows in c(1L, 3L, 7L, 100L)) {
@@ -126,10 +126,10 @@ test_that("a missing column is reported for every row across every batch", {
 
 vs_details_equal <- function(streamed, expected, label) {
   expect_equal(streamed$ok, expected$ok, info = label)
-  expect_equal(streamed$schema_valid, expected$schema_valid, info = label)
+  expect_equal(streamed$columnspec_valid, expected$columnspec_valid, info = label)
   expect_equal(streamed$rules_valid, expected$rules_valid, info = label)
   expect_equal(streamed$import_valid, expected$import_valid, info = label)
-  expect_equal(streamed$n_schema_errors, expected$n_schema_errors, info = label)
+  expect_equal(streamed$n_columnspec_errors, expected$n_columnspec_errors, info = label)
   expect_equal(streamed$n_rule_errors, expected$n_rule_errors, info = label)
   expect_equal(
     as.integer(streamed$n_import_errors),
@@ -164,7 +164,7 @@ test_that("streaming reproduces the materialised verdict for every corpus case",
   }
 })
 
-test_that("streamed schema errors match the materialised ones row for row", {
+test_that("streamed column spec errors match the materialised ones row for row", {
   corpus <- vc_corpus()
 
   for (name in names(corpus)) {
@@ -178,8 +178,8 @@ test_that("streamed schema errors match the materialised ones row for row", {
     )
 
     expect_equal(
-      streamed$schema_errors$full_error,
-      expected$schema_errors$full_error,
+      streamed$columnspec_errors$full_error,
+      expected$columnspec_errors$full_error,
       info = paste0("case '", name, "'")
     )
   }
@@ -220,13 +220,13 @@ test_that("the streamed details object satisfies the published contract", {
   expect_named(
     streamed,
     c(
-      "ok", "schema_valid", "rules_valid", "import_valid",
-      "n_schema_errors", "n_rule_errors", "n_import_errors",
-      "schema_errors", "rule_results", "rule_errors", "import_errors",
-      "schema_version"
+      "ok", "columnspec_valid", "rules_valid", "import_valid",
+      "n_columnspec_errors", "n_rule_errors", "n_import_errors",
+      "columnspec_errors", "rule_results", "rule_errors", "import_errors",
+      "result_version"
     )
   )
-  expect_named(streamed$schema_errors, c("summarised_error", "full_error"))
+  expect_named(streamed$columnspec_errors, c("summarised_error", "full_error"))
   expect_type(streamed$n_import_errors, "integer")
 
   # And it must survive the coercion every consumer goes through.
@@ -260,7 +260,7 @@ test_that("streaming types each batch when asked, recording import errors", {
   expect_equal(sort(streamed$import_errors$row), c(2L, 4L))
 })
 
-test_that("max_errors caps retained schema detail without changing the verdict", {
+test_that("max_errors caps retained column spec detail without changing the verdict", {
   specs <- vc_specs(list(
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
   ))
@@ -275,14 +275,14 @@ test_that("max_errors caps retained schema detail without changing the verdict",
     verbose = FALSE, coerce = FALSE
   )
 
-  expect_equal(nrow(capped$schema_errors$full_error), 5)
-  expect_equal(nrow(uncapped$schema_errors$full_error), 20)
+  expect_equal(nrow(capped$columnspec_errors$full_error), 5)
+  expect_equal(nrow(uncapped$columnspec_errors$full_error), 20)
 
   # The count and the verdict are unaffected by how much detail was kept.
-  expect_equal(capped$n_schema_errors, 20)
-  expect_equal(capped$n_schema_errors, uncapped$n_schema_errors)
+  expect_equal(capped$n_columnspec_errors, 20)
+  expect_equal(capped$n_columnspec_errors, uncapped$n_columnspec_errors)
   expect_equal(capped$ok, uncapped$ok)
-  expect_false(capped$schema_valid)
+  expect_false(capped$columnspec_valid)
 })
 
 # ---- end to end, from a file -------------------------------------------------
@@ -308,10 +308,10 @@ test_that("a file is validated by scanning it, matching the in-memory verdict", 
 
   streamed <- validate_file_stream(specs, path, verbose = FALSE)
 
-  expect_false(streamed$schema_valid)
-  expect_equal(streamed$n_schema_errors, 1)
-  expect_equal(streamed$schema_errors$full_error$row, 2L)
-  expect_equal(streamed$schema_errors$full_error$keyword, "maxLength")
+  expect_false(streamed$columnspec_valid)
+  expect_equal(streamed$n_columnspec_errors, 1)
+  expect_equal(streamed$columnspec_errors$full_error$row, 2L)
+  expect_equal(streamed$columnspec_errors$full_error$keyword, "maxLength")
 })
 
 test_that("the scanned result is a drop-in for the reporting functions", {
@@ -327,7 +327,7 @@ test_that("the scanned result is a drop-in for the reporting functions", {
   expect_true(all(
     c("source", "rule_id", "row", "column", "keyword", "message") %in% names(flat)
   ))
-  expect_equal(flat$source, "schema")
+  expect_equal(flat$source, "columnspec")
   expect_equal(flat$row, 2)
 })
 
@@ -347,8 +347,8 @@ test_that("row numbers survive a scan divided into many batches", {
       specs, path,
       batch_rows = batch_rows, verbose = FALSE
     )
-    expect_equal(streamed$n_schema_errors, 1)
-    expect_equal(streamed$schema_errors$full_error$row, 177L)
+    expect_equal(streamed$n_columnspec_errors, 1)
+    expect_equal(streamed$columnspec_errors$full_error$row, 177L)
   }
 })
 
@@ -497,14 +497,14 @@ test_that("stopping on a missing column reports it once, not once per row", {
     on_missing_column = "scan", verbose = FALSE
   )
 
-  expect_equal(stopped$n_schema_errors, 1)
-  expect_equal(scanned$n_schema_errors, 50)
+  expect_equal(stopped$n_columnspec_errors, 1)
+  expect_equal(scanned$n_columnspec_errors, 50)
 
   # Both agree the file is invalid; they differ only in how much they say.
   expect_false(stopped$ok)
   expect_false(scanned$ok)
-  expect_false(stopped$schema_valid)
-  expect_false(scanned$schema_valid)
+  expect_false(stopped$columnspec_valid)
+  expect_false(scanned$columnspec_valid)
 })
 
 test_that("the default still scans, so existing behaviour is unchanged", {
@@ -516,7 +516,7 @@ test_that("the default still scans, so existing behaviour is unchanged", {
   on.exit(unlink(path), add = TRUE)
 
   defaulted <- validate_file_stream(specs, path, verbose = FALSE)
-  expect_equal(defaulted$n_schema_errors, 7)
+  expect_equal(defaulted$n_columnspec_errors, 7)
 })
 
 test_that("a structural verdict is marked as resting on the header alone", {
@@ -534,9 +534,9 @@ test_that("a structural verdict is marked as resting on the header alone", {
   )
 
   expect_true(isTRUE(attr(stopped, "structural_only")))
-  expect_equal(stopped$schema_errors$full_error$keyword, "required")
+  expect_equal(stopped$columnspec_errors$full_error$keyword, "required")
   expect_match(
-    stopped$schema_errors$full_error$message,
+    stopped$columnspec_errors$full_error$message,
     "must have required property 'GONE'",
     fixed = TRUE
   )
@@ -629,11 +629,11 @@ test_that("dispatching by holding produces the same verdict either way", {
   )
 
   expect_equal(materialised$ok, lazy$ok)
-  expect_equal(materialised$schema_valid, lazy$schema_valid)
-  expect_equal(materialised$n_schema_errors, lazy$n_schema_errors)
+  expect_equal(materialised$columnspec_valid, lazy$columnspec_valid)
+  expect_equal(materialised$n_columnspec_errors, lazy$n_columnspec_errors)
   expect_equal(
-    materialised$schema_errors$full_error$row,
-    lazy$schema_errors$full_error$row
+    materialised$columnspec_errors$full_error$row,
+    lazy$columnspec_errors$full_error$row
   )
 })
 
@@ -658,12 +658,12 @@ test_that("fail_fast stops the scan once something is wrong", {
   # Both agree the file is invalid.
   expect_false(quick$ok)
   expect_false(full$ok)
-  expect_false(quick$schema_valid)
+  expect_false(quick$columnspec_valid)
 
   # The full scan sees both violations; the quick one stops after the first
   # batch that showed a problem, so it sees only the early one.
-  expect_equal(full$n_schema_errors, 2)
-  expect_equal(quick$n_schema_errors, 1)
+  expect_equal(full$n_columnspec_errors, 2)
+  expect_equal(quick$n_columnspec_errors, 1)
   expect_true(isTRUE(attr(quick, "partial_scan")))
 })
 
@@ -714,7 +714,7 @@ test_that("fail_fast on a clean file scans it all and reports normally", {
   )
 
   expect_true(quick$ok)
-  expect_true(quick$schema_valid)
+  expect_true(quick$columnspec_valid)
   expect_true(quick$rules_valid)
   # Nothing was cut short, so the result is complete.
   expect_null(attr(quick, "partial_scan"))
@@ -731,7 +731,7 @@ test_that("fail_fast defaults off so a full report is the norm", {
   on.exit(unlink(path), add = TRUE)
 
   defaulted <- validate_file_stream(specs, path, batch_rows = 2L, verbose = FALSE)
-  expect_equal(defaulted$n_schema_errors, 2)
+  expect_equal(defaulted$n_columnspec_errors, 2)
   expect_null(attr(defaulted, "partial_scan"))
 })
 
@@ -769,13 +769,13 @@ test_that("a cached file validates to the same verdict as the original", {
   from_cache <- validate_file_stream(specs, cache, verbose = FALSE)
 
   expect_equal(from_cache$ok, from_csv$ok)
-  expect_equal(from_cache$schema_valid, from_csv$schema_valid)
+  expect_equal(from_cache$columnspec_valid, from_csv$columnspec_valid)
   expect_equal(from_cache$rules_valid, from_csv$rules_valid)
-  expect_equal(from_cache$n_schema_errors, from_csv$n_schema_errors)
+  expect_equal(from_cache$n_columnspec_errors, from_csv$n_columnspec_errors)
   expect_equal(from_cache$n_rule_errors, from_csv$n_rule_errors)
   expect_equal(
-    from_cache$schema_errors$full_error$row,
-    from_csv$schema_errors$full_error$row
+    from_cache$columnspec_errors$full_error$row,
+    from_csv$columnspec_errors$full_error$row
   )
 })
 
@@ -894,7 +894,7 @@ test_that("check() scans a lazy table held in a DTADataSetTabular", {
   status <- validation_status(ds)
 
   expect_false(status$ok[[1]])
-  expect_equal(status$n_schema_errors[[1]], 1)
+  expect_equal(status$n_columnspec_errors[[1]], 1)
   expect_equal(status$n_rule_errors[[1]], 1)
 })
 
@@ -1020,7 +1020,7 @@ test_that("streaming reproduces every rule result from the corpus", {
     case <- rule_cases[[name]]
 
     for (rule in case$specs@rules) {
-      expected <- apply_schema_rules(list(rule), case$table, verbose = FALSE)[[1]]
+      expected <- apply_rules(list(rule), case$table, verbose = FALSE)[[1]]
 
       for (batch_rows in c(1L, 2L)) {
         streamed <- vs_stream_rule(rule, case$table, batch_rows)
@@ -1066,7 +1066,7 @@ test_that("uniqueness keys do not collide across column boundaries", {
   expect_true(streamed$valid)
   expect_equal(
     streamed$valid,
-    apply_schema_rules(list(rule), table, verbose = FALSE)[[1]]$valid
+    apply_rules(list(rule), table, verbose = FALSE)[[1]]$valid
   )
 })
 
@@ -1077,7 +1077,7 @@ test_that("repeated missing values count as duplicates when streamed", {
   table <- data.frame(K = c("a", NA_character_, NA_character_), stringsAsFactors = FALSE)
 
   streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
-  expected <- apply_schema_rules(list(rule), table, verbose = FALSE)[[1]]
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
 
   expect_equal(streamed$valid, expected$valid)
   expect_equal(streamed$message, expected$message)
@@ -1221,4 +1221,105 @@ test_that("max_errors leaves an under-cap result untruncated", {
   expect_equal(nrow(streamed$full_error), 1)
   expect_equal(streamed$n_errors, 1L)
   expect_null(attr(streamed$full_error, "truncated"))
+})
+
+test_that("a grouped rule reports failure before the scan ends", {
+  # fail_fast reads dta_rule_stream_failing(), not state$count: a grouped rule
+  # never touches `count`, so reading it left fail_fast scanning a whole file
+  # whose very first rows already broke a mutually_exclusive constraint.
+  rule <- DTARuleGroupCondition(
+    id = "excl",
+    group_by = "SUBJECT_ID",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(
+      type = "mutually_exclusive", left = "c_failed", right = "c_reported"
+    ))
+  )
+
+  state <- dta_rule_stream_init(rule)
+  expect_false(dta_rule_stream_failing(state))
+
+  first_batch <- data.frame(
+    SUBJECT_ID = c("S1", "S1"),
+    STATUS = c("FAILED", "FAILED"),
+    RESULT = c(NA, 12)
+  )
+  dta_rule_stream_update(state, rule, first_batch)
+  expect_true(dta_rule_stream_failing(state))
+
+  # And the verdict the finalised result reports is unchanged by that.
+  expect_false(dta_rule_stream_finalise(state, rule)$valid)
+})
+
+test_that("a group whose constraint could still be rescued is not called failed early", {
+  # `requires` is not monotone -- a later batch can satisfy the THEN -- so it
+  # must not trip fail_fast on the strength of one batch.
+  rule <- DTARuleGroupCondition(
+    id = "req",
+    group_by = "SUBJECT_ID",
+    conditions = list(
+      c_if = list(STATUS = list(equals = "FAILED")),
+      c_then = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(
+      type = "requires", "if" = "c_if", "then" = "c_then"
+    ))
+  )
+
+  state <- dta_rule_stream_init(rule)
+  dta_rule_stream_update(state, rule, data.frame(
+    SUBJECT_ID = "S1", STATUS = "FAILED", RESULT = NA
+  ))
+  expect_false(dta_rule_stream_failing(state))
+
+  dta_rule_stream_update(state, rule, data.frame(
+    SUBJECT_ID = "S1", STATUS = "OK", RESULT = 12
+  ))
+  expect_true(dta_rule_stream_finalise(state, rule)$valid)
+})
+
+test_that("import errors from both axes are counted once each, cap or no cap", {
+  # Import errors arrive on two axes: import typing records a value it could
+  # not represent, and the rule layer records a value it could not read as a
+  # number. They are merged, and the merge is the only place that knows a cell
+  # flagged on both is one error rather than two. Summing the raw sink totals
+  # bypassed it and could report more import errors than `import_errors` had
+  # rows. Nothing else in the suite populates BOTH sinks at once, which is
+  # exactly the combination that broke.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
+    ),
+    rules = list(
+      DTARuleColRange(id = "textrange", columns = "TEXTCOL", min = 0, max = 100)
+    )
+  )
+
+  n <- 20L
+  path <- vs_write_csv(data.frame(
+    NUMCOL = rep("abc", n),
+    TEXTCOL = rep("xyz", n),
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  full <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_false(full$import_valid)
+  # NUMCOL is flagged by import typing, TEXTCOL by the range rule reading it as
+  # a number. Different cells, so the merge deduplicates nothing away.
+  expect_equal(as.integer(full$n_import_errors), 2L * n)
+  # The headline count may never exceed the detail it claims to summarise while
+  # nothing has been capped. That invariant is what the double-count broke.
+  expect_equal(as.integer(full$n_import_errors), nrow(full$import_errors))
+  expect_setequal(unique(full$import_errors$column), c("NUMCOL", "TEXTCOL"))
+
+  # With the retained-error cap on, the detail shrinks and the count does not.
+  capped <- validate_file_stream(specs, path, max_errors = 5L, verbose = FALSE)
+  expect_equal(as.integer(capped$n_import_errors), 2L * n)
+  expect_lt(nrow(capped$import_errors), 2L * n)
 })

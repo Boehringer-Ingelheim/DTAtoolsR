@@ -57,7 +57,7 @@
         "Config/testthat/edition": "3",
         "VignetteBuilder": "knitr",
         "URL": "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-        "Collate": "'00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R' 'DTADataSet-class.R'\n'DTADataSetTabular-class.R' 'validationReporting.R'\n'DTADataSetFile-class.R' 'DTAFile-class.R'\n'DTAFileTabular-class.R' 'DTAFileCSV-class.R'\n'DTAFileDelim-class.R' 'DTAFileTSV-class.R'\n'DTAMetaData-class.R' 'DTAMetaData-helpers.R' 'DTARule-class.R'\n'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R' 'documentBuilders.R'\n'evaluateSchemaRules.R' 'exportDocuments.R' 'exportFunctions.R'\n'exportTemplateDocx.R' 'formattingHelpers.R' 'run_dta_app.R'\n'validationFunctions.R' 'zzz.R'",
+        "Collate": "'00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R' 'DTADataSet-class.R'\n'DTADataSetTabular-class.R' 'validationReporting.R'\n'DTADataSetFile-class.R' 'DTAFile-class.R'\n'DTAFileTabular-class.R' 'DTAFileCSV-class.R'\n'DTAFileDelim-class.R' 'DTAFileTSV-class.R'\n'DTAMetaData-class.R' 'DTAMetaData-helpers.R' 'DTARule-class.R'\n'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R' 'documentBuilders.R'\n'evaluateRules.R' 'exportDocuments.R' 'exportFunctions.R'\n'exportTemplateDocx.R' 'formattingHelpers.R' 'run_dta_app.R'\n'validationFunctions.R' 'zzz.R'",
         "Config/roxygen2/version": "8.0.0",
         "RemoteType": "github",
         "RemoteHost": "api.github.com",

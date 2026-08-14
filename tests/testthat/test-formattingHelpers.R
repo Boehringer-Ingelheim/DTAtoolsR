@@ -154,3 +154,41 @@ test_that(".title_case_field normalizes snake and dotted field names", {
   expect_equal(.title_case_field("date_first_transfer"), "Date First Transfer")
   expect_equal(.title_case_field("name"), "Name")
 })
+
+test_that("a markdown table cell survives an embedded newline as one row", {
+  # A GFM pipe table is line-based. A description authored as a YAML block
+  # scalar carries real newlines, and each one used to split the row in two --
+  # the renderer then read the tail as a fresh table row, misattributing its
+  # text to the first column and dropping everything after the last pipe.
+  df <- data.frame(
+    id = "age_range",
+    description = "Ages over 100 need:\nsupervisor sign-off | extra consent",
+    stringsAsFactors = FALSE
+  )
+
+  lines <- .df_to_md_table(df)
+
+  # Header, separator, and exactly one body line.
+  expect_length(lines, 3)
+  expect_false(any(grepl("\n", lines, fixed = TRUE)))
+
+  body <- lines[3]
+  expect_match(body, "supervisor sign-off", fixed = TRUE)
+  expect_match(body, "extra consent", fixed = TRUE)
+  # The pipe inside the text stays escaped, so it cannot open a new cell.
+  expect_match(body, "\\|", fixed = TRUE)
+  expect_match(body, "<br>", fixed = TRUE)
+})
+
+test_that("carriage returns are folded the same way as newlines", {
+  df <- data.frame(x = "a\r\nb", stringsAsFactors = FALSE)
+  lines <- .df_to_md_table(df)
+
+  expect_length(lines, 3)
+  expect_equal(lines[3], "| a<br>b |")
+})
+
+test_that("an empty table renders as nothing at all", {
+  expect_equal(.df_to_md_table(NULL), character(0))
+  expect_equal(.df_to_md_table(data.frame()), character(0))
+})
