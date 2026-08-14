@@ -4,17 +4,13 @@
 \alias{run_dta_app}
 \title{Launch the DTAtools Shiny Application}
 \usage{
-run_dta_app(launch.browser = TRUE, port = NULL, restore_session = TRUE, ...)
+run_dta_app(launch.browser = TRUE, port = NULL, ...)
 }
 \arguments{
 \item{launch.browser}{Logical. Whether to open the app in the system browser.
 Passed to \code{\link[shiny:runApp]{shiny::runApp()}}. Default \code{TRUE}.}
 
 \item{port}{Optional integer port for the app. Passed to \code{\link[shiny:runApp]{shiny::runApp()}}.}
-
-\item{restore_session}{Logical. Whether the app may autosave your work and
-offer to restore it after a reload. Default \code{TRUE}, which is right for the
-single-user local run this function performs. See Details.}
 
 \item{...}{Additional arguments passed to \code{\link[shiny:runApp]{shiny::runApp()}}.}
 }
@@ -34,19 +30,6 @@ The app is shipped inside the package under \code{inst/shiny/dta_app}.
 Requires the suggested packages \strong{shiny}, \strong{bslib}, and \strong{DT}. If any are
 missing, an informative error explains what to install.
 }
-\section{Session restore and who can see it}{
-The autosave that backs "Restore previous session" is a file on disk, and one
-R process serves every browser connected to it. On a shared deployment that
-makes the saved work readable by whoever connects next, so the app writes it
-only when this function has explicitly enabled it -- which it does by
-pointing \code{options(DTAtools.app.session_dir)} at a directory created for this
-launch. An app started any other way (Shiny Server, Connect, a bare
-\code{shiny::runApp()} on the app directory) sees no such option and does not
-autosave or offer to restore at all.
-
-Pass \code{restore_session = FALSE} to turn it off even locally.
-}
-
 \examples{
 \dontrun{
 run_dta_app()

@@ -45,9 +45,19 @@ brandbar <- div(
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
-# Prefer a nearby DESCRIPTION (deployed app bundle/source of truth), then fall
-# back to the installed package version.
-dta_package_version <- function() {
+# The app bundle and installed package can differ on Posit Connect, so report
+# both when they do.
+dta_bundle_version <- function() {
+  app_version_file <- file.path(getwd(), "VERSION")
+  if (file.exists(app_version_file)) {
+    vv <- tryCatch(trimws(readLines(app_version_file, n = 1, warn = FALSE, encoding = "UTF-8")),
+      error = function(e) ""
+    )
+    if (length(vv) > 0 && nzchar(vv[[1]])) {
+      return(vv[[1]])
+    }
+  }
+
   roots <- unique(normalizePath(c(
     getwd(),
     file.path(getwd(), ".."),
@@ -73,6 +83,10 @@ dta_package_version <- function() {
     }
   }
 
+  ""
+}
+
+dta_runtime_package_version <- function() {
   v <- tryCatch(as.character(utils::packageVersion("DTAtools")),
     error = function(e) ""
   )
@@ -83,11 +97,30 @@ dta_package_version <- function() {
   ""
 }
 
-dta_pkg_version <- dta_package_version()
+dta_version_label <- function() {
+  bundle_version <- dta_bundle_version()
+  runtime_version <- dta_runtime_package_version()
+
+  if (nzchar(bundle_version) && nzchar(runtime_version) && bundle_version != runtime_version) {
+    return(paste0("app v", bundle_version, " (pkg v", runtime_version, ")"))
+  }
+
+  if (nzchar(bundle_version)) {
+    return(paste0("v", bundle_version))
+  }
+
+  if (nzchar(runtime_version)) {
+    return(paste0("v", runtime_version))
+  }
+
+  ""
+}
+
+dta_pkg_version <- dta_version_label()
 app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
-  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", paste0("v", dta_pkg_version)),
+  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
   tags$span(class = "foot-sep", "\u2022"),
   tags$span("Boehringer Ingelheim"),
   tags$span(class = "foot-sep", "\u2022"),
@@ -149,6 +182,40 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 });
 "
 
+# Per-browser secret backing 'Restore previous session'. The autosaved session
+# must outlive the Shiny session (the whole point is recovering after a reload
+# or a crash), so it cannot be keyed to session$token, which is regenerated on
+# every page load. It is keyed instead to a 128-bit random id held in the
+# browser's localStorage: stable across reloads for one browser profile,
+# unguessable by, and never shared with, any other visitor of the same app.
+# If localStorage is unavailable (private mode) a fresh id is minted per load,
+# so the feature degrades to "no session found" rather than leaking one.
+client_id_js <- "
+(function(){
+  function dtaClientId(){
+    var KEY = 'dtatools_client_id';
+    var id = null;
+    try { id = window.localStorage.getItem(KEY); } catch (e) { id = null; }
+    if (!id || !/^[a-f0-9]{32}$/.test(id)) {
+      var buf = new Uint8Array(16);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(buf);
+      } else {
+        for (var i = 0; i < buf.length; i++) { buf[i] = Math.floor(Math.random() * 256); }
+      }
+      id = Array.prototype.map.call(buf, function(b){
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+      try { window.localStorage.setItem(KEY, id); } catch (e) {}
+    }
+    return id;
+  }
+  $(document).on('shiny:connected', function(){
+    Shiny.setInputValue('dta_client_id', dtaClientId());
+  });
+})();
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
   shinyjs::useShinyjs(),
@@ -156,7 +223,8 @@ ui <- bslib::page_fluid(
     tags$style(bi_css()),
     tags$script(shiny::HTML(reset_fileinput_js)),
     tags$script(shiny::HTML(msgs_dock_js)),
-    tags$script(shiny::HTML(download_trigger_js))
+    tags$script(shiny::HTML(download_trigger_js)),
+    tags$script(shiny::HTML(client_id_js))
   ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),
@@ -221,20 +289,26 @@ server <- function(input, output, session) {
   )
 
   upload_registry <- new.env(parent = emptyenv())
-  # Where the autosave behind "Restore previous session" lives -- or NULL, in
-  # which case there is no autosave and no restore offer.
-  #
-  # `tempdir()` belongs to the R PROCESS, not to a browser session, and one
-  # process serves every connection to it. A fixed path there meant any visitor
-  # was offered a restore of whoever had used the app last, handing one user's
-  # uploaded clinical data to another with no ownership check. Restoring is for
-  # one person running the app locally and reloading the page, so it happens
-  # only when run_dta_app() has said that is the situation.
-  session_dir <- getOption("DTAtools.app.session_dir", NULL)
-  session_file <- if (is.null(session_dir)) {
-    NULL
-  } else {
-    file.path(session_dir, "dtatools_app_session.rds")
+
+  # Autosave slot for 'Restore previous session', keyed to the browser's
+  # localStorage id (see client_id_js) rather than to session$token: the file
+  # has to survive the Shiny session to be restorable after a reload, but must
+  # still be reachable only by the browser that wrote it. The id is re-validated
+  # here because an input value is client-supplied and could be anything; only a
+  # 32-char lowercase hex string is accepted, which also makes it path-safe.
+  client_id <- function() {
+    id <- isolate(input$dta_client_id)
+    if (is.null(id) || length(id) != 1L || is.na(id) || !grepl("^[a-f0-9]{32}$", id)) {
+      return(NULL)
+    }
+    id
+  }
+  session_file <- function() {
+    id <- client_id()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    file.path(tempdir(), paste0("dtatools_app_session_", id, ".rds"))
   }
 
   # Stable id per bound file so its trash button keeps working across renders.
@@ -284,11 +358,13 @@ server <- function(input, output, session) {
   }
 
   autosave <- function() {
-    if (is.null(session_file)) {
+    target <- session_file()
+    if (is.null(target)) {
       return(invisible(NULL))
     }
     try(saveRDS(
       list(
+        client_id = client_id(),
         dump = dta_dump_session(isolate(rv$dta)),
         yaml_text = isolate(rv$yaml_text),
         structure = isolate(rv$structure),
@@ -298,7 +374,7 @@ server <- function(input, output, session) {
         dataset_only = isolate(rv$dataset_only),
         is_example = isolate(rv$is_example)
       ),
-      session_file
+      target
     ), silent = TRUE)
   }
 
@@ -3189,11 +3265,11 @@ server <- function(input, output, session) {
       enum = paste0("one of: ", .first_nonempty(
         r[["columnspec_params.allowedValues"]],
         r[["columnspec_parent.enum"]],
-        r[["schema_schema"]]
+        r[["columnspec_columnspec"]]
       )),
       const = paste0("exactly: ", .first_nonempty(
         r[["columnspec_parent.const"]],
-        r[["schema_schema"]]
+        r[["columnspec_columnspec"]]
       )),
       maxLength = paste0(
         "at most ", .first_nonempty(
@@ -3214,7 +3290,7 @@ server <- function(input, output, session) {
       type = paste0("type: ", .first_nonempty(r[["columnspec_parent.type"]])),
       pattern = paste0("match pattern ", .first_nonempty(
         r[["columnspec_params.pattern"]],
-        r[["schema_schema"]]
+        r[["columnspec_columnspec"]]
       )),
       required = "the value must be present (not missing)",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
@@ -3258,7 +3334,7 @@ server <- function(input, output, session) {
     r <- as.list(d[1, , drop = FALSE])
     # `source` is the fallback for `type`: both name the axis ("columnspec", "rule",
     # "import"), and falling back on the rule_id guess alone would route an
-    # import record into the schema branch.
+    # import record into the column spec branch.
     typ <- .first_nonempty(r[["type"]], r[["source"]])
     if (!nzchar(typ)) {
       typ <- if ("rule_id" %in% names(d)) "rule" else "columnspec"
@@ -3303,8 +3379,8 @@ server <- function(input, output, session) {
       # Third validation axis: the value could not be represented in the type
       # the spec declares, so the typed column holds NA and the raw text was
       # kept. inspect() supplies it as import_* columns (from import_matches).
-      # Without this branch the record fell into the schema branch below and
-      # rendered two empty schema_* panels.
+      # Without this branch the record fell into the column spec branch below and
+      # rendered two empty columnspec_* panels.
       f <- dta_inspect_import_fields(r)
       col <- f$column
       raw <- f$raw
@@ -4454,9 +4530,7 @@ server <- function(input, output, session) {
     rv$status <- list()
     rv$is_example <- FALSE
     rv$example_target <- NULL
-    if (!is.null(session_file)) {
-      try(unlink(session_file), silent = TRUE)
-    }
+    try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
 
@@ -4709,8 +4783,13 @@ server <- function(input, output, session) {
     # uploads -- which mutate rv$dta -- do not rebuild the whole workspace or
     # reset the active tab / file inputs. Live bits live in their own outputs.
     if (is.null(rv$structure)) {
-      # Landing
-      restore_available <- !is.null(session_file) && file.exists(session_file)
+      # Landing. Reference input$dta_client_id directly so this re-renders once
+      # the browser reports its id and the restore button can appear.
+      restore_available <- {
+        input$dta_client_id
+        sf <- session_file()
+        !is.null(sf) && file.exists(sf)
+      }
       card(
         max_height = "620px",
         card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
@@ -4808,10 +4887,22 @@ server <- function(input, output, session) {
 
   # --- restore previous session ------------------------------------------
   observeEvent(input$restore_session, {
-    if (is.null(session_file) || !file.exists(session_file)) {
+    sf <- session_file()
+    if (is.null(sf) || !file.exists(sf)) {
       return()
     }
-    saved <- tryCatch(readRDS(session_file), error = function(e) NULL)
+    saved <- tryCatch(readRDS(sf), error = function(e) NULL)
+    if (is.null(saved)) {
+      showNotification("Could not restore the previous session.", type = "error")
+      return()
+    }
+    # Defence in depth behind the per-browser filename: refuse a payload that
+    # does not carry this browser's own id, so a stale or planted file under a
+    # guessed name cannot be loaded into someone else's session.
+    if (!identical(saved$client_id, client_id())) {
+      showNotification("Cannot restore a session saved by a different browser.", type = "error")
+      return()
+    }
     # Prefer the saveRDS-safe dump (arrow tables collected to data.frames);
     # fall back to a legacy `dta` field for older session files.
     restored <- if (!is.null(saved$dump)) {
@@ -4819,7 +4910,7 @@ server <- function(input, output, session) {
     } else {
       saved$dta
     }
-    if (is.null(saved) || is.null(restored)) {
+    if (is.null(restored)) {
       showNotification("Could not restore the previous session.", type = "error")
       return()
     }

@@ -44,9 +44,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   including row numbers under batched streaming. `inst/extdata` ships
   `clinical_data2.csv.gz` as a worked example.
 
-- `run_dta_app(restore_session = )` controls whether the app may autosave your
-  work and offer to restore it.
-
 ### Fixed
 
 - **A conditional rule no longer waves through a row whose IF clause could not
@@ -79,12 +76,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   path keeps them all; both now carry `rows_truncated`, so ten rows can no
   longer be mistaken for all of them.
 
-- **The Shiny app no longer offers one user's session to another.** The autosave
-  behind "Restore previous session" was written to a fixed path in `tempdir()`,
-  which belongs to the R process rather than to a browser session — so on a
-  shared deployment any visitor was offered a restore of whoever had used the
-  app last, uploaded data included. It is now written only when
-  `run_dta_app()` has enabled it for a local single-user run.
+- **The Shiny app's document export no longer collides between sessions.** The
+  export wrote to a path built from the document title and the date, so two
+  untitled exports on the same day shared one file — and because the browser
+  fetches it on a later request, whichever session wrote last was the one both
+  downloads received. Each export now writes to its own `tempfile()`; the name
+  the browser saves it under is unchanged.
 
 - **A multi-line description no longer corrupts a Markdown report.** Pipe tables
   are line-based, so a newline inside a cell split the row and the renderer read
@@ -105,6 +102,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   nothing in the output explained. The original spelling is gone by the time
   the parser hands the list over and cannot be recovered, so importing such a
   specification now says which column is affected and to quote the values.
+
+## [0.16.1] - 2026-08-14
+
+### Security
+
+- **The Shiny app's "Restore previous session" no longer exposes one user's
+  work to another.** The autosaved workspace was written to a single fixed path
+  in `tempdir()`. `tempdir()` is per R *process*, not per Shiny session, so
+  every browser session served by the same worker — the normal arrangement
+  under Shiny Server, Posit Connect, or a shared `runApp()` — read and wrote
+  the same file. One user's spec, metadata, upload paths and collected table
+  contents were offered to the next visitor behind the restore button, and each
+  session silently clobbered the other's saved state.
+
+  The slot is now keyed to a 128-bit random id the browser keeps in
+  `localStorage`, and the payload carries that id and is rejected on restore if
+  it does not match. The id is re-validated server-side as 32 lowercase hex
+  characters before it is used to build a path, so a hostile value on the
+  websocket cannot steer the write. Recovery after a reload or a crash still
+  works, because the id is stable for a browser profile — unlike `session$token`,
+  which is minted afresh on every page load and would have made the feature
+  unreachable.
+
+- **The Shiny app's custom Word template picker no longer resolves a name
+  outside the bundled templates directory.** `get_template_path()` pasted
+  `input$export_template_select` straight into a path. A Shiny client is not
+  bound by the choices offered in a `selectInput` and can put any string on the
+  websocket, so `"../.."` or an absolute path escaped
+  `inst/extdata/templates`; the file was then rendered by
+  `export_with_template()` and returned to the client as a download. The name
+  must now match one of the bundled templates exactly.
 
 ## [0.16.0] - 2026-08-14
 

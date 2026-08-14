@@ -8,12 +8,9 @@ test_that("run_dta_app() keeps its documented signature", {
 
   # Documented defaults in R/run_dta_app.R — a silent change here would break
   # callers that rely on the app opening a browser by default.
-  expect_equal(names(fmls), c("launch.browser", "port", "restore_session", "..."))
+  expect_equal(names(fmls), c("launch.browser", "port", "..."))
   expect_true(eval(fmls$launch.browser))
   expect_null(eval(fmls$port))
-  # Autosave/restore is on for the local single-user run this function performs,
-  # and is what tells the app it may write session state to disk at all.
-  expect_true(eval(fmls$restore_session))
 })
 
 test_that("run_dta_app() resolves the app directory that is actually shipped", {
