@@ -1,0 +1,93 @@
+# Bump the package version everywhere it is recorded, and open a PR to `dev`.
+#
+# Trigger it from the Actions tab (Actions -> Bump version -> Run workflow) and
+# give it the new version, e.g. `0.17.4`. The same bump can be done locally with
+#
+#   Rscript .github/scripts/bump_version.R 0.17.4
+#
+# and it is the identical code path -- this workflow is only a button for it, so
+# there is no second implementation to keep in step.
+#
+# What gets rewritten is defined in .github/scripts/bump_version.R: DESCRIPTION,
+# inst/shiny/dta_app/VERSION, the two version-carrying entries in the app's
+# manifest.json, the badge and footer in docs/index.html, and the CHANGELOG
+# heading. The r-style workflow runs the same script in `--check` mode, so a
+# hand-edited version that misses a site fails CI.
+#
+# It opens a PR rather than pushing to `dev` directly: `dev` is the shared
+# working branch and the bump should go through the normal checks and review
+# like any other change.
+name: Bump version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, e.g. 0.17.4 (no leading 'v')"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: dev
+
+      # setup-r alone, with no setup-r-dependencies step: bump_version.R is
+      # deliberately base-R only (read.dcf, readLines, tools::md5sum), so there
+      # is no package library to restore and this job finishes in seconds
+      # rather than minutes.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Bump every version site
+        run: Rscript .github/scripts/bump_version.R "${{ inputs.version }}"
+
+      - name: Verify the result is self-consistent
+        run: Rscript .github/scripts/check_version_sync.R
+
+      # NOTE: a PR opened with the default GITHUB_TOKEN does not trigger other
+      # workflows, so r-style and R-CMD-check will not run on it automatically.
+      # Either close and reopen the PR to kick them off, or set a repo secret
+      # named BUMP_PAT (a fine-grained PAT with contents:write and
+      # pull-requests:write) -- the token expression below prefers it when
+      # present and falls back to GITHUB_TOKEN when it is not.
+      - name: Open the pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.BUMP_PAT || secrets.GITHUB_TOKEN }}
+          base: dev
+          branch: bump/v${{ inputs.version }}
+          delete-branch: true
+          commit-message: "release: bump version to ${{ inputs.version }}"
+          title: "release: bump version to ${{ inputs.version }}"
+          body: |
+            Automated version bump to `${{ inputs.version }}`, opened by the
+            **Bump version** workflow.
+
+            Rewritten by `.github/scripts/bump_version.R`:
+
+            - `DESCRIPTION` — `Version:`
+            - `inst/shiny/dta_app/VERSION`
+            - `inst/shiny/dta_app/manifest.json` — the DTAtools `Version` and the
+              recorded md5 of the `VERSION` file
+            - `docs/index.html` — version badge and footer
+            - `CHANGELOG.md` — `[Unreleased]` promoted to this version, or a new
+              stanza inserted
+
+            **Before merging:** fill in the CHANGELOG entry if it still says
+            `TODO`, and check that no other workflow needed to run — a PR opened
+            with the default `GITHUB_TOKEN` does not trigger CI (see the note in
+            this workflow).

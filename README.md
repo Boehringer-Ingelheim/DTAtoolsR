@@ -152,34 +152,6 @@ as.data.frame(get_table(ds_imp, "demo"))   # the offending cell is now NA
 See the [vignette's Import Errors
 section](vignettes/DTAtools.Rmd) for the full treatment.
 
-## Upgrading from 0.12.x
-
-Data that passed validation under 0.12.x can fail under 0.13.0, by design.
-Several defects caused invalid data to be reported as clean, and the import
-axis above did not exist at all. In particular:
-
-- A `col_condition` with more than one operator in its `then:` block
-  evaluated only the first, so `{AGE: {greater: 18, less: 65}}` never
-  enforced `less`.
-- `col_range` on a factor column compared level codes rather than values.
-- Numeric comparisons on character columns used locale collation, so
-  `"9" > 65` was `TRUE`.
-- Rule violations were invisible whenever the table also had a column spec error.
-- Metadata is now validated: a transmission date that had to be coerced to
-  fit its declared type fails the whole `DTA`.
-
-Validation artifacts written by an earlier version know nothing about the
-import axis, so `results()` reports `n_import_errors` as `NA` — unknown, not
-zero — and `messages()` returns a warning row saying the artifact predates
-import checking. Re-validate once to replace them:
-
-```r
-dta <- check(dta, force = TRUE)
-```
-
-`force = TRUE` bypasses the skip-if-unchanged shortcut, so every table is
-validated again on the current result version.
-
 ## Package Architecture
 
 `DTAtools` organises objects into a layered hierarchy that maps directly to
@@ -980,8 +952,8 @@ specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
   the JSON Schema is built. A value that cannot be represented in it becomes
   `NA` and is reported as an import error, which fails validation on its own.
 - `check()` skips a table whose data and specs are unchanged since the last
-  run. Use `check(x, force = TRUE)` to override — required once after
-  upgrading from 0.12.x.
+  run. Use `check(x, force = TRUE)` to override and re-validate every table
+  regardless.
 
 ## Credits
 

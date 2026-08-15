@@ -79,9 +79,14 @@ jobs:
         shell: Rscript {0}
         run: source(".github/scripts/check_deps_in_desc.R")
 
-      - name: Check Shiny VERSION file matches DESCRIPTION Version
+      # Covers every file that records the version, not just the Shiny VERSION
+      # file: DESCRIPTION, inst/shiny/dta_app/VERSION, the two version-carrying
+      # entries in the app's manifest.json, and the badge/footer in
+      # docs/index.html. See .github/scripts/bump_version.R for the site list and
+      # for the command that resyncs them.
+      - name: Check every version site matches DESCRIPTION Version
         shell: Rscript {0}
-        run: source(".github/scripts/check_shiny_version_file.R")
+        run: source(".github/scripts/check_version_sync.R")
 
       # Parity with style-files. Fails rather than auto-fixes: this workflow
       # has no write-back step (see the note on the roxygen step below for

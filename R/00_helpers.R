@@ -1,3 +1,15 @@
+#' Null-Coalescing Operator
+#'
+#' `%||%` is used throughout the package but only became part of base R in
+#' 4.4.0, while `DESCRIPTION` declares `R (>= 4.1.0)`. Importing it from
+#' `rlang` keeps the package working on the older R versions it claims to
+#' support.
+#'
+#' @importFrom rlang %||%
+#' @name null-default
+#' @noRd
+NULL
+
 class_null <- S7::new_S3_class("NULL")
 class_Date_or_null <- S7::class_Date | class_null
 class_DTAColumnSpec <- S7::new_class("DTAColumnSpec")

@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.3] - 2026-08-15
+
+### Added
+
+- `.github/scripts/bump_version.R`, which rewrites every file that records the
+  package version — `DESCRIPTION`, `inst/shiny/dta_app/VERSION`, the DTAtools
+  entry and the `VERSION` checksum in the app's `manifest.json`, and the badge
+  and footer in `docs/index.html` — plus the `CHANGELOG` heading. Run it as
+  `Rscript .github/scripts/bump_version.R <version>`, or from the Actions tab
+  via the new **Bump version** workflow, which opens a PR against `dev`.
+  `--check` reports drift without writing and is what CI runs.
+
+### Changed
+
+- The GitHub Pages tutorial (`docs/index.html`) now uses the Boehringer
+  Ingelheim brand palette that the Shiny app and the Word/PDF export already
+  share, replacing the stock Bootstrap blue, and shows the real DTAtools logo
+  instead of an emoji placeholder. The dark theme uses lifted tints of the
+  brand greens; every foreground/background pair passes WCAG AA. (#37)
+- `.github/scripts/check_shiny_version_file.R` is replaced by
+  `check_version_sync.R`, which checks all six version sites rather than only
+  `inst/shiny/dta_app/VERSION`. The two sites it did not cover had both
+  silently drifted: `manifest.json` still said `0.17.2` with a stale `VERSION`
+  checksum, and `docs/index.html` still said `0.17.1`. All are now resynced.
+
+### Removed
+
+- The "Upgrading from 0.12.x" sections in `README.md` and
+  `vignettes/DTAtools.Rmd`, and the inline references to that migration. The
+  `force = TRUE` behaviour they described is still documented, on its own
+  terms rather than as an upgrade step. The 0.13.0 CHANGELOG entry remains as
+  the historical record. (#35)
+
+### Fixed
+
+- `%||%` is now imported from `rlang`. It is used throughout the package but
+  only entered base R in 4.4.0, while `DESCRIPTION` declares `R (>= 4.1.0)`,
+  so on R 4.1–4.3 operations such as reading a DTA from YAML failed with
+  `could not find function "%||%"`.
+
+### Added
+
+- `tests/testthat/test-namespaceImports.R`, asserting `%||%` is bound in the
+  package's own imports environment rather than inherited from base R.
+
 ## [0.17.2] - 2026-08-15
 
 ### Added

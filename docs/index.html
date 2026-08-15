@@ -15,32 +15,43 @@
     /* ===== CSS RESET & VARIABLES ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* Boehringer Ingelheim brand palette. Source of truth: inst/shiny/dta_app/R/theme.R (BI list), kept in step with R/formattingHelpers.R */
     :root {
-      --primary: #0d6efd;
-      --primary-dark: #0a58ca;
-      --success: #198754;
-      --danger: #dc3545;
-      --warning: #fd7e14;
-      --purple: #6f42c1;
-      --yellow: #ffc107;
+      --primary: #00625B;
+      --primary-dark: #003D38;
+      --success: #1E8E5A;
+      --danger: #C0392B;
+      --warning: #C77700;
+      --accent: #00A886;
+      --yellow: #B8860B;
 
       --bg: #ffffff;
-      --bg-subtle: #f8f9fa;
+      --bg-subtle: #F4F7F6;
       --bg-card: #ffffff;
-      --border: #dee2e6;
-      --text: #212529;
-      --text-muted: #6c757d;
-      --sidebar-bg: #f8f9fa;
-      --sidebar-active-bg: #e7f1ff;
-      --sidebar-active-text: #0d6efd;
+      --border: #CDD5D4;
+      --text: #1A2B2A;
+      --text-muted: #5B6B6A;
+      --sidebar-bg: #F4F7F6;
+      --sidebar-active-bg: #E6F1EF;
+      --sidebar-active-text: #00625B;
       --header-bg: #ffffff;
       --shadow: 0 1px 3px rgba(0,0,0,.08), 0 2px 8px rgba(0,0,0,.04);
       --shadow-md: 0 4px 16px rgba(0,0,0,.10);
       --radius: 8px;
       --radius-lg: 12px;
+      --success-bg: #E5F4EC;
+      --danger-bg: #FBEAE7;
+      --primary-bg: #E6F1EF;
+      --success-border: #9BD3B4;
+      --danger-border: #E9B4AC;
     }
 
     [data-theme="dark"] {
+      --primary: #4FD1B5;
+      --primary-dark: #6FE0C7;
+      --accent: #5FD9C0;
+      --success: #56D394;
+      --danger: #F1948A;
       --bg: #0d1117;
       --bg-subtle: #161b22;
       --bg-card: #1c2128;
@@ -48,11 +59,16 @@
       --text: #e6edf3;
       --text-muted: #8b949e;
       --sidebar-bg: #161b22;
-      --sidebar-active-bg: #1f3051;
-      --sidebar-active-text: #58a6ff;
+      --sidebar-active-bg: #122E2C;
+      --sidebar-active-text: #4FD1B5;
       --header-bg: #161b22;
       --shadow: 0 1px 3px rgba(0,0,0,.3);
       --shadow-md: 0 4px 16px rgba(0,0,0,.4);
+      --success-bg: #10291F;
+      --danger-bg: #3B1A16;
+      --primary-bg: #122E2A;
+      --success-border: #1E5E43;
+      --danger-border: #6E332C;
     }
 
     /* ===== BASE ===== */
@@ -93,11 +109,9 @@
     }
     .header-brand .logo-icon {
       width: 32px; height: 32px;
-      background: linear-gradient(135deg, var(--primary), var(--purple));
       border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem;
-      color: white;
+      object-fit: contain;
+      flex-shrink: 0;
     }
     .header-spacer { flex: 1; }
     .version-badge {
@@ -272,9 +286,9 @@
       border: 1px solid var(--border);
       border-radius: 4px;
       padding: .12em .4em;
-      color: var(--purple);
+      color: var(--accent);
     }
-    [data-theme="dark"] code:not(.hljs) { color: #c792ea; }
+    [data-theme="dark"] code:not(.hljs) { color: #5FD9C0; }
 
     /* ===== CALLOUTS ===== */
     .callout {
@@ -291,15 +305,15 @@
     .callout-body p { margin: 0; }
     .callout-body p + p { margin-top: .5rem; }
 
-    .callout-tip    { background: #eff6ff; border-color: var(--primary); }
-    .callout-warn   { background: #fff7ed; border-color: var(--warning); }
-    .callout-success{ background: #f0fdf4; border-color: var(--success); }
-    .callout-error  { background: #fef2f2; border-color: var(--danger); }
+    .callout-tip    { background: var(--primary-bg); border-color: var(--primary); }
+    .callout-warn   { background: #FDF4E7; border-color: var(--warning); }
+    .callout-success{ background: var(--success-bg); border-color: var(--success); }
+    .callout-error  { background: var(--danger-bg); border-color: var(--danger); }
 
-    [data-theme="dark"] .callout-tip    { background: #1e3a5f; }
-    [data-theme="dark"] .callout-warn   { background: #3d2a10; }
-    [data-theme="dark"] .callout-success{ background: #14532d; }
-    [data-theme="dark"] .callout-error  { background: #450a0a; }
+    [data-theme="dark"] .callout-tip    { background: var(--primary-bg); }
+    [data-theme="dark"] .callout-warn   { background: #4A3820; }
+    [data-theme="dark"] .callout-success{ background: var(--success-bg); }
+    [data-theme="dark"] .callout-error  { background: var(--danger-bg); }
 
     /* ===== TABLES ===== */
     .table-wrap { overflow-x: auto; margin: 1.25rem 0; border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -362,8 +376,8 @@
       min-width: 110px;
     }
     .diag-box.yaml  { border-color: var(--primary); color: var(--primary); }
-    .diag-box.engine{ border-color: var(--purple); color: var(--purple); background: #f3e8ff; }
-    [data-theme="dark"] .diag-box.engine { background: #2d1b69; }
+    .diag-box.engine{ border-color: var(--accent); color: var(--accent); background: #D1F2EB; }
+    [data-theme="dark"] .diag-box.engine { background: #0E4A42; }
     .diag-box.data  { border-color: var(--text-muted); }
     .diag-box.pass  { border-color: var(--success); color: var(--success); }
     .diag-box.fail  { border-color: var(--danger);  color: var(--danger); }
@@ -421,12 +435,12 @@
       padding: 1.2rem 1.3rem;
       border-left: 5px solid;
     }
-    .error-card.import { background: #fef2f2; border-color: var(--danger); }
-    .error-card.columnspec { background: #fff7ed; border-color: var(--warning); }
-    .error-card.rule   { background: #fefce8; border-color: var(--yellow); }
-    [data-theme="dark"] .error-card.import { background: #450a0a; }
-    [data-theme="dark"] .error-card.columnspec { background: #3d2a10; }
-    [data-theme="dark"] .error-card.rule   { background: #3d3200; }
+    .error-card.import { background: var(--danger-bg); border-color: var(--danger); }
+    .error-card.columnspec { background: #FDF4E7; border-color: var(--warning); }
+    .error-card.rule   { background: #FBF5D9; border-color: var(--yellow); }
+    [data-theme="dark"] .error-card.import { background: var(--danger-bg); }
+    [data-theme="dark"] .error-card.columnspec { background: #4A3820; }
+    [data-theme="dark"] .error-card.rule   { background: #3D3800; }
     .error-card-title { font-weight: 700; font-size: 1rem; margin-bottom: .5rem; }
     .error-card ul { margin: .5rem 0 0 1rem; font-size: .88rem; }
     .error-card li { margin-bottom: .3rem; }
@@ -462,14 +476,14 @@
       font-size: .75rem;
       font-weight: 600;
     }
-    .badge-yes  { background: #dcfce7; color: #15803d; }
-    .badge-no   { background: #fee2e2; color: #dc2626; }
-    [data-theme="dark"] .badge-yes { background: #14532d; color: #86efac; }
-    [data-theme="dark"] .badge-no  { background: #450a0a; color: #fca5a5; }
+    .badge-yes  { background: var(--success-bg); color: var(--success); }
+    .badge-no   { background: var(--danger-bg); color: var(--danger); }
+    [data-theme="dark"] .badge-yes { background: var(--success-bg); color: #86DD9B; }
+    [data-theme="dark"] .badge-no  { background: var(--danger-bg); color: #F7B8B0; }
 
     /* ===== CHEAT SHEET ===== */
-    .cheat-fn { font-family: 'JetBrains Mono', monospace; font-size: .85rem; color: var(--purple); }
-    [data-theme="dark"] .cheat-fn { color: #c792ea; }
+    .cheat-fn { font-family: 'JetBrains Mono', monospace; font-size: .85rem; color: var(--accent); }
+    [data-theme="dark"] .cheat-fn { color: #5FD9C0; }
 
     /* ===== FOOTER ===== */
     .site-footer {
@@ -519,11 +533,11 @@
 <header class="site-header">
   <button class="hamburger" id="hamburger" aria-label="Toggle navigation">☰</button>
   <a href="#" class="header-brand">
-    <div class="logo-icon">🧪</div>
+    <img src="dtatools_logo_small.png" alt="DTAtools" width="32" height="32" class="logo-icon">
     DTAtools
   </a>
   <div class="header-spacer"></div>
-  <span class="version-badge">v0.17.1</span>
+  <span class="version-badge">v0.17.3</span>
   <button class="theme-toggle" id="themeToggle">
     <span id="themeIcon">🌙</span>
     <span id="themeLabel">Dark</span>
@@ -802,17 +816,17 @@ messages(dta)</code></pre>
         <tbody>
           <tr>
             <td><span style="color:var(--danger);font-weight:600">import</span></td>
-            <td><span style="background:#fef2f2;color:var(--danger);padding:.1rem .5rem;border-radius:4px">🔴 red</span></td>
+            <td><span style="background:var(--danger-bg);color:var(--danger);padding:.1rem .5rem;border-radius:4px">🔴 red</span></td>
             <td>Value <code>"unknown"</code> cannot be read as <code>SAS Num</code></td>
           </tr>
           <tr>
             <td><span style="color:var(--warning);font-weight:600">columnspec</span></td>
-            <td><span style="background:#fff7ed;color:var(--warning);padding:.1rem .5rem;border-radius:4px">🟠 orange</span></td>
+            <td><span style="background:#FDF4E7;color:var(--warning);padding:.1rem .5rem;border-radius:4px">🟠 orange</span></td>
             <td>Value <code>"V99"</code> not in allowed values list</td>
           </tr>
           <tr>
-            <td><span style="color:#a16207;font-weight:600">rule</span></td>
-            <td><span style="background:#fefce8;color:#a16207;padding:.1rem .5rem;border-radius:4px">🟡 yellow</span></td>
+            <td><span style="color:var(--yellow);font-weight:600">rule</span></td>
+            <td><span style="background:#FBF5D9;color:var(--yellow);padding:.1rem .5rem;border-radius:4px">🟡 yellow</span></td>
             <td>CONSENT='YES' but CONSENT_DATE is empty (rule: consent_requires_date)</td>
           </tr>
         </tbody>
@@ -1047,11 +1061,12 @@ messages(dta)</code></pre>
       after all column spec checks have passed.
     </p>
 
-    <p>DTAtools supports three built-in rule types:</p>
+    <p>DTAtools supports four built-in rule types:</p>
     <ul style="margin:.5rem 0 1rem 1.5rem">
       <li><strong><code>col_condition</code></strong> — if/then logic between columns</li>
       <li><strong><code>col_range</code></strong> — numeric min/max constraint on a single column</li>
       <li><strong><code>col_unique</code></strong> — uniqueness constraint (single column or combination)</li>
+      <li><strong><code>group_condition</code></strong> — group-Level If/Then Logic</li>
     </ul>
 
     <!-- ===== COL_CONDITION ===== -->
@@ -1831,7 +1846,7 @@ datasets:
 <!-- FOOTER -->
 <footer class="site-footer">
   <p>
-    DTAtools v0.17.1 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
+    DTAtools v0.17.3 — R package for Data Transfer Agreement validation &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR" target="_blank">GitHub Repository</a>
     &nbsp;·&nbsp;
     <a href="https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues" target="_blank">Report an Issue</a>
