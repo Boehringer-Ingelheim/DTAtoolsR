@@ -88,6 +88,20 @@ jobs:
         shell: Rscript {0}
         run: source(".github/scripts/check_version_sync.R")
 
+      # The version check above can only cover lines that carry a version. This
+      # covers the rest of the app's manifest.json -- the file list, every
+      # checksum, and the fields that must stay deleted. Six of the eight
+      # checksums were verified by nothing at all until this was added, which is
+      # how release 0.16.0 shipped with the wrong md5 for app.R.
+      #
+      # This step FAILS; it does not repair. The repair runs in the separate
+      # manifest-sync workflow, which pushes to the PR branch -- so on a normal
+      # PR this step is a backstop that should already be green by the time it
+      # runs.
+      - name: Check the app manifest describes the app
+        shell: Rscript {0}
+        run: source(".github/scripts/check_manifest.R")
+
       # Parity with style-files. Fails rather than auto-fixes: this workflow
       # has no write-back step (see the note on the roxygen step below for
       # why), so a fixable style diff and an unfixable one are treated the
