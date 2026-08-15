@@ -70,40 +70,6 @@ library(DTAtools)
 
 ---
 
-## Upgrading from 0.12.x
-
-Data that passed validation under 0.12.x can fail under 0.13.0, by design.
-Three changes account for almost all of it:
-
-- **A third axis was added.** A value that cannot be represented in its declared
-  type is now an *import error*, and a single import error fails the table on
-  its own. Nothing reported this before. See
-  [Import Errors](#import-errors-values-that-do-not-fit-their-declared-type).
-- **Several checks that silently passed now fire.** A `col_condition` with more
-  than one operator in its `then:` block evaluated only the first; a `col_range`
-  rule on a factor column compared level codes rather than values; numeric
-  comparisons on character columns used locale collation, so `"9" > 65` was
-  `TRUE`; and rule violations were invisible whenever the table also had a
-  column spec error. All of these now report.
-- **Metadata is validated too.** A transmission date that had to be coerced to
-  fit its declared type fails the whole `DTA`, where before it was recorded
-  while the banner still reported success.
-
-If a dataset carries validation artifacts written by an earlier version, those
-artifacts know nothing about the import axis. `validation_status()` and
-`results()` therefore report `n_import_errors` as `NA` — unknown, not zero — and
-`messages()` returns a warning row saying the artifact predates import checking.
-Re-validate to replace them:
-
-```{r upgrade_force, eval=FALSE}
-dta <- check(dta, force = TRUE)
-```
-
-`force = TRUE` bypasses the skip-if-unchanged shortcut, so every table is
-validated again and every artifact is rewritten on the current result version.
-
----
-
 ## Package Architecture
 
 `DTAtools` organises objects into a layered hierarchy that maps directly to how
@@ -512,8 +478,8 @@ Useful arguments:
 | `tables`       | `NULL`  | Restrict validation to named or indexed tables (`datasets` on a `DTA`)   |
 
 Without `force`, a table whose data and specs hash unchanged is skipped and its
-previous result is reused — which is why upgrading requires
-`check(x, force = TRUE)` once.
+previous result is reused. Pass `check(x, force = TRUE)` to bypass that shortcut
+and re-validate every table regardless.
 
 #### Validating a dataset
 
@@ -539,7 +505,8 @@ plus `dataset`, `target` and the roll-up columns `n_targets`, `n_validated`,
 `n_valid`, `n_invalid`, `n_skipped`, `n_not_validated`.
 
 `n_import_errors` is `NA` rather than `0` when the recorded result predates the
-import axis; see [Upgrading from 0.12.x](#upgrading-from-0.12.x).
+import axis — unknown, not zero. `messages()` returns a warning row saying as
+much, and `check(x, force = TRUE)` re-validates to replace the stale artifact.
 
 ```{r inspect_results}
 # Summary per table
@@ -710,10 +677,10 @@ When this happens, three things follow:
 3. The table fails validation. **Any import error makes validation fail**, on
    its own, even when every column spec constraint and every rule passes.
 
-The third point is what a returning user notices first: a file that validated
-cleanly under 0.12.x can fail now without a single column spec or rule error against
-it. That is not a false positive — it means a value was being quietly discarded
-before.
+The third point is the one that surprises: a file can fail without a single
+column spec or rule error against it. That is not a false positive — it means a
+value could not be represented in its declared type and would otherwise have
+been quietly discarded.
 
 ### A minimal example
 
