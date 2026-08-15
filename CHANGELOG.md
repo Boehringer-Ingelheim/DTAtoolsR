@@ -48,6 +48,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The Shiny app no longer asks whether to stream a file; it just does the
+  right thing.** The "Load large files without reading them into memory"
+  checkbox added in 0.17.1 is gone, and the app now calls `load_file()` with
+  its own default of `stream = "auto"` -- reading a file into memory below
+  `getOption("DTAtools.stream_threshold")` and scanning a larger one in
+  batches. The checkbox put a storage-strategy question in front of someone
+  who came to validate a file, and the answer is one the size of the file
+  already determines. Nothing is lost: `"auto"` still streams the files that
+  need it.
+
 - `set_dta_compute_threads()`'s roxygen documentation now describes both
   `options(DTAtools.use_arrow_compute)` and
   `options(DTAtools.arrow_min_rows)` under `@details` -- these were
