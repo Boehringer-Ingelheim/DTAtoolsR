@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-## [0.17.4] - 2026-08-15
+## [0.17.3] - 2026-08-15
 
 ### Added
 
@@ -38,8 +38,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `force = TRUE` behaviour they described is still documented, on its own
   terms rather than as an upgrade step. The 0.13.0 CHANGELOG entry remains as
   the historical record. (#35)
-
-## [0.17.3] - 2026-08-15
 
 ### Fixed
 
