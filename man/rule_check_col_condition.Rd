@@ -4,7 +4,7 @@
 \alias{rule_check_col_condition}
 \title{Rule: check_col_condition}
 \usage{
-rule_check_col_condition(rule, df)
+rule_check_col_condition(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A DTARule object of type \code{"check_col_condition"}. Expected slots:
@@ -19,6 +19,9 @@ rule_check_col_condition(rule, df)
 }}
 
 \item{df}{A data.frame to validate.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert each column on demand.}
 }
 \value{
 A list with elements \code{id}, \code{valid}, and \code{message}.

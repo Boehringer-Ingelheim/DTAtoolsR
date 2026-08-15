@@ -4,7 +4,7 @@
 \alias{dta_condition_in_scope}
 \title{Rows a Conditional Rule's IF Clause Applies To}
 \usage{
-dta_condition_in_scope(conditions, df, if_rows)
+dta_condition_in_scope(conditions, df, if_rows, numeric_cache = NULL)
 }
 \arguments{
 \item{conditions}{The rule's IF clause.}
@@ -12,6 +12,9 @@ dta_condition_in_scope(conditions, df, if_rows)
 \item{df}{A data.frame.}
 
 \item{if_rows}{The mask returned by \code{evaluate_conditions()} for \code{conditions}.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert each column on demand.}
 }
 \value{
 A logical vector with one element per row of \code{df}, never \code{NA}.

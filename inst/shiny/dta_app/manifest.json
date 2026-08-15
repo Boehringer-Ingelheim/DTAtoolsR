@@ -42,31 +42,31 @@
       "Repository": null,
       "description": {
         "Package": "DTAtools",
-        "Title": "Tools for Handling Data from Data Transfer Agreements (DTAs) /\nData Transfer Specifications (DTS)",
-        "Version": "0.17.0",
-        "Authors@R": "c(\n\tperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\n\t\trole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\n\tperson(\"Daniel\", \"Schreyer\",\n\t\temail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
+        "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
+        "Version": "0.17.2",
+        "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
-        "Description": "Provides a comprehensive set of tools for importing, validating,\n\ttransforming, and exporting data governed by data transfer agreements (DTAs)\n\tor data transfer specifications (DTS). The package supports workflows for\n\thandling structured data, ensuring compliance with agreement requirements,\n\tand facilitating reproducible data processing. Key features include flexible\n\tdata import/export, column spec validation, metadata management, and integration\n\twith common R data analysis pipelines.",
+        "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
         "License": "LGPL (>= 3)",
         "Encoding": "UTF-8",
         "Roxygen": "list(markdown = TRUE)",
         "RoxygenNote": "7.3.3",
-        "Imports": "yaml, dplyr, cli, utils, tools, glue, methods, R.utils, rlang,\ndocxtractr, purrr, magrittr, jsonlite, flextable, arrow,\nstringr, tibble, officer, xml2, zip",
-        "Depends": "R (>= 4.1.0), S7 (>= 0.2.2)",
-        "Suggests": "knitr, rmarkdown, testthat (>= 3.0.0), shiny, bslib, shinyjs,\nDT, writexl, shinyAce, htmltools, tinytex, doconv, remotes,\npkgload",
+        "Imports": "yaml,\ndplyr,\ncli,\nutils,\ntools,\nstats,\nglue,\nmethods,\nR.utils,\nrlang,\ndocxtractr,\npurrr,\nmagrittr,\njsonlite,\nflextable,\narrow,\nstringr,\ntibble,\nofficer,\nxml2,\nzip",
+        "Depends": "R (>= 4.1.0),\nS7 (>= 0.2.2)",
+        "Suggests": "knitr,\nrmarkdown,\ntestthat (>= 3.0.0),\nshiny,\nbslib,\nshinyjs,\nDT,\nwritexl,\nshinyAce,\nhtmltools,\ntinytex,\ndoconv,\nremotes,\npkgload",
         "Config/testthat/edition": "3",
         "VignetteBuilder": "knitr",
         "URL": "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-        "Collate": "'00_helpers.R' 'DTA-class.R' 'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R' 'importConversion.R'\n'DTADataSet-class.R' 'DTADataSetTabular-class.R'\n'validationReporting.R' 'DTADataSetFile-class.R'\n'DTAFile-class.R' 'DTAFileTabular-class.R'\n'DTAFileCSV-class.R' 'DTAFileDelim-class.R'\n'DTAFileTSV-class.R' 'DTAMetaData-class.R'\n'DTAMetaData-helpers.R' 'DTARule-class.R'\n'DTARuleColCondition-class.R' 'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R' 'DTARuleGroupCondition-class.R'\n'columnSpecChecks.R' 'documentBuilders.R' 'evaluateRules.R'\n'exportDocuments.R' 'exportFunctions.R' 'exportTemplateDocx.R'\n'formattingHelpers.R' 'run_dta_app.R' 'streamingValidation.R'\n'validationFunctions.R' 'zzz.R'",
+        "Collate": "'00_helpers.R'\n'DTA-class.R'\n'DTAColumnSpec-class.R'\n'DTAColumnSpecCollection-class.R'\n'DTAColumnSpecStructure-class.R'\n'DTAColumnSpecStructureSAS-class.R'\n'importConversion.R'\n'DTADataSet-class.R'\n'DTADataSetTabular-class.R'\n'validationReporting.R'\n'DTADataSetFile-class.R'\n'DTAFile-class.R'\n'DTAFileTabular-class.R'\n'DTAFileCSV-class.R'\n'DTAFileDelim-class.R'\n'DTAFileTSV-class.R'\n'DTAMetaData-class.R'\n'DTAMetaData-helpers.R'\n'DTARule-class.R'\n'DTARuleColCondition-class.R'\n'DTARuleColRange-class.R'\n'DTARuleColUnique-class.R'\n'DTARuleGroupCondition-class.R'\n'arrowCompute.R'\n'columnSpecChecks.R'\n'documentBuilders.R'\n'evaluateRules.R'\n'exportDocuments.R'\n'exportFunctions.R'\n'exportTemplateDocx.R'\n'exportValidationReport.R'\n'formattingHelpers.R'\n'reportRendering.R'\n'run_dta_app.R'\n'streamingValidation.R'\n'validationFunctions.R'\n'zzz.R'",
         "Config/roxygen2/version": "8.0.0",
         "RemoteType": "github",
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "v0.17.0",
+        "RemoteRef": "v0.17.2",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "v0.17.0",
+        "GithubRef": "v0.17.2",
         "NeedsCompilation": "no",
         "Packaged": "2026-08-14 12:37:01 UTC; schwarz8",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]",
@@ -3121,16 +3121,16 @@
       "checksum": "755a98abcfecb3b29179d03285da7d91"
     },
     "R/utils_dta.R": {
-      "checksum": "71274bcc345b2c365a395927a979223b"
+      "checksum": "9d93b205d3cccac237ce4d82589c1674"
     },
     "R/utils_export.R": {
       "checksum": "cb019d396e88a149968e9ec549bea956"
     },
     "VERSION": {
-      "checksum": "07de42e32bc52bd26c47f87d1122bf76"
+      "checksum": "5ff254c0c41aad3c717678540c34573e"
     },
     "app.R": {
-      "checksum": "293849fee4d657366056ad66b22d11e0"
+      "checksum": "304c94fbd8ac4bddf072767efe0945e7"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

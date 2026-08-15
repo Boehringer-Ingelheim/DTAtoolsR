@@ -4,12 +4,15 @@
 \alias{rule_check_group_condition}
 \title{Rule: check_group_condition}
 \usage{
-rule_check_group_condition(rule, df)
+rule_check_group_condition(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A \code{DTARuleGroupCondition} object.}
 
 \item{df}{A data.frame to validate.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert each column on demand.}
 }
 \value{
 A list with elements \code{id}, \code{valid}, and \code{message}.

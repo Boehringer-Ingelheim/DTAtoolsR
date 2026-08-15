@@ -993,6 +993,44 @@ vs_stream_rule <- function(rule, table, batch_rows) {
   dta_rule_stream_finalise(state, rule)
 }
 
+test_that("a constraint referencing an unknown condition fails the rule via streaming, not the run (FIX 8)", {
+  # Mirrors the materialising path's regression test: mutate a validly
+  # constructed rule's `@constraints` slot to reference a condition name that
+  # is not defined, and verify the streaming finaliser surfaces this as a rule
+  # FAILURE (via the `dta_rule_not_applicable` class), not an aborted scan.
+  rule <- DTARuleGroupCondition(
+    id = "bad_constraint_stream",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "c_failed", right = "c_failed")
+    )
+  )
+  S7::prop(rule, "constraints") <- list(list(
+    id = "constraint_1",
+    type = "mutually_exclusive",
+    left = "c_failed",
+    right = "c_ghost", # not a defined condition
+    left_scope = "any",
+    right_scope = "any",
+    message = NULL
+  ))
+
+  table <- data.frame(
+    SUBJ = c("S1", "S1"),
+    STATUS = c("FAILED", "OK"),
+    stringsAsFactors = FALSE
+  )
+
+  result <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_false(result$valid)
+  expect_match(result$message, "could not be evaluated", fixed = TRUE)
+  expect_match(result$message, "c_ghost", fixed = TRUE)
+})
+
 test_that("rules are classified by how much of the table they need", {
   corpus <- vc_corpus()
   kinds <- vapply(
@@ -1200,6 +1238,96 @@ test_that("scope = all is not satisfied vacuously by an empty group", {
     streamed <- vs_stream_rule(rule, table, batch_rows)
     expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
     expect_equal(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("a high-cardinality grouped rule streams to the same verdict when batches split groups", {
+  # Item B rewrote both rule_check_group_condition() (materialising) and
+  # dta_group_stream_update() (streaming) to evaluate each condition once
+  # rather than once per group. A batch size that does not align with group
+  # boundaries is what would expose any drift between the two rewrites.
+  n_groups <- 120
+  df <- data.frame(
+    SUBJ = sprintf("S%03d", rep(seq_len(n_groups), each = 3)),
+    STATUS = rep("FAILED", n_groups * 3),
+    RESULT = rep(NA_character_, n_groups * 3),
+    stringsAsFactors = FALSE
+  )
+  # A handful of groups actually violate the constraint.
+  violating <- c("S010", "S055", "S119")
+  df$RESULT[df$SUBJ %in% violating] <- "12"
+
+  rule <- DTARuleGroupCondition(
+    id = "high_card_stream",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+
+  expected <- rule_check_group_condition(rule, df)
+  expect_false(expected$valid)
+
+  # batch_rows = 2 never aligns with the 3-row groups, so every group is split
+  # across at least two batches.
+  for (batch_rows in c(2L, 7L, 1000L)) {
+    streamed <- vs_stream_rule(rule, df, batch_rows)
+    expect_equal(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_equal(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("a grouped rule and a uniqueness rule together stream to the materialised verdict", {
+  # Both item B (grouped) and item C (keyed uniqueness) touch the streaming
+  # driver; validating them together through the real driver is what item 7
+  # of the design asks for, rather than each rule in isolation.
+  n_groups <- 40
+  df <- data.frame(
+    SUBJ = sprintf("S%02d", rep(seq_len(n_groups), each = 3)),
+    STATUS = rep("FAILED", n_groups * 3),
+    RESULT = rep(NA_character_, n_groups * 3),
+    ID = seq_len(n_groups * 3),
+    stringsAsFactors = FALSE
+  )
+  df$RESULT[df$SUBJ == "S20"] <- "12"
+  # Introduce one duplicate ID, split away from its twin by row position.
+  df$ID[nrow(df)] <- df$ID[1]
+
+  group_rule <- DTARuleGroupCondition(
+    id = "combo_group",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+  unique_rule <- DTARuleColUnique(id = "combo_unique", columns = "ID")
+
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "SUBJ", type = "SAS Char", length = 3, nullable = FALSE),
+    DTAColumnSpec(id = "STATUS", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "RESULT", type = "SAS Char", length = 8, nullable = TRUE),
+    DTAColumnSpec(id = "ID", type = "SAS Num", length = 8, nullable = FALSE)
+  ), rules = list(group_rule, unique_rule))
+
+  expected <- validate_table_detailed(specs = specs, table = df, verbose = FALSE)
+  expect_false(expected$rules_valid)
+
+  for (batch_rows in c(2L, 5L)) {
+    streamed <- dta_validate_table_stream(
+      specs, vs_reader(df, batch_rows),
+      verbose = FALSE, coerce = FALSE
+    )
+    expect_equal(streamed$rules_valid, expected$rules_valid, info = paste("batch", batch_rows))
+    expect_equal(streamed$n_rule_errors, expected$n_rule_errors, info = paste("batch", batch_rows))
+    expect_equal(
+      vapply(streamed$rule_errors, function(e) e$message, character(1)),
+      vapply(expected$rule_errors, function(e) e$message, character(1)),
+      info = paste("batch", batch_rows)
+    )
   }
 })
 
