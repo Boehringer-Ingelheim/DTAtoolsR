@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.3] - 2026-08-15
+
+### Fixed
+
+- `%||%` is now imported from `rlang`. It is used throughout the package but
+  only entered base R in 4.4.0, while `DESCRIPTION` declares `R (>= 4.1.0)`,
+  so on R 4.1–4.3 operations such as reading a DTA from YAML failed with
+  `could not find function "%||%"`.
+
+### Added
+
+- `tests/testthat/test-namespaceImports.R`, asserting `%||%` is bound in the
+  package's own imports environment rather than inherited from base R.
+
 ## [0.17.2] - 2026-08-15
 
 ### Added
