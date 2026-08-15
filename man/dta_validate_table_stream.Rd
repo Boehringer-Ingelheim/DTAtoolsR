@@ -8,7 +8,7 @@ dta_validate_table_stream(
   specs,
   reader,
   verbose = FALSE,
-  max_errors = NULL,
+  max_errors = getOption("DTAtools.max_errors", 10000L),
   coerce = TRUE,
   fail_fast = FALSE
 )
@@ -20,8 +20,11 @@ dta_validate_table_stream(
 
 \item{verbose}{Logical. Print progress.}
 
-\item{max_errors}{Integer or \code{NULL}. Cap on retained per-cell errors. \code{NULL}
-retains everything, matching the materialising path.}
+\item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
+per-cell errors, defaulting to \code{getOption("DTAtools.max_errors", 10000L)}
+so that the option is honoured wherever a sink is created, not only at the
+outer entry points. \code{NULL} retains everything, matching the materialising
+path.}
 
 \item{coerce}{Logical. Type each batch against the specs as it arrives,
 recording values that cannot be represented. This is the streaming

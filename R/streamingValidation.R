@@ -87,14 +87,24 @@ dta_rule_stream_init <- function(rule) {
   kind <- dta_rule_stream_kind(rule)
   state <- new.env(parent = emptyenv())
   state$kind <- kind
-  state$count <- 0L
+  # A double, not an integer. The counter accumulates across every batch in the
+  # file, and an integer one silently becomes NA past .Machine$integer.max --
+  # about 2.1 billion -- which is inside the range this path is built for. A
+  # double counts whole numbers exactly to 2^53, and `sprintf("%d", ...)` still
+  # renders it, because the value is always whole.
+  state$count <- 0
   state$applicable <- TRUE
   state$condition <- NULL
 
   if (kind == "keyed") {
-    # Hashed environment: membership testing is what this is for, and it grows
-    # with distinct keys rather than with rows.
-    state$seen <- new.env(hash = TRUE, parent = emptyenv())
+    # fastmap instead of an R environment: assign(key, ...) / env[[key]] intern
+    # every key in R's global SYMBOL table, which is never garbage collected,
+    # so an environment used as a hash set leaks roughly 278 bytes per distinct
+    # key permanently -- measured -- and that is unrecoverable even after the
+    # accumulator is dropped and gc() runs. fastmap is a C++ hash map that does
+    # not touch the symbol table, so its memory is actually reclaimed.
+    state$seen <- fastmap::fastmap()
+    state$max_keys <- getOption("DTAtools.max_unique_keys", 50000000L)
   }
   if (kind == "grouped") {
     state$grouped <- dta_group_stream_init(rule)
@@ -140,12 +150,35 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
             )
           }
           keys <- dta_unique_key(df, cols)
-          for (key in keys) {
-            if (is.null(state$seen[[key]])) {
-              assign(key, TRUE, envir = state$seen)
-            } else {
-              state$count <- state$count + 1L
-            }
+          # Membership is tested for the whole batch against the state BEFORE
+          # any of it is inserted, so every occurrence of a key first seen in an
+          # earlier batch counts, and within this batch only the repeats do.
+          # That is exactly `duplicated()`'s notion, n - 1 per distinct key.
+          already <- state$seen$has(keys)
+          first_here <- !duplicated(keys)
+          state$count <- state$count + sum(already | !first_here)
+
+          new_keys <- keys[!already & first_here]
+          if (length(new_keys) > 0) {
+            state$seen$mset(
+              .list = stats::setNames(as.list(rep(TRUE, length(new_keys))), new_keys)
+            )
+          }
+
+          # dta_stream_budget_exceeded must not be caught by the surrounding
+          # tryCatch, which catches only dta_rule_not_applicable. A resource
+          # failure is not a data verdict, and degrading a uniqueness check to
+          # "not applicable" would report a clean-looking result for a
+          # constraint that was never actually checked.
+          if (state$seen$size() > state$max_keys) {
+            cli::cli_abort(
+              c(
+                "Rule {.val {rule@id}} exceeded the uniqueness key budget.",
+                x = "Tracking {state$seen$size()} distinct keys, over the limit of {state$max_keys}.",
+                i = "Raise {.code options(DTAtools.max_unique_keys = )} if the machine has the memory for it."
+              ),
+              class = "dta_stream_budget_exceeded"
+            )
           }
         },
         grouped = {
@@ -359,8 +392,11 @@ dta_error_sink_collect <- function(sink) {
 #' @param specs A `DTAColumnSpecCollection`.
 #' @param reader An object with a `read_next_batch()` method.
 #' @param verbose Logical. Print progress.
-#' @param max_errors Integer or `NULL`. Cap on retained per-cell errors. `NULL`
-#'   retains everything, matching the materialising path.
+#' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
+#'   per-cell errors, defaulting to `getOption("DTAtools.max_errors", 10000L)`
+#'   so that the option is honoured wherever a sink is created, not only at the
+#'   outer entry points. `NULL` retains everything, matching the materialising
+#'   path.
 #' @param coerce Logical. Type each batch against the specs as it arrives,
 #'   recording values that cannot be represented. This is the streaming
 #'   equivalent of typing the table once at import.
@@ -370,7 +406,7 @@ dta_error_sink_collect <- function(sink) {
 dta_validate_table_stream <- function(specs,
                                       reader,
                                       verbose = FALSE,
-                                      max_errors = NULL,
+                                      max_errors = getOption("DTAtools.max_errors", 10000L),
                                       coerce = TRUE,
                                       fail_fast = FALSE) {
   rules_list <- tryCatch(specs@rules, error = function(e) NULL)
@@ -403,6 +439,10 @@ dta_validate_table_stream <- function(specs,
     }
 
     df <- as.data.frame(batch)
+    # batch is no longer needed once df has been created from it; drop it
+    # promptly so it does not stay live for the whole batch iteration,
+    # multiplying whatever batch_rows the caller chose.
+    rm(batch)
     n_batch_rows <- nrow(df)
     if (n_batch_rows == 0) {
       next
@@ -415,6 +455,10 @@ dta_validate_table_stream <- function(specs,
       coerced <- dta_coerce_table_to_specs(df, specs)
       df <- coerced$table
       issues <- coerced$issues
+      # coerced is no longer needed once df and issues have been extracted; drop
+      # it promptly so it does not stay live for the whole batch iteration,
+      # multiplying whatever batch_rows the caller chose.
+      rm(coerced)
       if (is.data.frame(issues)) {
         # Read the true count BEFORE touching the frame: import typing caps the
         # rows it retains per column but records how many there really were on
@@ -634,9 +678,13 @@ dta_group_fold_rows <- function(head, count, new_rows) {
 #' @keywords internal
 dta_group_stream_init <- function(rule) {
   state <- new.env(parent = emptyenv())
-  state$groups <- new.env(hash = TRUE, parent = emptyenv())
-  state$keys <- character(0)
+  # fastmap rather than an environment, for the symbol-table reason given in
+  # dta_rule_stream_init(). A grouped rule leaks the same way a keyed one does:
+  # the key is the group label instead of the row key, but it is interned just
+  # the same.
+  state$groups <- fastmap::fastmap()
   state$condition_names <- names(rule_get_slot(rule, "conditions"))
+  state$max_groups <- getOption("DTAtools.max_groups", 5000000L)
 
   # `fail_fast` needs to know mid-scan that a group has already lost, which is
   # only sound for a constraint no later batch can rescue. `mutually_exclusive`
@@ -734,9 +782,8 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
     key <- levels(kf)[g]
     local_first <- first_row[g]
 
-    entry <- state$groups[[key]]
+    entry <- state$groups$get(key, missing = NULL)
     if (is.null(entry)) {
-      state$keys <- c(state$keys, key)
       entry <- list(
         label = paste(
           vapply(group_by, function(col) {
@@ -787,7 +834,23 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
       }
     }
 
-    assign(key, entry, envir = state$groups)
+    state$groups$set(key, entry)
+  }
+
+  # Check group budget after the loop completes but while still in
+  # dta_group_stream_update, before state is returned. dta_stream_budget_exceeded
+  # must not be caught by the surrounding tryCatch in dta_rule_stream_update,
+  # which catches only dta_rule_not_applicable. A resource failure is not a data
+  # verdict.
+  if (state$groups$size() > state$max_groups) {
+    cli::cli_abort(
+      c(
+        "Rule {.val {rule@id}} exceeded the group budget.",
+        x = "Tracking {state$groups$size()} distinct groups, over the limit of {state$max_groups}.",
+        i = "Raise {.code options(DTAtools.max_groups = )} if the machine has the memory for it."
+      ),
+      class = "dta_stream_budget_exceeded"
+    )
   }
 
   state
@@ -837,9 +900,9 @@ dta_group_stream_finalise <- function(state, rule) {
   # split() orders groups by sorted key, so the materialising path reports
   # violations in that order. Sorting here keeps the assembled message
   # identical.
-  sorted_keys <- sort(state$keys)
+  sorted_keys <- sort(state$groups$keys())
   n_groups <- length(sorted_keys)
-  entries <- mget(sorted_keys, envir = state$groups)
+  entries <- state$groups$mget(sorted_keys)
 
   # Vectorised per-(condition, scope) truth across ALL groups at once -- one
   # lookup per group, not the label/row-evidence assembly -- mirroring the
@@ -1038,14 +1101,23 @@ dta_table_is_lazy <- function(x) {
 #' @param table An Arrow `Table`, `Dataset`, or reader.
 #' @param verbose Logical. Print progress.
 #' @param batch_rows Integer. Rows per batch when scanning.
-#' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
+#' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
+#'   per-cell error detail, defaulting to 10000 and configurable via
+#'   `options(DTAtools.max_errors = )`. The default is finite because the error
+#'   sinks retain one row per bad cell: on a large dirty file, unbounded
+#'   retention exhausts memory exactly as holding the data would. Counting is
+#'   unaffected, so the totals and the pass/fail verdict stay exact even when the
+#'   retained detail is truncated, and a truncated frame is flagged as such.
+#' @param use_threads Logical. Whether Arrow's Scanner should use multiple
+#'   threads for I/O and decompression.
 #' @return A validation details list.
 #' @keywords internal
 dta_validate_any_table <- function(specs,
                                    table,
                                    verbose = FALSE,
                                    batch_rows = 131072L,
-                                   max_errors = NULL) {
+                                   max_errors = getOption("DTAtools.max_errors", 10000L),
+                                   use_threads = TRUE) {
   if (!dta_table_is_lazy(table)) {
     return(validate_table_detailed(specs, as.data.frame(table), verbose = verbose))
   }
@@ -1053,7 +1125,7 @@ dta_validate_any_table <- function(specs,
   reader <- if (inherits(table, "RecordBatchReader")) {
     table
   } else {
-    arrow::Scanner$create(table, batch_size = batch_rows)$ToRecordBatchReader()
+    arrow::Scanner$create(table, batch_size = batch_rows, use_threads = use_threads)$ToRecordBatchReader()
   }
 
   dta_validate_table_stream(
@@ -1317,9 +1389,13 @@ cache_as_parquet <- function(specs,
 #' @param has_header Logical. Whether the first line names the columns.
 #' @param batch_rows Integer. Rows per batch. Larger batches trade memory for
 #'   fewer per-batch overheads.
-#' @param max_errors Integer or `NULL`. Cap on retained per-cell error detail.
-#'   Counting is unaffected, so totals and the pass/fail verdict stay exact even
-#'   when the retained detail is truncated.
+#' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
+#'   per-cell error detail, defaulting to 10000 and configurable via
+#'   `options(DTAtools.max_errors = )`. The default is finite because the error
+#'   sinks retain one row per bad cell: on a large dirty file, unbounded
+#'   retention exhausts memory exactly as holding the data would. Counting is
+#'   unaffected, so the totals and the pass/fail verdict stay exact even when the
+#'   retained detail is truncated, and a truncated frame is flagged as such.
 #' @param fail_fast Logical. Stop at the first batch that shows any problem,
 #'   instead of scanning to the end. Answers "is this file valid?" without
 #'   costing a full pass, which on a large file that fails early is the
@@ -1335,7 +1411,25 @@ cache_as_parquet <- function(specs,
 #'   is reported once per row. `"stop"` reports it structurally and reads
 #'   nothing, which on a large file is the difference between an immediate
 #'   answer and hours spent restating it per row.
+#' @param use_threads Logical. Whether Arrow's Scanner should use multiple
+#'   threads for I/O and decompression. Arrow buffers batches ahead of R in its
+#'   own C++ pool, outside the R heap. Single-threaded scanning is the lever when
+#'   RSS rather than speed is the constraint.
 #' @param verbose Logical. Print progress.
+#' @section Resource budgets:
+#' Two accumulators are bounded by the data rather than by the batch size, and
+#' each has a budget that aborts the scan instead of exhausting memory:
+#'
+#' * `options(DTAtools.max_unique_keys = )`, default 50,000,000 — distinct keys
+#'   held by a `check_unique` rule. A key that is unique per row makes this grow
+#'   with the file.
+#' * `options(DTAtools.max_groups = )`, default 5,000,000 — distinct groups held
+#'   by a `check_group_condition` rule.
+#'
+#' Exceeding either raises a condition of class `dta_stream_budget_exceeded`.
+#' This aborts rather than reporting a rule failure on purpose: a resource limit
+#' is not a verdict about the data, and recording it as one would present a
+#' clean-looking result for a constraint that was never actually checked.
 #' @return A validation details list.
 #' @examples
 #' specs <- DTAtools::DTAColumnSpecCollection(
@@ -1365,9 +1459,10 @@ validate_file_stream <- function(specs,
                                  quote = "\"",
                                  has_header = TRUE,
                                  batch_rows = 131072L,
-                                 max_errors = NULL,
+                                 max_errors = getOption("DTAtools.max_errors", 10000L),
                                  fail_fast = FALSE,
                                  on_missing_column = c("scan", "stop"),
+                                 use_threads = TRUE,
                                  verbose = TRUE) {
   if (!file.exists(path) && !dir.exists(path)) {
     cli::cli_abort("File not found: {.path {path}}")
@@ -1401,9 +1496,9 @@ validate_file_stream <- function(specs,
     return(dta_structural_failure_details(findings))
   }
 
-  reader <- arrow::Scanner$create(dataset, batch_size = batch_rows)$ToRecordBatchReader()
+  reader <- arrow::Scanner$create(dataset, batch_size = batch_rows, use_threads = use_threads)$ToRecordBatchReader()
 
-  dta_validate_table_stream(
+  details <- dta_validate_table_stream(
     specs,
     reader,
     verbose = verbose,
@@ -1411,6 +1506,24 @@ validate_file_stream <- function(specs,
     coerce = TRUE,
     fail_fast = fail_fast
   )
+
+  # Arrow buffers batches ahead of R in a C++ pool that gc() cannot see, so
+  # every memory figure this package reported before this line understated the
+  # true cost. The pool's high-water mark is per PROCESS, not per call, so it is
+  # labelled as such rather than attributed to this scan alone.
+  if (isTRUE(verbose)) {
+    max_memory_mb <- tryCatch(
+      ceiling(arrow::default_memory_pool()$max_memory / 1024^2),
+      error = function(e) NULL
+    )
+    if (!is.null(max_memory_mb)) {
+      cli::cli_alert_info(
+        "Arrow's C++ pool has peaked at {max_memory_mb} MB this session (not counted by {.code gc()})."
+      )
+    }
+  }
+
+  details
 }
 
 #' @title Details for a File That Failed Structurally

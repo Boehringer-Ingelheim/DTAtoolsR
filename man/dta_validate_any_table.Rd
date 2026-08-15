@@ -9,7 +9,8 @@ dta_validate_any_table(
   table,
   verbose = FALSE,
   batch_rows = 131072L,
-  max_errors = NULL
+  max_errors = getOption("DTAtools.max_errors", 10000L),
+  use_threads = TRUE
 )
 }
 \arguments{
@@ -21,7 +22,16 @@ dta_validate_any_table(
 
 \item{batch_rows}{Integer. Rows per batch when scanning.}
 
-\item{max_errors}{Integer or \code{NULL}. Cap on retained per-cell error detail.}
+\item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
+per-cell error detail, defaulting to 10000 and configurable via
+\code{options(DTAtools.max_errors = )}. The default is finite because the error
+sinks retain one row per bad cell: on a large dirty file, unbounded
+retention exhausts memory exactly as holding the data would. Counting is
+unaffected, so the totals and the pass/fail verdict stay exact even when the
+retained detail is truncated, and a truncated frame is flagged as such.}
+
+\item{use_threads}{Logical. Whether Arrow's Scanner should use multiple
+threads for I/O and decompression.}
 }
 \value{
 A validation details list.
