@@ -1510,7 +1510,9 @@ test_that("a uniqueness scan that exceeds its key budget aborts rather than repo
     stringsAsFactors = FALSE
   )
 
-  withr::local_options(DTAtools.max_unique_keys = 2L)
+  old <- getOption("DTAtools.max_unique_keys")
+  on.exit(options(DTAtools.max_unique_keys = old), add = TRUE)
+  options(DTAtools.max_unique_keys = 2L)
 
   reader <- vs_reader(table, batch_rows = 1L)
   state <- dta_rule_stream_init(rule)
@@ -1570,7 +1572,9 @@ test_that("a grouped scan that exceeds its group budget aborts", {
     stringsAsFactors = FALSE
   )
 
-  withr::local_options(DTAtools.max_groups = 1L)
+  old <- getOption("DTAtools.max_groups")
+  on.exit(options(DTAtools.max_groups = old), add = TRUE)
+  options(DTAtools.max_groups = 1L)
 
   reader <- vs_reader(table, batch_rows = 1L)
   state <- dta_rule_stream_init(rule)
@@ -1637,7 +1641,9 @@ test_that("the retained-error cap truncates detail without changing the counts",
     stringsAsFactors = FALSE
   )
 
-  withr::local_options(DTAtools.max_errors = 5L)
+  old <- getOption("DTAtools.max_errors")
+  on.exit(options(DTAtools.max_errors = old), add = TRUE)
+  options(DTAtools.max_errors = 5L)
 
   capped <- dta_validate_table_stream(
     specs,
@@ -1661,7 +1667,9 @@ test_that("max_errors defaults to a finite cap", {
   expect_equal(default_cap, 10000L)
 
   # And options() can override it.
-  withr::local_options(DTAtools.max_errors = 25L)
+  old <- getOption("DTAtools.max_errors")
+  on.exit(options(DTAtools.max_errors = old), add = TRUE)
+  options(DTAtools.max_errors = 25L)
   new_default <- eval(formals(validate_file_stream)$max_errors)
 
   expect_equal(new_default, 25L)
