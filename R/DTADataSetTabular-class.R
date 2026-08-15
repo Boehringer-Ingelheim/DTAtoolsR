@@ -913,11 +913,14 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. Larger batches
 #'       are faster but hold more rows in memory at once.}
-#'     \item{max_errors}{Integer or NULL (default). Cap on the number of
-#'       per-cell errors whose detail is retained while scanning. The reported
-#'       \emph{counts} and the verdict are unaffected; only how many individual
-#'       failures are kept for inspection is. Ignored for a table held in
-#'       memory.}
+#'     \item{max_errors}{Integer, or NULL to retain everything. Cap on the
+#'       number of per-cell errors whose detail is retained while scanning.
+#'       Defaults to \code{getOption("DTAtools.max_errors", 10000L)}; the
+#'       default is finite because retention is one row per bad cell, so an
+#'       unbounded cap exhausts memory on a large dirty file exactly as holding
+#'       the data would. The reported \emph{counts} and the verdict are
+#'       unaffected; only how many individual failures are kept for inspection
+#'       is. Ignored for a table held in memory.}
 #'   }
 #' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
 #'   with \code{validation_index}/\code{validation_store} updated and a
@@ -944,7 +947,7 @@ S7::method(check, DTADataSetTabular) <- function(
   quiet = FALSE,
   validation_run = NULL,
   batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
-  max_errors = NULL
+  max_errors = getOption("DTAtools.max_errors", 10000L)
 ) {
   # Handle single table vs multiple tables
   if (!is.null(tab) && !is.null(tables)) {
