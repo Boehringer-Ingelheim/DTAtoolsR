@@ -350,6 +350,30 @@ test_that("open_file rejects a path that does not exist", {
   expect_error(open_file(handler, missing), "cannot be found")
 })
 
+test_that("streaming load_file rejects non-scalar file paths early", {
+  file <- extdata_file("clinical_data.csv")
+
+  expect_error(
+    load_file(
+      tabular_fixture(),
+      file = c(file, file),
+      handler_index = 1,
+      stream = "always"
+    ),
+    "single non-missing, non-empty path"
+  )
+
+  expect_error(
+    load_file(
+      tabular_fixture(),
+      file = NA_character_,
+      handler_index = 1,
+      stream = "always"
+    ),
+    "single non-missing, non-empty path"
+  )
+})
+
 test_that("a handler with no lazy opener says so and names the way out", {
   file <- extdata_file("clinical_data.csv")
 

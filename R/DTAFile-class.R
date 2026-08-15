@@ -283,6 +283,17 @@ method(matches_filename, DTAFile) <- function(x, file) {
   }
 }
 
+#' @keywords internal
+dta_assert_single_file_path <- function(file, .caller) {
+  if (!is.character(file) || length(file) != 1 || is.na(file) || !nzchar(file)) {
+    cli::cli_abort(
+      "{.fn {(.caller)}} requires {.arg file} to be a single non-missing, non-empty path."
+    )
+  }
+
+  file
+}
+
 #' @title Read a file
 #' @description Reads a data file using the parameters specified in a
 #'   \code{DTAFile} object or one of its subclasses.
@@ -356,6 +367,7 @@ if (!exists("read_file", mode = "function")) {
 }
 
 method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+  file <- dta_assert_single_file_path(file, "read_file")
   continue <- TRUE
 
   if (namecheck) {
@@ -459,6 +471,8 @@ if (!exists("open_file", mode = "function")) {
 
 #' @export
 method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
+  file <- dta_assert_single_file_path(file, "open_file")
+
   if (namecheck && !DTAtools::matches_filename(x, basename(file))) {
     cli::cli_abort(
       stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
