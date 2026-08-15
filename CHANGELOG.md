@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-08-15
+
 ### Added
 
 - `.github/scripts/bump_version.R`, which rewrites every file that records the
