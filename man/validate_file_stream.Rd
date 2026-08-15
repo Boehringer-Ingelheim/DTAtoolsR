@@ -11,9 +11,10 @@ validate_file_stream(
   quote = "\\"",
   has_header = TRUE,
   batch_rows = 131072L,
-  max_errors = NULL,
+  max_errors = getOption("DTAtools.max_errors", 10000L),
   fail_fast = FALSE,
   on_missing_column = c("scan", "stop"),
+  use_threads = TRUE,
   verbose = TRUE
 )
 }
@@ -32,9 +33,13 @@ written by \code{\link[=cache_as_parquet]{cache_as_parquet()}}. The format is ch
 \item{batch_rows}{Integer. Rows per batch. Larger batches trade memory for
 fewer per-batch overheads.}
 
-\item{max_errors}{Integer or \code{NULL}. Cap on retained per-cell error detail.
-Counting is unaffected, so totals and the pass/fail verdict stay exact even
-when the retained detail is truncated.}
+\item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
+per-cell error detail, defaulting to 10000 and configurable via
+\code{options(DTAtools.max_errors = )}. The default is finite because the error
+sinks retain one row per bad cell: on a large dirty file, unbounded
+retention exhausts memory exactly as holding the data would. Counting is
+unaffected, so the totals and the pass/fail verdict stay exact even when the
+retained detail is truncated, and a truncated frame is flagged as such.}
 
 \item{fail_fast}{Logical. Stop at the first batch that shows any problem,
 instead of scanning to the end. Answers "is this file valid?" without
@@ -52,6 +57,11 @@ the default, preserves existing behaviour: the file is read and the absence
 is reported once per row. \code{"stop"} reports it structurally and reads
 nothing, which on a large file is the difference between an immediate
 answer and hours spent restating it per row.}
+
+\item{use_threads}{Logical. Whether Arrow's Scanner should use multiple
+threads for I/O and decompression. Arrow buffers batches ahead of R in its
+own C++ pool, outside the R heap. Single-threaded scanning is the lever when
+RSS rather than speed is the constraint.}
 
 \item{verbose}{Logical. Print progress.}
 }
@@ -83,6 +93,24 @@ because each batch pays its own dispatch and typing overhead.
 So: use this when the file is large enough that holding it is the problem.
 For a file that fits in memory comfortably, \code{validate_table()} is the faster
 choice and there is nothing to gain here.
+}
+
+\section{Resource budgets}{
+
+Two accumulators are bounded by the data rather than by the batch size, and
+each has a budget that aborts the scan instead of exhausting memory:
+\itemize{
+\item \code{options(DTAtools.max_unique_keys = )}, default 50,000,000 — distinct keys
+held by a \code{check_unique} rule. A key that is unique per row makes this grow
+with the file.
+\item \code{options(DTAtools.max_groups = )}, default 5,000,000 — distinct groups held
+by a \code{check_group_condition} rule.
+}
+
+Exceeding either raises a condition of class \code{dta_stream_budget_exceeded}.
+This aborts rather than reporting a rule failure on purpose: a resource limit
+is not a verdict about the data, and recording it as one would present a
+clean-looking result for a constraint that was never actually checked.
 }
 
 \examples{

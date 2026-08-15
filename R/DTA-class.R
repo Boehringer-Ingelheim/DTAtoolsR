@@ -312,9 +312,13 @@ method(load_file, DTA) <- function(
 #'       loaded with \code{stream = "always"} (see \code{\link{load_file}}).
 #'       Ignored for tables held in memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}.}
-#'     \item{max_errors}{Integer or NULL (default). Cap on the number of
-#'       per-cell errors whose detail is retained while scanning. Counts and the
-#'       verdict are unaffected. Ignored for tables held in memory.}
+#'     \item{max_errors}{Integer, or NULL to retain everything. Cap on the
+#'       number of per-cell errors whose detail is retained while scanning.
+#'       Defaults to \code{getOption("DTAtools.max_errors", 10000L)}; the
+#'       default is finite because retention is one row per bad cell, so an
+#'       unbounded cap exhausts memory on a large dirty file exactly as holding
+#'       the data would. Counts and the verdict are unaffected. Ignored for
+#'       tables held in memory.}
 #'   }
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
@@ -360,7 +364,7 @@ method(check, DTA) <- function(
   quiet = FALSE,
   validation_run = NULL,
   batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
-  max_errors = NULL
+  max_errors = getOption("DTAtools.max_errors", 10000L)
 ) {
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")

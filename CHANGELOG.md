@@ -6,6 +6,81 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-15
+
+### Fixed
+
+- **`validate_file_stream()` leaked memory permanently, proportional to the
+  number of distinct uniqueness keys and group labels.** Both cross-batch
+  accumulators used an R environment as a hash set. `assign(key, ...)` and
+  `env[[key]]` intern every key in R's global **symbol table**, which has no
+  garbage collector, so the memory was never reclaimed — not when the
+  accumulator was dropped, not after `gc()`, not for the life of the session.
+  Measured at 2,000,000 distinct keys: RSS rose 606 MB and **556 MB of that
+  remained after the accumulator was removed and `gc(full = TRUE)` ran twice**,
+  i.e. ~278 bytes leaked per distinct key. On a file with a per-row natural key
+  this is O(rows) with a large constant, and it is the dominant term in reports
+  of a 60 GB input consuming several hundred GB of RAM. Both accumulators now
+  use `fastmap::fastmap()`, a C++ hash map that does not touch the symbol
+  table; the same 2,000,000 keys now return 402 MB of 486 MB to the process on
+  `gc()`. Validation results are unchanged.
+- The per-batch duplicate count in the uniqueness accumulator was an R `for`
+  loop over every row (~10 µs/row, hours on a large file). It is now vectorised
+  over the whole batch and pinned by an oracle test against `duplicated()`
+  across batch boundaries.
+- `dta_group_stream_update()` accumulated group keys with
+  `state$keys <- c(state$keys, key)` inside a per-group loop, which is
+  quadratic in the number of groups. The keys are now read back from the map at
+  finalise, so the append is gone entirely.
+- The Arrow record batch and the pre-coercion data frame stayed live for the
+  whole of each batch iteration alongside the coerced frame and the numeric
+  cache, multiplying whatever `batch_rows` the caller chose. Both are now
+  dropped as soon as they are consumed.
+- A rule's violation counter was an R integer, so a rule violated by more than
+  `.Machine$integer.max` (~2.1 billion) rows silently counted `NA` rather than
+  overflowing loudly — inside the range this path is explicitly built for. It
+  is now a double, which counts whole numbers exactly to 2^53. Pre-existing,
+  but on the same line as the vectorised rewrite above.
+
+### Changed
+
+- **`max_errors` now defaults to `10000` rather than `NULL`** everywhere a
+  retained-error sink is created — `validate_file_stream()`,
+  `dta_validate_any_table()` and the internal streaming driver — configurable
+  with `options(DTAtools.max_errors = )`. The three per-cell error sinks retain one
+  row per bad cell, so the previous unbounded default exhausted memory on a
+  large dirty file exactly as holding the data would — the very case the
+  streaming path exists to serve. Counting is unaffected: the totals and the
+  pass/fail verdict stay exact, and a truncated frame is still flagged.
+  Pass `max_errors = NULL` for the previous behaviour. `check()` on a `DTA` and
+  on a `DTADataSetTabular` defaults the same way; both previously passed `NULL`
+  through explicitly, so the bounded default would never have reached the main
+  user-facing path.
+- `validate_file_stream()` gains a `use_threads` argument, forwarded to Arrow's
+  `Scanner`. Arrow buffers batches ahead of R in its own C++ pool, outside the
+  R heap and invisible to `gc()`; single-threaded scanning is the lever when
+  resident memory rather than throughput is the binding constraint.
+- With `verbose = TRUE`, `validate_file_stream()` now reports Arrow's C++ pool
+  high-water mark, which no existing memory measurement in this package could
+  see.
+
+### Added
+
+- Two resource budgets, `options(DTAtools.max_unique_keys = )` (default
+  50,000,000) and `options(DTAtools.max_groups = )` (default 5,000,000). A scan
+  that exceeds one aborts with the classed condition
+  `dta_stream_budget_exceeded`, naming the rule and the option to raise. This
+  is deliberately an abort and not a rule failure: a resource limit is not a
+  data verdict, and reporting a uniqueness constraint as "not applicable"
+  would present a clean-looking result for a constraint never actually checked.
+- `benchmarks/bench_streaming.R` now measures process RSS, and RSS again after
+  two full `gc()`s, alongside the R-heap figure it reported before — a leak is
+  visible only in the gap between them. Its fixture gained a dirty-row
+  fraction, a unique per-row `SUBJID`, and a `SITE` grouping column, with
+  matching uniqueness and group-condition rules. The previous fixture was
+  clean and had neither rule, so it exercised none of the three defects above,
+  and the R-heap-only measurement could not have seen them regardless.
+
 ## [0.17.3] - 2026-08-15
 
 ### Added
