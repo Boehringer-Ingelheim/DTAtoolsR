@@ -944,6 +944,35 @@ test_that("Unique rules treat repeated NA combinations as duplicates", {
   expect_match(result$message, "violated: 1 duplicate")
 })
 
+test_that("rule_check_unique() gives identical valid/message with Arrow on and off (FIX 3)", {
+  testthat::skip_if_not(dta_arrow_compute_available())
+
+  old_use <- getOption("DTAtools.use_arrow_compute")
+  old_min_rows <- getOption("DTAtools.arrow_min_rows")
+  on.exit(options(
+    DTAtools.use_arrow_compute = old_use,
+    DTAtools.arrow_min_rows = old_min_rows
+  ))
+
+  set.seed(123)
+  n <- 500L
+  df <- data.frame(
+    ID = sample.int(n / 2, n, replace = TRUE),
+    GROUP = sample(letters[1:5], n, replace = TRUE),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleColUnique(id = "u_arrow", columns = c("ID", "GROUP"))
+
+  options(DTAtools.use_arrow_compute = FALSE)
+  result_off <- rule_check_unique(rule, df)
+
+  options(DTAtools.use_arrow_compute = TRUE, DTAtools.arrow_min_rows = 10L)
+  result_on <- rule_check_unique(rule, df)
+
+  expect_identical(result_on$valid, result_off$valid)
+  expect_identical(result_on$message, result_off$message)
+})
+
 test_that("apply_rules returns empty list for empty rule set", {
   result <- apply_rules(list(), data.frame(A = 1), verbose = FALSE)
   expect_type(result, "list")
@@ -1250,6 +1279,394 @@ test_that("Malformed conditions abort with a clear message, never 'invalid argum
     class = "rlang_error"
   )
 })
+
+# ---- shared numeric conversion cache (perf/rule-checking, item A) ----------
+
+test_that("dta_build_numeric_cache only converts columns rules read numerically", {
+  df <- data.frame(
+    AGE = c("20", "70", "ninety"),
+    NAME = c("a", "b", "c"),
+    UNUSED = c(1, 2, 3),
+    stringsAsFactors = FALSE
+  )
+
+  range_rule <- DTARuleColRange(id = "r1", columns = "AGE", range = c(18, 65))
+  cond_rule <- DTARuleColCondition(
+    id = "r2",
+    condition = list(NAME = list(equals = "a")),
+    then = list(AGE = list(greater = 0))
+  )
+
+  cache <- dta_build_numeric_cache(df, list(range_rule, cond_rule))
+  expect_named(cache, "AGE")
+  expect_equal(cache$AGE$values, c(20, 70, NA))
+  expect_true(cache$AGE$unconvertible[3])
+
+  # NULL / empty rule list -> no cache at all.
+  expect_equal(dta_build_numeric_cache(df, NULL), list())
+  expect_equal(dta_build_numeric_cache(df, list()), list())
+
+  # A rule naming a column absent from the frame contributes nothing.
+  stale_rule <- DTARuleColRange(id = "stale", columns = "GONE", range = c(0, 1))
+  expect_equal(dta_build_numeric_cache(df, list(stale_rule)), list())
+})
+
+test_that("apply_rules with the shared cache matches per-rule calls without one", {
+  df <- data.frame(
+    AGE = c("20", "70", "ninety", "40"),
+    STATUS = c("FAILED", "FAILED", "OK", "OK"),
+    stringsAsFactors = FALSE
+  )
+
+  range_rule <- DTARuleColRange(id = "range", columns = "AGE", range = c(18, 65))
+  cond_rule <- DTARuleColCondition(
+    id = "cond",
+    condition = list(STATUS = list(equals = "FAILED")),
+    then = list(AGE = list(less = 65))
+  )
+  rules <- list(range_rule, cond_rule)
+
+  cached <- apply_rules(rules, df, verbose = FALSE)
+
+  uncached <- list(
+    rule_check_range(range_rule, df),
+    rule_check_col_condition(cond_rule, df)
+  )
+  uncached[[1]]$import_errors <- dta_rule_import_errors(range_rule, df)
+  uncached[[2]]$import_errors <- dta_rule_import_errors(cond_rule, df)
+
+  for (i in seq_along(rules)) {
+    expect_equal(cached[[i]]$valid, uncached[[i]]$valid)
+    expect_equal(cached[[i]]$message, uncached[[i]]$message)
+    expect_equal(cached[[i]]$import_errors, uncached[[i]]$import_errors)
+  }
+})
+
+test_that("the numeric cache does not mask a rule naming an absent column", {
+  df <- data.frame(AGE = c("20", "30"), stringsAsFactors = FALSE)
+  stale_rule <- DTARuleColRange(id = "stale", columns = "MISSING", range = c(0, 1))
+
+  result <- apply_rules(list(stale_rule), df, verbose = FALSE)[[1]]
+  expect_false(result$valid)
+  expect_match(result$message, "could not be evaluated", fixed = TRUE)
+})
+
+test_that("a cache built for a larger frame is not recycled against a subset (FIX 1)", {
+  # A cache built for the full table must never be reused, unchanged, for a
+  # rule evaluated against a shorter subset of that table -- `dta_numeric_cache_get()`
+  # must detect the length mismatch and recompute rather than silently
+  # recycle `cached$values` against the shorter frame.
+  df_full <- data.frame(
+    AGE = c("20", "70", "ninety", "40", "55"),
+    stringsAsFactors = FALSE
+  )
+  range_rule <- DTARuleColRange(id = "range", columns = "AGE", range = c(18, 65))
+
+  full_cache <- dta_build_numeric_cache(df_full, list(range_rule))
+  expect_equal(length(full_cache$AGE$values), nrow(df_full))
+
+  df_subset <- df_full[1:3, , drop = FALSE]
+
+  with_stale_cache <- rule_check_range(range_rule, df_subset, numeric_cache = full_cache)
+  without_cache <- rule_check_range(range_rule, df_subset)
+
+  expect_equal(with_stale_cache$valid, without_cache$valid)
+  expect_equal(with_stale_cache$message, without_cache$message)
+})
+
+test_that("import errors are deduplicated when two rules read the same column", {
+  df <- data.frame(
+    AGE = c("ninety", "40"),
+    STATUS = c("FAILED", "OK"),
+    stringsAsFactors = FALSE
+  )
+
+  range_rule <- DTARuleColRange(id = "range", columns = "AGE", range = c(18, 65))
+  cond_rule <- DTARuleColCondition(
+    id = "cond",
+    condition = list(STATUS = list(equals = "FAILED")),
+    then = list(AGE = list(less = 65))
+  )
+
+  results <- apply_rules(list(range_rule, cond_rule), df, verbose = FALSE)
+  collected <- dta_collect_import_errors(results)
+
+  # Both rules read AGE numerically and both see the same unconvertible value
+  # at row 1 -- that is one import error, not two.
+  expect_equal(nrow(collected), 1)
+  expect_equal(collected$row, 1L)
+  expect_equal(collected$column, "AGE")
+})
+
+# ---- vectorised grouped rule evaluation (perf/rule-checking, item B) -------
+
+test_that("group_condition handles high group cardinality and sorts group order", {
+  n_groups <- 300
+  df <- data.frame(
+    SUBJ = sprintf("S%03d", rep(seq_len(n_groups), each = 2)),
+    STATUS = rep(c("FAILED", "FAILED"), n_groups),
+    RESULT = rep(c(NA, NA), n_groups),
+    stringsAsFactors = FALSE
+  )
+  # Make exactly one group (the alphabetically last one) pass, so the rest
+  # violate the mutually_exclusive constraint.
+  last <- sprintf("S%03d", n_groups)
+  df$RESULT[df$SUBJ == last] <- NA
+
+  rule <- DTARuleGroupCondition(
+    id = "high_card",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_true(res$valid)
+  expect_null(res$message)
+
+  # Now make one specific group actually violate, and confirm it is named.
+  df$RESULT[df$SUBJ == "S150"] <- "12"
+  res2 <- rule_check_group_condition(rule, df)
+  expect_false(res2$valid)
+  expect_match(res2$message, "SUBJ=S150", fixed = TRUE)
+  # Group order in the assembled message is sorted (S150 sorts before S151).
+  expect_true(
+    regexpr("SUBJ=S150", res2$message) < regexpr("SUBJ=S299", res2$message) ||
+      !grepl("SUBJ=S299", res2$message)
+  )
+})
+
+test_that("group_condition with many groups reports exactly the few that violate, in sorted order", {
+  # This pins the behaviour the group/constraint vectorisation turns on: only
+  # violating (group, constraint) pairs should ever contribute a violation
+  # entry or row-evidence/label work, and the rest of the (large) group
+  # population must be entirely silent in the output.
+  n_groups <- 1000
+  df <- data.frame(
+    SUBJ = sprintf("S%04d", rep(seq_len(n_groups), each = 2)),
+    STATUS = rep("OK", n_groups * 2),
+    RESULT = rep(NA_character_, n_groups * 2),
+    stringsAsFactors = FALSE
+  )
+
+  # Scatter exactly three violating groups across the (sorted) key space.
+  violators <- c("S0007", "S0500", "S0999")
+  for (subj in violators) {
+    idx <- which(df$SUBJ == subj)
+    df$STATUS[idx] <- "FAILED"
+    df$RESULT[idx[1]] <- "12" # one row satisfies both c_failed and c_reported
+  }
+
+  rule <- DTARuleGroupCondition(
+    id = "sparse_violations",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+
+  reported_groups <- vapply(res$details, function(v) v$group, character(1))
+  expect_identical(length(reported_groups), 3L)
+  expect_identical(
+    reported_groups,
+    sprintf("SUBJ=%s", violators)
+  )
+
+  # Groups that never violate contribute nothing: no other SUBJ id appears in
+  # any detail's group label or message. A fixed, explicitly named handful is
+  # checked (rather than a random sample) so a failure here is reproducible.
+  fixed_non_violators <- c(
+    "S0001", "S0006", "S0008", "S0100", "S0499",
+    "S0501", "S0750", "S0998", "S1000"
+  )
+  stopifnot(all(fixed_non_violators %in% setdiff(unique(df$SUBJ), violators)))
+  for (subj in fixed_non_violators) {
+    expect_false(any(grepl(subj, reported_groups, fixed = TRUE)))
+    expect_false(grepl(subj, res$message, fixed = TRUE))
+  }
+})
+
+test_that("a constraint referencing an unknown condition name fails the rule, not the run (FIX 8)", {
+  # The DTARuleGroupCondition constructor rejects unknown condition names up
+  # front, so this is only reachable by bypassing the constructor -- mutate a
+  # validly constructed rule's `@constraints` slot directly to simulate that.
+  rule <- DTARuleGroupCondition(
+    id = "bad_constraint",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "c_failed", right = "c_failed")
+    )
+  )
+  S7::prop(rule, "constraints") <- list(list(
+    id = "constraint_1",
+    type = "mutually_exclusive",
+    left = "c_failed",
+    right = "c_ghost", # not a defined condition
+    left_scope = "any",
+    right_scope = "any",
+    message = NULL
+  ))
+
+  df <- data.frame(
+    SUBJ = c("S1", "S1"),
+    STATUS = c("FAILED", "OK"),
+    stringsAsFactors = FALSE
+  )
+
+  # Directly: aborts with the narrowly classed condition rather than silently
+  # reporting no violation.
+  expect_error(
+    rule_check_group_condition(rule, df),
+    class = "dta_rule_not_applicable"
+  )
+
+  # Through apply_rules(): surfaces as a FAILED rule, not an aborted run.
+  results <- apply_rules(list(rule), df, verbose = FALSE)
+  expect_length(results, 1L)
+  expect_false(results[[1]]$valid)
+  expect_match(results[[1]]$message, "could not be evaluated", fixed = TRUE)
+  expect_match(results[[1]]$message, "c_ghost", fixed = TRUE)
+})
+
+test_that("group_condition row evidence caps at 10 and reports the remainder", {
+  n <- 30
+  df <- data.frame(
+    SUBJ = rep("A", n),
+    REASND = c(rep("FAILED", 15), rep("", n - 15)),
+    RESULT = c(rep(NA, 15), rep("12", n - 15)),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "row_cap",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(REASND = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+  expect_match(res$message, "(+5 more)", fixed = TRUE)
+  # Exactly ten row numbers shown before the "more" marker for each side.
+  shown <- regmatches(res$message, gregexpr("rows matching \"[^\"]+\": [0-9,]+", res$message))[[1]]
+  expect_true(length(shown) == 2)
+})
+
+test_that("group_condition scope 'all' is false for an empty condition set, not vacuously true", {
+  df <- data.frame(
+    SUBJ = c("A", "A", "B"),
+    STAT = c("DONE", "OPEN", "DONE"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "grp_all_scope",
+    group_by = "SUBJ",
+    conditions = list(done = list(STAT = list(equals = "DONE"))),
+    constraints = list(list(type = "requires", `if` = "done", then = "done", then_scope = "all"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  # Group A has one row satisfying "done" (if_truth TRUE under "any") and one
+  # that does not, so "all" fails for group A specifically.
+  expect_false(res$valid)
+  expect_match(res$message, "SUBJ=A", fixed = TRUE)
+})
+
+test_that("group_condition mutually_exclusive/requires 'all' scope on a multi-row group", {
+  df <- data.frame(
+    SUBJ = c("A", "A", "A"),
+    STATUS = c("FAILED", "FAILED", "FAILED"),
+    RESULT = c(NA, NA, "9"),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "grp_scope_all",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(
+      type = "mutually_exclusive", left = "c_failed", right = "c_reported",
+      left_scope = "all", right_scope = "any"
+    ))
+  )
+
+  # left_scope "all": every row in the group must satisfy c_failed. It does.
+  # right_scope "any": at least one row satisfies c_reported. It does (row 3).
+  res <- rule_check_group_condition(rule, df)
+  expect_false(res$valid)
+})
+
+# ---- key-based uniqueness (perf/rule-checking, item C) ---------------------
+
+test_that("rule_check_unique matches duplicated() on character, integer, and NA keys", {
+  df <- data.frame(
+    K_CHR = c("a", "b", "a", NA_character_, NA_character_),
+    K_INT = c(1L, 2L, 1L, 3L, 3L),
+    stringsAsFactors = FALSE
+  )
+
+  chr_rule <- DTARuleColUnique(id = "chr", columns = "K_CHR")
+  int_rule <- DTARuleColUnique(id = "int", columns = "K_INT")
+
+  chr_res <- rule_check_unique(chr_rule, df)
+  int_res <- rule_check_unique(int_rule, df)
+
+  expect_false(chr_res$valid)
+  expect_match(chr_res$message, sprintf("%d duplicate", sum(duplicated(df[, "K_CHR", drop = FALSE]))))
+  expect_false(int_res$valid)
+  expect_match(int_res$message, sprintf("%d duplicate", sum(duplicated(df[, "K_INT", drop = FALSE]))))
+})
+
+test_that("rule_check_unique matches duplicated() for a multi-column character/integer key", {
+  df <- data.frame(
+    A = c("x", "x", "y", "x"),
+    B = c(1L, 1L, 2L, 2L),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleColUnique(id = "multi", columns = c("A", "B"))
+  res <- rule_check_unique(rule, df)
+  expected_dupes <- sum(duplicated(df[, c("A", "B"), drop = FALSE]))
+  expect_equal(!res$valid, expected_dupes > 0)
+  if (expected_dupes > 0) {
+    expect_match(res$message, sprintf("%d duplicate", expected_dupes))
+  }
+})
+
+test_that("rule_check_unique falls back to the data.frame method for a double key column", {
+  # 0.1 + 0.2 and 0.3 are `==`-different doubles that as.character() can print
+  # identically, which is exactly what the double fallback guards against.
+  df <- data.frame(
+    K = c(0.1 + 0.2, 0.3, 0.3),
+    stringsAsFactors = FALSE
+  )
+  expect_true(is.double(df$K))
+
+  rule <- DTARuleColUnique(id = "dbl", columns = "K")
+  res <- rule_check_unique(rule, df)
+  expected_dupes <- sum(duplicated(df[, "K", drop = FALSE]))
+
+  expect_equal(!res$valid, expected_dupes > 0)
+  if (expected_dupes > 0) {
+    expect_match(res$message, sprintf("%d duplicate", expected_dupes))
+  }
+})
+
 
 test_that("A rule naming an absent column fails the rule instead of aborting the run", {
   df <- data.frame(ID = "A", stringsAsFactors = FALSE)

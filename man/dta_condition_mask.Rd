@@ -4,7 +4,7 @@
 \alias{dta_condition_mask}
 \title{Evaluate one operator of a column condition}
 \usage{
-dta_condition_mask(column_name, operator, value, x)
+dta_condition_mask(column_name, operator, value, x, converted = NULL)
 }
 \arguments{
 \item{column_name}{Name of the column being tested.}
@@ -14,6 +14,9 @@ dta_condition_mask(column_name, operator, value, x)
 \item{value}{The value supplied for that operator.}
 
 \item{x}{The column vector taken from the table.}
+
+\item{converted}{The result of \code{dta_as_numeric_strict(x)}, when already
+available, so a numeric operator does not convert \code{x} again.}
 }
 \value{
 A logical vector, one element per row of the table.

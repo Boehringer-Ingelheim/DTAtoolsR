@@ -4,12 +4,15 @@
 \alias{dta_condition_violated}
 \title{Rows an IF/THEN Rule Counts as Violations}
 \usage{
-dta_condition_violated(rule, df)
+dta_condition_violated(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A conditional rule.}
 
 \item{df}{A data.frame.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL} to convert each column on demand.}
 }
 \value{
 A logical vector with one element per row, never \code{NA}.

@@ -4,12 +4,15 @@
 \alias{dta_numeric_operands}
 \title{Operands for a Numeric Comparison}
 \usage{
-dta_numeric_operands(x, value)
+dta_numeric_operands(x, value, converted = NULL)
 }
 \arguments{
 \item{x}{The column vector taken from the table.}
 
 \item{value}{The bound supplied in the specification.}
+
+\item{converted}{The result of \code{dta_as_numeric_strict(x)}, when already
+available, so \code{x} is not converted twice for the same comparison.}
 }
 \value{
 A list with the numeric \code{x} and \code{value}.

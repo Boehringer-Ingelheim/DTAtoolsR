@@ -4,7 +4,7 @@
 \alias{rule_check_unique}
 \title{Rule: check_unique}
 \usage{
-rule_check_unique(rule, df)
+rule_check_unique(rule, df, numeric_cache = NULL)
 }
 \arguments{
 \item{rule}{A DTARule object of type \code{"check_unique"}. Expected slots:
@@ -15,6 +15,11 @@ rule_check_unique(rule, df)
 }}
 
 \item{df}{A data.frame to validate.}
+
+\item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}}, or
+\code{NULL}. Ignored: uniqueness never compares columns numerically, but the
+parameter is accepted so \code{apply_rules()} can dispatch to every rule
+function uniformly.}
 }
 \value{
 A list with elements \code{id}, \code{valid}, and \code{message}.

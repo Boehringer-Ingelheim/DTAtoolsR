@@ -70,9 +70,10 @@ dta_as_numeric_strict <- function(x) {
   }
 
   raw_chr <- as.character(raw)
+  trimmed <- trimws(raw_chr)
   # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
-  missing <- is.na(raw_chr) | trimws(raw_chr) %in% ""
-  values <- suppressWarnings(as.numeric(trimws(raw_chr)))
+  missing <- is.na(raw_chr) | trimmed %in% ""
+  values <- suppressWarnings(as.numeric(trimmed))
 
   list(
     values = values,
@@ -80,6 +81,67 @@ dta_as_numeric_strict <- function(x) {
     missing = missing,
     unconvertible = is.na(values) & !missing
   )
+}
+
+#' @title Build a Shared Numeric Conversion Cache for a Set of Rules
+#' @description
+#' Rules that compare a column numerically each convert that column through
+#' [dta_as_numeric_strict()] independently. When several rules read the same
+#' column, `apply_rules()` would otherwise convert it once per rule; this
+#' collects the columns every rule in `rules` reads numerically and converts
+#' each of them exactly once.
+#' @param df A data.frame.
+#' @param rules A list of `DTARule` objects, or `NULL`.
+#' @return A named list mapping column name to the result of
+#'   `dta_as_numeric_strict()` for that column. Empty when `rules` is `NULL`,
+#'   empty, or names no columns present in `df`.
+#' @keywords internal
+dta_build_numeric_cache <- function(df, rules) {
+  if (is.null(rules) || length(rules) == 0) {
+    return(list())
+  }
+
+  columns <- unique(unlist(lapply(rules, function(rule) {
+    tryCatch(dta_rule_numeric_columns(rule), error = function(e) character(0))
+  })))
+  columns <- columns[columns %in% names(df)]
+
+  if (length(columns) == 0) {
+    return(list())
+  }
+
+  stats::setNames(
+    lapply(columns, function(col) dta_as_numeric_strict(df[[col]])),
+    columns
+  )
+}
+
+#' @title Look Up a Column's Numeric Conversion, Cached or Not
+#' @description
+#' The single place the fallback to converting on demand lives: when
+#' `numeric_cache` already holds the column's conversion, that is reused;
+#' otherwise the column is converted directly.
+#' @param df A data.frame.
+#' @param column Character. The column name.
+#' @param numeric_cache A named list produced by
+#'   [dta_build_numeric_cache()], or `NULL`.
+#' @return The result of `dta_as_numeric_strict()` for that column.
+#' @keywords internal
+dta_numeric_cache_get <- function(df, column, numeric_cache = NULL) {
+  cached <- if (!is.null(numeric_cache)) numeric_cache[[column]] else NULL
+
+  # A cache is only valid for the exact frame it was built from. If a cache
+  # built for a larger (or otherwise different) frame is ever passed in
+  # alongside a subset of that frame -- e.g. a future refactor that reuses a
+  # table-level cache for a filtered copy -- `cached$values` would silently
+  # recycle against `df[[column]]`, producing a wrong-length mask and a wrong
+  # violation count instead of an error. Checking the length here means a
+  # stale-length cache degrades to a correct recomputation rather than a
+  # silent wrong verdict.
+  if (!is.null(cached) && length(cached$values) == nrow(df)) {
+    return(cached)
+  }
+  dta_as_numeric_strict(df[[column]])
 }
 
 #' @title Operands for a Numeric Comparison
@@ -91,9 +153,11 @@ dta_as_numeric_strict <- function(x) {
 #' sides first is what makes the comparison mean what it says.
 #' @param x The column vector taken from the table.
 #' @param value The bound supplied in the specification.
+#' @param converted The result of `dta_as_numeric_strict(x)`, when already
+#'   available, so `x` is not converted twice for the same comparison.
 #' @return A list with the numeric `x` and `value`.
 #' @keywords internal
-dta_numeric_operands <- function(x, value) {
+dta_numeric_operands <- function(x, value, converted = NULL) {
   # Dates and date-times carry their own comparison semantics -- a character
   # bound is parsed as a date -- so they are compared exactly as before.
   if (inherits(x, "Date") || inherits(x, "POSIXt")) {
@@ -106,7 +170,8 @@ dta_numeric_operands <- function(x, value) {
     value
   }
 
-  list(x = dta_as_numeric_strict(x)$values, value = bound)
+  values <- if (!is.null(converted)) converted$values else dta_as_numeric_strict(x)$values
+  list(x = values, value = bound)
 }
 
 #' @title Rule: check_range
@@ -116,6 +181,9 @@ dta_numeric_operands <- function(x, value) {
 #'   - `@column` character: name of the column to check
 #'   - `@range` numeric(2): inclusive lower/upper bounds, e.g. c(0, 1)
 #' @param df A data.frame to validate.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()] mapping
+#'   column name to its cached numeric conversion, or `NULL` to convert on
+#'   demand.
 #' @description Ensures all non-missing values in `rule@column` fall within
 #' an **inclusive** numeric range `[lower, upper]`. Missing values are ignored.
 #' @return A list with elements `id`, `valid`, and `message`.
@@ -123,10 +191,10 @@ dta_numeric_operands <- function(x, value) {
 #' # Suppose `rule` is a DTARule with column="age", range=c(18, 65)
 #' # rule_check_range(rule, df)
 #' @export
-rule_check_range <- function(rule, df) {
+rule_check_range <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
   target <- dta_range_target(rule)
-  violated <- dta_range_violated(rule, df)
+  violated <- dta_range_violated(rule, df, numeric_cache)
 
   if (any(violated)) {
     list(
@@ -185,9 +253,11 @@ dta_range_target <- function(rule) {
 #' which is what lets a batched scan reproduce a whole-table answer exactly.
 #' @param rule A range rule.
 #' @param df A data.frame.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert the column on demand.
 #' @return A logical vector with one element per row.
 #' @keywords internal
-dta_range_violated <- function(rule, df) {
+dta_range_violated <- function(rule, df, numeric_cache = NULL) {
   target <- dta_range_target(rule)
   col <- target$col
 
@@ -198,7 +268,7 @@ dta_range_violated <- function(rule, df) {
     )
   }
 
-  converted <- dta_as_numeric_strict(df[[col]])
+  converted <- dta_numeric_cache_get(df, col, numeric_cache)
   in_range <- converted$values >= target$range[1] & converted$values <= target$range[2]
 
   # A genuinely missing value is ignored: it neither passes nor violates.
@@ -228,13 +298,17 @@ dta_range_violation_message <- function(id, n, col, range) {
 #'   - `@type` = "check_unique"
 #'   - `@column` character: name of the column to check
 #' @param df A data.frame to validate.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL`. Ignored: uniqueness never compares columns numerically, but the
+#'   parameter is accepted so `apply_rules()` can dispatch to every rule
+#'   function uniformly.
 #' @description Ensures that all values in the specified column are unique.
 #' Repeated `NA` values are considered duplicates by base R `duplicated()`.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' # rule_check_unique(rule, df)
 #' @export
-rule_check_unique <- function(rule, df) {
+rule_check_unique <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
   cols <- rule_get_slot(rule, "column")
   if (is.null(cols)) {
@@ -249,16 +323,17 @@ rule_check_unique <- function(rule, df) {
     )
   }
 
-  # Check for uniqueness across combined columns
-  duplicated_rows <- duplicated(df[, cols, drop = FALSE])
+  # The actual duplicate count is delegated to `dta_count_duplicates()`
+  # (R/arrowCompute.R), which owns the R reference implementation (including
+  # the double-key fallback documented there) and, only when opted in via
+  # `options(DTAtools.use_arrow_compute = TRUE)`, an Arrow-accelerated path.
+  n_duplicates <- dta_count_duplicates(df, cols)
 
-  if (any(duplicated_rows, na.rm = TRUE)) {
+  if (n_duplicates > 0) {
     list(
       id = rule@id,
       valid = FALSE,
-      message = dta_unique_violation_message(
-        rule@id, sum(duplicated_rows, na.rm = TRUE), cols
-      )
+      message = dta_unique_violation_message(rule@id, n_duplicates, cols)
     )
   } else {
     list(id = rule@id, valid = TRUE, message = NULL)
@@ -368,16 +443,18 @@ dta_normalize_conditions <- function(conditions, arg = "condition") {
 #' @param operator The operator key supplied in the specification.
 #' @param value The value supplied for that operator.
 #' @param x The column vector taken from the table.
+#' @param converted The result of `dta_as_numeric_strict(x)`, when already
+#'   available, so a numeric operator does not convert `x` again.
 #' @return A logical vector, one element per row of the table.
 #' @keywords internal
-dta_condition_mask <- function(column_name, operator, value, x) {
+dta_condition_mask <- function(column_name, operator, value, x, converted = NULL) {
   # Numeric comparisons must compare numbers. Applied to the raw column, `>` on
   # a character vector coerces the bound to character and compares by locale
   # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
   # after "65". `pattern` and the equality/set operators are unaffected and
   # deliberately stay on the raw column.
   if (operator %in% dta_numeric_condition_operators()) {
-    operands <- dta_numeric_operands(x, value)
+    operands <- dta_numeric_operands(x, value, converted)
     x <- operands$x
     value <- operands$value
   }
@@ -447,9 +524,11 @@ dta_numeric_condition_operators <- function() {
 #' must not be resolved the same way; see [dta_condition_in_scope()].
 #' @param conditions A clause, in either the named or the YAML sequence form.
 #' @param df A data.frame.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
 #' @return A logical vector with one element per row of `df`, never `NA`.
 #' @keywords internal
-dta_condition_undecidable <- function(conditions, df) {
+dta_condition_undecidable <- function(conditions, df, numeric_cache = NULL) {
   conditions <- dta_normalize_conditions(conditions)
   out <- rep(FALSE, nrow(df))
   numeric_operators <- dta_numeric_condition_operators()
@@ -469,7 +548,7 @@ dta_condition_undecidable <- function(conditions, df) {
       next
     }
 
-    out <- out | dta_as_numeric_strict(x)$unconvertible
+    out <- out | dta_numeric_cache_get(df, column_name, numeric_cache)$unconvertible
   }
 
   out
@@ -495,15 +574,17 @@ dta_condition_undecidable <- function(conditions, df) {
 #' @param conditions The rule's IF clause.
 #' @param df A data.frame.
 #' @param if_rows The mask returned by `evaluate_conditions()` for `conditions`.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
 #' @return A logical vector with one element per row of `df`, never `NA`.
 #' @keywords internal
-dta_condition_in_scope <- function(conditions, df, if_rows) {
+dta_condition_in_scope <- function(conditions, df, if_rows, numeric_cache = NULL) {
   undecided <- is.na(if_rows)
   if (!any(undecided)) {
     return(if_rows)
   }
 
-  if_rows[undecided] <- dta_condition_undecidable(conditions, df)[undecided]
+  if_rows[undecided] <- dta_condition_undecidable(conditions, df, numeric_cache)[undecided]
   if_rows
 }
 
@@ -592,13 +673,20 @@ dta_rule_numeric_columns <- function(rule) {
 #' make any consumer reading `n_rule_errors` see fewer errors than before.
 #' @param rule A `DTARule` object.
 #' @param df A data.frame to scan.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
+#' @param columns Character vector of columns to scan, when already known
+#'   (e.g. precomputed once per rule by the streaming driver), or `NULL` to
+#'   recompute via [dta_rule_numeric_columns()].
 #' @return A data.frame in the shape of `dta_empty_import_errors()`.
 #' @keywords internal
-dta_rule_import_errors <- function(rule, df) {
-  columns <- tryCatch(
-    dta_rule_numeric_columns(rule),
-    error = function(e) character(0)
-  )
+dta_rule_import_errors <- function(rule, df, numeric_cache = NULL, columns = NULL) {
+  if (is.null(columns)) {
+    columns <- tryCatch(
+      dta_rule_numeric_columns(rule),
+      error = function(e) character(0)
+    )
+  }
   columns <- unique(columns[columns %in% names(df)])
 
   if (length(columns) == 0) {
@@ -606,7 +694,17 @@ dta_rule_import_errors <- function(rule, df) {
   }
 
   parts <- lapply(columns, function(column) {
-    converted <- dta_as_numeric_strict(df[[column]])
+    x <- df[[column]]
+    # A numeric, logical, Date or POSIXt column can never contain an
+    # unconvertible value by construction -- dta_as_numeric_strict() only ever
+    # marks a value unconvertible when converting *text* fails, and none of
+    # these types are text. Skipping them avoids building the conversion (or a
+    # frame) for a column that is provably clean.
+    if (is.numeric(x) || is.logical(x) || inherits(x, "Date") || inherits(x, "POSIXt")) {
+      return(dta_empty_import_errors())
+    }
+
+    converted <- dta_numeric_cache_get(df, column, numeric_cache)
     offending <- which(converted$unconvertible)
 
     if (length(offending) == 0) {
@@ -631,7 +729,7 @@ dta_rule_import_errors <- function(rule, df) {
 }
 
 #' @keywords internal
-evaluate_condition <- function(column_name, condition, df) {
+evaluate_condition <- function(column_name, condition, df, numeric_cache = NULL) {
   if (!column_name %in% names(df)) {
     cli::cli_abort(
       "Column not found in table: {column_name}",
@@ -652,6 +750,16 @@ evaluate_condition <- function(column_name, condition, df) {
   x <- df[[column_name]]
   masks <- list()
 
+  # If any operator on this column compares numbers, convert the column ONCE
+  # here and reuse it for every such operator below (the `min`/`max` band
+  # needs it twice by itself). Dates/POSIXt are excluded because
+  # dta_numeric_operands() never routes them through this conversion anyway.
+  converted <- NULL
+  if (any(operators %in% dta_numeric_condition_operators()) &&
+    !inherits(x, "Date") && !inherits(x, "POSIXt")) {
+    converted <- dta_numeric_cache_get(df, column_name, numeric_cache)
+  }
+
   # `min` and `max` are the one documented pair: together they describe a single
   # inclusive band, so they are consumed as a unit rather than as two operators.
   if (any(c("min", "max") %in% operators)) {
@@ -659,8 +767,8 @@ evaluate_condition <- function(column_name, condition, df) {
     upper <- if ("max" %in% operators) condition[["max"]] else Inf
     # Same collation trap as the other comparisons: the band is numeric, so
     # both ends and the column are taken as numbers.
-    lower_operands <- dta_numeric_operands(x, lower)
-    upper_operands <- dta_numeric_operands(x, upper)
+    lower_operands <- dta_numeric_operands(x, lower, converted)
+    upper_operands <- dta_numeric_operands(x, upper, converted)
     masks[[length(masks) + 1L]] <-
       lower_operands$x >= lower_operands$value &
         upper_operands$x <= upper_operands$value
@@ -675,7 +783,8 @@ evaluate_condition <- function(column_name, condition, df) {
       column_name = column_name,
       operator = operator,
       value = condition[[i]],
-      x = x
+      x = x,
+      converted = converted
     )
   }
 
@@ -685,7 +794,7 @@ evaluate_condition <- function(column_name, condition, df) {
 }
 
 #' @keywords internal
-evaluate_conditions <- function(conditions, df) {
+evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
   conditions <- dta_normalize_conditions(conditions)
 
   if (length(conditions) == 0L) {
@@ -696,7 +805,7 @@ evaluate_conditions <- function(conditions, df) {
   # Iterate over each condition (column name and its rule)
   results <- lapply(names(conditions), function(column_name) {
     condition <- conditions[[column_name]]
-    evaluate_condition(column_name, condition, df)
+    evaluate_condition(column_name, condition, df, numeric_cache)
   })
 
   # Combine results using logical AND (NA propagates)
@@ -742,15 +851,17 @@ evaluate_conditions <- function(conditions, df) {
 #' single-column mappings; they are normalised to the named form.
 #'
 #' If `@condition` is empty, the `@then` part applies to **all rows**.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' # Example: If species == "setosa", then petal_length in [1.0, 1.9]
 #' # rule_check_col_condition(rule, iris)
 #' @export
-rule_check_col_condition <- function(rule, df) {
+rule_check_col_condition <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
 
-  violated_count <- sum(dta_condition_violated(rule, df))
+  violated_count <- sum(dta_condition_violated(rule, df, numeric_cache))
 
   if (violated_count > 0) {
     list(
@@ -774,12 +885,14 @@ rule_check_col_condition <- function(rule, df) {
 #' scan, a whole-table pass and the row preview cannot disagree.
 #' @param rule A conditional rule.
 #' @param df A data.frame.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
 #' @return A logical vector with one element per row, never `NA`.
 #' @keywords internal
-dta_condition_violated <- function(rule, df) {
-  if_rows <- evaluate_conditions(rule@condition, df)
-  then_rows <- evaluate_conditions(rule@then, df)
-  dta_condition_in_scope(rule@condition, df, if_rows) &
+dta_condition_violated <- function(rule, df, numeric_cache = NULL) {
+  if_rows <- evaluate_conditions(rule@condition, df, numeric_cache)
+  then_rows <- evaluate_conditions(rule@then, df, numeric_cache)
+  dta_condition_in_scope(rule@condition, df, if_rows, numeric_cache) &
     (is.na(then_rows) | !then_rows)
 }
 
@@ -876,6 +989,8 @@ dta_group_scope_truth <- function(mask, scope) {
 #' condition outcomes.
 #' @param rule A `DTARuleGroupCondition` object.
 #' @param df A data.frame to validate.
+#' @param numeric_cache A named list from [dta_build_numeric_cache()], or
+#'   `NULL` to convert each column on demand.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' df <- data.frame(
@@ -897,7 +1012,7 @@ dta_group_scope_truth <- function(mask, scope) {
 #' )
 #' rule_check_group_condition(rule, df)
 #' @export
-rule_check_group_condition <- function(rule, df) {
+rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
 
   format_rows <- function(rows, max_show = 10L) {
@@ -927,116 +1042,210 @@ rule_check_group_condition <- function(rule, df) {
 
   grouped <- df[, group_by, drop = FALSE]
   split_key <- dta_group_key(df, group_by)
-  groups <- split(seq_len(nrow(df)), split_key)
 
-  violations <- list()
+  # Every condition operator -- equals, not_equals, in, not_in, the numeric
+  # comparisons, pattern, empty -- is ELEMENTWISE: none of them consult
+  # another row. That is what makes evaluate_conditions(spec, df[idx, ])
+  # identical to evaluate_conditions(spec, df)[idx], and therefore valid to
+  # evaluate each condition ONCE over the whole table and reduce per group
+  # with tabulate(), rather than copying every column of `df` per group as
+  # `df[row_idx, , drop = FALSE]` used to.
+  #
+  # `factor(split_key)` sorts its levels the same way `split()` orders its
+  # groups, so iterating group ids in that order reproduces the group order
+  # (and therefore the assembled violation message order) of the previous
+  # split()-based implementation exactly.
+  kf <- factor(split_key)
+  gid <- as.integer(kf)
+  n_groups <- nlevels(kf)
+  n_seen <- tabulate(gid, nbins = n_groups)
+  # `groups_idx` (the row indices belonging to each group) is only read in the
+  # `requires` + `then_scope == "all"` branch below, and only for groups that
+  # actually violate a constraint -- almost always a small minority. Building
+  # it unconditionally for every grouped rule would be an O(nrow) list
+  # allocation paid even when it is never consulted, so it is built lazily on
+  # first use and memoised for the remainder of this call.
+  groups_idx_cache <- NULL
+  groups_idx <- function() {
+    if (is.null(groups_idx_cache)) {
+      groups_idx_cache <<- split(seq_len(nrow(df)), gid)
+    }
+    groups_idx_cache
+  }
 
-  for (group_index in seq_along(groups)) {
-    row_idx <- groups[[group_index]]
-    gdf <- df[row_idx, , drop = FALSE]
-
-    cond_hits <- lapply(names(conditions), function(cond_name) {
-      spec <- conditions[[cond_name]]
-      tryCatch(
-        evaluate_conditions(spec, gdf),
-        dta_rule_not_applicable = function(cnd) {
-          cli::cli_abort(c(
-            "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
-            x = "{conditionMessage(cnd)}",
-            i = "Condition {.field {cond_name}} is defined as: {.val {paste(capture.output(str(spec, give.attr = FALSE)), collapse = ' ')}}"
-          ), class = "dta_rule_not_applicable")
-        }
-      )
-    })
-    names(cond_hits) <- names(conditions)
-    cond_rows <- lapply(cond_hits, function(mask) row_idx[mask %in% TRUE])
-
-    group_values <- grouped[row_idx[1], , drop = FALSE]
-    group_label <- paste(
+  # First row (in original table order) of each group, for the label -- the
+  # same row `df[row_idx[1], ]` picked out before. The label string itself is
+  # only ever needed for groups that end up violating a constraint (almost
+  # always a small minority), so it is built lazily below rather than for
+  # every group up front.
+  first_row <- match(levels(kf), split_key)
+  group_label_for <- function(g) {
+    row <- first_row[g]
+    paste(
       vapply(group_by, function(col) {
-        paste0(col, "=", as.character(group_values[[col]][1]))
+        paste0(col, "=", as.character(grouped[[col]][row]))
       }, character(1)),
       collapse = ", "
     )
+  }
 
-    for (constraint in constraints) {
+  cond_hits <- lapply(names(conditions), function(cond_name) {
+    spec <- conditions[[cond_name]]
+    tryCatch(
+      evaluate_conditions(spec, df, numeric_cache),
+      dta_rule_not_applicable = function(cnd) {
+        cli::cli_abort(c(
+          "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
+          x = "{conditionMessage(cnd)}",
+          i = "Condition {.field {cond_name}} is defined as: {.val {paste(capture.output(str(spec, give.attr = FALSE)), collapse = ' ')}}"
+        ), class = "dta_rule_not_applicable")
+      }
+    )
+  })
+  names(cond_hits) <- names(conditions)
+
+  # `hit` per condition, over the whole table -- the same truth value
+  # `mask %in% TRUE` computed once per group before.
+  cond_hit <- lapply(cond_hits, function(mask) mask %in% TRUE)
+  # Rows where the condition holds, but only for groups that have at least one
+  # such row: cheap, because it only touches the (usually few) matching rows,
+  # not every group.
+  cond_rows_by_group <- lapply(cond_hit, function(hit) split(which(hit), gid[hit]))
+  cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
+  cond_any_true <- lapply(cond_n_true, function(n_true) n_true > 0)
+  # Matches dta_group_scope_truth()'s "all": a group with no rows is not
+  # vacuously TRUE, hence the `n_seen > 0` guard.
+  cond_all_true <- lapply(cond_n_true, function(n_true) n_seen > 0 & n_true == n_seen)
+
+  # `scope_truth_vec()` is the vectorised counterpart of the previous
+  # `group_scope_truth(cond_name, scope, g)`: it returns the whole per-group
+  # truth vector for a condition/scope pair in one lookup, rather than one
+  # element at a time, since cond_any_true/cond_all_true are already vectors
+  # over all groups.
+  scope_truth_vec <- function(cond_name, scope) {
+    if (!cond_name %in% names(conditions)) {
+      cli::cli_abort(
+        c(
+          "Rule {.val {rule@id}} references an unknown condition.",
+          x = "Constraint refers to condition {.field {cond_name}}, which is not defined.",
+          i = "Defined conditions: {.val {names(conditions)}}."
+        ),
+        class = "dta_rule_not_applicable"
+      )
+    }
+    if (identical(scope, "all")) {
+      cond_all_true[[cond_name]]
+    } else {
+      cond_any_true[[cond_name]]
+    }
+  }
+
+  group_rows <- function(cond_name, g) {
+    rows <- cond_rows_by_group[[cond_name]][[as.character(g)]]
+    if (is.null(rows)) integer(0) else rows
+  }
+
+  # Evaluate each constraint's truth condition across ALL groups at once
+  # (vectorised, O(n_groups) but with a tiny constant), so that the
+  # subsequent per-group work -- building labels, row evidence, and messages
+  # -- only ever touches groups that actually violate something. In real
+  # data almost no group violates, so this makes the expensive part of the
+  # loop proportional to the number of violations rather than the number of
+  # groups.
+  constraint_viol <- vector("list", length(constraints))
+  for (ci in seq_along(constraints)) {
+    constraint <- constraints[[ci]]
+    ctype <- constraint$type
+
+    if (identical(ctype, "mutually_exclusive")) {
+      left_truth <- scope_truth_vec(constraint$left, constraint$left_scope %||% "any")
+      right_truth <- scope_truth_vec(constraint$right, constraint$right_scope %||% "any")
+      constraint_viol[[ci]] <- left_truth & right_truth
+    } else if (identical(ctype, "requires")) {
+      if_truth <- scope_truth_vec(constraint[["if"]], constraint$if_scope %||% "any")
+      then_truth <- scope_truth_vec(constraint[["then"]], constraint$then_scope %||% "any")
+      constraint_viol[[ci]] <- if_truth & !then_truth
+    } else {
+      constraint_viol[[ci]] <- logical(n_groups)
+    }
+  }
+
+  violating_groups <- sort(unique(unlist(lapply(constraint_viol, which), use.names = FALSE)))
+
+  violations <- list()
+
+  for (g in violating_groups) {
+    group_label <- NULL # computed lazily, once, on first use for this group
+
+    for (ci in seq_along(constraints)) {
+      if (!isTRUE(constraint_viol[[ci]][g])) {
+        next
+      }
+      constraint <- constraints[[ci]]
       ctype <- constraint$type
+
+      if (is.null(group_label)) {
+        group_label <- group_label_for(g)
+      }
 
       if (identical(ctype, "mutually_exclusive")) {
         left <- constraint$left
         right <- constraint$right
 
-        left_truth <- dta_group_scope_truth(
-          cond_hits[[left]],
-          constraint$left_scope %||% "any"
-        )
-        right_truth <- dta_group_scope_truth(
-          cond_hits[[right]],
-          constraint$right_scope %||% "any"
-        )
-
-        if (isTRUE(left_truth) && isTRUE(right_truth)) {
-          message <- constraint$message %||%
-            sprintf(
-              "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
-              group_label,
-              left,
-              right,
-              left,
-              format_rows(cond_rows[[left]]),
-              right,
-              format_rows(cond_rows[[right]])
-            )
-          violations[[length(violations) + 1L]] <- list(
-            constraint_id = constraint$id,
-            group = group_label,
-            message = message,
-            rows = sort(unique(c(cond_rows[[left]], cond_rows[[right]]))),
-            # The whole table is in hand here, so `rows` is never a head.
-            rows_truncated = FALSE
+        left_rows <- group_rows(left, g)
+        right_rows <- group_rows(right, g)
+        message <- constraint$message %||%
+          sprintf(
+            "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
+            group_label,
+            left,
+            right,
+            left,
+            format_rows(left_rows),
+            right,
+            format_rows(right_rows)
           )
-        }
+        violations[[length(violations) + 1L]] <- list(
+          constraint_id = constraint$id,
+          group = group_label,
+          message = message,
+          rows = sort(unique(c(left_rows, right_rows))),
+          # The whole table is in hand here, so `rows` is never a head.
+          rows_truncated = FALSE
+        )
       } else if (identical(ctype, "requires")) {
         if_name <- constraint[["if"]]
         then_name <- constraint[["then"]]
-
-        if_truth <- dta_group_scope_truth(
-          cond_hits[[if_name]],
-          constraint$if_scope %||% "any"
-        )
         then_scope <- constraint$then_scope %||% "any"
-        then_truth <- dta_group_scope_truth(cond_hits[[then_name]], then_scope)
 
-        if (isTRUE(if_truth) && !isTRUE(then_truth)) {
-          if_rows <- cond_rows[[if_name]]
-          then_rows <- cond_rows[[then_name]]
-          then_failed <- if (identical(then_scope, "all")) {
-            row_idx[!(cond_hits[[then_name]] %in% TRUE)]
-          } else {
-            integer(0)
-          }
-          then_scope_reason <- if (identical(then_scope, "all")) {
-            sprintf("rows %s do not satisfy \"%s\"", format_rows(then_failed), then_name)
-          } else {
-            sprintf("no row in the group satisfies \"%s\"", then_name)
-          }
-          message <- constraint$message %||%
-            sprintf(
-              "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
-              group_label,
-              if_name,
-              format_rows(if_rows),
-              then_name,
-              then_scope_reason
-            )
-          violations[[length(violations) + 1L]] <- list(
-            constraint_id = constraint$id,
-            group = group_label,
-            message = message,
-            rows = sort(unique(c(if_rows, then_failed))),
-            rows_truncated = FALSE
-          )
+        if_rows <- group_rows(if_name, g)
+        row_idx <- groups_idx()[[as.character(g)]]
+        then_failed <- if (identical(then_scope, "all")) {
+          row_idx[!cond_hit[[then_name]][row_idx]]
+        } else {
+          integer(0)
         }
+        then_scope_reason <- if (identical(then_scope, "all")) {
+          sprintf("rows %s do not satisfy \"%s\"", format_rows(then_failed), then_name)
+        } else {
+          sprintf("no row in the group satisfies \"%s\"", then_name)
+        }
+        message <- constraint$message %||%
+          sprintf(
+            "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
+            group_label,
+            if_name,
+            format_rows(if_rows),
+            then_name,
+            then_scope_reason
+          )
+        violations[[length(violations) + 1L]] <- list(
+          constraint_id = constraint$id,
+          group = group_label,
+          message = message,
+          rows = sort(unique(c(if_rows, then_failed))),
+          rows_truncated = FALSE
+        )
       }
     }
   }
@@ -1078,6 +1287,11 @@ apply_rules <- function(rules, df, verbose = TRUE) {
     rules <- list()
   }
 
+  # Built once for every rule rather than once per rule: a column read
+  # numerically by several rules would otherwise be strict-converted once per
+  # rule that reads it.
+  numeric_cache <- dta_build_numeric_cache(df, rules)
+
   rule_functions <- list(
     check_range = rule_check_range,
     check_unique = rule_check_unique,
@@ -1105,7 +1319,7 @@ apply_rules <- function(rules, df, verbose = TRUE) {
     # `dta_rule_not_applicable` condition is caught here; genuine programming
     # errors and malformed rule specifications still propagate.
     result <- tryCatch(
-      rule_functions[[rule_type]](rule, df),
+      rule_functions[[rule_type]](rule, df, numeric_cache),
       dta_rule_not_applicable = function(cnd) {
         list(
           id = rule@id,
@@ -1122,7 +1336,7 @@ apply_rules <- function(rules, df, verbose = TRUE) {
     # The import axis is sourced from the same columns the rule just read as
     # numbers, so an unrepresentable value is reported on both axes rather than
     # reclassified from one to the other.
-    result$import_errors <- dta_rule_import_errors(rule, df)
+    result$import_errors <- dta_rule_import_errors(rule, df, numeric_cache)
 
     if (isTRUE(verbose)) {
       if (isTRUE(result$valid)) {
