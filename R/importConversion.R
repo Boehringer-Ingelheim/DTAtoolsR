@@ -275,7 +275,10 @@ dta_coerce_table_to_specs <- function(table, specs) {
   }
 
   parts <- list()
-  n_total <- 0L
+  # Double, not integer: one error per bad cell over every typed column can
+  # exceed `.Machine$integer.max` on a wide dirty table, and an integer
+  # accumulator silently becomes `NA` there. See `dta_narrow_count()`.
+  n_total <- 0
   changed <- FALSE
 
   for (column in names(df)) {
@@ -330,7 +333,7 @@ dta_coerce_table_to_specs <- function(table, specs) {
     out
   }
 
-  attr(issues, "n_import_errors") <- as.integer(n_total)
+  attr(issues, "n_import_errors") <- dta_narrow_count(n_total)
 
   # Nothing was typed and nothing failed: hand back the original object rather
   # than paying for a round trip that cannot have changed anything.
@@ -376,7 +379,8 @@ dta_carried_import_issues <- function(table) {
 #' per-column cap truncated the retained rows.
 #' @param issues A data.frame in the shape of [dta_empty_import_errors()], or
 #'   `NULL`.
-#' @return A length-1 integer.
+#' @return A length-1 count: an integer, or a double when the count exceeds
+#'   `.Machine$integer.max` (see `dta_narrow_count()`).
 #' @keywords internal
 dta_import_error_count <- function(issues) {
   if (!is.data.frame(issues)) {
@@ -390,8 +394,11 @@ dta_import_error_count <- function(issues) {
   }
 
   # The retained rows are the floor: a frame can never report fewer errors than
-  # the rows it actually carries.
-  as.integer(max(as.integer(n), nrow(issues)))
+  # the rows it actually carries. Compared and returned without an `as.integer()`
+  # round trip, which turned a count above `.Machine$integer.max` into `NA` --
+  # and `NA` here is read as "no attribute", falling back to the *capped*
+  # `nrow()` and under-reporting by however much the cap threw away.
+  dta_narrow_count(max(n, nrow(issues)))
 }
 
 
@@ -435,7 +442,9 @@ dta_merge_import_errors <- function(carried, rule_errors) {
     rownames(out) <- NULL
   }
 
-  n_rule <- if (is.null(rule_errors)) 0L else as.integer(nrow(rule_errors))
-  attr(out, "n_import_errors") <- carried_total + n_rule
+  n_rule <- if (is.null(rule_errors)) 0 else nrow(rule_errors)
+  attr(out, "n_import_errors") <- dta_narrow_count(
+    as.double(carried_total) + n_rule
+  )
   out
 }

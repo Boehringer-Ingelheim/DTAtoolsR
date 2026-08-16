@@ -11,7 +11,8 @@ dta_import_error_count(issues)
 \code{NULL}.}
 }
 \value{
-A length-1 integer.
+A length-1 count: an integer, or a double when the count exceeds
+\code{.Machine$integer.max} (see \code{dta_narrow_count()}).
 }
 \description{
 The number of values that failed to convert, which is not \code{nrow()} when the

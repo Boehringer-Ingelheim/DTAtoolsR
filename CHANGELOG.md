@@ -4,9 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.18.1] - 2026-08-16
 
 ### Fixed
+
+- **`validate_file_stream()` stopped counting errors — and stopped judging the
+  file — once a scan passed `.Machine$integer.max` errors.** The error sink
+  accumulated its totals as integers, so on a file dirty enough to exceed the
+  integer range the addition returned `NA` with a
+  `NAs produced by integer overflow` warning rather than a count. Because
+  `NA > 0` is `NA`, the `NA` then propagated into `columnspec_valid`,
+  `import_valid`, and the fail-fast check, so the files too broken to count were
+  exactly the files that stopped receiving a verdict. Retention is capped but
+  counting deliberately is not, which is what makes these counters the one
+  unbounded quantity in the streaming path. They are now accumulated as doubles,
+  exact for whole numbers to 2^53.
+- The same overflow was reachable on the import-typing axis outside streaming:
+  `dta_coerce_table_to_specs()` accumulated its per-cell count as an integer,
+  and `dta_import_error_count()` round-tripped the recorded total through
+  `as.integer()`. The latter was the more damaging of the two — an `NA` count is
+  read as "no count recorded", which falls back to the *capped* row count and
+  under-reports by however much the cap discarded.
+- Counts are still reported as integers wherever they fit, so the `details`
+  contract is unchanged; only a count that cannot be an integer without becoming
+  `NA` is now widened.
 
 - **The Shiny app's `manifest.json` was verified on two lines out of 3,143, and
   the unverified remainder had been wrong in every release that touched the

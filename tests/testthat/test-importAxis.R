@@ -717,3 +717,34 @@ test_that("check() console output states the import failure instead of only clai
   expect_true(grepl("BMI", output, fixed = TRUE))
   expect_true(grepl("heavy", output, fixed = TRUE))
 })
+
+
+test_that("a flattened inspect record keeps a count above the integer limit", {
+  record <- list(
+    id = 1L,
+    dataset = "ds",
+    target = "tab",
+    source = "import",
+    severity = "error",
+    type = "import",
+    headline = "h",
+    message = "m",
+    details = list(
+      ok = FALSE,
+      columnspec_valid = FALSE,
+      rules_valid = TRUE,
+      import_valid = FALSE,
+      n_columnspec_errors = 3e9,
+      n_rule_errors = 0L,
+      n_import_errors = 2.5e9,
+      result_version = 2L
+    )
+  )
+
+  # The counters are accumulated as doubles precisely so an uncountably dirty
+  # file still gets a count; coercing back with as.integer() on the way into
+  # inspect() output would put the NA straight back, one hop further on.
+  expect_no_warning(flat <- dta_flatten_inspect_record(record))
+  expect_equal(flat$details_n_columnspec_errors, 3e9)
+  expect_equal(flat$details_n_import_errors, 2.5e9)
+})

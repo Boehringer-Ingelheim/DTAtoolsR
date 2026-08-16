@@ -312,8 +312,13 @@ dta_unique_columns <- function(rule) {
 dta_error_sink <- function(max_errors) {
   sink <- new.env(parent = emptyenv())
   sink$parts <- list()
-  sink$retained <- 0L
-  sink$total <- 0L
+  # Doubles, not integers. Counting is uncapped by design, so on a file dirty
+  # enough to produce more than `.Machine$integer.max` errors an integer
+  # accumulator returns `NA` with a warning instead of a count -- and `NA > 0`
+  # is `NA`, so the truncation-proof verdict this sink exists to protect became
+  # unknowable at exactly the scale that matters. See `dta_narrow_count()`.
+  sink$retained <- 0
+  sink$total <- 0
   sink$truncated <- FALSE
   sink$max <- max_errors
   sink
@@ -541,7 +546,7 @@ dta_validate_table_stream <- function(specs,
   # the two are not confused: a duplicate is one error counted once, a capped
   # row is one error whose identity is gone. The carried axis needs this only
   # when the cap left nothing at all for the merge to count.
-  carried_capped <- if (is.null(carried)) carried_sink$total else 0L
+  carried_capped <- if (is.null(carried)) carried_sink$total else 0
   rule_capped <- rule_import_sink$total - NROW(rule_import)
 
   if (!is.null(rule_import)) {
@@ -560,7 +565,7 @@ dta_validate_table_stream <- function(specs,
   # counts the merged frame, reported the right number for the same input.
   # Capped rows were never available to deduplicate, so they are added back
   # unreduced: a truncated scan over-reports rather than under-reports.
-  n_import_errors <- dta_import_error_count(import_errors) +
+  n_import_errors <- as.double(dta_import_error_count(import_errors)) +
     carried_capped + rule_capped
   import_valid <- n_import_errors == 0L
   if (n_import_errors == 0L) {
@@ -572,9 +577,9 @@ dta_validate_table_stream <- function(specs,
     columnspec_valid = !has_columnspec_errors,
     rules_valid = isTRUE(rules_valid),
     import_valid = isTRUE(import_valid),
-    n_columnspec_errors = columnspec_sink$total,
+    n_columnspec_errors = dta_narrow_count(columnspec_sink$total),
     n_rule_errors = length(rule_errors),
-    n_import_errors = as.integer(n_import_errors),
+    n_import_errors = dta_narrow_count(n_import_errors),
     columnspec_errors = list(
       summarised_error = summarised_error,
       full_error = full_error
