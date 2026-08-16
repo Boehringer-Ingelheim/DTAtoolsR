@@ -6,7 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.18.1] - 2026-08-16
 
+A bug-fix release for the validation error counters. It also carries the Shiny
+app manifest verification work, which had been merged to `dev` without a release
+of its own and so ships here.
+
 ### Fixed
+
+#### Validation error counting
 
 - **`validate_file_stream()` stopped counting errors — and stopped judging the
   file — once a scan passed `.Machine$integer.max` errors.** The error sink
@@ -28,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Counts are still reported as integers wherever they fit, so the `details`
   contract is unchanged; only a count that cannot be an integer without becoming
   `NA` is now widened.
+
+#### Shiny app manifest verification
 
 - **The Shiny app's `manifest.json` was verified on two lines out of 3,143, and
   the unverified remainder had been wrong in every release that touched the
@@ -52,6 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   recorded the previous release's commit.
 
 ### Added
+
+All of the following belong to the manifest verification work above.
 
 - `.github/scripts/check_manifest.R`, run by the `r-style` workflow: asserts the
   manifest's file list matches the app directory exactly, that every checksum is
