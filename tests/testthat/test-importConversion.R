@@ -455,3 +455,34 @@ test_that("a column absent from the specs is inferred, not dropped", {
   expect_true(is.numeric(out$table$EXTRA))
   expect_equal(as.numeric(out$table$EXTRA), c(10, 20))
 })
+
+
+test_that("an import error count above the integer limit survives being read back", {
+  issues <- dta_empty_import_errors()
+  attr(issues, "n_import_errors") <- 3e9
+
+  # The count used to be round-tripped through `as.integer()`, which turns 3e9
+  # into `NA` -- and an `NA` attribute is read here as "no attribute at all",
+  # falling back to the capped `nrow()`. The cap exists precisely for frames
+  # this large, so the fallback under-reported by nearly the whole count.
+  expect_no_warning(n <- dta_import_error_count(issues))
+  expect_equal(n, 3e9)
+})
+
+
+test_that("merging import errors totals past the integer limit", {
+  carried <- dta_empty_import_errors()
+  attr(carried, "n_import_errors") <- 2.5e9
+
+  rule <- data.frame(
+    row = 1L,
+    column = "VAL",
+    raw = "nope",
+    declared_type = "SAS Num",
+    reason = "not_convertible",
+    stringsAsFactors = FALSE
+  )
+
+  expect_no_warning(merged <- dta_merge_import_errors(carried, rule))
+  expect_equal(dta_import_error_count(merged), 2.5e9 + 1)
+})

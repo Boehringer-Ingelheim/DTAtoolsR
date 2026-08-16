@@ -53,6 +53,30 @@ class_character_or_numeric_or_null_or_list <- S7::class_character |
   list(prefix = prefix, rest = rest)
 }
 
+# Narrow an error count back to integer, but only when it fits.
+#
+# Error counts are accumulated as doubles. Both the schema and the import axis
+# produce one error per bad cell, and counting -- unlike retention -- is
+# deliberately uncapped, so a large dirty file runs the total past
+# `.Machine$integer.max`. Integer accumulation there does not raise an error: it
+# yields `NA` with a warning, and the `NA` then propagates into the pass/fail
+# verdict, so the files too broken to count were the ones that stopped being
+# judged. Doubles represent whole numbers exactly to 2^53.
+#
+# Integer is still what every consumer of `details` has always seen, so counts
+# are narrowed back on the way out. A count that genuinely exceeds the integer
+# range stays a double rather than becoming `NA`.
+#
+# The range test is two-sided even though counts are never negative: a one-sided
+# `n <= .Machine$integer.max` is true of every negative number, so it would hand
+# `as.integer()` exactly the values it cannot represent.
+dta_narrow_count <- function(n) {
+  if (length(n) == 1 && !is.na(n) && abs(n) <= .Machine$integer.max) {
+    return(as.integer(n))
+  }
+  n
+}
+
 `__DTAtools_supported_backends__` <- c("SAS")
 `__DTAtools_supported_dataset_types__` <- c("tabular", "file")
 `__DTAtools_stream_modes__` <- c("auto", "always", "never")
