@@ -42,6 +42,19 @@ repos:
         exclude: '(\.Rd$|^inst/extdata/|^tests/testthat/_snaps/)'
       - id: detect-private-key
       - id: check-ast
+      # inst/shiny/dta_app/manifest.json is patched line-by-line by
+      # .github/scripts/bump_version.R rather than round-tripped through a JSON
+      # parser (see the header comment there for why). A textual patch can
+      # produce a file that is no longer valid JSON, and nothing else in the
+      # repo parses it -- so a broken manifest would be committed, pass CI, and
+      # only surface at deploy time. This hook is the parse check, and it is
+      # pure Python so it costs the pre-commit workflow nothing: that job
+      # deliberately installs no R (see .github/workflows/pre-commit.yml).
+      #
+      # Scope is small and deliberate: the only tracked .json files are this
+      # manifest and .vscode/settings.json, both strict JSON today. Note the
+      # hook rejects JSONC, so keep comments out of .vscode/settings.json.
+      - id: check-json
       - id: mixed-line-ending
         args: [--fix=lf]
         exclude: '^inst/extdata/'

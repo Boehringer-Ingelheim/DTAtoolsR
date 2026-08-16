@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.18.0",
+        "Version": "0.18.1",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -63,16 +63,12 @@
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "v0.18.0",
-        "RemoteSha": "c5db0cfe1aa83efe0f088ade0be9df368f3f9db0",
+        "RemoteRef": "v0.18.1",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "v0.18.0",
-        "GithubSHA1": "c5db0cfe1aa83efe0f088ade0be9df368f3f9db0",
+        "GithubRef": "v0.18.1",
         "NeedsCompilation": "no",
-        "Packaged": "2026-08-14 12:37:01 UTC; schwarz8",
-        "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]",
-        "Built": "R 4.5.1; ; 2026-08-14 12:37:06 UTC; windows"
+        "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
     },
     "R.methodsS3": {
@@ -3129,7 +3125,7 @@
       "checksum": "cb019d396e88a149968e9ec549bea956"
     },
     "VERSION": {
-      "checksum": "e6e84b799f8125f3370d03a312b3ee1b"
+      "checksum": "f8ecb2aaf58a7e2ff3b5923992928b70"
     },
     "app.R": {
       "checksum": "0badc081f11876163b8527d1fb71d26e"

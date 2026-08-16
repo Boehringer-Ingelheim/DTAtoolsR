@@ -4,7 +4,85 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.18.1] - 2026-08-16
+
+A bug-fix release for the validation error counters. It also carries the Shiny
+app manifest verification work, which had been merged to `dev` without a release
+of its own and so ships here.
+
+### Fixed
+
+#### Validation error counting
+
+- **`validate_file_stream()` stopped counting errors — and stopped judging the
+  file — once a scan passed `.Machine$integer.max` errors.** The error sink
+  accumulated its totals as integers, so on a file dirty enough to exceed the
+  integer range the addition returned `NA` with a
+  `NAs produced by integer overflow` warning rather than a count. Because
+  `NA > 0` is `NA`, the `NA` then propagated into `columnspec_valid`,
+  `import_valid`, and the fail-fast check, so the files too broken to count were
+  exactly the files that stopped receiving a verdict. Retention is capped but
+  counting deliberately is not, which is what makes these counters the one
+  unbounded quantity in the streaming path. They are now accumulated as doubles,
+  exact for whole numbers to 2^53.
+- The same overflow was reachable on the import-typing axis outside streaming:
+  `dta_coerce_table_to_specs()` accumulated its per-cell count as an integer,
+  and `dta_import_error_count()` round-tripped the recorded total through
+  `as.integer()`. The latter was the more damaging of the two — an `NA` count is
+  read as "no count recorded", which falls back to the *capped* row count and
+  under-reports by however much the cap discarded.
+- Counts are still reported as integers wherever they fit, so the `details`
+  contract is unchanged; only a count that cannot be an integer without becoming
+  `NA` is now widened.
+
+#### Shiny app manifest verification
+
+- **The Shiny app's `manifest.json` was verified on two lines out of 3,143, and
+  the unverified remainder had been wrong in every release that touched the
+  app.** `bump_version.R` kept the `DTAtools` `Version` entry and the `VERSION`
+  file's checksum in step with `DESCRIPTION`; everything else was maintained by
+  hand. The consequences, all present in released tags:
+  - **Six of the eight file checksums were checked by nothing.** Release 0.16.0
+    shipped with `app.R` recorded as `df2b7079…` while the file on disk was
+    `9d798811…`. App source changed in two releases with no accompanying
+    manifest commit.
+  - **The version-bearing fields contradicted each other.** 0.17.3 shipped with
+    `RemoteRef` still reading `v0.17.2`; 0.18.0 shipped with hand-added
+    `GithubSHA1`/`RemoteSha` pointing at the *0.17.3* release commit.
+  - **Nothing checked the file was even parseable**, though it is patched by
+    text substitution.
+- `RemoteRef` and `GithubRef` are now version sites in
+  `.github/scripts/bump_version.R`, so the writer and the checker cannot
+  disagree about them. `GithubSHA1`, `RemoteSha`, `Packaged`, and `Built` were
+  **removed** from the `DTAtools` entry rather than checked: a bump commit
+  cannot know the SHA of the release commit that will contain it, so there is no
+  value they could ever be verified against, and each hand-maintained attempt
+  recorded the previous release's commit.
+
+### Added
+
+All of the following belong to the manifest verification work above.
+
+- `.github/scripts/check_manifest.R`, run by the `r-style` workflow: asserts the
+  manifest's file list matches the app directory exactly, that every checksum is
+  live, that the removed fields stay removed, and that every package the app
+  loads has a `packages` entry. It deliberately does not police the `packages`
+  block's contents, which is a frozen snapshot of one developer's `renv` library
+  and is not reproducible on another machine.
+- `Rscript .github/scripts/bump_version.R --sync-manifest`, which rebuilds the
+  manifest's `files` block from the app directory — handling added and removed
+  files, which a line patcher cannot see. Entry order is sorted with
+  `method = "radix"` so it does not depend on the collation locale; plain
+  `sort()` orders the block differently under `de_DE` than under CI's `C`
+  collation, which would have made the file flip on every hop between machines.
+- `.github/workflows/manifest-sync.yml`, which runs that repair on pull requests
+  and pushes the result to the PR branch, so checksums are never copied by hand.
+  Only the mechanical half is auto-committed; a version mismatch, a missing
+  package entry, or a re-added unverifiable field still fails `r-style` and must
+  be fixed deliberately.
+- The `check-json` pre-commit hook, covering the parse check that nothing
+  performed before. It is pure Python, so the `pre-commit` workflow still
+  installs no R.
 
 ## [0.18.0] - 2026-08-15
 

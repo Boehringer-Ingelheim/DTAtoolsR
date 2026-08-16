@@ -1706,3 +1706,54 @@ test_that("use_threads does not change the verdict", {
     multi$columnspec_errors$full_error
   )
 })
+
+
+# Error counting past the integer limit.
+#
+# Retention is capped; counting is not. That is the whole point of the sink --
+# the verdict must not become an artefact of truncation -- but it also means the
+# counters are the one quantity in the streaming path that grows without bound.
+# An integer accumulator does not error when it runs out of range: it returns
+# `NA` with a warning, and `NA > 0` is `NA`, so the file too dirty to count was
+# the file that stopped being judged.
+
+test_that("the error sink counts past the integer limit without overflowing", {
+  sink <- dta_error_sink(max_errors = 1L)
+  one <- data.frame(row = 1L, column = "A", stringsAsFactors = FALSE)
+
+  # Two batches each reporting more than half of `.Machine$integer.max` errors
+  # is the smallest reproduction of a scan whose total leaves the integer range.
+  expect_no_warning({
+    dta_error_sink_add(sink, one, n_total = 1.5e9)
+    dta_error_sink_add(sink, one, n_total = 1.5e9)
+  })
+
+  expect_equal(sink$total, 3e9)
+  expect_false(is.na(sink$total))
+  # The assertion that actually matters: this comparison is what the pass/fail
+  # verdict reads, and it was `NA` rather than `TRUE`.
+  expect_true(sink$total > 0)
+  expect_true(sink$truncated)
+})
+
+
+test_that("counts are reported as integers until they cannot be", {
+  # Every consumer of `details` has always seen integer counts, and the
+  # materialising path is explicit about not letting the type depend on whether
+  # anything failed. Widening happens only where integer would mean `NA`.
+  expect_identical(dta_narrow_count(0), 0L)
+  expect_identical(dta_narrow_count(5), 5L)
+  expect_identical(dta_narrow_count(.Machine$integer.max), .Machine$integer.max)
+  expect_identical(dta_narrow_count(3e9), 3e9)
+
+  # Anything the integer range cannot hold is passed through untouched rather
+  # than coerced, because coercion here is what produced `NA` in the first
+  # place. That includes the inputs no call site currently produces: narrowing
+  # must never be the step that loses a value.
+  expect_no_warning({
+    expect_identical(dta_narrow_count(NA_real_), NA_real_)
+    expect_identical(dta_narrow_count(-3e9), -3e9)
+    expect_identical(dta_narrow_count(c(1, 2)), c(1, 2))
+    expect_identical(dta_narrow_count(numeric(0)), numeric(0))
+  })
+})

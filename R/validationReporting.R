@@ -713,9 +713,14 @@ dta_flatten_inspect_record <- function(record) {
     if (!is.null(details$import_valid)) {
       extra$details_import_valid <- if (is.na(details$import_valid)) NA else isTRUE(details$import_valid)
     }
-    if (!is.null(details$n_columnspec_errors)) extra$details_n_columnspec_errors <- as.integer(details$n_columnspec_errors)
+    # dta_narrow_count(), not as.integer(): these two counts are uncapped, so a
+    # dirty enough file pushes them past the integer range, and coercing there
+    # would put back the `NA` the counters were widened to avoid -- losing the
+    # count in `inspect()` output rather than in the verdict. `n_rule_errors` is
+    # a count of failing rules, bounded by the spec, so it stays an integer.
+    if (!is.null(details$n_columnspec_errors)) extra$details_n_columnspec_errors <- dta_narrow_count(details$n_columnspec_errors)
     if (!is.null(details$n_rule_errors)) extra$details_n_rule_errors <- as.integer(details$n_rule_errors)
-    if (!is.null(details$n_import_errors)) extra$details_n_import_errors <- as.integer(details$n_import_errors)
+    if (!is.null(details$n_import_errors)) extra$details_n_import_errors <- dta_narrow_count(details$n_import_errors)
   }
   if (ncol(extra) > 0) {
     extra <- extra[rep(1L, out_n), , drop = FALSE]

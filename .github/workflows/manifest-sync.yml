@@ -1,0 +1,88 @@
+# Keep inst/shiny/dta_app/manifest.json's file list and checksums in step with
+# the app source, and push the repair to the PR branch so nobody has to copy an
+# md5 by hand.
+#
+# Doing it by hand is what put the wrong app.R checksum into release 0.16.0
+# (manifest said df2b7079..., the file was 9d798811...) and what left six of the
+# eight checksums unverified by anything for the project's whole history.
+#
+# WHY THIS WRITES BACK, when r-style.yaml deliberately does not. That workflow
+# argues -- correctly -- that auto-committing a NAMESPACE diff would paper over
+# the silent-export bug its roxygen check exists to catch. That reasoning is
+# about diffs which encode a DECISION. An md5 is a pure function of the file's
+# bytes: there is nothing in it for a reviewer to agree or disagree with, and
+# the only thing a human contributes is the opportunity to get it wrong. So the
+# mechanical half is repaired here, while the half that does imply a decision --
+# a version mismatch, a missing package entry, a re-added unverifiable field --
+# still FAILS in r-style.yaml and must be fixed deliberately.
+#
+# Pull requests only: the push below targets `github.head_ref`, which is empty
+# outside a `pull_request` event, so a push-triggered run could never commit
+# anything. Same constraint as pre-commit.yml, whose shape this follows.
+#
+# NOTE: a `pull_request` run from a FORK gets a read-only token. The push step is
+# NOT skipped in that case -- it runs, the push is rejected, and the job goes
+# red with a permissions error rather than quietly doing nothing. The drift is
+# still reported properly by r-style.yaml's check_manifest.R step, and the fix is
+# for the contributor to run
+# `Rscript .github/scripts/bump_version.R --sync-manifest` themselves. This repo
+# works from branches rather than forks, so that is the exception path.
+#
+# NOTE: pre-commit.yml also auto-commits to the PR branch on the same trigger, so
+# in principle both can push at once and one push is rejected as non-fast-forward.
+# Left unserialised deliberately: each only pushes when it actually changed
+# something (this one is scoped to manifest.json via `file_pattern`), so both
+# having work to do on the same PR is rare, and the failure mode is a red job
+# that a re-run clears -- not a corrupted branch. Serialising the two via a
+# shared concurrency group would trade that for pre-commit cancelling this job.
+on:
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch:
+
+name: manifest-sync
+
+concurrency:
+  group: manifest-sync-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  manifest-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to push the resynced manifest back to the pull request's branch.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The default `pull_request` checkout is a detached merge commit, which
+          # cannot be pushed to. Check out the PR's own branch instead.
+          ref: ${{ github.head_ref }}
+
+      # setup-r alone, with no setup-r-dependencies step: the --sync-manifest
+      # path in bump_version.R is deliberately base-R only (list.files,
+      # readLines, tools::md5sum), so there is no package library to restore and
+      # this job finishes in seconds. Same reasoning as bump-version.yml.
+      #
+      # check_manifest.R does need jsonlite, which is why the *checking* half
+      # lives in r-style.yaml where that library already exists, and only the
+      # *repair* runs here.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Resync the app manifest's file list and checksums
+        run: Rscript .github/scripts/bump_version.R --sync-manifest
+
+      # NOTE: deliberately NOT `if: '!cancelled()'`, which is what pre-commit.yml
+      # uses. That is correct there because pre-commit's autofixers exit non-zero
+      # *because* they fixed something, so the step "fails" on success.
+      # --sync-manifest has no such convention: a non-zero exit is a real error.
+      # Running the commit anyway would push a manifest the script had just
+      # rejected. Default step behaviour -- run only if the previous step
+      # succeeded -- is the correct gate here.
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: resync app manifest checksums"
+          file_pattern: inst/shiny/dta_app/manifest.json
