@@ -319,11 +319,16 @@ method(load_file, DTA) <- function(
 #'       unbounded cap exhausts memory on a large dirty file exactly as holding
 #'       the data would. Counts and the verdict are unaffected. Ignored for
 #'       tables held in memory.}
+#'     \item{benchmark}{Logical. If TRUE, measures runtime and memory for this
+#'       call and attaches the result as the \code{"benchmark"} attribute.
+#'       Defaults to \code{getOption("DTAtools.benchmark", FALSE)}. Opt-in
+#'       because measuring accurately resets R's \code{gc()} peak counters; see
+#'       \code{\link{validation_benchmark}} for the metrics shape and caveats.}
 #'   }
 #' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
 #'   validated datasets having their \code{validation_index} and
-#'   \code{validation_store} populated. Three attributes are attached:
+#'   \code{validation_store} populated. Attributes are attached:
 #'   \describe{
 #'     \item{\code{"last_validation_summary"}}{data.frame with one row per
 #'       dataset and columns dataset, n_targets, n_validated, n_valid,
@@ -336,6 +341,11 @@ method(load_file, DTA) <- function(
 #'     \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 #'       no dataset is invalid, no table has an import error, and the metadata
 #'       imported cleanly.}
+#'     \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
+#'       one-row data.frame of runtime/memory metrics; see
+#'       \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
+#'       level: there is no cheap, trustworthy row total across every dataset,
+#'       and guessing would be worse than reporting unknown.}
 #'   }
 #' @details
 #' \code{check()} validates two things: every requested dataset, and the DTA's
@@ -364,10 +374,23 @@ method(check, DTA) <- function(
   quiet = FALSE,
   validation_run = NULL,
   batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
-  max_errors = getOption("DTAtools.max_errors", 10000L)
+  max_errors = getOption("DTAtools.max_errors", 10000L),
+  benchmark = getOption("DTAtools.benchmark", FALSE)
 ) {
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
+  }
+
+  state <- dta_benchmark_begin(benchmark)
+  # The reset cannot live only inside dta_benchmark_end(): several branches
+  # below (a bad `datasets` index, an unknown dataset name, ...) cli_abort()
+  # before end() is ever reached, which would otherwise leave the nesting
+  # guard stuck TRUE and silently kill benchmarking for the rest of the
+  # session. Registering the reset here, in this call's own frame, fires on
+  # any exit -- normal or error -- while the matching reset still inside
+  # dta_benchmark_end() keeps that helper safe to call directly.
+  if (!is.null(state)) {
+    on.exit(dta_benchmark_env$active <- FALSE, add = TRUE)
   }
 
   # Determine which datasets to validate
@@ -538,6 +561,15 @@ method(check, DTA) <- function(
   attr(x, "last_validation_summary") <- summary_df
   attr(x, "last_metadata_summary") <- metadata_summary
   attr(x, "last_validation_ok") <- overall_ok
+
+  # rows = NA_real_: there is no cheap, trustworthy row total across every
+  # dataset at this level, and a guess would be worse than reporting unknown.
+  metrics <- dta_benchmark_end(state, rows = NA_real_)
+  attr(x, "benchmark") <- metrics
+  if (!isTRUE(quiet)) {
+    dta_benchmark_report(metrics)
+  }
+
   invisible(x)
 }
 

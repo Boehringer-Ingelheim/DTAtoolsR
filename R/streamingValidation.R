@@ -606,6 +606,13 @@ dta_validate_table_stream <- function(specs,
 
   details$ok <- dta_details_ok(details)
 
+  # Total rows actually read, exposed as an attribute for callers that want to
+  # report a rate (e.g. `dta_benchmark_end(rows = )`). `dta_as_validation_details()`
+  # only sets a class on the list and never touches other attributes, so this
+  # survives the call below either way; set here so it travels with `details`
+  # regardless of which caller reads it.
+  attr(details, "n_rows_scanned") <- row_offset
+
   # Tagged before returning, so `as.data.frame()` dispatches to the method that
   # flattens it. The materialising path leaves this to its callers, which is
   # workable when every caller is inside the package -- but this result is
@@ -1421,6 +1428,12 @@ cache_as_parquet <- function(specs,
 #'   own C++ pool, outside the R heap. Single-threaded scanning is the lever when
 #'   RSS rather than speed is the constraint.
 #' @param verbose Logical. Print progress.
+#' @param benchmark Logical. If TRUE, measures runtime and memory for this
+#'   call and attaches the result as the `n_rows_scanned` row count and the
+#'   `"benchmark"` attribute on the returned `details`. Defaults to
+#'   `getOption("DTAtools.benchmark", FALSE)`. Opt-in because measuring
+#'   accurately resets R's `gc()` peak counters; see
+#'   [validation_benchmark()] for the metrics shape and caveats.
 #' @section Resource budgets:
 #' Two accumulators are bounded by the data rather than by the batch size, and
 #' each has a budget that aborts the scan instead of exhausting memory:
@@ -1435,7 +1448,9 @@ cache_as_parquet <- function(specs,
 #' This aborts rather than reporting a rule failure on purpose: a resource limit
 #' is not a verdict about the data, and recording it as one would present a
 #' clean-looking result for a constraint that was never actually checked.
-#' @return A validation details list.
+#' @return A validation details list. When `benchmark = TRUE`, also carries an
+#'   `n_rows_scanned` attribute (rows actually read; `0` for a structural early
+#'   return) and a `"benchmark"` attribute; see [validation_benchmark()].
 #' @examples
 #' specs <- DTAtools::DTAColumnSpecCollection(
 #'   columns = list(
@@ -1468,11 +1483,23 @@ validate_file_stream <- function(specs,
                                  fail_fast = FALSE,
                                  on_missing_column = c("scan", "stop"),
                                  use_threads = TRUE,
-                                 verbose = TRUE) {
+                                 verbose = TRUE,
+                                 benchmark = getOption("DTAtools.benchmark", FALSE)) {
   if (!file.exists(path) && !dir.exists(path)) {
     cli::cli_abort("File not found: {.path {path}}")
   }
   on_missing_column <- match.arg(on_missing_column)
+  state <- dta_benchmark_begin(benchmark)
+  # The reset cannot live only inside dta_benchmark_end(): opening the
+  # dataset or streaming the table below can cli_abort() before end() is
+  # ever reached, which would otherwise leave the nesting guard stuck TRUE
+  # and silently kill benchmarking for the rest of the session. Registering
+  # the reset here, in this call's own frame, fires on any exit -- normal or
+  # error -- while the matching reset still inside dta_benchmark_end() keeps
+  # that helper safe to call directly.
+  if (!is.null(state)) {
+    on.exit(dta_benchmark_env$active <- FALSE, add = TRUE)
+  }
 
   dataset <- dta_open_validation_dataset(
     path,
@@ -1498,7 +1525,16 @@ validate_file_stream <- function(specs,
         "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the file."
       )
     }
-    return(dta_structural_failure_details(findings))
+    structural_details <- dta_structural_failure_details(findings)
+    # No rows were read for a structural early return -- 0 is accurate here,
+    # not a stand-in for "unknown".
+    attr(structural_details, "n_rows_scanned") <- 0
+    metrics <- dta_benchmark_end(state, rows = 0)
+    attr(structural_details, "benchmark") <- metrics
+    if (isTRUE(verbose)) {
+      dta_benchmark_report(metrics)
+    }
+    return(structural_details)
   }
 
   reader <- arrow::Scanner$create(dataset, batch_size = batch_rows, use_threads = use_threads)$ToRecordBatchReader()
@@ -1526,6 +1562,12 @@ validate_file_stream <- function(specs,
         "Arrow's C++ pool has peaked at {max_memory_mb} MB this session (not counted by {.code gc()})."
       )
     }
+  }
+
+  metrics <- dta_benchmark_end(state, rows = attr(details, "n_rows_scanned"))
+  attr(details, "benchmark") <- metrics
+  if (isTRUE(verbose)) {
+    dta_benchmark_report(metrics)
   }
 
   details

@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-16
+
+### Added
+
+- **Opt-in benchmark mode for `check()` and `validate_file_stream()`.** Passing
+  `benchmark = TRUE` (or setting `options(DTAtools.benchmark = TRUE)`) attaches a
+  one-row metrics `data.frame` — elapsed time, CPU time, R heap peak, process
+  RSS, Arrow's memory-pool peak, and rows/sec — as a `"benchmark"` attribute on
+  the result, retrievable with the new exported `validation_benchmark()`. Off by
+  default, so the normal call path is unaffected. R's heap peak is read from
+  `gc()`'s `max used` counters (not a before/after delta, which would miss
+  transient allocations), and a nesting guard makes the outermost `check()` call
+  the one that measures, so that if the benchmark window is ever re-entered
+  (defensively guarded against, not currently reachable through `check(DTA)`'s
+  own call graph) the outer figure is not corrupted by an inner reset. Arrow's
+  memory pool has no reset in
+  the installed `arrow` version, so its peak is reported honestly as a
+  per-process high-water mark, alongside a flag saying whether the figure
+  attributed to this call is exact or a lower bound. Measuring the R heap peak
+  accurately requires resetting `gc()`'s peak counters, which is a session-wide
+  side effect — documented on `validation_benchmark()`. Process RSS needs the
+  new `Suggests`-only `ps` package; it reports `NA` when `ps` is not installed.
+
 ## [0.18.1] - 2026-08-16
 
 A bug-fix release for the validation error counters. It also carries the Shiny
