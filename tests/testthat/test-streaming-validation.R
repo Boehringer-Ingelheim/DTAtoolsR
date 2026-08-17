@@ -1517,15 +1517,18 @@ test_that("a uniqueness scan that exceeds its key budget aborts rather than repo
   reader <- vs_reader(table, batch_rows = 1L)
   state <- dta_rule_stream_init(rule)
 
-  # Advance through batches until the budget is exceeded.
+  # Advance through batches until the budget is exceeded. A budget this small
+  # also crosses the (unrelated) warn-before-abort threshold on the way, which
+  # is expected and not the point of this test, so it is muffled here rather
+  # than left to print as test-run noise.
   expect_error(
-    {
+    suppressWarnings(
       repeat {
         batch <- reader$read_next_batch()
         if (is.null(batch)) break
         dta_rule_stream_update(state, rule, as.data.frame(batch))
       }
-    },
+    ),
     class = "dta_stream_budget_exceeded"
   )
 
@@ -1540,12 +1543,64 @@ test_that("a uniqueness scan that exceeds its key budget aborts rather than repo
     list(rule)
   )
   expect_error(
-    dta_validate_table_stream(
+    suppressWarnings(dta_validate_table_stream(
       specs, vs_reader(table, batch_rows = 1L),
       verbose = FALSE, coerce = FALSE
-    ),
+    )),
     class = "dta_stream_budget_exceeded"
   )
+})
+
+test_that("a uniqueness scan warns once, before it aborts, on approach to the key budget", {
+  # A key count crossing DTAtools.unique_key_warn_fraction of the budget raises
+  # dta_stream_budget_warning exactly once -- advisory, distinct from the hard
+  # dta_stream_budget_exceeded abort that follows once the budget is actually
+  # crossed. This gives a scan running unattended a chance to be re-run with a
+  # higher budget instead of only learning it was too low after a full abort.
+  rule <- DTARuleColUnique(id = "k_budget_warn", columns = "K")
+
+  table <- data.frame(
+    K = c("key1", "key2", "key3", "key4"),
+    stringsAsFactors = FALSE
+  )
+
+  old_max <- getOption("DTAtools.max_unique_keys")
+  old_fraction <- getOption("DTAtools.unique_key_warn_fraction")
+  on.exit(
+    options(
+      DTAtools.max_unique_keys = old_max,
+      DTAtools.unique_key_warn_fraction = old_fraction
+    ),
+    add = TRUE
+  )
+  # Budget of 4, warn threshold at 50%: the warning must fire at the 2nd
+  # distinct key (already at the threshold), well before the 5th key would
+  # exceed the budget.
+  options(DTAtools.max_unique_keys = 4L, DTAtools.unique_key_warn_fraction = 0.5)
+
+  reader <- vs_reader(table, batch_rows = 1L)
+  state <- dta_rule_stream_init(rule)
+
+  warnings_seen <- character(0)
+  withCallingHandlers(
+    {
+      repeat {
+        batch <- reader$read_next_batch()
+        if (is.null(batch)) break
+        dta_rule_stream_update(state, rule, as.data.frame(batch))
+      }
+    },
+    dta_stream_budget_warning = function(cnd) {
+      warnings_seen[[length(warnings_seen) + 1]] <<- conditionMessage(cnd)
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  # Raised exactly once, not once per batch after the threshold is crossed.
+  expect_length(warnings_seen, 1)
+  expect_true(state$warned)
+  # No abort: 4 distinct keys sits exactly at, not over, the budget of 4.
+  expect_true(state$applicable)
 })
 
 test_that("a grouped scan that exceeds its group budget aborts", {

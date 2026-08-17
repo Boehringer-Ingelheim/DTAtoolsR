@@ -105,6 +105,18 @@ dta_rule_stream_init <- function(rule) {
     # not touch the symbol table, so its memory is actually reclaimed.
     state$seen <- fastmap::fastmap()
     state$max_keys <- getOption("DTAtools.max_unique_keys", 50000000L)
+    # Rows scanned so far, tracked only for "keyed" state so the warning and
+    # abort messages can report the true scale of the file being read -- a
+    # small compressed file can decompress to a very large row count, and
+    # "distinct keys" alone does not make that legible.
+    state$rows_seen <- 0
+    # A fraction of `max_keys` at which a warning is raised once, before the
+    # hard budget is hit. Gives a user watching a long scan (or logs from an
+    # unattended one) a chance to raise `DTAtools.max_unique_keys` and re-run,
+    # instead of only discovering the limit was too low after the scan
+    # aborts. Purely advisory: it never changes the pass/fail verdict.
+    state$warn_fraction <- getOption("DTAtools.unique_key_warn_fraction", 0.8)
+    state$warned <- FALSE
   }
   if (kind == "grouped") {
     state$grouped <- dta_group_stream_init(rule)
@@ -150,6 +162,7 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
             )
           }
           keys <- dta_unique_key(df, cols)
+          state$rows_seen <- state$rows_seen + nrow(df)
           # Membership is tested for the whole batch against the state BEFORE
           # any of it is inserted, so every occurrence of a key first seen in an
           # earlier batch counts, and within this batch only the repeats do.
@@ -165,16 +178,43 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
             )
           }
 
+          size_now <- state$seen$size()
+
+          # Advisory only, raised once. A scan running unattended (or one a
+          # user is watching over a long file) gets a chance to raise the
+          # budget and re-run before the hard abort below, instead of only
+          # learning the default was too low after paying for a full scan.
+          if (!state$warned && size_now >= state$warn_fraction * state$max_keys) {
+            cli::cli_warn(
+              c(
+                "Rule {.val {rule@id}} is approaching its uniqueness key budget.",
+                i = paste(
+                  "Tracking {size_now} distinct keys after {state$rows_seen} rows",
+                  "scanned, against a limit of {state$max_keys}."
+                ),
+                i = paste(
+                  "If the scan later aborts, raise",
+                  "{.code options(DTAtools.max_unique_keys = )} before re-running."
+                )
+              ),
+              class = "dta_stream_budget_warning"
+            )
+            state$warned <- TRUE
+          }
+
           # dta_stream_budget_exceeded must not be caught by the surrounding
           # tryCatch, which catches only dta_rule_not_applicable. A resource
           # failure is not a data verdict, and degrading a uniqueness check to
           # "not applicable" would report a clean-looking result for a
           # constraint that was never actually checked.
-          if (state$seen$size() > state$max_keys) {
+          if (size_now > state$max_keys) {
             cli::cli_abort(
               c(
                 "Rule {.val {rule@id}} exceeded the uniqueness key budget.",
-                x = "Tracking {state$seen$size()} distinct keys, over the limit of {state$max_keys}.",
+                x = paste(
+                  "Tracking {size_now} distinct keys after {state$rows_seen} rows",
+                  "scanned, over the limit of {state$max_keys}."
+                ),
                 i = "Raise {.code options(DTAtools.max_unique_keys = )} if the machine has the memory for it."
               ),
               class = "dta_stream_budget_exceeded"
@@ -1447,6 +1487,17 @@ cache_as_parquet <- function(specs,
 #' This aborts rather than reporting a rule failure on purpose: a resource limit
 #' is not a verdict about the data, and recording it as one would present a
 #' clean-looking result for a constraint that was never actually checked.
+#'
+#' A `check_unique` rule also raises a `dta_stream_budget_warning` once,
+#' before the abort, when its tracked key count reaches a fraction of
+#' `DTAtools.max_unique_keys` (default 0.8, configurable via
+#' `options(DTAtools.unique_key_warn_fraction = )`). This is advisory only --
+#' it never changes the pass/fail verdict -- and exists so a scan running
+#' unattended (or one being watched over a large file) gives a chance to raise
+#' the budget before paying for a full scan that would only abort at the end.
+#' Both the warning and the abort report how many rows had been scanned when
+#' the threshold was reached, since a compressed or otherwise small-looking
+#' input file can decompress to a very large row count.
 #' @return A validation details list. It always carries an `n_rows_scanned`
 #'   attribute (rows actually read; `0` for a structural early return). When
 #'   `benchmark = TRUE` it additionally carries a `"benchmark"` attribute; see

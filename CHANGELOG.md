@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A `check_unique` streaming rule now warns before it aborts on its key
+  budget.** Once the tracked distinct-key count reaches a fraction of
+  `options(DTAtools.max_unique_keys = )` (default 80%, configurable via
+  `options(DTAtools.unique_key_warn_fraction = )`), a `dta_stream_budget_warning`
+  is raised once, giving a chance to raise the budget and re-run before a long
+  scan pays for a full pass only to abort at the end. Both the warning and the
+  eventual `dta_stream_budget_exceeded` abort now report how many rows had been
+  scanned when the threshold was reached, since a small compressed file can
+  decompress to a much larger row count than its size on disk suggests.
+
 ## [0.18.2] - 2026-08-17
 
 ### Added

@@ -121,6 +121,17 @@ Exceeding either raises a condition of class \code{dta_stream_budget_exceeded}.
 This aborts rather than reporting a rule failure on purpose: a resource limit
 is not a verdict about the data, and recording it as one would present a
 clean-looking result for a constraint that was never actually checked.
+
+A \code{check_unique} rule also raises a \code{dta_stream_budget_warning} once,
+before the abort, when its tracked key count reaches a fraction of
+\code{DTAtools.max_unique_keys} (default 0.8, configurable via
+\code{options(DTAtools.unique_key_warn_fraction = )}). This is advisory only --
+it never changes the pass/fail verdict -- and exists so a scan running
+unattended (or one being watched over a large file) gives a chance to raise
+the budget before paying for a full scan that would only abort at the end.
+Both the warning and the abort report how many rows had been scanned when
+the threshold was reached, since a compressed or otherwise small-looking
+input file can decompress to a very large row count.
 }
 
 \examples{

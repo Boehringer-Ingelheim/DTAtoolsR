@@ -251,8 +251,12 @@ test_that("validate_file_stream(benchmark = TRUE) resets the nesting guard when 
   on.exit(options(DTAtools.max_unique_keys = old), add = TRUE)
   options(DTAtools.max_unique_keys = 2L)
 
+  # A budget this small also crosses the (unrelated) warn-before-abort
+  # threshold on the way, which is expected and not the point of this test.
   expect_error(
-    validate_file_stream(specs, path, verbose = FALSE, benchmark = TRUE, batch_rows = 1L),
+    suppressWarnings(
+      validate_file_stream(specs, path, verbose = FALSE, benchmark = TRUE, batch_rows = 1L)
+    ),
     class = "dta_stream_budget_exceeded"
   )
   expect_false(dta_benchmark_env$active)
