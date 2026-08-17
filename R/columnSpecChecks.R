@@ -251,6 +251,48 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
   do.call(rbind, parts)
 }
 
+# ---- compiled specs ---------------------------------------------------------
+
+#' @title Compile a Collection's Column Schemas Once
+#' @description
+#' Derives the `as_json_schema()` form of every column in a collection, paired
+#' with the name that column is expected to carry in the data.
+#'
+#' A column's schema is a pure function of its `DTAColumnSpec`, which does not
+#' change while a table is being validated. Deriving it is nevertheless several
+#' S7 dispatches deep -- `as_json_schema()` calls `as_json_schema_type()`, which
+#' dispatches again on the structure -- so on the streaming path, where
+#' `dta_columnspec_errors()` is called once per batch, deriving it inside that
+#' call repeated the whole derivation once per column per batch. A 500-column
+#' spec scanned in 1000 batches paid for it 500,000 times to obtain 500 distinct
+#' answers.
+#'
+#' Compiling once and passing the result in makes that cost proportional to the
+#' spec rather than to the data.
+#' @param specs A `DTAColumnSpecCollection`.
+#' @return A list with one element per column, each a list of `name` (the
+#'   expected column name) and `schema` (the column's schema, or `NULL` when it
+#'   could not be derived).
+#' @keywords internal
+dta_compile_columnspec_schemas <- function(specs) {
+  columns <- tryCatch(specs@columns, error = function(e) NULL)
+  if (is.null(columns) || length(columns) == 0) {
+    return(list())
+  }
+
+  spec_names <- names(columns)
+  if (is.null(spec_names)) {
+    spec_names <- vapply(columns, function(s) s@id, character(1))
+  }
+
+  lapply(seq_along(columns), function(i) {
+    list(
+      name = spec_names[[i]],
+      schema = tryCatch(as_json_schema(columns[[i]]), error = function(e) NULL)
+    )
+  })
+}
+
 # ---- whole-table evaluation -------------------------------------------------
 
 #' @title Schema-Axis Validation of a Table
@@ -265,28 +307,35 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
 #' 400M-row table produces 400M errors.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @param table A data frame.
+#' @param schemas Optional. The collection's compiled schemas, from
+#'   [dta_compile_columnspec_schemas()]. Derived from `specs` when absent.
+#'   Callers that validate many tables against one collection -- the streaming
+#'   path, which calls this once per batch -- should compile once and pass the
+#'   result in, so that the derivation costs the spec rather than the data.
 #' @return A list with `summarised_error` and `full_error`, each `NULL` when the
 #'   table is valid.
 #' @keywords internal
-dta_columnspec_errors <- function(specs, table) {
-  columns <- tryCatch(specs@columns, error = function(e) NULL)
+dta_columnspec_errors <- function(specs, table, schemas = NULL) {
   n_rows <- nrow(table)
-
-  if (is.null(columns) || length(columns) == 0 || n_rows == 0) {
+  if (n_rows == 0) {
     return(list(summarised_error = NULL, full_error = NULL))
   }
 
-  spec_names <- names(columns)
-  if (is.null(spec_names)) {
-    spec_names <- vapply(columns, function(s) s@id, character(1))
+  if (is.null(schemas)) {
+    schemas <- dta_compile_columnspec_schemas(specs)
   }
 
+  if (length(schemas) == 0) {
+    return(list(summarised_error = NULL, full_error = NULL))
+  }
+
+  table_names <- names(table)
   parts <- list()
 
-  for (i in seq_along(columns)) {
-    column_name <- spec_names[[i]]
+  for (i in seq_along(schemas)) {
+    column_name <- schemas[[i]]$name
 
-    if (!column_name %in% names(table)) {
+    if (!column_name %in% table_names) {
       # Object-level failure: reported for every row, as the array schema meant.
       parts[[length(parts) + 1]] <- data.frame(
         row = seq_len(n_rows),
@@ -300,10 +349,7 @@ dta_columnspec_errors <- function(specs, table) {
       next
     }
 
-    col_spec <- tryCatch(
-      as_json_schema(columns[[i]]),
-      error = function(e) NULL
-    )
+    col_spec <- schemas[[i]]$schema
     if (is.null(col_spec)) {
       next
     }

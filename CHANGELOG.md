@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Column schemas are now compiled once per scan instead of once per batch.**
+  On the streaming path `dta_columnspec_errors()` runs once per batch, and it
+  previously re-derived every column's schema through `as_json_schema()` on each
+  call. A column's schema is a pure function of its `DTAColumnSpec` and does not
+  change while a table is being validated, so the derivation is now hoisted out
+  of the batch loop by the new internal `dta_compile_columnspec_schemas()`. The
+  cost is now proportional to the width of the spec rather than to the number of
+  batches; validation results are unchanged, which
+  `tests/testthat/test-streaming-validation.R` asserts over the whole
+  validation corpus.
+
 ## [0.18.2] - 2026-08-17
 
 ### Added

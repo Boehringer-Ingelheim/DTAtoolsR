@@ -4,12 +4,18 @@
 \alias{dta_columnspec_errors}
 \title{Schema-Axis Validation of a Table}
 \usage{
-dta_columnspec_errors(specs, table)
+dta_columnspec_errors(specs, table, schemas = NULL)
 }
 \arguments{
 \item{specs}{A \code{DTAColumnSpecCollection}.}
 
 \item{table}{A data frame.}
+
+\item{schemas}{Optional. The collection's compiled schemas, from
+\code{\link[=dta_compile_columnspec_schemas]{dta_compile_columnspec_schemas()}}. Derived from \code{specs} when absent.
+Callers that validate many tables against one collection -- the streaming
+path, which calls this once per batch -- should compile once and pass the
+result in, so that the derivation costs the spec rather than the data.}
 }
 \value{
 A list with \code{summarised_error} and \code{full_error}, each \code{NULL} when the
