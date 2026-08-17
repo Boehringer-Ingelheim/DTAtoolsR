@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in benchmark mode for `check()` and `validate_file_stream()`.** Passing
+  `benchmark = TRUE` (or setting `options(DTAtools.benchmark = TRUE)`) attaches a
+  one-row metrics `data.frame` — elapsed time, CPU time, R heap peak, process
+  RSS, Arrow's memory-pool peak, and rows/sec — as a `"benchmark"` attribute on
+  the result, retrievable with the new exported `validation_benchmark()`. Off by
+  default, so the normal call path is unaffected. R's heap peak is read from
+  `gc()`'s `max used` counters rather than a before/after delta, which would
+  miss transient allocations entirely.
+- The instrument is built not to distort or break what it measures. `gc()` runs
+  outside the timed region at both ends, so the bracketing collections are never
+  charged to the call. A nesting guard makes the outermost call the one that
+  measures, so an inner `gc(reset = TRUE)` cannot silently corrupt an outer
+  figure, and the guard is released via `on.exit()` in the caller's own frame,
+  so a call that aborts part-way does not leave benchmarking dead for the rest
+  of the session. Nothing about the verdict changes when the flag is on.
+- Figures that cannot be measured say so instead of guessing. Arrow's memory
+  pool has no reset in the installed `arrow` version, so its peak is reported as
+  the per-process high-water mark it is, alongside an `arrow_call_exact` flag
+  saying whether the figure attributed to this call is exact or merely a lower
+  bound; an unreadable pool reports `NA`, never `0`. Process RSS needs the new
+  `Suggests`-only `ps` package and reports `NA` without it. `check()` reports
+  `rows` as `NA` because there is no cheap, trustworthy row total across every
+  dataset at that level. Measuring the R heap peak requires resetting `gc()`'s
+  peak counters, a session-wide side effect documented on
+  `validation_benchmark()`.
+
 ### Fixed
 
 #### Shiny app manifest: R Connect archiveUrl crash

@@ -15,7 +15,8 @@ validate_file_stream(
   fail_fast = FALSE,
   on_missing_column = c("scan", "stop"),
   use_threads = TRUE,
-  verbose = TRUE
+  verbose = TRUE,
+  benchmark = getOption("DTAtools.benchmark", FALSE)
 )
 }
 \arguments{
@@ -64,9 +65,18 @@ own C++ pool, outside the R heap. Single-threaded scanning is the lever when
 RSS rather than speed is the constraint.}
 
 \item{verbose}{Logical. Print progress.}
+
+\item{benchmark}{Logical. If TRUE, measures runtime and memory for this call
+and attaches the result as the \code{"benchmark"} attribute on the returned
+\code{details}. Defaults to \code{getOption("DTAtools.benchmark", FALSE)}. Opt-in
+because measuring accurately resets R's \code{gc()} peak counters; see
+\code{\link[=validation_benchmark]{validation_benchmark()}} for the metrics shape and caveats.}
 }
 \value{
-A validation details list.
+A validation details list. It always carries an \code{n_rows_scanned}
+attribute (rows actually read; \code{0} for a structural early return). When
+\code{benchmark = TRUE} it additionally carries a \code{"benchmark"} attribute; see
+\code{\link[=validation_benchmark]{validation_benchmark()}}.
 }
 \description{
 Validates a delimited file against a set of column specs by scanning it in
