@@ -174,6 +174,34 @@ test_that("rss_end_mb is NA or a positive number, never asserted non-NA", {
   expect_true(is.na(metrics$rss_end_mb) || metrics$rss_end_mb > 0)
 })
 
+test_that("an absent row count is recorded as NA rather than aborting the call", {
+  # Call sites read `rows` off an attribute, and an absent attribute is NULL.
+  # A NULL reaching `is.na()` would make the `if` fail with a zero-length
+  # condition -- the instrument killing the call it was only meant to measure.
+  on.exit(dta_benchmark_env$active <- FALSE, add = TRUE)
+
+  state <- dta_benchmark_begin(TRUE)
+  metrics <- dta_benchmark_end(state, rows = NULL)
+
+  bm_expect_valid_metrics(metrics)
+  expect_true(is.na(metrics$rows))
+  expect_true(is.na(metrics$rows_per_sec))
+})
+
+test_that("an unreadable Arrow pool reports NA, not a zero that reads as measured", {
+  on.exit(dta_benchmark_env$active <- FALSE, add = TRUE)
+
+  local_mocked_bindings(dta_arrow_pool_max_bytes = function() NA_real_)
+
+  state <- dta_benchmark_begin(TRUE)
+  metrics <- dta_benchmark_end(state, rows = NA_real_)
+
+  bm_expect_valid_metrics(metrics)
+  expect_true(is.na(metrics$arrow_pool_peak_mb))
+  expect_true(is.na(metrics$arrow_call_mb))
+  expect_false(metrics$arrow_call_exact)
+})
+
 # ---- regression: the nesting guard must not leak on the error path ------
 #
 # dta_benchmark_env$active is set TRUE by dta_benchmark_begin() and was only

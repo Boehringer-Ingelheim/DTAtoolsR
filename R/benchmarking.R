@@ -93,7 +93,9 @@ dta_benchmark_begin <- function(enabled) {
 #' @param state The state list returned by [dta_benchmark_begin()], or `NULL`.
 #' @param rows Numeric. Row count to attach to the metrics (for
 #'   `rows_per_sec`), or `NA_real_` when no trustworthy count is available at
-#'   the call site.
+#'   the call site. Anything that is not a single number -- including the
+#'   `NULL` a caller gets from reading an absent attribute -- is recorded as
+#'   `NA_real_`.
 #' @return A one-row `data.frame` of metrics, or `NULL` when `state` is
 #'   `NULL`.
 #' @keywords internal
@@ -107,6 +109,16 @@ dta_benchmark_end <- function(state, rows = NA_real_) {
 
   arrow_pool_end_bytes <- dta_arrow_pool_max_bytes()
   rss_end_bytes <- dta_process_rss_bytes()
+
+  # Call sites read this off an attribute, which is NULL when absent. An
+  # instrument must degrade to "unknown" rather than abort the call it
+  # measures, so anything that is not a single number becomes NA here instead
+  # of reaching the `if` below as a zero-length value.
+  if (length(rows) != 1L || !is.numeric(rows)) {
+    rows <- NA_real_
+  } else {
+    rows <- as.numeric(rows)
+  }
 
   # The closing collection runs AFTER the clock and the pool/RSS reads above,
   # for the same reason `dta_benchmark_begin()` runs its collection before
@@ -147,8 +159,15 @@ dta_benchmark_end <- function(state, rows = NA_real_) {
   # new high-water mark. When an earlier call in the session peaked higher,
   # the difference is 0 -- a lower bound, not the truth -- and
   # `arrow_call_exact` says so rather than letting a reader assume otherwise.
-  arrow_call_exact <- isTRUE(arrow_pool_end_bytes > state$arrow_pool_start_bytes)
-  arrow_call_mb <- if (arrow_call_exact) {
+  # When either pool read failed, 0 would be indistinguishable from "measured,
+  # no new peak"; NA is the only honest figure there.
+  arrow_measured <- !is.na(arrow_pool_end_bytes) &&
+    !is.na(state$arrow_pool_start_bytes)
+  arrow_call_exact <- arrow_measured &&
+    arrow_pool_end_bytes > state$arrow_pool_start_bytes
+  arrow_call_mb <- if (!arrow_measured) {
+    NA_real_
+  } else if (arrow_call_exact) {
     (arrow_pool_end_bytes - state$arrow_pool_start_bytes) / 1024^2
   } else {
     0
@@ -235,7 +254,9 @@ dta_benchmark_report <- function(metrics) {
 #' process to a new high-water mark; when it is `FALSE`, `arrow_call_mb` is a
 #' lower bound on what this call allocated, not a measurement of it -- an
 #' earlier, larger call in the same session may be why nothing "new" showed up
-#' here.
+#' here. If the pool could not be read at all, both `arrow_pool_peak_mb` and
+#' `arrow_call_mb` are `NA` rather than `0`, so an unreadable pool is never
+#' mistaken for an idle one.
 #' @section Side effect of `benchmark = TRUE`:
 #' Measuring the R heap peak accurately requires resetting R's `gc()` peak
 #' counters (`gc(reset = TRUE)`) at the start of the call. This is a

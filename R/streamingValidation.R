@@ -1428,11 +1428,10 @@ cache_as_parquet <- function(specs,
 #'   own C++ pool, outside the R heap. Single-threaded scanning is the lever when
 #'   RSS rather than speed is the constraint.
 #' @param verbose Logical. Print progress.
-#' @param benchmark Logical. If TRUE, measures runtime and memory for this
-#'   call and attaches the result as the `n_rows_scanned` row count and the
-#'   `"benchmark"` attribute on the returned `details`. Defaults to
-#'   `getOption("DTAtools.benchmark", FALSE)`. Opt-in because measuring
-#'   accurately resets R's `gc()` peak counters; see
+#' @param benchmark Logical. If TRUE, measures runtime and memory for this call
+#'   and attaches the result as the `"benchmark"` attribute on the returned
+#'   `details`. Defaults to `getOption("DTAtools.benchmark", FALSE)`. Opt-in
+#'   because measuring accurately resets R's `gc()` peak counters; see
 #'   [validation_benchmark()] for the metrics shape and caveats.
 #' @section Resource budgets:
 #' Two accumulators are bounded by the data rather than by the batch size, and
@@ -1448,9 +1447,10 @@ cache_as_parquet <- function(specs,
 #' This aborts rather than reporting a rule failure on purpose: a resource limit
 #' is not a verdict about the data, and recording it as one would present a
 #' clean-looking result for a constraint that was never actually checked.
-#' @return A validation details list. When `benchmark = TRUE`, also carries an
-#'   `n_rows_scanned` attribute (rows actually read; `0` for a structural early
-#'   return) and a `"benchmark"` attribute; see [validation_benchmark()].
+#' @return A validation details list. It always carries an `n_rows_scanned`
+#'   attribute (rows actually read; `0` for a structural early return). When
+#'   `benchmark = TRUE` it additionally carries a `"benchmark"` attribute; see
+#'   [validation_benchmark()].
 #' @examples
 #' specs <- DTAtools::DTAColumnSpecCollection(
 #'   columns = list(

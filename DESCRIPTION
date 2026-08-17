@@ -64,7 +64,6 @@ VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
 Collate:
     '00_helpers.R'
-    'benchmarking.R'
     'DTA-class.R'
     'DTAColumnSpec-class.R'
     'DTAColumnSpecCollection-class.R'
@@ -88,6 +87,7 @@ Collate:
     'DTARuleColUnique-class.R'
     'DTARuleGroupCondition-class.R'
     'arrowCompute.R'
+    'benchmarking.R'
     'columnSpecChecks.R'
     'documentBuilders.R'
     'evaluateRules.R'
