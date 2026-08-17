@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   eventual `dta_stream_budget_exceeded` abort now report how many rows had been
   scanned when the threshold was reached, since a small compressed file can
   decompress to a much larger row count than its size on disk suggests.
-  
+
 ### Changed
 
 - **Column schemas are now compiled once per scan instead of once per batch.**
