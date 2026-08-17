@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+#### Shiny app manifest: R Connect archiveUrl crash
+
+- **R Connect failed to deploy the Shiny app with `Error in if (!grepl("^http",
+  archiveUrl)) { : argument is of length zero`.** Posit Connect needs a
+  resolvable commit SHA (`RemoteSha`/`GithubSHA1`) to build the archive
+  download URL for `manifest.json`'s `Source: "github"` DTAtools entry; without
+  one it computes a `NULL` `archiveUrl` and crashes on the `grepl()` guard.
+  `v0.18.1` shipped with neither field present, because the manifest-validation
+  work added in `0.18.1` itself (`#47`) had them forbidden outright rather than
+  verified -- a reaction to those fields going *stale* every previous release
+  (`v0.17.3` shipped with a `RemoteRef` still naming the prior tag; `v0.18.0`
+  shipped hand-added SHAs pointing at the `v0.17.3` commit), but removing them
+  broke every deploy instead of just a stale one.
+- `manifest.json`'s DTAtools entry now carries `RemoteSha`/`GithubSHA1` again,
+  pinned to the `v0.18.1` release commit.
+- `.github/scripts/bump_version.R` gained `--set-release-sha <sha>`, the one
+  place that writes those two fields, and its version-bump `write()` now
+  CLEARS them whenever `RemoteRef`/`GithubRef` move to a new tag -- an existing
+  SHA belongs to the *old* tag and is stale the instant the ref changes, so a
+  release-automation failure now degrades to a loud, visible deploy crash
+  rather than a silent stale deploy.
+- `.github/scripts/check_manifest.R` no longer forbids `RemoteSha`/`GithubSHA1`
+  outright. When present, it resolves the field's ref with `git rev-parse` and
+  fails if the recorded SHA doesn't match -- a correctness check the old
+  "must stay absent" rule could never provide, and would have caught the
+  `v0.18.0` incident directly.
+- New workflow `.github/workflows/manifest-release-sha.yml`, triggered on
+  `release: published`, resolves the tag's commit and pins
+  `RemoteSha`/`GithubSHA1` automatically -- replacing the hand-written
+  follow-up PR every previous release needed (`#41`, `#43`, `#45`) and which
+  was, predictably, forgotten for `v0.18.1`.
+- `.github/workflows/r-style.yaml`'s checkout now fetches full history
+  (`fetch-depth: 0`) so `check_manifest.R`'s `git rev-parse` calls can actually
+  see the release tags.
+
 ## [0.18.1] - 2026-08-16
 
 A bug-fix release for the validation error counters. It also carries the Shiny

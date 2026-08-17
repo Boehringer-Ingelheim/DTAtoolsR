@@ -12,12 +12,19 @@
 #     by nothing at all, and app.R is the most-edited file in the bundle.
 #   - the file shipped 0.17.3 with `RemoteRef` still reading v0.17.2, then
 #     shipped 0.18.0 with hand-added `GithubSHA1`/`RemoteSha` pointing at the
-#     *0.17.3* release commit.
+#     *0.17.3* release commit -- and 0.18.1 shipped with no SHA fields at all,
+#     because an earlier version of this script simply forbade their presence
+#     rather than checking their correctness. Posit Connect needs a resolvable
+#     SHA to build a github-sourced package's archive URL; without one it
+#     crashes with "argument is of length zero" on every deploy, not just a
+#     stale one. See .github/workflows/manifest-release-sha.yml, which is what
+#     populates these fields now, and bump_version.R's manifest_ref_site()
+#     comment for why they can't be bump-version sites.
 #
 # So this script checks the parts a version patcher structurally cannot:
 # whether the manifest still describes the right set of files, whether the
-# checksums are live, and whether the fields that can never be correct have
-# stayed deleted.
+# checksums are live, and whether GithubSHA1/RemoteSha -- when present -- name
+# the commit their ref actually resolves to.
 #
 # What it deliberately does NOT check:
 #   - the `packages` block's contents. It is a frozen snapshot of one
@@ -35,17 +42,20 @@
 #     commit (and which fromJSON() below would surface anyway).
 #
 # Like every other script in this directory, it assumes the repository root as
-# the working directory -- that is how the r-style workflow sources it.
+# the working directory -- that is how the r-style workflow sources it. Unlike
+# the others, it also needs `git rev-parse` to see the release tags, which
+# means the checkout step that runs it must NOT be a shallow, tag-less clone
+# (see the fetch-depth note in r-style.yaml).
 
 APP_DIR <- "inst/shiny/dta_app"
 MANIFEST <- file.path(APP_DIR, "manifest.json")
 
-# Fields removed from the manifest's DTAtools entry, which must stay removed. A
-# bump commit cannot know the SHA of the release commit that will eventually
-# contain it, and it cannot know when that release will be built -- so there is
-# no value these could ever be checked against, and every past attempt to
-# maintain them by hand recorded the *previous* release's commit.
-FORBIDDEN_DTATOOLS_FIELDS <- c("GithubSHA1", "RemoteSha", "Packaged", "Built")
+# Fields that describe when/where the package was locally built, which has no
+# correct value to check against -- it names a developer's machine, not this
+# release. These must stay removed, full stop; GithubSHA1/RemoteSha are handled
+# separately below, because unlike a build timestamp they DO have a correct
+# value once the release tag exists.
+FORBIDDEN_DTATOOLS_FIELDS <- c("Packaged", "Built")
 
 problems <- character(0)
 note <- function(...) problems <<- c(problems, sprintf(...))
@@ -115,6 +125,59 @@ if (is.null(dtatools)) {
   }
 }
 
+# --- release SHA fields, when present, must be correct ------------------------
+#
+# GithubSHA1/RemoteSha are legitimately ABSENT for most of a release cycle --
+# see bump_version.R's manifest_ref_site() -- so their absence is not checked
+# here at all. What's checked is the thing "forbidden" never could: when one IS
+# present, does it actually name the commit its ref (GithubRef/RemoteRef)
+# resolves to? A stale SHA is worse than a missing one -- Connect would
+# silently deploy old code under a new version number instead of failing loudly
+# -- and "forbidden" cannot distinguish stale from correct, only present from
+# absent.
+SHA_FIELDS <- list(RemoteRef = "RemoteSha", GithubRef = "GithubSHA1")
+
+# NA if `ref` does not resolve to a commit at all (unknown tag, or a checkout
+# too shallow to have fetched it) -- `--verify --quiet` fails silently instead
+# of printing to stderr, which system2() would otherwise interleave into
+# `out`.
+git_commit_for <- function(ref) {
+  out <- suppressWarnings(system2(
+    "git", c("rev-parse", "--verify", "--quiet", paste0(ref, "^{commit}")),
+    stdout = TRUE, stderr = FALSE
+  ))
+  status <- attr(out, "status")
+  if (!is.null(status) && status != 0L) return(NA_character_)
+  if (length(out) != 1L) return(NA_character_)
+  out
+}
+
+if (!is.null(dtatools)) {
+  for (ref_field in names(SHA_FIELDS)) {
+    sha_field <- SHA_FIELDS[[ref_field]]
+    recorded_sha <- dtatools[[sha_field]]
+    if (is.null(recorded_sha)) next # absent is expected; nothing to verify
+
+    ref <- dtatools[[ref_field]]
+    resolved <- git_commit_for(ref)
+    if (is.na(resolved)) {
+      note(
+        paste0(
+          "the DTAtools entry's %s is \"%s\", but git cannot resolve %s to a commit ",
+          "(unknown tag, or the checkout didn't fetch it). A %s should never be ",
+          "recorded for a ref that doesn't exist."
+        ),
+        sha_field, recorded_sha, ref, sha_field
+      )
+    } else if (!identical(resolved, recorded_sha)) {
+      note(
+        "the DTAtools entry's %s is \"%s\", but %s resolves to \"%s\".",
+        sha_field, recorded_sha, ref, resolved
+      )
+    }
+  }
+}
+
 # --- every package the app loads is present ----------------------------------
 #
 # getParseData() rather than a text regex, for the same reason
@@ -174,8 +237,10 @@ if (length(problems) > 0) {
   cat("\nMost of this is repaired mechanically by\n")
   cat("  Rscript .github/scripts/bump_version.R --sync-manifest\n")
   cat("which rebuilds the file list and every checksum from the app directory.\n")
-  cat("(A missing packages entry and a forbidden field are NOT repaired by it --\n")
-  cat("fix those by hand.)\n")
+  cat("(A missing packages entry, a forbidden field, and a wrong/unresolvable\n")
+  cat("RemoteSha or GithubSHA1 are NOT repaired by it. The SHA fields are set by\n")
+  cat("  Rscript .github/scripts/bump_version.R --set-release-sha <sha>\n")
+  cat("everything else needs fixing by hand.)\n")
   quit(status = 1)
 }
 
