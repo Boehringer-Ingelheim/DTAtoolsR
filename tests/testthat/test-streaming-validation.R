@@ -72,6 +72,110 @@ test_that("streaming reproduces the materialised column spec axis for every corp
   }
 })
 
+test_that("compiling a collection's schemas once matches deriving them per call", {
+  # The streaming driver derives each column's schema once for the whole scan
+  # and passes it into every batch. That is only sound if the compiled form is
+  # what `dta_columnspec_errors()` would have derived for itself, so assert the
+  # two agree rather than trusting that the derivation is pure.
+  corpus <- vc_corpus()
+
+  for (name in names(corpus)) {
+    case <- corpus[[name]]
+
+    compiled <- dta_compile_columnspec_schemas(case$specs)
+
+    expect_equal(
+      vapply(compiled, function(entry) entry$name, character(1)),
+      names(case$specs@columns),
+      info = paste0("case '", name, "' compiled names")
+    )
+    expect_equal(
+      lapply(compiled, function(entry) entry$schema),
+      unname(lapply(case$specs@columns, as_json_schema)),
+      info = paste0("case '", name, "' compiled schemas")
+    )
+
+    expect_equal(
+      dta_columnspec_errors(case$specs, case$table, schemas = compiled),
+      dta_columnspec_errors(case$specs, case$table),
+      info = paste0("case '", name, "' results")
+    )
+  }
+})
+
+test_that("compiling schemas keeps the branches the refactor moved", {
+  # These are the paths that moved into dta_compile_columnspec_schemas(), and
+  # the corpus does not reach any of them. Without these, a regression in
+  # exactly the code that changed would still pass the whole suite.
+  corpus <- vc_corpus()
+
+  # A collection whose columns cannot be read at all compiles to nothing, and
+  # a table validated against nothing is not thereby invalid.
+  expect_equal(dta_compile_columnspec_schemas(list()), list())
+  expect_equal(
+    dta_columnspec_errors(list(), corpus[[1]]$table, schemas = list()),
+    list(summarised_error = NULL, full_error = NULL)
+  )
+
+  # A column whose schema cannot be derived is skipped, not dropped: it keeps
+  # its index, so the `.col_order` of every later column is unchanged and only
+  # that column's own violations disappear. Run over the whole corpus, because
+  # the first case ("clean") has no violations at all to lose.
+  exercised <- 0L
+
+  for (nm in names(corpus)) {
+    case <- corpus[[nm]]
+    compiled <- dta_compile_columnspec_schemas(case$specs)
+    expect_length(compiled, length(case$specs@columns))
+
+    first_name <- compiled[[1]]$name
+    without_first <- function(errs) {
+      if (is.null(errs)) {
+        return(NULL)
+      }
+      kept <- errs[!(!is.na(errs$column) & errs$column == first_name), , drop = FALSE]
+      rownames(kept) <- NULL
+      if (nrow(kept) == 0) NULL else kept
+    }
+
+    full <- dta_columnspec_errors(case$specs, case$table, schemas = compiled)$full_error
+
+    undecidable <- compiled
+    undecidable[[1]]$schema <- NULL
+    skipped <- dta_columnspec_errors(case$specs, case$table, schemas = undecidable)$full_error
+
+    expect_equal(skipped, without_first(full), info = paste0("case '", nm, "'"))
+
+    if (!is.null(full) && any(!is.na(full$column) & full$column == first_name)) {
+      exercised <- exercised + 1L
+    }
+  }
+
+  # Guards the assertion above against being vacuous: with no violation on any
+  # first column, dropping that column's schema removes nothing and the
+  # comparison only ever pits NULL against NULL.
+  expect_gt(exercised, 0L)
+
+  # A spec column absent from the data still yields one `required` error per
+  # row, sourced from the compiled name rather than from the live spec.
+  case <- corpus[["clean"]]
+  compiled <- dta_compile_columnspec_schemas(case$specs)
+  first_name <- compiled[[1]]$name
+  missing_first <- case$table[, setdiff(names(case$table), first_name), drop = FALSE]
+  expect_false(first_name %in% names(missing_first))
+
+  res <- dta_columnspec_errors(case$specs, missing_first, schemas = compiled)
+  required <- res$full_error[res$full_error$keyword == "required", , drop = FALSE]
+  expect_equal(nrow(required), nrow(missing_first))
+  expect_true(all(required$columnspec == first_name))
+
+  # An empty table short-circuits before any schema is consulted.
+  expect_equal(
+    dta_columnspec_errors(case$specs, case$table[0, , drop = FALSE], schemas = compiled),
+    list(summarised_error = NULL, full_error = NULL)
+  )
+})
+
 test_that("row numbers are positions in the input, not in the batch", {
   # A violation in the last row of a multi-batch scan is the case that a
   # missing offset gets wrong: batch-local numbering would report row 1.

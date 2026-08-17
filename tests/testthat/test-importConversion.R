@@ -354,22 +354,20 @@ id_specs <- function() {
   )
 }
 
-test_that("dta_reader_col_types pins only the declared character columns", {
+test_that("dta_reader_col_types pins all declared columns to utf8", {
   schema <- dta_reader_col_types(id_specs())
 
-  # AGE is declared Int and is deliberately left to inference: telling arrow a
-  # column is int64 makes it abort the entire read on the first cell it cannot
-  # parse, which would turn one reportable bad cell into a file that will not
-  # load at all.
-  expect_equal(schema$names, "SUBJID")
+  # Both SUBJID (Char) and AGE (Int) are pinned to utf8 so Arrow never
+  # infers int64 for either. Pinning numeric columns prevents a hard read
+  # abort when a column that looks like integers (int64 inference) later
+  # contains a value like "0.01".
+  expect_setequal(schema$names, c("SUBJID", "AGE"))
   expect_true(schema$GetFieldByName("SUBJID")$type == arrow::utf8())
+  expect_true(schema$GetFieldByName("AGE")$type == arrow::utf8())
 })
 
 test_that("dta_reader_col_types yields NULL when there is nothing to pin", {
   expect_null(dta_reader_col_types(NULL))
-  expect_null(dta_reader_col_types(make_specs(
-    DTAColumnSpec(id = "AGE", type = "SAS Int", format = "SAS 8.")
-  )))
 
   # Without a header arrow generates positional names that cannot correspond to
   # spec ids, so no schema can be built.
@@ -454,6 +452,85 @@ test_that("a column absent from the specs is inferred, not dropped", {
   expect_true("EXTRA" %in% names(out$table))
   expect_true(is.numeric(out$table$EXTRA))
   expect_equal(as.numeric(out$table$EXTRA), c(10, 20))
+})
+
+
+# ---------------------------------------------------------------------------
+# Regression: float value in a declared Int column must not abort the read
+# ---------------------------------------------------------------------------
+
+test_that("a float in a declared Int column is an import error, not a read abort", {
+  # Before the fix, Arrow inferred the column as int64 (because early rows look
+  # like integers) and then aborted with
+  #   "CSV conversion error to int64: invalid value '0.01'"
+  # when it encountered the fractional value.  The column is now pinned to
+  # utf8 at read time so Arrow never attempts the int64 conversion.
+  # dta_coerce_column() intentionally does NOT flag 0.01 as an import error --
+  # a fractional value in an Int column is left as a double and reported as a
+  # *schema* (column spec) error, not an import error.  What matters here is
+  # that the file loads without aborting.
+  dir <- file.path(tempdir(), "dta-float-in-int")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  csv <- file.path(dir, "float_in_int.csv")
+  writeLines(
+    c(
+      '"SUBJID","DOSE"',
+      paste(paste0('"S', seq_len(100), '"'), "10", sep = ","),
+      '"S101",0.01'
+    ),
+    csv
+  )
+
+  specs <- make_specs(
+    DTAColumnSpec(id = "SUBJID", type = "SAS Char", nullable = FALSE),
+    DTAColumnSpec(id = "DOSE", type = "SAS Int", nullable = FALSE)
+  )
+
+  handler <- DTAFileCSV(filename = "float_in_int.csv")
+  ds <- DTADataSetTabular(name = "fi", specs = specs, files = list(handler))
+
+  # Must not abort -- this was the bug.
+  expect_no_error(ds <- DTAtools:::load_file(ds, file = csv, handler_index = 1))
+
+  typed <- as.data.frame(ds@tables[["float_in_int"]])
+
+  # The fractional value is readable; it stays as a double so the schema axis
+  # can report it as a type violation.
+  expect_true(is.numeric(typed$DOSE))
+  expect_equal(typed$DOSE[[101]], 0.01)
+})
+
+
+test_that("streaming validation does not abort on a float in a declared Int column", {
+  dir <- file.path(tempdir(), "dta-float-in-int-stream")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  csv <- file.path(dir, "stream_float.csv")
+  writeLines(
+    c(
+      '"SUBJID","DOSE"',
+      paste(paste0('"S', seq_len(100), '"'), "10", sep = ","),
+      '"S101",0.01'
+    ),
+    csv
+  )
+
+  specs <- make_specs(
+    DTAColumnSpec(id = "SUBJID", type = "SAS Char", nullable = FALSE),
+    DTAColumnSpec(id = "DOSE", type = "SAS Int", nullable = FALSE)
+  )
+
+  # Must not abort -- this was the bug.
+  expect_no_error(
+    details <- validate_file_stream(specs, csv, verbose = FALSE)
+  )
+
+  # 0.01 in an Int column is a schema (column spec) violation, so the table
+  # fails even though there are no *import* errors.
+  expect_false(details$ok)
 })
 
 

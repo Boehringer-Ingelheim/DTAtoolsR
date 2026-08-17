@@ -70,7 +70,7 @@ jobs:
       # commit that carries the regenerated files with it.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: cran::styler@1.11.0, cran::roxygen2@8.0.0
+          extra-packages: cran::styler@1.11.0, cran::roxygen2@8.1.0
           needs: check
 
       # Parity with parsable-R / no-browser-statement / no-debug-statement.

@@ -467,6 +467,11 @@ dta_validate_table_stream <- function(specs,
     tryCatch(dta_rule_numeric_columns(r), error = function(e) character(0))
   })
 
+  # Each column's schema is a pure function of its spec, so it is derived once
+  # for the whole scan rather than re-derived (through several S7 dispatches)
+  # on every batch.
+  columnspec_schemas <- dta_compile_columnspec_schemas(specs)
+
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
@@ -518,7 +523,7 @@ dta_validate_table_stream <- function(specs,
       }
     }
 
-    schema_result <- dta_columnspec_errors(specs, df)
+    schema_result <- dta_columnspec_errors(specs, df, schemas = columnspec_schemas)
     columnspec_errs <- schema_result$full_error
     if (!is.null(columnspec_errs) && nrow(columnspec_errs) > 0) {
       columnspec_errs$row <- columnspec_errs$row + row_offset
