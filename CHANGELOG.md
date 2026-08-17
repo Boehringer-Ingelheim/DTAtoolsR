@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-08-17
+
+### Added
+
+- **Opt-in benchmark metrics for `check()` and `validate_file_stream()`.**
+  Passing `benchmark = TRUE` or setting `options(DTAtools.benchmark = TRUE)`
+  attaches elapsed time, CPU time, memory, and throughput metrics to the
+  validation result. The new `validation_benchmark()` function retrieves them.
+
+### Fixed
+
+- The Shiny app manifest is now synchronized with the files on disk, including
+  live checksums and the `v0.18.2` package reference. Release SHA fields remain
+  empty until the release tag exists, preventing a new version from inheriting
+  the previous release's commit.
+
 ## [0.18.1] - 2026-08-16
 
 A bug-fix release for the validation error counters. It also carries the Shiny

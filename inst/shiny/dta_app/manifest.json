@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.18.1",
+        "Version": "0.18.2",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -63,12 +63,10 @@
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "v0.18.1",
-        "RemoteSha": "7b9762c335db90ac39dc3207ba63fcdaae39a056",
+        "RemoteRef": "v0.18.2",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "v0.18.1",
-        "GithubSHA1": "7b9762c335db90ac39dc3207ba63fcdaae39a056",
+        "GithubRef": "v0.18.2",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3127,7 +3125,7 @@
       "checksum": "6a26fac0f72ebeeac3f366ba736ec513"
     },
     "VERSION": {
-      "checksum": "1a519dae75f25ac0ca34dbf0eb83c2ef"
+      "checksum": "b1dad40f1b6ce5b023a0d175fddba1ee"
     },
     "app.R": {
       "checksum": "bf48bc0133c08eb9e79f071c317eb74a"
