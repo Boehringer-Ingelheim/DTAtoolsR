@@ -72,7 +72,7 @@ dta_rule_stream_kind <- function(rule) {
 dta_unique_key <- function(df, cols) {
   parts <- lapply(cols, function(column_name) {
     values <- df[[column_name]]
-    if (is.numeric(values) || is.logical(values)) {
+    if (!is.character(values)) {
       values <- as.character(values)
     }
     values[is.na(values)] <- "\001NA"

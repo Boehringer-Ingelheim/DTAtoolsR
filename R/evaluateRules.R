@@ -964,7 +964,7 @@ dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
 dta_group_key <- function(df, group_by) {
   group_sep <- "\037"
   key_parts <- lapply(df[, group_by, drop = FALSE], function(x) {
-    if (is.numeric(x) || is.logical(x)) {
+    if (!is.character(x)) {
       x <- as.character(x)
     }
     x[is.na(x)] <- "\001NA"
