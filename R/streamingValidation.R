@@ -72,11 +72,13 @@ dta_rule_stream_kind <- function(rule) {
 dta_unique_key <- function(df, cols) {
   parts <- lapply(cols, function(column_name) {
     values <- df[[column_name]]
-    text <- as.character(values)
-    text[is.na(values)] <- "\001NA"
-    paste0(nchar(text, type = "bytes"), ":", text)
+    if (is.numeric(values) || is.logical(values)) {
+      values <- as.character(values)
+    }
+    values[is.na(values)] <- "\001NA"
+    values
   })
-  do.call(paste, c(parts, sep = "\002"))
+  do.call(paste, c(parts, sep = "\037"))
 }
 
 #' @title Start Accumulating a Rule Across Batches
@@ -159,10 +161,8 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
           state$count <- state$count + sum(already | !first_here)
 
           new_keys <- keys[!already & first_here]
-          if (length(new_keys) > 0) {
-            state$seen$mset(
-              .list = stats::setNames(as.list(rep(TRUE, length(new_keys))), new_keys)
-            )
+          for (k in new_keys) {
+            state$seen$set(k, TRUE)
           }
 
           # dta_stream_budget_exceeded must not be caught by the surrounding
@@ -748,18 +748,12 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   split_key <- dta_group_key(df, group_by)
   grouped <- df[, group_by, drop = FALSE]
 
-  # Same reasoning as the materialising path: every condition operator is
-  # elementwise, so it is evaluated ONCE over the whole batch and folded into
-  # each group's accumulator by group id, instead of re-evaluated per group
-  # per condition against a `df[local_idx, , drop = FALSE]` copy.
-  #
-  # `factor(split_key)` sorts its levels the same way `split()` orders its
-  # groups, so `local_groups <- split(seq_len(nrow(df)), split_key)` and
-  # iterating group ids in level order visit groups identically.
-  kf <- factor(split_key)
-  gid <- as.integer(kf)
-  n_groups <- nlevels(kf)
-  first_row <- match(levels(kf), split_key)
+  # Use unique() and match() instead of factor() to avoid interning strings as factor levels
+  # in R's global symbol table. The integer gids map exactly to local_levels.
+  local_levels <- unique(split_key)
+  gid <- match(split_key, local_levels)
+  n_groups <- length(local_levels)
+  first_row <- match(local_levels, split_key)
   n_seen_batch <- tabulate(gid, nbins = n_groups)
 
   cond_hit <- lapply(state$condition_names, function(cond_name) {
@@ -791,7 +785,7 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   })
 
   for (g in seq_len(n_groups)) {
-    key <- levels(kf)[g]
+    key <- local_levels[g]
     local_first <- first_row[g]
 
     entry <- state$groups$get(key, missing = NULL)

@@ -962,13 +962,13 @@ dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
 #' @return A character vector, one key per row.
 #' @keywords internal
 dta_group_key <- function(df, group_by) {
-  # ASCII unit separator. Written as a code point rather than an escape so the
-  # source carries no raw control byte for tooling to mangle.
-  group_sep <- intToUtf8(31L)
+  group_sep <- "\037"
   key_parts <- lapply(df[, group_by, drop = FALSE], function(x) {
-    chr <- as.character(x)
-    chr[is.na(chr)] <- "<NA>"
-    gsub(group_sep, paste0(group_sep, group_sep), chr, fixed = TRUE)
+    if (is.numeric(x) || is.logical(x)) {
+      x <- as.character(x)
+    }
+    x[is.na(x)] <- "\001NA"
+    x
   })
   do.call(paste, c(key_parts, sep = group_sep))
 }
