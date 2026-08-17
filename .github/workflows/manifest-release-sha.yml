@@ -1,0 +1,86 @@
+# Pin the Shiny app manifest's DTAtools RemoteSha/GithubSHA1 to the commit the
+# just-published release tag actually points at.
+#
+# Why this exists, and why it is a SEPARATE workflow from release.yml (which
+# builds and attaches the CRAN-style tarball). Posit Connect needs a
+# resolvable commit SHA to build the archive download URL for a
+# `Source: "github"` package; without one it crashes with
+# "argument is of length zero" on every deploy. That SHA cannot be known at
+# version-bump time -- the release commit doesn't exist yet -- so
+# bump_version.R deliberately leaves RemoteSha/GithubSHA1 absent (see its
+# manifest_ref_site() comment) and CLEARS them on every bump. This is the one
+# place that becomes possible again: the `release: published` event fires only
+# once the tag -- and the commit it points at -- already exist.
+#
+# Every release before this workflow existed needed a hand-written follow-up
+# PR to do this (#41 for v0.17.3, #43+#45 for v0.18.0), and v0.18.1 shipped
+# without one because nobody remembered. This replaces "remember to open a PR"
+# with "happens automatically when the release is published".
+#
+# Pushes straight to `master` (like manifest-sync.yml pushes to a PR branch),
+# rather than opening a PR -- there is no decision here for a reviewer to make,
+# the SHA a tag resolves to is a pure fact. This does NOT re-trigger r-style.yaml
+# (pull_request-only), so check_manifest.R's SHA-vs-tag verification will next
+# run on whatever PR next touches the manifest -- typically the following
+# release's version bump.
+#
+# Deliberately does not also update `dev`: syncing dev from master after a
+# release is already a manual reconciliation step (squash-merge conflicts),
+# and this commit rides along with the next one of those the same way any
+# other master-only release commit does.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to resolve and pin (e.g. v0.18.1)'
+        required: true
+
+name: manifest-release-sha
+
+concurrency:
+  group: manifest-release-sha-${{ github.event.release.tag_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  pin-release-sha:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+    permissions:
+      # Needed to push the SHA-pin commit straight to master.
+      contents: write
+
+    steps:
+      # master's tip, not the tag: the commit this job pushes lands AFTER the
+      # tagged release commit, referencing it by SHA. fetch-depth: 0 so the tag
+      # itself (an earlier commit than this checkout's tip) is actually
+      # resolvable by `git rev-parse` below.
+      - uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve the release tag to a commit
+        run: |
+          SHA=$(git rev-parse --verify --quiet "${TAG}^{commit}") || {
+            echo "::error::could not resolve ${TAG} to a commit. Was it pushed as an annotated or lightweight tag?"
+            exit 1
+          }
+          echo "SHA=${SHA}" >> "$GITHUB_ENV"
+
+      # base-R only, same as --sync-manifest: no package library to restore,
+      # so this finishes in seconds. See bump_version.R's header comment.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Pin manifest.json's RemoteSha/GithubSHA1
+        run: Rscript .github/scripts/bump_version.R --set-release-sha "${SHA}"
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(release): point manifest.json at the ${{ env.TAG }} commit"
+          file_pattern: inst/shiny/dta_app/manifest.json
+          branch: master

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.19.0] - 2026-08-16
+## [Unreleased]
 
 ### Added
 
@@ -14,18 +14,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   RSS, Arrow's memory-pool peak, and rows/sec — as a `"benchmark"` attribute on
   the result, retrievable with the new exported `validation_benchmark()`. Off by
   default, so the normal call path is unaffected. R's heap peak is read from
-  `gc()`'s `max used` counters (not a before/after delta, which would miss
-  transient allocations), and a nesting guard makes the outermost `check()` call
-  the one that measures, so that if the benchmark window is ever re-entered
-  (defensively guarded against, not currently reachable through `check(DTA)`'s
-  own call graph) the outer figure is not corrupted by an inner reset. Arrow's
-  memory pool has no reset in
-  the installed `arrow` version, so its peak is reported honestly as a
-  per-process high-water mark, alongside a flag saying whether the figure
-  attributed to this call is exact or a lower bound. Measuring the R heap peak
-  accurately requires resetting `gc()`'s peak counters, which is a session-wide
-  side effect — documented on `validation_benchmark()`. Process RSS needs the
-  new `Suggests`-only `ps` package; it reports `NA` when `ps` is not installed.
+  `gc()`'s `max used` counters rather than a before/after delta, which would
+  miss transient allocations entirely.
+- The instrument is built not to distort or break what it measures. `gc()` runs
+  outside the timed region at both ends, so the bracketing collections are never
+  charged to the call. A nesting guard makes the outermost call the one that
+  measures, so an inner `gc(reset = TRUE)` cannot silently corrupt an outer
+  figure, and the guard is released via `on.exit()` in the caller's own frame,
+  so a call that aborts part-way does not leave benchmarking dead for the rest
+  of the session. Nothing about the verdict changes when the flag is on.
+- Figures that cannot be measured say so instead of guessing. Arrow's memory
+  pool has no reset in the installed `arrow` version, so its peak is reported as
+  the per-process high-water mark it is, alongside an `arrow_call_exact` flag
+  saying whether the figure attributed to this call is exact or merely a lower
+  bound; an unreadable pool reports `NA`, never `0`. Process RSS needs the new
+  `Suggests`-only `ps` package and reports `NA` without it. `check()` reports
+  `rows` as `NA` because there is no cheap, trustworthy row total across every
+  dataset at that level. Measuring the R heap peak requires resetting `gc()`'s
+  peak counters, a session-wide side effect documented on
+  `validation_benchmark()`.
+
+### Fixed
+
+#### Shiny app manifest: R Connect archiveUrl crash
+
+- **R Connect failed to deploy the Shiny app with `Error in if (!grepl("^http",
+  archiveUrl)) { : argument is of length zero`.** Posit Connect needs a
+  resolvable commit SHA (`RemoteSha`/`GithubSHA1`) to build the archive
+  download URL for `manifest.json`'s `Source: "github"` DTAtools entry; without
+  one it computes a `NULL` `archiveUrl` and crashes on the `grepl()` guard.
+  `v0.18.1` shipped with neither field present, because the manifest-validation
+  work added in `0.18.1` itself (`#47`) had them forbidden outright rather than
+  verified -- a reaction to those fields going *stale* every previous release
+  (`v0.17.3` shipped with a `RemoteRef` still naming the prior tag; `v0.18.0`
+  shipped hand-added SHAs pointing at the `v0.17.3` commit), but removing them
+  broke every deploy instead of just a stale one.
+- `manifest.json`'s DTAtools entry now carries `RemoteSha`/`GithubSHA1` again,
+  pinned to the `v0.18.1` release commit.
+- `.github/scripts/bump_version.R` gained `--set-release-sha <sha>`, the one
+  place that writes those two fields, and its version-bump `write()` now
+  CLEARS them whenever `RemoteRef`/`GithubRef` move to a new tag -- an existing
+  SHA belongs to the *old* tag and is stale the instant the ref changes, so a
+  release-automation failure now degrades to a loud, visible deploy crash
+  rather than a silent stale deploy.
+- `.github/scripts/check_manifest.R` no longer forbids `RemoteSha`/`GithubSHA1`
+  outright. When present, it resolves the field's ref with `git rev-parse` and
+  fails if the recorded SHA doesn't match -- a correctness check the old
+  "must stay absent" rule could never provide, and would have caught the
+  `v0.18.0` incident directly.
+- New workflow `.github/workflows/manifest-release-sha.yml`, triggered on
+  `release: published`, resolves the tag's commit and pins
+  `RemoteSha`/`GithubSHA1` automatically -- replacing the hand-written
+  follow-up PR every previous release needed (`#41`, `#43`, `#45`) and which
+  was, predictably, forgotten for `v0.18.1`.
+- `.github/workflows/r-style.yaml`'s checkout now fetches full history
+  (`fetch-depth: 0`) so `check_manifest.R`'s `git rev-parse` calls can actually
+  see the release tags.
 
 ## [0.18.1] - 2026-08-16
 
