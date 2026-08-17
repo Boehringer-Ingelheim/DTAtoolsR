@@ -3,10 +3,13 @@
 # Single source of truth for the package version across every file that carries
 # it. Run from the repository root:
 #
-#   Rscript .github/scripts/bump_version.R 0.17.4          # rewrite every site
-#   Rscript .github/scripts/bump_version.R --check         # report drift, write nothing
-#   Rscript .github/scripts/bump_version.R --sync-manifest # rebuild the app manifest's
-#                                                          # file list and checksums
+#   Rscript .github/scripts/bump_version.R 0.17.4              # rewrite every site
+#   Rscript .github/scripts/bump_version.R --check              # report drift, write nothing
+#   Rscript .github/scripts/bump_version.R --sync-manifest      # rebuild the app manifest's
+#                                                               # file list and checksums
+#   Rscript .github/scripts/bump_version.R --set-release-sha <sha>
+#                                                               # pin RemoteSha/GithubSHA1 to a
+#                                                               # released commit (post-tag only)
 #
 # `--check` is what CI runs (see check_version_sync.R); it exits non-zero on any
 # mismatch. The two modes share the site definitions below, so the checker can
@@ -24,6 +27,13 @@
 # app.R checksum into release 0.16.0. The structural half of the guarantee (the
 # file list, and the fields that must NOT be present) lives in
 # .github/scripts/check_manifest.R.
+#
+# `--set-release-sha` is a third axis: it pins RemoteSha/GithubSHA1, the commit
+# RemoteRef/GithubRef resolve to. Also not part of a version bump -- a bump
+# commit cannot know the SHA of a release commit that does not exist yet -- so
+# this only runs once it does, wired into
+# .github/workflows/manifest-release-sha.yml on the `release: published` event.
+# See the comment above manifest_ref_site() for why the two are kept apart.
 #
 # manifest.json is patched line by line rather than round-tripped through
 # jsonlite deliberately. It is a 3100-line rsconnect manifest whose `packages`
@@ -91,7 +101,11 @@ DOCS <- "docs/index.html"
 # Scoped to the lines after the `"DTAtools": {` key so the ~90 other entries (one
 # per renv package) cannot be hit by accident -- every one of them has a
 # "Version", and several also carry a "GithubRef".
-manifest_pkg_field_line <- function(lines, field) {
+#
+# `required = FALSE` returns NA instead of failing when the field is absent --
+# used for RemoteSha/GithubSHA1, which are legitimately missing between a
+# version bump and the next release (see manifest_ref_site()).
+manifest_pkg_field_line <- function(lines, field, required = TRUE) {
   anchor <- sole_match(lines, '^\\s*"DTAtools": \\{\\s*$', "DTAtools package entry in the manifest")
 
   # Bound the search at the END of the DTAtools entry -- the `    },` that closes
@@ -110,12 +124,40 @@ manifest_pkg_field_line <- function(lines, field) {
 
   rel <- grep(sprintf('^\\s*"%s": ".*",?\\s*$', field), entry)
   if (length(rel) == 0L) {
+    if (!required) return(NA_integer_)
     fail("no \"%s\" line found under the manifest's DTAtools entry.", field)
   }
   anchor + rel[1L] - 1L
 }
 
 manifest_pkg_version_line <- function(lines) manifest_pkg_field_line(lines, "Version")
+
+# Insert `"field": "value",` immediately after `after_field`'s line, matching
+# its indentation -- or overwrite `field`'s value in place if it is already
+# present, so this is safe to call whether or not a previous run (or the
+# hand-patch it replaces) already added the line. `after_field` is assumed
+# present (RemoteRef/GithubRef always are; they are version-bump sites).
+manifest_set_field_after <- function(lines, field, value, after_field) {
+  existing <- manifest_pkg_field_line(lines, field, required = FALSE)
+  if (!is.na(existing)) {
+    lines[existing] <- sub(
+      sprintf('"%s": "[^"]*"', field), sprintf('"%s": "%s"', field, value), lines[existing]
+    )
+    return(lines)
+  }
+  after <- manifest_pkg_field_line(lines, after_field)
+  indent <- sub('^(\\s*)".*$', "\\1", lines[after])
+  append(lines, sprintf('%s"%s": "%s",', indent, field, value), after = after)
+}
+
+# Delete `field`'s line from the DTAtools entry if present; a no-op if it
+# isn't. Used when a version bump moves RemoteRef/GithubRef forward -- see
+# manifest_ref_site().
+manifest_clear_field <- function(lines, field) {
+  i <- manifest_pkg_field_line(lines, field, required = FALSE)
+  if (is.na(i)) return(lines)
+  lines[-i]
+}
 
 # manifest.json: the recorded md5 of the VERSION file, inside `files`.
 manifest_version_checksum_line <- function(lines) {
@@ -136,12 +178,19 @@ extract <- function(line, pattern) sub(pattern, "\\1", line)
 # pointing at the 0.17.3 release commit. Making them sites means the writer and
 # the checker cannot disagree about them, which is the whole point of this file.
 #
-# The sibling `GithubSHA1`/`RemoteSha`/`Packaged`/`Built` fields were REMOVED
-# from the DTAtools entry rather than added here: a bump commit cannot know the
-# SHA of the release commit that will eventually contain it, so there is no
-# value those sites could ever be checked against.
-# .github/scripts/check_manifest.R asserts they stay absent.
+# The sibling `GithubSHA1`/`RemoteSha` fields are NOT bump-version sites: a bump
+# commit cannot know the SHA of the release commit that will eventually contain
+# it, so there is nothing to write here. Instead, `write()` CLEARS them if
+# present -- moving the ref forward makes any existing SHA stale by definition,
+# since it names the commit the *previous* tag resolved to, not this one. That
+# is deliberate: a cleared field makes a deploy fail loudly (archiveUrl is
+# empty) rather than silently install the wrong release under the new version
+# number, which is what a stale-but-present SHA would do. They are repopulated
+# once the new tag actually exists, by `--set-release-sha` (see the file header
+# and .github/workflows/manifest-release-sha.yml), and checked when present by
+# .github/scripts/check_manifest.R.
 manifest_ref_site <- function(field) {
+  sha_field <- c(RemoteRef = "RemoteSha", GithubRef = "GithubSHA1")[[field]]
   list(
     name = paste0("manifest.json DTAtools ", field),
     expected = function(v) paste0("v", v),
@@ -153,6 +202,14 @@ manifest_ref_site <- function(field) {
       lines <- read_lines_utf8(MANIFEST)
       i <- manifest_pkg_field_line(lines, field)
       lines[i] <- sub('": "[^"]*"', sprintf('": "v%s"', v), lines[i])
+      had_sha <- !is.na(manifest_pkg_field_line(lines, sha_field, required = FALSE))
+      lines <- manifest_clear_field(lines, sha_field)
+      if (had_sha) {
+        cat(sprintf(
+          "  %-34s cleared (pinned the previous release)\n",
+          paste0("manifest.json DTAtools ", sha_field)
+        ))
+      }
       write_lines_utf8(lines, MANIFEST)
     }
   )
@@ -248,6 +305,42 @@ sites <- list(
     }
   )
 )
+
+# --- the manifest's release SHA fields ----------------------------------------
+#
+# RemoteSha/GithubSHA1 record the commit RemoteRef/GithubRef resolve to. Not a
+# bump-version site (see manifest_ref_site()) -- this runs once, after the
+# release tag exists, from .github/workflows/manifest-release-sha.yml.
+#
+# Guarded by requiring RemoteRef/GithubRef to already read `v<DESCRIPTION
+# Version>`: that is what makes "the tag exists" and "DESCRIPTION says this
+# version" the same fact, so a SHA can never get attached to the wrong ref.
+set_release_sha <- function(sha) {
+  if (!grepl("^[0-9a-f]{40}$", sha)) {
+    fail("'%s' is not a 40-character git commit SHA.", sha)
+  }
+
+  want_ref <- paste0("v", description_version())
+  lines <- read_lines_utf8(MANIFEST)
+  for (field in c("RemoteRef", "GithubRef")) {
+    got <- extract(
+      lines[manifest_pkg_field_line(lines, field)], '^\\s*"[^"]*": "([^"]*)".*$'
+    )
+    if (!identical(got, want_ref)) {
+      fail(
+        "manifest.json's %s is \"%s\", not \"%s\" (DESCRIPTION Version). Bump the version first.",
+        field, got, want_ref
+      )
+    }
+  }
+
+  lines <- manifest_set_field_after(lines, "RemoteSha", sha, "RemoteRef")
+  lines <- manifest_set_field_after(lines, "GithubSHA1", sha, "GithubRef")
+  write_lines_utf8(lines, MANIFEST)
+
+  cat(sprintf("RemoteSha/GithubSHA1 now point at %s (%s).\n", sha, want_ref))
+  invisible(TRUE)
+}
 
 # --- the manifest's `files` block --------------------------------------------
 #
@@ -506,10 +599,13 @@ main <- function() {
 
   if (length(args) == 0L || identical(args[[1L]], "--help")) {
     cat("Usage:\n")
-    cat("  Rscript .github/scripts/bump_version.R <version>         rewrite every version site\n")
-    cat("  Rscript .github/scripts/bump_version.R --check           report drift, write nothing\n")
-    cat("  Rscript .github/scripts/bump_version.R --sync-manifest   rebuild the app manifest's\n")
-    cat("                                                          file list and checksums\n")
+    cat("  Rscript .github/scripts/bump_version.R <version>            rewrite every version site\n")
+    cat("  Rscript .github/scripts/bump_version.R --check               report drift, write nothing\n")
+    cat("  Rscript .github/scripts/bump_version.R --sync-manifest       rebuild the app manifest's\n")
+    cat("                                                              file list and checksums\n")
+    cat("  Rscript .github/scripts/bump_version.R --set-release-sha <sha>\n")
+    cat("                                                              pin RemoteSha/GithubSHA1 to a\n")
+    cat("                                                              released commit\n")
     quit(status = if (length(args) == 0L) 1 else 0)
   }
 
@@ -522,6 +618,12 @@ main <- function() {
   # source changes, which happens far more often than a release.
   if (identical(args[[1L]], "--sync-manifest")) {
     sync_manifest()
+    return(invisible(NULL))
+  }
+
+  if (identical(args[[1L]], "--set-release-sha")) {
+    if (length(args) < 2L) fail("--set-release-sha requires a commit SHA argument.")
+    set_release_sha(trimws(args[[2L]]))
     return(invisible(NULL))
   }
 
