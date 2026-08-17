@@ -3112,25 +3112,25 @@
   },
   "files": {
     "R/template_core.R": {
-      "checksum": "996c47f79864e81826bc57b3402c1ae4"
+      "checksum": "72ea0d256b57c239c245b85cb2f91b2f"
     },
     "R/theme.R": {
-      "checksum": "ded005836ea1dc832791b67486c3a5e7"
+      "checksum": "f777bec3e249c6f88b86f088ee8a5127"
     },
     "R/ui_components.R": {
-      "checksum": "755a98abcfecb3b29179d03285da7d91"
+      "checksum": "a8cd32432feb63c7ec3d834d27dcd32b"
     },
     "R/utils_dta.R": {
-      "checksum": "77caff42e4869c84f128a419b2b95aaa"
+      "checksum": "2040c98bc32c8396f5d7081c93594279"
     },
     "R/utils_export.R": {
-      "checksum": "cb019d396e88a149968e9ec549bea956"
+      "checksum": "6a26fac0f72ebeeac3f366ba736ec513"
     },
     "VERSION": {
-      "checksum": "f8ecb2aaf58a7e2ff3b5923992928b70"
+      "checksum": "1a519dae75f25ac0ca34dbf0eb83c2ef"
     },
     "app.R": {
-      "checksum": "0badc081f11876163b8527d1fb71d26e"
+      "checksum": "bf48bc0133c08eb9e79f071c317eb74a"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
