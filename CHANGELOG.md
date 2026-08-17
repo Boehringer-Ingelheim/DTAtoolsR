@@ -30,6 +30,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Float value in a declared `Int` column no longer aborts the read.**
+  Arrow infers a column as `int64` when early rows look like integers and then
+  aborts with `CSV conversion error to int64: invalid value '0.01'` if a
+  fractional value appears further down. All declared columns are now pinned to
+  `utf8` at read time; `dta_coerce_table_to_specs()` handles conversion and
+  leaves the fractional value as a double so the schema-validation axis can
+  report it as a type violation.
+
 - The Shiny app manifest is now synchronized with the files on disk, including
   live checksums and the `v0.18.2` package reference. Release SHA fields remain
   empty until the release tag exists, preventing a new version from inheriting
