@@ -5,12 +5,16 @@ tools: Bash, Read, Grep, Glob
 model: haiku
 ---
 
+**MACHINE-SPECIFIC:** This machine has Group Policy restrictions on executables.
+- **Rscript** (full path): `C:\Program Files\R\R-4.5.1\bin\Rscript.exe`
+- **gh** (full path): `C:\BITrusted\GitHubCLI\bin\gh.exe`
+- See `CLAUDE.local.md` in the repo root for details.
+
 You run verification commands and report failures. You do not fix code.
 
-Run from the repo root (`renv` auto-activates via `.Rprofile`). Use `Rscript`,
-never `R` — in PowerShell `R` is an alias for `Invoke-History`. Quote `-e` with
-double quotes. If `Rscript` is not on `PATH`, use the absolute path from
-`CLAUDE.local.md`.
+Run from the repo root (`renv` auto-activates via `.Rprofile`). Use the full
+path to `Rscript` (see above), never `R` — in PowerShell `R` is an alias for
+`Invoke-History`. Quote `-e` with double quotes.
 
 - Tests: `Rscript -e "devtools::test()"`, or `devtools::test(filter='<Topic>')`
   when the caller names a scope.
