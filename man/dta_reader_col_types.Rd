@@ -25,22 +25,25 @@ declared type of a column -- not the reader's guess at it -- decides how the
 bytes in the file are parsed.
 
 Arrow infers a column's type from its contents, and that inference runs
-\emph{before} any code in this package sees the data. A column of quoted subject
-ids -- \code{"007"}, \code{"008"} -- is inferred as \code{int64} and arrives in R as \code{7} and
-\code{8}. The leading zeros are gone by the time \code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}} is
-reached, so its "never coerce a \code{Char} column" guard has nothing left to
-protect: the corruption already happened. The only place to stop it is the
-read itself.
+\emph{before} any code in this package sees the data. Two classes of problem
+arise:
+\enumerate{
+\item \strong{Character corruption.} A column of quoted subject ids -- \code{"007"},
+\code{"008"} -- is inferred as \code{int64} and arrives in R as \code{7} and \code{8}. The
+leading zeros are gone before \code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}} runs, so its
+"never coerce a \code{Char} column" guard has nothing left to protect.
+\item \strong{Hard abort on mixed numeric data.} Arrow locks in the inferred type
+after scanning enough rows. If it picks \code{int64} for a column that mostly
+looks like integers and then encounters \code{0.01} further down, it aborts the
+entire read: \verb{CSV conversion error to int64: invalid value '0.01'}. That
+turns one reportable bad-cell into a file that will not load at all.
+}
 
-The schema only ever \emph{widens} a column to \code{utf8}, and only for columns whose
-declared R type is \code{"character"}. Narrowing is deliberately left alone.
-Telling Arrow that a column is \code{int64} makes it abort the entire read on the
-first cell it cannot parse (\verb{CSV conversion error to int64: invalid value 'abc'}), which would turn a single reportable bad cell into a transfer that
-will not load at all. Numeric columns are therefore still read by inference
-and narrowed by \code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}}, where an unrepresentable value
-becomes \code{NA} and is reported as an import error.
-
-Reading a \code{character} column as text can never fail and never loses
-information, which is what makes widening the safe half of the operation.
+Both problems are solved the same way: pin every declared column to \code{utf8}
+at read time and let \code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}} handle the conversion.
+Reading as text can never fail and never loses information. An unrepresentable
+value (\code{"0.01"} in an \code{Int} column, \code{"abc"} in a \code{Num} column) becomes \code{NA}
+in the typed column and its source text is retained as an import error --
+which is exactly what the schema-validation axis expects to see.
 }
 \keyword{internal}
