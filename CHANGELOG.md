@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Roxygen parameter documentation coverage:** Fixed parameter documentation for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()` generics to ensure argument `x` is properly documented in Rd pages. Added missing `@param` descriptions to internal helpers `dta_validate_table_stream()`, `dta_error_sink_add()`, and `validate_table_detailed()`.
+
 ## [0.18.2] - 2026-08-17
 
 ### Added
