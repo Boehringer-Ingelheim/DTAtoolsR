@@ -5,7 +5,7 @@
 \alias{as_json_schema}
 \title{as_json_schema}
 \arguments{
-\item{columns}{Column spec information}
+\item{x}{A \code{DTAColumnSpecStructure} object.}
 }
 \value{
 A list representing the JSON Schema.
