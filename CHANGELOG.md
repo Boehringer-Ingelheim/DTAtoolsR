@@ -17,6 +17,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Uniqueness and grouping keys are built about 2.1x faster, and now agree
+  with `duplicated()` on the atomic types validation deals with, where they
+  previously did not.**
+  `dta_unique_key()` and `dta_group_key()` now share a single encoder, the new
+  internal `dta_row_key()`, instead of each length-prefixing or
+  `gsub()`-escaping every value on every batch. The encoding stays injective:
+  the rows `c("x", "y<US>z")` and `c("x<US>y", "z")` are different rows and get
+  different keys, where a plain separator join would have merged them and
+  reported a duplicate -- or a group rule violation -- that the data does not
+  contain. A reserved byte is escaped only when the column actually contains
+  one, which is a pure optimisation rather than a second encoding, because the
+  escape is the identity on text that does not contain it; equal rows therefore
+  still key equally across batch boundaries, and strings are normalised to
+  UTF-8 first so that the marked encoding of a value cannot change its key
+  either.
+
+  Several verdicts that disagreed between the streaming and materialising
+  paths are fixed along the way, all of them on key columns holding doubles:
+  `0.1 + 0.2` and `0.3` are no longer reported as a duplicate pair (keys render
+  doubles with `%.17g` rather than through `as.character()`, which rounds to 15
+  significant digits), `NaN` is no longer treated as a missing value, and a
+  sub-second `POSIXct` now keys on the instant it names. The same applies to
+  grouping, where two doubles that render alike are now two groups rather than
+  one, on both paths -- so a `check_group_condition` grouped by a double or a
+  timestamp column can report differently than before, and correctly. `0` and
+  `-0` remain one value, as `duplicated()` has them, and `integer64` is
+  rendered by bit64 rather than reinterpreted as the double it is stored as. A
+  value that merely looks like the internal missing-value marker is also no
+  longer read as missing. Measured on 5e5 rows over three key columns: 0.58s
+  before, 0.28s after.
+
 - **Column schemas are now compiled once per scan instead of once per batch.**
   On the streaming path `dta_columnspec_errors()` runs once per batch, and it
   previously re-derived every column's schema through `as_json_schema()` on each

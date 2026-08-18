@@ -1212,6 +1212,206 @@ test_that("uniqueness keys do not collide across column boundaries", {
   )
 })
 
+test_that("uniqueness keys survive separator bytes in the data", {
+  # REGRESSION GUARD for the key encoding. A raw separator join would render
+  # both of these rows as "x<sep>y<sep>z" and report a duplicate that the data
+  # does not contain. Asserted against the materialising path so the two can
+  # never disagree, and at batch_rows = 1 so every row is keyed in its own
+  # batch.
+  sep <- intToUtf8(31L)
+  rule <- DTARuleColUnique(id = "k", columns = c("A", "B"))
+  table <- data.frame(
+    A = c(paste0("x", sep, "y"), "x"),
+    B = c("z", paste0("y", sep, "z")),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_true(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("a separator appearing only in a later batch does not change the encoding", {
+  # The hazard a "join raw, escape only when needed" key would have if the
+  # decision were made per batch: rows 1 and 3 are identical and must be seen
+  # as duplicates even though the separator only enters the stream with row 2.
+  sep <- intToUtf8(31L)
+  rule <- DTARuleColUnique(id = "k", columns = c("A", "B"))
+  table <- data.frame(
+    A = c("x", paste0("p", sep, "q"), "x"),
+    B = c("y", "r", "y"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_false(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("a literal that looks like the missing-value marker is not a missing value", {
+  # The marker is unreachable from real data because a literal escape byte is
+  # itself escaped, so this row is distinct from the NA row rather than a
+  # duplicate of it.
+  marker_like <- paste0(intToUtf8(1L), "n")
+  rule <- DTARuleColUnique(id = "k", columns = "K")
+  table <- data.frame(
+    K = c(marker_like, NA_character_, "a"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_true(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("factor and date key columns stream the same verdict as they materialise", {
+  # Neither type is character, and both can hold NA. A key builder that
+  # subassigned its missing-value marker into the column itself would corrupt
+  # the factor (an invalid level becomes NA) and fail outright on the Date.
+  rule <- DTARuleColUnique(id = "k", columns = c("F", "D"))
+  table <- data.frame(
+    F = factor(c("a", "b", NA, NA, "a")),
+    D = as.Date(c("2020-01-01", "2020-01-02", NA, NA, "2020-01-01")),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- expect_no_warning(vs_stream_rule(rule, table, batch_rows = 1L))
+
+  expect_false(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("double key columns key on the value, not on a 15-digit rendering", {
+  # `as.character()` renders both of these to "0.3", but they are two different
+  # doubles and `duplicated()` keeps them apart. A key built on the rendering
+  # would report a duplicate that the file does not contain.
+  rule <- DTARuleColUnique(id = "k", columns = "K")
+  table <- data.frame(K = c(0.1 + 0.2, 0.3), stringsAsFactors = FALSE)
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_true(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("NaN is not a missing value and -0 is not a second zero", {
+  # Two conventions that have to be taken from `duplicated()` rather than
+  # guessed: it treats NA and NaN as different values, and 0 and -0 as the
+  # same one.
+  rule <- DTARuleColUnique(id = "k", columns = "K")
+  table <- data.frame(K = c(NA_real_, NaN, 0, -0), stringsAsFactors = FALSE)
+
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 1L)
+
+  expect_false(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("a sub-second timestamp keys on the instant it names", {
+  # Asserted on the key directly, and at a precision below the one
+  # `as.character.POSIXct()` renders, because on R >= 4.3 that method keeps
+  # enough digits for a coarser case to pass without the fix. It is asserted
+  # on the key rather than through `vs_stream_rule()` because the batch reader
+  # goes through arrow, whose timestamp type cannot carry a difference this
+  # small -- the two instants would arrive equal and the test would be
+  # measuring arrow's resolution instead of the key's.
+  t1 <- as.POSIXct(1, origin = "1970-01-01", tz = "UTC")
+  t2 <- t1 + 1e-9
+  df <- data.frame(K = c(t1, t2, t1))
+
+  expect_identical(as.character(t1), as.character(t2))
+  expect_equal(
+    sum(duplicated(dta_unique_key(df, "K"))),
+    sum(duplicated(df))
+  )
+})
+
+test_that("a complex key column keys on both parts at full precision", {
+  z <- c(complex(real = 0.1 + 0.2, imaginary = 0), 0.3 + 0i)
+  df <- data.frame(K = z)
+
+  expect_identical(as.character(z[[1]]), as.character(z[[2]]))
+  expect_equal(
+    sum(duplicated(dta_unique_key(df, "K"))),
+    sum(duplicated(df))
+  )
+})
+
+test_that("an integer64 key column is not reinterpreted as a double", {
+  skip_if_not_installed("bit64")
+
+  # integer64 is stored as a double, so a key that unclassed it would read
+  # NA_integer64_ (INT64_MIN) as the double -0 and key it as the value 0.
+  df <- data.frame(K = bit64::as.integer64(c(0, NA, 1, 0)))
+
+  expect_equal(
+    sum(duplicated(dta_unique_key(df, "K"))),
+    sum(duplicated(df))
+  )
+})
+
+test_that("a non-UTF-8 marked string keys identically in every batch", {
+  # The hazard: the escaping pass can re-encode a latin1 string, and it only
+  # runs in a batch that actually contains a reserved byte. Rows 1 and 3 are
+  # the same value and must be recognised as duplicates even though only the
+  # batch holding row 2 triggers escaping.
+  #
+  # Asserted on the raw bytes, not with expect_equal(): R's string comparison
+  # translates before comparing, so it would call two differently marked
+  # encodings of one value equal, while `fastmap` -- which is what actually
+  # holds these keys across batches -- hashes the bytes and would not.
+  latin1 <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xe9)))
+  Encoding(latin1) <- "latin1"
+  sep <- intToUtf8(31L)
+
+  table <- data.frame(
+    K = c(latin1, paste0("p", sep, "q"), latin1),
+    stringsAsFactors = FALSE
+  )
+
+  escaping_batch <- dta_unique_key(table[1:2, , drop = FALSE], "K")
+  plain_batch <- dta_unique_key(table[3, , drop = FALSE], "K")
+
+  expect_identical(charToRaw(plain_batch[[1]]), charToRaw(escaping_batch[[1]]))
+  expect_identical(Encoding(plain_batch[[1]]), Encoding(escaping_batch[[1]]))
+
+  # And through the accumulator that keys on those bytes, with the two
+  # occurrences landing in different batches.
+  rule <- DTARuleColUnique(id = "k", columns = "K")
+  expected <- apply_rules(list(rule), table, verbose = FALSE)[[1]]
+  streamed <- vs_stream_rule(rule, table, batch_rows = 2L)
+
+  expect_false(expected$valid)
+  expect_equal(streamed$valid, expected$valid)
+  expect_equal(streamed$message, expected$message)
+})
+
+test_that("a key over no columns makes every row the same row", {
+  # Degenerate, but the two paths have to agree on it: `duplicated()` on a
+  # zero-column data frame calls every row after the first a duplicate.
+  df <- data.frame(A = c("x", "y", "z"), stringsAsFactors = FALSE)
+
+  expect_equal(
+    sum(duplicated(dta_unique_key(df, character(0)))),
+    sum(duplicated(df[, character(0), drop = FALSE]))
+  )
+})
+
 test_that("repeated missing values count as duplicates when streamed", {
   # duplicated() treats repeated NAs as duplicates. A key that dropped them, or
   # gave each its own identity, would silently disagree.

@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: r-lib/actions/setup-pandoc@v2
+      - uses: r-lib/actions/setup-pandoc@v2.12.1
 
       # PDF export (write_dta(format = "pdf")) converts the generated DOCX with
       # an external engine. Without one installed here the end-to-end PDF test
@@ -58,15 +58,15 @@ jobs:
       # tests/testthat/test-exportDocuments.R fails the build if this step is
       # ever dropped. TinyTeX is used because it is what the package tells users
       # to install, so CI exercises the documented remedy. Adds ~1 min per leg.
-      - uses: r-lib/actions/setup-tinytex@v2
+      - uses: r-lib/actions/setup-tinytex@v2.12.1
 
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@v2.12.1
         with:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
+      - uses: r-lib/actions/setup-r-dependencies@v2.12.1
         with:
           extra-packages: any::rcmdcheck,any::remotes
           needs: check
@@ -85,7 +85,7 @@ jobs:
           }
           cat("PDF backend:", backend$name, "| engine:", backend$engine, "\n")
 
-      - uses: r-lib/actions/check-r-package@v2
+      - uses: r-lib/actions/check-r-package@v2.12.1
         with:
           upload-snapshots: true
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
