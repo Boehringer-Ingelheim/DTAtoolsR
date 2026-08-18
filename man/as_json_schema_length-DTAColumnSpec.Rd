@@ -3,9 +3,6 @@
 \name{as_json_schema_length}
 \alias{as_json_schema_length}
 \title{as_json_schema_length}
-\arguments{
-\item{x}{A \code{DTAColumnSpec} object.}
-}
 \description{
 Converts a DTAColumnSpec to a JSON Schema length.
 }

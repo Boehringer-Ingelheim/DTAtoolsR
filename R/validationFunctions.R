@@ -69,10 +69,6 @@ validate_table <- function(specs, table, verbose = TRUE) {
 }
 
 
-#' @param specs A [DTAColumnSpecCollection] object.
-#' @param table Data frame or Arrow Table to validate.
-#' @param verbose Logical. Whether to print progress messages. Default `TRUE`.
-#' @noRd
 #' @keywords internal
 validate_table_detailed <- function(specs, table, verbose = TRUE) {
   # Read before the table is touched: these were recorded when the table was

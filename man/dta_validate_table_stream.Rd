@@ -29,9 +29,6 @@ path.}
 \item{coerce}{Logical. Type each batch against the specs as it arrives,
 recording values that cannot be represented. This is the streaming
 equivalent of typing the table once at import.}
-
-\item{fail_fast}{Logical. If TRUE, stops validation on the first failure
-encountered.}
 }
 \value{
 A \code{details} list of the same shape \code{validate_table_detailed()}

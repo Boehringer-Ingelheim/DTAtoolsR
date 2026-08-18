@@ -346,7 +346,6 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
   c(x1, x2)
 }
 
-#' @param x A `DTAColumnSpec` object.
 #' @name as_json_schema_type
 #' @title as_json_schema_type
 #' @description
@@ -366,7 +365,6 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
   type
 }
 
-#' @param x A `DTAColumnSpec` object.
 #' @name as_json_schema_length
 #' @rdname as_json_schema_length-DTAColumnSpec
 #' @title as_json_schema_length
@@ -382,7 +380,6 @@ method(as_json_schema_length, DTAColumnSpec) <- function(x) {
 }
 
 
-#' @param x A `DTAColumnSpec` object.
 #' @name as_json_schema
 #' @title as_json_schema
 #' @description

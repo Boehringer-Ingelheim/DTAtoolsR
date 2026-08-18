@@ -572,7 +572,7 @@ columns_specs_from_word <- function(
 
 #' @title Convert DTAColumnSpec s to JSON Schema
 #' @description Converts a DTAColumnSpec s into a JSON Schema.
-#' @param x A `DTAColumnSpecCollection` object.
+#' @param columns Column spec information
 #' @name as_json_schema
 #' @return A list representing the JSON Schema.
 #' @importFrom jsonlite toJSON

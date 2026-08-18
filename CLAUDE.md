@@ -69,9 +69,7 @@ contract.
 ## Tools
 
 - `gh` (on `PATH`) for all GitHub work — PRs, issues, `gh run view` for CI logs.
-  Never scrape the web UI. Always supply PR/issue bodies using `--body-file`
-  rather than inline `--body "..."` so that PowerShell does not interpret
-  markdown backticks as escape sequences (e.g. `` `a `` becoming bell/`\a`).
+  Never scrape the web UI.
 - Graphify is installed but produces nothing here: its extractor has no `.R`
   parser, so a build reports "No code files found". Use `Explore`, not a graph.
   `.graphifyignore` exists only to keep an accidental build from spending
