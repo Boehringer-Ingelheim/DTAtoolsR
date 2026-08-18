@@ -478,6 +478,60 @@ test_that("group_condition missing group_by columns explains available columns",
   expect_match(wrapped[[1]]$message, "Available columns", fixed = TRUE)
 })
 
+test_that("group_condition grouping key does not collide on separator-like values", {
+  # REGRESSION GUARD. Two groups whose values straddle the key separator must
+  # stay two groups. A key that joined the fields with a raw separator would
+  # merge them and report a violation that the data does not contain, so this
+  # test is what makes the encoding in `dta_row_key()` load-bearing rather than
+  # decorative -- do not delete it to buy key-building speed.
+  sep_like <- "\u001f"
+  df <- data.frame(
+    A = c(paste0("x", sep_like, "y"), paste0("x", sep_like, "y"), "x", "x"),
+    B = c("z", "z", paste0("y", sep_like, "z"), paste0("y", sep_like, "z")),
+    FLAG = c(1, 1, 2, 2),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "group_key_collision_guard",
+    group_by = c("A", "B"),
+    conditions = list(
+      c1 = list(FLAG = list(equals = 1)),
+      c2 = list(FLAG = list(equals = 2))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_true(res$valid)
+  expect_null(res$message)
+})
+
+test_that("group_condition does not merge two doubles that render alike", {
+  # 0.1 + 0.2 and 0.3 are two different doubles that `split()` keeps apart, so
+  # they are two groups; a key rendered through `as.character()` rounds both to
+  # "0.3" and would merge them into one group that violates the constraint.
+  df <- data.frame(
+    G = c(0.1 + 0.2, 0.3),
+    FLAG = c(1, 2),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "group_key_double_precision",
+    group_by = "G",
+    conditions = list(
+      c1 = list(FLAG = list(equals = 1)),
+      c2 = list(FLAG = list(equals = 2))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+  )
+
+  res <- rule_check_group_condition(rule, df)
+  expect_true(res$valid)
+  expect_null(res$message)
+})
+
 test_that("Range rules support min/max slots and reject multi-column usage", {
   df <- data.frame(AGE = c(20, 40, NA), stringsAsFactors = FALSE)
 

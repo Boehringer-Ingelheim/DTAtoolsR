@@ -16,8 +16,10 @@ A character vector, one key per row.
 }
 \description{
 The key by which rows are grouped. Shared between the materialising and
-streaming paths so a group is the same group in both: a separator appearing
-in the data is escaped, and a missing value groups with other missing values
-rather than forming its own.
+streaming paths so a group is the same group in both, and built by
+\code{\link[=dta_row_key]{dta_row_key()}} so that it is shared with the uniqueness key as well: a
+separator appearing in the data is escaped rather than allowed to merge two
+distinct groups, and a missing value groups with other missing values rather
+than forming its own.
 }
 \keyword{internal}

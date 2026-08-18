@@ -954,23 +954,17 @@ dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
 #' @title Group Key for a Set of Grouping Columns
 #' @description
 #' The key by which rows are grouped. Shared between the materialising and
-#' streaming paths so a group is the same group in both: a separator appearing
-#' in the data is escaped, and a missing value groups with other missing values
-#' rather than forming its own.
+#' streaming paths so a group is the same group in both, and built by
+#' [dta_row_key()] so that it is shared with the uniqueness key as well: a
+#' separator appearing in the data is escaped rather than allowed to merge two
+#' distinct groups, and a missing value groups with other missing values rather
+#' than forming its own.
 #' @param df A data frame.
 #' @param group_by Character. The grouping columns.
 #' @return A character vector, one key per row.
 #' @keywords internal
 dta_group_key <- function(df, group_by) {
-  group_sep <- "\037"
-  key_parts <- lapply(df[, group_by, drop = FALSE], function(x) {
-    if (!is.character(x)) {
-      x <- as.character(x)
-    }
-    x[is.na(x)] <- "\001NA"
-    x
-  })
-  do.call(paste, c(key_parts, sep = group_sep))
+  dta_row_key(df, group_by)
 }
 
 #' @keywords internal

@@ -63,22 +63,146 @@ dta_rule_stream_kind <- function(rule) {
   )
 }
 
-# A key that reproduces `duplicated()`'s notion of an identical row.
-#
-# Repeated NAs are duplicates of each other, so missing values need a value of
-# their own rather than being dropped. Each part is length-prefixed so that
-# c("a", "b") and c("a\002b", "") cannot produce the same key -- without that,
-# a separator appearing in the data would silently merge distinct keys.
-dta_unique_key <- function(df, cols) {
+# The bytes the row key encoding reserves. Written as code points rather than
+# escapes so the source carries no raw control byte for tooling to mangle.
+DTA_KEY_SEP <- intToUtf8(31L)
+DTA_KEY_ESC <- intToUtf8(1L)
+DTA_KEY_RESERVED <- paste0("[", intToUtf8(1L), intToUtf8(31L), "]")
+
+#' @title Collision-Free Row Key for a Set of Columns
+#' @description
+#' One string per row, equal for two rows exactly when `duplicated()` would
+#' call those rows duplicates, so that keys can stand in for the rows
+#' themselves -- in a hash set across batches, or in `duplicated()` on a single
+#' vector instead of on a data frame.
+#'
+#' The encoding is injective, which a plain separator-joined key is not:
+#' `c("x", "y\037z")` and `c("x\037y", "z")` are different rows that would both
+#' render to `x\037y\037z`, silently merging distinct keys. Within a field a
+#' reserved byte is therefore escaped -- `ESC` becomes `ESC e`, the separator
+#' becomes `ESC s` -- so an encoded field can contain neither a bare separator
+#' nor a bare `ESC`, and splitting the joined string on the separator recovers
+#' the fields exactly.
+#'
+#' Missing values are given the marker `ESC n`, which no literal can produce
+#' (a literal `ESC n` encodes to `ESC e n`). They therefore compare equal to
+#' each other and to nothing else, which is `duplicated()`'s notion, under
+#' which repeated NAs are duplicates but `NaN` is not one of them.
+#'
+#' Doubles are rendered with `%.17g` rather than through `as.character()`,
+#' which rounds to 15 significant digits: `0.1 + 0.2` and `0.3` are two
+#' different doubles that `duplicated()` keeps apart and `as.character()` does
+#' not. That applies to everything stored as a double, `POSIXct` and `Date`
+#' included, so a sub-second timestamp keys exactly, and to both parts of a
+#' `complex`. `integer64` is excluded: it is stored as a double but is not one,
+#' and bit64 renders it exactly itself.
+#'
+#' What is left is as distinguishable as its character rendering -- a list
+#' column, or any class with its own `as.character()` method -- which is why
+#' the eager path in `dta_count_duplicates()` keeps its own type gate rather
+#' than trusting every type to this function.
+#'
+#' The escaping pass is skipped when the column holds no reserved byte at all,
+#' which is the overwhelmingly common case. That is a pure optimisation and not
+#' a second encoding: `gsub()` is the identity on text it does not match, so
+#' the result is the same string either way, and equal rows in different
+#' batches still encode equally -- which is what the streaming path's key set
+#' depends on.
+#' @param df A data frame.
+#' @param cols Character. The key columns.
+#' @return A character vector, one key per row.
+#' @keywords internal
+dta_row_key <- function(df, cols) {
+  if (length(cols) == 0) {
+    # Every row is then the same row, which is what the materialising path
+    # sees: `duplicated(df[, character(0), drop = FALSE])` is TRUE from the
+    # second row on. Returning `character(0)` here -- what `paste()` with no
+    # arguments would give -- would instead report no rows at all.
+    return(rep("", nrow(df)))
+  }
+
   parts <- lapply(cols, function(column_name) {
     values <- df[[column_name]]
-    if (!is.character(values)) {
-      values <- as.character(values)
+
+    # `integer64` is stored as a double and would be reinterpreted as one by
+    # the branch below -- `NA_integer64_` is INT64_MIN, whose bit pattern read
+    # as a double is -0, which would then key as the integer64 value 0. bit64
+    # renders it exactly through `as.character()`, so it takes that route.
+    if (is.double(values) && !inherits(values, "integer64")) {
+      # `unclass()` so that a POSIXct or Date keys on its underlying instant
+      # rather than on a rendering that depends on the column's timezone
+      # attribute, and `+ 0` because -0 and 0 are one value to `duplicated()`
+      # but two renderings to `sprintf()`.
+      numbers <- unclass(values) + 0
+      text <- sprintf("%.17g", numbers)
+      # NaN is not a missing value to `duplicated()`, and `sprintf()` has
+      # already rendered it as "NaN", so only a true NA takes the marker.
+      na_mask <- is.na(numbers) & !is.nan(numbers)
+    } else if (is.complex(values)) {
+      # Both parts are doubles and lose the same precision through
+      # `as.character()`, which renders 0.1 + 0.2 + 0i and 0.3 + 0i alike.
+      text <- paste0(
+        sprintf("%.17g", Re(values) + 0), "+", sprintf("%.17g", Im(values) + 0), "i"
+      )
+      # `sprintf()` has already rendered NA and NaN parts distinguishably, and
+      # no other value can render to the same string, so no marker is needed.
+      na_mask <- logical(length(values))
+    } else {
+      text <- if (is.character(values)) values else as.character(values)
+      na_mask <- is.na(values)
     }
-    values[is.na(values)] <- "\001NA"
-    values
+
+    # A matrix or data frame column renders to more strings than the table has
+    # rows and would recycle silently against the other fields, producing a
+    # longer key vector and a duplicate count belonging to no real row.
+    if (length(text) != nrow(df)) {
+      cli::cli_abort(
+        c(
+          "Column {.val {column_name}} cannot be used as a key column.",
+          x = "It yields {length(text)} value{?s} for {nrow(df)} row{?s}.",
+          i = "Key columns must be plain vectors, not matrix or data frame columns."
+        ),
+        class = "dta_rule_not_applicable"
+      )
+    }
+
+    # The key must depend on the value alone. Without this, a latin1-marked
+    # string could be re-encoded by the escaping pass in a batch where some
+    # other row carries a reserved byte, and left alone in a batch where none
+    # does -- two different byte sequences for the same value, and a duplicate
+    # that the key set never sees.
+    text <- enc2utf8(text)
+
+    # Scanned unconditionally rather than only for character columns: any type
+    # whose `as.character()` returns user text -- a list column, or a class
+    # with its own method -- can carry a reserved byte too. `perl = TRUE,
+    # useBytes = TRUE` because this runs on every batch of every keyed rule and
+    # is pure overhead in the common case: measured on 5e5 ids it costs ~0.00s,
+    # against ~0.04s for the default engine.
+    if (any(grepl(DTA_KEY_RESERVED, text, perl = TRUE, useBytes = TRUE))) {
+      text <- gsub(DTA_KEY_ESC, paste0(DTA_KEY_ESC, "e"), text, fixed = TRUE, useBytes = TRUE)
+      text <- gsub(DTA_KEY_SEP, paste0(DTA_KEY_ESC, "s"), text, fixed = TRUE, useBytes = TRUE)
+      # `gsub(useBytes = TRUE)` returns the strings it rewrote unmarked while
+      # leaving the ones it did not touch marked UTF-8, which would put two
+      # encodings in one column again. The bytes are known to be UTF-8 (they
+      # came from `enc2utf8()` and both replacements are ASCII), so they are
+      # re-marked rather than re-translated.
+      Encoding(text) <- "UTF-8"
+    }
+
+    if (any(na_mask)) {
+      text[na_mask] <- paste0(DTA_KEY_ESC, "n")
+    }
+    text
   })
-  do.call(paste, c(parts, sep = "\037"))
+  do.call(paste, c(parts, sep = DTA_KEY_SEP))
+}
+
+# A key that reproduces `duplicated()`'s notion of an identical row. See
+# `dta_row_key()` for why the encoding has to be injective rather than a plain
+# separator join.
+dta_unique_key <- function(df, cols) {
+  dta_row_key(df, cols)
 }
 
 #' @title Start Accumulating a Rule Across Batches
@@ -161,6 +285,9 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
           state$count <- state$count + sum(already | !first_here)
 
           new_keys <- keys[!already & first_here]
+          # A plain loop over `set()`, not `mset()`: `mset()` needs the keys
+          # rendered as the names of a fully materialised list, which allocates
+          # a second copy of every new key in the batch for no benefit.
           for (k in new_keys) {
             state$seen$set(k, TRUE)
           }
@@ -753,8 +880,20 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   split_key <- dta_group_key(df, group_by)
   grouped <- df[, group_by, drop = FALSE]
 
-  # Use unique() and match() instead of factor() to avoid interning strings as factor levels
-  # in R's global symbol table. The integer gids map exactly to local_levels.
+  # Same reasoning as the materialising path: every condition operator is
+  # elementwise, so it is evaluated ONCE over the whole batch and folded into
+  # each group's accumulator by group id, instead of re-evaluated per group
+  # per condition against a `df[local_idx, , drop = FALSE]` copy.
+  #
+  # `unique()` and `match()` rather than `factor()`: this only needs group ids
+  # that agree with `local_levels`, and building a factor additionally sorts
+  # the levels, which this loop does not need. Visiting groups in order of
+  # first appearance rather than in sorted order is safe ONLY because the
+  # groups are keyed by string in `state$groups` and
+  # `dta_group_stream_finalise()` sorts those keys before assembling the
+  # message -- that is what keeps the streamed message identical to the
+  # materialised one, which sees groups in `split()`'s sorted order. Do not
+  # report violations straight out of this loop without restoring the sort.
   local_levels <- unique(split_key)
   gid <- match(split_key, local_levels)
   n_groups <- length(local_levels)
