@@ -8,7 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- **Roxygen parameter documentation coverage:** Fixed parameter documentation for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()` generics to ensure argument `x` is properly documented in Rd pages. Added missing `@param` descriptions to internal helpers `dta_validate_table_stream()`, `dta_error_sink_add()`, and `validate_table_detailed()`.
+- **Roxygen parameter documentation coverage:** Fixed parameter documentation
+  for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()` 
+  generics to ensure argument `x` is properly documented in Rd pages. Added 
+  missing `@param` descriptions to internal helpers 
+  `dta_validate_table_stream()`, `dta_error_sink_add()`, and
+  `validate_table_detailed()`.
+
+### Changed
+
+- **Column schemas are now compiled once per scan instead of once per batch.**
+  On the streaming path `dta_columnspec_errors()` runs once per batch, and it
+  previously re-derived every column's schema through `as_json_schema()` on each
+  call. A column's schema is a pure function of its `DTAColumnSpec` and does not
+  change while a table is being validated, so the derivation is now hoisted out
+  of the batch loop by the new internal `dta_compile_columnspec_schemas()`. The
+  cost is now proportional to the width of the spec rather than to the number of
+  batches; validation results are unchanged, which
+  `tests/testthat/test-streaming-validation.R` asserts over the whole
+  validation corpus.
 
 ## [0.18.2] - 2026-08-17
 
@@ -20,6 +38,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   validation result. The new `validation_benchmark()` function retrieves them.
 
 ### Fixed
+
+- **Float value in a declared `Int` column no longer aborts the read.**
+  Arrow infers a column as `int64` when early rows look like integers and then
+  aborts with `CSV conversion error to int64: invalid value '0.01'` if a
+  fractional value appears further down. All declared columns are now pinned to
+  `utf8` at read time; `dta_coerce_table_to_specs()` handles conversion and
+  leaves the fractional value as a double so the schema-validation axis can
+  report it as a type violation.
 
 - The Shiny app manifest is now synchronized with the files on disk, including
   live checksums and the `v0.18.2` package reference. Release SHA fields remain

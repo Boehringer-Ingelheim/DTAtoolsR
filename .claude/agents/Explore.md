@@ -5,6 +5,11 @@ tools: Read, Grep, Glob, Bash
 model: haiku
 ---
 
+**MACHINE-SPECIFIC:** This machine has Group Policy restrictions on executables.
+- **Rscript** (full path): `C:\Program Files\R\R-4.5.1\bin\Rscript.exe`
+- **gh** (full path): `C:\BITrusted\GitHubCLI\bin\gh.exe`
+- See `CLAUDE.local.md` in the repo root for details.
+
 You locate code in an R package and report back concisely.
 
 - Answer with `path:line` references and a one-line note per hit. Quote at most
