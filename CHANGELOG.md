@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Roxygen parameter documentation coverage:** Fixed parameter documentation
+  for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()`
+  generics to ensure argument `x` is properly documented in Rd pages. Added
+  missing `@param` descriptions to internal helpers
+  `dta_validate_table_stream()`, `dta_error_sink_add()`, and
+  `validate_table_detailed()`.
+
 ### Changed
 
 - **Uniqueness and grouping keys are built about 2.1x faster, and now agree
