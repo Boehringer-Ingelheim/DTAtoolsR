@@ -364,6 +364,8 @@ dta_error_sink <- function(max_errors) {
   sink
 }
 
+#' @param sink Environment. An error sink created by `dta_error_sink()`.
+#' @param errs Data frame of errors to add.
 #' @param n_total Integer or `NULL`. The true number of errors these rows
 #'   represent, when the caller has already truncated them. Import typing caps
 #'   retained rows per column but records the real total on the frame, so
@@ -445,6 +447,8 @@ dta_error_sink_collect <- function(sink) {
 #' @param coerce Logical. Type each batch against the specs as it arrives,
 #'   recording values that cannot be represented. This is the streaming
 #'   equivalent of typing the table once at import.
+#' @param fail_fast Logical. If TRUE, stops validation on the first failure
+#'   encountered.
 #' @return A `details` list of the same shape `validate_table_detailed()`
 #'   returns.
 #' @keywords internal

@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   scanned when the threshold was reached, since a small compressed file can
   decompress to a much larger row count than its size on disk suggests.
 
+### Fixed
+
+- **Roxygen parameter documentation coverage:** Fixed parameter documentation
+  for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()`
+  generics to ensure argument `x` is properly documented in Rd pages. Added
+  missing `@param` descriptions to internal helpers
+  `dta_validate_table_stream()`, `dta_error_sink_add()`, and
+  `validate_table_detailed()`.
+
 ### Changed
 
 - **Column schemas are now compiled once per scan instead of once per batch.**

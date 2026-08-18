@@ -1,0 +1,6 @@
+man/
+renv/
+docs/
+img/
+benchmarks/
+scratch/
