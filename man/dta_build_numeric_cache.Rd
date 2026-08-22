@@ -4,12 +4,23 @@
 \alias{dta_build_numeric_cache}
 \title{Build a Shared Numeric Conversion Cache for a Set of Rules}
 \usage{
-dta_build_numeric_cache(df, rules)
+dta_build_numeric_cache(df, rules, columns = NULL)
 }
 \arguments{
 \item{df}{A data.frame.}
 
 \item{rules}{A list of \code{DTARule} objects, or \code{NULL}.}
+
+\item{columns}{Character, or \code{NULL} (the default). The columns the rules read
+numerically, when the caller has already derived them. Deriving them means
+re-parsing every rule's clause structure -- for \code{check_col_condition} and
+\code{check_group_condition} rules that is \code{dta_normalize_conditions()} over
+every clause of every rule -- which is invariant across the batches of one
+scan. The streaming driver computes the list once before its batch loop and
+passes it here so the parse is not repeated per batch. When \code{NULL} the list
+is derived from \code{rules} exactly as before. A supplied list is filtered
+against \code{names(df)} on the same terms as a derived one, so a rule naming a
+column this frame does not have still yields an empty cache.}
 }
 \value{
 A named list mapping column name to the result of

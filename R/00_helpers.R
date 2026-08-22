@@ -77,6 +77,37 @@ dta_narrow_count <- function(n) {
   n
 }
 
+#' @title Narrow Reported Row Numbers Back to Integer
+#' @description
+#' The streaming driver turns a batch-local row number into a global one by
+#' adding the number of rows already consumed. That offset is a double, for the
+#' reason given above `dta_narrow_count()`: an integer offset silently becomes
+#' `NA` past `.Machine$integer.max`, and every reported row number goes with it,
+#' on exactly the files the streaming path exists to handle.
+#'
+#' Adding a double to an integer vector widens the whole vector, so without this
+#' the reported `row` column would change type for every file, however small.
+#' Integer is what every consumer of the error frames has always seen, so the
+#' vector is narrowed back whenever it still fits.
+#'
+#' The range test is two-sided, mirroring `dta_narrow_count()`: a one-sided
+#' `v <= .Machine$integer.max` is true of every negative number, so it would
+#' hand `as.integer()` precisely the values it cannot represent. `NA` passes the
+#' test because `as.integer(NA)` is `NA_integer_` and loses nothing; a row
+#' number genuinely beyond the integer range stays a double rather than becoming
+#' `NA`.
+#'
+#' @param v A numeric vector of row numbers.
+#' @return `v` as an integer vector when every value fits the integer range, and
+#'   `v` unchanged otherwise.
+#' @keywords internal
+dta_narrow_rows <- function(v) {
+  if (all(is.na(v) | abs(v) <= .Machine$integer.max)) {
+    return(as.integer(v))
+  }
+  v
+}
+
 `__DTAtools_supported_backends__` <- c("SAS")
 `__DTAtools_supported_dataset_types__` <- c("tabular", "file")
 `__DTAtools_stream_modes__` <- c("auto", "always", "never")

@@ -312,10 +312,20 @@ dta_compile_columnspec_schemas <- function(specs) {
 #'   Callers that validate many tables against one collection -- the streaming
 #'   path, which calls this once per batch -- should compile once and pass the
 #'   result in, so that the derivation costs the spec rather than the data.
+#' @param summarise Logical. Whether to also build `summarised_error`. The
+#'   summary is a grouped `dplyr` aggregation whose cost scales with the number
+#'   of violations *and* with the cardinality of the offending values -- the
+#'   `data` column is part of the grouping key, so a batch of mostly-distinct
+#'   bad cells is the expensive case. The streaming driver reads only
+#'   `full_error` from each batch and recomputes the summary once at the end
+#'   over the collected frame, so it passes `FALSE` and pays for that
+#'   aggregation once per scan instead of once per batch. Defaults to `TRUE`,
+#'   which is what the materialising path needs.
 #' @return A list with `summarised_error` and `full_error`, each `NULL` when the
-#'   table is valid.
+#'   table is valid. `summarised_error` is always `NULL` when `summarise` is
+#'   `FALSE`; the shape of the returned list is unchanged either way.
 #' @keywords internal
-dta_columnspec_errors <- function(specs, table, schemas = NULL) {
+dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE) {
   n_rows <- nrow(table)
   if (n_rows == 0) {
     return(list(summarised_error = NULL, full_error = NULL))
@@ -380,7 +390,11 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL) {
   rownames(full_error) <- NULL
 
   list(
-    summarised_error = dta_summarise_columnspec_errors(full_error),
+    summarised_error = if (isTRUE(summarise)) {
+      dta_summarise_columnspec_errors(full_error)
+    } else {
+      NULL
+    },
     full_error = full_error
   )
 }

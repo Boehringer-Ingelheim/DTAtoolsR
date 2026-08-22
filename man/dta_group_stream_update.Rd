@@ -13,7 +13,8 @@ dta_group_stream_update(state, rule, df, row_offset = 0L, numeric_cache = NULL)
 
 \item{df}{A data frame holding one batch.}
 
-\item{row_offset}{Integer. Rows already consumed, so row numbers are global.}
+\item{row_offset}{Numeric. Rows already consumed, so row numbers are global.
+A double at the call site, so it stays exact past \code{.Machine$integer.max}.}
 
 \item{numeric_cache}{A named list from \code{\link[=dta_build_numeric_cache]{dta_build_numeric_cache()}} built for
 this batch, or \code{NULL} to convert each column on demand.}

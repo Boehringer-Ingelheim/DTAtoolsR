@@ -190,8 +190,9 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the
-#'   converted `values`, the integer indices of the `offending` values, and the
-#'   source text `raw`.
+#'   converted `values`, the integer indices of the `offending` values, and
+#'   `source` -- the original input vector, from which the raw text of row `i`
+#'   is `as.character(source[i])`, i.e. [dta_numeric_raw()].
 #' @keywords internal
 dta_coerce_column <- function(values, target) {
   if (!isTRUE(target %in% c("double", "integer"))) {
@@ -231,7 +232,10 @@ dta_coerce_column <- function(values, target) {
   list(
     values = out,
     offending = which(converted$unconvertible),
-    raw = converted$raw
+    # The input vector itself, not a character rendering of it: the raw text is
+    # read at the offending indices only, and rendering the whole column up
+    # front cost an order of magnitude more memory than the column.
+    source = values
   )
 }
 
@@ -326,7 +330,7 @@ dta_coerce_table_to_specs <- function(table, specs) {
     parts[[length(parts) + 1L]] <- data.frame(
       row = as.integer(kept),
       column = column,
-      raw = substr(as.character(coerced$raw[kept]), 1L, dta_import_raw_max_chars),
+      raw = substr(dta_numeric_raw(coerced, kept), 1L, dta_import_raw_max_chars),
       declared_type = declared,
       reason = "not_convertible",
       stringsAsFactors = FALSE

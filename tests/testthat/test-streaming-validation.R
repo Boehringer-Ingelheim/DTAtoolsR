@@ -176,6 +176,57 @@ test_that("compiling schemas keeps the branches the refactor moved", {
   )
 })
 
+test_that("dta_columnspec_errors(summarise = FALSE) changes only whether the summary is built", {
+  # The streaming driver passes summarise = FALSE and recomputes the summary
+  # once at the end. That is only sound if skipping it leaves `full_error`
+  # byte-for-byte what the eager call produced, so assert identity rather than
+  # equality, over every corpus case that actually produces violations.
+  corpus <- vc_corpus()
+  n_error_cases <- 0L
+
+  for (name in names(corpus)) {
+    case <- corpus[[name]]
+    eager <- dta_columnspec_errors(case$specs, case$table)
+    lazy <- dta_columnspec_errors(case$specs, case$table, summarise = FALSE)
+
+    expect_named(lazy, c("summarised_error", "full_error"))
+    expect_identical(
+      lazy$full_error,
+      eager$full_error,
+      info = paste0("case '", name, "'")
+    )
+    expect_null(lazy$summarised_error)
+
+    if (!is.null(eager$full_error)) {
+      n_error_cases <- n_error_cases + 1L
+      # The eager call must still be doing the work that was skipped.
+      expect_false(is.null(eager$summarised_error), info = paste0("case '", name, "'"))
+    }
+  }
+
+  # Guards the loop above against passing on a corpus of clean tables, where
+  # both fields are NULL for trivial reasons.
+  expect_gt(n_error_cases, 0L)
+})
+
+test_that("dta_columnspec_errors summarises by default for its non-streaming callers", {
+  # The two callers that are NOT the streaming driver rely on the default, so
+  # pin it: an unnamed call must still return a populated summary.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
+  ))
+  table <- data.frame(ID = c("ok", "toolong", "alsotoolong"), stringsAsFactors = FALSE)
+
+  eager <- dta_columnspec_errors(specs, table)
+  lazy <- dta_columnspec_errors(specs, table, summarise = FALSE)
+
+  expect_s3_class(eager$summarised_error, "data.frame")
+  expect_gt(nrow(eager$summarised_error), 0L)
+  expect_null(lazy$summarised_error)
+  expect_identical(lazy$full_error, eager$full_error)
+  expect_equal(nrow(eager$full_error), 2L)
+})
+
 test_that("row numbers are positions in the input, not in the batch", {
   # A violation in the last row of a multi-batch scan is the case that a
   # missing offset gets wrong: batch-local numbering would report row 1.
@@ -2060,4 +2111,311 @@ test_that("counts are reported as integers until they cannot be", {
     expect_identical(dta_narrow_count(c(1, 2)), c(1, 2))
     expect_identical(dta_narrow_count(numeric(0)), numeric(0))
   })
+})
+
+
+# Row counting past the integer limit.
+#
+# Same failure mode as the error counters above, on the accumulators that count
+# ROWS rather than errors: the streaming path exists for files whose row count
+# leaves the integer range, so every accumulator that grows once per row is a
+# candidate. An integer one returns `NA` with a warning rather than erroring,
+# and the `NA` then spreads into whatever reads it -- every reported row number
+# for the offsets, and for `n_seen` the pass/fail verdict of a whole group.
+#
+# None of this can be reproduced by building a 2.1-billion-row file, so the
+# arithmetic is tested directly at the boundary instead.
+
+test_that("group condition counters are doubles that survive the integer limit", {
+  cond <- dta_group_cond_state()
+
+  # The type is the fix. `0L` here is what made the counters overflow, so
+  # asserting the values alone would let the defect back in unnoticed.
+  expect_type(cond$n_seen, "double")
+  expect_type(cond$true_n, "double")
+  expect_type(cond$false_n, "double")
+
+  # A group whose rows span the integer boundary: the same arithmetic on
+  # integers is `NA`, which is what the "all"-scope verdict below reads.
+  expect_true(is.na(suppressWarnings(2147400000L + 2000000L)))
+
+  expect_no_warning({
+    cond$n_seen <- cond$n_seen + 2147400000
+    cond$n_seen <- cond$n_seen + 2000000
+  })
+  expect_false(is.na(cond$n_seen))
+  expect_true(is.finite(cond$n_seen))
+  expect_equal(cond$n_seen, 2149400000)
+})
+
+test_that("folding row numbers keeps counting past the integer limit", {
+  # `dta_group_fold_rows()` caps the head it retains but not the count, exactly
+  # as the error sink caps retention and not counting. The count is therefore
+  # unbounded in file size, and `count + length(new_rows)` on an integer count
+  # is the overflow. The head is capped at ten, so only the count can move here.
+  folded <- dta_group_fold_rows(1:10, 2147483000, 1:1000)
+
+  expect_false(is.na(folded$count))
+  expect_true(is.finite(folded$count))
+  expect_equal(folded$count, 2147484000)
+  expect_identical(folded$head, 1:10)
+})
+
+test_that("reported row numbers stay integer until they cannot", {
+  # The offset a batch-local row number is shifted by is now a double, and
+  # adding it would otherwise widen the reported `row` column to double for
+  # every file, however small. Integer is what consumers have always seen.
+  narrowed <- dta_narrow_rows(c(1, 2, 3) + 0)
+  expect_type(narrowed, "integer")
+  expect_identical(narrowed, c(1L, 2L, 3L))
+
+  expect_identical(dta_narrow_rows(integer(0)), integer(0))
+  expect_identical(dta_narrow_rows(.Machine$integer.max + 0), .Machine$integer.max)
+
+  # A row number genuinely beyond the integer range is passed through as a
+  # double rather than coerced, because coercing it is what produces the `NA`
+  # this whole change exists to prevent. Missing row numbers narrow cleanly,
+  # since `as.integer(NA)` loses nothing.
+  expect_no_warning({
+    expect_identical(dta_narrow_rows(3e9), 3e9)
+    expect_identical(dta_narrow_rows(c(1, 3e9)), c(1, 3e9))
+    expect_identical(dta_narrow_rows(c(1, NA)), c(1L, NA_integer_))
+    expect_identical(dta_narrow_rows(NA_real_), NA_integer_)
+  })
+})
+
+test_that("an all-scope group verdict is still reached past the integer limit", {
+  # The reason this task exists. `dta_group_stream_truth()` reads
+  # `cond$n_seen > 0 && cond$all_true` for an "all" scope. With `n_seen`
+  # overflowed to `NA` that expression is `NA` (whenever `all_true` is TRUE),
+  # the `NA` flows through `if_truth & !then_truth` into `constraint_viol`, and
+  # the finaliser's `isTRUE(constraint_viol[[ci]][g])` is then FALSE -- so a
+  # group that really does violate the constraint is silently reported as
+  # passing. That is a wrong verdict, not a wrong message.
+  huge <- 2149400000
+
+  # A condition that held for every one of a group's 2.1-billion-plus rows.
+  all_rows <- dta_group_cond_state()
+  all_rows$n_seen <- huge
+  all_rows$any_true <- TRUE
+  all_rows$all_true <- TRUE
+
+  # And one that held for some row but not for all of them.
+  some_rows <- dta_group_cond_state()
+  some_rows$n_seen <- huge
+  some_rows$any_true <- TRUE
+  some_rows$all_true <- FALSE
+
+  expect_identical(dta_group_stream_truth(all_rows, "all"), TRUE)
+  expect_identical(dta_group_stream_truth(some_rows, "all"), FALSE)
+  expect_identical(dta_group_stream_truth(some_rows, "any"), TRUE)
+
+  # The `requires` reduction exactly as the finaliser computes it, with an
+  # `if_scope` of "all" so the verdict actually depends on `n_seen`: the IF
+  # condition holds for every row, the THEN condition does not hold for all of
+  # them, so the group is in violation and the finaliser must see a hard TRUE.
+  if_truth <- dta_group_stream_truth(all_rows, "all")
+  then_truth <- dta_group_stream_truth(some_rows, "all")
+  constraint_viol <- if_truth & !then_truth
+
+  expect_false(is.na(constraint_viol))
+  expect_true(isTRUE(constraint_viol))
+
+  # The overflowed counterpart, kept alongside so the mechanism is pinned and
+  # not merely its absence: this is the same violating group as above, seen
+  # through an integer `n_seen`. The violation is real and the finaliser drops
+  # it, because `isTRUE(NA)` is FALSE.
+  overflowed <- dta_group_cond_state()
+  overflowed$n_seen <- NA_real_
+  overflowed$any_true <- TRUE
+  overflowed$all_true <- TRUE
+
+  overflowed_truth <- dta_group_stream_truth(overflowed, "all")
+  expect_true(is.na(overflowed_truth))
+  expect_false(isTRUE(overflowed_truth & !then_truth))
+})
+
+
+# ---- the scan levers, reachable from check() ---------------------------------
+#
+# `fail_fast`, `on_missing_column` and `use_threads` are what make a scan of a
+# table too large to hold survivable, and they were previously reachable only
+# through `validate_file_stream()` -- not through `check()`, which is the
+# documented entry point. These tests pin the forwarding by its EFFECT, because
+# an argument that is accepted and then dropped would pass a signature check.
+
+test_that("dta_table_column_names reads names without consuming the holding", {
+  frame <- data.frame(ID = "A001", AGE = 1, stringsAsFactors = FALSE)
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  expect_identical(dta_table_column_names(frame), c("ID", "AGE"))
+  expect_identical(
+    dta_table_column_names(arrow::as_arrow_table(frame)), c("ID", "AGE")
+  )
+
+  dataset <- arrow::open_delim_dataset(path, delim = ",")
+  expect_identical(dta_table_column_names(dataset), c("ID", "AGE"))
+
+  # The one that matters. A reader is consumable, so asking it for its columns
+  # must not spend the rows the caller still needs -- the structural gate runs
+  # BEFORE the scan and would otherwise silently eat the first batch.
+  reader <- arrow::Scanner$create(dataset, batch_size = 1L)$ToRecordBatchReader()
+  expect_identical(dta_table_column_names(reader), c("ID", "AGE"))
+  expect_false(is.null(reader$read_next_batch()))
+
+  # An unfamiliar holding is a reason to fall back to scanning, not to abort.
+  expect_identical(dta_table_column_names(42L), character(0))
+})
+
+test_that("on_missing_column = 'stop' reaches the same verdict without scanning", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "ABSENT", type = "SAS Num", nullable = TRUE)
+  ))
+  frame <- data.frame(ID = c("A001", "A002", "A003"), stringsAsFactors = FALSE)
+
+  scanned <- dta_validate_any_table(specs, frame, verbose = FALSE)
+  stopped <- dta_validate_any_table(
+    specs, frame,
+    verbose = FALSE, on_missing_column = "stop"
+  )
+
+  # Same verdict, reached at different cost. The two paths disagreeing about
+  # whether the table is valid would make the lever unusable.
+  expect_false(scanned$ok)
+  expect_false(stopped$ok)
+
+  # The scan restates the absence once per row; the gate says it once.
+  expect_equal(scanned$n_columnspec_errors, nrow(frame))
+  expect_equal(stopped$n_columnspec_errors, 1)
+
+  # Flagged, so no reader mistakes a header verdict for one about the rows.
+  expect_true(isTRUE(attr(stopped, "structural_only")))
+  expect_false(isTRUE(attr(scanned, "structural_only")))
+
+  # The default must be the historical behaviour, unchanged.
+  expect_equal(
+    dta_validate_any_table(specs, frame, verbose = FALSE)$n_columnspec_errors,
+    dta_validate_any_table(
+      specs, frame,
+      verbose = FALSE, on_missing_column = "scan"
+    )$n_columnspec_errors
+  )
+})
+
+test_that("check() forwards on_missing_column to the structural gate", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "ABSENT", type = "SAS Num", nullable = TRUE)
+  ))
+  frame <- data.frame(ID = c("A001", "A002", "A003"), stringsAsFactors = FALSE)
+
+  build <- function() {
+    DTADataSetTabular(
+      name = "gate", specs = specs,
+      tables = list(demo = arrow::as_arrow_table(frame))
+    )
+  }
+
+  scanned <- check(build(), tab = "demo", quiet = TRUE, persist = FALSE)
+  stopped <- check(
+    build(),
+    tab = "demo", quiet = TRUE, persist = FALSE,
+    on_missing_column = "stop"
+  )
+
+  scanned_details <- attr(scanned, "last_validation_details")
+  stopped_details <- attr(stopped, "last_validation_details")
+
+  expect_equal(scanned_details$n_columnspec_errors, nrow(frame))
+  expect_equal(stopped_details$n_columnspec_errors, 1)
+  expect_true(isTRUE(attr(stopped_details, "structural_only")))
+
+  # Both still report the table as invalid.
+  expect_false(validation_status(scanned)$ok[[1]])
+  expect_false(validation_status(stopped)$ok[[1]])
+})
+
+test_that("check() forwards fail_fast and use_threads without changing defaults", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  # Every row is over length, so the first batch already settles the verdict.
+  frame <- data.frame(
+    ID = rep("TOOLONG", 40), stringsAsFactors = FALSE
+  )
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  build <- function() {
+    ds <- DTADataSetTabular(
+      name = "ff", specs = specs,
+      tables = list(demo = arrow::as_arrow_table(frame))
+    )
+    ds@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
+    ds
+  }
+
+  full <- check(
+    build(),
+    tab = "demo", quiet = TRUE, persist = FALSE, batch_rows = 8L
+  )
+  fast <- check(
+    build(),
+    tab = "demo", quiet = TRUE, persist = FALSE, batch_rows = 8L,
+    fail_fast = TRUE, use_threads = FALSE
+  )
+
+  full_details <- attr(full, "last_validation_details")
+  fast_details <- attr(fast, "last_validation_details")
+
+  # A partial scan is flagged as such; a complete one is not.
+  expect_false(isTRUE(attr(full_details, "partial_scan")))
+  expect_true(isTRUE(attr(fast_details, "partial_scan")))
+
+  # Stopping early must not turn an invalid table into a valid one.
+  expect_false(isTRUE(full_details$ok))
+  expect_false(isTRUE(fast_details$ok))
+
+  # It stopped early: it saw fewer rows than the full pass reported errors for.
+  expect_lt(fast_details$n_columnspec_errors, full_details$n_columnspec_errors)
+})
+
+test_that("scan progress is throttled by wall time, not printed per batch", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  frame <- data.frame(
+    ID = sprintf("A%03d", seq_len(400) %% 1000), stringsAsFactors = FALSE
+  )
+  path <- vs_write_csv(frame)
+  on.exit(unlink(path), add = TRUE)
+
+  # The package's own cli string, not a translated base message.
+  progress_lines <- function(out) sum(grepl("rows so far", out, fixed = TRUE))
+
+  # A short scan must stay silent: the first line is due only after a full
+  # interval, so a run that finishes inside one prints nothing at all.
+  quiet_out <- capture.output(
+    invisible(validate_file_stream(
+      specs, path,
+      batch_rows = 32L, verbose = TRUE
+    )),
+    type = "message"
+  )
+  expect_identical(progress_lines(quiet_out), 0L)
+
+  # With the interval collapsed, the same scan reports.
+  loud_out <- withr::with_options(
+    list(DTAtools.progress_seconds = 0),
+    capture.output(
+      invisible(validate_file_stream(
+        specs, path,
+        batch_rows = 32L, verbose = TRUE
+      )),
+      type = "message"
+    )
+  )
+  expect_gt(progress_lines(loud_out), 0L)
 })

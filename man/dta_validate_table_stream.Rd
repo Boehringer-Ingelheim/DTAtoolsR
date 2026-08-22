@@ -18,7 +18,13 @@ dta_validate_table_stream(
 
 \item{reader}{An object with a \code{read_next_batch()} method.}
 
-\item{verbose}{Logical. Print progress.}
+\item{verbose}{Logical. Print progress. While scanning, a line reporting the
+rows read so far and the current rate is emitted at most once every
+\code{getOption("DTAtools.progress_seconds", 30)} seconds, so a scan that runs
+for hours is distinguishable from a hang. The interval is measured from the
+start of the scan, so a run shorter than it prints nothing extra. There is
+no percentage and no ETA: a stream has no total row count to compute either
+from.}
 
 \item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
 per-cell errors, defaulting to \code{getOption("DTAtools.max_errors", 10000L)}
@@ -30,8 +36,9 @@ path.}
 recording values that cannot be represented. This is the streaming
 equivalent of typing the table once at import.}
 
-\item{fail_fast}{Logical. If TRUE, stops validation on the first failure
-encountered.}
+\item{fail_fast}{Logical. Stop at the first batch that shows any problem
+instead of scanning to the end. The result then carries a \code{partial_scan}
+attribute and axes that could not be settled report \code{NA}.}
 }
 \value{
 A \code{details} list of the same shape \code{validate_table_detailed()}

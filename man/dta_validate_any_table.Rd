@@ -10,7 +10,9 @@ dta_validate_any_table(
   verbose = FALSE,
   batch_rows = 131072L,
   max_errors = getOption("DTAtools.max_errors", 10000L),
-  use_threads = TRUE
+  use_threads = TRUE,
+  fail_fast = FALSE,
+  on_missing_column = c("scan", "stop")
 )
 }
 \arguments{
@@ -31,7 +33,24 @@ unaffected, so the totals and the pass/fail verdict stay exact even when the
 retained detail is truncated, and a truncated frame is flagged as such.}
 
 \item{use_threads}{Logical. Whether Arrow's Scanner should use multiple
-threads for I/O and decompression.}
+threads for I/O and decompression. Arrow buffers batches ahead of R in its
+own C++ pool, outside the R heap, so single-threaded scanning is the lever
+when RSS rather than speed is the constraint.}
+
+\item{fail_fast}{Logical. Stop at the first batch that shows any problem
+instead of scanning to the end. The report is then explicitly incomplete
+and carries a \code{partial_scan} attribute. Ignored for a table already held in
+memory, which is validated in one pass.}
+
+\item{on_missing_column}{One of \code{"scan"} or \code{"stop"}. \code{"scan"}, the default,
+preserves existing behaviour: a column the specs require but the table
+lacks is reported once per row. \code{"stop"} decides it from the column names
+alone and reads nothing.
+
+Note this gate runs ahead of the lazy/in-memory dispatch, so unlike
+\code{fail_fast} it applies to a materialised table as well -- the column names
+are available whatever the holding. When they cannot be obtained without
+consuming the table, the gate is skipped and the scan proceeds as usual.}
 }
 \value{
 A validation details list.
