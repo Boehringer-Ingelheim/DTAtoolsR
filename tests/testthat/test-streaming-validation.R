@@ -2406,16 +2406,18 @@ test_that("scan progress is throttled by wall time, not printed per batch", {
   )
   expect_identical(progress_lines(quiet_out), 0L)
 
-  # With the interval collapsed, the same scan reports.
-  loud_out <- withr::with_options(
-    list(DTAtools.progress_seconds = 0),
-    capture.output(
-      invisible(validate_file_stream(
-        specs, path,
-        batch_rows = 32L, verbose = TRUE
-      )),
-      type = "message"
-    )
+  # With the interval collapsed, the same scan reports. Base `options()` rather
+  # than withr: the package does not depend on withr, and `R CMD check` fails a
+  # `::` call to a package DESCRIPTION does not declare.
+  previous <- options(DTAtools.progress_seconds = 0)
+  on.exit(options(previous), add = TRUE)
+
+  loud_out <- capture.output(
+    invisible(validate_file_stream(
+      specs, path,
+      batch_rows = 32L, verbose = TRUE
+    )),
+    type = "message"
   )
   expect_gt(progress_lines(loud_out), 0L)
 })
