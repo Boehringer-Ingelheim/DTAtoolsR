@@ -100,7 +100,24 @@ jobs:
       # the PR is open. It sets a valid one so the release PR passes; the
       # release's actual commit is pinned afterwards by
       # .github/workflows/manifest-release-sha.yml.
+      # SKIPPED WHEN THE PR'S HEAD IS ITSELF A PROTECTED BRANCH -- in practice the
+      # `dev` -> `master` release PR. The commit below is pushed to the HEAD
+      # branch, and `dev` rejects pushes exactly as `master` does, so writing
+      # anything here would fail the job with GH013 on every single release. It
+      # did: this guard exists because the release PR for 0.20.1 went red on it.
+      #
+      # Nothing is lost by skipping. The manifest arrives at master reading
+      # `dev` with a SHA that is genuinely on `dev`, which check_manifest.R
+      # accepts, and manifest-release-sha.yml repoints it at master and the
+      # tagged commit as soon as the release is published. The release PR was
+      # never able to set a current pin anyway -- master's release commit does
+      # not exist while the PR is open.
+      #
+      # Note the earlier resync step is deliberately NOT guarded: it only writes
+      # when a checksum actually drifted, which on a release PR would be a real
+      # defect worth failing over rather than skipping past.
       - name: Point the manifest at the target branch
+        if: github.head_ref != 'dev' && github.head_ref != 'master'
         env:
           BASE_REF: ${{ github.base_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
