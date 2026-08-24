@@ -234,7 +234,11 @@ dta_rule_stream_init <- function(rule) {
   }
   if (kind == "grouped") {
     state$grouped <- dta_group_stream_init(rule)
-    state$row_offset <- 0L
+    # A double, for the same reason as `state$count` above. This one is added to
+    # every row number the grouped path reports, so an integer offset gone `NA`
+    # does not merely lose a count: it turns every violation message into
+    # "rows: NA, NA, NA" while the verdict still reads as authoritative.
+    state$row_offset <- 0
   }
 
   state
@@ -525,7 +529,13 @@ dta_error_sink_collect <- function(sink) {
 #' fall in.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @param reader An object with a `read_next_batch()` method.
-#' @param verbose Logical. Print progress.
+#' @param verbose Logical. Print progress. While scanning, a line reporting the
+#'   rows read so far and the current rate is emitted at most once every
+#'   `getOption("DTAtools.progress_seconds", 30)` seconds, so a scan that runs
+#'   for hours is distinguishable from a hang. The interval is measured from the
+#'   start of the scan, so a run shorter than it prints nothing extra. There is
+#'   no percentage and no ETA: a stream has no total row count to compute either
+#'   from.
 #' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
 #'   per-cell errors, defaulting to `getOption("DTAtools.max_errors", 10000L)`
 #'   so that the option is honoured wherever a sink is created, not only at the
@@ -534,8 +544,9 @@ dta_error_sink_collect <- function(sink) {
 #' @param coerce Logical. Type each batch against the specs as it arrives,
 #'   recording values that cannot be represented. This is the streaming
 #'   equivalent of typing the table once at import.
-#' @param fail_fast Logical. If TRUE, stops validation on the first failure
-#'   encountered.
+#' @param fail_fast Logical. Stop at the first batch that shows any problem
+#'   instead of scanning to the end. The result then carries a `partial_scan`
+#'   attribute and axes that could not be settled report `NA`.
 #' @return A `details` list of the same shape `validate_table_detailed()`
 #'   returns.
 #' @keywords internal
@@ -566,8 +577,24 @@ dta_validate_table_stream <- function(specs,
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
-  row_offset <- 0L
+  # A double, not an integer. This is the number of rows already consumed, and
+  # the streaming path is built for files past `.Machine$integer.max` rows. An
+  # integer accumulator returns `NA` with a warning rather than erroring, and
+  # the `NA` is then added to EVERY reported row number below -- counts and the
+  # pass/fail verdict still look authoritative while every row pointer is gone.
+  # Doubles represent whole numbers exactly to 2^53. `dta_narrow_rows()` puts
+  # the reported row numbers back to integer whenever they still fit.
+  row_offset <- 0
   partial_scan <- FALSE
+
+  # Progress, throttled by WALL TIME rather than by batch count. Batch cost
+  # varies by orders of magnitude between files, so "every N batches" is either
+  # silent for minutes or a flood, depending on the file. The clock starts here,
+  # which is also why nothing is printed until a full interval has passed: a
+  # short scan -- and the test suite -- stay exactly as quiet as before.
+  progress_seconds <- getOption("DTAtools.progress_seconds", 30)
+  progress_start <- Sys.time()
+  progress_last <- progress_start
 
   if (isTRUE(verbose)) {
     cli::cli_h3("validating with column specs")
@@ -606,7 +633,7 @@ dta_validate_table_stream <- function(specs,
         # the frame itself, and modifying a column can drop that attribute.
         n_issues <- dta_import_error_count(issues)
         if (nrow(issues) > 0) {
-          issues$row <- issues$row + row_offset
+          issues$row <- dta_narrow_rows(issues$row + row_offset)
         }
         if (n_issues > 0) {
           dta_error_sink_add(carried_sink, issues, n_total = n_issues)
@@ -614,17 +641,34 @@ dta_validate_table_stream <- function(specs,
       }
     }
 
-    schema_result <- dta_columnspec_errors(specs, df, schemas = columnspec_schemas)
+    # `schemas`: compiled once for the whole scan rather than re-derived per
+    # batch. `summarise = FALSE`: only `full_error` is read here, and the
+    # summary is recomputed once at the end over the whole collected frame.
+    # Building it per batch was pure waste, and expensive waste -- the
+    # aggregation groups by the offending value, so a dirty batch of distinct
+    # bad cells cost seconds.
+    schema_result <- dta_columnspec_errors(
+      specs, df,
+      schemas = columnspec_schemas, summarise = FALSE
+    )
     columnspec_errs <- schema_result$full_error
     if (!is.null(columnspec_errs) && nrow(columnspec_errs) > 0) {
-      columnspec_errs$row <- columnspec_errs$row + row_offset
+      columnspec_errs$row <- dta_narrow_rows(columnspec_errs$row + row_offset)
       dta_error_sink_add(columnspec_sink, columnspec_errs)
     }
 
     # Built once per batch rather than once per rule per batch: a column read
     # numerically by several rules would otherwise be strict-converted once
     # per rule that reads it, per batch.
-    numeric_cache <- dta_build_numeric_cache(df, rules_list)
+    # `columns` is the same flattened, de-duplicated list the function would
+    # have derived itself, handed over so the per-rule clause parse behind
+    # `rule_numeric_columns` is not repeated on every batch. The function still
+    # filters it against this batch's columns, so a rule naming an absent
+    # column yields an empty cache exactly as before.
+    numeric_cache <- dta_build_numeric_cache(
+      df, rules_list,
+      columns = unique(unlist(rule_numeric_columns, use.names = FALSE))
+    )
 
     for (i in seq_along(rules_list)) {
       dta_rule_stream_update(states[[i]], rules_list[[i]], df, numeric_cache)
@@ -641,12 +685,31 @@ dta_validate_table_stream <- function(specs,
         error = function(e) NULL
       )
       if (is.data.frame(rule_errs) && nrow(rule_errs) > 0) {
-        rule_errs$row <- rule_errs$row + row_offset
+        rule_errs$row <- dta_narrow_rows(rule_errs$row + row_offset)
         dta_error_sink_add(rule_import_sink, rule_errs)
       }
     }
 
     row_offset <- row_offset + n_batch_rows
+
+    if (isTRUE(verbose) &&
+      as.numeric(difftime(Sys.time(), progress_last, units = "secs")) >= progress_seconds) {
+      progress_last <- Sys.time()
+      elapsed <- as.numeric(difftime(progress_last, progress_start, units = "secs"))
+      # A stream has no total row count, so there is deliberately no percentage
+      # and no ETA here: both would be invented, and a made-up ETA on a scan
+      # that runs for hours is worse than none.
+      rate <- if (elapsed > 0) {
+        paste0(
+          format(round(row_offset / elapsed), big.mark = ",", scientific = FALSE, trim = TRUE),
+          " rows/sec"
+        )
+      } else {
+        "rate not yet measurable"
+      }
+      rows <- format(row_offset, big.mark = ",", scientific = FALSE, trim = TRUE)
+      cli::cli_alert_info("scanned {rows} rows so far ({rate})")
+    }
 
     if (isTRUE(fail_fast) &&
       (columnspec_sink$total > 0 ||
@@ -803,11 +866,21 @@ dta_group_cond_state <- function() {
   list(
     any_true = FALSE,
     all_true = TRUE,
-    n_seen = 0L,
+    # Doubles, not integers. All three count rows, without a cap -- `n_seen`
+    # counts every row of the group, `true_n`/`false_n` every row on each side
+    # of the condition -- and the streaming path is built for files past
+    # `.Machine$integer.max` rows. Integer accumulation there yields `NA` with a
+    # warning rather than an error, and `n_seen` gone `NA` is not cosmetic:
+    # `dta_group_stream_truth()` reads `cond$n_seen > 0 && cond$all_true` for an
+    # "all" scope, so the `NA` flows through the constraint into
+    # `isTRUE(constraint_viol[[ci]][g])`, which is then `FALSE` -- a group that
+    # genuinely violates the constraint is reported as passing. Doubles
+    # represent whole numbers exactly to 2^53.
+    n_seen = 0,
     true_head = integer(0),
-    true_n = 0L,
+    true_n = 0,
     false_head = integer(0),
-    false_n = 0L
+    false_n = 0
   )
 }
 
@@ -856,7 +929,8 @@ dta_group_stream_init <- function(rule) {
 #' @param state An accumulator from `dta_group_stream_init()`.
 #' @param rule The grouped rule.
 #' @param df A data frame holding one batch.
-#' @param row_offset Integer. Rows already consumed, so row numbers are global.
+#' @param row_offset Numeric. Rows already consumed, so row numbers are global.
+#'   A double at the call site, so it stays exact past `.Machine$integer.max`.
 #' @param numeric_cache A named list from [dta_build_numeric_cache()] built for
 #'   this batch, or `NULL` to convert each column on demand.
 #' @return The accumulator, updated in place.
@@ -966,11 +1040,15 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
       true_local <- cond_true_rows[[cond_name]][[g]]
       false_local <- cond_false_rows[[cond_name]][[g]]
 
-      folded_true <- dta_group_fold_rows(cond$true_head, cond$true_n, true_local + row_offset)
+      folded_true <- dta_group_fold_rows(
+        cond$true_head, cond$true_n, dta_narrow_rows(true_local + row_offset)
+      )
       cond$true_head <- folded_true$head
       cond$true_n <- folded_true$count
 
-      folded_false <- dta_group_fold_rows(cond$false_head, cond$false_n, false_local + row_offset)
+      folded_false <- dta_group_fold_rows(
+        cond$false_head, cond$false_n, dta_narrow_rows(false_local + row_offset)
+      )
       cond$false_head <- folded_false$head
       cond$false_n <- folded_false$count
 
@@ -1246,6 +1324,43 @@ dta_table_is_lazy <- function(x) {
     inherits(x, "RecordBatchReader")
 }
 
+#' @title Column Names of a Table, However It Is Held
+#' @description
+#' The column names of a table representation, read without scanning it.
+#'
+#' The structural gate decides a missing required column from the header alone,
+#' so it has to know the columns BEFORE any row is read -- and by then the
+#' table may be an Arrow `Table`, a `Dataset`, an `arrow_dplyr_query`, a
+#' `RecordBatchReader` or a plain data frame. `names()` answers for all of
+#' them, and on a reader it reports the schema without pulling a batch, so a
+#' consumable source is not spent merely by being inspected. `names(x$schema)`
+#' is not a substitute: an `arrow_dplyr_query` has no `$schema`.
+#'
+#' Anything else yields `character(0)`, which callers read as "not knowable
+#' cheaply" and answer by scanning exactly as they always did. That is
+#' deliberately not an error: an unfamiliar holding is a reason to fall back,
+#' not a reason to fail.
+#' @param table A table representation.
+#' @return Character. The column names, or `character(0)` when they cannot be
+#'   determined cheaply.
+#' @keywords internal
+dta_table_column_names <- function(table) {
+  known <- inherits(table, "data.frame") ||
+    inherits(table, "ArrowTabular") ||
+    inherits(table, "Dataset") ||
+    inherits(table, "arrow_dplyr_query") ||
+    inherits(table, "RecordBatchReader")
+  if (!known) {
+    return(character(0))
+  }
+
+  names <- tryCatch(names(table), error = function(e) NULL)
+  if (!is.character(names)) {
+    return(character(0))
+  }
+  names
+}
+
 #' @title Validate a Table However It Is Held
 #' @description
 #' Dispatches to the streaming path for a lazy table and the materialising path
@@ -1263,7 +1378,22 @@ dta_table_is_lazy <- function(x) {
 #'   unaffected, so the totals and the pass/fail verdict stay exact even when the
 #'   retained detail is truncated, and a truncated frame is flagged as such.
 #' @param use_threads Logical. Whether Arrow's Scanner should use multiple
-#'   threads for I/O and decompression.
+#'   threads for I/O and decompression. Arrow buffers batches ahead of R in its
+#'   own C++ pool, outside the R heap, so single-threaded scanning is the lever
+#'   when RSS rather than speed is the constraint.
+#' @param fail_fast Logical. Stop at the first batch that shows any problem
+#'   instead of scanning to the end. The report is then explicitly incomplete
+#'   and carries a `partial_scan` attribute. Ignored for a table already held in
+#'   memory, which is validated in one pass.
+#' @param on_missing_column One of `"scan"` or `"stop"`. `"scan"`, the default,
+#'   preserves existing behaviour: a column the specs require but the table
+#'   lacks is reported once per row. `"stop"` decides it from the column names
+#'   alone and reads nothing.
+#'
+#'   Note this gate runs ahead of the lazy/in-memory dispatch, so unlike
+#'   `fail_fast` it applies to a materialised table as well -- the column names
+#'   are available whatever the holding. When they cannot be obtained without
+#'   consuming the table, the gate is skipped and the scan proceeds as usual.
 #' @return A validation details list.
 #' @keywords internal
 dta_validate_any_table <- function(specs,
@@ -1271,7 +1401,31 @@ dta_validate_any_table <- function(specs,
                                    verbose = FALSE,
                                    batch_rows = 131072L,
                                    max_errors = getOption("DTAtools.max_errors", 10000L),
-                                   use_threads = TRUE) {
+                                   use_threads = TRUE,
+                                   fail_fast = FALSE,
+                                   on_missing_column = c("scan", "stop")) {
+  on_missing_column <- match.arg(on_missing_column)
+
+  # The structural gate, applied here rather than only at the file entry point,
+  # so it is reachable from check() -- which is where a caller with a 60 GB
+  # table actually stands. It needs the column names before a row is read; when
+  # the holding cannot be asked for them cheaply, the gate is skipped and the
+  # scan proceeds exactly as it always did.
+  if (identical(on_missing_column, "stop")) {
+    column_names <- dta_table_column_names(table)
+    if (length(column_names) > 0) {
+      findings <- dta_structure_findings(specs, column_names)
+      if (!findings$ok) {
+        if (isTRUE(verbose)) {
+          cli::cli_alert_danger(
+            "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the table."
+          )
+        }
+        return(dta_structural_failure_details(findings))
+      }
+    }
+  }
+
   if (!dta_table_is_lazy(table)) {
     return(validate_table_detailed(specs, as.data.frame(table), verbose = verbose))
   }
@@ -1287,7 +1441,8 @@ dta_validate_any_table <- function(specs,
     reader,
     verbose = verbose,
     max_errors = max_errors,
-    coerce = TRUE
+    coerce = TRUE,
+    fail_fast = fail_fast
   )
 }
 

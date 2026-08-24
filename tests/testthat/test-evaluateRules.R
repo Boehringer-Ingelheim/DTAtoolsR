@@ -567,8 +567,10 @@ test_that("dta_as_numeric_strict separates missing from unconvertible", {
     converted$unconvertible,
     c(FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE)
   )
-  # The raw source text is kept verbatim, so an import error can quote it.
-  expect_equal(converted$raw[[2]], "ninety")
+  # The raw source text is recoverable verbatim, so an import error can quote
+  # it. It is derived from the retained source vector, not stored as a second
+  # character copy of the column.
+  expect_equal(dta_numeric_raw(converted, 2L), "ninety")
 
   # Owner decision: a value that converts but changes representation is a clean
   # conversion, not an import error. "007" -> 7 and "1.50" -> 1.5 stay clean.
@@ -581,11 +583,36 @@ test_that("dta_as_numeric_strict separates missing from unconvertible", {
 
   factor_labels <- dta_as_numeric_strict(factor(c("high", "12")))
   expect_equal(factor_labels$unconvertible, c(TRUE, FALSE))
-  expect_equal(factor_labels$raw, c("high", "12"))
+  # The raw text of a factor is its LABEL, never its integer level code -- the
+  # accessor must resolve `factor("high")` to "high" and not to "2".
+  expect_equal(dta_numeric_raw(factor_labels, c(1L, 2L)), c("high", "12"))
 
   # Numeric and logical columns are already numbers; nothing is unconvertible.
   expect_false(any(dta_as_numeric_strict(c(1, NA, 3))$unconvertible))
   expect_true(dta_as_numeric_strict(c(1, NA, 3))$missing[[2]])
+})
+
+test_that("dta_as_numeric_strict does not render the whole column as text", {
+  # Pins the v0.17.2 memory regression. The conversion used to carry a `raw`
+  # field holding `as.character()` of the entire column, even though the text is
+  # only ever read at the rows that failed to convert -- usually none. On a
+  # numeric column that character rendering was ~8x the column itself, and
+  # dta_build_numeric_cache() holds one entry per column simultaneously.
+  #
+  # What the entry may legitimately hold is the numeric values, the source
+  # vector (shared with the column, so free in reality but counted again by
+  # object.size()) and the two logical masks -- about 3x the column. The eager
+  # character copy took it past 10x, so a 4x ceiling separates the two without
+  # being brittle about vector header sizes.
+  column <- as.numeric(seq_len(50000L))
+  entry <- dta_as_numeric_strict(column)
+
+  expect_lt(
+    as.numeric(object.size(entry)),
+    4 * as.numeric(object.size(column))
+  )
+  # The source is the column itself, not a copy of it.
+  expect_identical(entry$source, column)
 })
 
 test_that("Range rules read factor labels, not factor level codes", {
@@ -1339,6 +1366,68 @@ test_that("dta_build_numeric_cache only converts columns rules read numerically"
   # A rule naming a column absent from the frame contributes nothing.
   stale_rule <- DTARuleColRange(id = "stale", columns = "GONE", range = c(0, 1))
   expect_equal(dta_build_numeric_cache(df, list(stale_rule)), list())
+})
+
+test_that("dta_build_numeric_cache(columns =) matches the columns it would derive", {
+  # The streaming driver derives the numeric columns once for the whole scan
+  # and hands them over so the per-rule clause parse is not repeated on every
+  # batch. That is only sound if the supplied list produces the identical
+  # cache, filtering included.
+  df <- data.frame(
+    AGE = c("20", "70", "ninety"),
+    SCORE = c("1.5", "", "3"),
+    NAME = c("a", "b", "c"),
+    UNUSED = c(1, 2, 3),
+    stringsAsFactors = FALSE
+  )
+
+  range_rule <- DTARuleColRange(id = "r1", columns = "AGE", range = c(18, 65))
+  score_rule <- DTARuleColRange(id = "r2", columns = "SCORE", range = c(0, 10))
+  cond_rule <- DTARuleColCondition(
+    id = "r3",
+    condition = list(NAME = list(equals = "a")),
+    then = list(AGE = list(greater = 0))
+  )
+  rules <- list(range_rule, score_rule, cond_rule)
+
+  # Precomputed exactly as the streaming driver precomputes it.
+  precomputed <- lapply(rules, function(r) {
+    tryCatch(dta_rule_numeric_columns(r), error = function(e) character(0))
+  })
+  flattened <- unique(unlist(precomputed, use.names = FALSE))
+
+  expect_identical(
+    dta_build_numeric_cache(df, rules, columns = flattened),
+    dta_build_numeric_cache(df, rules)
+  )
+
+  # A rule naming a column this frame does not have must still yield an empty
+  # cache rather than an error, whether the columns were derived or supplied.
+  stale_rule <- DTARuleColRange(id = "stale", columns = "GONE", range = c(0, 1))
+  stale_rules <- list(stale_rule)
+  stale_columns <- unique(unlist(
+    lapply(stale_rules, dta_rule_numeric_columns),
+    use.names = FALSE
+  ))
+  expect_identical(stale_columns, "GONE")
+  expect_identical(
+    dta_build_numeric_cache(df, stale_rules, columns = stale_columns),
+    dta_build_numeric_cache(df, stale_rules)
+  )
+  expect_equal(dta_build_numeric_cache(df, stale_rules, columns = stale_columns), list())
+
+  # A mixed list -- one present column, one absent -- is filtered, not rejected.
+  mixed_rules <- list(range_rule, stale_rule)
+  mixed_columns <- unique(unlist(
+    lapply(mixed_rules, dta_rule_numeric_columns),
+    use.names = FALSE
+  ))
+  mixed_cache <- dta_build_numeric_cache(df, mixed_rules, columns = mixed_columns)
+  expect_named(mixed_cache, "AGE")
+  expect_identical(mixed_cache, dta_build_numeric_cache(df, mixed_rules))
+
+  # Positional calls keep working: `columns` was appended, not inserted.
+  expect_identical(dta_build_numeric_cache(df, rules), dta_build_numeric_cache(df, rules, NULL))
 })
 
 test_that("apply_rules with the shared cache matches per-rule calls without one", {

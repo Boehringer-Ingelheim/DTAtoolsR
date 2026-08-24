@@ -4,7 +4,7 @@
 \alias{dta_columnspec_errors}
 \title{Schema-Axis Validation of a Table}
 \usage{
-dta_columnspec_errors(specs, table, schemas = NULL)
+dta_columnspec_errors(specs, table, schemas = NULL, summarise = TRUE)
 }
 \arguments{
 \item{specs}{A \code{DTAColumnSpecCollection}.}
@@ -16,10 +16,21 @@ dta_columnspec_errors(specs, table, schemas = NULL)
 Callers that validate many tables against one collection -- the streaming
 path, which calls this once per batch -- should compile once and pass the
 result in, so that the derivation costs the spec rather than the data.}
+
+\item{summarise}{Logical. Whether to also build \code{summarised_error}. The
+summary is a grouped \code{dplyr} aggregation whose cost scales with the number
+of violations \emph{and} with the cardinality of the offending values -- the
+\code{data} column is part of the grouping key, so a batch of mostly-distinct
+bad cells is the expensive case. The streaming driver reads only
+\code{full_error} from each batch and recomputes the summary once at the end
+over the collected frame, so it passes \code{FALSE} and pays for that
+aggregation once per scan instead of once per batch. Defaults to \code{TRUE},
+which is what the materialising path needs.}
 }
 \value{
 A list with \code{summarised_error} and \code{full_error}, each \code{NULL} when the
-table is valid.
+table is valid. \code{summarised_error} is always \code{NULL} when \code{summarise} is
+\code{FALSE}; the shape of the returned list is unchanged either way.
 }
 \description{
 Validates a table against its column specs, producing the same

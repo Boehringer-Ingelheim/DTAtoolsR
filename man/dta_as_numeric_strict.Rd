@@ -10,9 +10,11 @@ dta_as_numeric_strict(x)
 \item{x}{A vector taken from a table column.}
 }
 \value{
-A list with \code{values} (numeric), \code{raw} (character, the source text
-verbatim), \code{missing} (logical) and \code{unconvertible} (logical), each the same
-length as \code{x}.
+A list with \code{values} (numeric), \code{missing} (logical) and
+\code{unconvertible} (logical) -- each the same length as \code{x} -- together with
+\code{source}, which is \code{x} itself. The source text of row \code{i} is \emph{derived} from
+\code{source} on demand by \code{\link[=dta_numeric_raw]{dta_numeric_raw()}} rather than stored as a second,
+eagerly built character copy of the whole column.
 }
 \description{
 Converts a column to numeric while keeping apart the three cases that a bare

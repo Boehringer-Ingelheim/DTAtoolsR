@@ -921,6 +921,34 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       the data would. The reported \emph{counts} and the verdict are
 #'       unaffected; only how many individual failures are kept for inspection
 #'       is. Ignored for a table held in memory.}
+#'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
+#'       shows any problem instead of scanning to the end. On a table large
+#'       enough to take hours, this answers \emph{is this valid?} without paying
+#'       for a full pass -- the difference between seconds and hours when the
+#'       data fails early. The report is then explicitly incomplete: it carries a
+#'       \code{partial_scan} attribute, only rules that actually failed are
+#'       listed, and axes that could not be settled report NA rather than TRUE,
+#'       because a rule that has not failed yet has not passed. Ignored for a
+#'       table held in memory.}
+#'     \item{on_missing_column}{One of \code{"scan"} (default) or
+#'       \code{"stop"}. A column the specs require but the table lacks is
+#'       decidable from the column names alone. \code{"scan"} preserves existing
+#'       behaviour and reports the absence once per row -- which on a 60 GB table
+#'       means reading all of it to restate one fact hundreds of millions of
+#'       times. \code{"stop"} reports it structurally and reads nothing; the
+#'       result carries a \code{structural_only} attribute so no reader mistakes
+#'       it for a verdict on the rows. Falls back to scanning when the columns
+#'       cannot be determined without consuming the table.
+#'
+#'       Unlike \code{fail_fast} and \code{use_threads}, this is \emph{not}
+#'       ignored for a table held in memory: the column names are known there
+#'       too, so the gate applies to every holding.}
+#'     \item{use_threads}{Logical, default TRUE. Whether Arrow's Scanner uses
+#'       multiple threads for I/O and decompression while scanning. Arrow
+#'       buffers batches ahead of R in its own C++ pool, outside the R heap and
+#'       invisible to \code{gc()}, so FALSE is the lever to reach for when
+#'       resident memory rather than speed is what binds. Ignored for a table
+#'       held in memory.}
 #'   }
 #' @return Invisibly returns the updated \code{DTADataSetTabular} object `x`,
 #'   with \code{validation_index}/\code{validation_store} updated and a
@@ -947,8 +975,15 @@ S7::method(check, DTADataSetTabular) <- function(
   quiet = FALSE,
   validation_run = NULL,
   batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
-  max_errors = getOption("DTAtools.max_errors", 10000L)
+  max_errors = getOption("DTAtools.max_errors", 10000L),
+  fail_fast = FALSE,
+  on_missing_column = c("scan", "stop"),
+  use_threads = TRUE
 ) {
+  # Matched here rather than only downstream so a typo is reported once, before
+  # any table is touched, instead of after the first one has been scanned.
+  on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
+
   # Handle single table vs multiple tables
   if (!is.null(tab) && !is.null(tables)) {
     cli::cli_abort("Cannot specify both 'tab' and 'tables' parameters. Use 'tab' for single table, 'tables' for multiple.")
@@ -1041,7 +1076,10 @@ S7::method(check, DTADataSetTabular) <- function(
       current_table,
       verbose = !isTRUE(quiet),
       batch_rows = batch_rows,
-      max_errors = max_errors
+      max_errors = max_errors,
+      use_threads = use_threads,
+      fail_fast = fail_fast,
+      on_missing_column = on_missing_column
     )
     artifact_path <- NULL
     validated_at <- Sys.time()

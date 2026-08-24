@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-08-22
 
 ### Fixed
 
@@ -14,6 +14,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   missing `@param` descriptions to internal helpers
   `dta_validate_table_stream()`, `dta_error_sink_add()`, and
   `validate_table_detailed()`.
+
+- **The numeric conversion cache held about ten times the column it cached.**
+  `dta_as_numeric_strict()` built an `as.character()` copy of every column it
+  converted and returned it as `raw`. On a 200,000-row numeric column the
+  source was 1.53 MB and the returned entry 16.02 MB, of which the character
+  copy alone was 12.97 MB. `dta_build_numeric_cache()` holds one such entry per
+  column that any rule reads numerically, all at once, so the cost was paid per
+  column per batch — and, on the materialising path, over the whole table.
+
+  The copy was only ever read at the rows that failed to convert, which is
+  usually none of them. The conversion now keeps the *source vector* — shared,
+  not copied — and renders the text on demand at those indices through
+  `dta_numeric_raw()`. A batch of 131,072 rows across 20 numeric columns now
+  adds about 20 MB of cache instead of about 190 MB.
+
+  This regressed in 0.17.2, in the rule-evaluation speed work. That speed win
+  is untouched: it came from converting each column once per batch rather than
+  once per rule, which never depended on how the source text was obtained.
+
+- **A violating group could be reported as passing past 2.1 billion rows.**
+  Four accumulators in the streaming path were R integers, which overflow to
+  `NA` with a warning rather than an error: the driver's row offset, the
+  grouped-rule row offset, and a grouped condition's `n_seen`, `true_n` and
+  `false_n`.
+
+  The row offsets corrupted reported row numbers — every error pointed at `NA`
+  while the counts and the verdict still looked authoritative. `n_seen` was
+  worse: `dta_group_stream_truth()` evaluates `n_seen > 0 && all_true` for an
+  `"all"` scope, an overflowed `n_seen` makes that `NA`, and `isTRUE(NA)` is
+  `FALSE`, so a group that genuinely violated its constraint was silently
+  reported as passing.
+
+  All four are now doubles, which count whole numbers exactly to 2^53.
+  Reported row numbers are narrowed back to integer when they fit, so the type
+  callers see is unchanged for any realistic file. This is the same class of
+  defect fixed for the error-sink counters in 0.18.1; these are the instances
+  that fix did not reach.
 
 ### Changed
 
@@ -58,6 +95,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   batches; validation results are unchanged, which
   `tests/testthat/test-streaming-validation.R` asserts over the whole
   validation corpus.
+
+- **The streaming scan no longer summarises every batch and discards it.**
+  `dta_columnspec_errors()` always built both a per-row error frame and a
+  grouped summary of it. The streaming driver reads only the frame and
+  recomputes the summary once at the end, so every batch paid for a `dplyr`
+  grouped summarise whose result was thrown away.
+
+  The cost scales with the error frame and with how distinct the offending
+  values are, because the offending value is part of the grouping key:
+  measured at 0.318 s versus 0.006 s per call on a 10,000-row frame of
+  distinct bad values. On a dirty file at the default batch size this was tens
+  of seconds per batch. `dta_columnspec_errors()` gained a `summarise`
+  argument; the streaming driver passes `FALSE`. Both other callers are
+  unchanged.
+
+  `dta_build_numeric_cache()` gained a `columns` argument. The streaming driver
+  already computed the numeric columns once for the whole scan, but the cache
+  re-derived them from the rules on every batch, re-parsing each rule's clause
+  structure. It now uses the list that was already computed.
+
+### Added
+
+- **`check()` can reach the levers that make a very large scan survivable.**
+  `fail_fast`, `on_missing_column` and `use_threads` were documented on
+  `validate_file_stream()` and recommended for exactly this scale, but were
+  unreachable through `check()`, which is the documented entry point. All three
+  are now forwarded, with defaults that reproduce the previous behaviour
+  exactly.
+
+  `on_missing_column = "stop"` decides a missing required column from the
+  column names alone and reads nothing, instead of scanning the whole table to
+  restate the same fact once per row. It reaches the same verdict as a full
+  scan. Unlike the other two it applies to a table held in memory as well.
+
+- **Progress reporting during a scan.** A scan of a table large enough to take
+  hours previously printed one line and then nothing, making a healthy run
+  indistinguishable from a hang. When `verbose` is set, the scan now reports
+  rows read and the current rate, throttled by wall time via
+  `options(DTAtools.progress_seconds = )` (default 30) so that short runs stay
+  silent. There is no total row count for a stream, so no percentage or ETA is
+  invented.
 
 ## [0.18.2] - 2026-08-17
 

@@ -42,16 +42,18 @@ normalize_rule_type <- function(type) {
 #' Dates and date-times are converted through their own numeric representation
 #' and can never be unconvertible; they are never text that failed to parse.
 #' @param x A vector taken from a table column.
-#' @return A list with `values` (numeric), `raw` (character, the source text
-#'   verbatim), `missing` (logical) and `unconvertible` (logical), each the same
-#'   length as `x`.
+#' @return A list with `values` (numeric), `missing` (logical) and
+#'   `unconvertible` (logical) -- each the same length as `x` -- together with
+#'   `source`, which is `x` itself. The source text of row `i` is *derived* from
+#'   `source` on demand by [dta_numeric_raw()] rather than stored as a second,
+#'   eagerly built character copy of the whole column.
 #' @keywords internal
 dta_as_numeric_strict <- function(x) {
   if (inherits(x, "Date") || inherits(x, "POSIXt")) {
     values <- as.numeric(x)
     return(list(
       values = values,
-      raw = as.character(x),
+      source = x,
       missing = is.na(values),
       unconvertible = rep(FALSE, length(values))
     ))
@@ -63,12 +65,14 @@ dta_as_numeric_strict <- function(x) {
     values <- as.numeric(raw)
     return(list(
       values = values,
-      raw = as.character(raw),
+      source = x,
       missing = is.na(values),
       unconvertible = rep(FALSE, length(values))
     ))
   }
 
+  # `raw_chr` is deliberately the UNTRIMMED text: `trimmed` is what is parsed,
+  # but the text reported back to the user must be what the file actually held.
   raw_chr <- as.character(raw)
   trimmed <- trimws(raw_chr)
   # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
@@ -77,10 +81,42 @@ dta_as_numeric_strict <- function(x) {
 
   list(
     values = values,
-    raw = raw_chr,
+    source = x,
     missing = missing,
     unconvertible = is.na(values) & !missing
   )
+}
+
+#' @title The Source Text Behind a Strict Numeric Conversion
+#' @description
+#' Returns the verbatim source text of selected rows of a
+#' [dta_as_numeric_strict()] result.
+#'
+#' The conversion keeps the *source vector* rather than a character rendering of
+#' the whole column, because the text is only ever read at the handful of rows
+#' that failed to convert -- usually none. On a 200,000-row numeric column the
+#' eager character copy was 13 MB against a 1.5 MB column, and one was held per
+#' cached column simultaneously.
+#'
+#' Rendering at the index is exactly equivalent to indexing an eagerly rendered
+#' vector, branch by branch:
+#'
+#' * numeric/logical: the text was `as.character(x)`, and `as.character()` is
+#'   elementwise, so `as.character(x[i])` is the same string.
+#' * factor: the text was `as.character(x)`, which yields the *labels*, not the
+#'   integer level codes. `x[i]` on a factor is still a factor carrying its
+#'   levels, so `as.character(x[i])` is the same label.
+#' * character: the text was the **untrimmed** `as.character(x)`. `source` is
+#'   the untrimmed column, so this must stay untrimmed here too -- the trimming
+#'   applies to parsing only.
+#' * Date/POSIXt: the text was `as.character(x)`; `[` preserves the class and
+#'   the time zone, so formatting at the index is unchanged.
+#' @param entry A list returned by [dta_as_numeric_strict()].
+#' @param idx An index vector into the column.
+#' @return A character vector of the source text at `idx`.
+#' @keywords internal
+dta_numeric_raw <- function(entry, idx) {
+  as.character(entry$source[idx])
 }
 
 #' @title Build a Shared Numeric Conversion Cache for a Set of Rules
@@ -92,18 +128,30 @@ dta_as_numeric_strict <- function(x) {
 #' each of them exactly once.
 #' @param df A data.frame.
 #' @param rules A list of `DTARule` objects, or `NULL`.
+#' @param columns Character, or `NULL` (the default). The columns the rules read
+#'   numerically, when the caller has already derived them. Deriving them means
+#'   re-parsing every rule's clause structure -- for `check_col_condition` and
+#'   `check_group_condition` rules that is `dta_normalize_conditions()` over
+#'   every clause of every rule -- which is invariant across the batches of one
+#'   scan. The streaming driver computes the list once before its batch loop and
+#'   passes it here so the parse is not repeated per batch. When `NULL` the list
+#'   is derived from `rules` exactly as before. A supplied list is filtered
+#'   against `names(df)` on the same terms as a derived one, so a rule naming a
+#'   column this frame does not have still yields an empty cache.
 #' @return A named list mapping column name to the result of
 #'   `dta_as_numeric_strict()` for that column. Empty when `rules` is `NULL`,
 #'   empty, or names no columns present in `df`.
 #' @keywords internal
-dta_build_numeric_cache <- function(df, rules) {
+dta_build_numeric_cache <- function(df, rules, columns = NULL) {
   if (is.null(rules) || length(rules) == 0) {
     return(list())
   }
 
-  columns <- unique(unlist(lapply(rules, function(rule) {
-    tryCatch(dta_rule_numeric_columns(rule), error = function(e) character(0))
-  })))
+  if (is.null(columns)) {
+    columns <- unique(unlist(lapply(rules, function(rule) {
+      tryCatch(dta_rule_numeric_columns(rule), error = function(e) character(0))
+    })))
+  }
   columns <- columns[columns %in% names(df)]
 
   if (length(columns) == 0) {
@@ -714,7 +762,7 @@ dta_rule_import_errors <- function(rule, df, numeric_cache = NULL, columns = NUL
     data.frame(
       row = as.integer(offending),
       column = column,
-      raw = converted$raw[offending],
+      raw = dta_numeric_raw(converted, offending),
       # A placeholder the caller replaces with the declared type from the
       # column spec; it is the observed storage type when no spec is at hand.
       declared_type = class(df[[column]])[[1]],
