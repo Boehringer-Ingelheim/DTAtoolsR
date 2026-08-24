@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.20.1] - 2026-08-24
 
 ### Fixed
 
@@ -37,8 +37,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   predicate that both scripts turn on now lives in one place,
   `.github/scripts/ref_shape.R`, so the writer and the checker cannot drift
   apart on the one distinction the fix depends on.
-- New `manifest-dev-sha.yml` workflow re-pins `dev`'s SHA on every push, the
-  counterpart to `manifest-release-sha.yml` for `master`.
+- The deploy pin is now maintained entirely through pull requests, because
+  neither long-lived branch accepts a direct push: `dev` and `master` both
+  carry a ruleset requiring changes to arrive via PR (`master` with no bypass
+  at all), so any workflow pushing to them is rejected with `GH013`. A
+  push-triggered pinner was written first and failed on its only run; the
+  pre-existing `manifest-release-sha.yml` would have failed the same way, which
+  had never been discovered because it had never run at all.
+  - `manifest-sync.yml` now points the manifest at the branch each PR merges
+    into, pinned to that branch's tip, alongside the checksum resync it already
+    did.
+  - `manifest-release-sha.yml` opens one PR per release to supersede that with
+    the tagged commit. It cannot happen in the release PR itself: `master`
+    gains its release commit only when that PR merges, so nothing can name
+    that SHA while the PR is open.
+- The app manifest now identifies its deploy target by **branch** on both
+  branches (`dev` / `master`) rather than by release tag. Connect resolves the
+  archive URL from the SHA, not the ref, so a SHA pins strictly more precisely
+  than a tag — and a tag ref cannot be validated in the release PR that
+  introduces it, since the tag does not exist yet.
 
 ## [0.20.0] - 2026-08-24
 

@@ -43,11 +43,13 @@
 # applies to.
 #
 # `--set-deploy-sha` is not part of a version bump -- a bump commit cannot know
-# the SHA of a release commit that does not exist yet. It runs afterwards:
-# .github/workflows/manifest-release-sha.yml on `release: published` for master,
-# .github/workflows/manifest-dev-sha.yml on `push: dev` for dev.
-# `--set-deploy-ref` is rarer still -- it moves the ref itself between a tag and
-# a branch, which happens when a branch changes what it deploys, not per release.
+# the SHA of a release commit that does not exist yet. Both it and
+# `--set-deploy-ref` are driven by workflows instead:
+# .github/workflows/manifest-sync.yml points the manifest at the branch each PR
+# merges into, and .github/workflows/manifest-release-sha.yml supersedes that
+# with the release commit once a tag is published. Neither pushes to a branch --
+# `dev` and `master` both require pull requests, so a push-triggered pinner is
+# rejected outright (GH013); see manifest-sync.yml for the full reasoning.
 # `--set-release-sha` remains accepted as an alias for `--set-deploy-sha`.
 #
 # manifest.json is patched line by line rather than round-tripped through
@@ -363,8 +365,8 @@ sites <- list(
 #
 # RemoteSha/GithubSHA1 record the commit RemoteRef/GithubRef resolve to, and
 # Connect builds the package's archive URL from them. Not a bump-version site
-# (see manifest_ref_site()) -- this runs afterwards, from
-# manifest-release-sha.yml on master and manifest-dev-sha.yml on dev.
+# (see manifest_ref_site()) -- this runs afterwards, from manifest-sync.yml at
+# PR time and manifest-release-sha.yml once a release tag exists.
 #
 # The guard is that both refs agree, plus -- for a release ref only -- that they
 # read `v<DESCRIPTION Version>`, which makes "the tag exists" and "DESCRIPTION

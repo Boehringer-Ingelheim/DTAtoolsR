@@ -1,54 +1,53 @@
-# Pin the Shiny app manifest's DTAtools RemoteSha/GithubSHA1 to the commit the
-# just-published release tag actually points at.
+# Point the Shiny app manifest's DTAtools pin at the commit a published release
+# tag resolves to, by opening a pull request against `master`.
 #
-# Why this exists, and why it is a SEPARATE workflow from release.yml (which
-# builds and attaches the CRAN-style tarball). Posit Connect needs a
-# resolvable commit SHA to build the archive download URL for a
-# `Source: "github"` package; without one it crashes with
-# "argument is of length zero" on every deploy. That SHA cannot be known at
-# version-bump time -- the release commit doesn't exist yet -- so
-# bump_version.R deliberately leaves RemoteSha/GithubSHA1 absent (see its
-# manifest_ref_site() comment) and CLEARS them on every bump. This is the one
-# place that becomes possible again: the `release: published` event fires only
-# once the tag -- and the commit it points at -- already exist.
+# Why this exists. Posit Connect builds a `Source: "github"` package's archive
+# download URL from GithubSHA1. With no SHA the URL is empty and the deploy dies
+# in Connect's installer on `if (!grepl("^http", archiveUrl))` --
+# "argument is of length zero" -- before anything else is attempted. `master`
+# and `dev` are each deployed to their own Connect instance, so both need a live
+# SHA; this workflow covers `master`.
 #
-# Every release before this workflow existed needed a hand-written follow-up
-# PR to do this (#41 for v0.17.3, #43+#45 for v0.18.0), and v0.18.1 shipped
-# without one because nobody remembered. This replaces "remember to open a PR"
-# with "happens automatically when the release is published".
+# WHY A PULL REQUEST rather than a direct push. `master` carries a ruleset
+# requiring changes to arrive via pull request, with NO bypass actors at all --
+# not even repository admins. A workflow pushing to it is rejected with
+# "GH013: Repository rule violations found", whatever token it uses. The
+# previous version of this file pushed directly and would have failed on its
+# first run; it never got one, because of the default-branch trap below, so the
+# breakage stayed invisible.
 #
 # CAUTION, learned the hard way: this file only has any effect once it is on the
 # DEFAULT branch. GitHub reads `release:` and `workflow_dispatch` definitions
-# from `master`, so while it existed only on `dev` it was inert -- v0.18.1
-# shipped unpinned with this workflow already written, and `gh run list` for it
-# answered "not found on the default branch". Any change here reaches production
-# only when it lands on `master`.
+# from `master`, so while it existed only on `dev` it was inert --
+# `gh run list --workflow=manifest-release-sha.yml` answered "not found on the
+# default branch". That is why v0.18.1 shipped unpinned despite this automation
+# already being written. Any change here reaches production only when it lands
+# on `master`.
 #
-# This is the `master` half of a pair; .github/workflows/manifest-dev-sha.yml is
-# the `dev` half, pinning that branch's tip on every push. Both branches are
-# deployed to their own Connect instance, so both need a live SHA.
+# WHY IT CANNOT HAPPEN IN THE RELEASE PR ITSELF. `master` gains its release
+# commit only when that PR merges, and nothing can name that commit's SHA while
+# the PR is still open. manifest-sync.yml therefore sets a VALID pin on the
+# release PR (the previous master tip) so its CI passes, and this workflow
+# supersedes it once the tag exists. One automated PR per release -- not a
+# manual follow-up somebody has to remember, which is exactly how v0.18.1
+# shipped broken.
 #
-# Pushes straight to `master` (like manifest-sync.yml pushes to a PR branch),
-# rather than opening a PR -- there is no decision here for a reviewer to make,
-# the SHA a tag resolves to is a pure fact. This does NOT re-trigger r-style.yaml
-# (pull_request-only), so check_manifest.R's SHA-vs-tag verification will next
-# run on whatever PR next touches the manifest -- typically the following
-# release's version bump.
-#
-# Deliberately does not also update `dev`: syncing dev from master after a
-# release is already a manual reconciliation step (squash-merge conflicts),
-# and this commit rides along with the next one of those the same way any
-# other master-only release commit does.
+# The `dev` half of the pair is manifest-sync.yml, which pins at PR time. There
+# is no push-triggered pinner: the branch rulesets make one impossible.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to resolve and pin (e.g. v0.18.1)'
+        description: 'Release tag to resolve and pin (e.g. v0.20.1)'
         required: true
 
 name: manifest-release-sha
+
+permissions:
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: manifest-release-sha-${{ github.event.release.tag_name || github.event.inputs.tag }}
@@ -59,15 +58,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
-    permissions:
-      # Needed to push the SHA-pin commit straight to master.
-      contents: write
 
     steps:
-      # master's tip, not the tag: the commit this job pushes lands AFTER the
+      # master's tip, not the tag: the pin this job proposes lands AFTER the
       # tagged release commit, referencing it by SHA. fetch-depth: 0 so the tag
-      # itself (an earlier commit than this checkout's tip) is actually
-      # resolvable by `git rev-parse` below.
+      # itself (an earlier commit than this checkout's tip) is resolvable by
+      # `git rev-parse` below.
       - uses: actions/checkout@v5
         with:
           ref: master
@@ -81,17 +77,49 @@ jobs:
           }
           echo "SHA=${SHA}" >> "$GITHUB_ENV"
 
-      # base-R only, same as --sync-manifest: no package library to restore,
-      # so this finishes in seconds. See bump_version.R's header comment.
+      # base-R only, same as --sync-manifest: no package library to restore, so
+      # this finishes in seconds. See bump_version.R's header comment.
       - uses: r-lib/actions/setup-r@v2.12.1
         with:
           use-public-rspm: true
 
-      - name: Pin manifest.json's RemoteSha/GithubSHA1
-        run: Rscript .github/scripts/bump_version.R --set-deploy-sha "${SHA}"
+      # The ref is set alongside the SHA because the release PR merged `dev`'s
+      # manifest into master, and that names `dev`. Setting both here means
+      # master's manifest describes master no matter what arrived from the merge
+      # -- there is no manual re-flip step for anyone to forget.
+      - name: Point the manifest at master's release commit
+        run: |
+          Rscript .github/scripts/bump_version.R --set-deploy-ref master
+          Rscript .github/scripts/bump_version.R --set-deploy-sha "${SHA}"
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Open the pull request
+        uses: peter-evans/create-pull-request@v7
         with:
-          commit_message: "chore(release): point manifest.json at the ${{ env.TAG }} commit"
-          file_pattern: inst/shiny/dta_app/manifest.json
-          branch: master
+          token: ${{ secrets.BUMP_PAT || secrets.GITHUB_TOKEN }}
+          base: master
+          branch: manifest/pin-${{ env.TAG }}
+          delete-branch: true
+          add-paths: inst/shiny/dta_app/manifest.json
+          commit-message: "chore(release): point manifest.json at the ${{ env.TAG }} commit"
+          title: "chore(release): point manifest.json at the ${{ env.TAG }} commit"
+          body: |
+            Automated by the **manifest-release-sha** workflow when `${{ env.TAG }}`
+            was published.
+
+            `inst/shiny/dta_app/manifest.json`'s DTAtools entry now reads:
+
+            - `RemoteRef` / `GithubRef` — `master`
+            - `RemoteSha` / `GithubSHA1` — `${{ env.SHA }}`
+
+            Posit Connect builds the package's archive download URL from that SHA.
+            Until this merges, the `master` Connect instance installs DTAtools from
+            whatever the previous pin named — the release PR can only set a *valid*
+            pin, never a current one, because master's release commit does not exist
+            while that PR is open.
+
+            **Merge this to finish the release.**
+
+            > A PR opened with the default `GITHUB_TOKEN` does not trigger other
+            > workflows. Close and reopen it to run CI, or set a `BUMP_PAT` secret
+            > (fine-grained, `contents:write` + `pull-requests:write`) — the token
+            > expression above prefers it when present.
