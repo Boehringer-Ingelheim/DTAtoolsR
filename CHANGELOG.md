@@ -46,7 +46,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   had never been discovered because it had never run at all.
   - `manifest-sync.yml` now points the manifest at the branch each PR merges
     into, pinned to that branch's tip, alongside the checksum resync it already
-    did.
+    did. It skips that when the PR's *head* is itself a protected branch — the
+    `dev` → `master` release PR — since the commit is pushed to the head branch
+    and `dev` rejects pushes just as `master` does.
   - `manifest-release-sha.yml` opens one PR per release to supersede that with
     the tagged commit. It cannot happen in the release PR itself: `master`
     gains its release commit only when that PR merges, so nothing can name
