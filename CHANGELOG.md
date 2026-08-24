@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The Shiny app can be deployed to Posit Connect again.** Both `master` and
+  `dev` shipped an app manifest whose `DTAtools` entry had no `GithubSHA1` /
+  `RemoteSha`. Connect builds the package's archive download URL from that SHA,
+  so every deploy failed in Connect's installer with
+  `if (!grepl("^http", archiveUrl)) : argument is of length zero` before
+  anything else ran. `dev` was doubly broken: its `GithubRef` named `v0.20.0`,
+  a tag that was never cut.
+
+  The cause was that the version tooling assumed a release tag is the only
+  thing ever deployed. `bump_version.R` rewrote the ref to `v<version>` on
+  every bump and cleared the SHA, on the reasoning that an absent field fails
+  loudly until the release exists. That holds for `master`, deployed at a tag;
+  it does not hold for `dev`, which is deployed continuously from the branch.
+  Refs are now either release-shaped (`v1.2.3`, tracks `DESCRIPTION`, clears
+  the SHA on a bump) or a branch (left alone by a bump, since neither the ref
+  nor its SHA is invalidated by a version change).
+
+### Changed
+
+- `check_manifest.R` now **requires** `GithubSHA1` / `RemoteSha` rather than
+  treating an absent one as expected. That single exemption is why CI reported
+  the manifest healthy through the entire outage. A release ref must equal its
+  tag's commit; a branch ref must merely contain the recorded one, and how far
+  the pin trails the branch is reported without failing the build.
+- `bump_version.R` gains `--set-deploy-sha` (replacing `--set-release-sha`,
+  still accepted as an alias) and `--set-deploy-ref`. The release-vs-branch
+  predicate that both scripts turn on now lives in one place,
+  `.github/scripts/ref_shape.R`, so the writer and the checker cannot drift
+  apart on the one distinction the fix depends on.
+- New `manifest-dev-sha.yml` workflow re-pins `dev`'s SHA on every push, the
+  counterpart to `manifest-release-sha.yml` for `master`.
+
 ## [0.20.0] - 2026-08-24
 
 ### Added
