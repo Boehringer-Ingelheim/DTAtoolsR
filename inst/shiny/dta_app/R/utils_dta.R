@@ -1620,6 +1620,109 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
   })
 }
 
+# ---- Dataset metadata editing --------------------------------------------
+# The DTADataSet-level properties -- name, description and the three template_*
+# fields -- as opposed to the DOCUMENT-level DTAMetaData handled by
+# dta_set_metadata_field() above. Both are called "metadata"; they are different
+# objects, and only these belong to a single dataset.
+#
+# `type` is deliberately absent from both helpers. It is fixed by the concrete
+# class (DTADataSetTabular's constructor hardcodes "tabular",
+# DTADataSetFile's "file"), but the property itself is a plain character whose
+# validator only checks set membership -- so `ds@type <- "file"` on a tabular
+# dataset SUCCEEDS and yields an object that claims to be file-backed while
+# still carrying @specs, @tables and @import_issues. Everything downstream
+# dispatches on the S7 class, so such an object behaves as tabular while every
+# document it generates says otherwise. Changing a type means rebuilding the
+# dataset in the other class, not assigning a field, so no helper here offers
+# it and the editor shows no control for it.
+
+# The editable fields of one dataset, as a plain list the editor form pre-fills
+# from. NULL when the dataset does not exist. Every element is a length-1
+# character, "" when the property is unset -- so the form never has to reason
+# about NULL.
+dta_dataset_meta_fields <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  if (is.null(ds)) {
+    return(NULL)
+  }
+  g <- function(prop) {
+    v <- tryCatch(S7::prop(ds, prop), error = function(e) NULL)
+    if (is.null(v) || length(v) == 0) {
+      return("")
+    }
+    as.character(v)[1]
+  }
+  list(
+    name = g("name"),
+    type = g("type"),
+    description = g("description"),
+    template_source = g("template_source"),
+    template_version = g("template_version"),
+    template_date = g("template_date")
+  )
+}
+
+# Update one dataset's metadata, returning dta_try() whose value is the updated
+# DTA.
+#
+# A blank optional field UNSETS the property (NULL) rather than storing "",
+# matching dta_set_metadata_field()'s rule for the document-level fields: an
+# empty field means "not set at all", and .dta_compact() then omits it from the
+# serialized YAML entirely. `name` is not optional -- the DTADataSet validator
+# rejects an empty one -- so it is required here.
+#
+# RENAMING RE-KEYS THE DATASET LIST IN PLACE. `dta@datasets` is a named list and
+# datasets(dta, name) looks up by name, so the entry has to move; but every
+# upload slot, example picker and nav button in the app is keyed by the
+# dataset's POSITION and resolves its name only at click time. The obvious
+# `datasets[[old]] <- NULL; datasets[[new]] <- ds` moves the dataset to the end
+# of the list, after which those controls silently address the wrong dataset.
+# The replace-in-place below is what keeps them correct.
+dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
+                                 template_source = NULL, template_version = NULL,
+                                 template_date = NULL) {
+  dta_try({
+    nm <- trimws(as.character(name %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+
+    # Resolved by position rather than through datasets(dta, dataset): the
+    # position is needed anyway for the in-place replacement below, and this
+    # reports a missing dataset as one plain sentence instead of surfacing the
+    # generic's own abort.
+    all_names <- names(dta@datasets) %||% character(0)
+    pos <- match(dataset, all_names)
+    if (is.na(pos)) stop(sprintf("Dataset '%s' not found.", dataset))
+    ds <- dta@datasets[[pos]]
+
+    # Without this the named-list assignment below would overwrite the other
+    # dataset outright, destroying it with no error and no warning.
+    if (nm %in% all_names[-pos]) {
+      stop(sprintf("A dataset named '%s' already exists.", nm))
+    }
+
+    blank_to_null <- function(x) {
+      if (is.null(x) || length(x) == 0) {
+        return(NULL)
+      }
+      v <- trimws(as.character(x)[1])
+      if (is.na(v) || !nzchar(v)) NULL else v
+    }
+
+    ds@name <- nm
+    ds@description <- blank_to_null(description)
+    ds@template_source <- blank_to_null(template_source)
+    ds@template_version <- blank_to_null(template_version)
+    ds@template_date <- blank_to_null(template_date)
+
+    dsets <- dta@datasets
+    dsets[[pos]] <- ds
+    names(dsets)[pos] <- nm
+    dta@datasets <- dsets
+    dta
+  })
+}
+
 # ---- Column editing ------------------------------------------------------
 
 dta_column_ids <- function(dta, dataset) {

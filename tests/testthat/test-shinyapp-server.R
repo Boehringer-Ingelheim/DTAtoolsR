@@ -934,3 +934,167 @@ test_that("HTML validation report download handler produces parseable HTML", {
     )
   })
 })
+
+# ---- Edit -> Metadata (dataset-level) ---------------------------------------
+
+test_that("opening the metadata editor targets the active dataset and pre-fills it", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    expect_null(rv$editor_dataset)
+
+    session$setInputs(edit_meta = 1)
+
+    expect_equal(rv$editor_dataset, "clinical_data")
+    # The form pre-fills from rv$meta_prefill rather than from live inputs, so
+    # a re-render can never resurrect a stale value.
+    expect_equal(rv$meta_prefill$name, "clinical_data")
+    expect_equal(rv$meta_prefill$description, "Clinical data table")
+    expect_gt(rv$meta_token, 0)
+    expect_null(rv$meta_msg)
+  })
+})
+
+test_that("the metadata modal body renders every field, pre-filled, and no type control", {
+  # The only test that actually RENDERS this output. Everything else drives the
+  # observers with setInputs(), which never evaluates renderUI() -- so a broken
+  # modal body would pass the whole suite and fail on the user's first click.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(edit_meta = 1)
+
+    html <- as.character(output$meta_modal_body$html)
+
+    for (id in c(
+      "meta_name", "meta_description", "meta_template_source",
+      "meta_template_version", "meta_template_date", "meta_save"
+    )) {
+      expect_match(html, paste0("\"", id, "\""), fixed = TRUE)
+    }
+    # The form opens on the dataset's current values, not empty.
+    expect_match(html, "value=\"clinical_data\"", fixed = TRUE)
+    expect_match(html, "Clinical data table", fixed = TRUE)
+    # A dataset's type is fixed by its S7 class; the editor offers no way in,
+    # not even a disabled control (which would still put an id on the page).
+    expect_no_match(html, "meta_type", fixed = TRUE)
+  })
+})
+
+test_that("editing only the description leaves a passed check passed", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    expect_equal(rv$status, c(clinical_data = "pass"))
+    structure_before <- rv$structure
+
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_name = "clinical_data",
+      meta_description = "Vitals collected at every visit",
+      meta_template_source = "CDISC SDTM",
+      meta_template_version = "3.4",
+      meta_template_date = "2026-01-15"
+    )
+    session$setInputs(meta_save = 1)
+
+    expect_null(rv$meta_msg)
+    # rv$structure is left alone: output$main depends on it and nothing else,
+    # so reassigning it re-renders the entire workspace and resets the active
+    # tab and every file input. Only a rename has to pay that price.
+    expect_identical(rv$structure, structure_before)
+    expect_equal(
+      DTAtools::datasets(rv$dta, "clinical_data")@description,
+      "Vitals collected at every visit"
+    )
+    # The description and template fields take no part in validation, so
+    # clearing a green result here would be gratuitous.
+    expect_equal(rv$status, c(clinical_data = "pass"))
+    expect_match(rv$yaml_text, "CDISC SDTM", fixed = TRUE)
+  })
+})
+
+test_that("renaming a dataset migrates every piece of name-keyed state", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    expect_equal(names(rv$uploads), "clinical_data||1")
+    expect_equal(rv$active, "clinical_data")
+
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_name = "renamed_data", meta_description = "Clinical data table",
+      meta_template_source = "", meta_template_version = "", meta_template_date = ""
+    )
+    session$setInputs(meta_save = 1)
+
+    expect_null(rv$meta_msg)
+    # Stale upload keys would leave the loaded file bound to the dataset --
+    # still counted for validation and export -- while it vanished from the
+    # "Loaded files" card with no way to reach it.
+    expect_equal(names(rv$uploads), "renamed_data||1")
+    expect_equal(rv$active, "renamed_data")
+    expect_equal(rv$editor_dataset, "renamed_data")
+    expect_equal(names(rv$structure), "renamed_data")
+    expect_equal(names(rv$status), "renamed_data")
+    # The data itself travelled with the dataset.
+    expect_equal(
+      DTAtools::tables(DTAtools::datasets(rv$dta, "renamed_data")) |> names(),
+      "clinical_data"
+    )
+    expect_match(rv$yaml_text, "renamed_data", fixed = TRUE)
+  })
+})
+
+test_that("renaming a dataset clears its validation", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    expect_equal(rv$status, c(clinical_data = "pass"))
+
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_name = "renamed_data", meta_description = "",
+      meta_template_source = "", meta_template_version = "", meta_template_date = ""
+    )
+    session$setInputs(meta_save = 1)
+
+    # Every stored validation record carries the name it was checked under, so
+    # results left in place would report a dataset that no longer exists.
+    expect_equal(rv$status, c(renamed_data = "pending"))
+  })
+})
+
+test_that("a rejected metadata save leaves the workspace untouched", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_name = "   ", meta_description = "irrelevant",
+      meta_template_source = "", meta_template_version = "", meta_template_date = ""
+    )
+    session$setInputs(meta_save = 1)
+
+    expect_false(rv$meta_msg$ok)
+    expect_match(rv$meta_msg$error, "name is required")
+    # Nothing was written: the dataset keeps its name and its description.
+    expect_equal(names(rv$structure), "clinical_data")
+    expect_equal(
+      DTAtools::datasets(rv$dta, "clinical_data")@description,
+      "Clinical data table"
+    )
+  })
+})
