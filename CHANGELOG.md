@@ -4,6 +4,66 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-08-24
+
+### Added
+
+- **Datasets can be added and removed in the Shiny app.** A new
+  **+ Add dataset** button under the dataset list creates an empty dataset,
+  choosing between a **Tabular** dataset (validated column by column against a
+  specification) and a **Files** dataset (which only checks that the expected
+  files arrive). Tabular is the default. A dataset is removed through
+  **Edit → Remove dataset**, below a divider and styled as destructive because
+  it deletes the dataset and unloads its files rather than opening an editor.
+
+  A dataset's `type` is fixed when it is created. The property is a plain
+  character whose validator only checks set membership, so assigning it would
+  produce an object claiming to be file-backed while still carrying `@specs`
+  and `@tables` — everything downstream dispatches on the S7 class, not the
+  string. Changing a type therefore means adding a new dataset and removing the
+  old one, and no control offers to do it in place.
+
+  New datasets are appended to the end of the list. Every nav button, upload
+  slot and example picker is keyed by a dataset's *position* and resolves its
+  name only at click time, so appending is the one way the list can grow
+  without silently repointing an existing control at the wrong dataset.
+
+- **An Edit mode switch in the header, off by default.** Until it is turned on
+  the document is read-only: the dataset **Edit** menu is hidden, the Metadata
+  tab renders its values as plain text instead of form controls (contacts
+  included, with no add/edit/remove controls), the Raw YAML editor is read-only
+  with no **Apply changes** button, and datasets can be neither added nor
+  removed.
+
+  Every surface that writes to the specification is gated twice — the control
+  is not rendered, *and* the observer behind it re-checks. Hiding a control is
+  not sufficient on its own: an input that is off screen can still be driven
+  over the websocket, the contact observers are registered for every contact
+  the moment a document loads, and the Metadata tab's fields save through a
+  700ms debounce that would otherwise flush after the switch was already turned
+  off. Turning Edit mode off also closes any open editor and clears the dataset
+  it targeted, so a save handler armed earlier in the session cannot fire
+  against a document that has since become read-only.
+
+  What Edit mode gates is the *specification* — columns, rules, file handlers,
+  dataset and document metadata, contacts, the raw YAML, and adding or removing
+  datasets. It deliberately does not gate working with *data* against that
+  specification: loading a document, uploading and unloading files, and running
+  checks all stay available, since validating a transfer is what most users
+  open the app to do.
+
+### Fixed
+
+- **A tabular dataset with no columns can be read back after being written.**
+  `specs_from_list()` rejected an absent `columns:` key outright, while the
+  serializer omits that key entirely for a dataset that has none — so the
+  package could not parse YAML it had itself just produced. Reaching it needed
+  no new feature: deleting a dataset's last column in the column editor was
+  enough, after which **Apply changes** on the Raw YAML tab, and reloading an
+  exported document, both failed with `` `columns` must be a list. `` An absent
+  key is now read as "no columns declared", which is also what every newly
+  added dataset starts as.
+
 ## [0.20.1] - 2026-08-24
 
 ### Fixed

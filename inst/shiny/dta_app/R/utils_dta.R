@@ -1723,6 +1723,96 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
   })
 }
 
+# ---- Dataset add/remove ---------------------------------------------------
+# Whole-dataset lifecycle: creating a new, empty dataset and deleting an
+# existing one. Both return dta_try() whose value is the updated DTA, and both
+# mutate `dta@datasets` -- the same named list dta_set_dataset_meta() above
+# re-keys in place for a rename.
+
+# Create a new, empty dataset of the given `type` and append it to `dta`.
+#
+# `type` is a CREATION-TIME choice only, never revisited afterwards -- see the
+# comment above dta_set_dataset_meta() (~L1629-1637) for why the property
+# itself cannot be trusted once a dataset exists: assigning `ds@type` passes
+# its validator without changing the S7 class, so nothing downstream would
+# dispatch correctly on the new value. That is exactly why no helper in this
+# file offers a way to change an existing dataset's type -- the only route to
+# a different type is to add a new dataset and remove the old one.
+#
+# APPENDED AT THE END, never inserted anywhere else. Every nav button, upload
+# slot and example picker in the app (app.R:774-799 and nearby) is keyed by
+# the dataset's POSITION in `dta@datasets`, resolving the name only at click
+# time -- so inserting ahead of an existing entry would silently repoint those
+# controls at the wrong dataset. Appending is the one mutation that cannot do
+# that: every existing index keeps meaning exactly what it meant before. Same
+# reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
+# holds ONE index steady across a rename, here it holds every OTHER index
+# steady across the list's growth.
+dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
+  dta_try({
+    nm <- trimws(as.character(name %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+
+    all_names <- names(dta@datasets) %||% character(0)
+    if (nm %in% all_names) {
+      stop(sprintf("A dataset named '%s' already exists.", nm))
+    }
+
+    type <- tolower(trimws(as.character(type %||% "")[1]))
+    if (!type %in% c("tabular", "file")) {
+      stop(sprintf(
+        "Dataset type must be one of: %s.",
+        paste(c("tabular", "file"), collapse = ", ")
+      ))
+    }
+
+    blank_to_null <- function(x) {
+      if (is.null(x) || length(x) == 0) {
+        return(NULL)
+      }
+      v <- trimws(as.character(x)[1])
+      if (is.na(v) || !nzchar(v)) NULL else v
+    }
+    desc <- blank_to_null(description)
+
+    ds <- if (identical(type, "tabular")) {
+      DTAtools::DTADataSetTabular(
+        name = nm,
+        specs = DTAtools::DTAColumnSpecCollection(columns = list()),
+        description = desc
+      )
+    } else {
+      DTAtools::DTADataSetFile(name = nm, description = desc)
+    }
+
+    dsets <- dta@datasets
+    dsets[[nm]] <- ds
+    dta@datasets <- dsets
+    dta
+  })
+}
+
+# Remove one dataset from `dta`, resolved by position exactly like
+# dta_set_dataset_meta() resolves its `dataset` argument.
+#
+# Removing the LAST remaining dataset is ALLOWED, not refused: the app's
+# output$main renders the workspace whenever rv$structure is non-NULL, and
+# build_structure() returns list() -- not NULL -- once there are zero
+# datasets, so the workspace UI survives an empty DTA rather than falling back
+# to the landing page.
+dta_remove_dataset <- function(dta, dataset) {
+  dta_try({
+    all_names <- names(dta@datasets) %||% character(0)
+    pos <- match(dataset, all_names)
+    if (is.na(pos)) stop(sprintf("Dataset '%s' not found.", dataset))
+
+    dsets <- dta@datasets
+    dsets[[pos]] <- NULL
+    dta@datasets <- dsets
+    dta
+  })
+}
+
 # ---- Column editing ------------------------------------------------------
 
 dta_column_ids <- function(dta, dataset) {

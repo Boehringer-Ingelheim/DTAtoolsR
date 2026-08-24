@@ -7,7 +7,9 @@
 specs_from_list(columns, rules = list())
 }
 \arguments{
-\item{columns}{A list of column specification lists. Each must contain at least an \code{id}.}
+\item{columns}{A list of column specification lists. Each must contain at
+least an \code{id}. \code{NULL} or an empty list yields a collection with no
+columns.}
 
 \item{rules}{Optional list of rules.}
 }

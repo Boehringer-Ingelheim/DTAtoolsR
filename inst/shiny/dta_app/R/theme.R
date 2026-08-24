@@ -93,6 +93,24 @@ bi_css <- function() {
       border-color: rgba(255,255,255,.7);
       text-decoration: none;
     }
+    /* edit_mode_switch()'s bslib::input_switch() wraps its checkbox+label in
+       Bootstrap layout containers built for a standalone form
+       (container-fluid > form-group), not for sitting inline among the
+       brand-link pills here. Flatten those wrappers to auto width with no
+       block margin, then center the switch itself on the same line and
+       give its label the same white, .82rem/1.2 treatment as the pills next
+       to it so the two read as one row of actions, not a form floating in
+       the brandbar. */
+    .app-actions .container-fluid { padding: 0; width: auto; }
+    .app-actions .form-group { margin-bottom: 0; }
+    .app-actions .form-switch {
+      display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 0;
+    }
+    .app-actions .form-switch .form-check-input { margin: 0; cursor: pointer; }
+    .app-actions .form-switch .form-check-label {
+      color: #fff; font-weight: 600; font-size: .82rem; line-height: 1.2;
+      white-space: nowrap; cursor: pointer;
+    }
     @media (max-width: 900px) {
       .app-brandbar { flex-wrap: wrap; }
       .app-actions {
@@ -101,6 +119,9 @@ bi_css <- function() {
         justify-content: flex-start;
         flex-wrap: wrap;
       }
+      /* Keep the switch at its own intrinsic size instead of stretching or
+         shrinking when the actions row wraps onto a second line. */
+      .app-actions .form-switch { flex: 0 0 auto; }
     }
 
     /* Status chips */
@@ -349,6 +370,22 @@ bi_css <- function() {
       color: var(--bi-green-dark);
     }
     .ds-edit-desc { font-size: .78rem; color: var(--bi-grey); line-height: 1.3; }
+    /* Remove dataset: the one destructive row below the divider, colored
+       like the app's other danger affordances (btn-outline-danger,
+       .file-remove) so it reads as delete rather than a fifth editor, even
+       before the divider above it registers. Same specificity as the
+       .ds-edit-item rules above (one class + :hover), so source order alone
+       -- these coming after -- is what makes the danger tint win. */
+    .ds-edit-item-danger .ds-edit-title { color: var(--bi-fail); }
+    .ds-edit-item-danger:hover,
+    .ds-edit-item-danger:focus,
+    .ds-edit-item-danger:active {
+      background: var(--bi-fail-bg);
+    }
+    .ds-edit-item-danger:hover .ds-edit-title,
+    .ds-edit-item-danger:focus .ds-edit-title {
+      color: var(--bi-fail);
+    }
 
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }
@@ -395,6 +432,25 @@ bi_css <- function() {
     .contact-item { cursor: pointer; }
     .contact-item:hover { background: var(--bi-green-light); }
     .contact-item .contact-edit-ic { color: var(--bi-grey); font-size: .78rem; margin-left: 8px; white-space: nowrap; }
+
+    /* meta_field_text(): the read-only counterpart of a textInput() /
+       textAreaInput(), shown on the Metadata tab while edit mode is off.
+       Sized to Bootstrap's own .form-label / .form-control rhythm (.5rem
+       label margin, 1rem/1.5 value text with .375rem vertical padding
+       standing in for the control's border) so the tab occupies the same
+       vertical space either way and does not visibly jump when the switch
+       flips the fields between plain text and inputs. white-space:pre-wrap
+       on the value because one of the fields it replaces is a
+       textAreaInput(), whose value can contain newlines that a plain
+       (nowrap) block would otherwise collapse. */
+    .md-ro-field { margin-bottom: 1rem; }
+    .md-ro-label {
+      margin-bottom: .5rem; font-size: .875rem; font-weight: 600; color: var(--bi-grey);
+    }
+    .md-ro-value {
+      font-size: 1rem; line-height: 1.5; color: var(--bi-ink);
+      padding: .375rem 0; white-space: pre-wrap; word-break: break-word;
+    }
 
     /* Example-file picker: the drop zone with a dashed 'Load an example file'
        button to its RIGHT, styled to match the dashed filedrop tile. */

@@ -28,6 +28,33 @@ test_that("the Edit menu offers columns, rules, files and metadata in that order
   expect_false(is.unsorted(positions))
 })
 
+test_that("Remove dataset is present and appears after Metadata", {
+  html <- render_html(app_fn("ds_edit_menu")())
+
+  meta_pos <- regexpr("id=\"edit_meta\"", html, fixed = TRUE)[[1]]
+  remove_pos <- regexpr("id=\"remove_dataset\"", html, fixed = TRUE)[[1]]
+
+  expect_true(meta_pos > 0)
+  expect_true(remove_pos > 0)
+  expect_true(remove_pos > meta_pos)
+})
+
+test_that("a divider separates Remove dataset from the four editors", {
+  # The divider (plus the danger styling on the row itself, asserted at the
+  # CSS level in theme.R) is what keeps a destructive action from reading
+  # like a fifth, equally-reversible editor -- assert it sits strictly
+  # between the last editor row and the destructive one, not merely present
+  # somewhere in the menu.
+  html <- render_html(app_fn("ds_edit_menu")())
+
+  meta_pos <- regexpr("id=\"edit_meta\"", html, fixed = TRUE)[[1]]
+  divider_pos <- regexpr("dropdown-divider", html, fixed = TRUE)[[1]]
+  remove_pos <- regexpr("id=\"remove_dataset\"", html, fixed = TRUE)[[1]]
+
+  expect_true(divider_pos > meta_pos)
+  expect_true(divider_pos < remove_pos)
+})
+
 test_that("the Metadata row carries both bindings and names what it edits", {
   html <- render_html(app_fn("ds_edit_menu")())
 

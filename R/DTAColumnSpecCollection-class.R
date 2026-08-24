@@ -330,7 +330,9 @@ import_specs_from_yaml <- function(file) {
 #' Supports both named and unnamed lists of column specifications.
 #'
 #' @importFrom cli cli_abort
-#' @param columns A list of column specification lists. Each must contain at least an `id`.
+#' @param columns A list of column specification lists. Each must contain at
+#'   least an `id`. `NULL` or an empty list yields a collection with no
+#'   columns.
 #' @param rules Optional list of rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
@@ -348,6 +350,14 @@ specs_from_list <- function(
   columns,
   rules = list()
 ) {
+  # An absent `columns:` key means "no columns declared", not an error. The
+  # serializer omits the key entirely for a dataset with none, so rejecting
+  # NULL here made the package unable to read YAML it had itself just written --
+  # reachable by deleting a dataset's last column, and by every newly added
+  # dataset, which starts empty.
+  if (is.null(columns)) {
+    columns <- list()
+  }
   if (!is.list(columns)) {
     cli::cli_abort("`columns` must be a list.")
   }

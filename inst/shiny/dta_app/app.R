@@ -23,6 +23,7 @@ brandbar <- div(
   ),
   div(
     class = "app-actions",
+    edit_mode_switch(),
     tags$a(
       class = "brand-link",
       href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues",
@@ -288,7 +289,49 @@ server <- function(input, output, session) {
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
     template_def = NULL, # active creation-template definition (modal flow)
-    template_path = NULL # source path of active creation-template
+    template_path = NULL, # source path of active creation-template
+    add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
+    add_ds_token = 0 # bump to re-render the add-dataset modal body
+  )
+
+  # The single gate for every editing surface. Off by default: input_switch() is
+  # created with value = FALSE, and isTRUE(NULL) is FALSE, so the app is
+  # read-only from the first frame -- before the client has reported anything.
+  #
+  # Each surface is gated TWICE: its control is not rendered, and the observer
+  # behind it calls req(editing()). The render is the affordance; the observer
+  # guard is what actually holds, since an input that is not on screen can still
+  # be driven over the websocket. For the Metadata tab the guard is load-bearing
+  # for a second reason -- see save_md() below.
+  #
+  # WHAT IT GATES is the SPECIFICATION: columns, rules, file handlers, dataset
+  # metadata, document metadata, contacts, the raw YAML, and adding or removing
+  # datasets. Every observer that writes one of those calls req(editing()).
+  #
+  # WHAT IT DELIBERATELY DOES NOT GATE is working with DATA against that
+  # specification: loading a document, uploading and unloading files, running
+  # checks, restoring a session, and Start over. Read-only is about not being
+  # able to change what the document SAYS, not about being unable to use it --
+  # gating uploads or checks would make the app's default mode useless, since
+  # validating a transfer is the thing most users open it to do.
+  editing <- reactive(isTRUE(input$edit_mode))
+
+  # Turning Edit mode off closes whatever editor was open and disarms it.
+  #
+  # The file/column/rule/dataset-metadata save handlers resolve their target
+  # from rv$editor_dataset, which is set when an editor is opened and otherwise
+  # cleared only by a rename or a removal. Without this, an editor opened once
+  # would leave those handlers addressable for the rest of the session. They
+  # each re-check editing() as well -- this is what stops a modal from sitting
+  # open, apparently editable, over a document that has just gone read-only.
+  observeEvent(editing(),
+    {
+      if (!editing()) {
+        rv$editor_dataset <- NULL
+        removeModal()
+      }
+    },
+    ignoreInit = TRUE
   )
 
   upload_registry <- new.env(parent = emptyenv())
@@ -796,6 +839,159 @@ server <- function(input, output, session) {
         })
       }
     }
+  })
+
+  # --- add / remove a whole dataset ---------------------------------------
+  # Both are gated on Edit mode twice over: the control is only rendered while
+  # editing() is TRUE, and the observer behind it re-checks. See editing().
+
+  output$add_dataset_ui <- renderUI({
+    if (!editing()) {
+      return(NULL)
+    }
+    actionButton("add_dataset_open", "+ Add dataset",
+      class = "btn btn-outline-primary w-100",
+      style = "margin-bottom: 6px;"
+    )
+  })
+
+  observeEvent(input$add_dataset_open, {
+    req(editing())
+    rv$add_ds_msg <- NULL
+    rv$add_ds_token <- rv$add_ds_token + 1
+    showModal(modalDialog(
+      title = "Add a dataset",
+      uiOutput("add_ds_body"),
+      easyClose = TRUE,
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("add_ds_save", "Add dataset", class = "btn btn-primary")
+      )
+    ))
+  })
+
+  output$add_ds_body <- renderUI({
+    rv$add_ds_token
+    tagList(
+      textInput("add_ds_name", "Name",
+        value = "", width = "100%",
+        placeholder = "e.g. demographics"
+      ),
+      radioButtons("add_ds_type", "Type",
+        choices = c("Tabular" = "tabular", "Files" = "file"),
+        selected = "tabular"
+      ),
+      div(
+        class = "msg-hint",
+        HTML("A <b>Tabular</b> dataset is validated column by column against a specification you define. A <b>Files</b> dataset only checks that the expected files arrive. The type is fixed once the dataset is created — to change it, add a new dataset and remove this one.")
+      ),
+      uiOutput("add_ds_msg")
+    )
+  })
+
+  output$add_ds_msg <- renderUI({
+    m <- rv$add_ds_msg
+    if (is.null(m) || isTRUE(m$ok)) {
+      return(NULL)
+    }
+    div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+  })
+
+  observeEvent(input$add_ds_save, {
+    req(editing())
+    r <- dta_add_dataset(
+      isolate(rv$dta),
+      name = input$add_ds_name,
+      type = input$add_ds_type %||% "tabular"
+    )
+    if (!isTRUE(r$ok)) {
+      # The modal stays open with everything the user typed still in it, and
+      # nothing in rv changes -- the same contract as meta_save() below.
+      # Deliberately NOT bumping rv$add_ds_token here: that is add_ds_body's
+      # only dependency, and re-rendering would reset the name field to "" and
+      # the type back to "tabular", making the user retype a name they can see
+      # is wrong rather than correct it in place. output$add_ds_msg reacts to
+      # rv$add_ds_msg on its own, so the error still appears.
+      rv$add_ds_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+    nm <- trimws(as.character(input$add_ds_name)[1])
+    rv$dta <- r$value
+    # build_structure() is what registers the new dataset's nav and upload
+    # observers, so it has to run before anything can address the new slot.
+    rv$structure <- build_structure(rv$dta)
+    st <- rv$status
+    st[[nm]] <- "nodata"
+    rv$status <- st
+    rv$active <- nm
+    rv$add_ds_msg <- NULL
+    sync_yaml_text()
+    removeModal()
+    showNotification(sprintf("Dataset '%s' added.", nm), type = "message")
+  })
+
+  observeEvent(input$remove_dataset, {
+    req(editing())
+    req(rv$active)
+    ed <- rv$active
+    n_files <- length(dta_dataset_table_names(dta_get_dataset(rv$dta, ed)))
+    showModal(modalDialog(
+      title = "Remove this dataset?",
+      div(
+        # tags$b() rather than HTML(sprintf(...)): the name is user-supplied and
+        # htmltools escapes a plain string, so a dataset called "<b>x" cannot
+        # inject markup here.
+        tags$p("Dataset ", tags$b(ed), " and its specification will be removed from the document."),
+        if (n_files > 0) {
+          div(class = "msg-hint", sprintf(
+            "%d loaded file%s will be unloaded with it.",
+            n_files, if (n_files == 1) "" else "s"
+          ))
+        }
+      ),
+      easyClose = TRUE,
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("remove_dataset_confirm", "Remove", class = "btn btn-danger")
+      )
+    ))
+  })
+
+  observeEvent(input$remove_dataset_confirm, {
+    req(editing())
+    ed <- isolate(rv$active)
+    req(ed)
+    r <- dta_remove_dataset(isolate(rv$dta), ed)
+    if (!isTRUE(r$ok)) {
+      showNotification(paste("Could not remove dataset —", r$error),
+        type = "error", duration = 10
+      )
+      return()
+    }
+    rv$dta <- r$value
+
+    # The same state rename_dataset_state() re-keys for a rename, dropped
+    # instead: uploads keyed "<dataset>||<handlerIdx>", the minted file ids, the
+    # status entry, and any modal still pointing at this dataset.
+    up <- rv$uploads
+    keys <- names(up) %||% character(0)
+    hit <- startsWith(keys, paste0(ed, "||"))
+    if (any(hit)) rv$uploads <- up[!hit]
+
+    purge_file_ids(ed)
+
+    st <- rv$status
+    if (ed %in% names(st)) rv$status <- st[setdiff(names(st), ed)]
+
+    if (identical(rv$editor_dataset, ed)) rv$editor_dataset <- NULL
+
+    rv$structure <- build_structure(rv$dta)
+    remaining <- names(rv$structure)
+    rv$active <- if (length(remaining) > 0) remaining[[1]] else NULL
+
+    sync_yaml_text()
+    removeModal()
+    showNotification(sprintf("Dataset '%s' removed.", ed), type = "message")
   })
 
   # --- upload observers (registered once per handler) ---------------------
@@ -1420,6 +1616,7 @@ server <- function(input, output, session) {
   # Unloading before removing keeps every intermediate object valid, the same
   # ordering dta_unload_table() itself relies on.
   do_remove_handler <- function(ed, idx, tables) {
+    req(editing())
     n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
     for (tbl in tables) {
       r <- dta_unload_table(rv$dta, ed, tbl)
@@ -1452,6 +1649,7 @@ server <- function(input, output, session) {
   }
 
   move_handler <- function(idx, direction) {
+    req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
     n <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
@@ -1542,6 +1740,7 @@ server <- function(input, output, session) {
   # buttons by the handler's POSITION -- so every mutation goes through
   # after_handler_change(), which re-keys that state before anything re-renders.
   observeEvent(input$edit_files, {
+    req(editing())
     req(rv$active)
     rv$editor_dataset <- rv$active
     rv$file_view <- "list"
@@ -1804,6 +2003,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$file_save, {
+    req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
     # Both text areas are one entry per line; dta_set_handler() does the split.
@@ -1846,6 +2046,7 @@ server <- function(input, output, session) {
   # is ever open. rv$col_view drives which view renders; rv$col_token forces a
   # re-render. The form pre-fills from rv$col_prefill (never stale inputs).
   observeEvent(input$edit_cols, {
+    req(editing())
     req(rv$active)
     rv$editor_dataset <- rv$active
     rv$col_view <- "list"
@@ -2013,6 +2214,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$col_del_click, {
+    req(editing())
     idx <- as.integer(input$col_del_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -2033,6 +2235,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$col_up_click, {
+    req(editing())
     idx <- as.integer(input$col_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -2052,6 +2255,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$col_down_click, {
+    req(editing())
     idx <- as.integer(input$col_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -2071,6 +2275,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$col_save, {
+    req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
     id <- trimws(input$col_id %||% "")
@@ -2542,6 +2747,7 @@ server <- function(input, output, session) {
   # A single modal with two swappable views (list <-> form) so only ONE popup is
   # ever open. rv$rule_view drives the view; rv$rule_token forces re-renders.
   observeEvent(input$edit_rules, {
+    req(editing())
     req(rv$active)
     rv$editor_dataset <- rv$active
     rv$rule_view <- "list"
@@ -2824,6 +3030,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$rule_del_click, {
+    req(editing())
     idx <- as.integer(input$rule_del_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -2843,6 +3050,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$rule_up_click, {
+    req(editing())
     idx <- as.integer(input$rule_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -2861,6 +3069,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$rule_down_click, {
+    req(editing())
     idx <- as.integer(input$rule_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -3003,6 +3212,7 @@ server <- function(input, output, session) {
   )
 
   observeEvent(input$rule_save, {
+    req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
     id <- trimws(input$rule_id %||% "")
@@ -3128,6 +3338,7 @@ server <- function(input, output, session) {
   }
 
   observeEvent(input$edit_meta, {
+    req(editing())
     req(rv$active)
     rv$editor_dataset <- rv$active
     rv$meta_prefill <- dta_dataset_meta_fields(rv$dta, rv$active)
@@ -3208,6 +3419,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$meta_save, {
+    req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
     r <- dta_set_dataset_meta(
@@ -3827,25 +4039,51 @@ server <- function(input, output, session) {
       v <- tr[[k]]
       if (is.null(v)) "" else if (inherits(v, "Date")) format(v, "%Y-%m-%d") else as.character(v)[1]
     }
+    # Read-only renders static text instead of form controls. Only the LEAF
+    # controls swap; every div, layout_columns, card and section title below is
+    # shared, so the tab keeps its shape when the switch flips and there is one
+    # layout to maintain rather than two.
+    #
+    # editing() is deliberately NOT isolated -- this render has to re-run when
+    # the switch changes. rv$dta stays isolated, as before, so typing in a field
+    # still does not rebuild the form under the cursor.
+    ro <- !editing()
+    f_text <- function(id, label, value, ...) {
+      if (ro) meta_field_text(label, value) else textInput(id, label, value = value, ...)
+    }
+    f_area <- function(id, label, value, ...) {
+      if (ro) meta_field_text(label, value) else textAreaInput(id, label, value = value, ...)
+    }
     tagList(
       md_import_ui,
       div(class = "md-section-title", "Document"),
       layout_columns(
         col_widths = c(6, 6),
-        textInput("md_title", "Title", value = getf("title"), width = "100%"),
-        textInput("md_version", "Version", value = getf("version"), width = "100%")
+        f_text("md_title", "Title", getf("title"), width = "100%"),
+        f_text("md_version", "Version", getf("version"), width = "100%")
       ),
       layout_columns(
         col_widths = c(6, 6),
         # Optional date: a native dateInput shows TODAY when value = NULL, so to
         # render an EMPTY picker for an unset date we pass NA (-> empty
         # data-initial-date). suppressWarnings() hides the NA->date coercion note.
-        suppressWarnings(dateInput(
-          "md_date", "Date",
-          value = if (inherits(date_val, "Date") && !is.na(date_val)) date_val else NA,
-          width = "100%"
-        )),
-        textInput("md_header", "Header / organization", value = getf("header"), width = "100%")
+        if (ro) {
+          meta_field_text(
+            "Date",
+            if (inherits(date_val, "Date") && !is.na(date_val)) {
+              format(date_val, "%Y-%m-%d")
+            } else {
+              ""
+            }
+          )
+        } else {
+          suppressWarnings(dateInput(
+            "md_date", "Date",
+            value = if (inherits(date_val, "Date") && !is.na(date_val)) date_val else NA,
+            width = "100%"
+          ))
+        },
+        f_text("md_header", "Header / organization", getf("header"), width = "100%")
       ),
       tags$hr(),
       div(class = "md-section-title", "Parties"),
@@ -3861,7 +4099,7 @@ server <- function(input, output, session) {
               class = "section-label",
               style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
               tags$span("Contacts"),
-              actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")
+              if (!ro) actionButton("add_receiver", "Add person", class = "btn btn-sm btn-outline-primary")
             ),
             uiOutput("receiver_contacts")
           )
@@ -3876,7 +4114,7 @@ server <- function(input, output, session) {
               class = "section-label",
               style = "display:flex; justify-content:space-between; align-items:center; gap:8px;",
               tags$span("Contacts"),
-              actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")
+              if (!ro) actionButton("add_supplier", "Add person", class = "btn btn-sm btn-outline-primary")
             ),
             uiOutput("supplier_contacts")
           )
@@ -3886,60 +4124,86 @@ server <- function(input, output, session) {
       div(class = "md-section-title", "Transmission"),
       layout_columns(
         col_widths = c(4, 4, 4),
-        textInput("tr_type", "Type",
-          value = trf("type"), width = "100%",
+        f_text("tr_type", "Type",
+          trf("type"), width = "100%",
           placeholder = "e.g. secure S3 bucket"
         ),
-        textInput("tr_frequency", "Frequency",
-          value = trf("frequency"), width = "100%",
+        f_text("tr_frequency", "Frequency",
+          trf("frequency"), width = "100%",
           placeholder = "e.g. one-time, weekly"
         ),
-        textInput("tr_notification", "Notification",
-          value = trf("notification"), width = "100%",
+        f_text("tr_notification", "Notification",
+          trf("notification"), width = "100%",
           placeholder = "e.g. email"
         )
       ),
       layout_columns(
         col_widths = c(6, 6),
-        textInput("tr_date_first", "Date of first transfer",
-          value = trf("date_first_transfer"),
+        f_text("tr_date_first", "Date of first transfer",
+          trf("date_first_transfer"),
           width = "100%", placeholder = "YYYY-MM-DD or phrase"
         ),
-        textInput("tr_date_last", "Date of last transfer",
-          value = trf("date_last_transfer"),
+        f_text("tr_date_last", "Date of last transfer",
+          trf("date_last_transfer"),
           width = "100%", placeholder = "YYYY-MM-DD or phrase"
         )
       ),
       layout_columns(
         col_widths = c(6, 6),
-        selectInput("tr_test_upload", "Test upload",
-          choices = c("undefined", "yes", "no"),
-          selected = dta_flag_to_choice(tr$test_upload), width = "100%"
-        ),
-        selectInput("tr_blinded", "Blinded transfer",
-          choices = c("undefined", "yes", "no"),
-          selected = dta_flag_to_choice(tr$blinded_transfer), width = "100%"
-        )
+        # Read-only shows the CHOICE ("undefined" / "yes" / "no"), which is
+        # exactly what dta_flag_to_choice() already returns, rather than the
+        # underlying flag.
+        if (ro) {
+          meta_field_text("Test upload", dta_flag_to_choice(tr$test_upload))
+        } else {
+          selectInput("tr_test_upload", "Test upload",
+            choices = c("undefined", "yes", "no"),
+            selected = dta_flag_to_choice(tr$test_upload), width = "100%"
+          )
+        },
+        if (ro) {
+          meta_field_text("Blinded transfer", dta_flag_to_choice(tr$blinded_transfer))
+        } else {
+          selectInput("tr_blinded", "Blinded transfer",
+            choices = c("undefined", "yes", "no"),
+            selected = dta_flag_to_choice(tr$blinded_transfer), width = "100%"
+          )
+        }
       ),
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
-      textAreaInput("md_error_handling", "Error handling",
-        value = getf("error_handling"), width = "100%", rows = 2,
+      f_area("md_error_handling", "Error handling",
+        getf("error_handling"), width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
-      textInput("md_authorized", "Authorized for corrections",
-        value = getf("authorized_for_corrections"), width = "100%",
+      f_text("md_authorized", "Authorized for corrections",
+        getf("authorized_for_corrections"), width = "100%",
         placeholder = "Contact(s) authorized to request corrections"
       ),
-      div(
-        class = "msg-hint",
-        "Changes are saved automatically to the current session as you type."
-      )
+      # Only true while editing; in read-only there is nothing to save.
+      if (!ro) {
+        div(
+          class = "msg-hint",
+          "Changes are saved automatically to the current session as you type."
+        )
+      }
     )
   })
 
   # per-field debounced saves (incremental, non-destructive)
+  #
+  # req(editing()) here is the server half of the read-only gate. The controls
+  # not being rendered is not sufficient on its own: these fields save through a
+  # 700ms debounce, so a value typed just before the switch is flipped off still
+  # flushes afterwards, and an input driven straight over the websocket arrives
+  # whatever is on screen. Both write into the document without this.
+  #
+  # (An input going NULL when its control stops rendering is already harmless --
+  # observeEvent() defaults to ignoreNULL = TRUE, so the debounced observers
+  # below never fire on it. The guard is about non-NULL values arriving while
+  # the document is meant to be read-only.)
   save_md <- function(field, value) {
+    req(editing())
     req(rv$dta)
     r <- dta_set_metadata_field(rv$dta, field, value)
     if (r$ok) {
@@ -3954,6 +4218,7 @@ server <- function(input, output, session) {
     }
   }
   save_tr <- function(field, value) {
+    req(editing()) # same reasoning as save_md() above
     req(rv$dta)
     r <- dta_set_transmission_field(rv$dta, field, value)
     if (r$ok) {
@@ -4039,12 +4304,25 @@ server <- function(input, output, session) {
 
   render_contacts <- function(side) {
     cs <- dta_contacts(isolate(rv$dta), side)
+    ro <- !editing()
     if (length(cs) == 0) {
-      return(div(class = "msg-hint", "No contacts yet. Click \u201cAdd person\u201d to create one."))
+      # Read-only has no "Add person" button to point at, so the empty state
+      # must not tell the user to click one.
+      return(div(class = "msg-hint", if (ro) {
+        "No contacts."
+      } else {
+        "No contacts yet. Click \u201cAdd person\u201d to create one."
+      }))
     }
     tags$ul(
       class = "list-group",
       lapply(seq_along(cs), function(i) {
+        if (ro) {
+          return(tags$li(
+            class = "list-group-item contact-item",
+            span(contact_display(cs[[i]]))
+          ))
+        }
         tags$li(
           class = "list-group-item contact-item d-flex justify-content-between align-items-center",
           actionLink(
@@ -4067,6 +4345,7 @@ server <- function(input, output, session) {
 
   # Open a pre-filled modal to edit one contact's details.
   edit_contact_flow <- function(side, index) {
+    req(editing())
     p <- dta_contact_at(isolate(rv$dta), side, index)
     if (is.null(p)) {
       return()
@@ -4088,6 +4367,7 @@ server <- function(input, output, session) {
   }
 
   observeEvent(input$confirm_edit_contact, {
+    req(editing())
     ec <- rv$editing_contact
     req(ec)
     nm <- trimws(input$edit_contact_name %||% "")
@@ -4131,19 +4411,23 @@ server <- function(input, output, session) {
   render_affiliation <- function(side) {
     aff <- dta_affiliation(isolate(rv$dta), side)
     g <- function(k) aff[[k]] %||% ""
+    # Same leaf-swap rule as the metadata form above: the layout is shared, only
+    # the controls differ. Reading editing() here is also what gives the two
+    # renderUI wrappers below their dependency on the switch.
+    ro <- !editing()
+    ff <- function(id, label, value, ...) {
+      if (ro) meta_field_text(label, value) else textInput(id, label, value = value, ...)
+    }
     tagList(
-      textInput(paste0(side, "_aff_name"), "Organization",
-        value = g("name"), width = "100%",
+      ff(paste0(side, "_aff_name"), "Organization",
+        g("name"),
+        width = "100%",
         placeholder = "e.g. Test Company"
       ),
       layout_columns(
         col_widths = c(6, 6),
-        textInput(paste0(side, "_aff_country"), "Country",
-          value = g("country"), width = "100%"
-        ),
-        textInput(paste0(side, "_aff_address"), "Address",
-          value = g("address"), width = "100%"
-        )
+        ff(paste0(side, "_aff_country"), "Country", g("country"), width = "100%"),
+        ff(paste0(side, "_aff_address"), "Address", g("address"), width = "100%")
       )
     )
   }
@@ -4159,6 +4443,7 @@ server <- function(input, output, session) {
   })
 
   save_affiliation <- function(side, field, value) {
+    req(editing()) # same reasoning as save_md() above
     req(rv$dta)
     kv <- list()
     kv[[field]] <- value %||% ""
@@ -4223,6 +4508,7 @@ server <- function(input, output, session) {
             )
             observeEvent(input[[paste0("confirm_", ID)]],
               {
+                req(editing())
                 r <- dta_remove_contact(rv$dta, SIDE, IDX)
                 if (r$ok) {
                   rv$dta <- r$value
@@ -4260,6 +4546,7 @@ server <- function(input, output, session) {
   observeEvent(input$add_supplier, add_contact_flow("supplier"))
 
   confirm_add <- function(side) {
+    req(editing())
     nm <- trimws(input$new_contact_name %||% "")
     if (!nzchar(nm)) {
       showNotification("A name is required.", type = "warning")
@@ -4316,7 +4603,46 @@ server <- function(input, output, session) {
     rv$yaml_msg <- NULL
   })
 
+  # The Raw YAML tab is a full-document write path, so it is gated like every
+  # other editing surface: the buttons are not rendered, the Ace editor is put
+  # into readOnly, and the apply observer re-checks.
+  output$yaml_edit_hint <- renderUI({
+    if (!editing()) {
+      return(div(
+        class = "msg-hint",
+        HTML("This document is <b>read-only</b>. Turn on <b>Edit mode</b> (top right) to change it.")
+      ))
+    }
+    div(
+      class = "msg-hint",
+      HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Loaded files are kept, including when you edit <code>files:</code>, as long as the dataset still has a slot to show them under; files belonging to a slot you deleted are unloaded with it. A dataset's validation is cleared whenever its files, columns or rules changed, and deleted datasets drop everything.")
+    )
+  })
+
+  output$yaml_edit_actions <- renderUI({
+    if (!editing()) {
+      return(NULL)
+    }
+    div(
+      class = "yaml-edit-actions",
+      actionButton("apply_yaml", "Apply changes", class = "btn btn-sm btn-primary"),
+      actionButton("revert_yaml", "Revert", class = "btn btn-sm btn-outline-secondary")
+    )
+  })
+
+  observe({
+    ro <- !editing()
+    if (requireNamespace("shinyAce", quietly = TRUE)) {
+      shinyAce::updateAceEditor(session, "raw_yaml_editor", readOnly = ro)
+    } else if (ro) {
+      shinyjs::disable("raw_yaml_editor")
+    } else {
+      shinyjs::enable("raw_yaml_editor")
+    }
+  })
+
   observeEvent(input$apply_yaml, {
+    req(editing())
     txt <- input$raw_yaml_editor %||% ""
     if (!nzchar(trimws(txt))) {
       rv$yaml_msg <- list(ok = FALSE, error = "The editor is empty — nothing to apply.")
@@ -5021,7 +5347,11 @@ server <- function(input, output, session) {
         actionButton("check_one", "Check this dataset",
           class = "btn btn-primary"
         ),
-        ds_edit_menu(),
+        # Editing the specification is gated on Edit mode; checking it and
+        # exporting it are not, so those two stay put and only the menu between
+        # them appears and disappears. div() drops a NULL child, so nothing else
+        # in this row has to know.
+        if (editing()) ds_edit_menu(),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
           class = "btn btn-outline-primary",
           title = "Download this dataset's specification as YAML"
@@ -5109,6 +5439,7 @@ server <- function(input, output, session) {
           uiOutput("workspace_header"),
           uiOutput("summary_metrics"),
           uiOutput("dataset_nav_ui"),
+          uiOutput("add_dataset_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
@@ -5127,15 +5458,8 @@ server <- function(input, output, session) {
               "Raw YAML",
               div(
                 class = "yaml-edit-bar",
-                div(
-                  class = "msg-hint",
-                  HTML("Edit the document and click <b>Apply changes</b>. It is validated as YAML <i>and</i> as a full DTA / DTADataSet before it replaces the loaded document — on any error nothing changes and the reason is shown below. Loaded files are kept, including when you edit <code>files:</code>, as long as the dataset still has a slot to show them under; files belonging to a slot you deleted are unloaded with it. A dataset's validation is cleared whenever its files, columns or rules changed, and deleted datasets drop everything.")
-                ),
-                div(
-                  class = "yaml-edit-actions",
-                  actionButton("apply_yaml", "Apply changes", class = "btn btn-sm btn-primary"),
-                  actionButton("revert_yaml", "Revert", class = "btn btn-sm btn-outline-secondary")
-                )
+                uiOutput("yaml_edit_hint"),
+                uiOutput("yaml_edit_actions")
               ),
               uiOutput("yaml_validation_msg"),
               if (requireNamespace("shinyAce", quietly = TRUE)) {
