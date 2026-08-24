@@ -23,8 +23,8 @@
 #
 # So this script checks the parts a version patcher structurally cannot:
 # whether the manifest still describes the right set of files, whether the
-# checksums are live, and whether GithubSHA1/RemoteSha -- when present -- name
-# the commit their ref actually resolves to.
+# checksums are live, and whether GithubSHA1/RemoteSha are present at all and
+# name the commit their ref actually resolves to.
 #
 # What it deliberately does NOT check:
 #   - the `packages` block's contents. It is a frozen snapshot of one
@@ -125,55 +125,160 @@ if (is.null(dtatools)) {
   }
 }
 
-# --- release SHA fields, when present, must be correct ------------------------
+# --- deploy SHA fields must be present and correct ----------------------------
 #
-# GithubSHA1/RemoteSha are legitimately ABSENT for most of a release cycle --
-# see bump_version.R's manifest_ref_site() -- so their absence is not checked
-# here at all. What's checked is the thing "forbidden" never could: when one IS
-# present, does it actually name the commit its ref (GithubRef/RemoteRef)
-# resolves to? A stale SHA is worse than a missing one -- Connect would
-# silently deploy old code under a new version number instead of failing loudly
-# -- and "forbidden" cannot distinguish stale from correct, only present from
-# absent.
+# GithubSHA1/RemoteSha used to be treated as legitimately ABSENT for most of a
+# release cycle, on the theory that only tagged releases are ever deployed.
+# That theory was wrong: `master` and `dev` are each deployed to their own
+# Connect instance, and Connect builds the package's archive URL from this SHA.
+# Without one, `archiveUrl` is empty and every deploy dies on
+# `if (!grepl("^http", archiveUrl))` -- "argument is of length zero".
+#
+# Both branches shipped in exactly that state while this script reported OK,
+# because "absent" was the one case it declined to look at. So absence is now a
+# FAILURE. The correctness check remains: does the SHA actually name the commit
+# its ref resolves to? A stale SHA is worse than a missing one -- Connect would
+# silently deploy old code under a new version number rather than failing
+# loudly.
 SHA_FIELDS <- list(RemoteRef = "RemoteSha", GithubRef = "GithubSHA1")
+
+# Tag-shaped refs pin a release; anything else is a branch. The shape decides
+# both what bump_version.R writes and what this script demands, so the predicate
+# is SHARED with it rather than restated here -- two copies of this rule are two
+# things that can drift, and the cost of drift is precisely the release/branch
+# conflation this whole check exists to catch.
+REF_SHAPE <- ".github/scripts/ref_shape.R"
+if (!file.exists(REF_SHAPE)) {
+  cat("check_manifest.R: cannot find", REF_SHAPE, "\n")
+  cat("Run this from the repository root.\n")
+  quit(status = 1)
+}
+source(REF_SHAPE)
 
 # NA if `ref` does not resolve to a commit at all (unknown tag, or a checkout
 # too shallow to have fetched it) -- `--verify --quiet` fails silently instead
 # of printing to stderr, which system2() would otherwise interleave into
 # `out`.
+#
+# Falls back to origin/<ref>: a branch name like `dev` has no LOCAL ref in an
+# actions/checkout run, which checks out a detached merge commit for a
+# pull_request and only creates the one branch it was told to. Without the
+# fallback a perfectly good branch ref reads as unresolvable and fails every PR.
 git_commit_for <- function(ref) {
+  candidates <- c(ref, paste0("origin/", ref), paste0("refs/remotes/origin/", ref))
+  for (candidate in candidates) {
+    out <- suppressWarnings(system2(
+      "git", c("rev-parse", "--verify", "--quiet", paste0(candidate, "^{commit}")),
+      stdout = TRUE, stderr = FALSE
+    ))
+    status <- attr(out, "status")
+    if (!is.null(status) && status != 0L) next
+    if (length(out) != 1L) next
+    return(out)
+  }
+  NA_character_
+}
+
+# TRUE when `ancestor` is contained in `ref`'s history. FALSE when it is not, and
+# also when it is not a commit this checkout knows about -- both are equally a
+# reason to reject the SHA, so they collapse to one answer here.
+git_contains <- function(ancestor, ref) {
+  status <- suppressWarnings(system2(
+    "git", c("merge-base", "--is-ancestor", ancestor, ref),
+    stdout = FALSE, stderr = FALSE
+  ))
+  identical(as.integer(status), 0L)
+}
+
+# How many commits `ref` has moved on since `sha`. NA if that cannot be counted.
+git_commits_behind <- function(sha, ref) {
   out <- suppressWarnings(system2(
-    "git", c("rev-parse", "--verify", "--quiet", paste0(ref, "^{commit}")),
+    "git", c("rev-list", "--count", paste0(sha, "..", ref)),
     stdout = TRUE, stderr = FALSE
   ))
   status <- attr(out, "status")
-  if (!is.null(status) && status != 0L) return(NA_character_)
-  if (length(out) != 1L) return(NA_character_)
-  out
+  if (!is.null(status) && status != 0L) return(NA_integer_)
+  if (length(out) != 1L) return(NA_integer_)
+  suppressWarnings(as.integer(out))
 }
+
+# Reported, never enforced. Being ON the branch is the correctness property and
+# is checked below; being CURRENT is a matter of degree, and the honest bound on
+# it is the manifest-dev-sha.yml workflow that re-pins on every push -- not a
+# threshold here. A stricter rule would have to pick a number of commits to
+# tolerate and would go red for the whole window between a push landing and that
+# workflow finishing: a false alarm, not a defect.
+#
+# READ THE NUMBER CAREFULLY. Where this script actually runs -- r-style.yaml, on
+# pull_request -- the count is mostly the AGE OF THE BRANCH, not a problem: a PR
+# opened before ten commits landed on dev trails by ten through no fault of its
+# own, and merging fixes it. It is worth attention only when it is large on
+# `dev` itself, which means the pinning workflow has stopped running. The
+# printed line says so, because a number that looks like a warning and usually
+# is not is how people learn to stop reading warnings.
+#
+# What the ancestor test does NOT catch: a SHA genuinely on the branch but very
+# old still passes. Connect would install that old DTAtools under the current
+# app bundle. This note is the only thing that would show it.
+staleness_notes <- character(0)
 
 if (!is.null(dtatools)) {
   for (ref_field in names(SHA_FIELDS)) {
     sha_field <- SHA_FIELDS[[ref_field]]
     recorded_sha <- dtatools[[sha_field]]
-    if (is.null(recorded_sha)) next # absent is expected; nothing to verify
-
     ref <- dtatools[[ref_field]]
+
+    if (is.null(recorded_sha)) {
+      note(
+        paste0(
+          "the DTAtools entry has no \"%s\". Connect builds the package's archive URL from it ",
+          "and fails with \"argument is of length zero\" without one, so the app cannot be ",
+          "deployed at all. Pin it with `bump_version.R --set-deploy-sha <sha>`."
+        ),
+        sha_field
+      )
+      next
+    }
+
     resolved <- git_commit_for(ref)
     if (is.na(resolved)) {
       note(
         paste0(
           "the DTAtools entry's %s is \"%s\", but git cannot resolve %s to a commit ",
-          "(unknown tag, or the checkout didn't fetch it). A %s should never be ",
+          "(unknown tag or branch, or the checkout didn't fetch it). A %s should never be ",
           "recorded for a ref that doesn't exist."
         ),
         sha_field, recorded_sha, ref, sha_field
       )
-    } else if (!identical(resolved, recorded_sha)) {
+      next
+    }
+
+    # A release ref names one immutable commit, so the SHA must equal it. A
+    # branch ref moves: the pin necessarily trails the tip by at least the
+    # commit that recorded it, so demanding equality would fail on every push.
+    # What must hold is that the SHA is genuinely ON that branch.
+    if (is_release_ref(ref)) {
+      if (!identical(resolved, recorded_sha)) {
+        note(
+          "the DTAtools entry's %s is \"%s\", but %s resolves to \"%s\".",
+          sha_field, recorded_sha, ref, resolved
+        )
+      }
+    } else if (!git_contains(recorded_sha, resolved)) {
       note(
-        "the DTAtools entry's %s is \"%s\", but %s resolves to \"%s\".",
-        sha_field, recorded_sha, ref, resolved
+        paste0(
+          "the DTAtools entry's %s is \"%s\", which is not in %s's history. A branch ref may ",
+          "trail its tip, but the SHA must name a commit actually on the branch."
+        ),
+        sha_field, recorded_sha, ref
       )
+    } else {
+      behind <- git_commits_behind(recorded_sha, resolved)
+      if (!is.na(behind) && behind > 0L) {
+        staleness_notes <- c(staleness_notes, sprintf(
+          "%s trails %s by %d commit%s", sha_field, ref, behind, if (behind == 1L) "" else "s"
+        ))
+      }
     }
   }
 }
@@ -237,9 +342,12 @@ if (length(problems) > 0) {
   cat("\nMost of this is repaired mechanically by\n")
   cat("  Rscript .github/scripts/bump_version.R --sync-manifest\n")
   cat("which rebuilds the file list and every checksum from the app directory.\n")
-  cat("(A missing packages entry, a forbidden field, and a wrong/unresolvable\n")
-  cat("RemoteSha or GithubSHA1 are NOT repaired by it. The SHA fields are set by\n")
-  cat("  Rscript .github/scripts/bump_version.R --set-release-sha <sha>\n")
+  cat("(A missing packages entry, a forbidden field, and a missing, wrong or\n")
+  cat("unresolvable RemoteSha or GithubSHA1 are NOT repaired by it. The SHA fields\n")
+  cat("are set by\n")
+  cat("  Rscript .github/scripts/bump_version.R --set-deploy-sha <sha>\n")
+  cat("and the ref they hang off by\n")
+  cat("  Rscript .github/scripts/bump_version.R --set-deploy-ref <ref>\n")
   cat("everything else needs fixing by hand.)\n")
   quit(status = 1)
 }
@@ -248,3 +356,11 @@ cat(sprintf(
   "check_manifest.R: OK -- %d files and %d packages, every checksum live.\n",
   length(recorded), length(manifest$packages)
 ))
+for (s in staleness_notes) {
+  cat("  note: ", s, ".\n", sep = "")
+}
+if (length(staleness_notes) > 0) {
+  cat("        Expected on a branch opened before those commits landed -- merging clears it.\n")
+  cat("        Only a concern if it is large on dev itself, which would mean\n")
+  cat("        manifest-dev-sha.yml has stopped re-pinning.\n")
+}
