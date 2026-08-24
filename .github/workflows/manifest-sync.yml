@@ -68,12 +68,62 @@ jobs:
       # check_manifest.R does need jsonlite, which is why the *checking* half
       # lives in r-style.yaml where that library already exists, and only the
       # *repair* runs here.
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@v2.12.1
         with:
           use-public-rspm: true
 
       - name: Resync the app manifest's file list and checksums
         run: Rscript .github/scripts/bump_version.R --sync-manifest
+
+      # Point the DTAtools entry at the branch this PR merges into, pinned to
+      # that branch's current tip. Connect builds the package's archive download
+      # URL from this SHA; with none present every deploy dies in its installer
+      # on "argument is of length zero", which is how BOTH branches came to be
+      # undeployable at once.
+      #
+      # WHY IT HAPPENS HERE, in a PR, rather than on a push to the branch. Both
+      # `dev` and `master` carry a ruleset requiring changes to arrive via pull
+      # request -- `dev` bypasses only for repository admins, `master` for
+      # nobody at all -- so a workflow pushing to either is rejected with GH013
+      # no matter which token it uses. A push-triggered pinner cannot work here
+      # and was removed. The PR branch is unprotected, so this can.
+      #
+      # base, not head: after a squash merge the head commit does not exist on
+      # the target branch at all, so pinning it would name a commit that is on
+      # no branch. The base is always a real commit on the target, and each
+      # successive PR carries the pin forward, so it trails by roughly one
+      # merge -- which is why check_manifest.R asks a branch SHA to be CONTAINED
+      # in the branch rather than equal to its tip.
+      #
+      # This cannot give `master` a CURRENT pin, because master only gains a
+      # commit when the release PR merges and that SHA does not exist yet while
+      # the PR is open. It sets a valid one so the release PR passes; the
+      # release's actual commit is pinned afterwards by
+      # .github/workflows/manifest-release-sha.yml.
+      # SKIPPED WHEN THE PR'S HEAD IS ITSELF A PROTECTED BRANCH -- in practice the
+      # `dev` -> `master` release PR. The commit below is pushed to the HEAD
+      # branch, and `dev` rejects pushes exactly as `master` does, so writing
+      # anything here would fail the job with GH013 on every single release. It
+      # did: this guard exists because the release PR for 0.20.1 went red on it.
+      #
+      # Nothing is lost by skipping. The manifest arrives at master reading
+      # `dev` with a SHA that is genuinely on `dev`, which check_manifest.R
+      # accepts, and manifest-release-sha.yml repoints it at master and the
+      # tagged commit as soon as the release is published. The release PR was
+      # never able to set a current pin anyway -- master's release commit does
+      # not exist while the PR is open.
+      #
+      # Note the earlier resync step is deliberately NOT guarded: it only writes
+      # when a checksum actually drifted, which on a release PR would be a real
+      # defect worth failing over rather than skipping past.
+      - name: Point the manifest at the target branch
+        if: github.head_ref != 'dev' && github.head_ref != 'master'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          Rscript .github/scripts/bump_version.R --set-deploy-ref "${BASE_REF}"
+          Rscript .github/scripts/bump_version.R --set-deploy-sha "${BASE_SHA}"
 
       # NOTE: deliberately NOT `if: '!cancelled()'`, which is what pre-commit.yml
       # uses. That is correct there because pre-commit's autofixers exit non-zero
@@ -84,5 +134,5 @@ jobs:
       # succeeded -- is the correct gate here.
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: resync app manifest checksums"
+          commit_message: "chore: resync app manifest checksums and deploy pin"
           file_pattern: inst/shiny/dta_app/manifest.json

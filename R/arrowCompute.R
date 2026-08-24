@@ -79,8 +79,8 @@ dta_use_arrow_compute <- function() {
 #' @return A single integer.
 #' @keywords internal
 dta_count_duplicates <- function(df, cols) {
-  # `dta_unique_key()` (R/streamingValidation.R) length-prefixes each part and
-  # maps NA to a sentinel, which is much faster than the data.frame method of
+  # `dta_unique_key()` (R/streamingValidation.R) encodes each row as one string
+  # and maps NA to a marker, which is much faster than the data.frame method of
   # `duplicated()` -- but it goes through `as.character()`, and *any* type
   # whose distinct values can render to the same string is at risk of
   # colliding on the same key string, not just doubles: a double only
@@ -96,6 +96,11 @@ dta_count_duplicates <- function(df, cols) {
   # already keys every type, including doubles, the same way regardless --
   # that drift between the two paths for an unsafe key column is pre-existing
   # and deliberately not addressed here.
+  #
+  # This type gate is about *rendering* collisions only. The other way two
+  # different rows could share a key -- values that straddle the field
+  # separator -- is ruled out by the encoding itself, which escapes the
+  # reserved bytes; see `dta_row_key()`.
   is_safe_key_type <- function(x) {
     is.character(x) || is.factor(x) || is.integer(x) || is.logical(x)
   }

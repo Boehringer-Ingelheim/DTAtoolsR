@@ -31,12 +31,14 @@ ds_edit_menu_item <- function(id, icon, title, description) {
   )
 }
 
-# The dataset Edit control: one button opening a menu over the three editors.
+# The dataset Edit control: one button opening a menu over the four editors.
 #
-# They all act on one object -- this dataset's specification -- so they read as
-# one entry point rather than three sibling buttons competing with "Check this
-# dataset" and the export. Columns, then rules, then files: the order the
-# specification itself is written in, and the order a user fills it out.
+# They all act on one object -- this dataset -- so they read as one entry point
+# rather than four sibling buttons competing with "Check this dataset" and the
+# export. Columns, then rules, then files: the order the specification itself is
+# written in, and the order a user fills it out. Metadata comes last because it
+# describes the dataset rather than its contents -- the other three are what a
+# user came to edit, and this one is the header they set once.
 ds_edit_menu <- function() {
   div(
     class = "dropdown ds-edit",
@@ -65,6 +67,10 @@ ds_edit_menu <- function() {
       tags$li(ds_edit_menu_item(
         "edit_files", "&#x1F5C2;&#xFE0F;", "Files",
         "Expected files, and the upload slots they create"
+      )),
+      tags$li(ds_edit_menu_item(
+        "edit_meta", "&#x1F4CB;", "Metadata",
+        "Name, description and template details"
       ))
     )
   )

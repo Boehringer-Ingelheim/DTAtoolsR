@@ -13,8 +13,9 @@ dta_coerce_column(values, target)
 }
 \value{
 \code{NULL} when the column is left untouched, otherwise a list with the
-converted \code{values}, the integer indices of the \code{offending} values, and the
-source text \code{raw}.
+converted \code{values}, the integer indices of the \code{offending} values, and
+\code{source} -- the original input vector, from which the raw text of row \code{i}
+is \code{as.character(source[i])}, i.e. \code{\link[=dta_numeric_raw]{dta_numeric_raw()}}.
 }
 \description{
 Converts a single column to the type its spec declares, reporting the values

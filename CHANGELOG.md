@@ -4,6 +4,388 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-08-24
+
+### Fixed
+
+- **The Shiny app can be deployed to Posit Connect again.** Both `master` and
+  `dev` shipped an app manifest whose `DTAtools` entry had no `GithubSHA1` /
+  `RemoteSha`. Connect builds the package's archive download URL from that SHA,
+  so every deploy failed in Connect's installer with
+  `if (!grepl("^http", archiveUrl)) : argument is of length zero` before
+  anything else ran. `dev` was doubly broken: its `GithubRef` named `v0.20.0`,
+  a tag that was never cut.
+
+  The cause was that the version tooling assumed a release tag is the only
+  thing ever deployed. `bump_version.R` rewrote the ref to `v<version>` on
+  every bump and cleared the SHA, on the reasoning that an absent field fails
+  loudly until the release exists. That holds for `master`, deployed at a tag;
+  it does not hold for `dev`, which is deployed continuously from the branch.
+  Refs are now either release-shaped (`v1.2.3`, tracks `DESCRIPTION`, clears
+  the SHA on a bump) or a branch (left alone by a bump, since neither the ref
+  nor its SHA is invalidated by a version change).
+
+### Changed
+
+- `check_manifest.R` now **requires** `GithubSHA1` / `RemoteSha` rather than
+  treating an absent one as expected. That single exemption is why CI reported
+  the manifest healthy through the entire outage. A release ref must equal its
+  tag's commit; a branch ref must merely contain the recorded one, and how far
+  the pin trails the branch is reported without failing the build.
+- `bump_version.R` gains `--set-deploy-sha` (replacing `--set-release-sha`,
+  still accepted as an alias) and `--set-deploy-ref`. The release-vs-branch
+  predicate that both scripts turn on now lives in one place,
+  `.github/scripts/ref_shape.R`, so the writer and the checker cannot drift
+  apart on the one distinction the fix depends on.
+- The deploy pin is now maintained entirely through pull requests, because
+  neither long-lived branch accepts a direct push: `dev` and `master` both
+  carry a ruleset requiring changes to arrive via PR (`master` with no bypass
+  at all), so any workflow pushing to them is rejected with `GH013`. A
+  push-triggered pinner was written first and failed on its only run; the
+  pre-existing `manifest-release-sha.yml` would have failed the same way, which
+  had never been discovered because it had never run at all.
+  - `manifest-sync.yml` now points the manifest at the branch each PR merges
+    into, pinned to that branch's tip, alongside the checksum resync it already
+    did. It skips that when the PR's *head* is itself a protected branch — the
+    `dev` → `master` release PR — since the commit is pushed to the head branch
+    and `dev` rejects pushes just as `master` does.
+  - `manifest-release-sha.yml` opens one PR per release to supersede that with
+    the tagged commit. It cannot happen in the release PR itself: `master`
+    gains its release commit only when that PR merges, so nothing can name
+    that SHA while the PR is open.
+- The app manifest now identifies its deploy target by **branch** on both
+  branches (`dev` / `master`) rather than by release tag. Connect resolves the
+  archive URL from the SHA, not the ref, so a SHA pins strictly more precisely
+  than a tag — and a tag ref cannot be validated in the release PR that
+  introduces it, since the tag does not exist yet.
+
+## [0.20.0] - 2026-08-24
+
+### Added
+
+- **A dataset's metadata is now editable in the Shiny app.** The dataset **Edit**
+  menu has a fourth entry, **Metadata**, after *Files*. It opens a dialog over
+  the `DTADataSet`-level properties — `name`, `description`, `template_source`,
+  `template_version` and `template_date` — which until now could only be changed
+  by hand-editing the Raw YAML. Clearing a field removes it from the
+  specification entirely rather than storing an empty value.
+
+  Renaming a dataset re-keys everything that referred to it by name (loaded
+  files, per-file controls, validation status, the selected dataset) while
+  leaving it in its original position in the document, and clears its
+  validation — stored results carry the name they were checked under, so they no
+  longer describe the dataset once it is renamed. Editing only the description or
+  the template fields does not touch validation, since none of them take part in
+  it.
+
+  A dataset's `type` is deliberately **not** editable. It is fixed by the
+  concrete class (`DTADataSetTabular` / `DTADataSetFile`) and everything
+  downstream dispatches on that class, so assigning the property would yield a
+  dataset whose declared type and actual behaviour disagree. It remains visible
+  as a chip on the dataset page.
+
+## [0.19.0] - 2026-08-22
+
+### Fixed
+
+- **Roxygen parameter documentation coverage:** Fixed parameter documentation
+  for `as_json_schema()`, `as_json_schema_length()`, and `as_json_schema_type()`
+  generics to ensure argument `x` is properly documented in Rd pages. Added
+  missing `@param` descriptions to internal helpers
+  `dta_validate_table_stream()`, `dta_error_sink_add()`, and
+  `validate_table_detailed()`.
+
+- **The numeric conversion cache held about ten times the column it cached.**
+  `dta_as_numeric_strict()` built an `as.character()` copy of every column it
+  converted and returned it as `raw`. On a 200,000-row numeric column the
+  source was 1.53 MB and the returned entry 16.02 MB, of which the character
+  copy alone was 12.97 MB. `dta_build_numeric_cache()` holds one such entry per
+  column that any rule reads numerically, all at once, so the cost was paid per
+  column per batch — and, on the materialising path, over the whole table.
+
+  The copy was only ever read at the rows that failed to convert, which is
+  usually none of them. The conversion now keeps the *source vector* — shared,
+  not copied — and renders the text on demand at those indices through
+  `dta_numeric_raw()`. A batch of 131,072 rows across 20 numeric columns now
+  adds about 20 MB of cache instead of about 190 MB.
+
+  This regressed in 0.17.2, in the rule-evaluation speed work. That speed win
+  is untouched: it came from converting each column once per batch rather than
+  once per rule, which never depended on how the source text was obtained.
+
+- **A violating group could be reported as passing past 2.1 billion rows.**
+  Four accumulators in the streaming path were R integers, which overflow to
+  `NA` with a warning rather than an error: the driver's row offset, the
+  grouped-rule row offset, and a grouped condition's `n_seen`, `true_n` and
+  `false_n`.
+
+  The row offsets corrupted reported row numbers — every error pointed at `NA`
+  while the counts and the verdict still looked authoritative. `n_seen` was
+  worse: `dta_group_stream_truth()` evaluates `n_seen > 0 && all_true` for an
+  `"all"` scope, an overflowed `n_seen` makes that `NA`, and `isTRUE(NA)` is
+  `FALSE`, so a group that genuinely violated its constraint was silently
+  reported as passing.
+
+  All four are now doubles, which count whole numbers exactly to 2^53.
+  Reported row numbers are narrowed back to integer when they fit, so the type
+  callers see is unchanged for any realistic file. This is the same class of
+  defect fixed for the error-sink counters in 0.18.1; these are the instances
+  that fix did not reach.
+
+### Changed
+
+- **Uniqueness and grouping keys are built about 2.1x faster, and now agree
+  with `duplicated()` on the atomic types validation deals with, where they
+  previously did not.**
+  `dta_unique_key()` and `dta_group_key()` now share a single encoder, the new
+  internal `dta_row_key()`, instead of each length-prefixing or
+  `gsub()`-escaping every value on every batch. The encoding stays injective:
+  the rows `c("x", "y<US>z")` and `c("x<US>y", "z")` are different rows and get
+  different keys, where a plain separator join would have merged them and
+  reported a duplicate -- or a group rule violation -- that the data does not
+  contain. A reserved byte is escaped only when the column actually contains
+  one, which is a pure optimisation rather than a second encoding, because the
+  escape is the identity on text that does not contain it; equal rows therefore
+  still key equally across batch boundaries, and strings are normalised to
+  UTF-8 first so that the marked encoding of a value cannot change its key
+  either.
+
+  Several verdicts that disagreed between the streaming and materialising
+  paths are fixed along the way, all of them on key columns holding doubles:
+  `0.1 + 0.2` and `0.3` are no longer reported as a duplicate pair (keys render
+  doubles with `%.17g` rather than through `as.character()`, which rounds to 15
+  significant digits), `NaN` is no longer treated as a missing value, and a
+  sub-second `POSIXct` now keys on the instant it names. The same applies to
+  grouping, where two doubles that render alike are now two groups rather than
+  one, on both paths -- so a `check_group_condition` grouped by a double or a
+  timestamp column can report differently than before, and correctly. `0` and
+  `-0` remain one value, as `duplicated()` has them, and `integer64` is
+  rendered by bit64 rather than reinterpreted as the double it is stored as. A
+  value that merely looks like the internal missing-value marker is also no
+  longer read as missing. Measured on 5e5 rows over three key columns: 0.58s
+  before, 0.28s after.
+
+- **Column schemas are now compiled once per scan instead of once per batch.**
+  On the streaming path `dta_columnspec_errors()` runs once per batch, and it
+  previously re-derived every column's schema through `as_json_schema()` on each
+  call. A column's schema is a pure function of its `DTAColumnSpec` and does not
+  change while a table is being validated, so the derivation is now hoisted out
+  of the batch loop by the new internal `dta_compile_columnspec_schemas()`. The
+  cost is now proportional to the width of the spec rather than to the number of
+  batches; validation results are unchanged, which
+  `tests/testthat/test-streaming-validation.R` asserts over the whole
+  validation corpus.
+
+- **The streaming scan no longer summarises every batch and discards it.**
+  `dta_columnspec_errors()` always built both a per-row error frame and a
+  grouped summary of it. The streaming driver reads only the frame and
+  recomputes the summary once at the end, so every batch paid for a `dplyr`
+  grouped summarise whose result was thrown away.
+
+  The cost scales with the error frame and with how distinct the offending
+  values are, because the offending value is part of the grouping key:
+  measured at 0.318 s versus 0.006 s per call on a 10,000-row frame of
+  distinct bad values. On a dirty file at the default batch size this was tens
+  of seconds per batch. `dta_columnspec_errors()` gained a `summarise`
+  argument; the streaming driver passes `FALSE`. Both other callers are
+  unchanged.
+
+  `dta_build_numeric_cache()` gained a `columns` argument. The streaming driver
+  already computed the numeric columns once for the whole scan, but the cache
+  re-derived them from the rules on every batch, re-parsing each rule's clause
+  structure. It now uses the list that was already computed.
+
+### Added
+
+- **`check()` can reach the levers that make a very large scan survivable.**
+  `fail_fast`, `on_missing_column` and `use_threads` were documented on
+  `validate_file_stream()` and recommended for exactly this scale, but were
+  unreachable through `check()`, which is the documented entry point. All three
+  are now forwarded, with defaults that reproduce the previous behaviour
+  exactly.
+
+  `on_missing_column = "stop"` decides a missing required column from the
+  column names alone and reads nothing, instead of scanning the whole table to
+  restate the same fact once per row. It reaches the same verdict as a full
+  scan. Unlike the other two it applies to a table held in memory as well.
+
+- **Progress reporting during a scan.** A scan of a table large enough to take
+  hours previously printed one line and then nothing, making a healthy run
+  indistinguishable from a hang. When `verbose` is set, the scan now reports
+  rows read and the current rate, throttled by wall time via
+  `options(DTAtools.progress_seconds = )` (default 30) so that short runs stay
+  silent. There is no total row count for a stream, so no percentage or ETA is
+  invented.
+
+## [0.18.2] - 2026-08-17
+
+### Added
+
+- **Opt-in benchmark metrics for `check()` and `validate_file_stream()`.**
+  Passing `benchmark = TRUE` or setting `options(DTAtools.benchmark = TRUE)`
+  attaches elapsed time, CPU time, memory, and throughput metrics to the
+  validation result. The new `validation_benchmark()` function retrieves them.
+
+### Fixed
+
+- **Float value in a declared `Int` column no longer aborts the read.**
+  Arrow infers a column as `int64` when early rows look like integers and then
+  aborts with `CSV conversion error to int64: invalid value '0.01'` if a
+  fractional value appears further down. All declared columns are now pinned to
+  `utf8` at read time; `dta_coerce_table_to_specs()` handles conversion and
+  leaves the fractional value as a double so the schema-validation axis can
+  report it as a type violation.
+
+- The Shiny app manifest is now synchronized with the files on disk, including
+  live checksums and the `v0.18.2` package reference. Release SHA fields remain
+  empty until the release tag exists, preventing a new version from inheriting
+  the previous release's commit.
+
+## [0.18.1] - 2026-08-16
+
+A bug-fix release for the validation error counters. It also carries the Shiny
+app manifest verification work, which had been merged to `dev` without a release
+of its own and so ships here.
+
+### Fixed
+
+#### Validation error counting
+
+- **`validate_file_stream()` stopped counting errors — and stopped judging the
+  file — once a scan passed `.Machine$integer.max` errors.** The error sink
+  accumulated its totals as integers, so on a file dirty enough to exceed the
+  integer range the addition returned `NA` with a
+  `NAs produced by integer overflow` warning rather than a count. Because
+  `NA > 0` is `NA`, the `NA` then propagated into `columnspec_valid`,
+  `import_valid`, and the fail-fast check, so the files too broken to count were
+  exactly the files that stopped receiving a verdict. Retention is capped but
+  counting deliberately is not, which is what makes these counters the one
+  unbounded quantity in the streaming path. They are now accumulated as doubles,
+  exact for whole numbers to 2^53.
+- The same overflow was reachable on the import-typing axis outside streaming:
+  `dta_coerce_table_to_specs()` accumulated its per-cell count as an integer,
+  and `dta_import_error_count()` round-tripped the recorded total through
+  `as.integer()`. The latter was the more damaging of the two — an `NA` count is
+  read as "no count recorded", which falls back to the *capped* row count and
+  under-reports by however much the cap discarded.
+- Counts are still reported as integers wherever they fit, so the `details`
+  contract is unchanged; only a count that cannot be an integer without becoming
+  `NA` is now widened.
+
+#### Shiny app manifest verification
+
+- **The Shiny app's `manifest.json` was verified on two lines out of 3,143, and
+  the unverified remainder had been wrong in every release that touched the
+  app.** `bump_version.R` kept the `DTAtools` `Version` entry and the `VERSION`
+  file's checksum in step with `DESCRIPTION`; everything else was maintained by
+  hand. The consequences, all present in released tags:
+  - **Six of the eight file checksums were checked by nothing.** Release 0.16.0
+    shipped with `app.R` recorded as `df2b7079…` while the file on disk was
+    `9d798811…`. App source changed in two releases with no accompanying
+    manifest commit.
+  - **The version-bearing fields contradicted each other.** 0.17.3 shipped with
+    `RemoteRef` still reading `v0.17.2`; 0.18.0 shipped with hand-added
+    `GithubSHA1`/`RemoteSha` pointing at the *0.17.3* release commit.
+  - **Nothing checked the file was even parseable**, though it is patched by
+    text substitution.
+- `RemoteRef` and `GithubRef` are now version sites in
+  `.github/scripts/bump_version.R`, so the writer and the checker cannot
+  disagree about them. `GithubSHA1`, `RemoteSha`, `Packaged`, and `Built` were
+  **removed** from the `DTAtools` entry rather than checked: a bump commit
+  cannot know the SHA of the release commit that will contain it, so there is no
+  value they could ever be verified against, and each hand-maintained attempt
+  recorded the previous release's commit.
+
+### Added
+
+All of the following belong to the manifest verification work above.
+
+- `.github/scripts/check_manifest.R`, run by the `r-style` workflow: asserts the
+  manifest's file list matches the app directory exactly, that every checksum is
+  live, that the removed fields stay removed, and that every package the app
+  loads has a `packages` entry. It deliberately does not police the `packages`
+  block's contents, which is a frozen snapshot of one developer's `renv` library
+  and is not reproducible on another machine.
+- `Rscript .github/scripts/bump_version.R --sync-manifest`, which rebuilds the
+  manifest's `files` block from the app directory — handling added and removed
+  files, which a line patcher cannot see. Entry order is sorted with
+  `method = "radix"` so it does not depend on the collation locale; plain
+  `sort()` orders the block differently under `de_DE` than under CI's `C`
+  collation, which would have made the file flip on every hop between machines.
+- `.github/workflows/manifest-sync.yml`, which runs that repair on pull requests
+  and pushes the result to the PR branch, so checksums are never copied by hand.
+  Only the mechanical half is auto-committed; a version mismatch, a missing
+  package entry, or a re-added unverifiable field still fails `r-style` and must
+  be fixed deliberately.
+- The `check-json` pre-commit hook, covering the parse check that nothing
+  performed before. It is pure Python, so the `pre-commit` workflow still
+  installs no R.
+
+### Added
+
+- **Opt-in benchmark mode for `check()` and `validate_file_stream()`.** Passing
+  `benchmark = TRUE` (or setting `options(DTAtools.benchmark = TRUE)`) attaches a
+  one-row metrics `data.frame` — elapsed time, CPU time, R heap peak, process
+  RSS, Arrow's memory-pool peak, and rows/sec — as a `"benchmark"` attribute on
+  the result, retrievable with the new exported `validation_benchmark()`. Off by
+  default, so the normal call path is unaffected. R's heap peak is read from
+  `gc()`'s `max used` counters rather than a before/after delta, which would
+  miss transient allocations entirely.
+- The instrument is built not to distort or break what it measures. `gc()` runs
+  outside the timed region at both ends, so the bracketing collections are never
+  charged to the call. A nesting guard makes the outermost call the one that
+  measures, so an inner `gc(reset = TRUE)` cannot silently corrupt an outer
+  figure, and the guard is released via `on.exit()` in the caller's own frame,
+  so a call that aborts part-way does not leave benchmarking dead for the rest
+  of the session. Nothing about the verdict changes when the flag is on.
+- Figures that cannot be measured say so instead of guessing. Arrow's memory
+  pool has no reset in the installed `arrow` version, so its peak is reported as
+  the per-process high-water mark it is, alongside an `arrow_call_exact` flag
+  saying whether the figure attributed to this call is exact or merely a lower
+  bound; an unreadable pool reports `NA`, never `0`. Process RSS needs the new
+  `Suggests`-only `ps` package and reports `NA` without it. `check()` reports
+  `rows` as `NA` because there is no cheap, trustworthy row total across every
+  dataset at that level. Measuring the R heap peak requires resetting `gc()`'s
+  peak counters, a session-wide side effect documented on
+  `validation_benchmark()`.
+
+### Fixed
+
+#### Shiny app manifest: R Connect archiveUrl crash
+
+- **R Connect failed to deploy the Shiny app with `Error in if (!grepl("^http",
+  archiveUrl)) { : argument is of length zero`.** Posit Connect needs a
+  resolvable commit SHA (`RemoteSha`/`GithubSHA1`) to build the archive
+  download URL for `manifest.json`'s `Source: "github"` DTAtools entry; without
+  one it computes a `NULL` `archiveUrl` and crashes on the `grepl()` guard.
+  `v0.18.1` shipped with neither field present, because the manifest-validation
+  work added in `0.18.1` itself (`#47`) had them forbidden outright rather than
+  verified -- a reaction to those fields going *stale* every previous release
+  (`v0.17.3` shipped with a `RemoteRef` still naming the prior tag; `v0.18.0`
+  shipped hand-added SHAs pointing at the `v0.17.3` commit), but removing them
+  broke every deploy instead of just a stale one.
+- `manifest.json`'s DTAtools entry now carries `RemoteSha`/`GithubSHA1` again,
+  pinned to the `v0.18.1` release commit.
+- `.github/scripts/bump_version.R` gained `--set-release-sha <sha>`, the one
+  place that writes those two fields, and its version-bump `write()` now
+  CLEARS them whenever `RemoteRef`/`GithubRef` move to a new tag -- an existing
+  SHA belongs to the *old* tag and is stale the instant the ref changes, so a
+  release-automation failure now degrades to a loud, visible deploy crash
+  rather than a silent stale deploy.
+- `.github/scripts/check_manifest.R` no longer forbids `RemoteSha`/`GithubSHA1`
+  outright. When present, it resolves the field's ref with `git rev-parse` and
+  fails if the recorded SHA doesn't match -- a correctness check the old
+  "must stay absent" rule could never provide, and would have caught the
+  `v0.18.0` incident directly.
+- New workflow `.github/workflows/manifest-release-sha.yml`, triggered on
+  `release: published`, resolves the tag's commit and pins
+  `RemoteSha`/`GithubSHA1` automatically -- replacing the hand-written
+  follow-up PR every previous release needed (`#41`, `#43`, `#45`) and which
+  was, predictably, forgotten for `v0.18.1`.
+- `.github/workflows/r-style.yaml`'s checkout now fetches full history
+  (`fetch-depth: 0`) so `check_manifest.R`'s `git rev-parse` calls can actually
+  see the release tags.
+
 ## [0.18.1] - 2026-08-16
 
 A bug-fix release for the validation error counters. It also carries the Shiny

@@ -3,10 +3,16 @@
 # Single source of truth for the package version across every file that carries
 # it. Run from the repository root:
 #
-#   Rscript .github/scripts/bump_version.R 0.17.4          # rewrite every site
-#   Rscript .github/scripts/bump_version.R --check         # report drift, write nothing
-#   Rscript .github/scripts/bump_version.R --sync-manifest # rebuild the app manifest's
-#                                                          # file list and checksums
+#   Rscript .github/scripts/bump_version.R 0.17.4              # rewrite every site
+#   Rscript .github/scripts/bump_version.R --check              # report drift, write nothing
+#   Rscript .github/scripts/bump_version.R --sync-manifest      # rebuild the app manifest's
+#                                                               # file list and checksums
+#   Rscript .github/scripts/bump_version.R --set-deploy-sha <sha>
+#                                                               # pin RemoteSha/GithubSHA1 to the
+#                                                               # commit being deployed
+#   Rscript .github/scripts/bump_version.R --set-deploy-ref <ref>
+#                                                               # point RemoteRef/GithubRef at a
+#                                                               # tag or a branch
 #
 # `--check` is what CI runs (see check_version_sync.R); it exits non-zero on any
 # mismatch. The two modes share the site definitions below, so the checker can
@@ -24,6 +30,27 @@
 # app.R checksum into release 0.16.0. The structural half of the guarantee (the
 # file list, and the fields that must NOT be present) lives in
 # .github/scripts/check_manifest.R.
+#
+# `--set-deploy-sha` is a third axis: it pins RemoteSha/GithubSHA1, the commit
+# RemoteRef/GithubRef resolve to. Posit Connect builds the package's archive
+# download URL from that SHA, so a manifest without one makes every deploy fail
+# with "argument is of length zero" -- not eventually, immediately.
+#
+# BOTH long-lived branches are deployed to a Connect instance: `master` (at a
+# release tag) and `dev` (at the branch tip). So the SHA is not a release-only
+# concern, and the ref is not always a tag. See is_release_ref() for the
+# distinction that follows from that, and which of the two shapes each mode
+# applies to.
+#
+# `--set-deploy-sha` is not part of a version bump -- a bump commit cannot know
+# the SHA of a release commit that does not exist yet. Both it and
+# `--set-deploy-ref` are driven by workflows instead:
+# .github/workflows/manifest-sync.yml points the manifest at the branch each PR
+# merges into, and .github/workflows/manifest-release-sha.yml supersedes that
+# with the release commit once a tag is published. Neither pushes to a branch --
+# `dev` and `master` both require pull requests, so a push-triggered pinner is
+# rejected outright (GH013); see manifest-sync.yml for the full reasoning.
+# `--set-release-sha` remains accepted as an alias for `--set-deploy-sha`.
 #
 # manifest.json is patched line by line rather than round-tripped through
 # jsonlite deliberately. It is a 3100-line rsconnect manifest whose `packages`
@@ -53,6 +80,16 @@ fail <- function(...) {
   cat("bump_version.R: ", sprintf(...), "\n", sep = "")
   quit(status = 1)
 }
+
+# is_release_ref(), shared with check_manifest.R so the writer and the checker
+# cannot disagree about which refs are tags -- see that file's header. Sourced
+# rather than duplicated, and relative to the repository root like every other
+# path here.
+REF_SHAPE <- ".github/scripts/ref_shape.R"
+if (!file.exists(REF_SHAPE)) {
+  fail("cannot find %s (run this from the repository root).", REF_SHAPE)
+}
+source(REF_SHAPE)
 
 # Locate the single line matching `pattern`. Anything other than exactly one hit
 # means the file's shape changed and the caller's assumption no longer holds --
@@ -91,7 +128,11 @@ DOCS <- "docs/index.html"
 # Scoped to the lines after the `"DTAtools": {` key so the ~90 other entries (one
 # per renv package) cannot be hit by accident -- every one of them has a
 # "Version", and several also carry a "GithubRef".
-manifest_pkg_field_line <- function(lines, field) {
+#
+# `required = FALSE` returns NA instead of failing when the field is absent --
+# used for RemoteSha/GithubSHA1, which are legitimately missing between a
+# version bump and the next release (see manifest_ref_site()).
+manifest_pkg_field_line <- function(lines, field, required = TRUE) {
   anchor <- sole_match(lines, '^\\s*"DTAtools": \\{\\s*$', "DTAtools package entry in the manifest")
 
   # Bound the search at the END of the DTAtools entry -- the `    },` that closes
@@ -110,12 +151,40 @@ manifest_pkg_field_line <- function(lines, field) {
 
   rel <- grep(sprintf('^\\s*"%s": ".*",?\\s*$', field), entry)
   if (length(rel) == 0L) {
+    if (!required) return(NA_integer_)
     fail("no \"%s\" line found under the manifest's DTAtools entry.", field)
   }
   anchor + rel[1L] - 1L
 }
 
 manifest_pkg_version_line <- function(lines) manifest_pkg_field_line(lines, "Version")
+
+# Insert `"field": "value",` immediately after `after_field`'s line, matching
+# its indentation -- or overwrite `field`'s value in place if it is already
+# present, so this is safe to call whether or not a previous run (or the
+# hand-patch it replaces) already added the line. `after_field` is assumed
+# present (RemoteRef/GithubRef always are; they are version-bump sites).
+manifest_set_field_after <- function(lines, field, value, after_field) {
+  existing <- manifest_pkg_field_line(lines, field, required = FALSE)
+  if (!is.na(existing)) {
+    lines[existing] <- sub(
+      sprintf('"%s": "[^"]*"', field), sprintf('"%s": "%s"', field, value), lines[existing]
+    )
+    return(lines)
+  }
+  after <- manifest_pkg_field_line(lines, after_field)
+  indent <- sub('^(\\s*)".*$', "\\1", lines[after])
+  append(lines, sprintf('%s"%s": "%s",', indent, field, value), after = after)
+}
+
+# Delete `field`'s line from the DTAtools entry if present; a no-op if it
+# isn't. Used when a version bump moves RemoteRef/GithubRef forward -- see
+# manifest_ref_site().
+manifest_clear_field <- function(lines, field) {
+  i <- manifest_pkg_field_line(lines, field, required = FALSE)
+  if (is.na(i)) return(lines)
+  lines[-i]
+}
 
 # manifest.json: the recorded md5 of the VERSION file, inside `files`.
 manifest_version_checksum_line <- function(lines) {
@@ -136,23 +205,66 @@ extract <- function(line, pattern) sub(pattern, "\\1", line)
 # pointing at the 0.17.3 release commit. Making them sites means the writer and
 # the checker cannot disagree about them, which is the whole point of this file.
 #
-# The sibling `GithubSHA1`/`RemoteSha`/`Packaged`/`Built` fields were REMOVED
-# from the DTAtools entry rather than added here: a bump commit cannot know the
-# SHA of the release commit that will eventually contain it, so there is no
-# value those sites could ever be checked against.
-# .github/scripts/check_manifest.R asserts they stay absent.
+# The sibling `GithubSHA1`/`RemoteSha` fields are NOT bump-version sites: a bump
+# commit cannot know the SHA of the release commit that will eventually contain
+# it, so there is nothing to write here. For a RELEASE ref, `write()` CLEARS them
+# if present -- moving the ref forward makes any existing SHA stale by
+# definition, since it names the commit the *previous* tag resolved to, not this
+# one. They are repopulated once the new tag exists, by `--set-deploy-sha`.
+#
+# A ref is a RELEASE ref when it is tag-shaped (`v1.2.3`); anything else -- in
+# practice the branch name `dev` -- is a BRANCH ref. The two behave differently
+# under a bump, and conflating them is what broke the dev deploy:
+#
+#   release ref  tracks DESCRIPTION. A bump moves it to v<version>, which
+#                invalidates any recorded SHA -> rewrite the ref, clear the SHA.
+#   branch ref   does not track the version at all. A bump must leave BOTH the
+#                ref and the SHA alone: the branch still points where it did,
+#                and its SHA still names a real commit on it.
+#
+# Before this distinction existed, bumping on `dev` rewrote its deploy ref to
+# `v0.20.0` -- a tag that was never cut -- and cleared a SHA that was still
+# perfectly valid. The result was a manifest naming a nonexistent tag with no
+# SHA at all, i.e. a `dev` Connect instance that could not deploy at all. Note
+# that clearing is only "fail loudly rather than deploy the wrong code" when
+# somebody is going to SEE the failure; for a branch that is deployed
+# continuously it is just breakage. check_manifest.R now requires the SHA to be
+# present precisely so that neither shape can go out the door without one.
+#
+# is_release_ref() itself lives in .github/scripts/ref_shape.R, sourced above.
 manifest_ref_site <- function(field) {
+  sha_field <- c(RemoteRef = "RemoteSha", GithubRef = "GithubSHA1")[[field]]
+  read_ref <- function() {
+    lines <- read_lines_utf8(MANIFEST)
+    extract(lines[manifest_pkg_field_line(lines, field)], '^\\s*"[^"]*": "([^"]*)".*$')
+  }
   list(
     name = paste0("manifest.json DTAtools ", field),
-    expected = function(v) paste0("v", v),
-    read = function() {
-      lines <- read_lines_utf8(MANIFEST)
-      extract(lines[manifest_pkg_field_line(lines, field)], '^\\s*"[^"]*": "([^"]*)".*$')
+    # A branch ref is its own expectation -- it is not derived from the version,
+    # so there is no drift for `--check` to report. Whether it actually resolves
+    # to the recorded SHA is check_manifest.R's job: that needs git, which this
+    # script deliberately does without (see the header's note on why it has no
+    # library to restore).
+    expected = function(v) {
+      cur <- read_ref()
+      if (is_release_ref(cur)) paste0("v", v) else cur
     },
+    read = read_ref,
     write = function(v) {
       lines <- read_lines_utf8(MANIFEST)
       i <- manifest_pkg_field_line(lines, field)
+      if (!is_release_ref(extract(lines[i], '^\\s*"[^"]*": "([^"]*)".*$'))) {
+        return(invisible(NULL))
+      }
       lines[i] <- sub('": "[^"]*"', sprintf('": "v%s"', v), lines[i])
+      had_sha <- !is.na(manifest_pkg_field_line(lines, sha_field, required = FALSE))
+      lines <- manifest_clear_field(lines, sha_field)
+      if (had_sha) {
+        cat(sprintf(
+          "  %-34s cleared (pinned the previous release)\n",
+          paste0("manifest.json DTAtools ", sha_field)
+        ))
+      }
       write_lines_utf8(lines, MANIFEST)
     }
   )
@@ -248,6 +360,91 @@ sites <- list(
     }
   )
 )
+
+# --- the manifest's deploy SHA fields -----------------------------------------
+#
+# RemoteSha/GithubSHA1 record the commit RemoteRef/GithubRef resolve to, and
+# Connect builds the package's archive URL from them. Not a bump-version site
+# (see manifest_ref_site()) -- this runs afterwards, from manifest-sync.yml at
+# PR time and manifest-release-sha.yml once a release tag exists.
+#
+# The guard is that both refs agree, plus -- for a release ref only -- that they
+# read `v<DESCRIPTION Version>`, which makes "the tag exists" and "DESCRIPTION
+# says this version" the same fact so a SHA cannot be attached to the wrong tag.
+# A branch ref has no version to compare against, so the useful check is instead
+# "does this ref really resolve to this SHA" -- and that needs git. It lives in
+# check_manifest.R, which already shells out to git and runs with fetch-depth: 0;
+# putting it here would give this script a git dependency it does not otherwise
+# have, for a check that would then run in two places and be able to disagree.
+read_ref_field <- function(lines, field) {
+  extract(lines[manifest_pkg_field_line(lines, field)], '^\\s*"[^"]*": "([^"]*)".*$')
+}
+
+set_deploy_sha <- function(sha) {
+  if (!grepl("^[0-9a-f]{40}$", sha)) {
+    fail("'%s' is not a 40-character git commit SHA.", sha)
+  }
+
+  lines <- read_lines_utf8(MANIFEST)
+  remote_ref <- read_ref_field(lines, "RemoteRef")
+  github_ref <- read_ref_field(lines, "GithubRef")
+  if (!identical(remote_ref, github_ref)) {
+    fail(
+      "manifest.json's RemoteRef (\"%s\") and GithubRef (\"%s\") disagree; fix that before pinning a SHA.",
+      remote_ref, github_ref
+    )
+  }
+
+  if (is_release_ref(remote_ref)) {
+    want_ref <- paste0("v", description_version())
+    if (!identical(remote_ref, want_ref)) {
+      fail(
+        "manifest.json's ref is \"%s\", not \"%s\" (DESCRIPTION Version). Bump the version first.",
+        remote_ref, want_ref
+      )
+    }
+  }
+
+  lines <- manifest_set_field_after(lines, "RemoteSha", sha, "RemoteRef")
+  lines <- manifest_set_field_after(lines, "GithubSHA1", sha, "GithubRef")
+  write_lines_utf8(lines, MANIFEST)
+
+  cat(sprintf("RemoteSha/GithubSHA1 now point at %s (%s).\n", sha, remote_ref))
+  invisible(TRUE)
+}
+
+# Move RemoteRef/GithubRef between a tag and a branch. Rare -- it changes WHAT a
+# branch deploys, not which commit of it -- and used here once, to replace dev's
+# never-cut `v0.20.0` tag with the `dev` branch it is actually deployed from.
+#
+# Clears any recorded SHA: it describes the ref being moved away from, so it
+# cannot survive the move. --set-deploy-sha is what repopulates it.
+set_deploy_ref <- function(ref) {
+  if (!nzchar(ref) || grepl('["\\\\]', ref)) {
+    fail("'%s' is not a usable git ref.", ref)
+  }
+
+  lines <- read_lines_utf8(MANIFEST)
+  for (field in c("RemoteRef", "GithubRef")) {
+    i <- manifest_pkg_field_line(lines, field)
+    lines[i] <- sub('": "[^"]*"', sprintf('": "%s"', ref), lines[i])
+  }
+  cleared <- character(0)
+  for (sha_field in c("RemoteSha", "GithubSHA1")) {
+    if (!is.na(manifest_pkg_field_line(lines, sha_field, required = FALSE))) {
+      cleared <- c(cleared, sha_field)
+      lines <- manifest_clear_field(lines, sha_field)
+    }
+  }
+  write_lines_utf8(lines, MANIFEST)
+
+  cat(sprintf("RemoteRef/GithubRef now read \"%s\".\n", ref))
+  if (length(cleared) > 0L) {
+    cat(sprintf("  cleared %s -- it described the previous ref.\n", paste(cleared, collapse = "/")))
+  }
+  cat("Pin the new one with --set-deploy-sha <sha>.\n")
+  invisible(TRUE)
+}
 
 # --- the manifest's `files` block --------------------------------------------
 #
@@ -506,10 +703,16 @@ main <- function() {
 
   if (length(args) == 0L || identical(args[[1L]], "--help")) {
     cat("Usage:\n")
-    cat("  Rscript .github/scripts/bump_version.R <version>         rewrite every version site\n")
-    cat("  Rscript .github/scripts/bump_version.R --check           report drift, write nothing\n")
-    cat("  Rscript .github/scripts/bump_version.R --sync-manifest   rebuild the app manifest's\n")
-    cat("                                                          file list and checksums\n")
+    cat("  Rscript .github/scripts/bump_version.R <version>            rewrite every version site\n")
+    cat("  Rscript .github/scripts/bump_version.R --check               report drift, write nothing\n")
+    cat("  Rscript .github/scripts/bump_version.R --sync-manifest       rebuild the app manifest's\n")
+    cat("                                                              file list and checksums\n")
+    cat("  Rscript .github/scripts/bump_version.R --set-deploy-sha <sha>\n")
+    cat("                                                              pin RemoteSha/GithubSHA1 to the\n")
+    cat("                                                              commit being deployed\n")
+    cat("  Rscript .github/scripts/bump_version.R --set-deploy-ref <ref>\n")
+    cat("                                                              point RemoteRef/GithubRef at a\n")
+    cat("                                                              tag or a branch\n")
     quit(status = if (length(args) == 0L) 1 else 0)
   }
 
@@ -522,6 +725,21 @@ main <- function() {
   # source changes, which happens far more often than a release.
   if (identical(args[[1L]], "--sync-manifest")) {
     sync_manifest()
+    return(invisible(NULL))
+  }
+
+  # --set-release-sha kept as an alias: it is what the manifest-release-sha.yml
+  # already on master invokes, and that workflow must keep working through the
+  # window where master has the old copy and dev the new one.
+  if (args[[1L]] %in% c("--set-deploy-sha", "--set-release-sha")) {
+    if (length(args) < 2L) fail("%s requires a commit SHA argument.", args[[1L]])
+    set_deploy_sha(trimws(args[[2L]]))
+    return(invisible(NULL))
+  }
+
+  if (identical(args[[1L]], "--set-deploy-ref")) {
+    if (length(args) < 2L) fail("--set-deploy-ref requires a git ref argument.")
+    set_deploy_ref(trimws(args[[2L]]))
     return(invisible(NULL))
   }
 

@@ -98,6 +98,7 @@ export(validate_file_stream)
 export(validate_rules)
 export(validate_table)
 export(validate_transmission_dates)
+export(validation_benchmark)
 export(validation_errors)
 export(validation_status)
 export(write_columns_to_json)
@@ -110,71 +111,93 @@ export(write_validation_report)
 if (getRversion() < "4.3.0") importFrom("S7", "@")
 import(S7)
 importFrom(R.utils,gzip)
-importFrom(arrow,arrow_table)
-importFrom(arrow,read_csv_arrow)
-importFrom(arrow,read_delim_arrow)
-importFrom(arrow,read_tsv_arrow)
-importFrom(cli,cli_abort)
-importFrom(cli,cli_alert)
-importFrom(cli,cli_alert_danger)
-importFrom(cli,cli_alert_info)
-importFrom(cli,cli_alert_success)
-importFrom(cli,cli_alert_warning)
-importFrom(cli,cli_div)
-importFrom(cli,cli_h1)
-importFrom(cli,cli_h2)
-importFrom(cli,cli_h3)
-importFrom(cli,cli_text)
-importFrom(cli,cli_warn)
-importFrom(cli,format_message)
+importFrom(arrow,
+  arrow_table,
+  read_csv_arrow,
+  read_delim_arrow,
+  read_tsv_arrow
+)
+importFrom(cli,
+  cli_abort,
+  cli_alert,
+  cli_alert_danger,
+  cli_alert_info,
+  cli_alert_success,
+  cli_alert_warning,
+  cli_div,
+  cli_h1,
+  cli_h2,
+  cli_h3,
+  cli_text,
+  cli_warn,
+  format_message
+)
 importFrom(docxtractr,docx_extract_all_tbls)
-importFrom(dplyr,across)
-importFrom(dplyr,any_of)
-importFrom(dplyr,arrange)
-importFrom(dplyr,distinct)
-importFrom(dplyr,everything)
-importFrom(dplyr,filter)
-importFrom(dplyr,group_by)
-importFrom(dplyr,mutate)
-importFrom(dplyr,n)
-importFrom(dplyr,select)
-importFrom(dplyr,summarise)
-importFrom(dplyr,where)
-importFrom(flextable,align)
-importFrom(flextable,bg)
-importFrom(flextable,body_add_flextable)
-importFrom(flextable,bold)
-importFrom(flextable,border_inner)
-importFrom(flextable,border_outer)
-importFrom(flextable,flextable)
-importFrom(flextable,font)
-importFrom(flextable,italic)
-importFrom(flextable,padding)
-importFrom(flextable,save_as_docx)
-importFrom(flextable,valign)
-importFrom(flextable,width)
+importFrom(dplyr,
+  across,
+  any_of,
+  arrange,
+  distinct,
+  everything,
+  filter,
+  group_by,
+  mutate,
+  n,
+  select,
+  summarise,
+  where
+)
+importFrom(flextable,
+  align,
+  bg,
+  body_add_flextable,
+  bold,
+  border_inner,
+  border_outer,
+  flextable,
+  font,
+  italic,
+  padding,
+  save_as_docx,
+  valign,
+  width
+)
 importFrom(glue,glue)
-importFrom(jsonlite,toJSON)
-importFrom(jsonlite,write_json)
+importFrom(jsonlite,
+  toJSON,
+  write_json
+)
 importFrom(magrittr,"%>%")
 importFrom(methods,is)
-importFrom(officer,body_add_break)
-importFrom(officer,body_add_par)
-importFrom(officer,fp_border)
-importFrom(officer,fp_par)
-importFrom(officer,fp_text)
-importFrom(officer,read_docx)
-importFrom(purrr,map)
-importFrom(purrr,set_names)
-importFrom(rlang,"%||%")
-importFrom(rlang,.data)
+importFrom(officer,
+  body_add_break,
+  body_add_par,
+  fp_border,
+  fp_par,
+  fp_text,
+  read_docx
+)
+importFrom(purrr,
+  map,
+  set_names
+)
+importFrom(rlang,
+  "%||%",
+  .data
+)
 importFrom(stats,setNames)
-importFrom(stringr,str_c)
-importFrom(stringr,str_detect)
-importFrom(stringr,str_flatten_comma)
-importFrom(stringr,str_glue)
-importFrom(tools,file_ext)
-importFrom(tools,md5sum)
+importFrom(stringr,
+  str_c,
+  str_detect,
+  str_flatten_comma,
+  str_glue
+)
+importFrom(tools,
+  file_ext,
+  md5sum
+)
 importFrom(utils,write.table)
-importFrom(yaml,read_yaml)
-importFrom(yaml,write_yaml)
+importFrom(yaml,
+  read_yaml,
+  write_yaml
+)

@@ -69,7 +69,14 @@ contract.
 ## Tools
 
 - `gh` (on `PATH`) for all GitHub work — PRs, issues, `gh run view` for CI logs.
-  Never scrape the web UI.
+  Never scrape the web UI. Always supply PR/issue bodies using `--body-file`
+  rather than inline `--body "..."` so that PowerShell does not interpret
+  markdown backticks as escape sequences (e.g. `` `a `` becoming bell/`\a`).
+- **Merging PRs**: Never call `gh pr merge --auto` or `gh pr merge` immediately
+  assuming GitHub will wait. Instead, explicitly poll and wait with `gh pr checks`
+  or `gh run list --branch` until **all** CI workflows (`R-CMD-check` on all OS
+  matrix targets, `manifest-sync`, `r-style`, `pre-commit`) have finished and
+  reported passing status (`pass` / `completed success`) before initiating a merge.
 - Graphify is installed but produces nothing here: its extractor has no `.R`
   parser, so a build reports "No code files found". Use `Explore`, not a graph.
   `.graphifyignore` exists only to keep an accidental build from spending

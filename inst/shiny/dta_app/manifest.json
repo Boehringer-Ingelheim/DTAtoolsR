@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.18.1",
+        "Version": "0.20.1",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -63,10 +63,12 @@
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "v0.18.1",
+        "RemoteRef": "dev",
+        "RemoteSha": "47289c5dd0b3e4fd6623ba6d19de9d055aea4411",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "v0.18.1",
+        "GithubRef": "dev",
+        "GithubSHA1": "47289c5dd0b3e4fd6623ba6d19de9d055aea4411",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3116,19 +3118,19 @@
       "checksum": "ded005836ea1dc832791b67486c3a5e7"
     },
     "R/ui_components.R": {
-      "checksum": "755a98abcfecb3b29179d03285da7d91"
+      "checksum": "6e604646d54dcf45e46d0c8c8b9e4d9e"
     },
     "R/utils_dta.R": {
-      "checksum": "77caff42e4869c84f128a419b2b95aaa"
+      "checksum": "07c4d1b7b3185fed1ffc52f84f8cbf86"
     },
     "R/utils_export.R": {
       "checksum": "cb019d396e88a149968e9ec549bea956"
     },
     "VERSION": {
-      "checksum": "f8ecb2aaf58a7e2ff3b5923992928b70"
+      "checksum": "2892934a5d7c376677cffd1beb58999d"
     },
     "app.R": {
-      "checksum": "0badc081f11876163b8527d1fb71d26e"
+      "checksum": "1b6b611b8e71566829373d722a6091f2"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

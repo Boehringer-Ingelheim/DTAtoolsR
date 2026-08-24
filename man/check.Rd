@@ -35,7 +35,7 @@ Depends on the method implementation.
 
 Invisibly returns the updated \code{DTA} object \code{x} with all
 validated datasets having their \code{validation_index} and
-\code{validation_store} populated. Three attributes are attached:
+\code{validation_store} populated. Attributes are attached:
 \describe{
 \item{\code{"last_validation_summary"}}{data.frame with one row per
 dataset and columns dataset, n_targets, n_validated, n_valid,
@@ -48,6 +48,11 @@ row of the per-dataset summary.}
 \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 no dataset is invalid, no table has an import error, and the metadata
 imported cleanly.}
+\item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
+one-row data.frame of runtime/memory metrics; see
+\code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
+level: there is no cheap, trustworthy row total across every dataset,
+and guessing would be worse than reporting unknown.}
 }
 
 Invisibly returns \code{x}.

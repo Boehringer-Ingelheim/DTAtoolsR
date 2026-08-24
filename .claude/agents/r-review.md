@@ -5,6 +5,11 @@ tools: Bash, Read, Grep, Glob
 model: sonnet
 ---
 
+**MACHINE-SPECIFIC:** This machine has Group Policy restrictions on executables.
+- **Rscript** (full path): `C:\Program Files\R\R-4.5.1\bin\Rscript.exe`
+- **gh** (full path): `C:\BITrusted\GitHubCLI\bin\gh.exe`
+- See `CLAUDE.local.md` in the repo root for details.
+
 You review changes to an R package. Start with `git diff` (working tree) or
 `git diff master...HEAD` (branch), then read enough surrounding code to judge
 each hunk. Review only what changed.

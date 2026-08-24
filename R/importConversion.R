@@ -88,24 +88,26 @@ dta_spec_r_type <- function(specs, column) {
 #' bytes in the file are parsed.
 #'
 #' Arrow infers a column's type from its contents, and that inference runs
-#' *before* any code in this package sees the data. A column of quoted subject
-#' ids -- `"007"`, `"008"` -- is inferred as `int64` and arrives in R as `7` and
-#' `8`. The leading zeros are gone by the time [dta_coerce_table_to_specs()] is
-#' reached, so its "never coerce a `Char` column" guard has nothing left to
-#' protect: the corruption already happened. The only place to stop it is the
-#' read itself.
+#' *before* any code in this package sees the data. Two classes of problem
+#' arise:
 #'
-#' The schema only ever *widens* a column to `utf8`, and only for columns whose
-#' declared R type is `"character"`. Narrowing is deliberately left alone.
-#' Telling Arrow that a column is `int64` makes it abort the entire read on the
-#' first cell it cannot parse (`CSV conversion error to int64: invalid value
-#' 'abc'`), which would turn a single reportable bad cell into a transfer that
-#' will not load at all. Numeric columns are therefore still read by inference
-#' and narrowed by [dta_coerce_table_to_specs()], where an unrepresentable value
-#' becomes `NA` and is reported as an import error.
+#' 1. **Character corruption.** A column of quoted subject ids -- `"007"`,
+#'    `"008"` -- is inferred as `int64` and arrives in R as `7` and `8`. The
+#'    leading zeros are gone before [dta_coerce_table_to_specs()] runs, so its
+#'    "never coerce a `Char` column" guard has nothing left to protect.
 #'
-#' Reading a `character` column as text can never fail and never loses
-#' information, which is what makes widening the safe half of the operation.
+#' 2. **Hard abort on mixed numeric data.** Arrow locks in the inferred type
+#'    after scanning enough rows. If it picks `int64` for a column that mostly
+#'    looks like integers and then encounters `0.01` further down, it aborts the
+#'    entire read: `CSV conversion error to int64: invalid value '0.01'`. That
+#'    turns one reportable bad-cell into a file that will not load at all.
+#'
+#' Both problems are solved the same way: pin every declared column to `utf8`
+#' at read time and let [dta_coerce_table_to_specs()] handle the conversion.
+#' Reading as text can never fail and never loses information. An unrepresentable
+#' value (`"0.01"` in an `Int` column, `"abc"` in a `Num` column) becomes `NA`
+#' in the typed column and its source text is retained as an import error --
+#' which is exactly what the schema-validation axis expects to see.
 #' @param specs A `DTAColumnSpecCollection`, or `NULL`. `NULL` means "no
 #'   declared types are available", and yields `NULL`: the reader then infers
 #'   every column exactly as it did before.
@@ -140,22 +142,29 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
   keys <- unique(c(names(columns), ids))
   keys <- keys[!is.na(keys) & nzchar(keys)]
 
-  textual <- keys[vapply(
+  # Pin every column with a declared type to utf8.  Arrow's inference is applied
+  # *before* any R code runs, so two things can go wrong without this:
+  # (a) a "007" Char id is inferred as int64 and arrives as 7; and
+  # (b) a column inferred as int64 aborts the entire read when it later
+  #     encounters "0.01", turning one reportable bad cell into a load failure.
+  # Columns with no spec are left alone (NA from dta_spec_r_type) so Arrow
+  # infers them exactly as it would without specs.
+  typed_keys <- keys[vapply(
     keys,
-    function(key) identical(dta_spec_r_type(specs, key), "character"),
+    function(key) !is.na(dta_spec_r_type(specs, key)),
     logical(1),
     USE.NAMES = FALSE
   )]
 
-  if (length(textual) == 0) {
+  if (length(typed_keys) == 0) {
     return(NULL)
   }
 
   # A schema entry for a column the file does not contain is ignored by Arrow,
   # so a spec that declares more columns than the file carries is not an error
   # here. Whether the column is missing is the column spec axis's question.
-  types <- rep(list(arrow::utf8()), length(textual))
-  names(types) <- textual
+  types <- rep(list(arrow::utf8()), length(typed_keys))
+  names(types) <- typed_keys
 
   do.call(arrow::schema, types)
 }
@@ -181,8 +190,9 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the
-#'   converted `values`, the integer indices of the `offending` values, and the
-#'   source text `raw`.
+#'   converted `values`, the integer indices of the `offending` values, and
+#'   `source` -- the original input vector, from which the raw text of row `i`
+#'   is `as.character(source[i])`, i.e. [dta_numeric_raw()].
 #' @keywords internal
 dta_coerce_column <- function(values, target) {
   if (!isTRUE(target %in% c("double", "integer"))) {
@@ -222,7 +232,10 @@ dta_coerce_column <- function(values, target) {
   list(
     values = out,
     offending = which(converted$unconvertible),
-    raw = converted$raw
+    # The input vector itself, not a character rendering of it: the raw text is
+    # read at the offending indices only, and rendering the whole column up
+    # front cost an order of magnitude more memory than the column.
+    source = values
   )
 }
 
@@ -317,7 +330,7 @@ dta_coerce_table_to_specs <- function(table, specs) {
     parts[[length(parts) + 1L]] <- data.frame(
       row = as.integer(kept),
       column = column,
-      raw = substr(as.character(coerced$raw[kept]), 1L, dta_import_raw_max_chars),
+      raw = substr(dta_numeric_raw(coerced, kept), 1L, dta_import_raw_max_chars),
       declared_type = declared,
       reason = "not_convertible",
       stringsAsFactors = FALSE

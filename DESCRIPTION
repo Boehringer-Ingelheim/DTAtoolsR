@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
-Version: 0.18.1
+Version: 0.20.1
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -16,7 +16,6 @@ Description: Tools for defining, validating, and processing data transfer
 License: LGPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Imports:
 	yaml,
 	dplyr,
@@ -47,6 +46,7 @@ Suggests:
 	knitr,
 	rmarkdown,
 	testthat (>= 3.0.0),
+	bit64,
 	shiny,
 	bslib,
 	shinyjs,
@@ -57,7 +57,8 @@ Suggests:
 	tinytex,
 	doconv,
 	remotes,
-	pkgload
+	pkgload,
+	ps
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
@@ -86,6 +87,7 @@ Collate:
     'DTARuleColUnique-class.R'
     'DTARuleGroupCondition-class.R'
     'arrowCompute.R'
+    'benchmarking.R'
     'columnSpecChecks.R'
     'documentBuilders.R'
     'evaluateRules.R'
@@ -99,4 +101,4 @@ Collate:
     'streamingValidation.R'
     'validationFunctions.R'
     'zzz.R'
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0

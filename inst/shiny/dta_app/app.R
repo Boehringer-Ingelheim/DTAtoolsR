@@ -278,6 +278,9 @@ server <- function(input, output, session) {
     rule_token = 0, # bump to re-render the rule editor body
     rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
     rule_prefill = NULL, # list() of the rule fields currently loaded in the form
+    meta_token = 0, # bump to re-render the dataset-metadata editor body
+    meta_prefill = NULL, # list() of the dataset metadata fields loaded in the form
+    meta_msg = NULL, # inline dataset-metadata-editor result: NULL | list(ok, error)
     col_msg = NULL, # inline column-editor result: NULL | list(ok, error)
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
@@ -1330,6 +1333,56 @@ server <- function(input, output, session) {
         rm(list = key, envir = file_id_env)
       }
     }
+    invisible(NULL)
+  }
+
+  # Move every piece of app state a dataset owns from its old name to its new
+  # one, after dta_set_dataset_meta() renamed it inside the DTA.
+  #
+  # Five structures are keyed by dataset NAME and each fails differently if it
+  # is left behind:
+  #   rv$uploads   -- keyed "<name>||<handlerIdx>". Stale keys make the loaded
+  #                   files disappear from "Loaded files" while staying bound to
+  #                   the dataset, still counting towards validation and export
+  #                   with no way to reach them (the same failure remap_uploads()
+  #                   exists to prevent).
+  #   file_id_env  -- the stable ids behind the per-file trash buttons encode the
+  #                   name they were minted under, so a stale id removes from the
+  #                   wrong key. Purged rather than migrated; get_file_id() mints
+  #                   them again on the next render.
+  #   rv$status    -- the nav list reads the status by name; a stale entry leaves
+  #                   the renamed dataset with no status at all.
+  #   rv$active / rv$editor_dataset -- the selected dataset and the dataset the
+  #                   open modal targets, both bare names.
+  #
+  # rv$structure is NOT migrated here: build_structure() rebuilds it wholesale
+  # from the DTA, and the caller does that straight after.
+  rename_dataset_state <- function(old, new) {
+    if (identical(old, new)) {
+      return(invisible(NULL))
+    }
+
+    up <- rv$uploads
+    keys <- names(up) %||% character(0)
+    old_prefix <- paste0(old, "||")
+    hit <- startsWith(keys, old_prefix)
+    if (any(hit)) {
+      keys[hit] <- paste0(new, "||", substring(keys[hit], nchar(old_prefix) + 1L))
+      names(up) <- keys
+      rv$uploads <- up
+    }
+
+    purge_file_ids(old)
+
+    st <- rv$status
+    if (old %in% names(st)) {
+      names(st)[match(old, names(st))] <- new
+      rv$status <- st
+    }
+
+    if (identical(rv$active, old)) rv$active <- new
+    if (identical(rv$editor_dataset, old)) rv$editor_dataset <- new
+
     invisible(NULL)
   }
 
@@ -3047,6 +3100,159 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule saved.", type = "message")
+  })
+
+  # ======================= Edit dataset metadata ==========================
+  # The DATASET's own properties -- name, description, template_* -- as opposed
+  # to the DOCUMENT-level DTAMetaData edited on the Metadata page. Both are
+  # called metadata; these belong to one dataset and travel with it in the
+  # exported dataset YAML.
+  #
+  # Unlike the file, column and rule editors this is a SINGLE-VIEW modal: those
+  # three edit a collection and need a list view to pick from, while a dataset
+  # has exactly one metadata record, so a list would be an empty ceremony.
+  # rv$meta_token drives the re-render; the form pre-fills from rv$meta_prefill
+  # rather than from live inputs, so a re-render never resurrects a stale value.
+  #
+  # `type` is NOT offered. See the note in dta_set_dataset_meta(): it is fixed by
+  # the concrete S7 class, and assigning it would produce a dataset whose
+  # declared type and actual behaviour disagree. It is shown as a chip on the
+  # dataset page, which is where a fact about the dataset belongs.
+  show_meta_editor_modal <- function(ed) {
+    showModal(modalDialog(
+      title = paste("Edit metadata —", ed),
+      size = "l", easyClose = FALSE,
+      uiOutput("meta_modal_body"),
+      footer = NULL
+    ))
+  }
+
+  observeEvent(input$edit_meta, {
+    req(rv$active)
+    rv$editor_dataset <- rv$active
+    rv$meta_prefill <- dta_dataset_meta_fields(rv$dta, rv$active)
+    rv$meta_msg <- NULL
+    rv$meta_token <- rv$meta_token + 1
+    show_meta_editor_modal(rv$active)
+  })
+
+  output$meta_modal_body <- renderUI({
+    rv$meta_token
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    pf <- isolate(rv$meta_prefill) %||% list()
+    g <- function(k, d = "") pf[[k]] %||% d
+    tagList(
+      div(
+        class = "spec-form",
+        textInput("meta_name", "Dataset name",
+          value = g("name"), width = "100%",
+          placeholder = "vitals"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          paste(
+            "The name identifies the dataset in the specification, in every",
+            "validation message and in the exported documents. Renaming it",
+            "clears this dataset's validation, because results recorded under",
+            "the old name no longer describe it."
+          )
+        ),
+        textAreaInput("meta_description", "Description",
+          value = g("description"), width = "100%", rows = 2,
+          placeholder = "What this dataset contains, in words"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Shown as the heading of this dataset's page when set."
+        ),
+        tags$h6("Template", style = "margin-top:4px;"),
+        div(
+          class = "msg-hint", style = "margin:-4px 0 8px;",
+          "Where this dataset's specification came from. Documentation only — none of it affects validation."
+        ),
+        layout_columns(
+          col_widths = c(4, 4, 4),
+          textInput("meta_template_source", "Source",
+            value = g("template_source"), width = "100%"
+          ),
+          textInput("meta_template_version", "Version",
+            value = g("template_version"), width = "100%"
+          ),
+          textInput("meta_template_date", "Date",
+            value = g("template_date"), width = "100%",
+            placeholder = "2026-01-15"
+          )
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 0;",
+          "Clearing a field removes it from the specification entirely."
+        )
+      ),
+      uiOutput("meta_editor_msg"),
+      tags$hr(),
+      div(
+        style = "display:flex; justify-content:space-between; margin-top:8px;",
+        modalButton("Close"),
+        actionButton("meta_save", "Save metadata", class = "btn btn-primary")
+      )
+    )
+  })
+
+  output$meta_editor_msg <- renderUI({
+    m <- rv$meta_msg
+    if (is.null(m) || isTRUE(m$ok)) {
+      return(NULL)
+    }
+    div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+  })
+
+  observeEvent(input$meta_save, {
+    ed <- isolate(rv$editor_dataset)
+    req(ed)
+    r <- dta_set_dataset_meta(
+      isolate(rv$dta), ed,
+      name = input$meta_name,
+      description = input$meta_description,
+      template_source = input$meta_template_source,
+      template_version = input$meta_template_version,
+      template_date = input$meta_template_date
+    )
+    if (!isTRUE(r$ok)) {
+      # The modal stays open with everything the user typed still in it, and
+      # nothing in rv has changed.
+      rv$meta_msg <- list(ok = FALSE, error = r$error)
+      return()
+    }
+
+    new_name <- trimws(as.character(input$meta_name %||% "")[1])
+    renamed <- !identical(new_name, ed)
+    rv$dta <- r$value
+
+    # ORDER MATTERS: the state migration has to land before anything reads the
+    # dataset by name again -- invalidate_dataset() looks its status up by name,
+    # and every output keyed off rv$active re-renders as soon as it changes.
+    if (renamed) {
+      rename_dataset_state(ed, new_name)
+      # A rename does not change what the data IS, but every stored validation
+      # record carries the dataset name it was checked under, so results left
+      # in place would report a dataset that no longer exists. The description
+      # and template fields take no part in validation, so editing only those
+      # deliberately leaves a passed check passed.
+      invalidate_dataset(new_name)
+      # Only a rename touches rv$structure -- it is keyed by name and caches
+      # each dataset's name, so the nav list would otherwise keep showing the
+      # old one. Assigning it re-renders the WHOLE workspace (output$main
+      # depends on rv$structure alone), resetting the active tab and every file
+      # input, which is why the column and rule editors never touch it and why
+      # a description-only edit here must not either.
+      rv$structure <- build_structure(rv$dta)
+    }
+
+    rv$meta_msg <- NULL
+    sync_yaml_text()
+    removeModal()
+    showNotification("Metadata updated.", type = "message")
   })
 
   # --- messages + inspect -------------------------------------------------

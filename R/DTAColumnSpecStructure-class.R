@@ -108,6 +108,7 @@ method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
 
 #' @description
 #' Converts a DTAColumnSpecStructure to a JSON Schema.
+#' @param x A `DTAColumnSpecStructure` object.
 #' @name as_json_schema
 #' @title as_json_schema
 #' @export
