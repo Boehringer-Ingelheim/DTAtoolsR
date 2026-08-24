@@ -12,19 +12,39 @@ render_html <- function(tag) {
   paste(as.character(tag), collapse = "\n")
 }
 
-test_that("the Edit menu offers columns, rules and files in that order", {
+test_that("the Edit menu offers columns, rules, files and metadata in that order", {
   html <- render_html(app_fn("ds_edit_menu")())
 
   positions <- vapply(
-    c("edit_cols", "edit_rules", "edit_files"),
+    c("edit_cols", "edit_rules", "edit_files", "edit_meta"),
     function(id) regexpr(paste0("id=\"", id, "\""), html, fixed = TRUE)[[1]],
     numeric(1)
   )
 
   # Every row is present...
   expect_true(all(positions > 0))
-  # ...and in the order a specification is read in.
+  # ...and in the order a specification is read in, with metadata last: it
+  # describes the dataset, the other three describe its contents.
   expect_false(is.unsorted(positions))
+})
+
+test_that("the Metadata row carries both bindings and names what it edits", {
+  html <- render_html(app_fn("ds_edit_menu")())
+
+  expect_match(html, "id=\"edit_meta\"", fixed = TRUE)
+  expect_match(html, "Metadata", fixed = TRUE)
+  expect_match(html, "Name, description and template details", fixed = TRUE)
+})
+
+test_that("the Edit menu offers no control for a dataset's type", {
+  # A dataset's type is fixed by its S7 class; the property is assignable but
+  # doing so yields an object whose declared type and behaviour disagree. The
+  # editor therefore offers no way in -- not even a disabled one, which would
+  # still put an input id on the page.
+  html <- render_html(app_fn("ds_edit_menu")())
+
+  expect_no_match(html, "meta_type", fixed = TRUE)
+  expect_no_match(app_source("app.R"), "input$meta_type", fixed = TRUE)
 })
 
 test_that("each Edit menu row carries both bindings it needs", {
@@ -66,6 +86,7 @@ test_that("the dataset actions no longer render three separate edit buttons", {
   expect_no_match(src, "actionButton(\"edit_cols\"", fixed = TRUE)
   expect_no_match(src, "actionButton(\"edit_rules\"", fixed = TRUE)
   expect_no_match(src, "actionButton(\"edit_files\"", fixed = TRUE)
+  expect_no_match(src, "actionButton(\"edit_meta\"", fixed = TRUE)
   # ...and the one entry point is rendered where they used to be.
   expect_match(src, "ds_edit_menu()", fixed = TRUE)
 })

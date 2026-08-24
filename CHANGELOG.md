@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-08-24
+
+### Added
+
+- **A dataset's metadata is now editable in the Shiny app.** The dataset **Edit**
+  menu has a fourth entry, **Metadata**, after *Files*. It opens a dialog over
+  the `DTADataSet`-level properties — `name`, `description`, `template_source`,
+  `template_version` and `template_date` — which until now could only be changed
+  by hand-editing the Raw YAML. Clearing a field removes it from the
+  specification entirely rather than storing an empty value.
+
+  Renaming a dataset re-keys everything that referred to it by name (loaded
+  files, per-file controls, validation status, the selected dataset) while
+  leaving it in its original position in the document, and clears its
+  validation — stored results carry the name they were checked under, so they no
+  longer describe the dataset once it is renamed. Editing only the description or
+  the template fields does not touch validation, since none of them take part in
+  it.
+
+  A dataset's `type` is deliberately **not** editable. It is fixed by the
+  concrete class (`DTADataSetTabular` / `DTADataSetFile`) and everything
+  downstream dispatches on that class, so assigning the property would yield a
+  dataset whose declared type and actual behaviour disagree. It remains visible
+  as a chip on the dataset page.
+
 ## [0.19.0] - 2026-08-22
 
 ### Fixed
