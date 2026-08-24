@@ -160,12 +160,25 @@ source(REF_SHAPE)
 # of printing to stderr, which system2() would otherwise interleave into
 # `out`.
 #
-# Falls back to origin/<ref>: a branch name like `dev` has no LOCAL ref in an
-# actions/checkout run, which checks out a detached merge commit for a
-# pull_request and only creates the one branch it was told to. Without the
-# fallback a perfectly good branch ref reads as unresolvable and fails every PR.
+# origin/<ref> is tried FIRST, and the bare ref only as a fallback. Two reasons,
+# and the order matters in opposite directions in the two places this runs:
+#
+#   in CI   a branch name like `dev` has no LOCAL ref at all. actions/checkout
+#           builds a detached merge commit for a pull_request and creates only
+#           the branch it was told to, so the bare lookup finds nothing.
+#   locally a local branch of that name usually DOES exist, and is routinely
+#           stale -- a checked-out `dev` sitting several commits behind
+#           origin/dev is the normal state of a worktree. Trusting it inverts
+#           the containment test: a freshly pushed tip reads as "not in dev's
+#           history" because it is a DESCENDANT of the stale local branch
+#           rather than an ancestor. That is a false failure, and the
+#           mirror-image false PASS is available too.
+#
+# The remote-tracking ref is what the deployed branch actually is, which is the
+# thing the pin has to be consistent with. A tag has no origin/ form, so it
+# simply falls through to the bare name.
 git_commit_for <- function(ref) {
-  candidates <- c(ref, paste0("origin/", ref), paste0("refs/remotes/origin/", ref))
+  candidates <- c(paste0("origin/", ref), paste0("refs/remotes/origin/", ref), ref)
   for (candidate in candidates) {
     out <- suppressWarnings(system2(
       "git", c("rev-parse", "--verify", "--quiet", paste0(candidate, "^{commit}")),
@@ -204,7 +217,7 @@ git_commits_behind <- function(sha, ref) {
 
 # Reported, never enforced. Being ON the branch is the correctness property and
 # is checked below; being CURRENT is a matter of degree, and the honest bound on
-# it is the manifest-dev-sha.yml workflow that re-pins on every push -- not a
+# it is the manifest-sync.yml workflow that re-pins on every PR -- not a
 # threshold here. A stricter rule would have to pick a number of commits to
 # tolerate and would go red for the whole window between a push landing and that
 # workflow finishing: a false alarm, not a defect.
@@ -362,5 +375,5 @@ for (s in staleness_notes) {
 if (length(staleness_notes) > 0) {
   cat("        Expected on a branch opened before those commits landed -- merging clears it.\n")
   cat("        Only a concern if it is large on dev itself, which would mean\n")
-  cat("        manifest-dev-sha.yml has stopped re-pinning.\n")
+  cat("        manifest-sync.yml has stopped re-pinning.\n")
 }
