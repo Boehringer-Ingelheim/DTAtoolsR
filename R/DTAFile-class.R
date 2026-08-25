@@ -269,6 +269,20 @@ if (!exists("matches_filename", mode = "function")) {
 }
 
 method(matches_filename, DTAFile) <- function(x, file) {
+  dta_matches_filename_base(x, file)
+}
+
+# The name/pattern half of matches_filename(), shared with the DTAFileAny
+# method, which ANDs its file-ending restriction onto this result.
+#
+# Factored out rather than reached through S7::super(): this codebase calls
+# super() nowhere (the only two occurrences are commented out), and a plain
+# helper keeps the base behaviour testable on its own.
+#
+# Returns one logical PER declared name or pattern -- a handler may carry
+# several -- and every caller reduces the vector itself.
+#' @keywords internal
+dta_matches_filename_base <- function(x, file) {
   file_name <- basename(file)
   candidates <- unique(c(file_name, dta_strip_compression_extension(file_name)))
 

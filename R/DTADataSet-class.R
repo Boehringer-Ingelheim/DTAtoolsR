@@ -437,7 +437,10 @@ method(load_file, DTADataSet) <- function(
   name = tools::file_path_sans_ext(basename(file)),
   ...
 ) {
-  stop("This method needs to be implemented in derived classes.")
+  cli::cli_abort(c(
+    "{.fn load_file} is not implemented for {.cls {class(x)[[1]]}}.",
+    i = "Use a {.cls DTADataSetTabular} or {.cls DTADataSetFile}, or add a method for this subclass."
+  ))
 }
 
 

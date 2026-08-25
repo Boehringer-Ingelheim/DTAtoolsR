@@ -4,6 +4,104 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A file handler for deliverables that are never parsed: `DTAFileAny`,
+  written `type: any` in YAML.** A `DTADataSetFile` exists to confirm that
+  PDFs, archives, reports and raw instrument output arrived intact, but the
+  only handler types on offer were `csv` and `tsv` — so such a file had to be
+  declared as something it was not.
+
+  The handler optionally carries `extensions`, an **open** allow-list of file
+  endings (`extensions: [pdf, zip]`). Left unset, any ending is accepted.
+  Because the list is open rather than a fixed enum, a delivery of `.xpt` or
+  `.sas7bdat` files needs no change to this package. Entries are normalised on
+  construction — lower-cased, leading dot removed — so `.PDF` and `pdf` declare
+  the same thing, and a compressed delivery satisfies the ending underneath it
+  (`report.pdf.gz` passes `extensions: [pdf]`, exactly as `data.csv.gz` already
+  matches a handler declared `data.csv`).
+
+  The restriction is enforced by `matches_filename()`, so a file with the wrong
+  ending is refused as it is offered rather than at validation time.
+
+- **`load_file()` for `DTADataSetFile`.** A file dataset can now be populated
+  the same way a tabular one is, binding each file to a declared handler as it
+  arrives, instead of only through the `paths =` constructor shortcut.
+
+  Nothing is read or stat-ed when a file is bound: whether it exists, is
+  non-empty and can be opened remains the whole contract of `check()`, which is
+  what lets a specification bind a file that has not arrived yet and report it
+  as missing. The delivered name is still checked against the handler, as it is
+  for a tabular dataset.
+
+- **`clear_validation()` for `DTADataSetFile`**, matching the tabular method.
+
+### Changed
+
+- `__DTAtools_supported_file_types__` is split in two. `type:` was answering two
+  unrelated questions with one list: *which reader parses this file* (tabular
+  only) and *what may this file be* (file datasets). Tabular handlers now
+  validate against `__DTAtools_supported_file_types_tabular__` (`csv`, `tsv`)
+  and file datasets against `__DTAtools_supported_file_types_file__`, which adds
+  `any`.
+
+- `DTADataSetTabular` now requires every file handler to be readable (a
+  `DTAFileTabular`). A tabular dataset parses everything it is given, so a
+  reader-less handler used to construct happily and then abort deep inside the
+  read, naming the wrong problem long after the document that caused it was
+  accepted. This is also what keeps `type: any` out of a tabular dataset without
+  threading the dataset's type through the YAML reader.
+
+- `DTADataSetFile(paths = ...)` builds `DTAFileAny` handlers rather than bare
+  `DTAFile` ones, so a dataset built that way round-trips through YAML.
+
+- The bare `stop()` in the `load_file()` fallback is now a `cli::cli_abort()`
+  naming the class it could not dispatch on.
+
+### Fixed
+
+- **Files could not be uploaded into a Files dataset in the Shiny app.**
+  Dropping a file reported *"This method needs to be implemented in derived
+  classes"* — the text of the unimplemented `load_file()` stub, surfaced
+  verbatim to the user. Three further defects sat behind it, each of which would
+  have surfaced as soon as the first was fixed:
+
+  - `clear_validation()` had no `DTADataSetFile` method either, so the *second*
+    upload of a file, and every specification edit, would still have failed.
+  - The app keyed a bound file by its basename *without* the extension, while
+    the package keys it *with* — silently breaking overwrite detection, the
+    per-file pass/fail tick and the remove button. Both sides now agree, through
+    one helper.
+  - `validation_status()` returned `NULL` rather than an empty table for a
+    dataset with nothing validated yet, which `check()` then measured with
+    `nrow()`.
+
+- The Files editor announced *"This dataset expects no files at all, so nothing
+  can be loaded into it"* in the red styling used for save failures, for a
+  dataset the user had merely not finished configuring — and neither the Columns
+  nor the Rules editor has any equivalent. The empty state now sits in the table
+  where the eye already is, and the dataset page points at the editor rather
+  than stating a dead end.
+
+- A dataset that could not report its results made every *other* dataset look
+  unvalidated. The app asks `results()` for the whole document at once, and that
+  call aborts outright if any one dataset cannot answer — a tabular dataset with
+  no data loaded raises *"No tables found in dataset."* — so checking a dataset
+  that passed left nothing turning green. Each dataset is now asked separately
+  when the combined call fails, keeping the failure local to the dataset that
+  actually cannot report.
+
+- `load_file()` on a `DTA` chose the name a bound item is stored under before it
+  knew which kind of dataset it was dispatching to, always stripping the file's
+  extension. That is right for a tabular dataset, whose tables are named after
+  the file, and wrong for a file dataset, which keys by the delivered name in
+  full — so a file re-delivered through the `DTA` API was *appended* rather than
+  replaced, growing `file_paths` on every call and leaving the duplicate entries
+  disambiguated as `<path>_1`, `<path>_2`. The name is now left to whichever
+  dataset method receives it, each of which already had the right default.
+
 ## [0.21.0] - 2026-08-24
 
 ### Added

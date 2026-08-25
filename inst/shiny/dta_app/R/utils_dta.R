@@ -126,7 +126,12 @@ handler_is_pattern <- function(h) {
 
 handler_expected <- function(h) {
   fn <- tryCatch(h@filename, error = function(e) NA_character_)
-  paste(fn, collapse = ", ")
+  result <- paste(fn, collapse = ", ")
+  ext <- tryCatch(h@extensions, error = function(e) NULL)
+  if (!is.null(ext) && length(ext) > 0) {
+    result <- paste0(result, " (", paste(ext, collapse = ", "), ")")
+  }
+  result
 }
 
 handler_hint <- function(h) {
@@ -450,6 +455,29 @@ dta_status_map <- function(dta) {
   }
 
   res <- tryCatch(DTAtools::results(dta), error = function(e) NULL)
+  # One dataset must not be able to blind the whole map. results(dta) walks
+  # every dataset and aborts outright if ANY of them cannot report -- a tabular
+  # dataset with no tables loaded raises "No tables found in dataset." -- which
+  # would leave every OTHER dataset, including ones that just validated
+  # cleanly, showing as merely pending. That is easy to reach the moment a
+  # document holds more than one dataset and the user fills in one of them:
+  # they check it, it passes, and nothing turns green.
+  #
+  # Falling back to asking each dataset on its own keeps the failure local to
+  # the dataset that actually cannot answer.
+  if (is.null(res)) {
+    per_dataset <- lapply(names_ds, function(nm) {
+      tryCatch(
+        DTAtools::results(dta_get_dataset(dta, nm)),
+        error = function(e) NULL
+      )
+    })
+    per_dataset <- Filter(
+      function(r) !is.null(r) && nrow(r) > 0,
+      per_dataset
+    )
+    res <- if (length(per_dataset) > 0) do.call(rbind, per_dataset) else NULL
+  }
   have_res <- !is.null(res) && nrow(res) > 0
   if (have_res) {
     n_invalid <- if ("n_invalid" %in% names(res)) suppressWarnings(as.numeric(res$n_invalid)) else rep(NA_real_, nrow(res))
@@ -507,6 +535,17 @@ dta_dataset_table_names <- function(ds) {
   } else {
     names(tryCatch(ds@tables, error = function(e) list())) %||% character(0)
   }
+}
+
+# Compute a bound item's key: the single source of truth for how a dataset's
+# inputs are indexed. For file datasets, the key is the basename WITH extension
+# (matching what the package's dta_file_target_keys() produces and what
+# validation_status(), messages(), inspect(), and dta_unload_table() all key
+# on). For tabular datasets, the key is the basename WITHOUT extension
+# (a table name). Must be vectorised over filename.
+dta_bound_item_name <- function(type, filename) {
+  base <- basename(filename)
+  if (identical(type, "file")) base else tools::file_path_sans_ext(base)
 }
 
 # Per-table validation status: named vector
@@ -1434,6 +1473,9 @@ dta_condition_operators <- function() {
 # every document containing one unreadable instead; the real fix is a `delim`
 # branch in DTAFileFactory, at which point this should return "delim".
 dta_handler_type <- function(h) {
+  if (inherits(h, "DTAtools::DTAFileAny")) {
+    return("any")
+  }
   if (inherits(h, "DTAtools::DTAFileTSV")) {
     return("tsv")
   }
@@ -1464,6 +1506,10 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
+  ext <- tryCatch(h@extensions, error = function(e) NULL)
+  if (!is.null(ext) && length(ext) > 0) {
+    out$extensions <- if (length(ext) == 1) ext else as.list(ext)
+  }
   out
 }
 
@@ -2143,8 +2189,12 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # tree: DTAFileFactory() -- the only route from a YAML document back to an
 # object -- implements csv and tsv only, so offering `delim` would create a
 # handler that cannot be read back.
-dta_handler_types <- function() {
-  c("csv", "tsv")
+dta_handler_types <- function(dataset_type = "tabular") {
+  if (identical(dataset_type, "file")) {
+    c("any", "csv", "tsv")
+  } else {
+    c("csv", "tsv")
+  }
 }
 
 # A compact data.frame overview of a dataset's file handlers (editor table).
@@ -2238,7 +2288,8 @@ dta_handler_fields <- function(dta, dataset, index) {
     min_number_of_files = if (is.na(mn)) 1L else as.integer(mn),
     max_number_of_files = if (is.na(mx)) 1L else as.integer(mx),
     pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
-    info = paste(.dta_info_to_lines(info), collapse = "\n")
+    info = paste(.dta_info_to_lines(info), collapse = "\n"),
+    extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", ")
   )
 }
 
@@ -2253,7 +2304,7 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
                             pattern = FALSE, count_mode = "exact",
                             number_of_files = 1, min_number_of_files = 1,
                             max_number_of_files = 1, pattern_description = NULL,
-                            info = NULL) {
+                            info = NULL, extensions = NULL, dataset_type = "tabular") {
   dta_try({
     # One name or pattern per line, so a multi-name handler survives the
     # fields -> form -> set round trip as several names rather than one.
@@ -2261,10 +2312,10 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
     if (length(fn) == 0) stop("A file name or pattern is required.")
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
-    if (!type %in% dta_handler_types()) {
+    if (!type %in% dta_handler_types(dataset_type)) {
       stop(sprintf(
         "File type must be one of: %s.",
-        paste(dta_handler_types(), collapse = ", ")
+        paste(dta_handler_types(dataset_type), collapse = ", ")
       ))
     }
 
@@ -2302,7 +2353,11 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
 
     pd <- trimws(as.character(pattern_description %||% "")[1])
 
-    handler <- do.call(DTAtools::DTAFileFactory, c(
+    # Parse extensions: split on newlines AND commas, trim, drop empties.
+    ext <- .dta_split_lines(gsub(",", "\n", as.character(extensions %||% "")))
+    ext <- if (length(ext) == 0) NULL else ext
+
+    factory_args <- c(
       list(
         type = type,
         filename = fn,
@@ -2311,7 +2366,14 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
         info = .dta_lines_to_info(info)
       ),
       args
-    ))
+    )
+
+    # Only add extensions when type is "any" (csv/tsv do not accept this arg).
+    if (identical(type, "any") && !is.null(ext)) {
+      factory_args$extensions <- ext
+    }
+
+    handler <- do.call(DTAtools::DTAFileFactory, factory_args)
 
     ds <- DTAtools::datasets(dta, dataset)
     hs <- dta_handlers(ds)

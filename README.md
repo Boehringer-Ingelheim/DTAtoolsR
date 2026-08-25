@@ -199,8 +199,9 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
-        ├── file_paths           ← character vector of expected file paths
-        └── files (list)         ← DTAFile descriptors (derived from file_paths)
+        ├── file_paths           ← bound file paths (via load_file() or paths=)
+        └── files (list)         ← DTAFileAny descriptors (type: any), which
+                                          may restrict the allowed endings
 ```
 
 </details>
@@ -448,6 +449,32 @@ ds_file <- DTADataSetFile(
 ds_file <- check(ds_file)
 results(ds_file)
 ```
+
+Files can also be declared up front and bound as they arrive, the same way a
+tabular dataset is loaded. Declare the expected files with `type: any` — the
+handler for a deliverable that is never parsed — and optionally restrict which
+endings you will accept:
+
+```r
+ds_file <- DTADataSetFile(
+  name  = "delivery_check",
+  files = list(
+    DTAFileAny(
+      filename    = "^report_.*",
+      pattern     = TRUE,
+      number_of_files = 3,
+      extensions  = c("pdf", "zip")   # omit to accept any ending
+    )
+  )
+)
+
+ds_file <- load_file(ds_file, file = "report_2024.pdf", handler_index = 1)
+ds_file <- check(ds_file)
+```
+
+`extensions` is an open list, so a delivery of `.xpt` or `.sas7bdat` files needs
+no change to the package. A file whose ending is not listed is refused as it is
+offered, rather than at validation time.
 
 ### Building a full `DTA` object, mixing dataset types
 
@@ -887,6 +914,7 @@ row-level validation.
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
+| `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
 

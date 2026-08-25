@@ -192,7 +192,28 @@ dta_resolve_stream_mode <- function(
 
   size > threshold
 }
-`__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
+# Two lists, because `type:` answers two different questions depending on the
+# dataset it sits in.
+#
+# In a TABULAR dataset the type picks the reader that parses the file, so it can
+# only ever name a format this package can actually read. In a FILE dataset
+# nothing is parsed at all -- `check()` asks only whether the file arrived, is
+# non-empty and can be opened -- so restricting it to the readable formats forced
+# a PDF or an archive to be declared `type: csv`, which is simply untrue and
+# leaves the document lying about its own contents.
+#
+# `any` exists for exactly that case, and carries no reader. It is offered only
+# to a file dataset; a tabular dataset rejects it through
+# `DTADataSetTabular`'s validator, which requires every handler to be a
+# `DTAFileTabular` rather than through this list, so a handler is validated
+# against the dataset that holds it rather than against the argument someone
+# passed to the factory.
+`__DTAtools_supported_file_types_tabular__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
+`__DTAtools_supported_file_types_file__` <- c("any", "csv", "tsv")
+`__DTAtools_supported_file_types__` <- unique(c(
+  `__DTAtools_supported_file_types_tabular__`,
+  `__DTAtools_supported_file_types_file__`
+))
 
 #' @title Check Generic
 #' @description
@@ -435,8 +456,18 @@ dta_file_handlers_from_list <- function(files) {
 #' Constructs a DTAFile object for a specified backend (e.g., SAS or R),
 #' based on the provided type and file path.
 #'
+#' `type` may name any format in either supported list: the readable formats a
+#' tabular dataset needs (`csv`, `tsv`) or `any`, the reader-less handler a
+#' \code{\link{DTADataSetFile}} uses for a deliverable that is never parsed.
+#' Which of those a given dataset will accept is enforced by the dataset itself
+#' -- \code{\link{DTADataSetTabular}} requires every handler to be readable --
+#' so this factory builds what it is asked for and the dataset has the final
+#' say.
+#'
 #' @param type Character. The type specification, potentially prefixed with a backend identifier.
 #' @param ... Additional arguments passed to the specific backend constructor.
+#'   For `type = "any"` this includes the optional `extensions` restriction; see
+#'   \code{\link{DTAFileAny}}.
 #'
 #' @return An object derived from class \code{DTAFile}, depending on the backend specified.
 #'
@@ -444,7 +475,15 @@ dta_file_handlers_from_list <- function(files) {
 #' library(DTAtools)
 #' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
-#' @seealso \code{\link{DTAFile}}
+#' # A deliverable that is never parsed, restricted to two endings.
+#' DTAFileFactory(
+#'   type = "any",
+#'   filename = ".*",
+#'   pattern = TRUE,
+#'   extensions = c("pdf", "zip")
+#' )
+#'
+#' @seealso \code{\link{DTAFile}}, \code{\link{DTAFileAny}}
 #' @export
 DTAFileFactory <- function(
   type,
@@ -465,6 +504,9 @@ DTAFileFactory <- function(
       ...
     ),
     tsv = DTAFileTSV(
+      ...
+    ),
+    any = DTAFileAny(
       ...
     ),
     cli_abort("Filetype '{type}' not implemented.")

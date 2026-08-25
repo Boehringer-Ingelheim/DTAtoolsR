@@ -4,6 +4,7 @@
 #' @import S7
 #' @importFrom cli cli_abort
 #' @include validationReporting.R
+#' @include DTAFileAny-class.R
 #' @param name Character. Name of the container.
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
@@ -31,8 +32,12 @@ DTADataSetFile <- S7::new_class(
     }
 
     if (length(paths) > 0 && length(files) == 0) {
+      # DTAFileAny, not a bare DTAFile: this handler is only ever asked whether
+      # the delivered name matches, never to read anything, and `any` is the one
+      # type dta_handler_type()/DTAFileFactory() can name in both directions. A
+      # bare DTAFile would serialise to a `type:` nothing could read back.
       files <- lapply(paths, function(path) {
-        DTAFile(filename = basename(path), number_of_files = 1)
+        DTAFileAny(filename = basename(path), number_of_files = 1)
       })
     }
 
@@ -223,6 +228,167 @@ dta_file_validation_details <- function(validation_result) {
     result_version = 2L
   )
 }
+
+# The status row of a target that has not been validated. Also, called with
+# character(0), the empty frame validation_status() must return when there is
+# nothing to report -- one definition, so the "no entry" and "no entries at all"
+# shapes cannot drift apart.
+#' @keywords internal
+dta_file_empty_status_row <- function(table_name) {
+  data.frame(
+    table = table_name,
+    target_type = rep("file", length(table_name)),
+    status = rep("not_validated", length(table_name)),
+    ok = rep(NA, length(table_name)),
+    validated_at = rep(NA_character_, length(table_name)),
+    run_id = rep(NA_character_, length(table_name)),
+    validation_run = rep(NA_character_, length(table_name)),
+    n_columnspec_errors = rep(NA_integer_, length(table_name)),
+    n_rule_errors = rep(NA_integer_, length(table_name)),
+    n_import_errors = rep(NA_integer_, length(table_name)),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @title Load a file into a DTADataSetFile
+#' @description
+#' Binds a delivered file to a file-backed dataset, the counterpart of the
+#' \code{\link{DTADataSetTabular}} method that reads a table.
+#'
+#' Nothing is read, opened or stat-ed here. Whether the file exists, is
+#' non-empty and can be opened is the entire contract of \code{\link{check}()}
+#' for this class, and deferring to it is what lets a specification bind a file
+#' that has not arrived yet and report it as missing rather than refusing to
+#' record it at all.
+#'
+#' The delivered name is still checked against the handler, exactly as
+#' \code{\link{read_file}()} does for a tabular dataset, so a file dropped into
+#' the wrong slot is refused the same way in both.
+#'
+#' @param x A \code{DTADataSetFile} object.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{file}{Path to the delivered file.}
+#'     \item{handler_index}{Single numeric index selecting the file handler
+#'       within the dataset. Defaults to \code{1}.}
+#'     \item{name}{Optional name under which the file is recorded. Defaults to
+#'       \code{basename(file)} -- with the extension, unlike the tabular
+#'       method, because that is the key every report for this class uses.}
+#'     \item{stream}{Accepted and ignored; a file dataset reads nothing.}
+#'   }
+#' @return The updated \code{DTADataSetFile} object.
+#' @examples
+#' handler <- DTAFileAny(filename = "clinical_data.csv")
+#' ds <- DTADataSetFile(name = "delivery", files = list(handler))
+#'
+#' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#' ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+#' validation_status(check(ds, quiet = TRUE))$ok
+#' @usage load_file(x, ...)
+#' @rdname load_file
+#' @export
+method(load_file, DTADataSetFile) <- function(
+  x,
+  file,
+  handler_index = 1,
+  name = basename(file),
+  # Accepted and ignored, like check()'s batch_rows/max_errors. A file dataset
+  # reads nothing, so there is no in-memory-versus-lazy decision to make -- but
+  # method(load_file, DTA) forwards `stream` to every dataset it dispatches to,
+  # and without the formal that call dies on "unused argument" before this body
+  # is ever reached.
+  stream = getOption("DTAtools.stream", "auto"),
+  ...
+) {
+  if (handler_index < 1 || handler_index > length(x@files)) {
+    cli::cli_abort(
+      "Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}."
+    )
+  }
+
+  file <- dta_assert_single_file_path(file, "load_file")
+
+  handler <- files(x, handler_index)
+  # any(): matches_filename() yields one logical PER declared name or pattern,
+  # and a handler may carry several. isTRUE() alone would collapse a length > 1
+  # result to FALSE and reject a file that matched.
+  if (!isTRUE(any(matches_filename(handler, basename(file))))) {
+    cli::cli_abort(
+      "The provided file '{file}' does not match the filename or pattern in the DTAFile object."
+    )
+  }
+
+  # Replace in place when this key is already bound, append otherwise -- the
+  # same contract as the tabular method's `x@tables[[name]] <- ...`. Keys are
+  # compared, not raw paths, so re-delivering a file from a different directory
+  # replaces the old entry instead of quietly binding both under one name.
+  existing_keys <- dta_file_target_keys(x@file_paths)
+  slot <- match(name, existing_keys)
+
+  if (is.na(slot)) {
+    x@file_paths <- c(x@file_paths, file)
+  } else {
+    x@file_paths[[slot]] <- file
+    # The previous file's verdict describes a file that is no longer there.
+    # Left behind, check() would compare the new file against the old
+    # fingerprint, find them different, and revalidate -- but until it ran, every
+    # report would show the replaced file's result under the new file's name.
+    x@validation_index[[name]] <- NULL
+    x@validation_store[[name]] <- NULL
+  }
+
+  x
+}
+
+
+#' @title Clear Validation State of a DTADataSetFile
+#' @description Clears in-memory validation state for one or all file targets.
+#' @param x A \code{DTADataSetFile} object.
+#' @param ... Additional arguments:
+#'   \describe{
+#'     \item{tables}{NULL (default), character target names, or numeric target
+#'       indices.}
+#'     \item{remove_artifacts}{Logical. If TRUE, delete artifact files for the
+#'       selected targets.}
+#'   }
+#' @return Invisibly returns \code{x}.
+#' @examples
+#' path <- tempfile(fileext = ".txt")
+#' writeLines("content", path)
+#' ds <- check(DTADataSetFile(name = "delivery", paths = path), quiet = TRUE)
+#' nrow(validation_status(clear_validation(ds)))
+#' @usage clear_validation(x, ...)
+#' @rdname clear_validation
+#' @export
+S7::method(clear_validation, DTADataSetFile) <- function(
+  x,
+  tables = NULL,
+  remove_artifacts = FALSE
+) {
+  # Resolved against the VALIDATED entries rather than the dataset's targets:
+  # there is nothing to clear for a target that was never checked, and asking
+  # for one by index should mean the same thing here as it does in
+  # validation_status() and messages().
+  target_tables <- dta_file_id_to_names(names(x@validation_index), tables)
+
+  for (table_name in target_tables) {
+    entry <- x@validation_index[[table_name]]
+
+    if (remove_artifacts && !is.null(entry) && !is.null(entry$artifact_path)) {
+      if (file.exists(entry$artifact_path)) {
+        unlink(entry$artifact_path)
+      }
+    }
+
+    x@validation_index[[table_name]] <- NULL
+    x@validation_store[[table_name]] <- NULL
+    # No @import_issues here, unlike the tabular method: nothing is typed on the
+    # way in, so a file dataset has no import axis to forget.
+  }
+
+  invisible(x)
+}
+
 
 #' @title Check DTADataSetFile
 #' @description
@@ -519,19 +685,7 @@ S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
   rows <- lapply(target_tables, function(table_name) {
     entry <- x@validation_index[[table_name]]
     if (is.null(entry)) {
-      return(data.frame(
-        table = table_name,
-        target_type = "file",
-        status = "not_validated",
-        ok = NA,
-        validated_at = NA_character_,
-        run_id = NA_character_,
-        validation_run = NA_character_,
-        n_columnspec_errors = NA_integer_,
-        n_rule_errors = NA_integer_,
-        n_import_errors = NA_integer_,
-        stringsAsFactors = FALSE
-      ))
+      return(dta_file_empty_status_row(table_name))
     }
 
     dta_validation_result_to_row(
@@ -541,6 +695,13 @@ S7::method(validation_status, DTADataSetFile) <- function(x, tables = NULL) {
       target_type = "file"
     )
   })
+
+  # rbind() of an empty list is NULL, and check(DTA) calls nrow() on whatever
+  # this returns -- so a dataset with nothing validated yet has to answer with
+  # an empty FRAME carrying the real columns, not with nothing at all.
+  if (length(rows) == 0) {
+    return(dta_file_empty_status_row(character(0)))
+  }
 
   do.call(rbind, rows)
 }

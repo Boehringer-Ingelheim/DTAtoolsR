@@ -1100,9 +1100,11 @@ server <- function(input, output, session) {
     h <- handlers[[hi]]
     key <- paste0(dsname, "||", hi)
 
-    # A dropped file will occupy a table named after it (load_file uses
-    # file_path_sans_ext). This mapping drives overwrite detection and binds.
-    tbl_of <- function(nm) tools::file_path_sans_ext(basename(nm))
+    # A dropped file will occupy a table named after it (for tabular datasets,
+    # load_file uses file_path_sans_ext; for file datasets, the basename with
+    # extension is kept). This mapping drives overwrite detection and binds.
+    ds_type <- tryCatch(ds@type, error = function(e) NA_character_)
+    tbl_of <- function(nm) dta_bound_item_name(ds_type, nm)
     existing <- dta_dataset_table_names(ds) # dataset-wide bound items
 
     # Overwrite gate: if a dropped file targets an already-bound table and the
@@ -1844,7 +1846,6 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     if (identical(isolate(rv$file_view), "list")) {
-      n_handlers <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
       tagList(
         div(
           class = "spec-toolbar",
@@ -1861,16 +1862,6 @@ server <- function(input, output, session) {
           )
         ),
         DT::dataTableOutput("file_tbl"),
-        if (n_handlers == 0) {
-          div(
-            class = "yaml-valid err", style = "margin-top:8px;",
-            HTML("&#x2716;"),
-            paste(
-              " This dataset expects no files at all, so nothing can be loaded",
-              "into it. Add at least one entry."
-            )
-          )
-        },
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
@@ -1878,6 +1869,19 @@ server <- function(input, output, session) {
       pf <- isolate(rv$file_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
       is_pattern <- isTRUE(pf$pattern)
+      # A file dataset parses nothing, so it is the only one that may declare
+      # `any` -- and the only one for which an ending restriction means
+      # anything. dta_handler_types() defaults to the tabular list, so a
+      # tabular dataset's editor is unchanged.
+      ds_type <- tryCatch(
+        dta_get_dataset(isolate(rv$dta), ed)@type,
+        error = function(e) "tabular"
+      )
+      type_choices <- dta_handler_types(ds_type)
+      # Labelled only where the bare token would not explain itself.
+      names(type_choices) <- ifelse(
+        type_choices == "any", "Any file (not parsed)", type_choices
+      )
       tagList(
         div(
           class = "spec-form",
@@ -1888,8 +1892,23 @@ server <- function(input, output, session) {
               placeholder = "clinical_data.csv   |   clinical_data.*[.]csv$"
             ),
             selectInput("file_type", "File type",
-              choices = dta_handler_types(),
-              selected = g("type", dta_handler_types()[1]), width = "100%"
+              choices = type_choices,
+              selected = g("type", type_choices[[1]]), width = "100%"
+            )
+          ),
+          conditionalPanel(
+            condition = "input.file_type == 'any'",
+            textInput("file_extensions", "Allowed file endings (optional)",
+              value = g("extensions"), width = "100%",
+              placeholder = "pdf, zip, xpt"
+            ),
+            div(
+              class = "msg-hint", style = "margin:-8px 0 10px;",
+              paste(
+                "Separate several endings with commas. Leave blank to accept",
+                "any ending. A file whose ending is not listed is refused as",
+                "it is uploaded, not at validation time."
+              )
             )
           ),
           checkboxInput("file_pattern",
@@ -1983,7 +2002,8 @@ server <- function(input, output, session) {
       class = "display compact", width = "100%",
       options = list(
         pageLength = 8, dom = "tp", scrollX = TRUE,
-        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L)),
+        language = list(emptyTable = "No files declared yet - add one entry for each file you expect to receive.")
       )
     )
   })
@@ -2109,7 +2129,15 @@ server <- function(input, output, session) {
       min_number_of_files = input$file_min_number_of_files %||% 1,
       max_number_of_files = input$file_max_number_of_files %||% 1,
       pattern_description = input$file_pattern_description,
-      info = input$file_info
+      info = input$file_info,
+      extensions = input$file_extensions,
+      # The dataset decides which types are on offer, so it has to decide which
+      # ones validate too -- otherwise the form could offer `any` and the save
+      # would reject it.
+      dataset_type = tryCatch(
+        dta_get_dataset(isolate(rv$dta), ed)@type,
+        error = function(e) "tabular"
+      )
     )
     if (!isTRUE(r$ok)) {
       rv$file_msg <- list(ok = FALSE, error = r$error)
@@ -5310,10 +5338,12 @@ server <- function(input, output, session) {
           class = "loaded-file-row",
           tags$span(class = paste("file-status", icls), title = ttl, icon_ch),
           tags$span(class = "file-name", rec$file),
-          tags$span(
-            class = "file-table", title = "Table name",
-            paste0("\u2192 ", rec$table)
-          ),
+          if (!identical(s$type, "file")) {
+            tags$span(
+              class = "file-table", title = "Table name",
+              paste0("\u2192 ", rec$table)
+            )
+          },
           actionButton(paste0("rmfile_", fid),
             label = HTML("&#x1F5D1;&#xFE0F;"),
             class = "btn btn-sm file-remove", title = "Remove this file"
@@ -5389,7 +5419,7 @@ server <- function(input, output, session) {
     example_files <- if (isTRUE(rv$is_example)) dta_example_data_files() else character(0)
 
     if (length(s$handlers) == 0) {
-      slots <- div(class = "msg-hint", "This dataset has no file handlers.")
+      slots <- div(class = "msg-hint", "No files are declared for this dataset yet. Use Edit > Files to add the files you expect to receive.")
     } else {
       slot_cards <- lapply(seq_along(s$handlers), function(hi) {
         h <- s$handlers[[hi]]
