@@ -217,6 +217,87 @@ client_id_js <- "
 })();
 "
 
+# The Raw YAML tab's editor (.yaml-ace-wrap, theme.R) is user-resizable via
+# CSS `resize: vertical`, but Ace never notices its own container changing
+# size -- it only recalculates gutter width, visible-row count and scrollbar
+# geometry when explicitly told to, via the editor's resize() method.
+# theme.R's `.yaml-ace-wrap .ace_editor { height: 100% !important; }` makes
+# the editor element's BOX track the wrapper as it is dragged (needed because
+# shinyAce::aceEditor(height = ...) sets a fixed inline `style="height: ..."`
+# on that same element, which would otherwise pin it at its initial size
+# regardless of the drag -- only `!important` in a stylesheet outranks an
+# inline style). This is the other half: telling Ace's own internal layout
+# that the box it is already filling has a new size.
+#
+# The wrapper does not exist until output$main's renderUI first draws the Raw
+# YAML tab (itself gated on shinyAce being installed at all), and is replaced
+# outright on every later re-render (a new load, or adding/removing a
+# dataset) -- so this cannot just run once at page load and grab one element.
+# A MutationObserver on the whole document is what lets it attach whenever
+# that first happens and again every time it recurs, instead of assuming the
+# wrapper exists yet or exists exactly once. `ace` (the global the vendored
+# ace.js attaches) may legitimately never appear at all -- if shinyAce is not
+# installed server-side, aceEditor() is never called and neither the wrapper
+# nor ace.js itself is ever added to the page -- so every step bails out
+# quietly rather than erroring.
+yaml_ace_resize_js <- "
+(function(){
+  function wireAceResize(wrap, attempt) {
+    if (!wrap || wrap.dataset.dtaAceResizeWired) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    attempt = attempt || 0;
+    var el = wrap.querySelector('.ace_editor');
+    // shinyAce builds the editor ASYNCHRONOUSLY, after its container node has
+    // already been inserted -- so the MutationObserver below almost always
+    // sees .yaml-ace-wrap before .ace_editor exists inside it. Giving up on
+    // that first sighting is what leaves the drag handle resizing the box
+    // while Ace goes on painting at the old height, with a blank strip at the
+    // bottom. Retry briefly instead, then stop: ~2s is far longer than the
+    // editor takes to appear, and bounding it means a tab that never gets an
+    // editor does not leave a timer running for the life of the session.
+    if (!el || typeof ace === 'undefined') {
+      if (attempt < 40) {
+        setTimeout(function () { wireAceResize(wrap, attempt + 1); }, 50);
+      }
+      return;
+    }
+    var editor = ace.edit(el);
+    if (!editor || typeof editor.resize !== 'function') return;
+    wrap.dataset.dtaAceResizeWired = 'true';
+    new ResizeObserver(function () { editor.resize(); }).observe(wrap);
+  }
+  function scan(root) {
+    if (root && root.querySelectorAll) {
+      root.querySelectorAll('.yaml-ace-wrap').forEach(wireAceResize);
+    }
+  }
+  function start() {
+    scan(document);
+    new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        record.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          if (node.classList && node.classList.contains('yaml-ace-wrap')) {
+            wireAceResize(node);
+          }
+          scan(node);
+        });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  // This script is registered in tags$head(), so it runs BEFORE <body> exists:
+  // document.body is null at that point and MutationObserver.observe() throws
+  // 'parameter 1 is not of type Node', which aborts the whole IIFE and leaves
+  // the editor permanently unwired -- silently, since nothing else here
+  // depends on it. Wait for the document to be ready before touching body.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+"
+
 ui <- bslib::page_fluid(
   theme = bi_theme(),
   shinyjs::useShinyjs(),
@@ -225,7 +306,8 @@ ui <- bslib::page_fluid(
     tags$script(shiny::HTML(reset_fileinput_js)),
     tags$script(shiny::HTML(msgs_dock_js)),
     tags$script(shiny::HTML(download_trigger_js)),
-    tags$script(shiny::HTML(client_id_js))
+    tags$script(shiny::HTML(client_id_js)),
+    tags$script(shiny::HTML(yaml_ace_resize_js))
   ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),
@@ -849,8 +931,14 @@ server <- function(input, output, session) {
     if (!editing()) {
       return(NULL)
     }
+    # Quiet on purpose: "Check all datasets" (btn-primary) sits directly
+    # below this in the sidebar, and that is the button that should read as
+    # the call to action. btn-outline-secondary + add-dataset-btn (theme.R)
+    # is what keeps this from competing with it -- Bootstrap's own
+    # btn-sm/btn-outline-secondary alone still draws a full-width bordered
+    # box the same size as the button under it, hence the extra CSS.
     actionButton("add_dataset_open", "+ Add dataset",
-      class = "btn btn-outline-primary w-100",
+      class = "btn btn-sm btn-outline-secondary add-dataset-btn w-100",
       style = "margin-bottom: 6px;"
     )
   })
@@ -3330,7 +3418,11 @@ server <- function(input, output, session) {
   # dataset page, which is where a fact about the dataset belongs.
   show_meta_editor_modal <- function(ed) {
     showModal(modalDialog(
-      title = paste("Edit metadata —", ed),
+      # "Edit details", not "Edit metadata": this is the modal the Details row
+      # of ds_edit_menu() opens (ui_components.R), and its title should read
+      # like the label the user just clicked, not the internal name the
+      # server-side code still uses for the concept (edit_meta, rv$meta_*).
+      title = paste("Edit details —", ed),
       size = "l", easyClose = FALSE,
       uiOutput("meta_modal_body"),
       footer = NULL
@@ -4318,9 +4410,16 @@ server <- function(input, output, session) {
       class = "list-group",
       lapply(seq_along(cs), function(i) {
         if (ro) {
+          # Full detail, not just contact_display()'s "name — role": editable
+          # mode hides the rest of a contact's fields behind a click
+          # (actionLink() below), but read-only has no click at all, so
+          # whatever contact_detail_block() does not show here is simply
+          # unreachable. "contact-item" is deliberately NOT applied to this
+          # <li> -- that class carries the pointer cursor/hover highlight
+          # that signal "click me", and this row no longer does anything.
           return(tags$li(
-            class = "list-group-item contact-item",
-            span(contact_display(cs[[i]]))
+            class = "list-group-item",
+            contact_detail_block(cs[[i]])
           ))
         }
         tags$li(
@@ -5351,7 +5450,13 @@ server <- function(input, output, session) {
         # exporting it are not, so those two stay put and only the menu between
         # them appears and disappears. div() drops a NULL child, so nothing else
         # in this row has to know.
-        if (editing()) ds_edit_menu(),
+        #
+        # s$type ("tabular"/"file", set by build_structure()) is what decides
+        # whether ds_edit_menu() offers Columns/Rules at all -- a file dataset
+        # has no @specs for either to edit. `s` is already this render's own
+        # dataset (req(!is.null(s)) above), so this reads it rather than
+        # re-deriving the type from rv$active/rv$dta a second time.
+        if (editing()) ds_edit_menu(s$type),
         downloadButton("dl_ds_yaml", "Export DataSet YAML",
           class = "btn btn-outline-primary",
           title = "Download this dataset's specification as YAML"
@@ -5469,15 +5574,23 @@ server <- function(input, output, session) {
                     "raw_yaml_editor",
                     value = isolate(rv$yaml_text) %||% "",
                     mode = "yaml", theme = "tomorrow_night",
-                    height = "55vh", fontSize = 13,
+                    # The CSS (.yaml-ace-wrap, theme.R) is what actually governs
+                    # the rendered height once the wrapper is draggable -- see
+                    # yaml_ace_resize_js above -- but this stays a realistic
+                    # initial value in its own right, matching it, rather than
+                    # relying entirely on the !important override.
+                    height = "70vh", fontSize = 13,
                     showLineNumbers = TRUE, wordWrap = FALSE,
                     debounce = 100, autoComplete = "disabled"
                   )
                 )
               } else {
+                # A plain <textarea> is natively resizable (a drag handle in
+                # the bottom-right corner, no CSS needed), unlike Ace -- so
+                # this fallback only needs the taller starting point.
                 textAreaInput("raw_yaml_editor",
                   label = NULL,
-                  value = isolate(rv$yaml_text), width = "100%", rows = 22
+                  value = isolate(rv$yaml_text), width = "100%", rows = 28
                 )
               }
             )

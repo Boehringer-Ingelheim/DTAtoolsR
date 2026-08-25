@@ -67,6 +67,74 @@ test_that("meta_field_text survives a length-0 or NA value", {
   expect_match(render_html(app_fn("meta_field_text")("Title", NA_character_)), "—", fixed = TRUE)
 })
 
+# ---- Pure UI: contact_detail_block() ----------------------------------------
+#
+# The read-only counterpart of one contact row (render_contacts(), app.R).
+# Editable mode only ever shows contact_display()'s short "name — role"; this
+# is what makes the rest reachable while edit mode is off.
+
+test_that("contact_detail_block renders email, department, phone and address when present", {
+  html <- render_html(app_fn("contact_detail_block")(list(
+    name = "Alice Smith", role = "Lead Data Manager",
+    email = "alice.smith@testcompany.com", department = "Data Management",
+    phone = "555-123-4567", address = "123 Main St, Cityville"
+  )))
+
+  expect_match(html, "alice.smith@testcompany.com", fixed = TRUE)
+  expect_match(html, "Data Management", fixed = TRUE)
+  expect_match(html, "555-123-4567", fixed = TRUE)
+  expect_match(html, "123 Main St, Cityville", fixed = TRUE)
+  # The heading carries the name/role the way contact_display() already does.
+  expect_match(html, "Alice Smith", fixed = TRUE)
+  expect_match(html, "Lead Data Manager", fixed = TRUE)
+})
+
+test_that("contact_detail_block omits an absent field rather than an empty row", {
+  # Only name + one field set: department/phone/address must not appear at
+  # all -- not as an empty "Department:" row, which the length-0/NA-safe
+  # value handling below exists specifically to avoid.
+  html <- render_html(app_fn("contact_detail_block")(list(
+    name = "Bob Johnson", email = "bob@example.com"
+  )))
+
+  expect_match(html, "bob@example.com", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Department", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Phone", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Address", fixed = TRUE)
+})
+
+test_that("contact_detail_block is NULL/character(0)/NA-safe for every optional field", {
+  # Same guarantee meta_field_text() gives a Metadata field: none of the three
+  # forms an unset value can take should error, and none should render as an
+  # empty row.
+  person <- list(
+    name = "Edge Case", email = NULL, department = character(0),
+    phone = NA_character_, address = "Real Address"
+  )
+
+  html <- expect_no_error(render_html(app_fn("contact_detail_block")(person)))
+
+  expect_match(html, "Real Address", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Email", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Department", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Phone", fixed = TRUE)
+})
+
+test_that("contact_detail_block shows the signature/reviewer flags only when TRUE", {
+  both <- render_html(app_fn("contact_detail_block")(list(
+    name = "Alice Smith", signature = TRUE, reviewer = TRUE
+  )))
+  neither <- render_html(app_fn("contact_detail_block")(list(
+    name = "Bob Johnson", signature = FALSE
+  )))
+  unset <- render_html(app_fn("contact_detail_block")(list(name = "No Flags")))
+
+  expect_match(both, "contact-detail-flag\">Signature", fixed = TRUE)
+  expect_match(both, "contact-detail-flag\">Reviewer", fixed = TRUE)
+  expect_no_match(neither, "contact-detail-flag", fixed = TRUE)
+  expect_no_match(unset, "contact-detail-flag", fixed = TRUE)
+})
+
 # ---- Server-side edit-mode guards -------------------------------------------
 #
 # Every editing surface is gated twice: the control is not rendered, and the
@@ -430,8 +498,14 @@ test_that("the contact and affiliation sub-outputs follow the switch too", {
     # No per-row edit link and no Remove button while read-only...
     expect_false(grepl("rm_receiver_1", con_off, fixed = TRUE))
     expect_false(grepl("editc_receiver_1", con_off, fixed = TRUE))
-    # ...but the people are still listed.
+    # ...but the people are still listed, and with the FULL detail
+    # contact_detail_block() adds: read-only has no click to reach the rest
+    # of a contact's fields the way editable mode's actionLink() does, so
+    # email/address (etc.) have to be on the page outright or they are simply
+    # unreachable. Alice Smith is clinical_dta.yaml's first receiver contact.
     expect_match(con_off, "Alice Smith", fixed = TRUE)
+    expect_match(con_off, "alice.smith@testcompany.com", fixed = TRUE)
+    expect_match(con_off, "123 Main St, Cityville", fixed = TRUE)
   })
 })
 

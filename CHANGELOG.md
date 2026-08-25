@@ -52,7 +52,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   checks all stay available, since validating a transfer is what most users
   open the app to do.
 
+  While read-only, a contact is shown in full — email, department, phone,
+  address and the signature/reviewer flags. Editable mode keeps those one click
+  away behind the edit modal, but read-only has no click to offer, so the
+  information would otherwise be unreachable.
+
+### Changed
+
+- The dataset Edit menu's **Metadata** entry is now called **Details**, and the
+  modal it opens is titled to match. The input id is unchanged.
+- The **+ Add dataset** button is quieter — it sat directly above "Check all
+  datasets" and read as a competing primary action rather than a small addition
+  to the list above it.
+- The Edit mode switch is vertically centred against the "Report issues" and
+  "About" links. `.app-actions` had no `align-items`, so it defaulted to
+  `stretch` and the switch, which has no vertical padding of its own, sat off
+  the pills' centre line.
+
 ### Fixed
+
+- **The Columns and Rules editors are no longer offered for a file dataset.**
+  Both act on `ds@specs`, which only `DTADataSetTabular` has. This was not
+  merely a redundant menu entry: `dta_column_ids()` swallows the missing
+  property with `tryCatch(...) %||% list()` rather than erroring, so on a
+  `DTADataSetFile` the column editor opened *empty* and let the user add a
+  column that had nowhere to be stored. The Edit menu now takes the dataset's
+  type and offers Files, Details and Remove for both kinds, Columns and Rules
+  for tabular only.
+
+- **The Raw YAML editor can be resized, and Ace follows.** The editor is taller
+  (70vh, down to 30vh) and the box has a drag handle. A CSS `resize` handle
+  alone is not enough twice over: `shinyAce::aceEditor(height =)` writes a fixed
+  inline style that only `!important` overrides, and Ace does not observe its
+  own container, so its canvas has to be told to re-lay-out. The
+  `ResizeObserver` that does that is now started on `DOMContentLoaded` — the
+  script is registered in `tags$head()`, where `document.body` is still `null`,
+  and `MutationObserver.observe(document.body)` threw there and aborted the
+  whole script silently, leaving the editor permanently unwired.
 
 - **A tabular dataset with no columns can be read back after being written.**
   `specs_from_list()` rejected an absent `columns:` key outright, while the

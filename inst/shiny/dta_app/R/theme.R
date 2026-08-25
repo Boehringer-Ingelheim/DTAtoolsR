@@ -74,7 +74,11 @@ bi_css <- function() {
     .app-brandbar .brand-logo { height: 40px; width: auto; display: block; flex: none; }
     .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
     .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
-    .app-actions { margin-left: auto; display: flex; gap: 8px; }
+    /* align-items: center -- without it a flex container defaults to
+       'stretch', so the switch (edit_mode_switch(), no vertical padding of
+       its own) and the .brand-link pills (padding: 5px 11px below) end up on
+       different baselines instead of one centre line. */
+    .app-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
     .app-actions .brand-link {
       color: #fff; text-decoration: none; font-weight: 600;
       border: 1px solid rgba(255,255,255,.45);
@@ -93,15 +97,13 @@ bi_css <- function() {
       border-color: rgba(255,255,255,.7);
       text-decoration: none;
     }
-    /* edit_mode_switch()'s bslib::input_switch() wraps its checkbox+label in
-       Bootstrap layout containers built for a standalone form
-       (container-fluid > form-group), not for sitting inline among the
-       brand-link pills here. Flatten those wrappers to auto width with no
-       block margin, then center the switch itself on the same line and
-       give its label the same white, .82rem/1.2 treatment as the pills next
-       to it so the two read as one row of actions, not a form floating in
-       the brandbar. */
-    .app-actions .container-fluid { padding: 0; width: auto; }
+    /* edit_mode_switch()'s bslib::input_switch() renders
+       .form-group.shiny-input-container > .bslib-input-switch.form-switch,
+       a wrapper shaped for a standalone form rather than for sitting inline
+       among the brand-link pills. Drop its block margin, lay the switch and
+       its label out on one line, and give the label the same white,
+       .82rem/1.2 treatment as the pills next to it, so the two read as one
+       row of actions rather than a form floating in the brandbar. */
     .app-actions .form-group { margin-bottom: 0; }
     .app-actions .form-switch {
       display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 0;
@@ -220,7 +222,10 @@ bi_css <- function() {
       background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: .84rem; line-height: 1.55; tab-size: 2; white-space: pre;
-      min-height: 55vh; overflow: auto;
+      /* A plain <textarea> is natively resizable (drag handle, bottom-right
+         corner) -- min-height only needs to match rows=28's taller starting
+         point (app.R), nothing else is needed for the drag itself. */
+      min-height: 70vh; overflow: auto;
     }
     textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px rgba(0,168,134,.25); }
     .yaml-valid { font-size: .82rem; padding: 7px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid transparent; }
@@ -298,6 +303,22 @@ bi_css <- function() {
       background: #fff; padding: 1px 8px; line-height: 1.3; border-radius: 6px; font-size: .85rem;
     }
     .dataset-nav-row .nav-check:hover { background: var(--bi-pass-bg); }
+
+    /* Add dataset sits directly above Check all datasets (btn-primary, the
+       sidebar's actual call to action) -- btn-sm + btn-outline-secondary
+       alone still draws a full-width bordered box the same size as that
+       button, so this drops the border and dims the text further at rest,
+       leaving only a hover/focus state as the affordance that it is
+       clickable at all. Reads as a small addition to the list above it, not
+       a second primary action. */
+    .add-dataset-btn {
+      border-color: transparent; background: transparent; color: var(--bi-grey);
+      font-size: .82rem; font-weight: 500;
+    }
+    .add-dataset-btn:hover, .add-dataset-btn:focus {
+      border-color: var(--bi-pending-border); background: var(--bi-grey-light);
+      color: var(--bi-green-dark);
+    }
 
     /* Non-floating footer: DTAtools version + author + GitHub link. Sits in the
        normal document flow at the bottom of the page (never fixed/floating). */
@@ -413,9 +434,31 @@ bi_css <- function() {
     }
     .cond-hint { font-size: .78rem; color: var(--bi-grey); margin: 2px 0 8px; }
 
-    /* Editable YAML via the Ace editor: rounded dark frame to match the app. */
-    .yaml-ace-wrap { border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
-    .yaml-ace-wrap .ace_editor { min-height: 55vh; font-size: 13px; }
+    /* Editable YAML via the Ace editor: rounded dark frame to match the app,
+       user-resizable (resize: vertical -- height only, the wrapper does not
+       widen). height (not just min-height) is what makes this a definite
+       size for .ace_editor's height:100% below to resolve against; dragging
+       the corner handle sets an inline height on THIS element that then
+       naturally overrides it, same as it would for a plain <textarea>.
+       overflow:auto (rather than the old overflow:hidden, which also
+       satisfies CSS's rule that resize needs non-visible overflow, but
+       silently clips instead) is the fallback for the instant between a
+       drag and yaml_ace_resize_js's ResizeObserver callback catching up. */
+    .yaml-ace-wrap {
+      border: 1px solid #30363d; border-radius: 8px; overflow: auto;
+      height: 70vh; min-height: 30vh; resize: vertical;
+    }
+    /* shinyAce::aceEditor(height = ...) sets that value as a fixed INLINE
+       style on this exact element (shinyAce's own R source builds
+       pre(..., style = paste0('height: ', height))), which a plain
+       stylesheet rule can never beat -- only !important does. Without this,
+       the editor would stay pinned at its initial height forever while the
+       wrapper around it grew or shrank: the editor not tracking the drag,
+       leaving a blank gap at the bottom, is the whole bug this rule exists
+       to close. See yaml_ace_resize_js (app.R) for the other half: Ace's own
+       internal layout, cached at init and untouched by a CSS size change
+       alone. */
+    .yaml-ace-wrap .ace_editor { height: 100% !important; font-size: 13px; }
 
     /* Column / rule spec editors (inside the Edit modals). */
     .spec-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
@@ -450,6 +493,29 @@ bi_css <- function() {
     .md-ro-value {
       font-size: 1rem; line-height: 1.5; color: var(--bi-ink);
       padding: .375rem 0; white-space: pre-wrap; word-break: break-word;
+    }
+
+    /* contact_detail_block(): the read-only counterpart of one contact row,
+       shown inside a .list-group-item (app.R's render_contacts()) while edit
+       mode is off. Same label/value colour split as .md-ro-label/.md-ro-value
+       above, just laid out as a compact label-then-value line per field
+       rather than the Metadata tab's stacked label-above-value -- several of
+       these can sit inside one list row, where the full form-field rhythm
+       would be too tall. */
+    .contact-detail-head { font-weight: 600; color: var(--bi-ink); margin-bottom: 4px; }
+    .contact-detail-field {
+      display: flex; gap: 6px; font-size: .86rem; color: var(--bi-ink);
+      margin-bottom: 2px;
+    }
+    .contact-detail-label { color: var(--bi-grey); flex: 0 0 auto; min-width: 90px; }
+    .contact-detail-value { word-break: break-word; }
+    /* The signature/reviewer flags: same pill treatment as .ws-pill (sidebar
+       header) and .foot-ver (footer), so a fact about this contact reads
+       consistently with the rest of the app rather than inventing a new look. */
+    .contact-detail-flags { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .contact-detail-flag {
+      font-size: .72rem; font-weight: 600; color: var(--bi-green-dark);
+      background: var(--bi-green-light); border-radius: 999px; padding: 1px 9px;
     }
 
     /* Example-file picker: the drop zone with a dashed 'Load an example file'

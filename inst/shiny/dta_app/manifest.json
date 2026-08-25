@@ -3115,10 +3115,10 @@
       "checksum": "996c47f79864e81826bc57b3402c1ae4"
     },
     "R/theme.R": {
-      "checksum": "451c66e6392b301436c545d998962c12"
+      "checksum": "cab56ccadfb7e16cc9f4504bf16e0522"
     },
     "R/ui_components.R": {
-      "checksum": "84251cc99ea71338083c8730887ece8a"
+      "checksum": "499589b127721eae5ad5877fe1d5d250"
     },
     "R/utils_dta.R": {
       "checksum": "195df4d26003f8461ae2c0c60cc5508c"
@@ -3130,7 +3130,7 @@
       "checksum": "361133710d86149dacfc73ee7619b754"
     },
     "app.R": {
-      "checksum": "911de6739df8f7c3cf1cfd3f1596c363"
+      "checksum": "fa818f78874bfe622349541aed60e340"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
