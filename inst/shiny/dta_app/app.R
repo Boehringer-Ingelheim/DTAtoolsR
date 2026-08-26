@@ -2792,31 +2792,34 @@ server <- function(input, output, session) {
     }
     gcond_rm_registry[[bid]] <- TRUE
 
-    observeEvent(input[[bid]], {
-      row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      deps <- find_condition_dependencies(row_name, excluding_row = i)
+    observeEvent(input[[bid]],
+      {
+        row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+        deps <- find_condition_dependencies(row_name, excluding_row = i)
 
-      if (length(deps) > 0) {
-        rv$rule_msg <- list(
-          ok = FALSE,
-          error = paste0(
-            "Cannot remove condition '", row_name,
-            "' because it is referenced by: ",
-            paste(deps, collapse = ", "),
-            ". Remove dependent constraints first."
+        if (length(deps) > 0) {
+          rv$rule_msg <- list(
+            ok = FALSE,
+            error = paste0(
+              "Cannot remove condition '", row_name,
+              "' because it is referenced by: ",
+              paste(deps, collapse = ", "),
+              ". Remove dependent constraints first."
+            )
           )
-        )
-        return()
-      }
+          return()
+        }
 
-      vis <- visible_group_condition_rows()
-      if (length(vis) <= 1) {
-        clear_group_condition_row(i)
-      } else {
-        removeUI(selector = paste0("#gcond_row_", i))
-      }
-      rv$rule_msg <- NULL
-    }, ignoreInit = TRUE)
+        vis <- visible_group_condition_rows()
+        if (length(vis) <= 1) {
+          clear_group_condition_row(i)
+        } else {
+          removeUI(selector = paste0("#gcond_row_", i))
+        }
+        rv$rule_msg <- NULL
+      },
+      ignoreInit = TRUE
+    )
   }
 
   ensure_gconstr_remove_observer <- function(i) {
@@ -2826,15 +2829,18 @@ server <- function(input, output, session) {
     }
     gconstr_rm_registry[[bid]] <- TRUE
 
-    observeEvent(input[[bid]], {
-      vis <- visible_group_constraint_rows()
-      if (length(vis) <= 1) {
-        clear_group_constraint_row(i)
-      } else {
-        removeUI(selector = paste0("#gconstr_row_", i))
-      }
-      rv$rule_msg <- NULL
-    }, ignoreInit = TRUE)
+    observeEvent(input[[bid]],
+      {
+        vis <- visible_group_constraint_rows()
+        if (length(vis) <= 1) {
+          clear_group_constraint_row(i)
+        } else {
+          removeUI(selector = paste0("#gconstr_row_", i))
+        }
+        rv$rule_msg <- NULL
+      },
+      ignoreInit = TRUE
+    )
   }
 
   flatten_group_constraints <- function(constraints) {
@@ -4276,15 +4282,18 @@ server <- function(input, output, session) {
       layout_columns(
         col_widths = c(4, 4, 4),
         f_text("tr_type", "Type",
-          trf("type"), width = "100%",
+          trf("type"),
+          width = "100%",
           placeholder = "e.g. secure S3 bucket"
         ),
         f_text("tr_frequency", "Frequency",
-          trf("frequency"), width = "100%",
+          trf("frequency"),
+          width = "100%",
           placeholder = "e.g. one-time, weekly"
         ),
         f_text("tr_notification", "Notification",
-          trf("notification"), width = "100%",
+          trf("notification"),
+          width = "100%",
           placeholder = "e.g. email"
         )
       ),
@@ -4324,11 +4333,13 @@ server <- function(input, output, session) {
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
       f_area("md_error_handling", "Error handling",
-        getf("error_handling"), width = "100%", rows = 2,
+        getf("error_handling"),
+        width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
       f_text("md_authorized", "Authorized for corrections",
-        getf("authorized_for_corrections"), width = "100%",
+        getf("authorized_for_corrections"),
+        width = "100%",
         placeholder = "Contact(s) authorized to request corrections"
       ),
       # Only true while editing; in read-only there is nothing to save.
@@ -5454,6 +5465,27 @@ server <- function(input, output, session) {
       div(div(class = "metric", nd), div(class = "slot-meta", "no data"))
     )
   })
+
+  # The sidebar's dynamic outputs must never be suspended as "hidden".
+  #
+  # Adding or removing a dataset (any rv$structure assignment) re-renders
+  # output$main, which replaces the whole workspace DOM -- including the
+  # sidebar's uiOutput placeholders. When the client re-binds those it
+  # snapshots their visibility, and that snapshot can race the DOM swap and
+  # report a visible output as hidden. Under the default suspendWhenHidden the
+  # server then suspends the render and never sends its HTML -- and unlike an
+  # output inside a nav_panel(), whose visibility is re-checked when its tab
+  # fires shown.bs.tab, nothing in the sidebar ever triggers a re-check, so
+  # the workspace header, the summary counts and the dataset list stay blank
+  # until something incidental (a window resize) forces a re-scan. Seen in the
+  # wild as "removed a dataset and the overview and Datasets list
+  # disappeared". These renders are cheap; send them unconditionally.
+  for (sidebar_output in c(
+    "workspace_header", "summary_metrics", "dataset_nav_ui",
+    "add_dataset_ui", "validation_report_ui"
+  )) {
+    outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
+  }
 
   # --- dataset detail (structure only -> stable file inputs) --------------
   output$dataset_detail <- renderUI({

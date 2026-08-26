@@ -99,6 +99,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Removing a dataset could blank the Shiny app's sidebar — the workspace
+  overview and the Datasets list disappeared until the window was resized.**
+  The removal itself was sound; what vanished was the render. Adding or
+  removing a dataset rebuilds the whole workspace (`output$main`), and when
+  the browser re-binds the sidebar's dynamic outputs it snapshots their
+  visibility — a snapshot that can race the DOM swap and misreport a visible
+  output as hidden. Shiny then suspends the render server-side
+  (`suspendWhenHidden`, the default) and never sends the HTML, and unlike a
+  tab pane, nothing in the sidebar ever triggers the re-check that would have
+  healed it. The five sidebar outputs are now excluded from
+  `suspendWhenHidden`, so the server pushes them regardless of what the
+  visibility snapshot claimed; the race can still misreport, but it can no
+  longer blank the panel.
+
 - **The Shiny app's downloadable validation summary announced *VALIDATION
   PASSED* while a dataset was still missing its data.** With several datasets
   in a DTA, checking them all leaves any dataset whose files never arrived at
