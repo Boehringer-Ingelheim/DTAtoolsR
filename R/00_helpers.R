@@ -192,28 +192,14 @@ dta_resolve_stream_mode <- function(
 
   size > threshold
 }
-# Two lists, because `type:` answers two different questions depending on the
-# dataset it sits in.
-#
-# In a TABULAR dataset the type picks the reader that parses the file, so it can
-# only ever name a format this package can actually read. In a FILE dataset
-# nothing is parsed at all -- `check()` asks only whether the file arrived, is
-# non-empty and can be opened -- so restricting it to the readable formats forced
-# a PDF or an archive to be declared `type: csv`, which is simply untrue and
-# leaves the document lying about its own contents.
-#
-# `any` exists for exactly that case, and carries no reader. It is offered only
-# to a file dataset; a tabular dataset rejects it through
-# `DTADataSetTabular`'s validator, which requires every handler to be a
-# `DTAFileTabular` rather than through this list, so a handler is validated
-# against the dataset that holds it rather than against the argument someone
-# passed to the factory.
-`__DTAtools_supported_file_types_tabular__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
-`__DTAtools_supported_file_types_file__` <- c("any", "csv", "tsv")
-`__DTAtools_supported_file_types__` <- unique(c(
-  `__DTAtools_supported_file_types_tabular__`,
-  `__DTAtools_supported_file_types_file__`
-))
+# All file types this package's `DTAFileFactory()` knows how to construct a
+# handler for. This list is deliberately just the union -- it does not by
+# itself keep `type: any` out of a tabular dataset or `type: csv` out of a
+# file dataset; that per-dataset-type enforcement lives in the dataset
+# validators, e.g. `DTADataSetTabular`'s, which requires every handler to
+# inherit from `DTAtools::DTAFileTabular` rather than checking against a type
+# string here.
+`__DTAtools_supported_file_types__` <- c("any", "csv", "tsv") # TODO: "sas7bdat", ..
 
 #' @title Check Generic
 #' @description

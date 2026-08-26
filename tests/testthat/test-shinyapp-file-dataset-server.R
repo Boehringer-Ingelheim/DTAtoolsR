@@ -38,6 +38,17 @@ file_ds_set <- function(session, name, value) {
   do.call(session$setInputs, stats::setNames(list(value), name))
 }
 
+# Select a dataset in the nav the way a user actually does: input$active_ds
+# does not exist anywhere in inst/shiny/dta_app -- the app never reads it.
+# What actually moves rv$active is clicking a nav row, which fires
+# `selds_<position>`, keyed by the dataset's position in rv$structure (see the
+# nav_registry observer in app.R). The position has to be read back from
+# rv$structure rather than assumed, because it depends on add/remove order.
+file_ds_select <- function(session, rv, name) {
+  idx <- rv$structure[[name]]$index
+  do.call(session$setInputs, stats::setNames(list(1), paste0("selds_", idx)))
+}
+
 file_ds_clean_session <- function() {
   unlink(
     list.files(tempdir(),
@@ -56,7 +67,8 @@ file_ds_setup <- quote({
   session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
   session$setInputs(add_ds_name = "reports", add_ds_type = "file")
   session$setInputs(add_ds_save = 1)
-  session$setInputs(active_ds = "reports")
+  file_ds_select(session, rv, "reports")
+  testthat::expect_equal(rv$active, "reports")
   session$setInputs(edit_files = 1)
   session$setInputs(file_add = 1)
   session$setInputs(
@@ -206,7 +218,8 @@ test_that("a Files dataset with nothing bound reports no data rather than passin
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     session$setInputs(add_ds_name = "empty_reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
-    session$setInputs(active_ds = "empty_reports")
+    file_ds_select(session, rv, "empty_reports")
+    expect_equal(rv$active, "empty_reports")
 
     session$setInputs(check_one = 1)
 
@@ -232,7 +245,8 @@ test_that("the handler form for a Files dataset offers no type to choose", {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
-    session$setInputs(active_ds = "reports")
+    file_ds_select(session, rv, "reports")
+    expect_equal(rv$active, "reports")
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
 
@@ -249,13 +263,16 @@ test_that("the handler form for a Files dataset offers no type to choose", {
 })
 
 test_that("the handler form for a tabular dataset still offers csv and tsv", {
-  # The guard that the change above is scoped to file datasets.
+  # The guard that the change above is scoped to file datasets: this drives
+  # the SAME edit_files/file_add flow as the two tests above, but against
+  # "clinical_data" (tabular) rather than a Files dataset.
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
-    session$setInputs(active_ds = "clinical_data")
+    file_ds_select(session, rv, "clinical_data")
+    expect_equal(rv$active, "clinical_data")
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
 
@@ -278,7 +295,8 @@ test_that("saving the form's own default builds an unparsed handler", {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
-    session$setInputs(active_ds = "reports")
+    file_ds_select(session, rv, "reports")
+    expect_equal(rv$active, "reports")
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
     session$setInputs(
@@ -343,5 +361,132 @@ test_that("the Loaded files panel shows the passing tick once the dataset is che
     html <- paste(as.character(output$loaded_files$html), collapse = "")
     expect_match(html, "report_2024.pdf", fixed = TRUE)
     expect_match(html, "file-ok", fixed = TRUE)
+  })
+})
+
+# ---------------------------------------------------------------------------
+# The column and rule editors refuse a file dataset, even with edit mode on
+# ---------------------------------------------------------------------------
+#
+# ds_edit_menu() (ui_components.R) only hides the Columns/Rules rows for a
+# "file" dataset -- an input that is not on screen can still be driven over
+# the websocket, so edit_cols/edit_rules and col_save/rule_save each re-check
+# rv$structure[[...]]$type themselves rather than trust the render gate.
+# Before the fix there was no re-check: driving edit_cols on a file dataset
+# opened the column editor, and saving surfaced raw S7 internals ("Can't find
+# property <DTAtools::DTADataSetFile>@specs") because DTADataSetFile has no
+# @specs for dta_column_ids()/dta_set_column() to read.
+
+test_that("edit_cols and edit_rules refuse to open on a file dataset", {
+  file_ds_clean_session()
+
+  shiny::testServer(file_ds_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
+    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_save = 1)
+    file_ds_select(session, rv, "reports")
+    expect_equal(rv$active, "reports")
+
+    session$setInputs(edit_cols = 1)
+    expect_null(rv$editor_dataset)
+    expect_equal(rv$col_view, "list") # its initial value -- never touched
+    expect_equal(rv$col_token, 0) # the modal-render trigger never bumped
+
+    session$setInputs(edit_rules = 1)
+    expect_null(rv$editor_dataset)
+    expect_equal(rv$rule_view, "list")
+    expect_equal(rv$rule_token, 0)
+  })
+})
+
+test_that("col_save and rule_save refuse a stashed editor_dataset that is a file dataset", {
+  # rv$editor_dataset is shared across the file/column/rule editors. The one
+  # way it can legitimately point at a file dataset is the File editor
+  # (edit_files) -- open THAT, then drive col_save/rule_save directly,
+  # bypassing edit_cols/edit_rules (and their own type guard) entirely. This
+  # is exactly the "raced or bypassed the same way edit_cols can" scenario
+  # the save handlers' own re-check comments describe.
+  file_ds_clean_session()
+
+  shiny::testServer(file_ds_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
+    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_save = 1)
+    file_ds_select(session, rv, "reports")
+
+    session$setInputs(edit_files = 1)
+    expect_equal(rv$editor_dataset, "reports")
+
+    before_cols <- app_fn("dta_column_ids")(rv$dta, "clinical_data")
+    session$setInputs(
+      col_id = "SNEAKY", col_backend = "SAS", col_type = "Char", col_save = 1
+    )
+    expect_equal(app_fn("dta_column_ids")(rv$dta, "clinical_data"), before_cols)
+    expect_null(rv$col_msg)
+
+    before_rules <- nrow(app_fn("dta_rules_overview")(rv$dta, "clinical_data"))
+    session$setInputs(rule_id = "SNEAKY", rule_save = 1)
+    expect_equal(nrow(app_fn("dta_rules_overview")(rv$dta, "clinical_data")), before_rules)
+    expect_null(rv$rule_msg)
+  })
+})
+
+test_that("edit_cols and edit_rules still open on a tabular dataset (positive control)", {
+  file_ds_clean_session()
+
+  shiny::testServer(file_ds_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
+    # "clinical_data" is tabular and already active on load -- no selection needed.
+    expect_equal(rv$active, "clinical_data")
+
+    session$setInputs(edit_cols = 1)
+    expect_equal(rv$editor_dataset, "clinical_data")
+
+    session$setInputs(edit_rules = 1)
+    expect_equal(rv$editor_dataset, "clinical_data")
+  })
+})
+
+# ---------------------------------------------------------------------------
+# The zero-handlers banner in the file editor
+# ---------------------------------------------------------------------------
+
+test_that("the file editor shows the zero-handlers banner for a freshly added Files dataset", {
+  # A dataset created via "+ Add dataset" starts with no handlers at all, and
+  # nothing can be uploaded into it until at least one exists -- the banner is
+  # what makes that consequence explicit in the editor that can fix it.
+  file_ds_clean_session()
+
+  shiny::testServer(file_ds_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
+    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_save = 1)
+    file_ds_select(session, rv, "reports")
+    expect_equal(rv$active, "reports")
+
+    session$setInputs(edit_files = 1)
+
+    html <- paste(output$file_modal_body$html, collapse = "\n")
+    expect_match(
+      html,
+      "This dataset expects no files at all, so nothing can be loaded into it. Add at least one entry.",
+      fixed = TRUE
+    )
+  })
+})
+
+test_that("the zero-handlers banner is gone once the dataset has a handler", {
+  file_ds_clean_session()
+
+  shiny::testServer(file_ds_app_dir(), {
+    eval(file_ds_setup) # adds one "any" handler to "reports"
+    session$setInputs(edit_files = 1) # re-open in list view
+
+    html <- paste(output$file_modal_body$html, collapse = "\n")
+    expect_false(grepl("expects no files at all", html, fixed = TRUE))
   })
 })

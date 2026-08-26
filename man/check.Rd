@@ -15,7 +15,8 @@ check(x, ...)
 check(x, ...)
 }
 \arguments{
-\item{x}{A \code{DTADataSetFile} object.}
+\item{x}{A \code{DTA}, \code{DTADataSet}, \code{DTADataSetTabular} or
+\code{DTADataSetFile} object -- this page documents every \code{check()} method.}
 
 \item{...}{Additional named arguments:
 \describe{

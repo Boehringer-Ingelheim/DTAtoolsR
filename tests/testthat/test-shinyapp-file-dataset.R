@@ -41,7 +41,14 @@ test_that("dta_load_file() into a Files dataset returns ok and increments the co
   before <- count_fn(DTAtools::datasets(dta_obj, "reports"))
   expect_equal(before, 0L)
 
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   expect_true(res$ok, info = res$error)
 
   after <- count_fn(DTAtools::datasets(res$value, "reports"))
@@ -79,7 +86,14 @@ test_that("dta_bound_item_name('file') agrees with dta_dataset_table_names()", {
   on.exit(unlink(target), add = TRUE)
 
   dta_obj <- make_file_dta()
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   expect_true(res$ok)
 
   listed <- table_names_fn(DTAtools::datasets(res$value, "reports"))
@@ -103,7 +117,14 @@ test_that("dta_clear_validation() on a Files dataset succeeds", {
   on.exit(unlink(target), add = TRUE)
 
   dta_obj <- make_file_dta()
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   dta_checked <- DTAtools::check(res$value, quiet = TRUE)
 
   # validation_status should have an entry
@@ -132,7 +153,14 @@ test_that("dta_table_status_map() yields 'pass' after a successful dta_check()",
   on.exit(unlink(target), add = TRUE)
 
   dta_obj <- make_file_dta()
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   res_checked <- check_fn(res$value)
   expect_true(res_checked$ok, info = res_checked$error)
 
@@ -180,7 +208,7 @@ test_that("full file-dataset round trip: add dataset, handler, load, check, YAML
   res_load <- load_fn(
     res_handler$value,
     dataset = "reports",
-    file = target, handler_index = 1
+    file = target, handler_index = 1, name = basename(target)
   )
   expect_true(res_load$ok, info = res_load$error)
 
@@ -261,7 +289,14 @@ test_that("a file bound but not yet checked reports 'pending', not a subscript e
   tbl <- name_fn(DTAtools::datasets(dta_obj, "reports")@type, target)
   expect_equal(tbl, "report.pdf")
 
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   expect_true(res$ok, info = res$error)
 
   # The precondition that made the panel throw: nothing is validated yet.
@@ -287,11 +322,50 @@ test_that("the per-file tick still turns to 'pass' once the dataset is checked",
 
   dta_obj <- make_file_dta()
   tbl <- name_fn(DTAtools::datasets(dta_obj, "reports")@type, target)
-  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  # A Files dataset's load_file() keys every record by the delivered file's OWN
+  # name (basename WITH extension) -- name defaults to file_path_sans_ext()
+  # inside dta_load_file(), which is right for a tabular dataset's table name
+  # but wrong here, so it has to be given explicitly.
+  res <- load_fn(
+    dta_obj,
+    dataset = "reports", file = target, handler_index = 1, name = basename(target)
+  )
   expect_true(res$ok, info = res$error)
 
   checked <- DTAtools::check(res$value, datasets = "reports", quiet = TRUE)
   tstatus <- status_fn(checked, "reports")
   expect_named(tstatus, tbl)
   expect_equal(lookup_fn(tstatus, tbl, "pending"), "pass")
+})
+
+test_that("dta_load_file() derives its default key from the dataset type", {
+  # The default used to hardcode the TABULAR rule (extension stripped) for
+  # both dataset types. The app's own call site always passes `name`, so it
+  # never noticed -- but every other caller bound a file dataset under a key
+  # no report for that class looks up, and once load_file(DTADataSetFile)
+  # began refusing a `name` that is not the delivered basename, the same
+  # default aborted outright. The branch now lives in dta_bound_item_name().
+  load_fn <- app_fn("dta_load_file")
+  names_fn <- app_fn("dta_dataset_table_names")
+  get_ds <- app_fn("dta_get_dataset")
+
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "report.pdf")
+  writeLines("content", path)
+
+  # A file dataset keys by the delivered name, extension KEPT.
+  res <- load_fn(make_file_dta(), "reports", file = path, handler_index = 1)
+  expect_true(isTRUE(res$ok))
+  expect_equal(names_fn(get_ds(res$value, "reports")), "report.pdf")
+
+  # A tabular dataset still names the table with the extension STRIPPED.
+  csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  tab <- DTAtools::DTA(datasets = list(clinical_data = DTAtools::DTADataSetTabular(
+    name = "clinical_data",
+    specs = DTAtools::create_example_DTAColumnSpecCollection(1),
+    files = list(DTAtools::DTAFileCSV(filename = "clinical_data.csv"))
+  )))
+  res2 <- load_fn(tab, "clinical_data", file = csv, handler_index = 1)
+  expect_true(isTRUE(res2$ok))
+  expect_equal(names_fn(get_ds(res2$value, "clinical_data")), "clinical_data")
 })

@@ -280,7 +280,9 @@ method(matches_filename, DTAFile) <- function(x, file) {
 # helper keeps the base behaviour testable on its own.
 #
 # Returns one logical PER declared name or pattern -- a handler may carry
-# several -- and every caller reduces the vector itself.
+# several. That is a vector, not a scalar, so no caller may feed the raw
+# result straight into `if`; every caller reduces it first, with
+# `isTRUE(any(...))`.
 #' @keywords internal
 dta_matches_filename_base <- function(x, file) {
   file_name <- basename(file)
@@ -385,7 +387,11 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
   continue <- TRUE
 
   if (namecheck) {
-    if (!DTAtools::matches_filename(x, basename(file))) {
+    # any(): matches_filename() yields one logical PER declared name or
+    # pattern, so a handler with several of either would otherwise feed a
+    # vector into `if` and abort with "the condition has length > 1" instead
+    # of the intended "does not match" message.
+    if (!isTRUE(any(DTAtools::matches_filename(x, basename(file))))) {
       continue <- FALSE
       cli::cli_abort(
         stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
@@ -487,7 +493,11 @@ if (!exists("open_file", mode = "function")) {
 method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
   file <- dta_assert_single_file_path(file, "open_file")
 
-  if (namecheck && !DTAtools::matches_filename(x, basename(file))) {
+  # any(): matches_filename() yields one logical PER declared name or
+  # pattern, so a handler with several of either would otherwise feed a
+  # vector into `if` and abort with "the condition has length > 1" instead
+  # of the intended "does not match" message.
+  if (namecheck && !isTRUE(any(DTAtools::matches_filename(x, basename(file))))) {
     cli::cli_abort(
       stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
     )
