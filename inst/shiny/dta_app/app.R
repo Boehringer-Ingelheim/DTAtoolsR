@@ -3642,7 +3642,12 @@ server <- function(input, output, session) {
             downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
             downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
             downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_html", "Report", class = "btn btn-sm btn-outline-secondary")
+            downloadButton("dl_msgs_html", "Report",
+              class = "btn btn-sm btn-outline-secondary",
+              # Named apart from the sidebar's "Validation summary": this is the
+              # message-level report, that one is the per-dataset outcome.
+              title = "Download the full validation message report"
+            )
           ),
           tags$span(class = "msgs-dock-chevron", HTML("&#x25BC;"))
         )
@@ -5238,8 +5243,13 @@ server <- function(input, output, session) {
     }
   )
 
-  # Validation report: offered ONLY once a validation has actually succeeded
-  # (at least one dataset passed and none failed). Hidden otherwise.
+  # Validation SUMMARY: the whole-DTA outcome, one row per dataset. Deliberately
+  # named apart from the "Report" in the Validation messages dock, which is the
+  # message-level DTAtools::write_validation_report() output.
+  #
+  # Offered once at least one dataset has passed and none has failed. It may
+  # still report the run as INCOMPLETE -- datasets skipped for missing data are
+  # not a pass, and the summary says so rather than certifying one.
   output$validation_report_ui <- renderUI({
     st <- unlist(rv$status)
     validated <- names(st)[st %in% c("pass", "fail")]
@@ -5247,18 +5257,27 @@ server <- function(input, output, session) {
     if (!isTRUE(ok)) {
       return(NULL)
     }
+    complete <- length(validated) == length(st)
     tagList(
       tags$hr(),
-      downloadButton("dl_validation_report", "Validation report",
-        class = "btn btn-success w-100",
-        title = "Download a report certifying this successful validation"
+      downloadButton("dl_validation_summary", "Validation summary",
+        class = if (complete) "btn btn-success w-100" else "btn btn-warning w-100",
+        title = if (complete) {
+          "Download a summary certifying this successful validation"
+        } else {
+          paste(
+            "Download a summary of this validation.",
+            "Some datasets have not been validated, so it will report the",
+            "validation as incomplete rather than passed."
+          )
+        }
       )
     )
   })
 
-  output$dl_validation_report <- downloadHandler(
+  output$dl_validation_summary <- downloadHandler(
     filename = function() {
-      paste0("validation_report_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".html")
+      paste0("validation_summary_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".html")
     },
     content = function(file) {
       req(rv$dta)

@@ -91,6 +91,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The Shiny app's downloadable validation summary announced *VALIDATION
+  PASSED* while a dataset was still missing its data.** With several datasets
+  in a DTA, checking them all leaves any dataset whose files never arrived at
+  *No data* — it is skipped, not validated. The summary counted only the
+  datasets that were actually validated, found no failures among them, and
+  certified the whole DTA as passed; the skipped dataset appeared in the table
+  below the banner, contradicting it.
+
+  The banner is now three-state and is only green when **every** dataset in the
+  DTA was validated and passed. A dataset that is *No data* or *Not validated*
+  yields *VALIDATION INCOMPLETE* (amber) together with a line naming what is
+  missing, and any failure yields *VALIDATION FAILED* — previously a failure
+  was also reported as merely "incomplete". The counts line now includes
+  datasets still awaiting validation, not just those without data.
+
+- **Two different downloads were both called the validation report.** The
+  sidebar button is now **"Validation summary"** — the whole-DTA outcome, one
+  row per dataset, downloading as `validation_summary_<timestamp>.html` — and
+  is styled amber rather than green when it would report an incomplete run. The
+  **"Report"** button in the Validation messages dock is unchanged and remains
+  the message-level `write_validation_report()` output; both now carry tooltips
+  saying which is which.
+
 - **Uploading into a Files dataset reported *"subscript out of bounds"* in the
   Loaded files panel, and the file was bound anyway.** The upload itself
   succeeded — which is why a second attempt offered to overwrite a file the
