@@ -38,7 +38,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **`clear_validation()` for `DTADataSetFile`**, matching the tabular method.
 
+- **A bundled example that validates a file dataset alongside a tabular one:
+  `inst/extdata/clinical_dta_with_file_dataset.yaml`.** `DTADataSetFile` and
+  `type: any` had no worked example — all three shipped specifications were
+  pure `type: tabular` — so the Shiny app's *Load example DTA* dialog could not
+  show one either.
+
+  The new specification carries the familiar `clinical_data` table plus a
+  second dataset, `raw_export`, declared `type: file` with a `type: any`
+  handler naming the bundled `clinical_data2.csv.gz`. Both deliverables are
+  files that ship with the package, so the example validates end to end:
+  the table is parsed and rule-checked as usual, while the export is only
+  confirmed to have arrived, be readable and be non-empty.
+
 ### Changed
+
+- **The *Load example DTA* dialog lists the bundled examples in a taught
+  order** — one tabular dataset, then one dataset fed by several files, then a
+  never-parsed file dataset alongside a tabular one, then the genomics
+  specification. The list was plain alphabetical, which made the sequence a
+  coincidence of the filenames and of the reader's collation locale; it is now
+  stated explicitly, and any example not named in that list is appended in
+  C-collation order.
 
 - **The generated Raw YAML is laid out in blank-line separated sections.** A
   serialised specification ran to several hundred unbroken lines, so finding
