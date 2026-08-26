@@ -870,6 +870,52 @@ test_that("dta_build_validation_report reports a passed banner when every datase
   expect_true(grepl("1 passed, 0 failed, 0 without data", html, fixed = TRUE))
 })
 
+test_that("a dataset skipped for missing data is never reported as a pass", {
+  dta <- app_fixture_dta()
+  # The reported bug: one dataset passed, a second was skipped because its data
+  # was missing, and the summary still announced VALIDATION PASSED.
+  status <- c(clinical_data = "pass", lab_data = "nodata")
+
+  html <- app_fn("dta_build_validation_report")(dta, status)
+
+  expect_false(grepl("VALIDATION PASSED", html, fixed = TRUE))
+  expect_true(grepl("VALIDATION INCOMPLETE", html, fixed = TRUE))
+  expect_true(grepl("1 passed, 0 failed, 1 without data", html, fixed = TRUE))
+  expect_true(grepl("cannot be reported as passed", html, fixed = TRUE))
+})
+
+test_that("a dataset still pending validation also blocks the passed banner", {
+  dta <- app_fixture_dta()
+  status <- c(clinical_data = "pass", lab_data = "pending")
+
+  html <- app_fn("dta_build_validation_report")(dta, status)
+
+  expect_false(grepl("VALIDATION PASSED", html, fixed = TRUE))
+  expect_true(grepl("VALIDATION INCOMPLETE", html, fixed = TRUE))
+  expect_true(grepl("1 not validated", html, fixed = TRUE))
+})
+
+test_that("dta_build_validation_report reports a failure as failed, not incomplete", {
+  dta <- app_fixture_dta()
+  status <- c(clinical_data = "fail", lab_data = "nodata")
+
+  html <- app_fn("dta_build_validation_report")(dta, status)
+
+  expect_true(grepl("VALIDATION FAILED", html, fixed = TRUE))
+  expect_false(grepl("VALIDATION PASSED", html, fixed = TRUE))
+})
+
+test_that("the summary is titled apart from the message-level validation report", {
+  dta <- app_fixture_dta()
+
+  html <- app_fn("dta_build_validation_report")(dta, c(clinical_data = "pass"))
+
+  # The Validation messages dock offers a "Report"; this one must not be
+  # confusable with it.
+  expect_true(grepl("<h1>DTA Validation Summary</h1>", html, fixed = TRUE))
+  expect_false(grepl("DTA Validation Report", html, fixed = TRUE))
+})
+
 test_that("dta_export_stem puts the version between the title and the date", {
   stem_fn <- app_fn("dta_export_stem")
   dta <- app_fixture_dta()
