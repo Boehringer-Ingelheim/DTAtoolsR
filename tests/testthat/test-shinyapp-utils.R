@@ -691,6 +691,95 @@ test_that("dta_dataset_to_yaml_text separates the dataset's own sections at its 
   expect_true(all(nzchar(lines[ids[-1] - 1L])))
 })
 
+# ---- bundled example listings ----------------------------------------------
+
+test_that("dta_example_yaml_files lists the bundled examples in the taught order", {
+  files <- app_fn("dta_example_yaml_files")()
+
+  # The whole vector, not membership: the landing page renders these in the
+  # order they arrive and preselects the first, so the ORDER is the behaviour.
+  expect_equal(
+    files,
+    c(
+      "clinical_dta.yaml",
+      "clinical_dta_multiple_files.yaml",
+      "clinical_dta_with_file_dataset.yaml",
+      "gf_dataset.yaml"
+    )
+  )
+})
+
+test_that("dta_order_example_yaml_files appends anything not on the preferred list", {
+  order_files <- app_fn("dta_order_example_yaml_files")
+
+  # The branch the bundled inst/extdata cannot reach today: a fifth example.
+  # It must land AFTER the taught four, not jump the queue on its name.
+  expect_equal(
+    order_files(c(
+      "aaa_new_example.yaml",
+      "gf_dataset.yaml",
+      "clinical_dta.yaml",
+      "zzz_new_example.yaml"
+    )),
+    c(
+      "clinical_dta.yaml",
+      "gf_dataset.yaml",
+      "aaa_new_example.yaml",
+      "zzz_new_example.yaml"
+    )
+  )
+})
+
+test_that("dta_order_example_yaml_files sorts the unlisted tail in C collation", {
+  order_files <- app_fn("dta_order_example_yaml_files")
+
+  # method = "radix" is what makes this locale-independent: under a collation
+  # that ignores punctuation, "a_b.yaml" and "a.b.yaml" swap places.
+  expect_equal(
+    order_files(c("a_b.yaml", "a.b.yaml", "AB.yaml")),
+    c("AB.yaml", "a.b.yaml", "a_b.yaml")
+  )
+})
+
+test_that("dta_order_example_yaml_files never drops or repeats a name", {
+  order_files <- app_fn("dta_order_example_yaml_files")
+  preferred <- get0("dta_example_yaml_preferred_order",
+    envir = app_env(), inherits = FALSE
+  )
+  expect_type(preferred, "character")
+
+  # A preferred name that is absent (a typo in the constant, or an example
+  # removed) must simply not appear -- it must not surface as an entry the
+  # landing page would then fail to resolve.
+  present <- c(preferred[[1]], "extra.yaml")
+  expect_equal(order_files(present), c(preferred[[1]], "extra.yaml"))
+
+  # Whatever goes in comes out exactly once, in some order.
+  shuffled <- rev(c(preferred, "extra.yaml", "other.yml"))
+  out <- order_files(shuffled)
+  expect_equal(sort(out), sort(shuffled))
+  expect_false(any(duplicated(out)))
+
+  expect_equal(order_files(character(0)), character(0))
+})
+
+test_that("dta_example_yaml_path resolves every listed example and refuses anything else", {
+  files <- app_fn("dta_example_yaml_files")()
+  resolve <- app_fn("dta_example_yaml_path")
+
+  for (filename in files) {
+    path <- resolve(filename)
+    expect_true(nzchar(path), info = filename)
+    expect_true(file.exists(path), info = filename)
+  }
+
+  # The whitelist is what keeps a crafted input value from reading an
+  # arbitrary path.
+  expect_equal(resolve("clinical_data.csv"), "")
+  expect_equal(resolve("../DESCRIPTION"), "")
+  expect_equal(resolve(""), "")
+})
+
 # ---- dta_read_yaml / dta_read_yaml_text ------------------------------------
 
 test_that("dta_read_yaml loads a real DTA YAML and reports has_metadata / not wrapped", {

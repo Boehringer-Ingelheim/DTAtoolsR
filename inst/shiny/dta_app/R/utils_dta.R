@@ -225,9 +225,39 @@ dta_example_data_path <- function(filename) {
   system.file("extdata", basename(filename), package = "DTAtools")
 }
 
+# The order the landing page offers the bundled examples in: a deliberate
+# teaching progression -- one tabular dataset, then one dataset fed by several
+# files, then a never-parsed file dataset alongside a tabular one, then the
+# genomics specification. Plain alphabetical order put that sequence at the
+# mercy of the filenames (and of the user's collation locale); naming it here
+# means a later example cannot silently jump the queue.
+dta_example_yaml_preferred_order <- c(
+  "clinical_dta.yaml",
+  "clinical_dta_multiple_files.yaml",
+  "clinical_dta_with_file_dataset.yaml",
+  "gf_dataset.yaml"
+)
+
+# Applies that order to a set of basenames: the preferred names that are
+# actually present, in the order named above, then everything else in
+# C-collation order -- method = "radix", so an example added later lands in the
+# same place on a German machine as it does in CI.
+#
+# Split out from dta_example_yaml_files() so the POLICY can be tested with
+# inputs the bundled inst/extdata does not contain. The interesting cases are
+# exactly the ones the real directory cannot produce today: an example that is
+# not on the preferred list, a preferred name that is absent (a typo, or a file
+# removed), and a duplicate in the constant. Nothing here may drop a file --
+# every input basename must come out exactly once.
+dta_order_example_yaml_files <- function(files) {
+  known <- intersect(dta_example_yaml_preferred_order, files)
+  c(known, sort(setdiff(files, known), method = "radix"))
+}
+
 # List the YAML specification documents bundled in inst/extdata (basenames),
 # i.e. the counterpart of dta_example_data_files() that keeps ONLY .yaml/.yml.
-# Used by the landing page to offer every bundled example DTA to load.
+# Used by the landing page to offer every bundled example DTA to load, in the
+# order dta_order_example_yaml_files() decides.
 dta_example_yaml_files <- function() {
   dir <- system.file("extdata", package = "DTAtools")
   if (!nzchar(dir) || !dir.exists(dir)) {
@@ -240,7 +270,7 @@ dta_example_yaml_files <- function() {
   files <- files[!dir.exists(file.path(dir, files))] # drop any subdirectories
   ext <- tolower(tools::file_ext(files))
   files <- files[ext %in% c("yaml", "yml")] # keep YAML specs only
-  sort(files)
+  dta_order_example_yaml_files(files)
 }
 
 # Absolute path to a bundled example YAML (given its basename). Returns "" when
