@@ -203,7 +203,8 @@ test_that("removing the only dataset leaves a valid DTA with zero datasets", {
 #
 # THE REPORTED BUG: with two datasets, removing one made the sidebar's overview
 # and Datasets list disappear. The removal itself was sound -- what vanished was
-# the RENDER: every rv$structure assignment re-renders output$main, replacing
+# the RENDER: at the time every rv$structure assignment re-rendered output$main
+# (it now re-renders only on rv$doc_token: load/reset/restore), replacing
 # the whole workspace DOM, and when the client re-binds the sidebar's uiOutputs
 # it can misreport them as hidden (a visibility snapshot racing the DOM swap).
 # Under the default suspendWhenHidden the server then never sends their HTML,
@@ -303,5 +304,92 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
     nav <- paste(as.character(output$dataset_nav_ui$html), collapse = "")
     expect_match(nav, "second_ds", fixed = TRUE)
     expect_false(grepl("clinical_data", nav, fixed = TRUE))
+  })
+})
+
+# ---- the workspace DOM is rebuilt only when the document changes -----------
+#
+# output$main (and output$floating_msgs, which shares the contract) depends on
+# rv$doc_token alone; rv$structure is read under isolate(). doc_token is bumped
+# exactly where the DOCUMENT changes identity -- apply_loaded() (a new load),
+# confirm_reset, restore_session -- so document MUTATIONS (add / remove /
+# rename a dataset, handler edits, a raw-YAML apply) no longer replace the
+# whole workspace DOM. Each such swap reset the active nav tab and every file
+# input, and re-opened the client-side visibility-snapshot race pinned above
+# for every output in the swapped DOM, not just the immunised sidebar.
+#
+# The render dependency itself is out of testServer's reach (the HTML of a
+# skipped re-render is indistinguishable from a re-render's), so what is
+# pinned is its server-side contract: WHEN the token moves. Plus, by reading
+# the outputs, that the token dependency actually re-renders the layout in
+# both directions (workspace on load, landing on reset) -- the failure mode of
+# an over-eager isolate() is a layout frozen on the landing page.
+
+test_that("doc_token moves only on load, restore and reset -- not on mutations", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    # A client id first, so every autosave lands in a restorable session file.
+    session$setInputs(dta_client_id = strrep("e", 32))
+
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    expect_equal(rv$doc_token, 1)
+
+    # Mutations of the loaded document: the token must not move.
+    session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_save = 1)
+    expect_equal(names(rv$structure), c("clinical_data", "second_ds"))
+    expect_equal(rv$doc_token, 1)
+
+    session$setInputs(remove_dataset = 1)
+    session$setInputs(remove_dataset_confirm = 1)
+    expect_equal(names(rv$structure), "clinical_data")
+    expect_equal(rv$doc_token, 1)
+
+    # A raw-YAML apply rebuilds rv$structure too, but the workspace (and the
+    # editor the user is typing in) must survive it.
+    session$setInputs(raw_yaml_editor = rv$yaml_text)
+    session$setInputs(apply_yaml = 1)
+    expect_true(isTRUE(rv$yaml_msg$ok))
+    expect_equal(rv$doc_token, 1)
+
+    # Restoring the autosaved session replaces the document wholesale.
+    session$setInputs(restore_session = 1)
+    expect_equal(rv$doc_token, 2)
+
+    # So does starting over.
+    session$setInputs(confirm_reset = 1)
+    expect_null(rv$structure)
+    expect_equal(rv$doc_token, 3)
+  })
+})
+
+test_that("the main layout follows doc_token: workspace on load, landing on reset", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+
+  shiny::testServer(.shiny_app_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+
+    main <- paste(as.character(output$main$html), collapse = "")
+    expect_match(main, "check_all", fixed = TRUE) # workspace sidebar rendered
+    dock <- paste(as.character(output$floating_msgs$html), collapse = "")
+    expect_match(dock, "dta-msgs-dock", fixed = TRUE)
+
+    session$setInputs(reset_app = 1)
+    session$setInputs(confirm_reset = 1)
+
+    main <- paste(as.character(output$main$html), collapse = "")
+    expect_match(main, "Load a DTA / DTS specification file", fixed = TRUE)
+    expect_false(grepl("check_all", main, fixed = TRUE))
+    dock <- paste(as.character(output$floating_msgs$html), collapse = "")
+    expect_false(grepl("dta-msgs-dock", dock, fixed = TRUE))
   })
 })

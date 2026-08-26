@@ -113,6 +113,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   visibility snapshot claimed; the race can still misreport, but it can no
   longer blank the panel.
 
+- **Editing the document no longer rebuilds the Shiny app's whole workspace.**
+  Adding, removing or renaming a dataset, editing its file handlers, and
+  applying Raw YAML all replaced the entire workspace DOM — snapping the view
+  back to the Datasets tab, clearing every file-picker's displayed name, and
+  re-opening for every main-content output the same visibility race the
+  sidebar had to be immunised against. The main layout now re-renders only
+  when the document itself changes identity (a load, *Start over*, a restored
+  session); everything inside it already updates through its own outputs, and
+  the Raw YAML editor is synced in place after each edit as before. The active
+  tab and the file inputs now survive all of the mutations above.
+
 - **The Shiny app offered the Validation messages downloads before any check
   had been run.** The dock's CSV, TSV, XLSX and Report buttons were live from
   the moment a DTA was loaded, and exporting produced a file whose only row
