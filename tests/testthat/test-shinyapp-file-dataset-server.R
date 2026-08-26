@@ -291,3 +291,57 @@ test_that("saving the form's own default builds an unparsed handler", {
     expect_equal(handler@filename, "summary.pdf")
   })
 })
+
+# ---- the Loaded files panel actually renders --------------------------------
+#
+# THE GAP THIS CLOSES: every test above drives the upload and then inspects
+# rv$dta. None of them ever asked for the OUTPUT, so the panel that the user
+# actually looks at was never rendered by the suite -- and "Error: subscript out
+# of bounds" in that panel survived a whole round of fixes to this journey.
+# Reading output$loaded_files is the entire point of these two tests.
+
+test_that("the Loaded files panel renders a freshly uploaded file as pending", {
+  # THE REPORTED BUG: the upload succeeded (so a retry offered to overwrite a
+  # file the user never saw arrive) and the panel then aborted drawing the
+  # per-file tick, because a file dataset has no validation_status() rows at all
+  # until check() runs and the tick looked its name up with `[[`.
+  file_ds_clean_session()
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  shiny::testServer(file_ds_app_dir(), {
+    eval(file_ds_setup)
+    file_ds_set(session, slot, file_ds_upload(file_ds_write(dir, "report_2024.pdf")))
+
+    # The precondition that made it abort: nothing validated, so the status map
+    # this panel indexes is empty.
+    expect_length(app_fn("dta_table_status_map")(rv$dta, "reports"), 0L)
+
+    html <- paste(as.character(output$loaded_files$html), collapse = "")
+    expect_match(html, "report_2024.pdf", fixed = TRUE)
+    # Drawn with the not-validated-yet tick rather than a pass or a fail.
+    expect_match(html, "file-pending", fixed = TRUE)
+    expect_false(grepl("file-ok", html, fixed = TRUE))
+  })
+})
+
+test_that("the Loaded files panel shows the passing tick once the dataset is checked", {
+  # The guard must not flatten every file to "pending": a real status still has
+  # to reach the panel.
+  file_ds_clean_session()
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  shiny::testServer(file_ds_app_dir(), {
+    eval(file_ds_setup)
+    file_ds_set(session, slot, file_ds_upload(file_ds_write(dir, "report_2024.pdf")))
+    session$setInputs(check_one = 1)
+    expect_equal(rv$status[["reports"]], "pass")
+
+    html <- paste(as.character(output$loaded_files$html), collapse = "")
+    expect_match(html, "report_2024.pdf", fixed = TRUE)
+    expect_match(html, "file-ok", fixed = TRUE)
+  })
+})
