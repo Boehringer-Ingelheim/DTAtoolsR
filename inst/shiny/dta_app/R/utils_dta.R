@@ -1301,9 +1301,13 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   invisible(file)
 }
 
-# Build a self-contained HTML validation report for a validated DTA. Summarises
+# Build a self-contained HTML validation SUMMARY for a validated DTA. Summarises
 # per-dataset status (from the app's status map) and, when available, the
 # per-target detail from results(). Returns a single HTML string.
+#
+# Distinct from DTAtools::write_validation_report(), which the Validation
+# messages dock offers as "Report": that one lists the individual validation
+# messages, this one certifies the overall per-dataset outcome.
 dta_build_validation_report <- function(dta, status = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
@@ -1332,7 +1336,10 @@ dta_build_validation_report <- function(dta, status = NULL) {
   n_pass <- sum(st[validated] == "pass")
   n_fail <- sum(st[validated] == "fail")
   n_nodata <- sum(st == "nodata")
-  overall_ok <- length(validated) > 0 && n_fail == 0
+  # Everything that was NOT validated: skipped for missing data, still pending,
+  # or any status the app grows later. These are what make a run incomplete.
+  n_unvalidated <- length(st) - length(validated)
+  n_pending <- n_unvalidated - n_nodata
 
   res <- dta_try(as.data.frame(DTAtools::results(dta)))
   rdf <- if (isTRUE(res$ok)) res$value else NULL
@@ -1379,12 +1386,39 @@ dta_build_validation_report <- function(dta, status = NULL) {
     }
   }
 
-  banner_cls <- if (overall_ok) "pass" else "warn"
-  banner_txt <- if (overall_ok) "VALIDATION PASSED" else "VALIDATION INCOMPLETE"
+  # Three-state banner. "Passed" is reserved for the case where EVERY dataset in
+  # the DTA was actually validated and passed -- a dataset skipped for missing
+  # data leaves the run incomplete, and calling that a pass overstates it.
+  banner_cls <- if (n_fail > 0) {
+    "warn"
+  } else if (n_pass > 0 && n_unvalidated == 0) {
+    "pass"
+  } else {
+    "incomplete"
+  }
+  banner_txt <- switch(banner_cls,
+    warn = "VALIDATION FAILED",
+    pass = "VALIDATION PASSED",
+    "VALIDATION INCOMPLETE"
+  )
   summary_line <- paste0(
     n_pass, " passed, ", n_fail, " failed, ",
-    n_nodata, " without data."
+    n_nodata, " without data",
+    if (n_pending > 0) paste0(", ", n_pending, " not validated") else "",
+    "."
   )
+  # The caveat points at the table below it, so it is only worth printing when
+  # that table actually has rows to point at.
+  caveat <- if (identical(banner_cls, "incomplete") && length(st) > 0) {
+    paste0(
+      "<div class='caveat'>Not every dataset was validated, so this DTA ",
+      "cannot be reported as passed. Load the missing data and re-check the ",
+      "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
+      "validated&rdquo;.</div>"
+    )
+  } else {
+    ""
+  }
   subtitle <- if (!is.null(title)) {
     paste0("<div class='subtitle'>", esc(title), "</div>")
   } else {
@@ -1400,7 +1434,9 @@ dta_build_validation_report <- function(dta, status = NULL) {
     "font-weight:700;letter-spacing:.04em}",
     ".banner.pass{background:#e6f4ea;color:#1e7e34;border:1px solid #2e7d32}",
     ".banner.warn{background:#fdecea;color:#b71c1c;border:1px solid #c62828}",
+    ".banner.incomplete{background:#fcf4e6;color:#8a6d3b;border:1px solid #c77700}",
     ".summary{margin:10px 0 4px;font-size:14px}",
+    ".caveat{margin:8px 0 0;font-size:14px;color:#8a6d3b;max-width:52em}",
     "table{border-collapse:collapse;font-size:13px;margin-top:6px}",
     "th,td{border:1px solid #ccc;padding:5px 10px;text-align:left}",
     "th{background:#f4f4f4}td.ok{color:#1e7e34;font-weight:600}",
@@ -1409,11 +1445,11 @@ dta_build_validation_report <- function(dta, status = NULL) {
 
   paste0(
     "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
-    "<title>DTA Validation Report</title><style>", css, "</style></head><body>",
-    "<h1>DTA Validation Report</h1>", subtitle,
+    "<title>DTA Validation Summary</title><style>", css, "</style></head><body>",
+    "<h1>DTA Validation Summary</h1>", subtitle,
     "<div class='meta'>Generated ", esc(ts), "</div>",
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
-    "<div class='summary'>", esc(summary_line), "</div>",
+    "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Status</th></tr>",
     "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
     "</body></html>"

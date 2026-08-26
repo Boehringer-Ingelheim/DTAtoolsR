@@ -1298,3 +1298,60 @@ test_that("a rejected metadata save leaves the workspace untouched", {
     )
   })
 })
+
+# --- the Validation summary button ------------------------------------------
+#
+# The button is the only route to dta_build_validation_report() in the app, and
+# it now carries a claim of its own: green means "this certifies a pass", amber
+# means "you can have the summary, but it will say the run is incomplete". A
+# renderUI output is never evaluated unless a test reads it, so without this the
+# gate could invert and CI would stay green.
+
+# renderUI yields list(html=, deps=); NULL from the render function leaves no
+# html at all, so collapse both shapes to a plain string.
+ui_text <- function(out) {
+  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
+}
+
+test_that("the Validation summary button is green only when nothing is left unvalidated", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    # Every dataset validated and passed: the summary really would certify one.
+    rv$status <- c(clinical_data = "pass")
+    session$flushReact()
+    html <- ui_text(output$validation_report_ui)
+    expect_match(html, "Validation summary", fixed = TRUE)
+    expect_match(html, "btn-success", fixed = TRUE)
+    expect_false(grepl("btn-warning", html, fixed = TRUE))
+
+    # A second dataset skipped for missing data. The summary is still offered --
+    # it is a summary, not a certificate -- but the button says so up front.
+    rv$status <- c(clinical_data = "pass", lab_data = "nodata")
+    session$flushReact()
+    html <- ui_text(output$validation_report_ui)
+    expect_match(html, "Validation summary", fixed = TRUE)
+    expect_match(html, "btn-warning", fixed = TRUE)
+    expect_match(html, "incomplete rather than passed", fixed = TRUE)
+    expect_false(grepl("btn-success", html, fixed = TRUE))
+  })
+})
+
+test_that("no Validation summary is offered while a dataset has failed", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    rv$status <- c(clinical_data = "fail")
+    session$flushReact()
+    expect_false(grepl("Validation summary", ui_text(output$validation_report_ui), fixed = TRUE))
+
+    # Nor before anything has been checked at all.
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+    expect_false(grepl("Validation summary", ui_text(output$validation_report_ui), fixed = TRUE))
+  })
+})
