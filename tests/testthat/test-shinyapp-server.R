@@ -49,6 +49,31 @@ clean_session_file <- function() {
   invisible(f)
 }
 
+# The rendered HTML of a renderUI output, as one string.
+#
+# renderUI yields list(html=, deps=); NULL from the render function leaves no
+# html at all, so collapse both shapes to a plain string. A renderUI output is
+# never evaluated unless a test reads it, so anything asserted about a UI gate
+# has to go through here.
+ui_text <- function(out) {
+  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
+}
+
+# The markup of ONE control out of a rendered button group, sliced out so a
+# per-button assertion cannot be satisfied by a sibling's markup.
+#
+# Do NOT assert on the string "disabled" here: shiny renders every
+# downloadButton with class "disabled" and aria-disabled, and only its
+# client-side binding clears them. The server-side tell is the binding class
+# itself -- `shiny-download-link` present means a live download, absent means
+# the app's inert stand-in.
+btn_html <- function(out, id) {
+  parts <- strsplit(ui_text(out), "<(a|button) ", perl = TRUE)[[1]]
+  hit <- parts[grepl(paste0('id="', id, '"'), parts, fixed = TRUE)]
+  expect_length(hit, 1)
+  hit[[1]]
+}
+
 test_that("the server starts with an empty workspace", {
   clean_session_file()
 
@@ -1087,19 +1112,22 @@ test_that("HTML validation report download handler produces parseable HTML", {
     doc <- xml2::read_html(report_file)
     expect_true(!is.na(doc))
 
-    # Verify wiring exists by reading app.R source and confirming both
-    # downloadButton and downloadHandler are present
-    app_source <- readLines(
-      file.path(app_server_dir(), "app.R"),
-      warn = FALSE
+    # The button really is rendered, and enabled -- a check has just run.
+    # Read the live output rather than grepping app.R for a downloadButton()
+    # call: that stopped being the wiring when the dock's buttons moved into
+    # output$msgs_dock_dl.
+    expect_match(
+      btn_html(output$msgs_dock_dl, "dl_msgs_html"),
+      "shiny-download-link",
+      fixed = TRUE
     )
-    app_source_str <- paste(app_source, collapse = "\n")
+
     expect_true(
-      grepl('downloadButton("dl_msgs_html"', app_source_str, fixed = TRUE),
-      info = "downloadButton wiring for dl_msgs_html not found in app.R"
-    )
-    expect_true(
-      grepl("output$dl_msgs_html <- downloadHandler", app_source_str, fixed = TRUE),
+      grepl(
+        "output$dl_msgs_html <- downloadHandler",
+        app_source("app.R"),
+        fixed = TRUE
+      ),
       info = "downloadHandler wiring for dl_msgs_html not found in app.R"
     )
   })
@@ -1307,12 +1335,6 @@ test_that("a rejected metadata save leaves the workspace untouched", {
 # renderUI output is never evaluated unless a test reads it, so without this the
 # gate could invert and CI would stay green.
 
-# renderUI yields list(html=, deps=); NULL from the render function leaves no
-# html at all, so collapse both shapes to a plain string.
-ui_text <- function(out) {
-  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
-}
-
 test_that("the Validation summary button is green only when nothing is left unvalidated", {
   clean_session_file()
 
@@ -1353,5 +1375,114 @@ test_that("no Validation summary is offered while a dataset has failed", {
     rv$status <- c(clinical_data = "pending")
     session$flushReact()
     expect_false(grepl("Validation summary", ui_text(output$validation_report_ui), fixed = TRUE))
+  })
+})
+
+# --- the Validation messages dock download buttons ---------------------------
+#
+# Before a check has been run there is nothing to export, and the CSV/TSV/XLSX
+# handlers would happily write a file whose single row reads "No validation
+# messages for this dataset." -- indistinguishable from a clean result. The
+# buttons are therefore disabled until a check has actually happened. A
+# renderUI output is never evaluated unless a test reads it, so without these
+# the gate could invert and CI would stay green.
+
+test_that("the dock download buttons are disabled until a check has been run", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+
+    ids <- c("dl_msgs_csv", "dl_msgs_tsv", "dl_msgs_xlsx", "dl_msgs_html")
+
+    # Data bound, never validated: every button is present but inert.
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+    for (id in ids) {
+      btn <- btn_html(output$msgs_dock_dl, id)
+      expect_false(grepl("shiny-download-link", btn, fixed = TRUE), info = id)
+      expect_match(btn, "disabled", fixed = TRUE)
+      expect_match(btn, "Run a check", fixed = TRUE)
+    }
+
+    # A dataset skipped for missing data is not a check either.
+    rv$status <- c(clinical_data = "nodata")
+    session$flushReact()
+    expect_false(
+      grepl(
+        "shiny-download-link",
+        btn_html(output$msgs_dock_dl, "dl_msgs_csv"),
+        fixed = TRUE
+      )
+    )
+
+    # Checked -- pass or fail, both are a result worth exporting.
+    for (st in c("pass", "fail")) {
+      rv$status <- stats::setNames(st, "clinical_data")
+      session$flushReact()
+      for (id in ids) {
+        btn <- btn_html(output$msgs_dock_dl, id)
+        expect_match(btn, "shiny-download-link", fixed = TRUE, info = paste(id, st))
+        expect_match(btn, "Download the", fixed = TRUE, info = paste(id, st))
+      }
+    }
+  })
+})
+
+test_that("the dock's Report follows the whole DTA, the table exports the active dataset", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+
+    # Another dataset has been checked, the active one has not. The per-dataset
+    # exports have nothing to give; the whole-DTA report does.
+    rv$active <- "clinical_data"
+    rv$status <- c(clinical_data = "pending", other_data = "pass")
+    session$flushReact()
+    expect_false(
+      grepl(
+        "shiny-download-link",
+        btn_html(output$msgs_dock_dl, "dl_msgs_csv"),
+        fixed = TRUE
+      )
+    )
+    expect_match(
+      btn_html(output$msgs_dock_dl, "dl_msgs_html"),
+      "shiny-download-link",
+      fixed = TRUE
+    )
+  })
+})
+
+test_that("the dock download handlers refuse to write before a check", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+
+    # The disabled button is a client-side courtesy; the handler URL stays
+    # reachable, so the gate has to hold on the server too. req() aborts the
+    # download with a silent shiny.silent.error rather than writing a file.
+    expect_error(
+      output$dl_msgs_csv,
+      class = "shiny.silent.error"
+    )
+    expect_error(
+      output$dl_msgs_html,
+      class = "shiny.silent.error"
+    )
+
+    # Once checked, the same download produces a real file.
+    session$setInputs(check_all = 1)
+    session$flushReact()
+    csv <- output$dl_msgs_csv
+    expect_true(file.exists(csv))
+    expect_gt(length(readLines(csv, warn = FALSE)), 0)
   })
 })
