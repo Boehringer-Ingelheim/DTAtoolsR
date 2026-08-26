@@ -108,6 +108,32 @@ test_that("format_datasets_detail matches the fixture's real rule shapes end to 
   expect_match(out, "unique(SUBJECT_ID, VISIT)", fixed = TRUE)
 })
 
+test_that("format_datasets_detail keeps a file handler's filename separate from its endings", {
+  # Before the fix, handler_expected() glued the allowed-endings restriction
+  # onto the filename, so the exported spec read
+  # "- ^report_.* (pdf, zip) (3 files) -- ...", two adjacent parenthesised
+  # groups, and the declared filename/pattern could not be read back verbatim
+  # from the export. handler_expected() now returns the filename/pattern
+  # ONLY; the endings restriction is surfaced by handler_endings() as its own
+  # labelled field.
+  h <- DTAtools::DTAFileAny(
+    filename = "^report_.*", pattern = TRUE, extensions = c("pdf", "zip")
+  )
+  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
+  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
+
+  expect_equal(app_fn("handler_expected")(h), "^report_.*")
+
+  out <- app_fn("format_datasets_detail")(dta_obj)
+
+  # The filename/pattern is verbatim, immediately after "- " -- not with
+  # "(pdf, zip)" glued directly onto it.
+  expect_match(out, "- ^report_.* (1 file) (allowed endings: pdf, zip) [regex]", fixed = TRUE)
+  expect_no_match(out, "^report_.* (pdf, zip)", fixed = TRUE)
+  # The endings restriction still shows up, in its own labelled field.
+  expect_match(out, "allowed endings: pdf, zip", fixed = TRUE)
+})
+
 test_that("embed_yaml_markdown appends the DTA's YAML to the original markdown text", {
   dta <- app_fixture_dta()
   md <- "# My Export\n\nSome narrative text."

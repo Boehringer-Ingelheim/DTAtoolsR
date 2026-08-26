@@ -124,14 +124,23 @@ handler_is_pattern <- function(h) {
   isTRUE(tryCatch(h@pattern, error = function(e) FALSE))
 }
 
+# The declared filename or pattern ONLY -- never glue anything else onto this.
+# It is read back verbatim in the exported specification document
+# (format_datasets_detail(), utils_export.R), so a suffix here would make a
+# declared filename unrecoverable from the export. Callers that also want the
+# allowed-endings restriction use handler_endings() below and surface it as
+# its own, clearly-labelled field.
 handler_expected <- function(h) {
   fn <- tryCatch(h@filename, error = function(e) NA_character_)
-  result <- paste(fn, collapse = ", ")
+  paste(fn, collapse = ", ")
+}
+
+# The allowed-endings restriction ("extensions") a `type = "any"` handler may
+# declare, as a display string ("pdf, zip") or "" when none is set. Kept
+# separate from handler_expected() -- see the comment there.
+handler_endings <- function(h) {
   ext <- tryCatch(h@extensions, error = function(e) NULL)
-  if (!is.null(ext) && length(ext) > 0) {
-    result <- paste0(result, " (", paste(ext, collapse = ", "), ")")
-  }
-  result
+  if (is.null(ext) || length(ext) == 0) "" else paste(ext, collapse = ", ")
 }
 
 handler_hint <- function(h) {
@@ -225,9 +234,39 @@ dta_example_data_path <- function(filename) {
   system.file("extdata", basename(filename), package = "DTAtools")
 }
 
+# The order the landing page offers the bundled examples in: a deliberate
+# teaching progression -- one tabular dataset, then one dataset fed by several
+# files, then a never-parsed file dataset alongside a tabular one, then the
+# genomics specification. Plain alphabetical order put that sequence at the
+# mercy of the filenames (and of the user's collation locale); naming it here
+# means a later example cannot silently jump the queue.
+dta_example_yaml_preferred_order <- c(
+  "clinical_dta.yaml",
+  "clinical_dta_multiple_files.yaml",
+  "clinical_dta_with_file_dataset.yaml",
+  "gf_dataset.yaml"
+)
+
+# Applies that order to a set of basenames: the preferred names that are
+# actually present, in the order named above, then everything else in
+# C-collation order -- method = "radix", so an example added later lands in the
+# same place on a German machine as it does in CI.
+#
+# Split out from dta_example_yaml_files() so the POLICY can be tested with
+# inputs the bundled inst/extdata does not contain. The interesting cases are
+# exactly the ones the real directory cannot produce today: an example that is
+# not on the preferred list, a preferred name that is absent (a typo, or a file
+# removed), and a duplicate in the constant. Nothing here may drop a file --
+# every input basename must come out exactly once.
+dta_order_example_yaml_files <- function(files) {
+  known <- intersect(dta_example_yaml_preferred_order, files)
+  c(known, sort(setdiff(files, known), method = "radix"))
+}
+
 # List the YAML specification documents bundled in inst/extdata (basenames),
 # i.e. the counterpart of dta_example_data_files() that keeps ONLY .yaml/.yml.
-# Used by the landing page to offer every bundled example DTA to load.
+# Used by the landing page to offer every bundled example DTA to load, in the
+# order dta_order_example_yaml_files() decides.
 dta_example_yaml_files <- function() {
   dir <- system.file("extdata", package = "DTAtools")
   if (!nzchar(dir) || !dir.exists(dir)) {
@@ -240,7 +279,7 @@ dta_example_yaml_files <- function() {
   files <- files[!dir.exists(file.path(dir, files))] # drop any subdirectories
   ext <- tolower(tools::file_ext(files))
   files <- files[ext %in% c("yaml", "yml")] # keep YAML specs only
-  sort(files)
+  dta_order_example_yaml_files(files)
 }
 
 # Absolute path to a bundled example YAML (given its basename). Returns "" when
@@ -265,7 +304,22 @@ dta_example_yaml_path <- function(filename) {
 # front of someone who came to validate a file, and the answer is one the size
 # of the file already determines.
 dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
-  nm <- name %||% tools::file_path_sans_ext(basename(file))
+  # The default key belongs to the DATASET TYPE, not to this helper. A tabular
+  # dataset names a table after the file with its extension stripped; a file
+  # dataset keys by the delivered name, extension kept, which is what
+  # dta_file_target_keys() produces and what every report for that class uses.
+  #
+  # This used to hardcode the tabular rule for both. The app's own call site
+  # passes `name` explicitly and so never noticed, but every other caller got a
+  # key no report for a file dataset would ever look up -- and now that
+  # load_file() for a DTADataSetFile refuses a `name` that is not the delivered
+  # basename, that same default aborts outright instead of failing quietly.
+  # dta_bound_item_name() is the single place that branch is written.
+  ds_type <- tryCatch(
+    dta_get_dataset(dta, dataset)@type,
+    error = function(e) NA_character_
+  )
+  nm <- name %||% dta_bound_item_name(ds_type, file)
   dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
@@ -2472,6 +2526,7 @@ dta_handlers_overview <- function(dta, dataset) {
       type = dta_handler_type(h),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
+      endings = handler_endings(h),
       description = handler_hint(h),
       stringsAsFactors = FALSE
     )

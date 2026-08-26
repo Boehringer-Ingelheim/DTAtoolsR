@@ -364,3 +364,36 @@ test_that("multiple manually added tables can be validated without errors", {
     expect_equal(nrow(res), 3)
   })
 })
+
+# ---------------------------------------------------------------------------
+# A table checked against zero column specs is "unspecified", not a pass
+# ---------------------------------------------------------------------------
+
+test_that("a table checked against zero column specs is 'unspecified', not a pass", {
+  # Before the fix, a DTAColumnSpecCollection with no columns validated every
+  # table against it as a clean PASS -- a "VALIDATION PASSED" certificate
+  # covering zero actual checks. `ok = NA` (never FALSE) is deliberate: n_valid
+  # counts `ok == TRUE` and n_invalid counts `ok == FALSE`, both with
+  # na.rm = TRUE, so an NA row is skipped by BOTH tallies rather than counted
+  # as either a pass or a fail -- which is what makes the dataset read as
+  # incomplete instead of either verdict.
+  ds <- DTADataSetTabular(
+    name = "d",
+    specs = specs_from_list(NULL),
+    files = list(DTAFileCSV(filename = "clinical_data.csv"))
+  )
+  ds <- load_file(
+    ds,
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools"),
+    handler_index = 1
+  )
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(status$status, "unspecified")
+  expect_true(is.na(status$ok))
+
+  res <- results(ds)
+  expect_equal(res$n_valid, 0)
+  expect_equal(res$n_invalid, 0)
+})

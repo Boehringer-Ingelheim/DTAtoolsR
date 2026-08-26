@@ -217,15 +217,22 @@ format_datasets_detail <- function(dta) {
     if (length(handlers) > 0) {
       lines <- c(lines, "", "**File Handlers:**")
       for (h in handlers) {
+        # handler_expected() returns the declared filename/pattern ONLY -- it
+        # must read back verbatim here, so the allowed-endings restriction (if
+        # any) is surfaced as its own clearly-labelled field below rather than
+        # glued onto the filename (see the handler_expected() comment,
+        # utils_dta.R).
         expected <- tryCatch(handler_expected(h), error = function(e) "unknown")
+        endings <- tryCatch(handler_endings(h), error = function(e) "")
         hint <- tryCatch(handler_hint(h), error = function(e) "")
         count_lbl <- tryCatch(handler_count_label(h), error = function(e) "")
         kind <- tryCatch(if (handler_is_pattern(h)) "regex" else "exact", error = function(e) "")
 
+        endings_text <- if (length(endings) > 0 && nzchar(endings)) paste0(" (allowed endings: ", endings, ")") else ""
         hint_text <- if (length(hint) > 0 && nzchar(hint)) paste0(" \u2014 ", hint) else ""
         count_text <- if (length(count_lbl) > 0 && nzchar(count_lbl)) paste0(" (", count_lbl, ")") else ""
         kind_text <- if (nzchar(kind)) paste0(" [", kind, "]") else ""
-        lines <- c(lines, paste0("- ", expected, count_text, hint_text, kind_text))
+        lines <- c(lines, paste0("- ", expected, count_text, endings_text, hint_text, kind_text))
       }
     }
 

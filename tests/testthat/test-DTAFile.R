@@ -753,3 +753,39 @@ test_that("a pattern handler may still declare a range", {
     "Min number of files"
   )
 })
+
+
+# ---------------------------------------------------------------------------
+# read_file()'s namecheck reduces a multi-pattern match with any() -- section
+# P11 of the code review fixes
+# ---------------------------------------------------------------------------
+# matches_filename() returns one logical PER declared name or pattern.
+# read_file()'s namecheck used to feed that vector straight into `if
+# (!matches_filename(...))`, which dies with R's own "the condition has
+# length > 1" the moment a handler declares more than one name/pattern and the
+# file matches only one of them.
+
+test_that("read_file() reads a file matching only the second of two patterns", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV(
+    filename = c("^nonexistent_pattern$", "^clinical_data[.]csv$"),
+    pattern = TRUE,
+    number_of_files = 2
+  )
+
+  x <- read_file(file_info, path)
+
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 14)
+})
+
+test_that("read_file() still aborts with 'does not match' when neither pattern matches", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV(
+    filename = c("^nope_a$", "^nope_b$"),
+    pattern = TRUE,
+    number_of_files = 2
+  )
+
+  expect_error(read_file(file_info, path), "does not match")
+})

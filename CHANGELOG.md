@@ -46,7 +46,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **`clear_validation()` for `DTADataSetFile`**, matching the tabular method.
 
+- **A bundled example that validates a file dataset alongside a tabular one:
+  `inst/extdata/clinical_dta_with_file_dataset.yaml`.** `DTADataSetFile` and
+  `type: any` had no worked example — all three shipped specifications were
+  pure `type: tabular` — so the Shiny app's *Load example DTA* dialog could not
+  show one either.
+
+  The new specification carries the familiar `clinical_data` table plus a
+  second dataset, `raw_export`, declared `type: file` with a `type: any`
+  handler naming the bundled `clinical_data2.csv.gz`. Both deliverables are
+  files that ship with the package, so the example validates end to end:
+  the table is parsed and rule-checked as usual, while the export is only
+  confirmed to have arrived, be readable and be non-empty.
+
 ### Changed
+
+- **The *Load example DTA* dialog lists the bundled examples in a taught
+  order** — one tabular dataset, then one dataset fed by several files, then a
+  never-parsed file dataset alongside a tabular one, then the genomics
+  specification. The list was plain alphabetical, which made the sequence a
+  coincidence of the filenames and of the reader's collation locale; it is now
+  stated explicitly, and any example not named in that list is appended in
+  C-collation order.
 
 - **The generated Raw YAML is laid out in blank-line separated sections.** A
   serialised specification ran to several hundred unbroken lines, so finding
@@ -64,12 +85,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   parse identically, and an **uploaded or hand-edited** YAML is still shown and
   kept exactly as the user wrote it — only generated text is laid out.
 
-- `__DTAtools_supported_file_types__` is split in two. `type:` was answering two
-  unrelated questions with one list: *which reader parses this file* (tabular
-  only) and *what may this file be* (file datasets). Tabular handlers now
-  validate against `__DTAtools_supported_file_types_tabular__` (`csv`, `tsv`)
-  and file datasets against `__DTAtools_supported_file_types_file__`, which adds
-  `any`.
+- `__DTAtools_supported_file_types__` gains `any`, and stays a single list.
+  `DTAFileFactory()` builds what it is asked for; **which handler a given
+  dataset may hold is enforced by the dataset itself**, not by this list — a
+  tabular dataset requires a readable `DTAFileTabular` (see below), and a file
+  dataset normalises whatever it is given to a `DTAFileAny`. Judging the
+  handler by the dataset that holds it is what avoids threading a dataset type
+  down into the factory.
 
 - `DTADataSetTabular` now requires every file handler to be readable (a
   `DTAFileTabular`). A tabular dataset parses everything it is given, so a
@@ -99,6 +121,138 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A file dataset stopped reporting the deliverables that never arrived, and
+  certified the delivery as passed.** `dta_file_dataset_targets()`
+  short-circuited on `@file_paths`, so the *first* `load_file()` switched the
+  dataset from "the handlers it declares" to "the paths it holds" and every
+  undelivered handler silently stopped being a target. A dataset declaring
+  `report.pdf`, `audit.log` and `raw.zip` with only the first one delivered
+  reported **one** target, `n_valid = 1, n_invalid = 0`, and the app rendered it
+  green and offered a summary reading *VALIDATION PASSED* — for a delivery that
+  was two thirds missing. Before any file was bound the same dataset correctly
+  reported all three as missing, so binding one file made the other two
+  disappear.
+
+  Targets are now the **union**: every delivered path, plus every declared name
+  no delivered file satisfies, carried as `NA` rather than as a path. Two
+  further defects fall out of the same rewrite. A declared filename is no
+  longer handed to the filesystem, so a same-named file in the process's
+  working directory can no longer stand in for one that was never delivered
+  (a deployed app's working directory is its own app folder, which makes names
+  like `report.pdf` a realistic collision). And a handler declaring several
+  names no longer aborts `check()` with a `vapply` length error — the app's own
+  Files editor accepts several names per handler, so that was one form
+  submission away.
+
+- **A tabular dataset with no column specification validated as a clean pass.**
+  Since `specs_from_list()` began accepting an absent `columns:` key, a dataset
+  with zero columns ran through `check()`, found zero errors on every axis, and
+  reported `ok = TRUE`. That is the starting state of every dataset created by
+  the app's *+ Add dataset* button, so: add a dataset, declare a file, upload
+  it, press Check, and the app issues a green certificate covering **zero
+  checks**.
+
+  Such a table now reports status `unspecified` with `ok = NA`. `NA` rather
+  than `FALSE` is deliberate: it makes both `n_valid` and `n_invalid` skip the
+  row, so the dataset reads as *incomplete* rather than as a data failure, and
+  the summary can no longer say *PASSED*. `check()` also says so on the console
+  instead of printing "N tables passed validation".
+
+- **`load_file()` on a file dataset could unbind a different file, or append
+  forever.** `name` was matched against keys derived from the bound paths but
+  never stored, so `load_file(ds, file = "b.pdf", name = "a.pdf")` overwrote
+  a.pdf's slot — a.pdf silently vanished from the dataset and b.pdf was keyed
+  as b.pdf anyway. Separately, once two bound paths shared a basename the keys
+  became full paths, the basename never matched again, and every re-delivery
+  appended, minting phantom `x.pdf_1` targets in every report. A divergent
+  `name` is now refused outright, and a re-delivery is matched on the path
+  first, so it replaces in both cases.
+
+- **`read_file()` and `open_file()` aborted with R's "the condition has length
+  > 1"** when a handler declared several patterns, because they tested
+  `matches_filename()`'s per-name result without reducing it. Both now reduce
+  with `any()`, as the file-dataset path already did.
+
+- **An ending restriction could not express a multi-part ending, and a YAML
+  boolean silently became one.** `extensions: [tar.gz]` never matched
+  `arch.tar.gz`, because only the final segment was compared — the same for
+  `nii.gz` and `sas7bdat.gz`, and the resulting rejection blamed the *filename*.
+  Endings are now matched as suffixes. And because `no`, `off`, `y` and `n` are
+  ordinary YAML booleans, `extensions: [no]` parsed to `FALSE` and was stored as
+  the unmatchable string `"false"`, refusing every upload; a non-character entry
+  is now refused with a message telling the author to quote it. Assigning
+  `@extensions` directly is validated too, instead of quietly producing a
+  handler that matches nothing.
+
+- **`clear_validation()` on a file dataset aborted for a target that exists.**
+  It resolved `tables` against the *validated* entries rather than the dataset's
+  targets, so naming a bound-but-unchecked target raised "Table not found",
+  where the tabular method is a harmless no-op. The app hit this on **every**
+  overwrite of a file upload and swallowed the error silently.
+
+- **`DTAFileAny` printed as `<DTAFile>` and never showed its ending
+  restriction**, so a handler that refuses every `.csv` was indistinguishable
+  from one that accepts anything. It now prints its own class and an
+  `Allowed endings` line.
+
+- **A file dataset accepted a reader handler.** `type: file` with `type: csv`
+  handlers constructed happily and loaded from YAML, contradicting the app,
+  which offers only `any` there — and opening such a handler in the editor
+  rewrote it to `any` on save, silently discarding `has_header` and `quote`.
+  Reader handlers are now normalised to `DTAFileAny` on construction, so
+  existing documents keep loading and converge on the honest declaration, and
+  the editor no longer discards a prefilled type.
+
+- **`handler_index` was compared as a string.** A character index — which the
+  `load_file()` generic documents as supported — made `"2" > 12` true, so a
+  valid index was rejected while an invalid one slipped through to fail much
+  deeper. `NULL`, `NA` and length-2 values raised raw base-R conditions rather
+  than the package's own errors.
+
+- **Removing the last dataset produced a document the app could not read back.**
+  `dta_from_list()` aborted with a base subscript error on a missing, `NULL` or
+  empty `datasets:` key, so *Apply changes* on the resulting YAML — or
+  reopening an export of it — failed with a message naming nothing the user
+  did. A zero-dataset document now round-trips.
+
+- **The app's column and rule editors were reachable on a file dataset.**
+  `ds_edit_menu()` only *hides* those two rows for a dataset with no `@specs`;
+  the observers behind them checked edit mode but never the dataset type, and
+  an input that is not on screen can still be driven over the websocket. Doing
+  so opened an empty editor and surfaced raw S7 internals — `Can't find
+  property <DTAtools::DTADataSetFile>@specs` — to the user. Both the open and
+  the save observers now re-check the type, matching the double-gating every
+  other editing surface already used.
+
+- **Read-only mode left the Raw YAML editor fully typeable.** The Ace editor
+  was created without `readOnly`, and the only thing that set it was an
+  observer depending solely on the edit-mode switch — which last fired before
+  the editor existed, since it is only drawn once a document is loaded. The
+  pane said *read-only*, hid Apply and Revert, and accepted typing anyway; the
+  edits were then silently discarded. The editor is now born in the correct
+  state.
+
+- **The ending restriction leaked into the exported specification document.**
+  The display suffix was appended inside the shared `handler_expected()`
+  accessor, so the Word/PDF/HTML export rendered
+  `- ^report_.* (pdf, zip) (3 files) — ...`: two adjacent parenthesised groups
+  in a formal deliverable, from which the declared filename could no longer be
+  read back verbatim. The filename is verbatim again and the endings have their
+  own labelled field.
+
+- **A contact field holding several values showed only the first.** In
+  read-only mode a two-line `address:` rendered as one line, and an empty one
+  could render the literal text `NULL` — and read-only is the only place these
+  fields appear, so the dropped lines were unreachable.
+
+- **The remove-dataset confirmation could delete a dataset other than the one
+  it named.** The dialog captured the dataset when it opened but the confirm
+  handler re-read the active dataset at click time, on an irreversible action
+  with no undo. It now acts on the name the dialog actually displayed.
+
+- **The "this dataset expects no files at all" warning is back** in the Files
+  editor — it was dropped in the same change that made zero handlers the
+  starting state of every newly added dataset.
 - **Removing a dataset could blank the Shiny app's sidebar — the workspace
   overview and the Datasets list disappeared until the window was resized.**
   The removal itself was sound; what vanished was the render. Adding or

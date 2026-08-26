@@ -107,6 +107,45 @@ DTAFileAny <- S7::new_class(
     if (!is.null(self@extensions) && !is.character(self@extensions)) {
       cli::cli_abort("'extensions' must be a character vector or NULL.")
     }
+
+    # dta_normalise_extensions() only runs in the constructor, so a direct
+    # property assignment (`h@extensions <- ".PDF"`) would otherwise sail past
+    # the validator with a value matches_filename() can never match: the
+    # comparison in dta_file_extension_allowed() is always against a bare,
+    # lower-cased ending. Every entry has to already be in that normalised
+    # shape -- non-empty, lower-case, no leading dot.
+    if (!is.null(self@extensions)) {
+      entries <- self@extensions
+      offending <- vapply(
+        entries,
+        function(entry) {
+          is.na(entry) ||
+            !nzchar(entry) ||
+            entry != tolower(entry) ||
+            startsWith(entry, ".")
+        },
+        logical(1)
+      )
+
+      if (any(offending)) {
+        bad <- entries[offending]
+        # dta_normalise_extensions() can itself collapse to NULL (e.g. every
+        # offending entry was blank), so the suggestion needs a fallback --
+        # `{.val {NULL}}` in the message below would otherwise render nothing.
+        suggestion <- dta_normalise_extensions(bad)
+        if (is.null(suggestion)) {
+          suggestion <- "a non-empty, lower-case ending with no leading dot"
+        }
+        # cli::qty() names the count explicitly: `bad` and `suggestion` can
+        # differ in length (normalisation may drop an entry), and leaving
+        # `{?y/ies}` to infer the count itself errors with "Multiple
+        # quantities for pluralization" whenever they do.
+        cli::cli_abort(c(
+          "!" = "{cli::qty(length(bad))}'extensions' entr{?y/ies} {.val {bad}} must already be normalised (non-empty, lower-case, no leading dot).",
+          "i" = "Use {.val {suggestion}} instead."
+        ))
+      }
+    }
   }
 )
 
@@ -125,6 +164,14 @@ DTAFileAny <- S7::new_class(
 # Everything empty collapses to NULL -- the "no restriction" value -- so a
 # blank field from the app's editor unsets the restriction instead of storing
 # an empty vector that would match nothing at all.
+#
+# `no`, `off`, `y`, `n`, `yes`, `on` are ordinary YAML booleans, and a bare
+# number is numeric -- neither arrives as a string, so `as.character()` used
+# to coerce them silently into the unmatchable "false"/"true"/"2". No real
+# extension is legitimately numeric-looking (a genuine one like `e2b` is
+# already text), so there is nothing worth coercing: anything that did not
+# already arrive as character aborts instead, naming the value and telling
+# the author to quote it.
 #' @keywords internal
 dta_normalise_extensions <- function(extensions) {
   if (is.null(extensions) || length(extensions) == 0) {
@@ -135,7 +182,13 @@ dta_normalise_extensions <- function(extensions) {
     extensions <- unlist(extensions, use.names = FALSE)
   }
 
-  extensions <- as.character(extensions)
+  if (!is.character(extensions)) {
+    cli::cli_abort(c(
+      "'extensions' must be given as text, not {.cls {class(extensions)[[1]]}} ({.val {extensions}}).",
+      i = "YAML parses an unquoted {.val no}/{.val off}/{.val yes} or a bare number as a boolean or numeric value -- quote it instead, e.g. {.code - \"no\"}."
+    ))
+  }
+
   extensions <- trimws(extensions[!is.na(extensions)])
   extensions <- tolower(sub("^\\.+", "", extensions))
   extensions <- unique(extensions[nzchar(extensions)])
@@ -178,6 +231,12 @@ method(matches_filename, DTAFileAny) <- function(x, file) {
 # declared as `data.csv`. Without that, restricting the endings would quietly
 # forbid the compressed deliveries the rest of the package goes out of its way
 # to accept.
+#
+# The test is a case-insensitive SUFFIX match (candidate ends with "." + ext),
+# not `tools::file_ext() %in% extensions`. `file_ext()` returns only the last
+# dot-separated segment, so a multi-part ending like `extensions = "tar.gz"`
+# could never match `arch.tar.gz` -- `file_ext()` sees only `"gz"`. A suffix
+# test has no such limit.
 #' @keywords internal
 dta_file_extension_allowed <- function(file, extensions) {
   if (is.null(extensions) || length(extensions) == 0) {
@@ -186,6 +245,66 @@ dta_file_extension_allowed <- function(file, extensions) {
 
   file_name <- basename(file)
   candidates <- unique(c(file_name, dta_strip_compression_extension(file_name)))
+  suffixes <- paste0(".", tolower(extensions))
 
-  any(tolower(tools::file_ext(candidates)) %in% extensions)
+  any(vapply(
+    candidates,
+    function(candidate) any(endsWith(tolower(candidate), suffixes)),
+    logical(1)
+  ))
+}
+
+#' @title Print DTAFileAny Object
+#' @description
+#' Print method for DTAFileAny objects.
+#' @param x An object of class DTAFileAny
+#' @param ... Additional arguments (not used)
+#' @return Invisibly returns the input object
+#' @importFrom cli cli_div cli_text
+#' @examples
+#' library(DTAtools)
+#' print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
+#'
+#' @name print
+#' @export
+method(print, DTAFileAny) <- function(x, ...) {
+  cli::cli_div(theme = list(span.emph = list(color = "orange")))
+  cli::cli_text("<{.emph DTAFileAny}>")
+
+  print_info(x)
+
+  invisible(x)
+}
+
+#' @title Print Information About a DTAFileAny Object
+#' @description
+#' Print method for detailed information about a \code{DTAFileAny} object,
+#' including its filename, pattern, number of files, and the endings it
+#' accepts.
+#' @param x A \code{DTAFileAny} object whose information is to be printed.
+#' @return The input object \code{x}, returned invisibly.
+#' @importFrom cli cli_alert_info cli_alert
+#' @examples
+#' library(DTAtools)
+#' print_info(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
+#'
+#' @name print_info
+#' @export
+method(print_info, DTAFileAny) <- function(x) {
+  # Duplicated from method(print_info, DTAFile) rather than calling super():
+  # per the TODO on DTAFileTabular's own override, super() does not work here.
+  # Duplicating is what lets this method add the "Allowed endings" line no
+  # other DTAFile sibling has -- without it, a handler that refuses every
+  # `.csv` prints identically to one that accepts anything.
+  cli::cli_alert_info("Filename: {x@filename}")
+  cli::cli_alert("Pattern: {x@pattern}")
+  if (x@min_number_of_files == x@max_number_of_files) {
+    cli::cli_alert("Number of files: {x@min_number_of_files}")
+  } else {
+    cli::cli_alert("Min number of files: {x@min_number_of_files}")
+    cli::cli_alert("Max number of files: {x@max_number_of_files}")
+  }
+  endings <- if (is.null(x@extensions)) "any" else paste(x@extensions, collapse = ", ")
+  cli::cli_alert("Allowed endings: {endings}")
+  invisible(x)
 }

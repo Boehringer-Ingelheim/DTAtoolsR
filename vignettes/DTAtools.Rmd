@@ -1437,7 +1437,7 @@ ds_declared <- DTADataSetFile(
   )
 )
 
-ds_declared <- DTAtools:::load_file(ds_declared, file = delivered_csv, handler_index = 1)
+ds_declared <- load_file(ds_declared, file = delivered_csv, handler_index = 1)
 ds_declared <- check(ds_declared, quiet = TRUE)
 validation_status(ds_declared)[, c("table", "status", "ok")]
 ```

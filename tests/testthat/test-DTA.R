@@ -480,3 +480,39 @@ test_that("messages(dta) is unchanged when metadata has no import errors", {
   expect_false(any(msgs$source == "import"))
   expect_identical(msgs$id, seq_len(nrow(msgs)))
 })
+
+# ---------------------------------------------------------------------------
+# dta_from_list() with no datasets -- section P12 of the code review fixes
+# ---------------------------------------------------------------------------
+# dta_dataset_from_list() tells "one dataset" from "several" apart by
+# inspecting `x[[1]]$name`, and `x[[1]]` on a zero-length list used to abort
+# with a raw base "subscript out of bounds" instead of the intended "no
+# datasets" outcome. This is exactly the document produced by removing a
+# DTA's last dataset and serialising it back to YAML.
+
+test_that("dta_from_list() with no 'datasets' key builds a DTA with zero datasets", {
+  dta <- dta_from_list(list(metadata = list(title = "Round trip", version = "1.0")))
+
+  expect_s3_class(dta, "DTAtools::DTA")
+  expect_length(datasets(dta), 0)
+})
+
+test_that("dta_from_list() with datasets = NULL builds a DTA with zero datasets", {
+  dta <- dta_from_list(list(
+    metadata = list(title = "Round trip", version = "1.0"),
+    datasets = NULL
+  ))
+
+  expect_s3_class(dta, "DTAtools::DTA")
+  expect_length(datasets(dta), 0)
+})
+
+test_that("dta_from_list() with datasets = list() builds a DTA with zero datasets", {
+  dta <- dta_from_list(list(
+    metadata = list(title = "Round trip", version = "1.0"),
+    datasets = list()
+  ))
+
+  expect_s3_class(dta, "DTAtools::DTA")
+  expect_length(datasets(dta), 0)
+})

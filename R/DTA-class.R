@@ -727,8 +727,18 @@ dta_from_list <- function(x) {
     metadata <- do.call(DTAMetaData, x$metadata)
   }
 
-  # Create dataset objects
-  datasets_list <- dta_dataset_from_list(x$datasets)
+  # Create dataset objects. A zero-length `datasets` -- absent, NULL, or an
+  # explicit `datasets: []` -- must short-circuit here rather than reach
+  # dta_dataset_from_list(): that function tells "one dataset" from "several"
+  # apart by inspecting `x[[1]]$name`, and `x[[1]]` on a zero-length list
+  # aborts with a raw base "subscript out of bounds" instead of the intended
+  # "no datasets" outcome. This is exactly the document produced by removing
+  # a DTA's last dataset and serialising it back to YAML.
+  datasets_list <- if (length(x$datasets) == 0) {
+    list()
+  } else {
+    dta_dataset_from_list(x$datasets)
+  }
 
   # Create and return DTA object
   DTA(

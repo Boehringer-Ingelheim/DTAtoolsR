@@ -596,12 +596,31 @@ test_that("dta_handler_type() returns 'any' for a DTAFileAny", {
   expect_equal(fn(h), "any")
 })
 
-test_that("handler_expected() appends extensions for a DTAFileAny", {
+test_that("handler_expected() returns the filename/pattern only, never the extensions", {
+  # handler_expected() must read back verbatim in the exported specification
+  # (format_datasets_detail(), utils_export.R), so the allowed-endings
+  # restriction moved to its own helper, handler_endings(), instead of being
+  # glued onto this string.
   fn <- app_fn("handler_expected")
+  h <- DTAtools::DTAFileAny(filename = ".*", pattern = TRUE, extensions = c("pdf", "zip"))
+  result <- fn(h)
+  expect_equal(result, ".*")
+  expect_false(grepl("pdf", result, fixed = TRUE))
+  expect_false(grepl("zip", result, fixed = TRUE))
+})
+
+test_that("handler_endings() reports a DTAFileAny's allowed extensions", {
+  fn <- app_fn("handler_endings")
   h <- DTAtools::DTAFileAny(filename = ".*", pattern = TRUE, extensions = c("pdf", "zip"))
   result <- fn(h)
   expect_match(result, "pdf")
   expect_match(result, "zip")
+})
+
+test_that("handler_endings() is empty when no extensions are declared", {
+  fn <- app_fn("handler_endings")
+  h <- DTAtools::DTAFileAny(filename = "report.pdf")
+  expect_equal(fn(h), "")
 })
 
 test_that("dta_set_handler() rejects type='any' when dataset_type is tabular (the default)", {

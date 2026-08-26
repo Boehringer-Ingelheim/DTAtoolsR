@@ -681,11 +681,11 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'   files = list(file_handler)
 #' )
 #' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-#' ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+#' ds <- load_file(ds, file = file, handler_index = 1)
 #' names(tables(ds))
 #'
 #' # The same file kept lazy: nothing is read until check() scans it.
-#' ds_lazy <- DTAtools:::load_file(
+#' ds_lazy <- load_file(
 #'   ds,
 #'   file = file, handler_index = 1, stream = "always"
 #' )
@@ -754,6 +754,44 @@ method(load_file, DTADataSetTabular) <- function(
   x
 }
 
+# The status row of a table checked against zero column specs. There is nothing
+# to check it against, so it is neither valid nor invalid.
+#
+# `ok = NA`, never FALSE, is what keeps this from reading as a data failure:
+# n_valid counts `ok == TRUE` and n_invalid counts `ok == FALSE` (see
+# dta_results_from_status() in R/validationReporting.R), both with
+# na.rm = TRUE, so an NA row is excluded from both tallies rather than counted
+# as either. That is the whole point -- a dataset with no column specification
+# must report as INCOMPLETE, not as a clean "VALIDATION PASSED", which is
+# exactly what it did before: zero specs meant zero errors on every axis.
+#' @keywords internal
+dta_unspecified_validation_row <- function(table_name, target_type = "table") {
+  # Delegates to the shared row builder rather than restating the schema. There
+  # were already three copies of this column set in the package; a fourth here
+  # would mean an eleventh status column has to be added in four places, and
+  # missing one makes rbind() inside validation_status() abort the first time a
+  # dataset holds one specified and one unspecified table.
+  #
+  # `ok = NA` is passed explicitly because the builder's default is
+  # isTRUE(entry$ok), which would flatten NA to FALSE -- see the comment there
+  # for why NA rather than FALSE is the correct verdict for "unspecified".
+  dta_validation_result_to_row(
+    table_name = table_name,
+    status = "unspecified",
+    target_type = target_type,
+    ok = NA,
+    index_entry = list(
+      ok = NA,
+      validated_at = NA_character_,
+      run_id = NA_character_,
+      validation_run = NA_character_,
+      n_columnspec_errors = NA_integer_,
+      n_rule_errors = NA_integer_,
+      n_import_errors = NA_integer_
+    )
+  )
+}
+
 #' @title Validation Status for DTADataSetTabular
 #' @description Returns a compact status table for validated tables.
 #' @param x A \'DTADataSetTabular\' object.
@@ -787,6 +825,15 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
         n_import_errors = NA_integer_,
         stringsAsFactors = FALSE
       ))
+    }
+
+    # A table checked while `specs@columns` was empty is tagged in its index
+    # entry rather than routed through dta_validation_result_to_row(): that
+    # helper forces `ok = isTRUE(index_entry$ok)`, which would turn the
+    # deliberate `NA` back into `FALSE` and misreport "incomplete" as
+    # "failed".
+    if (identical(entry$status, "unspecified")) {
+      return(dta_unspecified_validation_row(table_name = table_name, target_type = "table"))
     }
 
     dta_validation_result_to_row(
@@ -1070,6 +1117,32 @@ S7::method(check, DTADataSetTabular) <- function(
     table_name <- target_tables[idx]
     current_table <- x@tables[[table_name]]
 
+    # A dataset whose specs declare zero columns has nothing to check a table
+    # against -- `dta_validate_any_table()` would run and report a hollow
+    # pass, the exact "VALIDATION PASSED certificate covering ZERO checks"
+    # this branch exists to prevent. `ok = NA`, not `FALSE`: this is not a
+    # data failure, it is the absence of a specification, and `n_valid`/
+    # `n_invalid` (both computed with `na.rm = TRUE`) must skip this row
+    # rather than count it as either a pass or a fail. The dataset instead
+    # reports as incomplete. Checked ahead of the `force`/`unchanged` skip
+    # logic below because there is no validation run to skip -- there was
+    # never one to begin with.
+    if (length(x@specs@columns) == 0) {
+      if (!isTRUE(quiet)) {
+        cli::cli_alert_warning(
+          "Dataset {.field {x@name}} declares no columns in its specs; table {.field {table_name}} was not checked."
+        )
+      }
+
+      x@validation_index[[table_name]] <- list(status = "unspecified")
+
+      output_rows[[length(output_rows) + 1]] <- dta_unspecified_validation_row(
+        table_name = table_name,
+        target_type = "table"
+      )
+      next
+    }
+
     # Deliberately NOT as.data.frame() here. A lazy table is lazy precisely
     # because materialising it is not affordable, and hashing it to decide
     # whether to skip it would spend more than validating it costs.
@@ -1179,13 +1252,23 @@ S7::method(check, DTADataSetTabular) <- function(
         cli::cli_text()
       }
 
+      table_word <- if (n_total == 1) "table" else "tables"
+
       if (n_invalid > 0) {
-        table_word <- if (n_total == 1) "table" else "tables"
         cli::cli_alert_danger(
           paste0("", n_valid, " of ", n_total, " ", table_word, " valid")
         )
+      } else if (n_valid < n_total) {
+        # No table failed, but not every table was actually checked either --
+        # e.g. a table validated against zero column specs, status
+        # "unspecified", `ok = NA`. `n_valid == n_total` is required for a
+        # clean pass; falling into the success branch here is precisely the
+        # "VALIDATION PASSED certificate covering ZERO checks" this status
+        # exists to prevent.
+        cli::cli_alert_warning(
+          paste0("", n_valid, " of ", n_total, " ", table_word, " valid; ", n_total - n_valid, " not checked")
+        )
       } else {
-        table_word <- if (n_total == 1) "table" else "tables"
         cli::cli_alert_success(
           paste0("", n_total, " ", table_word, " passed validation")
         )

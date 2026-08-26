@@ -332,7 +332,10 @@ import_specs_from_yaml <- function(file) {
 #' @importFrom cli cli_abort
 #' @param columns A list of column specification lists. Each must contain at
 #'   least an `id`. `NULL` or an empty list yields a collection with no
-#'   columns.
+#'   columns -- and a `DTADataSetTabular` built on such a collection no longer
+#'   validates as a pass: `check()` records status `"unspecified"` (`ok = NA`)
+#'   for any table checked against zero column specs, rather than reporting a
+#'   clean pass over checks that never ran.
 #' @param rules Optional list of rules.
 #'
 #' @return An object of class DTAColumnSpecCollection.
@@ -354,7 +357,9 @@ specs_from_list <- function(
   # serializer omits the key entirely for a dataset with none, so rejecting
   # NULL here made the package unable to read YAML it had itself just written --
   # reachable by deleting a dataset's last column, and by every newly added
-  # dataset, which starts empty.
+  # dataset, which starts empty. The resulting empty collection is not a
+  # silent pass: `check(DTADataSetTabular)` treats zero columns as status
+  # `"unspecified"` (`ok = NA`), not a validated table.
   if (is.null(columns)) {
     columns <- list()
   }

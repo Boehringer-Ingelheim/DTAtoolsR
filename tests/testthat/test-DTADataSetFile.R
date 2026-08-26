@@ -375,3 +375,181 @@ test_that("DTADataSetFile(paths=f)@files[[1]] is a DTAFileAny", {
   ds <- DTADataSetFile(name = "d", paths = path)
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
 })
+
+test_that("DTADataSetFile coerces a reader handler (DTAFileCSV) into a DTAFileAny", {
+  # A file dataset never parses anything, so a reader handler is meaningless
+  # here -- it used to construct successfully and then abort deep inside
+  # check() with "This method is not implemented", naming the wrong problem.
+  ds <- DTADataSetFile(name = "d", files = list(DTAFileCSV(filename = "a.csv")))
+
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
+  expect_false(inherits(ds@files[[1]], "DTAtools::DTAFileCSV"))
+  expect_equal(ds@files[[1]]@filename, "a.csv")
+})
+
+test_that("DTADataSetFile coerces a bare DTAFile into a DTAFileAny", {
+  ds <- DTADataSetFile(name = "d", files = list(DTAFile(filename = "a.txt")))
+
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
+  expect_equal(ds@files[[1]]@filename, "a.txt")
+})
+
+# ---------------------------------------------------------------------------
+# check() reports every declared target -- not just what was delivered
+# ---------------------------------------------------------------------------
+
+test_that("check() reports undelivered declared targets as failures, not a clean pass", {
+  # Before the fix, dta_file_dataset_targets() returned x@file_paths verbatim
+  # whenever anything at all had been delivered, so one bound file out of
+  # three declared handlers reported as a single, clean PASS -- the other two
+  # targets vanished from the report entirely.
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path <- file.path(dir, "report.pdf")
+  writeLines("content", path)
+
+  ds <- DTADataSetFile(
+    name = "deliverables",
+    files = list(
+      DTAFileAny(filename = "report.pdf"),
+      DTAFileAny(filename = "audit.log"),
+      DTAFileAny(filename = "raw.zip")
+    )
+  )
+  ds <- load_file(ds, file = path, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 3)
+  expect_setequal(status$table, c("report.pdf", "audit.log", "raw.zip"))
+  expect_true(status$ok[status$table == "report.pdf"])
+  expect_false(status$ok[status$table == "audit.log"])
+  expect_false(status$ok[status$table == "raw.zip"])
+
+  # results() returns one row per target, with n_targets/n_valid/n_invalid
+  # repeated on every row -- check the (single) recycled value each carries.
+  res <- results(ds)
+  expect_equal(nrow(res), 3)
+  expect_equal(unique(res$n_targets), 3)
+  expect_equal(unique(res$n_valid), 1)
+  expect_equal(unique(res$n_invalid), 2)
+})
+
+test_that("a declared filename is never resolved against the working directory", {
+  # Before the fix, an undelivered target's declared NAME (e.g. "report.pdf")
+  # was itself treated as the path to stat. A real file happening to sit under
+  # that name in the current working directory made an UNDELIVERED target
+  # validate as present.
+  dir <- tempfile()
+  dir.create(dir)
+  writeLines("content", file.path(dir, "report.pdf"))
+
+  old_wd <- getwd()
+  setwd(dir)
+  on.exit(
+    {
+      setwd(old_wd)
+      unlink(dir, recursive = TRUE)
+    },
+    add = TRUE
+  )
+
+  # Nothing has been delivered -- `paths` is empty -- but the cwd happens to
+  # contain a real file with the declared name.
+  ds <- DTADataSetFile(name = "d", files = list(DTAFileAny(filename = "report.pdf")))
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 1)
+  expect_false(status$ok)
+})
+
+test_that("check() does not crash on a handler declaring several file names", {
+  # Before the fix, dta_file_dataset_targets() built its target list with
+  # vapply(x@files, function(h) h@filename, character(1)) whenever nothing had
+  # been delivered -- which aborts with a "values must be length 1" error the
+  # moment a handler's `filename` carries more than one name.
+  ds <- DTADataSetFile(
+    name = "d",
+    files = list(
+      DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
+    )
+  )
+
+  expect_no_error({
+    ds <- check(ds, quiet = TRUE, persist = FALSE)
+  })
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$table, c("a.pdf", "b.pdf"))
+  expect_false(any(status$ok))
+})
+
+# ---------------------------------------------------------------------------
+# load_file() key handling
+# ---------------------------------------------------------------------------
+
+test_that("load_file() aborts when 'name' diverges from the delivered file's own name", {
+  path <- file.path(tempdir(), "report.pdf")
+  writeLines("content", path)
+  on.exit(unlink(path), add = TRUE)
+
+  h <- DTAFileAny(filename = "report.pdf")
+  ds <- DTADataSetFile(name = "d", files = list(h))
+
+  expect_error(
+    load_file(ds, file = path, handler_index = 1, name = "different.pdf"),
+    "must equal the delivered file's own name"
+  )
+})
+
+test_that("redelivering one of two colliding-basename bound paths replaces, not appends", {
+  # Before the fix, the replace-vs-append decision was made by matching `name`
+  # (a bare basename) against dta_file_target_keys(x@file_paths) alone. Once
+  # two bound paths collided on basename, those keys become full paths, so a
+  # basename could never match either one -- every redelivery appended, and
+  # repeated redeliveries minted phantom "x.pdf_1", "x.pdf_2", ... targets.
+  dir_a <- file.path(tempdir(), "dta-collision-a")
+  dir_b <- file.path(tempdir(), "dta-collision-b")
+  dir.create(dir_a, showWarnings = FALSE)
+  dir.create(dir_b, showWarnings = FALSE)
+  on.exit(unlink(c(dir_a, dir_b), recursive = TRUE), add = TRUE)
+
+  path_a <- file.path(dir_a, "x.pdf")
+  path_b <- file.path(dir_b, "x.pdf")
+  writeLines("a", path_a)
+  writeLines("b", path_b)
+
+  h <- DTAFileAny(filename = "x.pdf")
+  ds <- DTADataSetFile(name = "d", files = list(h))
+  # Simulate two already-bound files sharing a basename.
+  ds@file_paths <- c(path_a, path_b)
+
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+
+  expect_length(ds@file_paths, 2)
+  expect_equal(ds@file_paths, c(path_a, path_b))
+})
+
+# ---------------------------------------------------------------------------
+# handler_index validation
+# ---------------------------------------------------------------------------
+
+test_that("handler_index resolves a character index numerically, not via string comparison", {
+  # The guard this replaces was `handler_index < 1 || handler_index > length(...)`,
+  # run directly on a character value -- so "2" > 12 is a STRING comparison,
+  # true, and a perfectly valid index was rejected.
+  handlers <- lapply(1:12, function(i) DTAFileAny(filename = paste0("f", i, ".txt")))
+
+  expect_equal(dta_resolve_file_handler_index("2", handlers), 2L)
+})
+
+test_that("handler_index aborts on NULL, NA, or a length-2 value", {
+  handlers <- list(DTAFileAny(filename = "a.txt"), DTAFileAny(filename = "b.txt"))
+
+  expect_error(dta_resolve_file_handler_index(NULL, handlers), class = "rlang_error")
+  expect_error(dta_resolve_file_handler_index(NA, handlers), class = "rlang_error")
+  expect_error(dta_resolve_file_handler_index(c(1, 2), handlers), class = "rlang_error")
+})
