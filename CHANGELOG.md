@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A manuscript-draft vignette in Nature Methods format**
+  (`vignette("DTAtools-manuscript")`). Abstract, introduction, and a full
+  methods section are drafted; the benchmark subsections of the results and
+  the discussion are explicit `[TO BE FILLED IN]` placeholders, with
+  `eval = FALSE` scaffold chunks wired to the package's own instrumentation
+  (`check(benchmark = TRUE)` / `validation_benchmark()`) so the campaign's
+  numbers can be dropped in without restructuring the text.
+
 - **A file handler for deliverables that are never parsed: `DTAFileAny`,
   written `type: any` in YAML.** A `DTADataSetFile` exists to confirm that
   PDFs, archives, reports and raw instrument output arrived intact, but the
