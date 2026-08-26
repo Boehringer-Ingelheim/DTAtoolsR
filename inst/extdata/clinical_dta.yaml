@@ -7,7 +7,7 @@ metadata:
   receiver: 
     affiliation:
       name: Test Company
-    
+
     contacts:
       - name: Alice Smith
         role: Lead Data Manager
@@ -17,7 +17,6 @@ metadata:
         phone: 555-123-4567
         signature: yes
         reviewer: yes
-
       - name: Bob Johnson
         role: Clinical Bioinformatician
         email: bob.johnson@testcompany.com
@@ -25,7 +24,6 @@ metadata:
         department: Bioinformatics
         signature: yes
         reviewer: yes
-
       - name: Carol Lee
         role: Backup Data Manager
         email: carol.lee@testcompany.com
@@ -33,7 +31,6 @@ metadata:
         department: Data Management
         phone: 555-987-6543
         backup: yes
-
       - name: David Kim
         role: Backup Bioinformatician
         email: david.kim@testcompany.com
@@ -47,7 +44,7 @@ metadata:
       name: Test Company 2
       address: Test Address 2
       country: Test Country
-    
+
     contacts:
       - name: Emily Turner
         role: Senior Data Manager
@@ -55,7 +52,6 @@ metadata:
         department: Data Management
         phone: "321-654-0987"
         signature: yes
-
       - name: Michael Brown
         role: Lead Bioinformatician
         email: michael.brown@testcompany2.com
@@ -63,7 +59,6 @@ metadata:
         department: Bioinformatics
         phone: "789-012-3456"
 
-  
   transmission:
     type: secure S3 bucket
     frequency: one-time
