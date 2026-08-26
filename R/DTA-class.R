@@ -252,8 +252,10 @@ load_file <- new_generic("load_file", "x")
 #'     \item{file}{Path to the input file to be read.}
 #'     \item{handler_index}{Single character or numeric index selecting the file
 #'       handler within the dataset. Defaults to \code{1}.}
-#'     \item{name}{Optional name under which the loaded table should be stored.
-#'       Defaults to \code{basename(file)}.}
+#'     \item{name}{Optional name under which the loaded item is stored. When
+#'       omitted, each dataset type applies its own default: a tabular dataset
+#'       names the table after the file with its extension stripped, a file
+#'       dataset keeps the full file name, which is the key it reports under.}
 #'     \item{stream}{One of \code{"auto"} (the default), \code{"always"} or
 #'       \code{"never"}, or a single logical. Decides whether the table is read
 #'       into memory or kept lazy and scanned in batches -- see the generic's
@@ -268,19 +270,34 @@ method(load_file, DTA) <- function(
   dataset,
   file,
   handler_index = 1,
-  name = tools::file_path_sans_ext(basename(file)),
+  # Deliberately NOT defaulted here. The two dataset types key their bound items
+  # differently -- a tabular dataset by the table name, with the extension
+  # stripped; a file dataset by the delivered file name, extension kept, which
+  # is what dta_file_target_keys() produces and what every report for that class
+  # uses. A default chosen at this level is necessarily wrong for one of them,
+  # and picking the tabular shape made a file dataset re-deliver as an APPEND
+  # rather than a replace: the key never matched an existing entry, so
+  # @file_paths grew on every load.
+  name = NULL,
   stream = getOption("DTAtools.stream", "auto"),
   ...
 ) {
   dataset_object <- datasets(x, dataset)
-  dataset_object <- load_file(
+
+  args <- list(
     dataset_object,
     handler_index = handler_index,
     file = file,
-    name = name,
     stream = stream,
     ...
   )
+  # Forwarded only when the caller actually chose one, so each method's own
+  # default stays reachable.
+  if (!is.null(name)) {
+    args$name <- name
+  }
+
+  dataset_object <- do.call(load_file, args)
 
   if (is.numeric(dataset)) {
     x@datasets[[dataset]] <- dataset_object

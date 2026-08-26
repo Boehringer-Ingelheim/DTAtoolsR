@@ -570,3 +570,90 @@ test_that("dta_match_handlers on a rewritten handler reports it as gone", {
     NA_integer_
   )
 })
+
+
+# ---------------------------------------------------------------------------
+# DTAFileAny / "any" type in the Shiny app helpers -- new tests
+# ---------------------------------------------------------------------------
+
+test_that("dta_handler_types() with no argument still returns exactly c('csv','tsv')", {
+  fn <- app_fn("dta_handler_types")
+  expect_equal(fn(), c("csv", "tsv"))
+})
+
+test_that("dta_handler_types('file') includes 'any'", {
+  fn <- app_fn("dta_handler_types")
+  types <- fn("file")
+  expect_true("any" %in% types)
+  expect_equal(types, c("any", "csv", "tsv"))
+})
+
+test_that("dta_handler_type() returns 'any' for a DTAFileAny", {
+  fn <- app_fn("dta_handler_type")
+  h <- DTAtools::DTAFileAny(filename = "report.pdf")
+  expect_equal(fn(h), "any")
+})
+
+test_that("handler_expected() appends extensions for a DTAFileAny", {
+  fn <- app_fn("handler_expected")
+  h <- DTAtools::DTAFileAny(filename = ".*", pattern = TRUE, extensions = c("pdf", "zip"))
+  result <- fn(h)
+  expect_match(result, "pdf")
+  expect_match(result, "zip")
+})
+
+test_that("dta_set_handler() rejects type='any' when dataset_type is tabular (the default)", {
+  fn <- app_fn("dta_set_handler")
+
+  res <- fn(app_fixture_dta(), "clinical_data",
+    index = 1, filename = "report.pdf", type = "any"
+  )
+  expect_false(res$ok)
+  expect_match(res$error, "must be one of")
+})
+
+test_that("a type='any' handler with extensions survives a YAML round trip", {
+  set_fn <- app_fn("dta_set_handler")
+  to_yaml <- app_fn("dta_to_yaml_text")
+  from_yaml <- app_fn("dta_read_yaml_text")
+  handlers_fn <- app_fn("dta_handlers")
+  fields_fn <- app_fn("dta_handler_fields")
+
+  # Build a file-type dataset with an "any" handler carrying extensions
+  h <- DTAtools::DTAFileAny(
+    filename = "^report_.*",
+    pattern = TRUE,
+    extensions = c("pdf", "zip")
+  )
+  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
+  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
+
+  txt <- to_yaml(dta_obj)
+  expect_true(txt$ok)
+
+  back <- from_yaml(txt$value)
+  expect_true(back$ok)
+
+  hs_back <- handlers_fn(DTAtools::datasets(back$value, "reports"))
+  expect_length(hs_back, 1)
+  h_back <- hs_back[[1]]
+  expect_s3_class(h_back, "DTAtools::DTAFileAny")
+
+  # Extensions must survive the round trip
+  ext_back <- tryCatch(h_back@extensions, error = function(e) NULL)
+  expect_equal(sort(ext_back), c("pdf", "zip"))
+})
+
+test_that("dta_handler_fields() returns extensions as a comma-separated string", {
+  fn <- app_fn("dta_handler_fields")
+
+  h <- DTAtools::DTAFileAny(filename = "report.pdf", extensions = c("pdf", "zip"))
+  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
+
+  fields <- fn(dta_obj, "rpts", 1)
+  # extensions field must be a comma-separated string
+  expect_true(is.character(fields$extensions))
+  expect_match(fields$extensions, "pdf")
+  expect_match(fields$extensions, "zip")
+})

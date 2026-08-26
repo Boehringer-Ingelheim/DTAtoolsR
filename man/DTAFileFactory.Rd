@@ -9,7 +9,9 @@ DTAFileFactory(type, ...)
 \arguments{
 \item{type}{Character. The type specification, potentially prefixed with a backend identifier.}
 
-\item{...}{Additional arguments passed to the specific backend constructor.}
+\item{...}{Additional arguments passed to the specific backend constructor.
+For \code{type = "any"} this includes the optional \code{extensions} restriction; see
+\code{\link{DTAFileAny}}.}
 }
 \value{
 An object derived from class \code{DTAFile}, depending on the backend specified.
@@ -17,12 +19,28 @@ An object derived from class \code{DTAFile}, depending on the backend specified.
 \description{
 Constructs a DTAFile object for a specified backend (e.g., SAS or R),
 based on the provided type and file path.
+
+\code{type} may name any format in either supported list: the readable formats a
+tabular dataset needs (\code{csv}, \code{tsv}) or \code{any}, the reader-less handler a
+\code{\link{DTADataSetFile}} uses for a deliverable that is never parsed.
+Which of those a given dataset will accept is enforced by the dataset itself
+-- \code{\link{DTADataSetTabular}} requires every handler to be readable --
+so this factory builds what it is asked for and the dataset has the final
+say.
 }
 \examples{
 library(DTAtools)
 DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 
+# A deliverable that is never parsed, restricted to two endings.
+DTAFileFactory(
+  type = "any",
+  filename = ".*",
+  pattern = TRUE,
+  extensions = c("pdf", "zip")
+)
+
 }
 \seealso{
-\code{\link{DTAFile}}
+\code{\link{DTAFile}}, \code{\link{DTAFileAny}}
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/DTA-class.R, R/DTAColumnSpec-class.R,
 %   R/DTAColumnSpecCollection-class.R, R/DTAColumnSpecStructure-class.R,
 %   R/DTAColumnSpecStructureSAS-class.R, R/DTADataSet-class.R,
-%   R/DTADataSetTabular-class.R, R/DTAFile-class.R, R/DTAFileCSV-class.R,
+%   R/DTAFile-class.R, R/DTADataSetTabular-class.R, R/DTAFileCSV-class.R,
 %   R/DTAFileDelim-class.R, R/DTAFileTSV-class.R, R/DTAMetaData-class.R,
 %   R/DTARule-class.R, R/DTARuleColCondition-class.R,
 %   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
@@ -23,10 +23,10 @@ print(x, ...)
 ## S7 method for class <DTAtools::DTADataSet>
 print(x, ...)
 
-## S7 method for class <DTAtools::DTADataSetTabular>
+## S7 method for class <DTAtools::DTAFile>
 print(x, ...)
 
-## S7 method for class <DTAtools::DTAFile>
+## S7 method for class <DTAtools::DTADataSetTabular>
 print(x, ...)
 
 ## S7 method for class <DTAtools::DTAFileCSV>
@@ -87,9 +87,9 @@ prints info of the column spec structure
 
 Print a summary of a DTADataSet object.
 
-Print a summary of a DTADataSetTabular object.
-
 Print method for DTAFile objects.
+
+Print a summary of a DTADataSetTabular object.
 
 Print method for DTAFileCSV objects.
 
@@ -116,11 +116,11 @@ x <- create_example_DTAColumnSpecCollection()
 print(x)
 library(DTAtools)
 print(create_example_DTADataSetTabular())
-library(DTAtools)
-print(create_example_DTADataSetTabular())
 # do not use this, use derived classes instead, e.g.
 # DTAFileCSV or DTAFileTSV
 print(DTAFileCSV("example.csv"))
+library(DTAtools)
+print(create_example_DTADataSetTabular())
 library(DTAtools)
 print(create_example_DTAFileCSV())
 

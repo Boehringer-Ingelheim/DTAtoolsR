@@ -113,8 +113,9 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
-        ├── file_paths           ← character vector of expected file paths
-        └── files (list)         ← DTAFile descriptors (derived from file_paths)
+        ├── file_paths           ← bound file paths (via load_file() or paths=)
+        └── files (list)         ← DTAFileAny descriptors (type: any), which
+                                          may restrict the allowed endings
 ```
 
 **Three ways to build any object, from most to least common:**
@@ -1412,6 +1413,52 @@ results(ds_missing) # one row fails
 messages(ds_missing)[, c("target", "rule_id", "message")]
 ```
 
+### Declaring the expected files, and binding them as they arrive
+
+`paths =` is the shortcut for files you already have. A specification written
+ahead of the delivery instead declares what it *expects*, and each file is bound
+with `load_file()` as it turns up — exactly as a tabular dataset is loaded.
+
+The handler for a file that is never parsed is `DTAFileAny` (`type: any` in
+YAML). Unlike `DTAFileCSV`/`DTAFileTSV` it carries no reader, which is what lets
+a file dataset accept a PDF, an archive or raw instrument output without
+pretending it is a table.
+
+Its optional `extensions` restricts which endings are accepted. The list is
+**open**, so a delivery of `.xpt` or `.sas7bdat` files needs no change to this
+package, and the restriction is applied when the file is offered rather than at
+validation time.
+
+```{r dataset_file_load}
+ds_declared <- DTADataSetFile(
+  name = "declared_delivery",
+  files = list(
+    DTAFileAny(filename = "clinical_data.csv", extensions = c("csv", "tsv"))
+  )
+)
+
+ds_declared <- DTAtools:::load_file(ds_declared, file = delivered_csv, handler_index = 1)
+ds_declared <- check(ds_declared, quiet = TRUE)
+validation_status(ds_declared)[, c("table", "status", "ok")]
+```
+
+Note the bound target is keyed by the file's **full** name, extension included
+(`clinical_data.csv`), which is the name every `results()`, `messages()` and
+`inspect()` row for a file dataset reports.
+
+A file whose ending is not allowed is refused up front:
+
+```{r dataset_file_extensions}
+pdf_only <- DTAFileAny(filename = ".*", pattern = TRUE, extensions = "pdf")
+
+matches_filename(pdf_only, "study_report.pdf")
+matches_filename(pdf_only, "clinical_data.csv")
+```
+
+A `DTAFileAny` is only meaningful in a `DTADataSetFile`. A `DTADataSetTabular`
+parses everything it is given, so it requires handlers that can actually read
+and rejects a reader-less one at construction.
+
 ### Mixing `DTADataSetTabular` and `DTADataSetFile` in one `DTA`
 
 A single `DTA` object can contain datasets of both types, letting you validate
@@ -2053,6 +2100,7 @@ datasets:
 | `DTAFileCSV`              | CSV file handler for `read_file()`                          |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                          |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`        |
+| `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
 

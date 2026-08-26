@@ -100,6 +100,42 @@ DTADataSetTabular <- S7::new_class(
       cli_abort("Property 'specs' must be of class 'DTAColumnSpecCollection'")
     }
 
+    # A tabular dataset parses every file it is given, so each handler has to be
+    # one that can actually read: it supplies the separator, header flag and
+    # quoting `read_file()`/`open_file()` need, and only a DTAFileTabular
+    # carries them. A reader-less handler (DTAFileAny, or a bare DTAFile) would
+    # construct happily here and then abort deep inside the read with
+    # "This method is not implemented", naming the wrong problem long after the
+    # document that caused it was accepted.
+    #
+    # This is also what keeps `type: any` out of a tabular dataset without
+    # threading the dataset's type down through dta_file_handlers_from_list()
+    # into DTAFileFactory(): the handler is judged by the dataset that holds it,
+    # which is the only place that knows whether it will be parsed.
+    if (length(self@files) > 0) {
+      readable <- vapply(
+        self@files,
+        function(file_info) inherits(file_info, "DTAtools::DTAFileTabular"),
+        logical(1)
+      )
+      if (!all(readable)) {
+        offending <- vapply(
+          self@files[!readable],
+          function(file_info) {
+            paste(tryCatch(file_info@filename, error = function(e) "<unnamed>"),
+              collapse = ", "
+            )
+          },
+          character(1)
+        )
+        cli_abort(c(
+          "A tabular dataset can only hold file handlers that can be read.",
+          x = "Handler{?s} {.field {offending}} {?is/are} not tabular.",
+          i = "Use a {.cls DTAFileCSV} or {.cls DTAFileTSV} here, or declare the dataset as {.code type: file} if its files are not parsed."
+        ))
+      }
+    }
+
     # A table may be materialised (an Arrow Table) or lazy (a Dataset, a query
     # over one, or a batch reader). The lazy forms exist so a file larger than
     # memory can be validated by scanning it, which an in-memory Table forbids

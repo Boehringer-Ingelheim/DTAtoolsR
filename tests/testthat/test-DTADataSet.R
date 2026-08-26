@@ -279,3 +279,57 @@ test_that("dta_file_handlers_from_list rejects a half-named files: block", {
     "not a mix of named and unnamed entries"
   )
 })
+
+
+# ---------------------------------------------------------------------------
+# DTADataSetTabular validator: only tabular file handlers allowed
+# ---------------------------------------------------------------------------
+
+test_that("DTADataSetTabular rejects a DTAFileAny handler", {
+  expect_error(
+    DTADataSetTabular(
+      name = "bad_tabular",
+      specs = create_example_DTAColumnSpecCollection(1),
+      files = list(DTAFileAny(filename = "audit.log"))
+    ),
+    "not tabular"
+  )
+})
+
+test_that("DTADataSetTabular rejects a bare DTAFile handler", {
+  expect_error(
+    DTADataSetTabular(
+      name = "bad_tabular2",
+      specs = create_example_DTAColumnSpecCollection(1),
+      files = list(DTAFile(filename = "data.txt"))
+    ),
+    "not tabular"
+  )
+})
+
+test_that("DTADataSetTabular accepts DTAFileCSV and DTAFileTSV handlers", {
+  expect_s3_class(
+    DTADataSetTabular(
+      name = "ok_csv",
+      specs = create_example_DTAColumnSpecCollection(1),
+      files = list(DTAFileCSV(filename = "data.csv"))
+    ),
+    "DTAtools::DTADataSetTabular"
+  )
+  expect_s3_class(
+    DTADataSetTabular(
+      name = "ok_tsv",
+      specs = create_example_DTAColumnSpecCollection(1),
+      files = list(DTAFileTSV(filename = "data.tsv"))
+    ),
+    "DTAtools::DTADataSetTabular"
+  )
+})
+
+test_that("DTADataSetFile may hold a DTAFileAny handler", {
+  h <- DTAFileAny(filename = "audit.log")
+  ds <- DTADataSetFile(name = "file_ds", files = list(h))
+
+  expect_s3_class(ds, "DTAtools::DTADataSetFile")
+  expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
+})
