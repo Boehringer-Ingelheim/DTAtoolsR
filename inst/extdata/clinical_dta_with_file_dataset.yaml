@@ -1,5 +1,5 @@
 metadata: 
-  title: Clinical Data Specification
+  title: Clinical Data Specification with Source File Delivery
   version: "0.1"
   date: 2024-06-19
   header: Company
@@ -76,8 +76,7 @@ datasets:
     files:
       filename: "clinical_data.*.csv$"
       pattern: Yes
-      min_number_of_files: 1
-      max_number_of_files: 2
+      number_of_files: 1
       type: "csv"
 
     columns:
@@ -228,3 +227,59 @@ datasets:
             max: 100
           WEIGHT:
             greater_equal: 5
+      - id: group_condition_pass_example
+        type: group_condition
+        description: Grouped pass showcase - every row with a visit must have status
+        group_by:
+          - SUBJECT_ID
+        conditions:
+          c_has_visit:
+            VISIT:
+              empty: false
+          c_has_status:
+            STATUS:
+              empty: false
+        constraints:
+          - id: visit_requires_status
+            type: requires
+            if: c_has_visit
+            then: c_has_status
+            if_scope: any
+            then_scope: all
+      - id: group_condition_fail_example
+        type: group_condition
+        description: Grouped fail showcase - consented records need a consent date
+        group_by:
+          - SUBJECT_ID
+        conditions:
+          c_consent_yes:
+            CONSENT:
+              equals: "YES"
+          c_consent_date_present:
+            CONSENT_DATE:
+              empty: false
+        constraints:
+          - id: consent_requires_date_grouped
+            type: requires
+            if: c_consent_yes
+            then: c_consent_date_present
+            if_scope: any
+            then_scope: all
+
+  # A second dataset in the SAME transfer that is never parsed. `type: file`
+  # builds a DTADataSetFile, whose entire contract is that the deliverable
+  # arrived, is readable and is not empty -- no columns, no rules, no import.
+  # Its handler is `type: any` (a DTAFileAny): the reader-less handler. A `csv`
+  # handler here would claim the file gets parsed, which it never is.
+  - name: raw_export
+    type: file
+    description: >-
+      Compressed raw export delivered alongside the clinical data table. It is
+      archived, not analysed, so the transfer only confirms that it arrived,
+      is readable and is not empty.
+
+    files:
+      type: any
+      filename: clinical_data2.csv.gz
+      number_of_files: 1
+      info: Compressed raw export of the clinical data table.

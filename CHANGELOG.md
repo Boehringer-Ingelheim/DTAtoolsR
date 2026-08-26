@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A manuscript-draft vignette in Nature Methods format**
+  (`vignette("DTAtools-manuscript")`). Abstract, introduction, and a full
+  methods section are drafted; the benchmark subsections of the results and
+  the discussion are explicit `[TO BE FILLED IN]` placeholders, with
+  `eval = FALSE` scaffold chunks wired to the package's own instrumentation
+  (`check(benchmark = TRUE)` / `validation_benchmark()`) so the campaign's
+  numbers can be dropped in without restructuring the text.
+
 - **A file handler for deliverables that are never parsed: `DTAFileAny`,
   written `type: any` in YAML.** A `DTADataSetFile` exists to confirm that
   PDFs, archives, reports and raw instrument output arrived intact, but the
@@ -38,7 +46,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **`clear_validation()` for `DTADataSetFile`**, matching the tabular method.
 
+- **A bundled example that validates a file dataset alongside a tabular one:
+  `inst/extdata/clinical_dta_with_file_dataset.yaml`.** `DTADataSetFile` and
+  `type: any` had no worked example — all three shipped specifications were
+  pure `type: tabular` — so the Shiny app's *Load example DTA* dialog could not
+  show one either.
+
+  The new specification carries the familiar `clinical_data` table plus a
+  second dataset, `raw_export`, declared `type: file` with a `type: any`
+  handler naming the bundled `clinical_data2.csv.gz`. Both deliverables are
+  files that ship with the package, so the example validates end to end:
+  the table is parsed and rule-checked as usual, while the export is only
+  confirmed to have arrived, be readable and be non-empty.
+
 ### Changed
+
+- **The *Load example DTA* dialog lists the bundled examples in a taught
+  order** — one tabular dataset, then one dataset fed by several files, then a
+  never-parsed file dataset alongside a tabular one, then the genomics
+  specification. The list was plain alphabetical, which made the sequence a
+  coincidence of the filenames and of the reader's collation locale; it is now
+  stated explicitly, and any example not named in that list is appended in
+  C-collation order.
 
 - **The generated Raw YAML is laid out in blank-line separated sections.** A
   serialised specification ran to several hundred unbroken lines, so finding
@@ -224,6 +253,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **The "this dataset expects no files at all" warning is back** in the Files
   editor — it was dropped in the same change that made zero handlers the
   starting state of every newly added dataset.
+- **Removing a dataset could blank the Shiny app's sidebar — the workspace
+  overview and the Datasets list disappeared until the window was resized.**
+  The removal itself was sound; what vanished was the render. Adding or
+  removing a dataset rebuilds the whole workspace (`output$main`), and when
+  the browser re-binds the sidebar's dynamic outputs it snapshots their
+  visibility — a snapshot that can race the DOM swap and misreport a visible
+  output as hidden. Shiny then suspends the render server-side
+  (`suspendWhenHidden`, the default) and never sends the HTML, and unlike a
+  tab pane, nothing in the sidebar ever triggers the re-check that would have
+  healed it. The five sidebar outputs are now excluded from
+  `suspendWhenHidden`, so the server pushes them regardless of what the
+  visibility snapshot claimed; the race can still misreport, but it can no
+  longer blank the panel.
+
+- **The Shiny app offered the Validation messages downloads before any check
+  had been run.** The dock's CSV, TSV, XLSX and Report buttons were live from
+  the moment a DTA was loaded, and exporting produced a file whose only row
+  read *No validation messages for this dataset.* — indistinguishable from the
+  clean result of a check that really did run.
+
+  The buttons are now inert until there is something to export, and say why on
+  hover. The three table exports are scoped to the active dataset and follow
+  its status; *Report* is the whole-DTA report and follows whether any dataset
+  has been checked, so the two can legitimately disagree. Neither *pending*
+  (data bound, never validated) nor *No data* (skipped for missing files)
+  counts as a check. The handlers refuse the request server-side as well, so
+  the rule holds even though a download URL stays reachable whatever the
+  button looks like.
 
 - **The Shiny app's downloadable validation summary announced *VALIDATION
   PASSED* while a dataset was still missing its data.** With several datasets

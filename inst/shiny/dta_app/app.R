@@ -2837,31 +2837,34 @@ server <- function(input, output, session) {
     }
     gcond_rm_registry[[bid]] <- TRUE
 
-    observeEvent(input[[bid]], {
-      row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      deps <- find_condition_dependencies(row_name, excluding_row = i)
+    observeEvent(input[[bid]],
+      {
+        row_name <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
+        deps <- find_condition_dependencies(row_name, excluding_row = i)
 
-      if (length(deps) > 0) {
-        rv$rule_msg <- list(
-          ok = FALSE,
-          error = paste0(
-            "Cannot remove condition '", row_name,
-            "' because it is referenced by: ",
-            paste(deps, collapse = ", "),
-            ". Remove dependent constraints first."
+        if (length(deps) > 0) {
+          rv$rule_msg <- list(
+            ok = FALSE,
+            error = paste0(
+              "Cannot remove condition '", row_name,
+              "' because it is referenced by: ",
+              paste(deps, collapse = ", "),
+              ". Remove dependent constraints first."
+            )
           )
-        )
-        return()
-      }
+          return()
+        }
 
-      vis <- visible_group_condition_rows()
-      if (length(vis) <= 1) {
-        clear_group_condition_row(i)
-      } else {
-        removeUI(selector = paste0("#gcond_row_", i))
-      }
-      rv$rule_msg <- NULL
-    }, ignoreInit = TRUE)
+        vis <- visible_group_condition_rows()
+        if (length(vis) <= 1) {
+          clear_group_condition_row(i)
+        } else {
+          removeUI(selector = paste0("#gcond_row_", i))
+        }
+        rv$rule_msg <- NULL
+      },
+      ignoreInit = TRUE
+    )
   }
 
   ensure_gconstr_remove_observer <- function(i) {
@@ -2871,15 +2874,18 @@ server <- function(input, output, session) {
     }
     gconstr_rm_registry[[bid]] <- TRUE
 
-    observeEvent(input[[bid]], {
-      vis <- visible_group_constraint_rows()
-      if (length(vis) <= 1) {
-        clear_group_constraint_row(i)
-      } else {
-        removeUI(selector = paste0("#gconstr_row_", i))
-      }
-      rv$rule_msg <- NULL
-    }, ignoreInit = TRUE)
+    observeEvent(input[[bid]],
+      {
+        vis <- visible_group_constraint_rows()
+        if (length(vis) <= 1) {
+          clear_group_constraint_row(i)
+        } else {
+          removeUI(selector = paste0("#gconstr_row_", i))
+        }
+        rv$rule_msg <- NULL
+      },
+      ignoreInit = TRUE
+    )
   }
 
   flatten_group_constraints <- function(constraints) {
@@ -3689,17 +3695,12 @@ server <- function(input, output, session) {
         uiOutput("msgs_dock_meta", inline = TRUE),
         div(
           class = "msgs-dock-actions",
-          tags$span(
-            class = "msgs-dock-dl", onclick = "event.stopPropagation();",
-            downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_html", "Report",
-              class = "btn btn-sm btn-outline-secondary",
-              # Named apart from the sidebar's "Validation summary": this is the
-              # message-level report, that one is the per-dataset outcome.
-              title = "Download the full validation message report"
-            )
+          # The .msgs-dock-dl flex container IS the uiOutput's own span: an
+          # extra wrapper around it would leave the buttons as inline children
+          # of a one-child flex box and lose the gap between them.
+          uiOutput("msgs_dock_dl",
+            inline = TRUE, class = "msgs-dock-dl",
+            onclick = "event.stopPropagation();"
           ),
           tags$span(class = "msgs-dock-chevron", HTML("&#x25BC;"))
         )
@@ -3712,6 +3713,91 @@ server <- function(input, output, session) {
           "Use the filters at the top of each column to search or pick a Dataset / Table. Click a message row to open the detailed inspect report."
         )
       )
+    )
+  })
+
+  # Has the ACTIVE dataset actually been checked? "pending" (data bound, never
+  # validated) and "nodata" (skipped for missing data) are both NOT a check --
+  # see the same distinction drawn for the sidebar's Validation summary.
+  msgs_active_checked <- reactive({
+    isTRUE(dta_lookup(rv$status, rv$active, "pending") %in% c("pass", "fail"))
+  })
+
+  # Has ANY dataset been checked? The whole-DTA report follows this, not the
+  # active dataset.
+  msgs_any_checked <- reactive({
+    st <- unlist(rv$status)
+    length(st) > 0 && any(st %in% c("pass", "fail"))
+  })
+
+  # The dock's download buttons, in their own output rather than inline in
+  # output$floating_msgs: the dock is deliberately rendered once per structure
+  # so the DT inside stays stable, and therefore cannot react to validation
+  # state -- but these buttons must.
+  #
+  # Before a check has been run there is nothing to export. Exporting anyway
+  # would hand back a file that reads as a clean result ("No validation
+  # messages for this dataset.") when in truth nothing was ever looked at, so
+  # the buttons are disabled instead.
+  #
+  # The three table exports are scoped to the active dataset and follow ITS
+  # status; "Report" is the whole-DTA write_validation_report() output and
+  # follows whether any dataset has been checked. The two can legitimately
+  # disagree, so they are gated separately.
+  output$msgs_dock_dl <- renderUI({
+    active_ok <- msgs_active_checked()
+    any_ok <- msgs_any_checked()
+    ds <- rv$active %||% "this dataset"
+
+    # A DISABLED downloadButton is not an option: shiny already renders every
+    # downloadButton with class "disabled" and aria-disabled, and its
+    # shiny-download-link binding drops both the moment the handler URL
+    # arrives from the server -- which it always does, since the handler is
+    # registered unconditionally. Marking it up as disabled therefore changes
+    # nothing on screen.
+    #
+    # So the off state is a look-alike <button> instead: same Bootstrap
+    # classes, no shiny-download-link class, and hence no binding to switch it
+    # back on. Bootstrap 5's `.btn.disabled` (pointer-events: none) plus the
+    # `disabled` attribute -- which a <button>, unlike an <a>, actually honours
+    # -- make it inert for mouse and keyboard alike.
+    dl_btn <- function(id, label, enabled, title) {
+      if (enabled) {
+        return(downloadButton(id, label,
+          class = "btn btn-sm btn-outline-secondary", title = title
+        ))
+      }
+      tags$button(
+        id = id, type = "button", disabled = NA,
+        class = "btn btn-sm btn-outline-secondary disabled",
+        `aria-disabled` = "true", title = title,
+        icon("download"), " ", label
+      )
+    }
+
+    tagList(
+      dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as CSV", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as TSV", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as XLSX", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      # Named apart from the sidebar's "Validation summary": this is the
+      # message-level report, that one is the per-dataset outcome.
+      dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
+        "Download the full validation message report"
+      } else {
+        "Run a check first -- there are no results to report yet"
+      })
     )
   })
 
@@ -3803,13 +3889,20 @@ server <- function(input, output, session) {
     nm <- rv$active %||% "dataset"
     paste0(gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_messages")
   }
+  # The `req()` in each content function is not redundant with the disabled
+  # buttons above: a downloadHandler's URL stays reachable whatever the button
+  # looks like, so the "no check, no export" rule is enforced here as well.
   output$dl_msgs_csv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".csv"),
-    content = function(file) utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+    content = function(file) {
+      req(msgs_active_checked())
+      utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+    }
   )
   output$dl_msgs_tsv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".tsv"),
     content = function(file) {
+      req(msgs_active_checked())
       utils::write.table(
         msgs_dl_df(), file,
         sep = "\t", row.names = FALSE, na = "", qmethod = "double"
@@ -3819,6 +3912,7 @@ server <- function(input, output, session) {
   output$dl_msgs_xlsx <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".xlsx"),
     content = function(file) {
+      req(msgs_active_checked())
       if (!requireNamespace("writexl", quietly = TRUE)) {
         showNotification(
           "XLSX export needs the 'writexl' package. Install it, or use CSV / TSV.",
@@ -3845,6 +3939,7 @@ server <- function(input, output, session) {
   output$dl_msgs_html <- downloadHandler(
     filename = function() paste0(report_dl_base(), ".html"),
     content = function(file) {
+      req(msgs_any_checked())
       tryCatch(
         DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
         error = function(e) {
@@ -4328,15 +4423,18 @@ server <- function(input, output, session) {
       layout_columns(
         col_widths = c(4, 4, 4),
         f_text("tr_type", "Type",
-          trf("type"), width = "100%",
+          trf("type"),
+          width = "100%",
           placeholder = "e.g. secure S3 bucket"
         ),
         f_text("tr_frequency", "Frequency",
-          trf("frequency"), width = "100%",
+          trf("frequency"),
+          width = "100%",
           placeholder = "e.g. one-time, weekly"
         ),
         f_text("tr_notification", "Notification",
-          trf("notification"), width = "100%",
+          trf("notification"),
+          width = "100%",
           placeholder = "e.g. email"
         )
       ),
@@ -4376,11 +4474,13 @@ server <- function(input, output, session) {
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
       f_area("md_error_handling", "Error handling",
-        getf("error_handling"), width = "100%", rows = 2,
+        getf("error_handling"),
+        width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
       f_text("md_authorized", "Authorized for corrections",
-        getf("authorized_for_corrections"), width = "100%",
+        getf("authorized_for_corrections"),
+        width = "100%",
         placeholder = "Contact(s) authorized to request corrections"
       ),
       # Only true while editing; in read-only there is nothing to save.
@@ -5506,6 +5606,27 @@ server <- function(input, output, session) {
       div(div(class = "metric", nd), div(class = "slot-meta", "no data"))
     )
   })
+
+  # The sidebar's dynamic outputs must never be suspended as "hidden".
+  #
+  # Adding or removing a dataset (any rv$structure assignment) re-renders
+  # output$main, which replaces the whole workspace DOM -- including the
+  # sidebar's uiOutput placeholders. When the client re-binds those it
+  # snapshots their visibility, and that snapshot can race the DOM swap and
+  # report a visible output as hidden. Under the default suspendWhenHidden the
+  # server then suspends the render and never sends its HTML -- and unlike an
+  # output inside a nav_panel(), whose visibility is re-checked when its tab
+  # fires shown.bs.tab, nothing in the sidebar ever triggers a re-check, so
+  # the workspace header, the summary counts and the dataset list stay blank
+  # until something incidental (a window resize) forces a re-scan. Seen in the
+  # wild as "removed a dataset and the overview and Datasets list
+  # disappeared". These renders are cheap; send them unconditionally.
+  for (sidebar_output in c(
+    "workspace_header", "summary_metrics", "dataset_nav_ui",
+    "add_dataset_ui", "validation_report_ui"
+  )) {
+    outputOptions(output, sidebar_output, suspendWhenHidden = FALSE)
+  }
 
   # --- dataset detail (structure only -> stable file inputs) --------------
   output$dataset_detail <- renderUI({
