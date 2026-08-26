@@ -2,9 +2,9 @@
 % Please edit documentation in R/DTA-class.R, R/DTAColumnSpec-class.R,
 %   R/DTAColumnSpecCollection-class.R, R/DTAColumnSpecStructure-class.R,
 %   R/DTAColumnSpecStructureSAS-class.R, R/DTADataSet-class.R,
-%   R/DTAFile-class.R, R/DTADataSetTabular-class.R, R/DTAFileCSV-class.R,
-%   R/DTAFileDelim-class.R, R/DTAFileTSV-class.R, R/DTAMetaData-class.R,
-%   R/DTARule-class.R, R/DTARuleColCondition-class.R,
+%   R/DTAFile-class.R, R/DTAFileAny-class.R, R/DTADataSetTabular-class.R,
+%   R/DTAFileCSV-class.R, R/DTAFileDelim-class.R, R/DTAFileTSV-class.R,
+%   R/DTAMetaData-class.R, R/DTARule-class.R, R/DTARuleColCondition-class.R,
 %   R/DTARuleColRange-class.R, R/DTARuleColUnique-class.R,
 %   R/DTARuleGroupCondition-class.R
 \name{print}
@@ -24,6 +24,9 @@ print(x, ...)
 print(x, ...)
 
 ## S7 method for class <DTAtools::DTAFile>
+print(x, ...)
+
+## S7 method for class <DTAtools::DTAFileAny>
 print(x, ...)
 
 ## S7 method for class <DTAtools::DTADataSetTabular>
@@ -73,6 +76,8 @@ Invisibly returns the input object
 Invisibly returns the input object
 
 Invisibly returns the input object
+
+Invisibly returns the input object
 }
 \description{
 Print method for DTA objects.
@@ -88,6 +93,8 @@ prints info of the column spec structure
 Print a summary of a DTADataSet object.
 
 Print method for DTAFile objects.
+
+Print method for DTAFileAny objects.
 
 Print a summary of a DTADataSetTabular object.
 
@@ -119,6 +126,9 @@ print(create_example_DTADataSetTabular())
 # do not use this, use derived classes instead, e.g.
 # DTAFileCSV or DTAFileTSV
 print(DTAFileCSV("example.csv"))
+library(DTAtools)
+print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
+
 library(DTAtools)
 print(create_example_DTADataSetTabular())
 library(DTAtools)

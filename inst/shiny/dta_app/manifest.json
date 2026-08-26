@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.21.1",
+        "Version": "0.21.2",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -3118,19 +3118,19 @@
       "checksum": "cab56ccadfb7e16cc9f4504bf16e0522"
     },
     "R/ui_components.R": {
-      "checksum": "499589b127721eae5ad5877fe1d5d250"
+      "checksum": "d6f2399f5ef4a481e7498c2f297a661b"
     },
     "R/utils_dta.R": {
-      "checksum": "99591612e968318b457ed6b37dba9845"
+      "checksum": "9543b29a3e839f5e7a63185a1ad30855"
     },
     "R/utils_export.R": {
-      "checksum": "cb019d396e88a149968e9ec549bea956"
+      "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
     },
     "VERSION": {
-      "checksum": "1bf6923aea67de0d18fe2f009ce17011"
+      "checksum": "a7b2ef20ab80c2cd993b60afa6d061c7"
     },
     "app.R": {
-      "checksum": "76d7ebb7bb3f3ab75960fb40b1e978d5"
+      "checksum": "57fa7f45fefa262908f6c49a658c9da8"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

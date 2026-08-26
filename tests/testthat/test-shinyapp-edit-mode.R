@@ -120,6 +120,32 @@ test_that("contact_detail_block is NULL/character(0)/NA-safe for every optional 
   expect_no_match(html, "contact-detail-label\">Phone", fixed = TRUE)
 })
 
+test_that("contact_detail_block renders every element of a list-valued field, not just the first", {
+  # .ro_field_value() used to keep only element 1 of a list/vector value and
+  # drop the rest. Read-only mode is the ONLY place these fields render (see
+  # the WHY comment on contact_detail_block()), so a dropped line was
+  # unreachable to whoever reads the page -- and a YAML sequence (`address:`
+  # written as several lines) is exactly this shape.
+  html <- render_html(app_fn("contact_detail_block")(list(
+    name = "Alice Smith", address = list("123 Main St", "Suite 400")
+  )))
+
+  expect_match(html, "123 Main St", fixed = TRUE)
+  expect_match(html, "Suite 400", fixed = TRUE)
+})
+
+test_that("contact_detail_block renders an all-empty list value as empty, not the string \"NULL\"", {
+  # unlist() drops NULL entries on its own; without that, a value like
+  # `address: [~]` (a one-element list holding NULL) would render as the
+  # literal text "NULL" instead of being omitted like any other unset field.
+  html <- render_html(app_fn("contact_detail_block")(list(
+    name = "Alice Smith", address = list(NULL, NA_character_, "")
+  )))
+
+  expect_no_match(html, "NULL", fixed = TRUE)
+  expect_no_match(html, "contact-detail-label\">Address", fixed = TRUE)
+})
+
 test_that("contact_detail_block shows the signature/reviewer flags only when TRUE", {
   both <- render_html(app_fn("contact_detail_block")(list(
     name = "Alice Smith", signature = TRUE, reviewer = TRUE
@@ -211,6 +237,45 @@ test_that("with edit mode off, applying raw YAML does not replace the document",
     expect_false(identical(
       as.character(S7::prop(DTAtools::metadata(rv$dta), "title")), "HIJACKED"
     ))
+  })
+})
+
+test_that("the Raw YAML (Ace) editor is born read-only when edit mode starts off", {
+  # readOnly is set at aceEditor() creation time (isolate(!editing())), not
+  # left to the later observe() toggle -- that observer only fires on LATER
+  # editing() changes and messages an input id that does not exist yet the
+  # first time it runs, since this editor lives inside output$main, which is
+  # still showing the landing card at server start. Relying on the observer
+  # alone would leave the very first render editable until edit mode was
+  # toggled at least once. shinyAce serialises its config (including
+  # readOnly) into a `<script type="application/json" data-for="...">` tag
+  # alongside the editor, which is what makes this observable through
+  # testServer without a real browser.
+  skip_if_not_installed("shinyAce")
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(edit_mode = FALSE)
+    load_fixture(session)
+
+    html <- paste(as.character(output$main$html), collapse = "\n")
+
+    expect_match(html, '"id":"raw_yaml_editor"', fixed = TRUE)
+    expect_match(html, '"readOnly":true', fixed = TRUE)
+  })
+})
+
+test_that("the Raw YAML (Ace) editor is born editable when edit mode starts on", {
+  # The positive control for the test above.
+  skip_if_not_installed("shinyAce")
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    load_fixture(session)
+
+    html <- paste(as.character(output$main$html), collapse = "\n")
+
+    expect_match(html, '"id":"raw_yaml_editor"', fixed = TRUE)
+    expect_match(html, '"readOnly":false', fixed = TRUE)
   })
 })
 
@@ -311,6 +376,9 @@ test_that("removing the active dataset moves the selection to a remaining one", 
     session$setInputs(add_ds_save = 1)
     expect_equal(rv$active, "alpha")
 
+    # Drive the real flow: opening the modal (remove_dataset) is what stashes
+    # the name the confirm handler acts on -- see rv$removing_dataset.
+    session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
     expect_equal(names(DTAtools::datasets(rv$dta)), "clinical_data")
@@ -326,6 +394,9 @@ test_that("removing the last dataset leaves an empty but usable workspace", {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
 
+    # Drive the real flow: opening the modal (remove_dataset) is what stashes
+    # the name the confirm handler acts on -- see rv$removing_dataset.
+    session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
     expect_length(DTAtools::datasets(rv$dta), 0)
@@ -346,11 +417,67 @@ test_that("removing a dataset unloads the files bound to it", {
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_true(any(startsWith(names(rv$uploads), "clinical_data||")))
 
+    # Drive the real flow: opening the modal (remove_dataset) is what stashes
+    # the name the confirm handler acts on -- see rv$removing_dataset.
+    session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
     # The upload records are keyed "<dataset>||<handlerIdx>"; left behind they
     # would still count towards validation and export with no way to reach them.
     expect_false(any(startsWith(names(rv$uploads) %||% character(0), "clinical_data||")))
+  })
+})
+
+test_that("remove_dataset_confirm removes the dataset the modal named, not whatever is active later", {
+  # THE BUG THIS PINS: the confirm handler used to read rv$active at click
+  # time. The modal is easyClose = TRUE, so it can be left open while rv$active
+  # changes underneath it (e.g. the user clicks a different dataset in the
+  # nav) -- and the old code would then delete THAT dataset instead of the one
+  # tags$b() named in the modal, irreversibly. The fix stashes the name into
+  # rv$removing_dataset when the modal opens and the confirm handler uses that.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    load_fixture(session)
+    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_save = 1)
+    expect_equal(rv$active, "alpha")
+
+    # Open the modal for "alpha" -- it stashes the name it named.
+    session$setInputs(remove_dataset = 1)
+    expect_equal(rv$removing_dataset, "alpha")
+
+    # rv$active drifts to a different dataset WHILE the modal is still open.
+    rv$active <- "clinical_data"
+
+    session$setInputs(remove_dataset_confirm = 1)
+
+    # "alpha" -- the dataset the modal named -- is gone. "clinical_data"
+    # survives untouched, even though it was active at confirm time.
+    expect_equal(names(DTAtools::datasets(rv$dta)), "clinical_data")
+    expect_true("clinical_data" %in% names(rv$structure))
+  })
+})
+
+test_that("cancelling the remove-dataset modal clears the stash", {
+  # A confirm click that arrives after Cancel (e.g. a delayed/duplicate
+  # websocket message) must not fall back to deleting anything.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(edit_mode = TRUE)
+    load_fixture(session)
+    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_save = 1)
+
+    session$setInputs(remove_dataset = 1)
+    expect_equal(rv$removing_dataset, "alpha")
+
+    session$setInputs(remove_dataset_cancel = 1)
+    expect_null(rv$removing_dataset)
+
+    session$setInputs(remove_dataset_confirm = 1)
+
+    expect_equal(names(DTAtools::datasets(rv$dta)), c("clinical_data", "alpha"))
   })
 })
 

@@ -11,7 +11,8 @@ clear_validation(x, ...)
 clear_validation(x, ...)
 }
 \arguments{
-\item{x}{A \code{DTADataSetFile} object.}
+\item{x}{A \code{DTADataSetTabular} or \code{DTADataSetFile} object --
+this page documents both \code{clear_validation()} methods.}
 
 \item{...}{Additional arguments:
 \describe{

@@ -18,16 +18,20 @@ load_file(x, ...)
 load_file(x, ...)
 }
 \arguments{
-\item{x}{A \code{DTADataSetFile} object.}
+\item{x}{A \code{DTA}, \code{DTADataSetTabular} or \code{DTADataSetFile}
+object -- this page documents every \code{load_file()} method.}
 
 \item{...}{Additional named arguments:
 \describe{
 \item{file}{Path to the delivered file.}
-\item{handler_index}{Single numeric index selecting the file handler
-within the dataset. Defaults to \code{1}.}
-\item{name}{Optional name under which the file is recorded. Defaults to
+\item{handler_index}{Single character or numeric index selecting the
+file handler within the dataset. Defaults to \code{1}.}
+\item{name}{Optional name under which the file is recorded. Must equal
 \code{basename(file)} -- with the extension, unlike the tabular
-method, because that is the key every report for this class uses.}
+method, because that is the key every report for this class uses. A
+file dataset is keyed by the delivered file's own name, so \code{name}
+cannot rename it; passing anything else aborts. Defaults to
+\code{basename(file)}.}
 \item{stream}{Accepted and ignored; a file dataset reads nothing.}
 }}
 }
@@ -109,11 +113,11 @@ ds <- DTADataSetTabular(
   files = list(file_handler)
 )
 file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+ds <- load_file(ds, file = file, handler_index = 1)
 names(tables(ds))
 
 # The same file kept lazy: nothing is read until check() scans it.
-ds_lazy <- DTAtools:::load_file(
+ds_lazy <- load_file(
   ds,
   file = file, handler_index = 1, stream = "always"
 )
@@ -122,7 +126,7 @@ handler <- DTAFileAny(filename = "clinical_data.csv")
 ds <- DTADataSetFile(name = "delivery", files = list(handler))
 
 file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
-ds <- DTAtools:::load_file(ds, file = file, handler_index = 1)
+ds <- load_file(ds, file = file, handler_index = 1)
 validation_status(check(ds, quiet = TRUE))$ok
 }
 \seealso{

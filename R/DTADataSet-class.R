@@ -494,12 +494,21 @@ dta_new_validation_run_id <- function() {
 }
 
 #' @keywords internal
-dta_validation_result_to_row <- function(table_name, status, index_entry, target_type = "table") {
+dta_validation_result_to_row <- function(table_name, status, index_entry, target_type = "table",
+                                         ok = NULL) {
+  # `ok` overrides the entry's own verdict, and exists for exactly one caller:
+  # the "unspecified" status, whose verdict is NA rather than TRUE or FALSE.
+  # NA is load-bearing -- it makes both n_valid (sum(ok == TRUE)) and n_invalid
+  # (sum(ok == FALSE)) skip the row, so a dataset with no column specification
+  # reports as incomplete rather than as either a pass or a data failure. The
+  # isTRUE() below would silently flatten that NA to FALSE, which is why the
+  # override is a parameter here rather than a second copy of this data.frame:
+  # the COLUMN SET stays defined in one place.
   data.frame(
     table = table_name,
     target_type = target_type,
     status = status,
-    ok = isTRUE(index_entry$ok),
+    ok = if (is.null(ok)) isTRUE(index_entry$ok) else ok,
     validated_at = as.character(index_entry$validated_at),
     run_id = index_entry$run_id,
     validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,

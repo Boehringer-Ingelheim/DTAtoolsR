@@ -134,16 +134,35 @@ ds_edit_menu <- function(type = "tabular") {
   )
 }
 
-# Normalise a value that may arrive as NULL, character(0) or NA into a single
-# string, collapsing all three to "". Shared by every read-only field renderer
-# in this file (meta_field_text(), contact_detail_block()) because an unset
-# S7 property and an unset YAML list element both show up this way: %||% only
-# catches NULL, and going straight to nzchar() on the rest would abort, since
-# `if (logical(0))` is an error rather than FALSE and `nzchar(NA)` is NA, not
-# FALSE.
+# Normalise a value that may arrive as NULL, character(0), NA, or a
+# multi-element list/vector into a single display string. Shared by every
+# read-only field renderer in this file (meta_field_text(),
+# contact_detail_block()) because an unset S7 property and an unset YAML list
+# element both show up as NULL/character(0)/NA: %||% only catches NULL, and
+# going straight to nzchar() on the rest would abort, since `if (logical(0))`
+# is an error rather than FALSE and `nzchar(NA)` is NA, not FALSE.
+#
+# Read-only mode is the ONLY place these fields render (see the WHY comment
+# above contact_detail_block()), so this must never silently keep only the
+# first element and drop the rest -- a YAML sequence (`address:` as several
+# lines) or a nested mapping has to show everything it holds. unlist()
+# flattens either shape to a plain vector; NA and empty elements are dropped
+# (unlist() already drops NULL entries on its own, which is what keeps
+# `address: [~]` from rendering as the literal string "NULL"); what remains
+# is joined with ", " into one line, which is fine because the value span
+# this feeds already sets `word-break`.
 .ro_field_value <- function(value) {
   v <- value %||% ""
-  if (length(v) == 0 || is.na(v[1])) "" else as.character(v)[1]
+  if (length(v) == 0) {
+    return("")
+  }
+  v <- unlist(v, use.names = FALSE)
+  if (length(v) == 0) {
+    return("")
+  }
+  v <- as.character(v)
+  v <- v[!is.na(v) & nzchar(v)]
+  if (length(v) == 0) "" else paste(v, collapse = ", ")
 }
 
 # The read-only counterpart of a textInput()/textAreaInput(), used on the

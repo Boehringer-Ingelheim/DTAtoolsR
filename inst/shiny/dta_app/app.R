@@ -373,7 +373,8 @@ server <- function(input, output, session) {
     template_def = NULL, # active creation-template definition (modal flow)
     template_path = NULL, # source path of active creation-template
     add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
-    add_ds_token = 0 # bump to re-render the add-dataset modal body
+    add_ds_token = 0, # bump to re-render the add-dataset modal body
+    removing_dataset = NULL # dataset name the remove-dataset confirm modal targets
   )
 
   # The single gate for every editing surface. Off by default: input_switch() is
@@ -1022,6 +1023,14 @@ server <- function(input, output, session) {
     req(editing())
     req(rv$active)
     ed <- rv$active
+    # Stash the name the modal is ABOUT this dataset under rv$removing_dataset,
+    # closing over it the way the contact-removal flow closes over its index
+    # in local() -- so the confirm handler below acts on the dataset this
+    # modal actually named, not on whatever rv$active happens to be when the
+    # user clicks Remove. rv$active can change while the modal is still open
+    # (easyClose = TRUE lets it be left open without cancelling), and this
+    # delete is irreversible.
+    rv$removing_dataset <- ed
     n_files <- length(dta_dataset_table_names(dta_get_dataset(rv$dta, ed)))
     showModal(modalDialog(
       title = "Remove this dataset?",
@@ -1039,16 +1048,25 @@ server <- function(input, output, session) {
       ),
       easyClose = TRUE,
       footer = tagList(
-        modalButton("Cancel"),
+        # A plain actionButton, not modalButton(), because cancelling has to
+        # clear rv$removing_dataset too -- modalButton() only closes the
+        # modal client-side and never reaches the server.
+        actionButton("remove_dataset_cancel", "Cancel", class = "btn btn-outline-secondary"),
         actionButton("remove_dataset_confirm", "Remove", class = "btn btn-danger")
       )
     ))
   })
 
+  observeEvent(input$remove_dataset_cancel, {
+    rv$removing_dataset <- NULL
+    removeModal()
+  })
+
   observeEvent(input$remove_dataset_confirm, {
     req(editing())
-    ed <- isolate(rv$active)
+    ed <- isolate(rv$removing_dataset)
     req(ed)
+    rv$removing_dataset <- NULL
     r <- dta_remove_dataset(isolate(rv$dta), ed)
     if (!isTRUE(r$ok)) {
       showNotification(paste("Could not remove dataset —", r$error),
@@ -1846,6 +1864,12 @@ server <- function(input, output, session) {
     ed <- isolate(rv$editor_dataset)
     req(ed)
     if (identical(isolate(rv$file_view), "list")) {
+      # Zero handlers is not a corner case: it is the STARTING state of every
+      # dataset created via "+ Add dataset", and nothing can be uploaded into
+      # it until at least one entry exists. The DT emptyTable string on
+      # file_tbl below covers the table itself; this banner is what makes the
+      # consequence explicit and hard to miss in the editor that can fix it.
+      n_handlers <- length(dta_handlers(dta_get_dataset(isolate(rv$dta), ed)))
       tagList(
         div(
           class = "spec-toolbar",
@@ -1862,6 +1886,16 @@ server <- function(input, output, session) {
           )
         ),
         DT::dataTableOutput("file_tbl"),
+        if (n_handlers == 0) {
+          div(
+            class = "yaml-valid err", style = "margin-top:8px;",
+            HTML("&#x2716;"),
+            paste(
+              " This dataset expects no files at all, so nothing can be loaded",
+              "into it. Add at least one entry."
+            )
+          )
+        },
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
@@ -1892,7 +1926,7 @@ server <- function(input, output, session) {
       type_input <- if (length(type_choices) == 1L) {
         shinyjs::disabled(
           selectInput("file_type", "File type",
-            choices = type_choices, selected = type_choices[[1]],
+            choices = type_choices, selected = g("type", type_choices[[1]]),
             width = "100%", selectize = FALSE
           )
         )
@@ -2010,7 +2044,7 @@ server <- function(input, output, session) {
     if (is.null(ov) || nrow(ov) == 0) {
       ov <- data.frame(
         filename = character(0), type = character(0), pattern = character(0),
-        files = character(0), description = character(0),
+        files = character(0), endings = character(0), description = character(0),
         stringsAsFactors = FALSE
       )
     }
@@ -2190,6 +2224,13 @@ server <- function(input, output, session) {
   observeEvent(input$edit_cols, {
     req(editing())
     req(rv$active)
+    # ds_edit_menu() only renders this control for a "tabular" dataset -- a
+    # "file" dataset has no @specs for dta_column_ids() to read. That render
+    # gate is only the affordance, though; edit_cols can still be driven over
+    # the websocket on a file dataset, so re-check the type here too. Resolve
+    # it the same way the ds_edit_menu(s$type) call site does: from
+    # rv$structure, not by re-deriving it from rv$dta.
+    req(identical(rv$structure[[rv$active]]$type, "tabular"))
     rv$editor_dataset <- rv$active
     rv$col_view <- "list"
     rv$col_edit_id <- NULL
@@ -2420,6 +2461,10 @@ server <- function(input, output, session) {
     req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
+    # rv$editor_dataset is only set by opening the column editor, but that
+    # observer's own guard can be raced or bypassed the same way edit_cols
+    # can -- refuse here too rather than trust the stashed name.
+    req(identical(rv$structure[[ed]]$type, "tabular"))
     id <- trimws(input$col_id %||% "")
     if (!nzchar(id)) {
       rv$col_msg <- list(ok = FALSE, error = "A column ID is required.")
@@ -2891,6 +2936,10 @@ server <- function(input, output, session) {
   observeEvent(input$edit_rules, {
     req(editing())
     req(rv$active)
+    # Same double-gating as edit_cols above: ds_edit_menu() hides this control
+    # for a "file" dataset, but the observer must refuse it too, since an
+    # input that is not on screen can still be driven over the websocket.
+    req(identical(rv$structure[[rv$active]]$type, "tabular"))
     rv$editor_dataset <- rv$active
     rv$rule_view <- "list"
     rv$rule_edit_index <- NULL
@@ -3357,6 +3406,9 @@ server <- function(input, output, session) {
     req(editing())
     ed <- isolate(rv$editor_dataset)
     req(ed)
+    # Same defense-in-depth as col_save: don't trust the stashed
+    # rv$editor_dataset alone, re-check its type is "tabular".
+    req(identical(rv$structure[[ed]]$type, "tabular"))
     id <- trimws(input$rule_id %||% "")
     if (!nzchar(id)) {
       rv$rule_msg <- list(ok = FALSE, error = "A rule ID is required.")
@@ -5656,17 +5708,30 @@ server <- function(input, output, session) {
                     # relying entirely on the !important override.
                     height = "70vh", fontSize = 13,
                     showLineNumbers = TRUE, wordWrap = FALSE,
-                    debounce = 100, autoComplete = "disabled"
+                    debounce = 100, autoComplete = "disabled",
+                    # Born in the correct state: the observe() below only
+                    # fires on later editing() changes (it is not
+                    # re-triggered by loading a document), and it messages an
+                    # input id that does not exist yet the first time it runs
+                    # -- this editor lives inside output$main, which is still
+                    # showing the landing card at server start.
+                    readOnly = !isolate(editing())
                   )
                 )
               } else {
                 # A plain <textarea> is natively resizable (a drag handle in
                 # the bottom-right corner, no CSS needed), unlike Ace -- so
-                # this fallback only needs the taller starting point.
-                textAreaInput("raw_yaml_editor",
+                # this fallback only needs the taller starting point. Same
+                # born-in-the-correct-state reasoning as the Ace editor above:
+                # the observe() that calls shinyjs::disable()/enable() only
+                # reacts to later editing() changes, and messages an input id
+                # that is not in the DOM yet the first time it runs -- so this
+                # has to start disabled itself when not editing.
+                ta <- textAreaInput("raw_yaml_editor",
                   label = NULL,
                   value = isolate(rv$yaml_text), width = "100%", rows = 28
                 )
+                if (isolate(editing())) ta else shinyjs::disabled(ta)
               }
             )
           )
