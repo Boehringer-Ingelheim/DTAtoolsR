@@ -1462,6 +1462,183 @@ dta_condition_operators <- function() {
   x
 }
 
+# Blank-line the sections of an emitted YAML document, for readability only.
+#
+# yaml::as.yaml() emits one unbroken block of text; a real specification runs to
+# several hundred lines and reads as a wall. This separates `metadata:` from
+# `datasets:`, each dataset from the next, and each of `files:`/`columns:`/
+# `rules:` from what follows -- while leaving column entries, rule entries and
+# `values:` lists tight, which is where blank lines would only add noise.
+#
+# It POST-PROCESSES the emitted string rather than pasting per-section chunks
+# together. as.yaml() stays the single source of truth for quoting, escaping and
+# indentation, this stays a pure character -> character function that can be
+# tested on its own, and -- crucially -- the OTHER as.yaml() calls in this file
+# are untouched: dta_match_handlers(), dta_handlers_signature() and
+# dta_specs_signature() use the emitted text as an equality signature, not for
+# display, and must stay byte-stable.
+#
+# `max_depth` is the deepest block that earns surrounding blank lines, counting
+# a top-level key as depth 1. dta_to_yaml_text() passes 3 (metadata / datasets,
+# then their children, then a dataset's own keys); dta_dataset_to_yaml_text()
+# passes 1, because a standalone dataset document IS a `datasets:` entry hoisted
+# to the root -- two levels shallower. Both views therefore lay out identical
+# dataset content identically.
+#
+# Depth is tracked with a stack rather than computed as indent / 2, because
+# as.yaml() renders a sequence at the SAME indent as its key -- `columns:` and
+# its `- id:` entries are both indented two spaces -- so the arithmetic reading
+# would collapse those two levels into one and blank-separate every column. A
+# sequence entry therefore ranks half a level below a mapping key at its indent.
+dta_yaml_blank_lines <- function(text, max_depth = 3L) {
+  if (!is.character(text) || length(text) != 1L || is.na(text) || !nzchar(text)) {
+    return(text)
+  }
+  if (max_depth < 1L) {
+    return(text)
+  }
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  if (length(lines) < 3L) {
+    return(text)
+  }
+  indent_of <- function(s) attr(regexpr("^ *", s), "match.length")
+
+  # Does this line open a block, or does it already carry its value inline?
+  # `columns:` opens one; `description: some text` cannot -- in block style a
+  # key with an inline value has no children, so anything indented below it is
+  # the emitter FOLDING that value across lines.
+  #
+  # This asks about the line's OWN shape rather than trying to recognise a
+  # continuation, because a continuation cannot be recognised: `and then Note:
+  # something` wrapped off the end of a description is indistinguishable from a
+  # mapping entry, and any test that reads it as one splits a user's prose.
+  # A plain value that would end in a colon is quoted by the emitter, so the
+  # trailing-colon test is not fooled by `label: 'Ratio:'`.
+  opens_children <- function(body) {
+    grepl(":[ \t]*$", sub("^(- )*", "", body))
+  }
+  # The header of a block scalar: `|` or `>`, then an indentation indicator and
+  # a chomping indicator IN EITHER ORDER (the spec allows both, and as.yaml
+  # writes `|2-` whenever the first content line begins with a space). Anchored
+  # on whitespace so a plain value that merely ENDS in one of those characters
+  # -- `pattern: .*>` -- is not mistaken for one.
+  opens_block_scalar <- function(body) {
+    grepl("(^|[ \t])[|>]([0-9]+[-+]?|[-+][0-9]*)?[ \t]*$", body)
+  }
+
+  # -- Group the lines into units. A unit is one structural line, plus every
+  # line that belongs to its value rather than to the structure.
+  units <- list()
+  i <- 1L
+  n <- length(lines)
+  while (i <= n) {
+    line <- lines[[i]]
+    if (!nzchar(trimws(line))) {
+      # as.yaml() never emits a blank line, so this text is either already laid
+      # out or came from somewhere else. Either way it is not ours to respace.
+      return(text)
+    }
+    ind <- indent_of(line)
+    body <- substring(line, ind + 1L)
+    dashes <- attr(regexpr("^(- )*", body), "match.length")
+    floor_ind <- ind + dashes
+    own <- line
+    scalar <- opens_block_scalar(body)
+    i <- i + 1L
+    if (scalar) {
+      # A block scalar's body is opaque: it may contain blank lines and lines
+      # that look like keys. Carry it through untouched -- a blank line inserted
+      # INSIDE one changes the value, not the layout.
+      while (i <= n &&
+        (!nzchar(trimws(lines[[i]])) || indent_of(lines[[i]]) > floor_ind)) {
+        own <- c(own, lines[[i]])
+        i <- i + 1L
+      }
+    } else if (!opens_children(body)) {
+      # A folded value's continuations are indented exactly like children would
+      # be. Reading them as structure brackets a long `description:` with blank
+      # lines it never asked for, and splits any prose containing a colon.
+      while (i <= n && indent_of(lines[[i]]) > floor_ind) {
+        own <- c(own, lines[[i]])
+        i <- i + 1L
+      }
+    }
+    units[[length(units) + 1L]] <- list(
+      rank = 2L * ind + as.integer(dashes > 0L),
+      scalar = scalar,
+      lines = own
+    )
+  }
+  m <- length(units)
+  if (m < 2L) {
+    return(text)
+  }
+  ranks <- vapply(units, function(u) u$rank, integer(1))
+
+  # -- Depth of each unit, and whether it has anything nested under it. Only a
+  # block that spans several lines earns blank lines around it.
+  depth <- integer(m)
+  nested <- vapply(units, function(u) isTRUE(u$scalar), logical(1))
+  stack <- integer(0)
+  for (j in seq_len(m)) {
+    while (length(stack) > 0L && ranks[[stack[[length(stack)]]]] >= ranks[[j]]) {
+      stack <- stack[-length(stack)]
+    }
+    depth[[j]] <- length(stack) + 1L
+    if (length(stack) > 0L) nested[[stack[[length(stack)]]]] <- TRUE
+    stack <- c(stack, j)
+  }
+  spaced <- nested & depth <= max_depth
+
+  # -- Emit. A blank goes before a spaced block and after one ends; both reduce
+  # to "before this unit", so at most one is ever inserted. A unit that is the
+  # FIRST child of its parent closes nothing, and gets no blank -- `datasets:`
+  # stays flush against the dataset that opens it.
+  chunks <- vector("list", m)
+  stack <- integer(0)
+  for (j in seq_len(m)) {
+    gap <- FALSE
+    closed <- FALSE
+    while (length(stack) > 0L && ranks[[stack[[length(stack)]]]] >= ranks[[j]]) {
+      if (spaced[[stack[[length(stack)]]]]) gap <- TRUE
+      stack <- stack[-length(stack)]
+      closed <- TRUE
+    }
+    if (closed && spaced[[j]]) gap <- TRUE
+    chunks[[j]] <- if (gap && j > 1L) c("", units[[j]]$lines) else units[[j]]$lines
+    stack <- c(stack, j)
+  }
+  out <- unlist(chunks, use.names = FALSE)
+  res <- paste0(
+    paste(out, collapse = "\n"),
+    if (endsWith(text, "\n")) "\n" else ""
+  )
+
+  # -- Guard. Nothing but blank lines may have changed; if anything else did,
+  # hand back the original. Losing the layout is a nuisance, losing a
+  # specification is not, and this is cosmetic either way.
+  #
+  # The re-parse is UNCONDITIONAL, and deliberately so. An earlier version ran
+  # it only where a block scalar had been detected -- which left the one case
+  # that can actually corrupt a value guarded by the very detection that would
+  # have to fail for it to arise. Reading the document back costs less than a
+  # millisecond at any size this app serializes, so it is not worth being
+  # clever about. The line comparison above stays as a cheaper first rejection;
+  # on its own it proves only that no line was dropped or reordered, not that a
+  # blank landed somewhere harmless.
+  if (!identical(out[nzchar(out)], lines[nzchar(lines)])) {
+    return(text)
+  }
+  same <- tryCatch(
+    identical(yaml::yaml.load(res), yaml::yaml.load(text)),
+    error = function(e) FALSE
+  )
+  if (!isTRUE(same)) {
+    return(text)
+  }
+  res
+}
+
 # Recover a handler's file-type token ("csv" / "tsv") from its S7 class.
 #
 # KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
@@ -1652,7 +1829,10 @@ dta_to_list <- function(dta) {
 dta_to_yaml_text <- function(dta) {
   dta_try({
     lst <- .dta_compact(dta_to_list(dta))
-    yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n")
+    dta_yaml_blank_lines(
+      yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n"),
+      max_depth = 3L
+    )
   })
 }
 
@@ -1662,7 +1842,12 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
     ds <- dta_get_dataset(dta, dataset)
     if (is.null(ds)) stop(sprintf("Dataset '%s' not found.", dataset))
     lst <- .dta_compact(dta_dataset_to_list(ds))
-    yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n")
+    # max_depth 1, not 3: this document is a `datasets:` entry hoisted to the
+    # root, so the same keys sit two levels shallower than in the full document.
+    dta_yaml_blank_lines(
+      yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n"),
+      max_depth = 1L
+    )
   })
 }
 

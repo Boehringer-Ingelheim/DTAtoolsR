@@ -385,6 +385,241 @@ test_that("dta_to_list builds metadata + datasets top-level keys", {
   expect_equal(l$datasets[[1]]$name, "clinical_data")
 })
 
+# ---- YAML blank-line layout -------------------------------------------------
+
+# The lines of a YAML string, so a layout expectation can be written as the
+# document it is meant to produce.
+yaml_lines <- function(x) strsplit(x, "\n", fixed = TRUE)[[1]]
+
+# A document with a nested metadata block, a dataset, and a column list: one of
+# each level the formatter has to tell apart.
+nested_yaml_fixture <- function() {
+  paste(
+    "metadata:",
+    "  title: T",
+    "  receiver:",
+    "    name: N",
+    "datasets:",
+    "- name: d",
+    "  type: tabular",
+    "  columns:",
+    "  - id: A",
+    "    label: a",
+    "  - id: B",
+    "    label: b",
+    sep = "\n"
+  )
+}
+
+test_that("dta_yaml_blank_lines spaces blocks down to max_depth and leaves deeper ones tight", {
+  out <- app_fn("dta_yaml_blank_lines")(nested_yaml_fixture(), max_depth = 3L)
+
+  expect_equal(
+    yaml_lines(out),
+    c(
+      "metadata:",
+      "  title: T",
+      "",
+      "  receiver:",
+      "    name: N",
+      "",
+      "datasets:",
+      "- name: d",
+      "  type: tabular",
+      "",
+      "  columns:",
+      "  - id: A",
+      "    label: a",
+      "  - id: B",
+      "    label: b"
+    )
+  )
+})
+
+test_that("dta_yaml_blank_lines honours max_depth: at 1 only the top-level blocks separate", {
+  out <- app_fn("dta_yaml_blank_lines")(nested_yaml_fixture(), max_depth = 1L)
+  lines <- yaml_lines(out)
+
+  # The one blank closes `metadata:` before `datasets:`; `receiver:` (depth 2)
+  # and `columns:` (depth 3) are now below the threshold and stay tight.
+  expect_equal(which(!nzchar(lines)), 5L)
+  expect_equal(lines[[6]], "datasets:")
+})
+
+test_that("dta_yaml_blank_lines lays a standalone dataset out at max_depth 1", {
+  text <- paste(
+    "name: d",
+    "type: tabular",
+    "files:",
+    "  filename: f.csv",
+    "columns:",
+    "- id: A",
+    "  label: a",
+    "- id: B",
+    sep = "\n"
+  )
+
+  expect_equal(
+    yaml_lines(app_fn("dta_yaml_blank_lines")(text, max_depth = 1L)),
+    c(
+      "name: d",
+      "type: tabular",
+      "",
+      "files:",
+      "  filename: f.csv",
+      "",
+      "columns:",
+      "- id: A",
+      "  label: a",
+      "- id: B"
+    )
+  )
+})
+
+test_that("dta_yaml_blank_lines keeps a block flush against the parent that opens it", {
+  # `datasets:` is immediately followed by its first entry, and `receiver:` by
+  # its first key: a blank there would orphan the parent line.
+  lines <- yaml_lines(
+    app_fn("dta_yaml_blank_lines")(nested_yaml_fixture(), max_depth = 3L)
+  )
+
+  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- name: d")
+  expect_equal(lines[[which(lines == "  receiver:") + 1L]], "    name: N")
+})
+
+test_that("dta_yaml_blank_lines preserves the trailing newline and adds none of its own", {
+  out <- app_fn("dta_yaml_blank_lines")(
+    paste0(nested_yaml_fixture(), "\n"),
+    max_depth = 3L
+  )
+
+  expect_true(endsWith(out, "b\n"))
+  expect_false(endsWith(out, "\n\n"))
+})
+
+test_that("dta_yaml_blank_lines carries a block scalar body through untouched", {
+  # The body contains a blank line and a line that looks like a key. Reading
+  # either as structure would insert a blank INSIDE the scalar, changing the
+  # value rather than the layout.
+  text <- paste(
+    "metadata:",
+    "  title: T",
+    "  note: |-",
+    "    line one",
+    "    key: not a key",
+    "",
+    "    after blank",
+    "  other: x",
+    sep = "\n"
+  )
+
+  out <- app_fn("dta_yaml_blank_lines")(text, max_depth = 3L)
+  lines <- yaml_lines(out)
+  start <- which(lines == "  note: |-")
+
+  expect_equal(
+    lines[start + seq_len(4L)],
+    c("    line one", "    key: not a key", "", "    after blank")
+  )
+  expect_identical(yaml::yaml.load(out), yaml::yaml.load(text))
+})
+
+test_that("dta_yaml_blank_lines survives the block scalar header as.yaml really writes", {
+  # A value whose first line starts with a space forces an explicit indentation
+  # indicator, and yaml writes it BEFORE the chomping one: `|2-`, not `|-`. A
+  # header regex that only allowed chomp-then-digit parsed the scalar's body as
+  # structure and spaced blank lines into the middle of a user's text. The
+  # fixture is emitted rather than hand-typed so it cannot drift from reality.
+  text <- yaml::as.yaml(
+    list(metadata = list(note = " indented first line\nsecond\n  deeper\nfourth")),
+    indent = 2, line.sep = "\n"
+  )
+  expect_true(grepl("|2-", text, fixed = TRUE))
+
+  out <- app_fn("dta_yaml_blank_lines")(text, max_depth = 3L)
+
+  expect_identical(yaml::yaml.load(out), yaml::yaml.load(text))
+  expect_identical(
+    yaml::yaml.load(out)$metadata$note,
+    " indented first line\nsecond\n  deeper\nfourth"
+  )
+})
+
+test_that("dta_yaml_blank_lines does not treat a folded long value as a nested block", {
+  # as.yaml() wraps a long plain scalar across several lines, indenting the
+  # continuations exactly as it would a child key. They are the value, not
+  # structure, and must not earn the field blank lines of its own.
+  long <- paste(rep("wordy", 40), collapse = " ")
+  # `template_source` follows `description` in a real dataset, and being a plain
+  # scalar it is what makes this discriminate: if the folded value counted as a
+  # block, closing it would push a blank line in front of the scalar after it.
+  text <- yaml::as.yaml(
+    list(datasets = list(list(
+      name = "d", description = long, template_source = "t.xlsx",
+      columns = list(list(id = "A"))
+    ))),
+    indent = 2, line.sep = "\n"
+  )
+  expect_gt(length(grep("^ +wordy", yaml_lines(text))), 0L)
+
+  lines <- yaml_lines(app_fn("dta_yaml_blank_lines")(text, max_depth = 3L))
+
+  expect_match(
+    lines[[which(lines == "  template_source: t.xlsx") - 1L]], "^ +wordy"
+  )
+  expect_true(all(nzchar(lines[grep("^ +wordy", lines) - 1L])))
+  expect_identical(
+    yaml::yaml.load(paste(lines, collapse = "\n"))$datasets[[1]]$description,
+    long
+  )
+})
+
+test_that("dta_yaml_blank_lines does not split folded prose that contains a colon", {
+  # `... and then Note: something ...` wrapped onto a continuation line is
+  # indistinguishable from a mapping entry by shape alone. What settles it is
+  # the OWNING line: `description:` already carries its value inline, so in
+  # block style it cannot have children at all.
+  prose <- paste(
+    paste(rep("filler", 14), collapse = " "),
+    "and then Note: something follows, e.g.: a second one",
+    paste(rep("filler", 14), collapse = " ")
+  )
+  text <- yaml::as.yaml(
+    list(datasets = list(list(
+      name = "d", description = prose, template_source = "t.xlsx",
+      columns = list(list(id = "A"))
+    ))),
+    indent = 2, line.sep = "\n"
+  )
+  # Pin the premise: a continuation line really does carry a `key: value` shape.
+  expect_gt(length(grep("^ +filler.*: ", yaml_lines(text))), 0L)
+
+  out <- app_fn("dta_yaml_blank_lines")(text, max_depth = 3L)
+  lines <- yaml_lines(out)
+
+  # The value is untouched, the scalar after it gains no blank line, and the
+  # document keeps its layout -- the guard bailing out here would silently cost
+  # the whole document its formatting.
+  expect_identical(yaml::yaml.load(out)$datasets[[1]]$description, prose)
+  expect_true(nzchar(lines[[which(lines == "  template_source: t.xlsx") - 1L]]))
+  expect_equal(lines[[which(lines == "  columns:") - 1L]], "")
+})
+
+test_that("dta_yaml_blank_lines leaves text it cannot own alone", {
+  text <- nested_yaml_fixture()
+  blank_lines <- app_fn("dta_yaml_blank_lines")
+
+  # max_depth below the top level: nothing is spaced, so nothing changes.
+  expect_identical(blank_lines(text, max_depth = 0L), text)
+  # Already laid out -- running twice must not double the blanks.
+  once <- blank_lines(text, max_depth = 3L)
+  expect_identical(blank_lines(once, max_depth = 3L), once)
+  # Degenerate input.
+  expect_identical(blank_lines("", max_depth = 3L), "")
+  expect_identical(blank_lines("{}\n", max_depth = 3L), "{}\n")
+  expect_null(blank_lines(NULL, max_depth = 3L))
+})
+
 # ---- YAML text serialization ------------------------------------------------
 
 test_that("dta_to_yaml_text serializes the whole DTA including metadata and dataset content", {
@@ -397,6 +632,37 @@ test_that("dta_to_yaml_text serializes the whole DTA including metadata and data
   expect_true(grepl("STUDYID", res$value, fixed = TRUE))
 })
 
+test_that("dta_to_yaml_text lays the document out in blank-line separated sections", {
+  res <- app_fn("dta_to_yaml_text")(app_fixture_dta())
+  expect_true(res$ok)
+  lines <- yaml_lines(res$value)
+
+  # `    contacts:` occurs under both receiver and supplier, so every
+  # occurrence of a key is checked rather than an assumed single one.
+  expect_blank_before <- function(key) {
+    at <- which(lines == key)
+    expect_gt(length(at), 0L)
+    expect_equal(lines[at - 1L], rep("", length(at)), info = key)
+  }
+
+  # Top-level paragraphs, and the depth-2/3 blocks inside them.
+  expect_blank_before("datasets:")
+  expect_blank_before("  supplier:")
+  expect_blank_before("    contacts:")
+  # A dataset's own sections.
+  expect_blank_before("  columns:")
+  expect_blank_before("  rules:")
+  # ... but not its list entries: two adjacent columns stay tight.
+  ids <- which(grepl("^  - id: ", lines))
+  expect_gt(length(ids), 1L)
+  expect_true(all(nzchar(lines[ids[-1] - 1L])))
+
+  # A block never opens with a blank, and the document never ends with one.
+  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- name: clinical_data")
+  expect_true(nzchar(lines[[length(lines)]]))
+  expect_false(any(!nzchar(utils::head(lines, -1L)) & !nzchar(lines[-1])))
+})
+
 test_that("dta_dataset_to_yaml_text serializes one dataset and errors for an unknown name", {
   dta <- app_fixture_dta()
 
@@ -407,6 +673,22 @@ test_that("dta_dataset_to_yaml_text serializes one dataset and errors for an unk
   bad_res <- app_fn("dta_dataset_to_yaml_text")(dta, "no_such_dataset")
   expect_false(bad_res$ok)
   expect_null(bad_res$value)
+})
+
+test_that("dta_dataset_to_yaml_text separates the dataset's own sections at its own root", {
+  res <- app_fn("dta_dataset_to_yaml_text")(app_fixture_dta(), "clinical_data")
+  expect_true(res$ok)
+  lines <- yaml_lines(res$value)
+
+  # `files:`/`columns:`/`rules:` are top-level here rather than two levels down,
+  # and must still be the things that separate.
+  expect_equal(lines[[which(lines == "files:") - 1L]], "")
+  expect_equal(lines[[which(lines == "columns:") - 1L]], "")
+  expect_equal(lines[[which(lines == "rules:") - 1L]], "")
+
+  ids <- which(grepl("^- id: ", lines))
+  expect_gt(length(ids), 1L)
+  expect_true(all(nzchar(lines[ids[-1] - 1L])))
 })
 
 # ---- dta_read_yaml / dta_read_yaml_text ------------------------------------

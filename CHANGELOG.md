@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **The generated Raw YAML is laid out in blank-line separated sections.** A
+  serialised specification ran to several hundred unbroken lines, so finding
+  where `metadata:` ended and `datasets:` began — or where one dataset stopped
+  and the next started — meant counting indentation.
+
+  A blank line now surrounds every block down to a dataset's own sections:
+  `metadata:` separates from `datasets:`, `receiver:`/`supplier:`/
+  `transmission:` from each other, each dataset from the next, and
+  `files:`/`columns:`/`rules:` from what follows. Column entries, rule entries
+  and `values:` lists stay tight, where blank lines would only add noise. The
+  single-dataset serialisation gets the same layout at its own root.
+
+  This is cosmetic and additive: nothing but whitespace changes, the documents
+  parse identically, and an **uploaded or hand-edited** YAML is still shown and
+  kept exactly as the user wrote it — only generated text is laid out.
+
 ### Added
 
 - **A file handler for deliverables that are never parsed: `DTAFileAny`,
