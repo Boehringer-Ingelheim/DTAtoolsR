@@ -57,6 +57,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `DTADataSetFile(paths = ...)` builds `DTAFileAny` handlers rather than bare
   `DTAFile` ones, so a dataset built that way round-trips through YAML.
 
+- **The Shiny app no longer lets a Files dataset's handler be declared `csv` or
+  `tsv`.** Adding a file to such a dataset offered a choice of `any`, `csv` and
+  `tsv`; a `DTADataSetFile` never reads a row, so the two parsing types
+  described a parse that never happens and invited a PDF or an archive to be
+  declared as something it was not. The type is now fixed at *Any file (not
+  parsed)* and shown read-only, and a `csv`/`tsv` save is refused with a
+  sentence saying why. Tabular datasets are unaffected — they still choose
+  between `csv` and `tsv`, and are still never offered `any`.
+
+  A document written by hand that declares a parsing handler inside a file
+  dataset still loads and still works; opening that handler in the editor and
+  saving it will retype it to `any`.
+
 - The bare `stop()` in the `load_file()` fallback is now a `cli::cli_abort()`
   naming the class it could not dispatch on.
 

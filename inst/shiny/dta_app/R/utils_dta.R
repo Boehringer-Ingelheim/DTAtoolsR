@@ -2185,13 +2185,23 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # positional list, so every helper here addresses a handler by its 1-based
 # index -- the same index the app uses in its upload keys ("<dataset>||<hi>").
 
-# File types the editor can offer. Deliberately narrower than the DTAFile class
-# tree: DTAFileFactory() -- the only route from a YAML document back to an
-# object -- implements csv and tsv only, so offering `delim` would create a
-# handler that cannot be read back.
+# File types the editor can offer, per dataset type. This is the ONE list: the
+# form builds its control from it and dta_set_handler() validates against it,
+# so the two can never drift apart.
+#
+# A FILE dataset offers `any` and nothing else. DTADataSetFile exists to
+# confirm that a deliverable arrived, is readable and is not empty -- it never
+# reads a row -- so `csv` or `tsv` there would describe a parse that never
+# happens, and invite a user to declare a PDF or an archive as something it is
+# not.
+#
+# A TABULAR dataset is offered csv and tsv, deliberately narrower than the
+# DTAFile class tree: DTAFileFactory() -- the only route from a YAML document
+# back to an object -- implements csv and tsv only, so offering `delim` would
+# create a handler that cannot be read back.
 dta_handler_types <- function(dataset_type = "tabular") {
   if (identical(dataset_type, "file")) {
-    c("any", "csv", "tsv")
+    "any"
   } else {
     c("csv", "tsv")
   }
@@ -2312,10 +2322,18 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
     if (length(fn) == 0) stop("A file name or pattern is required.")
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
-    if (!type %in% dta_handler_types(dataset_type)) {
+    allowed <- dta_handler_types(dataset_type)
+    if (!type %in% allowed) {
+      # A file dataset has exactly one legal type, so "must be one of: any"
+      # would state the rule without explaining it. Say why instead.
+      if (identical(dataset_type, "file")) {
+        stop(
+          "A file dataset does not parse its files, so its file type is always 'any'."
+        )
+      }
       stop(sprintf(
         "File type must be one of: %s.",
-        paste(dta_handler_types(dataset_type), collapse = ", ")
+        paste(allowed, collapse = ", ")
       ))
     }
 

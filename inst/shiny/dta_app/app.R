@@ -1869,9 +1869,9 @@ server <- function(input, output, session) {
       pf <- isolate(rv$file_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
       is_pattern <- isTRUE(pf$pattern)
-      # A file dataset parses nothing, so it is the only one that may declare
-      # `any` -- and the only one for which an ending restriction means
-      # anything. dta_handler_types() defaults to the tabular list, so a
+      # A file dataset parses nothing, so `any` is the only type it may
+      # declare -- and it is the only dataset for which an ending restriction
+      # means anything. dta_handler_types() defaults to the tabular list, so a
       # tabular dataset's editor is unchanged.
       ds_type <- tryCatch(
         dta_get_dataset(isolate(rv$dta), ed)@type,
@@ -1882,6 +1882,26 @@ server <- function(input, output, session) {
       names(type_choices) <- ifelse(
         type_choices == "any", "Any file (not parsed)", type_choices
       )
+      # With a single legal type there is nothing to choose, so the control is
+      # shown READ-ONLY rather than removed: `input$file_type` still has to
+      # exist client-side, because the endings panel below is conditional on
+      # it and an absent input reads as falsy -- which would hide the endings
+      # field on precisely the dataset type that has one. selectize = FALSE is
+      # what makes `disabled` visible: selectize.js replaces the original
+      # <select>, so the attribute alone would grey out nothing.
+      type_input <- if (length(type_choices) == 1L) {
+        shinyjs::disabled(
+          selectInput("file_type", "File type",
+            choices = type_choices, selected = type_choices[[1]],
+            width = "100%", selectize = FALSE
+          )
+        )
+      } else {
+        selectInput("file_type", "File type",
+          choices = type_choices,
+          selected = g("type", type_choices[[1]]), width = "100%"
+        )
+      }
       tagList(
         div(
           class = "spec-form",
@@ -1891,11 +1911,17 @@ server <- function(input, output, session) {
               value = g("filename"), width = "100%", rows = 2,
               placeholder = "clinical_data.csv   |   clinical_data.*[.]csv$"
             ),
-            selectInput("file_type", "File type",
-              choices = type_choices,
-              selected = g("type", type_choices[[1]]), width = "100%"
-            )
+            type_input
           ),
+          if (length(type_choices) == 1L) {
+            div(
+              class = "msg-hint", style = "margin:-8px 0 10px;",
+              paste(
+                "This dataset's files are checked for arrival, readability and",
+                "content, never parsed, so the type cannot be changed."
+              )
+            )
+          },
           conditionalPanel(
             condition = "input.file_type == 'any'",
             textInput("file_extensions", "Allowed file endings (optional)",
