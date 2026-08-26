@@ -581,11 +581,13 @@ test_that("dta_handler_types() with no argument still returns exactly c('csv','t
   expect_equal(fn(), c("csv", "tsv"))
 })
 
-test_that("dta_handler_types('file') includes 'any'", {
+test_that("dta_handler_types('file') offers 'any' and nothing else", {
+  # A DTADataSetFile never reads a row -- it only confirms the deliverable
+  # arrived, is readable and is not empty -- so a csv/tsv handler there would
+  # describe a parse that never happens. The editor must not offer the choice.
   fn <- app_fn("dta_handler_types")
-  types <- fn("file")
-  expect_true("any" %in% types)
-  expect_equal(types, c("any", "csv", "tsv"))
+
+  expect_equal(fn("file"), "any")
 })
 
 test_that("dta_handler_type() returns 'any' for a DTAFileAny", {
@@ -610,6 +612,24 @@ test_that("dta_set_handler() rejects type='any' when dataset_type is tabular (th
   )
   expect_false(res$ok)
   expect_match(res$error, "must be one of")
+})
+
+test_that("dta_set_handler() rejects a parsing type when dataset_type is file", {
+  # The mirror of the test above, and the programmatic half of the rule the
+  # form enforces by rendering its type control read-only.
+  fn <- app_fn("dta_set_handler")
+  ds <- DTAtools::DTADataSetFile(name = "reports")
+  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
+
+  for (ty in c("csv", "tsv")) {
+    res <- fn(dta_obj, "reports",
+      filename = "report.pdf", type = ty, dataset_type = "file"
+    )
+    expect_false(res$ok)
+    # Names the reason, not just the rule: "must be one of: any" would say
+    # nothing a user could act on.
+    expect_match(res$error, "does not parse its files")
+  }
 })
 
 test_that("a type='any' handler with extensions survives a YAML round trip", {

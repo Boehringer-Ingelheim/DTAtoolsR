@@ -840,7 +840,7 @@ server <- function(input, output, session) {
         class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
-          st <- st_map[[nm]] %||% "pending"
+          st <- dta_lookup(st_map, nm, "pending")
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
           st2 <- switch(st,
@@ -1869,9 +1869,9 @@ server <- function(input, output, session) {
       pf <- isolate(rv$file_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
       is_pattern <- isTRUE(pf$pattern)
-      # A file dataset parses nothing, so it is the only one that may declare
-      # `any` -- and the only one for which an ending restriction means
-      # anything. dta_handler_types() defaults to the tabular list, so a
+      # A file dataset parses nothing, so `any` is the only type it may
+      # declare -- and it is the only dataset for which an ending restriction
+      # means anything. dta_handler_types() defaults to the tabular list, so a
       # tabular dataset's editor is unchanged.
       ds_type <- tryCatch(
         dta_get_dataset(isolate(rv$dta), ed)@type,
@@ -1882,6 +1882,26 @@ server <- function(input, output, session) {
       names(type_choices) <- ifelse(
         type_choices == "any", "Any file (not parsed)", type_choices
       )
+      # With a single legal type there is nothing to choose, so the control is
+      # shown READ-ONLY rather than removed: `input$file_type` still has to
+      # exist client-side, because the endings panel below is conditional on
+      # it and an absent input reads as falsy -- which would hide the endings
+      # field on precisely the dataset type that has one. selectize = FALSE is
+      # what makes `disabled` visible: selectize.js replaces the original
+      # <select>, so the attribute alone would grey out nothing.
+      type_input <- if (length(type_choices) == 1L) {
+        shinyjs::disabled(
+          selectInput("file_type", "File type",
+            choices = type_choices, selected = type_choices[[1]],
+            width = "100%", selectize = FALSE
+          )
+        )
+      } else {
+        selectInput("file_type", "File type",
+          choices = type_choices,
+          selected = g("type", type_choices[[1]]), width = "100%"
+        )
+      }
       tagList(
         div(
           class = "spec-form",
@@ -1891,11 +1911,17 @@ server <- function(input, output, session) {
               value = g("filename"), width = "100%", rows = 2,
               placeholder = "clinical_data.csv   |   clinical_data.*[.]csv$"
             ),
-            selectInput("file_type", "File type",
-              choices = type_choices,
-              selected = g("type", type_choices[[1]]), width = "100%"
-            )
+            type_input
           ),
+          if (length(type_choices) == 1L) {
+            div(
+              class = "msg-hint", style = "margin:-8px 0 10px;",
+              paste(
+                "This dataset's files are checked for arrival, readability and",
+                "content, never parsed, so the type cannot be changed."
+              )
+            )
+          },
           conditionalPanel(
             condition = "input.file_type == 'any'",
             textInput("file_extensions", "Allowed file endings (optional)",
@@ -4844,7 +4870,7 @@ server <- function(input, output, session) {
         }
       }
       new_status[[nm]] <- if (specs_same && handlers_same) {
-        old_status[[nm]] %||% "pending"
+        dta_lookup(old_status, nm, "pending")
       } else {
         "pending"
       }
@@ -4862,7 +4888,7 @@ server <- function(input, output, session) {
     for (nm in new_names) reset_dataset_fileinputs(nm)
     for (nm in new_names) {
       if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
-        identical(new_status[[nm]], "pending")) {
+        identical(dta_lookup(new_status, nm, "pending"), "pending")) {
         new_status[[nm]] <- "nodata"
       }
     }
@@ -5269,7 +5295,7 @@ server <- function(input, output, session) {
   # --- status / summary outputs ------------------------------------------
   output$dataset_status_line <- renderUI({
     req(rv$active)
-    st <- rv$status[[rv$active]] %||% "pending"
+    st <- dta_lookup(rv$status, rv$active, "pending")
     s <- rv$structure[[rv$active]]
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
@@ -5309,7 +5335,7 @@ server <- function(input, output, session) {
       any_files <<- TRUE
       rows <- lapply(recs, function(rec) {
         fid <- get_file_id(dsname, hi, rec$table)
-        st <- tstatus[[rec$table]] %||% "pending"
+        st <- dta_lookup(tstatus, rec$table, "pending")
         # "unknown" is the third tick state: the table was validated, but by a
         # run that predates import checking, so its import axis is unknown --
         # neither the green pass nor the red fail (see dta_table_status_map()).

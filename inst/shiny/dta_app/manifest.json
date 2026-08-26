@@ -3121,7 +3121,7 @@
       "checksum": "499589b127721eae5ad5877fe1d5d250"
     },
     "R/utils_dta.R": {
-      "checksum": "a1c1ebe3654627e3901038ab3a61aab8"
+      "checksum": "09c9591e5ca8cd66d84451e5fc691ad3"
     },
     "R/utils_export.R": {
       "checksum": "cb019d396e88a149968e9ec549bea956"
@@ -3130,7 +3130,7 @@
       "checksum": "1bf6923aea67de0d18fe2f009ce17011"
     },
     "app.R": {
-      "checksum": "19648f158c96e79bfc73e65f2380296f"
+      "checksum": "4bb9115605b6572cc8a53bdd6fc4239a"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

@@ -6,24 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-### Changed
-
-- **The generated Raw YAML is laid out in blank-line separated sections.** A
-  serialised specification ran to several hundred unbroken lines, so finding
-  where `metadata:` ended and `datasets:` began — or where one dataset stopped
-  and the next started — meant counting indentation.
-
-  A blank line now surrounds every block down to a dataset's own sections:
-  `metadata:` separates from `datasets:`, `receiver:`/`supplier:`/
-  `transmission:` from each other, each dataset from the next, and
-  `files:`/`columns:`/`rules:` from what follows. Column entries, rule entries
-  and `values:` lists stay tight, where blank lines would only add noise. The
-  single-dataset serialisation gets the same layout at its own root.
-
-  This is cosmetic and additive: nothing but whitespace changes, the documents
-  parse identically, and an **uploaded or hand-edited** YAML is still shown and
-  kept exactly as the user wrote it — only generated text is laid out.
-
 ### Added
 
 - **A file handler for deliverables that are never parsed: `DTAFileAny`,
@@ -58,6 +40,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The generated Raw YAML is laid out in blank-line separated sections.** A
+  serialised specification ran to several hundred unbroken lines, so finding
+  where `metadata:` ended and `datasets:` began — or where one dataset stopped
+  and the next started — meant counting indentation.
+
+  A blank line now surrounds every block down to a dataset's own sections:
+  `metadata:` separates from `datasets:`, `receiver:`/`supplier:`/
+  `transmission:` from each other, each dataset from the next, and
+  `files:`/`columns:`/`rules:` from what follows. Column entries, rule entries
+  and `values:` lists stay tight, where blank lines would only add noise. The
+  single-dataset serialisation gets the same layout at its own root.
+
+  This is cosmetic and additive: nothing but whitespace changes, the documents
+  parse identically, and an **uploaded or hand-edited** YAML is still shown and
+  kept exactly as the user wrote it — only generated text is laid out.
+
 - `__DTAtools_supported_file_types__` is split in two. `type:` was answering two
   unrelated questions with one list: *which reader parses this file* (tabular
   only) and *what may this file be* (file datasets). Tabular handlers now
@@ -75,10 +73,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `DTADataSetFile(paths = ...)` builds `DTAFileAny` handlers rather than bare
   `DTAFile` ones, so a dataset built that way round-trips through YAML.
 
+- **The Shiny app no longer lets a Files dataset's handler be declared `csv` or
+  `tsv`.** Adding a file to such a dataset offered a choice of `any`, `csv` and
+  `tsv`; a `DTADataSetFile` never reads a row, so the two parsing types
+  described a parse that never happens and invited a PDF or an archive to be
+  declared as something it was not. The type is now fixed at *Any file (not
+  parsed)* and shown read-only, and a `csv`/`tsv` save is refused with a
+  sentence saying why. Tabular datasets are unaffected — they still choose
+  between `csv` and `tsv`, and are still never offered `any`.
+
+  A document written by hand that declares a parsing handler inside a file
+  dataset still loads and still works; opening that handler in the editor and
+  saving it will retype it to `any`.
+
 - The bare `stop()` in the `load_file()` fallback is now a `cli::cli_abort()`
   naming the class it could not dispatch on.
 
 ### Fixed
+
+- **Uploading into a Files dataset reported *"subscript out of bounds"* in the
+  Loaded files panel, and the file was bound anyway.** The upload itself
+  succeeded — which is why a second attempt offered to overwrite a file the
+  user had never seen arrive — and the panel then threw while drawing the
+  per-file pass/fail tick.
+
+  The tick looks a bound item up in the dataset's status map, defaulting to
+  *pending* when it is absent, and absent is the normal state for a file that
+  has just arrived: a file dataset's `validation_status()` is empty until
+  `check()` runs, where a tabular dataset already carries a pending row per
+  loaded table. That default was written `map[[name]] %||% "pending"`, which
+  cannot work — the status map is an atomic character vector, `[[` on an atomic
+  vector *throws* for an absent name rather than returning `NULL`, and the
+  error is raised while evaluating the left operand, so `%||%` never runs. On a
+  list the same expression is fine, which is why only the file datasets broke.
+
+  Every read of a status map now goes through one helper that is null-safe for
+  both shapes. Only the Loaded files panel was reachable from the reported
+  steps; the other five reads — the dataset nav's per-dataset icon, the dataset
+  status line, two in the Raw YAML apply and the validation report builder —
+  spell the lookup the same way and are safe only because each happens to
+  iterate the map's own names. Nothing enforced that, so they go through the
+  helper too.
+
+  The suite drove this whole journey already — add a Files dataset, declare a
+  file, upload, validate, overwrite — and still missed it, because it only ever
+  inspected the reactive state afterwards and never asked for the output. The
+  Loaded files panel is now rendered by two tests, one either side of
+  `check()`.
 
 - **Files could not be uploaded into a Files dataset in the Shiny app.**
   Dropping a file reported *"This method needs to be implemented in derived
