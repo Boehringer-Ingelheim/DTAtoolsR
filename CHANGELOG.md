@@ -62,6 +62,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Uploading into a Files dataset reported *"subscript out of bounds"* in the
+  Loaded files panel, and the file was bound anyway.** The upload itself
+  succeeded — which is why a second attempt offered to overwrite a file the
+  user had never seen arrive — and the panel then threw while drawing the
+  per-file pass/fail tick.
+
+  The tick looks a bound item up in the dataset's status map, defaulting to
+  *pending* when it is absent, and absent is the normal state for a file that
+  has just arrived: a file dataset's `validation_status()` is empty until
+  `check()` runs, where a tabular dataset already carries a pending row per
+  loaded table. That default was written `map[[name]] %||% "pending"`, which
+  cannot work — the status map is an atomic character vector, `[[` on an atomic
+  vector *throws* for an absent name rather than returning `NULL`, and the
+  error is raised while evaluating the left operand, so `%||%` never runs. On a
+  list the same expression is fine, which is why only the file datasets broke.
+
+  Every read of a status map now goes through one helper that is null-safe for
+  both shapes. Only the Loaded files panel was reachable from the reported
+  steps; the other five reads — the dataset nav's per-dataset icon, the dataset
+  status line, two in the Raw YAML apply and the validation report builder —
+  spell the lookup the same way and are safe only because each happens to
+  iterate the map's own names. Nothing enforced that, so they go through the
+  helper too.
+
+  The suite drove this whole journey already — add a Files dataset, declare a
+  file, upload, validate, overwrite — and still missed it, because it only ever
+  inspected the reactive state afterwards and never asked for the output. The
+  Loaded files panel is now rendered by two tests, one either side of
+  `check()`.
+
 - **Files could not be uploaded into a Files dataset in the Shiny app.**
   Dropping a file reported *"This method needs to be implemented in derived
   classes"* — the text of the unimplemented `load_file()` stub, surfaced

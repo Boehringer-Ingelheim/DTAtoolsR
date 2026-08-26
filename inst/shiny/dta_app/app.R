@@ -840,7 +840,7 @@ server <- function(input, output, session) {
         class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
-          st <- st_map[[nm]] %||% "pending"
+          st <- dta_lookup(st_map, nm, "pending")
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
           st2 <- switch(st,
@@ -4844,7 +4844,7 @@ server <- function(input, output, session) {
         }
       }
       new_status[[nm]] <- if (specs_same && handlers_same) {
-        old_status[[nm]] %||% "pending"
+        dta_lookup(old_status, nm, "pending")
       } else {
         "pending"
       }
@@ -4862,7 +4862,7 @@ server <- function(input, output, session) {
     for (nm in new_names) reset_dataset_fileinputs(nm)
     for (nm in new_names) {
       if (dta_dataset_content_count(dta_get_dataset(new_dta, nm)) == 0 &&
-        identical(new_status[[nm]], "pending")) {
+        identical(dta_lookup(new_status, nm, "pending"), "pending")) {
         new_status[[nm]] <- "nodata"
       }
     }
@@ -5269,7 +5269,7 @@ server <- function(input, output, session) {
   # --- status / summary outputs ------------------------------------------
   output$dataset_status_line <- renderUI({
     req(rv$active)
-    st <- rv$status[[rv$active]] %||% "pending"
+    st <- dta_lookup(rv$status, rv$active, "pending")
     s <- rv$structure[[rv$active]]
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
@@ -5309,7 +5309,7 @@ server <- function(input, output, session) {
       any_files <<- TRUE
       rows <- lapply(recs, function(rec) {
         fid <- get_file_id(dsname, hi, rec$table)
-        st <- tstatus[[rec$table]] %||% "pending"
+        st <- dta_lookup(tstatus, rec$table, "pending")
         # "unknown" is the third tick state: the table was validated, but by a
         # run that predates import checking, so its import axis is unknown --
         # neither the green pass nor the red fail (see dta_table_status_map()).

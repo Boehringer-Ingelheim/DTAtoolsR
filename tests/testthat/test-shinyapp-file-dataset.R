@@ -203,3 +203,95 @@ test_that("full file-dataset round trip: add dataset, handler, load, check, YAML
   expect_length(hs_back, 1)
   expect_s3_class(hs_back[[1]], "DTAtools::DTAFileAny")
 })
+
+# ---- dta_lookup(): name lookup that survives an atomic container ------------
+#
+# Regression cover for "Error: subscript out of bounds" in the Loaded files
+# panel. `[[` is null-safe on a list and NOT on an atomic vector, and
+# `x[["missing"]] %||% "pending"` cannot rescue the atomic case because the
+# error is raised while evaluating the left operand. The status maps are atomic
+# character vectors, so every read of one has to go through dta_lookup().
+
+test_that("dta_lookup() returns the default for a name absent from an ATOMIC vector", {
+  fn <- app_fn("dta_lookup")
+
+  # The bare `[[` this replaces: the message is base R's and is translated on a
+  # non-English machine, so pin the condition CLASS, never the text.
+  expect_error(c(a = "1")[["b"]], class = "subscriptOutOfBoundsError")
+
+  expect_equal(fn(c(a = "1"), "b", "pending"), "pending")
+  expect_equal(fn(stats::setNames(character(0), character(0)), "b", "pending"), "pending")
+})
+
+test_that("dta_lookup() returns the stored value when the name IS present", {
+  fn <- app_fn("dta_lookup")
+
+  expect_equal(fn(c(a = "pass"), "a", "pending"), "pass")
+  expect_equal(fn(list(a = "fail"), "a", "pending"), "fail")
+})
+
+test_that("dta_lookup() defaults for an unusable container or name", {
+  fn <- app_fn("dta_lookup")
+
+  expect_equal(fn(NULL, "a", "pending"), "pending")
+  expect_equal(fn(c(a = "1"), NULL, "pending"), "pending")
+  expect_equal(fn(c(a = "1"), NA_character_, "pending"), "pending")
+  expect_equal(fn(c("1", "2"), "a", "pending"), "pending") # unnamed
+  expect_equal(fn(c(a = "1", b = "2"), c("a", "b"), "pending"), "pending") # not length 1
+  expect_null(fn(c(a = "1"), "b"))
+})
+
+# ---- the reported bug, end to end ------------------------------------------
+
+test_that("a file bound but not yet checked reports 'pending', not a subscript error", {
+  # THE REPORTED BUG: uploading into a Files dataset bound the file (so a retry
+  # offered to overwrite it) and then blew up rendering the Loaded files panel.
+  # A file dataset's validation_status() is EMPTY until check() runs, so the
+  # per-file tick looked its name up in a zero-length named character vector.
+  load_fn <- app_fn("dta_load_file")
+  name_fn <- app_fn("dta_bound_item_name")
+  status_fn <- app_fn("dta_table_status_map")
+  lookup_fn <- app_fn("dta_lookup")
+
+  target <- file.path(tempdir(), "report.pdf")
+  writeLines("dummy", target)
+  on.exit(unlink(target), add = TRUE)
+
+  dta_obj <- make_file_dta()
+  tbl <- name_fn(DTAtools::datasets(dta_obj, "reports")@type, target)
+  expect_equal(tbl, "report.pdf")
+
+  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  expect_true(res$ok, info = res$error)
+
+  # The precondition that made the panel throw: nothing is validated yet.
+  tstatus <- status_fn(res$value, "reports")
+  expect_length(tstatus, 0)
+  expect_error(tstatus[[tbl]], class = "subscriptOutOfBoundsError")
+
+  # What the Loaded files panel now does instead.
+  expect_equal(lookup_fn(tstatus, tbl, "pending"), "pending")
+})
+
+test_that("the per-file tick still turns to 'pass' once the dataset is checked", {
+  # The guard must not swallow a real status: the same lookup has to keep
+  # reporting pass/fail after check() populates validation_status().
+  load_fn <- app_fn("dta_load_file")
+  name_fn <- app_fn("dta_bound_item_name")
+  status_fn <- app_fn("dta_table_status_map")
+  lookup_fn <- app_fn("dta_lookup")
+
+  target <- file.path(tempdir(), "report.pdf")
+  writeLines("dummy", target)
+  on.exit(unlink(target), add = TRUE)
+
+  dta_obj <- make_file_dta()
+  tbl <- name_fn(DTAtools::datasets(dta_obj, "reports")@type, target)
+  res <- load_fn(dta_obj, dataset = "reports", file = target, handler_index = 1)
+  expect_true(res$ok, info = res$error)
+
+  checked <- DTAtools::check(res$value, datasets = "reports", quiet = TRUE)
+  tstatus <- status_fn(checked, "reports")
+  expect_named(tstatus, tbl)
+  expect_equal(lookup_fn(tstatus, tbl, "pending"), "pass")
+})

@@ -609,6 +609,36 @@ dta_table_status_from_status_df <- function(vs) {
   stats::setNames(st, as.character(vs[[tcol]]))
 }
 
+# Look up ONE name in a named vector or list, with a default for an absent name.
+#
+# `[[` is null-safe on a LIST and is NOT null-safe on an ATOMIC vector:
+# `list(a = 1)[["b"]]` is NULL, but `c(a = "1")[["b"]]` throws "subscript out of
+# bounds". Crucially, `x[["b"]] %||% "default"` cannot rescue the atomic case --
+# the error is raised while evaluating the left operand, so `%||%` never runs.
+#
+# Both status maps are atomic character vectors -- dta_status_map() and
+# dta_table_status_from_status_df() both end in stats::setNames() over a
+# character vector -- while rv$status is *also* assigned a bare list() when a
+# document is closed. Neither shape may therefore be assumed at the point of
+# use, and an absent name is entirely normal: a file bound but not yet checked
+# has no row in validation_status() at all, which is exactly the state the app
+# renders as "pending".
+dta_lookup <- function(x, name, default = NULL) {
+  if (is.null(x) || is.null(name) || length(name) != 1L) {
+    return(default)
+  }
+  name <- as.character(name)
+  if (is.na(name)) {
+    return(default)
+  }
+  nms <- names(x)
+  if (is.null(nms) || !(name %in% nms)) {
+    return(default)
+  }
+  out <- x[[name]]
+  if (is.null(out)) default else out
+}
+
 # Reset ("not validated") the validation status of one/all tables of a dataset,
 # used after an overwrite so a stale pass/fail is never shown for changed data.
 # Returns dta_try() result (value = updated DTA).
@@ -1308,7 +1338,9 @@ dta_build_validation_report <- function(dta, status = NULL) {
   rdf <- if (isTRUE(res$ok)) res$value else NULL
 
   ds_rows <- paste0(vapply(ds_names, function(nm) {
-    s <- st[[nm]]
+    # Provably present today (ds_names IS names(st)), routed through the helper
+    # so the invariant is enforced rather than merely true.
+    s <- dta_lookup(st, nm, "pending")
     cls <- if (identical(s, "pass")) "ok" else if (identical(s, "fail")) "bad" else "muted"
     paste0(
       "<tr><td>", esc(nm), "</td><td class='", cls, "'>",
