@@ -64,7 +64,12 @@ test_that("the example's file dataset reports the deliverable as missing before 
   expect_equal(nrow(msgs), 1)
   expect_equal(msgs$rule_id, "file_presence")
   expect_match(msgs$message, "clinical_data2\\.csv\\.gz", fixed = FALSE)
-  expect_match(msgs$message, "not found")
+  # "not delivered", NOT "not found": a file declared in the spec that never
+  # arrived is a different condition from a delivered path that is missing
+  # from disk ("File '<path>' not found.", validate_file_dataset_entry()).
+  # This target has no path to look at at all, and the check deliberately
+  # never stats one for it.
+  expect_match(msgs$message, "was not delivered")
 })
 
 test_that("both example datasets validate clean once their deliverables are bound", {
