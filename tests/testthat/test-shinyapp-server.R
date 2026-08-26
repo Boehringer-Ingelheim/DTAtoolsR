@@ -1217,9 +1217,10 @@ test_that("editing only the description leaves a passed check passed", {
     session$setInputs(meta_save = 1)
 
     expect_null(rv$meta_msg)
-    # rv$structure is left alone: output$main depends on it and nothing else,
-    # so reassigning it re-renders the entire workspace and resets the active
-    # tab and every file input. Only a rename has to pay that price.
+    # rv$structure is left alone: reassigning it re-renders every
+    # structure-dependent output (dataset nav, detail panel and its file
+    # inputs) for no reason -- nothing name-keyed changed. Only a rename has
+    # to pay that price.
     expect_identical(rv$structure, structure_before)
     expect_equal(
       DTAtools::datasets(rv$dta, "clinical_data")@description,

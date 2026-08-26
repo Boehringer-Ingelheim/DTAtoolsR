@@ -231,8 +231,8 @@ client_id_js <- "
 #
 # The wrapper does not exist until output$main's renderUI first draws the Raw
 # YAML tab (itself gated on shinyAce being installed at all), and is replaced
-# outright on every later re-render (a new load, or adding/removing a
-# dataset) -- so this cannot just run once at page load and grab one element.
+# outright on every later re-render (a new load, a reset, a restored
+# session) -- so this cannot just run once at page load and grab one element.
 # A MutationObserver on the whole document is what lets it attach whenever
 # that first happens and again every time it recurs, instead of assuming the
 # wrapper exists yet or exists exactly once. `ace` (the global the vendored
@@ -344,6 +344,7 @@ server <- function(input, output, session) {
     is_example = FALSE, # TRUE when the bundled example DTA is loaded (enables example-file pickers)
     md_token = 0, # bump to re-render metadata editor
     contacts_token = 0, # bump to re-render contacts list
+    doc_token = 0, # bump ONLY on load/reset/restore -> re-render the main layout
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
     editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
@@ -525,6 +526,7 @@ server <- function(input, output, session) {
     rv$is_example <- isTRUE(is_example)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
+    rv$doc_token <- rv$doc_token + 1
     autosave()
   }
 
@@ -3606,10 +3608,11 @@ server <- function(input, output, session) {
       invalidate_dataset(new_name)
       # Only a rename touches rv$structure -- it is keyed by name and caches
       # each dataset's name, so the nav list would otherwise keep showing the
-      # old one. Assigning it re-renders the WHOLE workspace (output$main
-      # depends on rv$structure alone), resetting the active tab and every file
-      # input, which is why the column and rule editors never touch it and why
-      # a description-only edit here must not either.
+      # old one. Assigning it re-renders every structure-dependent output
+      # (dataset nav, detail panel and its file inputs), which is why the
+      # column and rule editors never touch it and why a description-only edit
+      # here must not either. It does NOT rebuild the whole workspace:
+      # output$main depends only on rv$doc_token (load/reset/restore).
       rv$structure <- build_structure(rv$dta)
     }
 
@@ -3627,11 +3630,14 @@ server <- function(input, output, session) {
   })
 
   # Floating, foldable dock that holds the validation messages for the ACTIVE
-  # dataset. Rendered once per loaded structure (so the DT inside stays stable);
-  # the table + count badge update reactively via their own outputs. The server
-  # sends 'dta_msgs_dock' -> 'open' after a check that produced messages.
+  # dataset. Rendered once per loaded document -- rv$doc_token, the same
+  # contract as output$main, so the DT inside stays stable across dataset
+  # add/remove/rename; the table + count badge update reactively via their own
+  # outputs. The server sends 'dta_msgs_dock' -> 'open' after a check that
+  # produced messages.
   output$floating_msgs <- renderUI({
-    if (is.null(rv$structure)) {
+    rv$doc_token
+    if (is.null(isolate(rv$structure))) {
       return(NULL)
     }
     div(
@@ -5407,6 +5413,7 @@ server <- function(input, output, session) {
     rv$status <- list()
     rv$is_example <- FALSE
     rv$example_target <- NULL
+    rv$doc_token <- rv$doc_token + 1
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
@@ -5557,18 +5564,21 @@ server <- function(input, output, session) {
 
   # The sidebar's dynamic outputs must never be suspended as "hidden".
   #
-  # Adding or removing a dataset (any rv$structure assignment) re-renders
-  # output$main, which replaces the whole workspace DOM -- including the
-  # sidebar's uiOutput placeholders. When the client re-binds those it
-  # snapshots their visibility, and that snapshot can race the DOM swap and
-  # report a visible output as hidden. Under the default suspendWhenHidden the
-  # server then suspends the render and never sends its HTML -- and unlike an
-  # output inside a nav_panel(), whose visibility is re-checked when its tab
-  # fires shown.bs.tab, nothing in the sidebar ever triggers a re-check, so
-  # the workspace header, the summary counts and the dataset list stay blank
+  # Whenever output$main re-renders (a load, a reset, a restored session --
+  # rv$doc_token) it replaces the whole workspace DOM, including the sidebar's
+  # uiOutput placeholders. When the client re-binds those it snapshots their
+  # visibility, and that snapshot can race the DOM swap and report a visible
+  # output as hidden. Under the default suspendWhenHidden the server then
+  # suspends the render and never sends its HTML -- and unlike an output
+  # inside a nav_panel(), whose visibility is re-checked when its tab fires
+  # shown.bs.tab, nothing in the sidebar ever triggers a re-check, so the
+  # workspace header, the summary counts and the dataset list stay blank
   # until something incidental (a window resize) forces a re-scan. Seen in the
   # wild as "removed a dataset and the overview and Datasets list
-  # disappeared". These renders are cheap; send them unconditionally.
+  # disappeared" -- back when every rv$structure assignment re-rendered
+  # output$main; the doc_token decoupling has since removed those extra swaps,
+  # but every swap that remains still races. These renders are cheap; send
+  # them unconditionally.
   for (sidebar_output in c(
     "workspace_header", "summary_metrics", "dataset_nav_ui",
     "add_dataset_ui", "validation_report_ui"
@@ -5689,10 +5699,19 @@ server <- function(input, output, session) {
 
   # --- main layout (landing vs workspace) --------------------------------
   output$main <- renderUI({
-    # Depend ONLY on rv$structure (set once per load) so metadata edits and
-    # uploads -- which mutate rv$dta -- do not rebuild the whole workspace or
-    # reset the active tab / file inputs. Live bits live in their own outputs.
-    if (is.null(rv$structure)) {
+    # Depend ONLY on rv$doc_token, bumped exactly where the DOCUMENT changes
+    # identity: apply_loaded() (a new load), confirm_reset and restore_session.
+    # Nothing that merely mutates the loaded document -- metadata edits,
+    # uploads, adding/removing/renaming a dataset, handler edits, a raw-YAML
+    # apply -- may rebuild the whole workspace DOM: that would reset the
+    # active nav tab and every file input, and re-open the client-side
+    # visibility-snapshot race described at the suspendWhenHidden block below
+    # for every output in the swapped DOM. rv$structure is therefore read
+    # under isolate(): it only decides landing vs workspace here, and every
+    # assignment that changes THAT answer also bumps rv$doc_token. Live bits
+    # live in their own outputs.
+    rv$doc_token
+    if (is.null(isolate(rv$structure))) {
       # Landing. Reference input$dta_client_id directly so this re-renders once
       # the browser reports its id and the restore button can appear.
       restore_available <- {
@@ -5733,7 +5752,6 @@ server <- function(input, output, session) {
       )
     } else {
       # Workspace
-      names_ds <- names(rv$structure)
       layout_sidebar(
         sidebar = sidebar(
           width = 320,
@@ -5849,6 +5867,7 @@ server <- function(input, output, session) {
     rv$is_example <- isTRUE(saved$is_example)
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
+    rv$doc_token <- rv$doc_token + 1
     showNotification("Previous session restored.", type = "message")
   })
 }
