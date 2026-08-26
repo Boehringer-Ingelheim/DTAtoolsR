@@ -3637,17 +3637,12 @@ server <- function(input, output, session) {
         uiOutput("msgs_dock_meta", inline = TRUE),
         div(
           class = "msgs-dock-actions",
-          tags$span(
-            class = "msgs-dock-dl", onclick = "event.stopPropagation();",
-            downloadButton("dl_msgs_csv", "CSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_tsv", "TSV", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_xlsx", "XLSX", class = "btn btn-sm btn-outline-secondary"),
-            downloadButton("dl_msgs_html", "Report",
-              class = "btn btn-sm btn-outline-secondary",
-              # Named apart from the sidebar's "Validation summary": this is the
-              # message-level report, that one is the per-dataset outcome.
-              title = "Download the full validation message report"
-            )
+          # The .msgs-dock-dl flex container IS the uiOutput's own span: an
+          # extra wrapper around it would leave the buttons as inline children
+          # of a one-child flex box and lose the gap between them.
+          uiOutput("msgs_dock_dl",
+            inline = TRUE, class = "msgs-dock-dl",
+            onclick = "event.stopPropagation();"
           ),
           tags$span(class = "msgs-dock-chevron", HTML("&#x25BC;"))
         )
@@ -3660,6 +3655,91 @@ server <- function(input, output, session) {
           "Use the filters at the top of each column to search or pick a Dataset / Table. Click a message row to open the detailed inspect report."
         )
       )
+    )
+  })
+
+  # Has the ACTIVE dataset actually been checked? "pending" (data bound, never
+  # validated) and "nodata" (skipped for missing data) are both NOT a check --
+  # see the same distinction drawn for the sidebar's Validation summary.
+  msgs_active_checked <- reactive({
+    isTRUE(dta_lookup(rv$status, rv$active, "pending") %in% c("pass", "fail"))
+  })
+
+  # Has ANY dataset been checked? The whole-DTA report follows this, not the
+  # active dataset.
+  msgs_any_checked <- reactive({
+    st <- unlist(rv$status)
+    length(st) > 0 && any(st %in% c("pass", "fail"))
+  })
+
+  # The dock's download buttons, in their own output rather than inline in
+  # output$floating_msgs: the dock is deliberately rendered once per structure
+  # so the DT inside stays stable, and therefore cannot react to validation
+  # state -- but these buttons must.
+  #
+  # Before a check has been run there is nothing to export. Exporting anyway
+  # would hand back a file that reads as a clean result ("No validation
+  # messages for this dataset.") when in truth nothing was ever looked at, so
+  # the buttons are disabled instead.
+  #
+  # The three table exports are scoped to the active dataset and follow ITS
+  # status; "Report" is the whole-DTA write_validation_report() output and
+  # follows whether any dataset has been checked. The two can legitimately
+  # disagree, so they are gated separately.
+  output$msgs_dock_dl <- renderUI({
+    active_ok <- msgs_active_checked()
+    any_ok <- msgs_any_checked()
+    ds <- rv$active %||% "this dataset"
+
+    # A DISABLED downloadButton is not an option: shiny already renders every
+    # downloadButton with class "disabled" and aria-disabled, and its
+    # shiny-download-link binding drops both the moment the handler URL
+    # arrives from the server -- which it always does, since the handler is
+    # registered unconditionally. Marking it up as disabled therefore changes
+    # nothing on screen.
+    #
+    # So the off state is a look-alike <button> instead: same Bootstrap
+    # classes, no shiny-download-link class, and hence no binding to switch it
+    # back on. Bootstrap 5's `.btn.disabled` (pointer-events: none) plus the
+    # `disabled` attribute -- which a <button>, unlike an <a>, actually honours
+    # -- make it inert for mouse and keyboard alike.
+    dl_btn <- function(id, label, enabled, title) {
+      if (enabled) {
+        return(downloadButton(id, label,
+          class = "btn btn-sm btn-outline-secondary", title = title
+        ))
+      }
+      tags$button(
+        id = id, type = "button", disabled = NA,
+        class = "btn btn-sm btn-outline-secondary disabled",
+        `aria-disabled` = "true", title = title,
+        icon("download"), " ", label
+      )
+    }
+
+    tagList(
+      dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as CSV", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as TSV", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
+        sprintf("Download the validation messages for %s as XLSX", ds)
+      } else {
+        sprintf("Run a check on %s first -- there are no results to export yet", ds)
+      }),
+      # Named apart from the sidebar's "Validation summary": this is the
+      # message-level report, that one is the per-dataset outcome.
+      dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
+        "Download the full validation message report"
+      } else {
+        "Run a check first -- there are no results to report yet"
+      })
     )
   })
 
@@ -3751,13 +3831,20 @@ server <- function(input, output, session) {
     nm <- rv$active %||% "dataset"
     paste0(gsub("[^A-Za-z0-9._-]+", "_", nm), "_validation_messages")
   }
+  # The `req()` in each content function is not redundant with the disabled
+  # buttons above: a downloadHandler's URL stays reachable whatever the button
+  # looks like, so the "no check, no export" rule is enforced here as well.
   output$dl_msgs_csv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".csv"),
-    content = function(file) utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+    content = function(file) {
+      req(msgs_active_checked())
+      utils::write.csv(msgs_dl_df(), file, row.names = FALSE, na = "")
+    }
   )
   output$dl_msgs_tsv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".tsv"),
     content = function(file) {
+      req(msgs_active_checked())
       utils::write.table(
         msgs_dl_df(), file,
         sep = "\t", row.names = FALSE, na = "", qmethod = "double"
@@ -3767,6 +3854,7 @@ server <- function(input, output, session) {
   output$dl_msgs_xlsx <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".xlsx"),
     content = function(file) {
+      req(msgs_active_checked())
       if (!requireNamespace("writexl", quietly = TRUE)) {
         showNotification(
           "XLSX export needs the 'writexl' package. Install it, or use CSV / TSV.",
@@ -3793,6 +3881,7 @@ server <- function(input, output, session) {
   output$dl_msgs_html <- downloadHandler(
     filename = function() paste0(report_dl_base(), ".html"),
     content = function(file) {
+      req(msgs_any_checked())
       tryCatch(
         DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
         error = function(e) {

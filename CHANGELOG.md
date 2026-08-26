@@ -91,6 +91,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The Shiny app offered the Validation messages downloads before any check
+  had been run.** The dock's CSV, TSV, XLSX and Report buttons were live from
+  the moment a DTA was loaded, and exporting produced a file whose only row
+  read *No validation messages for this dataset.* — indistinguishable from the
+  clean result of a check that really did run.
+
+  The buttons are now inert until there is something to export, and say why on
+  hover. The three table exports are scoped to the active dataset and follow
+  its status; *Report* is the whole-DTA report and follows whether any dataset
+  has been checked, so the two can legitimately disagree. Neither *pending*
+  (data bound, never validated) nor *No data* (skipped for missing files)
+  counts as a check. The handlers refuse the request server-side as well, so
+  the rule holds even though a download URL stays reachable whatever the
+  button looks like.
+
 - **The Shiny app's downloadable validation summary announced *VALIDATION
   PASSED* while a dataset was still missing its data.** With several datasets
   in a DTA, checking them all leaves any dataset whose files never arrived at
