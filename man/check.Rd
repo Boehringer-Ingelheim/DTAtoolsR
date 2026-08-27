@@ -40,15 +40,16 @@ validated datasets having their \code{validation_index} and
 \describe{
 \item{\code{"last_validation_summary"}}{data.frame with one row per
 dataset and columns dataset, n_targets, n_validated, n_valid,
-n_invalid, n_skipped, n_import_errors.}
+n_invalid, n_skipped, n_unchecked, n_import_errors.}
 \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 axis, with columns scope, status, import_valid, n_import_errors, fields,
 ok. Metadata belongs to the \code{DTA} itself rather than to any
 dataset, so it is reported as its own DTA-level result and never as a
 row of the per-dataset summary.}
 \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
-no dataset is invalid, no table has an import error, and the metadata
-imported cleanly.}
+no dataset is invalid, no table has an import error, the metadata
+imported cleanly, and no target -- e.g. a table checked against zero
+column specs -- was left unchecked.}
 \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 one-row data.frame of runtime/memory metrics; see
 \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -95,6 +96,13 @@ discarding part of what was written (see \code{metadata_import_errors()})
 fails the run on the import axis, exactly as a table value would - otherwise
 the "Validation PASSED" banner would print over a data transfer agreement
 whose dates no longer say what was agreed.
+
+A target with an unspecified (\code{NA}) verdict -- e.g. a table checked
+against a spec that declares zero columns -- is neither valid nor invalid,
+so it cannot be counted by summing \code{n_invalid}. Left unaccounted for,
+the same "Validation PASSED" banner would print over a run that checked
+nothing at all; such targets are instead tallied as \code{n_unchecked} and
+surfaced as "Validation INCOMPLETE".
 }
 \examples{
 dta <- create_example_DTA()

@@ -77,6 +77,23 @@ dta_narrow_count <- function(n) {
   n
 }
 
+#' @title Render a Count (or Row Number) for a Message
+#' @description
+#' Counts and row numbers are deliberately kept as doubles past
+#' `.Machine$integer.max` (see `dta_narrow_count()`), but `sprintf("%d", ...)`
+#' does not render such a double -- it errors -- and `as.character()`/`paste()`
+#' render it in scientific notation (`3e+09`). Both failure modes surfaced at
+#' exactly the scale the doubles exist for: a message assembled after a
+#' multi-hour scan either crashed or reported unreadable evidence. This is the
+#' one renderer every message builder shares: plain digits at any magnitude,
+#' identical to `%d` for values that fit an integer.
+#' @param n A numeric vector of whole numbers.
+#' @return A character vector of the numbers in plain (non-scientific) digits.
+#' @keywords internal
+dta_format_count <- function(n) {
+  format(n, scientific = FALSE, trim = TRUE, big.mark = "")
+}
+
 #' @title Narrow Reported Row Numbers Back to Integer
 #' @description
 #' The streaming driver turns a batch-local row number into a global one by
@@ -119,6 +136,15 @@ dta_narrow_rows <- function(v) {
 # is already a multi-gigabyte object.
 `__DTAtools_stream_threshold_default__` <- 512 * 1024^2
 
+# What a gzip-compressed delimited file typically expands to. Text tables
+# compress well, so comparing the on-disk size of a .gz against the threshold
+# made "auto" read multi-gigabyte tables into memory -- the inversion of its
+# purpose, on exactly the inputs large enough to be shipped compressed. A
+# fixed factor rather than gzip's ISIZE trailer, because ISIZE is the size
+# modulo 2^32 and lies for members past 4 GB -- the very files that matter
+# here.
+`__DTAtools_gz_expansion_ratio__` <- 4
+
 #' @title Decide Whether to Stream a File
 #' @description
 #' Turns the user-facing `stream` argument into the single yes/no the readers
@@ -135,10 +161,11 @@ dta_narrow_rows <- function(v) {
 #' @details
 #' The `"auto"` threshold is `getOption("DTAtools.stream_threshold")`, in bytes.
 #'
-#' Note that the size compared is the size *on disk*. For a compressed file --
-#' `.csv.gz` -- that is the compressed size, which can be several times smaller
-#' than what materialising it would cost, so `"auto"` under-triggers there. Pass
-#' `stream = "always"` for a large compressed input.
+#' For a gzip-compressed file the on-disk size is multiplied by a fixed
+#' expansion estimate (4x) before the comparison, so a compressed table large
+#' enough to blow up an R session streams by default. The estimate is coarse
+#' on purpose -- gzip's own ISIZE trailer is the size modulo 2^32 and lies for
+#' members past 4 GB -- and either `stream` override still wins.
 #' @keywords internal
 dta_resolve_stream_mode <- function(
   stream = getOption("DTAtools.stream", "auto"),
@@ -188,6 +215,14 @@ dta_resolve_stream_mode <- function(
   size <- file.size(file)
   if (is.na(size)) {
     return(FALSE)
+  }
+
+  # Compare an ESTIMATE of the materialised size, not the bytes on disk: a
+  # compressed file is several times smaller on disk than in memory, so the
+  # raw comparison under-triggered for exactly the large inputs "auto" exists
+  # to protect.
+  if (tolower(tools::file_ext(file)) %in% dta_compression_extensions()) {
+    size <- size * `__DTAtools_gz_expansion_ratio__`
   }
 
   size > threshold

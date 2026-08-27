@@ -24,13 +24,15 @@ dta_validate_any_table(
 
 \item{batch_rows}{Integer. Rows per batch when scanning.}
 
-\item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
-per-cell error detail, defaulting to 10000 and configurable via
-\code{options(DTAtools.max_errors = )}. The default is finite because the error
-sinks retain one row per bad cell: on a large dirty file, unbounded
-retention exhausts memory exactly as holding the data would. Counting is
-unaffected, so the totals and the pass/fail verdict stay exact even when the
-retained detail is truncated, and a truncated frame is flagged as such.}
+\item{max_errors}{Integer, or \code{NULL} to hold everything in memory. Cap on
+the per-cell error detail held in RAM, defaulting to 10000 and
+configurable via \code{options(DTAtools.max_errors = )}. The default is finite
+because the error sinks hold one row per bad cell: on a large dirty file,
+unbounded retention exhausts memory exactly as holding the data would.
+Nothing is lost, though: rows past the cap spill to a session-temporary
+directory and \code{\link[=collect_full_errors]{collect_full_errors()}} reassembles the complete detail;
+counts and the pass/fail verdict are exact either way, and a frame whose
+in-memory head is incomplete is flagged as such.}
 
 \item{use_threads}{Logical. Whether Arrow's Scanner should use multiple
 threads for I/O and decompression. Arrow buffers batches ahead of R in its

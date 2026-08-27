@@ -47,15 +47,20 @@ delimiter.
 
 Opens a CSV file as a lazy \code{arrow::Dataset} using the parameters
 specified in a \code{DTAFileCSV} object. The comma is fixed, matching this
-handler's eager reader.
+handler's eager reader. Any values declared in \code{missing_values} are
+honoured as missing, in addition to the empty string, which is always
+treated as missing.
 
 Opens a delimited file as a lazy \code{arrow::Dataset}, using the separator
 declared on the \code{DTAFileDelim} object -- the same one its eager reader
-uses.
+uses. Any values declared in \code{missing_values} are honoured as missing,
+in addition to the empty string, which is always treated as missing.
 
 Opens a TSV file as a lazy \code{arrow::Dataset} using the parameters
 specified in a \code{DTAFileTSV} object. The tab is fixed, matching this
-handler's eager reader.
+handler's eager reader. Any values declared in \code{missing_values} are
+honoured as missing, in addition to the empty string, which is always
+treated as missing.
 }
 \section{Methods}{
 

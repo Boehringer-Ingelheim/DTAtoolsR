@@ -99,10 +99,10 @@ Both paths find the same errors and produce the same verdict. They differ in
 \code{\link{check}()}. So after a streaming load, the dataset's
 \code{@import_issues} is empty until \code{check()} has run.
 
-Note that \code{"auto"} compares the size of the file \emph{on disk}. A
-compressed input (\code{.csv.gz}) is much smaller on disk than in memory, so
-\code{"auto"} under-triggers there; pass \code{stream = "always"} for a large
-compressed file.
+For a gzip-compressed input (\code{.csv.gz}) the size on disk is multiplied
+by a fixed expansion estimate (4x) before the comparison, so a compressed
+table large enough to matter streams by default. Either explicit
+\code{stream} value still overrides the guess.
 }
 
 \examples{

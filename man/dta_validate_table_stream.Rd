@@ -10,7 +10,9 @@ dta_validate_table_stream(
   verbose = FALSE,
   max_errors = getOption("DTAtools.max_errors", 10000L),
   coerce = TRUE,
-  fail_fast = FALSE
+  fail_fast = FALSE,
+  precomputed = list(),
+  known_columns = character(0)
 )
 }
 \arguments{
@@ -39,6 +41,21 @@ equivalent of typing the table once at import.}
 \item{fail_fast}{Logical. Stop at the first batch that shows any problem
 instead of scanning to the end. The result then carries a \code{partial_scan}
 attribute and axes that could not be settled report \code{NA}.}
+
+\item{precomputed}{A list parallel to \code{specs@rules}: entry \code{i} is a
+finalise-shaped result (\code{id}/\code{valid}/\code{message}) for a rule already
+answered outside the batch loop -- today, a uniqueness rule computed by
+Arrow's grouped aggregation over the whole dataset (see
+\code{\link[=dta_stream_unique_precompute]{dta_stream_unique_precompute()}}) -- or \code{NULL} for a rule this scan must
+still accumulate. Precomputed rules are skipped per batch and their
+result is spliced in at finalise, in rule order.}
+
+\item{known_columns}{Character. The source's full column names, when the
+caller can read them without consuming the source. Used only when the
+stream yields no rows: rules are then evaluated once against an empty
+table with these columns, so a rule naming a column the table lacks
+still reports "could not be evaluated" exactly as the materialising path
+does -- previously a header-only file certified such rules as passed.}
 }
 \value{
 A \code{details} list of the same shape \code{validate_table_detailed()}

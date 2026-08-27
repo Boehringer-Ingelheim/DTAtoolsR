@@ -226,10 +226,10 @@ method(`[`, DTA) <- function(x, i) {
 #' \code{\link{check}()}. So after a streaming load, the dataset's
 #' \code{@import_issues} is empty until \code{check()} has run.
 #'
-#' Note that \code{"auto"} compares the size of the file \emph{on disk}. A
-#' compressed input (\code{.csv.gz}) is much smaller on disk than in memory, so
-#' \code{"auto"} under-triggers there; pass \code{stream = "always"} for a large
-#' compressed file.
+#' For a gzip-compressed input (\code{.csv.gz}) the size on disk is multiplied
+#' by a fixed expansion estimate (4x) before the comparison, so a compressed
+#' table large enough to matter streams by default. Either explicit
+#' \code{stream} value still overrides the guess.
 #'
 #' @param x A \code{DTA} or \code{DTADataSetTabular} object.
 #' @param ... Additional arguments passed to the method.
@@ -329,12 +329,14 @@ method(load_file, DTA) <- function(
 #'       loaded with \code{stream = "always"} (see \code{\link{load_file}}).
 #'       Ignored for tables held in memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}.}
-#'     \item{max_errors}{Integer, or NULL to retain everything. Cap on the
-#'       number of per-cell errors whose detail is retained while scanning.
-#'       Defaults to \code{getOption("DTAtools.max_errors", 10000L)}; the
-#'       default is finite because retention is one row per bad cell, so an
+#'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
+#'       the number of per-cell errors whose detail is held in RAM while
+#'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
+#'       the default is finite because retention is one row per bad cell, so an
 #'       unbounded cap exhausts memory on a large dirty file exactly as holding
-#'       the data would. Counts and the verdict are unaffected. Ignored for
+#'       the data would. Rows past the cap spill to a session-temporary store
+#'       and \code{\link{collect_full_errors}()} reassembles the complete
+#'       detail; counts and the verdict are exact either way. Ignored for
 #'       tables held in memory.}
 #'     \item{benchmark}{Logical. If TRUE, measures runtime and memory for this
 #'       call and attaches the result as the \code{"benchmark"} attribute.
@@ -342,22 +344,23 @@ method(load_file, DTA) <- function(
 #'       because measuring accurately resets R's \code{gc()} peak counters; see
 #'       \code{\link{validation_benchmark}} for the metrics shape and caveats.}
 #'   }
-#' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_abort
+#' @importFrom cli cli_h2 cli_alert_info cli_alert_success cli_alert_danger cli_alert_warning cli_abort
 #' @return Invisibly returns the updated \code{DTA} object \code{x} with all
 #'   validated datasets having their \code{validation_index} and
 #'   \code{validation_store} populated. Attributes are attached:
 #'   \describe{
 #'     \item{\code{"last_validation_summary"}}{data.frame with one row per
 #'       dataset and columns dataset, n_targets, n_validated, n_valid,
-#'       n_invalid, n_skipped, n_import_errors.}
+#'       n_invalid, n_skipped, n_unchecked, n_import_errors.}
 #'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 #'       axis, with columns scope, status, import_valid, n_import_errors, fields,
 #'       ok. Metadata belongs to the \code{DTA} itself rather than to any
 #'       dataset, so it is reported as its own DTA-level result and never as a
 #'       row of the per-dataset summary.}
 #'     \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
-#'       no dataset is invalid, no table has an import error, and the metadata
-#'       imported cleanly.}
+#'       no dataset is invalid, no table has an import error, the metadata
+#'       imported cleanly, and no target -- e.g. a table checked against zero
+#'       column specs -- was left unchecked.}
 #'     \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 #'       one-row data.frame of runtime/memory metrics; see
 #'       \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -371,6 +374,13 @@ method(load_file, DTA) <- function(
 #' fails the run on the import axis, exactly as a table value would - otherwise
 #' the "Validation PASSED" banner would print over a data transfer agreement
 #' whose dates no longer say what was agreed.
+#'
+#' A target with an unspecified (\code{NA}) verdict -- e.g. a table checked
+#' against a spec that declares zero columns -- is neither valid nor invalid,
+#' so it cannot be counted by summing \code{n_invalid}. Left unaccounted for,
+#' the same "Validation PASSED" banner would print over a run that checked
+#' nothing at all; such targets are instead tallied as \code{n_unchecked} and
+#' surfaced as "Validation INCOMPLETE".
 #' @examples
 #' dta <- create_example_DTA()
 #' # Check all datasets
@@ -484,6 +494,16 @@ method(check, DTA) <- function(
     n_invalid <- sum(val_status$ok == FALSE, na.rm = TRUE)
     n_skipped <- sum(val_status$status == "skipped", na.rm = TRUE)
     n_import_errors <- sum(val_status$n_import_errors, na.rm = TRUE)
+    # A target with `ok = NA` -- "unspecified" (zero column specs) or
+    # "not_validated" (never reached) -- is neither a pass nor a fail, so it is
+    # invisible to n_valid/n_invalid above. Without tallying it separately, a
+    # dataset made entirely of such targets reports n_valid == n_invalid == 0,
+    # which the overall rollup below would read as nothing wrong: a validation
+    # certificate covering zero checks. "skipped" targets are NOT counted here
+    # -- they carry the real `ok` value from the run they were skipped against
+    # (see dta_validation_result_to_row()), so they already sit inside
+    # n_valid/n_invalid.
+    n_unchecked <- n_targets - n_valid - n_invalid
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
@@ -492,6 +512,7 @@ method(check, DTA) <- function(
       n_valid = n_valid,
       n_invalid = n_invalid,
       n_skipped = n_skipped,
+      n_unchecked = n_unchecked,
       n_import_errors = n_import_errors,
       stringsAsFactors = FALSE
     )
@@ -560,7 +581,12 @@ method(check, DTA) <- function(
   # is TRUE. Metadata import errors count on that same axis.
   total_import_errors <- sum(summary_df$n_import_errors, na.rm = TRUE) +
     n_metadata_import_errors
-  overall_ok <- total_invalid == 0 && total_import_errors == 0
+  # A target with `ok = NA` was never actually judged pass or fail -- see
+  # `n_unchecked` above. Left out of `overall_ok`, a DTA whose datasets declare
+  # zero-column specs would satisfy `total_invalid == 0 && total_import_errors
+  # == 0` and print "Validation PASSED" over a run that checked nothing.
+  total_unchecked <- sum(summary_df$n_unchecked, na.rm = TRUE)
+  overall_ok <- total_invalid == 0 && total_import_errors == 0 && total_unchecked == 0
 
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
@@ -570,6 +596,8 @@ method(check, DTA) <- function(
     } else if (total_import_errors > 0) {
       import_word <- if (total_import_errors == 1) "value" else "values"
       cli_alert_danger(paste0("Validation FAILED: ", total_import_errors, " ", import_word, " could not be imported in the declared type"))
+    } else if (total_unchecked > 0) {
+      cli_alert_warning(paste0("Validation INCOMPLETE: ", total_unchecked, " target", if (total_unchecked == 1) "" else "s", " ", if (total_unchecked == 1) "was" else "were", " not checked"))
     } else {
       cli_alert_success("Validation PASSED: All datasets are valid")
     }

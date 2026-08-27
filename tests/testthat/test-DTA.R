@@ -516,3 +516,30 @@ test_that("dta_from_list() with datasets = list() builds a DTA with zero dataset
   expect_s3_class(dta, "DTAtools::DTA")
   expect_length(datasets(dta), 0)
 })
+
+test_that("check() reports INCOMPLETE rather than certifying unchecked targets", {
+  # An ok = NA target (here: a table checked against zero column specs) used
+  # to vanish from the rollup entirely -- every sum ran na.rm = TRUE -- so an
+  # all-unspecified DTA printed "Validation PASSED: All datasets are valid"
+  # with last_validation_ok = TRUE: a certificate covering zero checks.
+  ds <- DTADataSetTabular(
+    name = "d",
+    specs = specs_from_list(NULL),
+    files = list(DTAFileCSV(filename = "clinical_data.csv"))
+  )
+  ds <- load_file(
+    ds,
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools"),
+    handler_index = 1
+  )
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  msgs <- capture_messages(dta <- check(dta, persist = FALSE))
+  expect_true(any(grepl("Validation INCOMPLETE", msgs)))
+  expect_false(any(grepl("Validation PASSED", msgs)))
+
+  summary_df <- attr(dta, "last_validation_summary")
+  expect_true("n_unchecked" %in% names(summary_df))
+  expect_equal(summary_df$n_unchecked, 1)
+  expect_false(attr(dta, "last_validation_ok"))
+})

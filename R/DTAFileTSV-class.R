@@ -22,6 +22,10 @@
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
 #'   is \code{'"'}.
+#' @param missing_values Character. Values the file writes for a missing cell
+#'   (for instance \code{"."} in the SAS convention), honoured in addition to
+#'   the empty string. The default \code{""} declares nothing and keeps the
+#'   reader's own missing set.
 #'
 #' @return An object of class \code{DTAFileTSV}.
 #' @name DTAFileTSV-class
@@ -40,7 +44,8 @@ DTAFileTSV <- S7::new_class(
     max_number_of_files = NULL,
     info = NULL,
     has_header = TRUE,
-    quote = '"'
+    quote = '"',
+    missing_values = ""
   ) {
     new_object(
       DTAFileTabular(
@@ -53,7 +58,8 @@ DTAFileTSV <- S7::new_class(
         pattern_description = pattern_description,
         has_header = has_header,
         quote = quote,
-        sep = "\t"
+        sep = "\t",
+        missing_values = missing_values
       )
     )
   }
@@ -62,11 +68,10 @@ DTAFileTSV <- S7::new_class(
 
 #' @title Read File for DTAFileTSV Objects
 #' @description
-#' Reads a TSV file using the parameters specified in a
-#' \code{DTAFileTSV} object. This method uses \code{arrow::read_delim_arrow}
-#' for efficient TSV parsing.
-#'
-#' @importFrom arrow read_tsv_arrow
+#' Reads a TSV file using the parameters specified in a \code{DTAFileTSV}
+#' object, via \code{dta_read_delim_normalized()}. Any values declared in
+#' \code{missing_values} are honoured as missing, in addition to the empty
+#' string, which is always treated as missing.
 #'
 #' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file to be read, and an
@@ -76,23 +81,18 @@ DTAFileTSV <- S7::new_class(
 #'
 #' @return A tibble containing the contents of the file if the filename
 #' matches; otherwise, returns \code{NULL}.
-##' @seealso Uses \code{arrow::read_tsv_arrow()} for parsing.
 ##' @name read_file_execution
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileTSV) <- function(x, ...) {
   args <- dta_reader_args(...)
-  table_obj <- arrow::read_tsv_arrow(
+  dta_read_delim_normalized(
     args$file,
+    delim = "\t",
     quote = x@quote,
-    # col_names = FALSE makes arrow generate names and keep the first row as
-    # data; skipping a row would instead discard the first data row.
-    col_names = x@has_header,
-    # NULL, the reader's own default, means "infer every column".
-    col_types = dta_reader_col_types(args$specs, x@has_header),
-    as_data_frame = FALSE
+    has_header = x@has_header,
+    specs = args$specs,
+    na = dta_reader_na_values(x)
   )
-
-  dta_normalize_column_names(table_obj)
 }
 
 #' @title Open File Lazily for DTAFileTSV Objects
@@ -100,7 +100,9 @@ method(read_file_execution, DTAFileTSV) <- function(x, ...) {
 #' @description
 #' Opens a TSV file as a lazy \code{arrow::Dataset} using the parameters
 #' specified in a \code{DTAFileTSV} object. The tab is fixed, matching this
-#' handler's eager reader.
+#' handler's eager reader. Any values declared in \code{missing_values} are
+#' honoured as missing, in addition to the empty string, which is always
+#' treated as missing.
 #' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file, and an optional
 #'   `specs` argument: a `DTAColumnSpecCollection` whose declared types decide
@@ -114,7 +116,8 @@ method(open_file_execution, DTAFileTSV) <- function(x, ...) {
     specs = args$specs,
     delim = "\t",
     quote = x@quote,
-    has_header = x@has_header
+    has_header = x@has_header,
+    na = dta_reader_na_values(x)
   )
 }
 
