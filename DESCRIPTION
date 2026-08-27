@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
-Version: 0.20.1
+Version: 0.23.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -46,6 +46,7 @@ Suggests:
 	knitr,
 	rmarkdown,
 	testthat (>= 3.0.0),
+	withr,
 	bit64,
 	shiny,
 	bslib,
@@ -71,10 +72,11 @@ Collate:
     'DTAColumnSpecStructureSAS-class.R'
     'importConversion.R'
     'DTADataSet-class.R'
+    'DTAFile-class.R'
+    'DTAFileAny-class.R'
     'DTADataSetTabular-class.R'
     'validationReporting.R'
     'DTADataSetFile-class.R'
-    'DTAFile-class.R'
     'DTAFileTabular-class.R'
     'DTAFileCSV-class.R'
     'DTAFileDelim-class.R'
@@ -98,6 +100,7 @@ Collate:
     'formattingHelpers.R'
     'reportRendering.R'
     'run_dta_app.R'
+    'streamingScale.R'
     'streamingValidation.R'
     'validationFunctions.R'
     'zzz.R'

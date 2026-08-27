@@ -199,8 +199,9 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
-        ├── file_paths           ← character vector of expected file paths
-        └── files (list)         ← DTAFile descriptors (derived from file_paths)
+        ├── file_paths           ← bound file paths (via load_file() or paths=)
+        └── files (list)         ← DTAFileAny descriptors (type: any), which
+                                          may restrict the allowed endings
 ```
 
 </details>
@@ -337,7 +338,7 @@ streaming load the dataset's `@import_issues` is empty until `check()` has run.
 | The file fits in memory comfortably | `"never"`, or just the default | About twice as fast, and import errors are reported immediately at load |
 | The file is larger than memory, or close to it | `"always"` | The only option that works at all; memory stays flat regardless of row count |
 | You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
-| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` compares the size *on disk*, which is far smaller than the materialised size, so it under-triggers |
+| A large compressed file (`.csv.gz`) | `"auto"` handles it | The size test multiplies a `.gz`'s on-disk bytes by an expansion estimate (4×), so a big compressed table streams by default |
 | You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan and same result shape, without building the object model |
 | You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
 
@@ -349,8 +350,9 @@ When tuning matters, `check()` takes the scan knobs:
 
 ```r
 # Rows per batch (default getOption("DTAtools.stream_batch_rows", 131072L)),
-# and a cap on how much per-cell failure detail is retained. Neither changes
-# the counts or the verdict.
+# and a cap on how much per-cell failure detail is held in RAM. Neither
+# changes the counts or the verdict — and detail past the cap spills to a
+# session-temporary store that collect_full_errors() reassembles.
 dta <- check(dta, batch_rows = 262144L, max_errors = 1000L)
 ```
 
@@ -366,11 +368,15 @@ as.data.frame(details)    # one row per error: source, row, column, keyword, mes
 ```
 
 Nothing in the scan grows with the number of rows. Memory is bounded by the
-batch size for the column checks, by the number of distinct keys for
-uniqueness rules, by the number of distinct groups for grouped rules, and by
-`max_errors` for how much per-cell detail is kept. Measured across a 16-fold
-increase in input, the working set stayed flat at ~19 MB while the in-memory
-path grew from 51 MB to 272 MB.
+batch size for the column checks and by `max_errors` for the per-cell detail
+held in RAM; the scan reads only the columns the specs and rules actually
+consult. A uniqueness rule over text keys runs inside Arrow's engine — the
+distinct keys never enter R at all — so a per-row-unique subject ID is
+checkable at any file size (`options(DTAtools.stream_arrow_unique = FALSE)`
+opts out). Grouped rules hold state per distinct group. There are no abort
+budgets: a scan runs to its verdict. Measured across a 16-fold increase in
+input, the working set stayed flat at ~19 MB while the in-memory path grew
+from 51 MB to 272 MB.
 
 **This buys feasibility, not speed.** Scanning runs about twice as slow as
 validating a table already in memory, because every batch pays its own
@@ -448,6 +454,32 @@ ds_file <- DTADataSetFile(
 ds_file <- check(ds_file)
 results(ds_file)
 ```
+
+Files can also be declared up front and bound as they arrive, the same way a
+tabular dataset is loaded. Declare the expected files with `type: any` — the
+handler for a deliverable that is never parsed — and optionally restrict which
+endings you will accept:
+
+```r
+ds_file <- DTADataSetFile(
+  name  = "delivery_check",
+  files = list(
+    DTAFileAny(
+      filename    = "^report_.*",
+      pattern     = TRUE,
+      number_of_files = 3,
+      extensions  = c("pdf", "zip")   # omit to accept any ending
+    )
+  )
+)
+
+ds_file <- load_file(ds_file, file = "report_2024.pdf", handler_index = 1)
+ds_file <- check(ds_file)
+```
+
+`extensions` is an open list, so a delivery of `.xpt` or `.sas7bdat` files needs
+no change to the package. A file whose ending is not listed is refused as it is
+offered, rather than at validation time.
 
 ### Building a full `DTA` object, mixing dataset types
 
@@ -887,6 +919,7 @@ row-level validation.
 | `DTAFileCSV`              | CSV file handler for `read_file()`                            |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                            |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`         |
+| `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
 

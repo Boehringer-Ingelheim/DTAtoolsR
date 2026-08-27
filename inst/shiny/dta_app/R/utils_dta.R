@@ -124,9 +124,23 @@ handler_is_pattern <- function(h) {
   isTRUE(tryCatch(h@pattern, error = function(e) FALSE))
 }
 
+# The declared filename or pattern ONLY -- never glue anything else onto this.
+# It is read back verbatim in the exported specification document
+# (format_datasets_detail(), utils_export.R), so a suffix here would make a
+# declared filename unrecoverable from the export. Callers that also want the
+# allowed-endings restriction use handler_endings() below and surface it as
+# its own, clearly-labelled field.
 handler_expected <- function(h) {
   fn <- tryCatch(h@filename, error = function(e) NA_character_)
   paste(fn, collapse = ", ")
+}
+
+# The allowed-endings restriction ("extensions") a `type = "any"` handler may
+# declare, as a display string ("pdf, zip") or "" when none is set. Kept
+# separate from handler_expected() -- see the comment there.
+handler_endings <- function(h) {
+  ext <- tryCatch(h@extensions, error = function(e) NULL)
+  if (is.null(ext) || length(ext) == 0) "" else paste(ext, collapse = ", ")
 }
 
 handler_hint <- function(h) {
@@ -220,9 +234,39 @@ dta_example_data_path <- function(filename) {
   system.file("extdata", basename(filename), package = "DTAtools")
 }
 
+# The order the landing page offers the bundled examples in: a deliberate
+# teaching progression -- one tabular dataset, then one dataset fed by several
+# files, then a never-parsed file dataset alongside a tabular one, then the
+# genomics specification. Plain alphabetical order put that sequence at the
+# mercy of the filenames (and of the user's collation locale); naming it here
+# means a later example cannot silently jump the queue.
+dta_example_yaml_preferred_order <- c(
+  "clinical_dta.yaml",
+  "clinical_dta_multiple_files.yaml",
+  "clinical_dta_with_file_dataset.yaml",
+  "gf_dataset.yaml"
+)
+
+# Applies that order to a set of basenames: the preferred names that are
+# actually present, in the order named above, then everything else in
+# C-collation order -- method = "radix", so an example added later lands in the
+# same place on a German machine as it does in CI.
+#
+# Split out from dta_example_yaml_files() so the POLICY can be tested with
+# inputs the bundled inst/extdata does not contain. The interesting cases are
+# exactly the ones the real directory cannot produce today: an example that is
+# not on the preferred list, a preferred name that is absent (a typo, or a file
+# removed), and a duplicate in the constant. Nothing here may drop a file --
+# every input basename must come out exactly once.
+dta_order_example_yaml_files <- function(files) {
+  known <- intersect(dta_example_yaml_preferred_order, files)
+  c(known, sort(setdiff(files, known), method = "radix"))
+}
+
 # List the YAML specification documents bundled in inst/extdata (basenames),
 # i.e. the counterpart of dta_example_data_files() that keeps ONLY .yaml/.yml.
-# Used by the landing page to offer every bundled example DTA to load.
+# Used by the landing page to offer every bundled example DTA to load, in the
+# order dta_order_example_yaml_files() decides.
 dta_example_yaml_files <- function() {
   dir <- system.file("extdata", package = "DTAtools")
   if (!nzchar(dir) || !dir.exists(dir)) {
@@ -235,7 +279,7 @@ dta_example_yaml_files <- function() {
   files <- files[!dir.exists(file.path(dir, files))] # drop any subdirectories
   ext <- tolower(tools::file_ext(files))
   files <- files[ext %in% c("yaml", "yml")] # keep YAML specs only
-  sort(files)
+  dta_order_example_yaml_files(files)
 }
 
 # Absolute path to a bundled example YAML (given its basename). Returns "" when
@@ -260,7 +304,22 @@ dta_example_yaml_path <- function(filename) {
 # front of someone who came to validate a file, and the answer is one the size
 # of the file already determines.
 dta_load_file <- function(dta, dataset, file, handler_index, name = NULL) {
-  nm <- name %||% tools::file_path_sans_ext(basename(file))
+  # The default key belongs to the DATASET TYPE, not to this helper. A tabular
+  # dataset names a table after the file with its extension stripped; a file
+  # dataset keys by the delivered name, extension kept, which is what
+  # dta_file_target_keys() produces and what every report for that class uses.
+  #
+  # This used to hardcode the tabular rule for both. The app's own call site
+  # passes `name` explicitly and so never noticed, but every other caller got a
+  # key no report for a file dataset would ever look up -- and now that
+  # load_file() for a DTADataSetFile refuses a `name` that is not the delivered
+  # basename, that same default aborts outright instead of failing quietly.
+  # dta_bound_item_name() is the single place that branch is written.
+  ds_type <- tryCatch(
+    dta_get_dataset(dta, dataset)@type,
+    error = function(e) NA_character_
+  )
+  nm <- name %||% dta_bound_item_name(ds_type, file)
   dta_try(DTAtools::load_file(
     dta,
     dataset = dataset,
@@ -450,6 +509,29 @@ dta_status_map <- function(dta) {
   }
 
   res <- tryCatch(DTAtools::results(dta), error = function(e) NULL)
+  # One dataset must not be able to blind the whole map. results(dta) walks
+  # every dataset and aborts outright if ANY of them cannot report -- a tabular
+  # dataset with no tables loaded raises "No tables found in dataset." -- which
+  # would leave every OTHER dataset, including ones that just validated
+  # cleanly, showing as merely pending. That is easy to reach the moment a
+  # document holds more than one dataset and the user fills in one of them:
+  # they check it, it passes, and nothing turns green.
+  #
+  # Falling back to asking each dataset on its own keeps the failure local to
+  # the dataset that actually cannot answer.
+  if (is.null(res)) {
+    per_dataset <- lapply(names_ds, function(nm) {
+      tryCatch(
+        DTAtools::results(dta_get_dataset(dta, nm)),
+        error = function(e) NULL
+      )
+    })
+    per_dataset <- Filter(
+      function(r) !is.null(r) && nrow(r) > 0,
+      per_dataset
+    )
+    res <- if (length(per_dataset) > 0) do.call(rbind, per_dataset) else NULL
+  }
   have_res <- !is.null(res) && nrow(res) > 0
   if (have_res) {
     n_invalid <- if ("n_invalid" %in% names(res)) suppressWarnings(as.numeric(res$n_invalid)) else rep(NA_real_, nrow(res))
@@ -507,6 +589,17 @@ dta_dataset_table_names <- function(ds) {
   } else {
     names(tryCatch(ds@tables, error = function(e) list())) %||% character(0)
   }
+}
+
+# Compute a bound item's key: the single source of truth for how a dataset's
+# inputs are indexed. For file datasets, the key is the basename WITH extension
+# (matching what the package's dta_file_target_keys() produces and what
+# validation_status(), messages(), inspect(), and dta_unload_table() all key
+# on). For tabular datasets, the key is the basename WITHOUT extension
+# (a table name). Must be vectorised over filename.
+dta_bound_item_name <- function(type, filename) {
+  base <- basename(filename)
+  if (identical(type, "file")) base else tools::file_path_sans_ext(base)
 }
 
 # Per-table validation status: named vector
@@ -568,6 +661,36 @@ dta_table_status_from_status_df <- function(vs) {
   # ... but a defect observed on any axis is still a definite failure.
   st[has_err] <- "fail"
   stats::setNames(st, as.character(vs[[tcol]]))
+}
+
+# Look up ONE name in a named vector or list, with a default for an absent name.
+#
+# `[[` is null-safe on a LIST and is NOT null-safe on an ATOMIC vector:
+# `list(a = 1)[["b"]]` is NULL, but `c(a = "1")[["b"]]` throws "subscript out of
+# bounds". Crucially, `x[["b"]] %||% "default"` cannot rescue the atomic case --
+# the error is raised while evaluating the left operand, so `%||%` never runs.
+#
+# Both status maps are atomic character vectors -- dta_status_map() and
+# dta_table_status_from_status_df() both end in stats::setNames() over a
+# character vector -- while rv$status is *also* assigned a bare list() when a
+# document is closed. Neither shape may therefore be assumed at the point of
+# use, and an absent name is entirely normal: a file bound but not yet checked
+# has no row in validation_status() at all, which is exactly the state the app
+# renders as "pending".
+dta_lookup <- function(x, name, default = NULL) {
+  if (is.null(x) || is.null(name) || length(name) != 1L) {
+    return(default)
+  }
+  name <- as.character(name)
+  if (is.na(name)) {
+    return(default)
+  }
+  nms <- names(x)
+  if (is.null(nms) || !(name %in% nms)) {
+    return(default)
+  }
+  out <- x[[name]]
+  if (is.null(out)) default else out
 }
 
 # Reset ("not validated") the validation status of one/all tables of a dataset,
@@ -1232,9 +1355,13 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   invisible(file)
 }
 
-# Build a self-contained HTML validation report for a validated DTA. Summarises
+# Build a self-contained HTML validation SUMMARY for a validated DTA. Summarises
 # per-dataset status (from the app's status map) and, when available, the
 # per-target detail from results(). Returns a single HTML string.
+#
+# Distinct from DTAtools::write_validation_report(), which the Validation
+# messages dock offers as "Report": that one lists the individual validation
+# messages, this one certifies the overall per-dataset outcome.
 dta_build_validation_report <- function(dta, status = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
@@ -1263,13 +1390,18 @@ dta_build_validation_report <- function(dta, status = NULL) {
   n_pass <- sum(st[validated] == "pass")
   n_fail <- sum(st[validated] == "fail")
   n_nodata <- sum(st == "nodata")
-  overall_ok <- length(validated) > 0 && n_fail == 0
+  # Everything that was NOT validated: skipped for missing data, still pending,
+  # or any status the app grows later. These are what make a run incomplete.
+  n_unvalidated <- length(st) - length(validated)
+  n_pending <- n_unvalidated - n_nodata
 
   res <- dta_try(as.data.frame(DTAtools::results(dta)))
   rdf <- if (isTRUE(res$ok)) res$value else NULL
 
   ds_rows <- paste0(vapply(ds_names, function(nm) {
-    s <- st[[nm]]
+    # Provably present today (ds_names IS names(st)), routed through the helper
+    # so the invariant is enforced rather than merely true.
+    s <- dta_lookup(st, nm, "pending")
     cls <- if (identical(s, "pass")) "ok" else if (identical(s, "fail")) "bad" else "muted"
     paste0(
       "<tr><td>", esc(nm), "</td><td class='", cls, "'>",
@@ -1308,12 +1440,39 @@ dta_build_validation_report <- function(dta, status = NULL) {
     }
   }
 
-  banner_cls <- if (overall_ok) "pass" else "warn"
-  banner_txt <- if (overall_ok) "VALIDATION PASSED" else "VALIDATION INCOMPLETE"
+  # Three-state banner. "Passed" is reserved for the case where EVERY dataset in
+  # the DTA was actually validated and passed -- a dataset skipped for missing
+  # data leaves the run incomplete, and calling that a pass overstates it.
+  banner_cls <- if (n_fail > 0) {
+    "warn"
+  } else if (n_pass > 0 && n_unvalidated == 0) {
+    "pass"
+  } else {
+    "incomplete"
+  }
+  banner_txt <- switch(banner_cls,
+    warn = "VALIDATION FAILED",
+    pass = "VALIDATION PASSED",
+    "VALIDATION INCOMPLETE"
+  )
   summary_line <- paste0(
     n_pass, " passed, ", n_fail, " failed, ",
-    n_nodata, " without data."
+    n_nodata, " without data",
+    if (n_pending > 0) paste0(", ", n_pending, " not validated") else "",
+    "."
   )
+  # The caveat points at the table below it, so it is only worth printing when
+  # that table actually has rows to point at.
+  caveat <- if (identical(banner_cls, "incomplete") && length(st) > 0) {
+    paste0(
+      "<div class='caveat'>Not every dataset was validated, so this DTA ",
+      "cannot be reported as passed. Load the missing data and re-check the ",
+      "datasets listed below as &ldquo;No data&rdquo; or &ldquo;Not ",
+      "validated&rdquo;.</div>"
+    )
+  } else {
+    ""
+  }
   subtitle <- if (!is.null(title)) {
     paste0("<div class='subtitle'>", esc(title), "</div>")
   } else {
@@ -1329,7 +1488,9 @@ dta_build_validation_report <- function(dta, status = NULL) {
     "font-weight:700;letter-spacing:.04em}",
     ".banner.pass{background:#e6f4ea;color:#1e7e34;border:1px solid #2e7d32}",
     ".banner.warn{background:#fdecea;color:#b71c1c;border:1px solid #c62828}",
+    ".banner.incomplete{background:#fcf4e6;color:#8a6d3b;border:1px solid #c77700}",
     ".summary{margin:10px 0 4px;font-size:14px}",
+    ".caveat{margin:8px 0 0;font-size:14px;color:#8a6d3b;max-width:52em}",
     "table{border-collapse:collapse;font-size:13px;margin-top:6px}",
     "th,td{border:1px solid #ccc;padding:5px 10px;text-align:left}",
     "th{background:#f4f4f4}td.ok{color:#1e7e34;font-weight:600}",
@@ -1338,11 +1499,11 @@ dta_build_validation_report <- function(dta, status = NULL) {
 
   paste0(
     "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
-    "<title>DTA Validation Report</title><style>", css, "</style></head><body>",
-    "<h1>DTA Validation Report</h1>", subtitle,
+    "<title>DTA Validation Summary</title><style>", css, "</style></head><body>",
+    "<h1>DTA Validation Summary</h1>", subtitle,
     "<div class='meta'>Generated ", esc(ts), "</div>",
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
-    "<div class='summary'>", esc(summary_line), "</div>",
+    "<div class='summary'>", esc(summary_line), "</div>", caveat,
     "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Status</th></tr>",
     "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
     "</body></html>"
@@ -1423,6 +1584,183 @@ dta_condition_operators <- function() {
   x
 }
 
+# Blank-line the sections of an emitted YAML document, for readability only.
+#
+# yaml::as.yaml() emits one unbroken block of text; a real specification runs to
+# several hundred lines and reads as a wall. This separates `metadata:` from
+# `datasets:`, each dataset from the next, and each of `files:`/`columns:`/
+# `rules:` from what follows -- while leaving column entries, rule entries and
+# `values:` lists tight, which is where blank lines would only add noise.
+#
+# It POST-PROCESSES the emitted string rather than pasting per-section chunks
+# together. as.yaml() stays the single source of truth for quoting, escaping and
+# indentation, this stays a pure character -> character function that can be
+# tested on its own, and -- crucially -- the OTHER as.yaml() calls in this file
+# are untouched: dta_match_handlers(), dta_handlers_signature() and
+# dta_specs_signature() use the emitted text as an equality signature, not for
+# display, and must stay byte-stable.
+#
+# `max_depth` is the deepest block that earns surrounding blank lines, counting
+# a top-level key as depth 1. dta_to_yaml_text() passes 3 (metadata / datasets,
+# then their children, then a dataset's own keys); dta_dataset_to_yaml_text()
+# passes 1, because a standalone dataset document IS a `datasets:` entry hoisted
+# to the root -- two levels shallower. Both views therefore lay out identical
+# dataset content identically.
+#
+# Depth is tracked with a stack rather than computed as indent / 2, because
+# as.yaml() renders a sequence at the SAME indent as its key -- `columns:` and
+# its `- id:` entries are both indented two spaces -- so the arithmetic reading
+# would collapse those two levels into one and blank-separate every column. A
+# sequence entry therefore ranks half a level below a mapping key at its indent.
+dta_yaml_blank_lines <- function(text, max_depth = 3L) {
+  if (!is.character(text) || length(text) != 1L || is.na(text) || !nzchar(text)) {
+    return(text)
+  }
+  if (max_depth < 1L) {
+    return(text)
+  }
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  if (length(lines) < 3L) {
+    return(text)
+  }
+  indent_of <- function(s) attr(regexpr("^ *", s), "match.length")
+
+  # Does this line open a block, or does it already carry its value inline?
+  # `columns:` opens one; `description: some text` cannot -- in block style a
+  # key with an inline value has no children, so anything indented below it is
+  # the emitter FOLDING that value across lines.
+  #
+  # This asks about the line's OWN shape rather than trying to recognise a
+  # continuation, because a continuation cannot be recognised: `and then Note:
+  # something` wrapped off the end of a description is indistinguishable from a
+  # mapping entry, and any test that reads it as one splits a user's prose.
+  # A plain value that would end in a colon is quoted by the emitter, so the
+  # trailing-colon test is not fooled by `label: 'Ratio:'`.
+  opens_children <- function(body) {
+    grepl(":[ \t]*$", sub("^(- )*", "", body))
+  }
+  # The header of a block scalar: `|` or `>`, then an indentation indicator and
+  # a chomping indicator IN EITHER ORDER (the spec allows both, and as.yaml
+  # writes `|2-` whenever the first content line begins with a space). Anchored
+  # on whitespace so a plain value that merely ENDS in one of those characters
+  # -- `pattern: .*>` -- is not mistaken for one.
+  opens_block_scalar <- function(body) {
+    grepl("(^|[ \t])[|>]([0-9]+[-+]?|[-+][0-9]*)?[ \t]*$", body)
+  }
+
+  # -- Group the lines into units. A unit is one structural line, plus every
+  # line that belongs to its value rather than to the structure.
+  units <- list()
+  i <- 1L
+  n <- length(lines)
+  while (i <= n) {
+    line <- lines[[i]]
+    if (!nzchar(trimws(line))) {
+      # as.yaml() never emits a blank line, so this text is either already laid
+      # out or came from somewhere else. Either way it is not ours to respace.
+      return(text)
+    }
+    ind <- indent_of(line)
+    body <- substring(line, ind + 1L)
+    dashes <- attr(regexpr("^(- )*", body), "match.length")
+    floor_ind <- ind + dashes
+    own <- line
+    scalar <- opens_block_scalar(body)
+    i <- i + 1L
+    if (scalar) {
+      # A block scalar's body is opaque: it may contain blank lines and lines
+      # that look like keys. Carry it through untouched -- a blank line inserted
+      # INSIDE one changes the value, not the layout.
+      while (i <= n &&
+        (!nzchar(trimws(lines[[i]])) || indent_of(lines[[i]]) > floor_ind)) {
+        own <- c(own, lines[[i]])
+        i <- i + 1L
+      }
+    } else if (!opens_children(body)) {
+      # A folded value's continuations are indented exactly like children would
+      # be. Reading them as structure brackets a long `description:` with blank
+      # lines it never asked for, and splits any prose containing a colon.
+      while (i <= n && indent_of(lines[[i]]) > floor_ind) {
+        own <- c(own, lines[[i]])
+        i <- i + 1L
+      }
+    }
+    units[[length(units) + 1L]] <- list(
+      rank = 2L * ind + as.integer(dashes > 0L),
+      scalar = scalar,
+      lines = own
+    )
+  }
+  m <- length(units)
+  if (m < 2L) {
+    return(text)
+  }
+  ranks <- vapply(units, function(u) u$rank, integer(1))
+
+  # -- Depth of each unit, and whether it has anything nested under it. Only a
+  # block that spans several lines earns blank lines around it.
+  depth <- integer(m)
+  nested <- vapply(units, function(u) isTRUE(u$scalar), logical(1))
+  stack <- integer(0)
+  for (j in seq_len(m)) {
+    while (length(stack) > 0L && ranks[[stack[[length(stack)]]]] >= ranks[[j]]) {
+      stack <- stack[-length(stack)]
+    }
+    depth[[j]] <- length(stack) + 1L
+    if (length(stack) > 0L) nested[[stack[[length(stack)]]]] <- TRUE
+    stack <- c(stack, j)
+  }
+  spaced <- nested & depth <= max_depth
+
+  # -- Emit. A blank goes before a spaced block and after one ends; both reduce
+  # to "before this unit", so at most one is ever inserted. A unit that is the
+  # FIRST child of its parent closes nothing, and gets no blank -- `datasets:`
+  # stays flush against the dataset that opens it.
+  chunks <- vector("list", m)
+  stack <- integer(0)
+  for (j in seq_len(m)) {
+    gap <- FALSE
+    closed <- FALSE
+    while (length(stack) > 0L && ranks[[stack[[length(stack)]]]] >= ranks[[j]]) {
+      if (spaced[[stack[[length(stack)]]]]) gap <- TRUE
+      stack <- stack[-length(stack)]
+      closed <- TRUE
+    }
+    if (closed && spaced[[j]]) gap <- TRUE
+    chunks[[j]] <- if (gap && j > 1L) c("", units[[j]]$lines) else units[[j]]$lines
+    stack <- c(stack, j)
+  }
+  out <- unlist(chunks, use.names = FALSE)
+  res <- paste0(
+    paste(out, collapse = "\n"),
+    if (endsWith(text, "\n")) "\n" else ""
+  )
+
+  # -- Guard. Nothing but blank lines may have changed; if anything else did,
+  # hand back the original. Losing the layout is a nuisance, losing a
+  # specification is not, and this is cosmetic either way.
+  #
+  # The re-parse is UNCONDITIONAL, and deliberately so. An earlier version ran
+  # it only where a block scalar had been detected -- which left the one case
+  # that can actually corrupt a value guarded by the very detection that would
+  # have to fail for it to arise. Reading the document back costs less than a
+  # millisecond at any size this app serializes, so it is not worth being
+  # clever about. The line comparison above stays as a cheaper first rejection;
+  # on its own it proves only that no line was dropped or reordered, not that a
+  # blank landed somewhere harmless.
+  if (!identical(out[nzchar(out)], lines[nzchar(lines)])) {
+    return(text)
+  }
+  same <- tryCatch(
+    identical(yaml::yaml.load(res), yaml::yaml.load(text)),
+    error = function(e) FALSE
+  )
+  if (!isTRUE(same)) {
+    return(text)
+  }
+  res
+}
+
 # Recover a handler's file-type token ("csv" / "tsv") from its S7 class.
 #
 # KNOWN GAP, not reachable from the app: a DTAFileDelim reports "csv", which
@@ -1434,6 +1772,9 @@ dta_condition_operators <- function() {
 # every document containing one unreadable instead; the real fix is a `delim`
 # branch in DTAFileFactory, at which point this should return "delim".
 dta_handler_type <- function(h) {
+  if (inherits(h, "DTAtools::DTAFileAny")) {
+    return("any")
+  }
   if (inherits(h, "DTAtools::DTAFileTSV")) {
     return("tsv")
   }
@@ -1464,6 +1805,10 @@ dta_handler_to_list <- function(h) {
   if (!is.null(pd) && length(pd) > 0 && any(nzchar(pd))) out$pattern_description <- pd
   info <- tryCatch(h@info, error = function(e) NULL)
   if (!is.null(info) && length(info) > 0) out$info <- info
+  ext <- tryCatch(h@extensions, error = function(e) NULL)
+  if (!is.null(ext) && length(ext) > 0) {
+    out$extensions <- if (length(ext) == 1) ext else as.list(ext)
+  }
   out
 }
 
@@ -1606,7 +1951,10 @@ dta_to_list <- function(dta) {
 dta_to_yaml_text <- function(dta) {
   dta_try({
     lst <- .dta_compact(dta_to_list(dta))
-    yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n")
+    dta_yaml_blank_lines(
+      yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n"),
+      max_depth = 3L
+    )
   })
 }
 
@@ -1616,7 +1964,12 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
     ds <- dta_get_dataset(dta, dataset)
     if (is.null(ds)) stop(sprintf("Dataset '%s' not found.", dataset))
     lst <- .dta_compact(dta_dataset_to_list(ds))
-    yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n")
+    # max_depth 1, not 3: this document is a `datasets:` entry hoisted to the
+    # root, so the same keys sit two levels shallower than in the full document.
+    dta_yaml_blank_lines(
+      yaml::as.yaml(lst %||% list(), indent = 2, line.sep = "\n"),
+      max_depth = 1L
+    )
   })
 }
 
@@ -1718,6 +2071,96 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
     dsets <- dta@datasets
     dsets[[pos]] <- ds
     names(dsets)[pos] <- nm
+    dta@datasets <- dsets
+    dta
+  })
+}
+
+# ---- Dataset add/remove ---------------------------------------------------
+# Whole-dataset lifecycle: creating a new, empty dataset and deleting an
+# existing one. Both return dta_try() whose value is the updated DTA, and both
+# mutate `dta@datasets` -- the same named list dta_set_dataset_meta() above
+# re-keys in place for a rename.
+
+# Create a new, empty dataset of the given `type` and append it to `dta`.
+#
+# `type` is a CREATION-TIME choice only, never revisited afterwards -- see the
+# comment above dta_set_dataset_meta() (~L1629-1637) for why the property
+# itself cannot be trusted once a dataset exists: assigning `ds@type` passes
+# its validator without changing the S7 class, so nothing downstream would
+# dispatch correctly on the new value. That is exactly why no helper in this
+# file offers a way to change an existing dataset's type -- the only route to
+# a different type is to add a new dataset and remove the old one.
+#
+# APPENDED AT THE END, never inserted anywhere else. Every nav button, upload
+# slot and example picker in the app (app.R:774-799 and nearby) is keyed by
+# the dataset's POSITION in `dta@datasets`, resolving the name only at click
+# time -- so inserting ahead of an existing entry would silently repoint those
+# controls at the wrong dataset. Appending is the one mutation that cannot do
+# that: every existing index keeps meaning exactly what it meant before. Same
+# reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
+# holds ONE index steady across a rename, here it holds every OTHER index
+# steady across the list's growth.
+dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
+  dta_try({
+    nm <- trimws(as.character(name %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+
+    all_names <- names(dta@datasets) %||% character(0)
+    if (nm %in% all_names) {
+      stop(sprintf("A dataset named '%s' already exists.", nm))
+    }
+
+    type <- tolower(trimws(as.character(type %||% "")[1]))
+    if (!type %in% c("tabular", "file")) {
+      stop(sprintf(
+        "Dataset type must be one of: %s.",
+        paste(c("tabular", "file"), collapse = ", ")
+      ))
+    }
+
+    blank_to_null <- function(x) {
+      if (is.null(x) || length(x) == 0) {
+        return(NULL)
+      }
+      v <- trimws(as.character(x)[1])
+      if (is.na(v) || !nzchar(v)) NULL else v
+    }
+    desc <- blank_to_null(description)
+
+    ds <- if (identical(type, "tabular")) {
+      DTAtools::DTADataSetTabular(
+        name = nm,
+        specs = DTAtools::DTAColumnSpecCollection(columns = list()),
+        description = desc
+      )
+    } else {
+      DTAtools::DTADataSetFile(name = nm, description = desc)
+    }
+
+    dsets <- dta@datasets
+    dsets[[nm]] <- ds
+    dta@datasets <- dsets
+    dta
+  })
+}
+
+# Remove one dataset from `dta`, resolved by position exactly like
+# dta_set_dataset_meta() resolves its `dataset` argument.
+#
+# Removing the LAST remaining dataset is ALLOWED, not refused: the app's
+# output$main renders the workspace whenever rv$structure is non-NULL, and
+# build_structure() returns list() -- not NULL -- once there are zero
+# datasets, so the workspace UI survives an empty DTA rather than falling back
+# to the landing page.
+dta_remove_dataset <- function(dta, dataset) {
+  dta_try({
+    all_names <- names(dta@datasets) %||% character(0)
+    pos <- match(dataset, all_names)
+    if (is.na(pos)) stop(sprintf("Dataset '%s' not found.", dataset))
+
+    dsets <- dta@datasets
+    dsets[[pos]] <- NULL
     dta@datasets <- dsets
     dta
   })
@@ -2049,12 +2492,26 @@ dta_move_rule <- function(dta, dataset, index, direction) {
 # positional list, so every helper here addresses a handler by its 1-based
 # index -- the same index the app uses in its upload keys ("<dataset>||<hi>").
 
-# File types the editor can offer. Deliberately narrower than the DTAFile class
-# tree: DTAFileFactory() -- the only route from a YAML document back to an
-# object -- implements csv and tsv only, so offering `delim` would create a
-# handler that cannot be read back.
-dta_handler_types <- function() {
-  c("csv", "tsv")
+# File types the editor can offer, per dataset type. This is the ONE list: the
+# form builds its control from it and dta_set_handler() validates against it,
+# so the two can never drift apart.
+#
+# A FILE dataset offers `any` and nothing else. DTADataSetFile exists to
+# confirm that a deliverable arrived, is readable and is not empty -- it never
+# reads a row -- so `csv` or `tsv` there would describe a parse that never
+# happens, and invite a user to declare a PDF or an archive as something it is
+# not.
+#
+# A TABULAR dataset is offered csv and tsv, deliberately narrower than the
+# DTAFile class tree: DTAFileFactory() -- the only route from a YAML document
+# back to an object -- implements csv and tsv only, so offering `delim` would
+# create a handler that cannot be read back.
+dta_handler_types <- function(dataset_type = "tabular") {
+  if (identical(dataset_type, "file")) {
+    "any"
+  } else {
+    c("csv", "tsv")
+  }
 }
 
 # A compact data.frame overview of a dataset's file handlers (editor table).
@@ -2069,6 +2526,7 @@ dta_handlers_overview <- function(dta, dataset) {
       type = dta_handler_type(h),
       pattern = if (handler_is_pattern(h)) "yes" else "no",
       files = handler_count_label(h),
+      endings = handler_endings(h),
       description = handler_hint(h),
       stringsAsFactors = FALSE
     )
@@ -2148,7 +2606,8 @@ dta_handler_fields <- function(dta, dataset, index) {
     min_number_of_files = if (is.na(mn)) 1L else as.integer(mn),
     max_number_of_files = if (is.na(mx)) 1L else as.integer(mx),
     pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
-    info = paste(.dta_info_to_lines(info), collapse = "\n")
+    info = paste(.dta_info_to_lines(info), collapse = "\n"),
+    extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", ")
   )
 }
 
@@ -2163,7 +2622,7 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
                             pattern = FALSE, count_mode = "exact",
                             number_of_files = 1, min_number_of_files = 1,
                             max_number_of_files = 1, pattern_description = NULL,
-                            info = NULL) {
+                            info = NULL, extensions = NULL, dataset_type = "tabular") {
   dta_try({
     # One name or pattern per line, so a multi-name handler survives the
     # fields -> form -> set round trip as several names rather than one.
@@ -2171,10 +2630,18 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
     if (length(fn) == 0) stop("A file name or pattern is required.")
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
-    if (!type %in% dta_handler_types()) {
+    allowed <- dta_handler_types(dataset_type)
+    if (!type %in% allowed) {
+      # A file dataset has exactly one legal type, so "must be one of: any"
+      # would state the rule without explaining it. Say why instead.
+      if (identical(dataset_type, "file")) {
+        stop(
+          "A file dataset does not parse its files, so its file type is always 'any'."
+        )
+      }
       stop(sprintf(
         "File type must be one of: %s.",
-        paste(dta_handler_types(), collapse = ", ")
+        paste(allowed, collapse = ", ")
       ))
     }
 
@@ -2212,7 +2679,11 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
 
     pd <- trimws(as.character(pattern_description %||% "")[1])
 
-    handler <- do.call(DTAtools::DTAFileFactory, c(
+    # Parse extensions: split on newlines AND commas, trim, drop empties.
+    ext <- .dta_split_lines(gsub(",", "\n", as.character(extensions %||% "")))
+    ext <- if (length(ext) == 0) NULL else ext
+
+    factory_args <- c(
       list(
         type = type,
         filename = fn,
@@ -2221,7 +2692,14 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
         info = .dta_lines_to_info(info)
       ),
       args
-    ))
+    )
+
+    # Only add extensions when type is "any" (csv/tsv do not accept this arg).
+    if (identical(type, "any") && !is.null(ext)) {
+      factory_args$extensions <- ext
+    }
+
+    handler <- do.call(DTAtools::DTAFileFactory, factory_args)
 
     ds <- DTAtools::datasets(dta, dataset)
     hs <- dta_handlers(ds)

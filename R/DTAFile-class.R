@@ -78,7 +78,11 @@ DTAFile <- S7::new_class(
       }
     }
 
-    if (length(number_of_files) > 1) {
+    # Length 0 (e.g. `numeric(0)`) is caught here too, not just length > 1:
+    # both are "not a single number". They used to be reported by two
+    # separate checks with two different messages; folding length 0 in here
+    # removes the second one, which was live only for that one case.
+    if (!is.null(number_of_files) && length(number_of_files) != 1) {
       cli::cli_abort("'number_of_files' can only be length 1.")
     }
 
@@ -91,14 +95,6 @@ DTAFile <- S7::new_class(
       )
     }
 
-    if (
-      !is.null(number_of_files) &&
-        is.numeric(number_of_files) &&
-        length(number_of_files) != 1
-    ) {
-      cli::cli_abort("'number_of_files' must be a single number or NULL.")
-    }
-
     if (!is.null(number_of_files)) {
       if (!is.numeric(number_of_files)) {
         cli::cli_abort(
@@ -107,15 +103,6 @@ DTAFile <- S7::new_class(
       }
       min_number_of_files <- number_of_files
       max_number_of_files <- number_of_files
-    }
-
-    if (
-      is.null(number_of_files) &&
-        is.null(min_number_of_files) &&
-        is.null(max_number_of_files)
-    ) {
-      min_number_of_files <- 1
-      max_number_of_files <- 1
     }
 
     new_object(
@@ -269,6 +256,22 @@ if (!exists("matches_filename", mode = "function")) {
 }
 
 method(matches_filename, DTAFile) <- function(x, file) {
+  dta_matches_filename_base(x, file)
+}
+
+# The name/pattern half of matches_filename(), shared with the DTAFileAny
+# method, which ANDs its file-ending restriction onto this result.
+#
+# Factored out rather than reached through S7::super(): this codebase calls
+# super() nowhere (the only two occurrences are commented out), and a plain
+# helper keeps the base behaviour testable on its own.
+#
+# Returns one logical PER declared name or pattern -- a handler may carry
+# several. That is a vector, not a scalar, so no caller may feed the raw
+# result straight into `if`; every caller reduces it first, with
+# `isTRUE(any(...))`.
+#' @keywords internal
+dta_matches_filename_base <- function(x, file) {
   file_name <- basename(file)
   candidates <- unique(c(file_name, dta_strip_compression_extension(file_name)))
 
@@ -289,6 +292,53 @@ dta_assert_single_file_path <- function(file, .caller) {
     cli::cli_abort(
       "{.fn {(.caller)}} requires {.arg file} to be a single non-missing, non-empty path."
     )
+  }
+
+  file
+}
+
+#' @title The Guard Sequence Shared by `read_file()` and `open_file()`
+#' @description
+#' Both generics accept the same arguments and must reject the same malformed
+#' input the same way before handing off to their respective `*_execution()`
+#' method -- factored out here so the two stay in sync rather than drifting,
+#' as two independent copies of the same checks eventually do.
+#' @param x A `DTAFile` object (or subclass).
+#' @param file A character string specifying the path to the file.
+#' @param namecheck Logical; when `TRUE` the file name must match the
+#'   object's filename or pattern.
+#' @param .caller Name of the generic to blame in the single-path error
+#'   message (`"read_file"` or `"open_file"`).
+#' @return The validated `file` path.
+#' @keywords internal
+dta_check_readable_file <- function(x, file, namecheck, .caller) {
+  file <- dta_assert_single_file_path(file, .caller)
+
+  # any(): matches_filename() yields one logical PER declared name or
+  # pattern, so a handler with several of either would otherwise feed a
+  # vector into `if` and abort with "the condition has length > 1" instead
+  # of the intended "does not match" message.
+  if (namecheck && !isTRUE(any(DTAtools::matches_filename(x, basename(file))))) {
+    cli::cli_abort(
+      stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
+    )
+  }
+
+  if (!file.exists(file)) {
+    cli::cli_abort(stringr::str_glue("File '{file}' cannot be found."))
+  }
+
+  # A missing file is the more fundamental problem, so this check runs after
+  # file.exists() above rather than before it. Arrow does not reject a `.zip`
+  # outright -- it tries to parse the archive bytes as delimited text and
+  # fails with an opaque "Is this a 'csv' file?" schema error, sometimes only
+  # after scanning for hours. Catching the extension here trades that for an
+  # immediate, actionable message.
+  if (tolower(tools::file_ext(file)) == "zip") {
+    cli::cli_abort(c(
+      ".zip archives are not supported.",
+      "i" = "Supply the file gzip-compressed (.gz) or uncompressed instead; Arrow reads both transparently."
+    ))
   }
 
   file
@@ -367,27 +417,8 @@ if (!exists("read_file", mode = "function")) {
 }
 
 method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
-  file <- dta_assert_single_file_path(file, "read_file")
-  continue <- TRUE
-
-  if (namecheck) {
-    if (!DTAtools::matches_filename(x, basename(file))) {
-      continue <- FALSE
-      cli::cli_abort(
-        stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
-      )
-    }
-  }
-
-  if (continue) {
-    if (file.exists(file)) {
-      read_file_execution(x, file, specs = specs)
-    } else {
-      cli::cli_abort(stringr::str_glue(
-        "File '{file}' cannot be found."
-      ))
-    }
-  }
+  file <- dta_check_readable_file(x, file, namecheck, "read_file")
+  read_file_execution(x, file, specs = specs)
 }
 
 
@@ -471,18 +502,7 @@ if (!exists("open_file", mode = "function")) {
 
 #' @export
 method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) {
-  file <- dta_assert_single_file_path(file, "open_file")
-
-  if (namecheck && !DTAtools::matches_filename(x, basename(file))) {
-    cli::cli_abort(
-      stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
-    )
-  }
-
-  if (!file.exists(file)) {
-    cli::cli_abort(stringr::str_glue("File '{file}' cannot be found."))
-  }
-
+  file <- dta_check_readable_file(x, file, namecheck, "open_file")
   open_file_execution(x, file, specs = specs)
 }
 
@@ -510,6 +530,42 @@ method(print, DTAFile) <- function(x, ...) {
 }
 
 
+#' @title Print a DTAFile's File-Count Bounds
+#' @description
+#' The number-of-files half of `print_info()`, factored out so `DTAFile` and
+#' `DTAFileTabular` -- which cannot reach the parent method through
+#' `S7::super()`, as this codebase uses it nowhere (see
+#' `dta_matches_filename_base()`) -- apply the identical, NULL-safe rule
+#' rather than two copies that can drift.
+#'
+#' `min_number_of_files` and `max_number_of_files` are usually set together,
+#' but a handler may declare only one bound (e.g. `min_number_of_files`
+#' alone), leaving the other `NULL`. Comparing a number to `NULL` with `==`
+#' yields a zero-length logical, and handing that to `if` aborts with
+#' "argument is of length zero" -- this helper renders a `NULL` bound as
+#' "unbounded" instead of ever making that comparison unguarded.
+#' @param x A `DTAFile` object (or subclass).
+#' @return `NULL`, invisibly. Called for its printed side effect.
+#' @keywords internal
+dta_print_file_count <- function(x) {
+  min_n <- x@min_number_of_files
+  max_n <- x@max_number_of_files
+
+  if (!is.null(min_n) && !is.null(max_n) && min_n == max_n) {
+    cli::cli_alert("Number of files: {min_n}")
+    return(invisible(NULL))
+  }
+
+  min_label <- if (is.null(min_n)) "unbounded" else min_n
+  max_label <- if (is.null(max_n)) "unbounded" else max_n
+
+  cli::cli_alert("Min number of files: {min_label}")
+  cli::cli_alert("Max number of files: {max_label}")
+
+  invisible(NULL)
+}
+
+
 #' Print Information About a DTAFile Object
 #'
 #' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
@@ -520,7 +576,7 @@ method(print, DTAFile) <- function(x, ...) {
 #' @return The input object \code{x}, returned invisibly.
 #'
 #' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
 #'
 #' @examples
 #' dta_file <- DTAFileCSV(filename = "data.csv")
@@ -540,12 +596,7 @@ if (!exists("print_info", mode = "function")) {
 method(print_info, DTAFile) <- function(x) {
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
-  if (x@min_number_of_files == x@max_number_of_files) {
-    cli::cli_alert("Number of files: {x@min_number_of_files}")
-  } else {
-    cli::cli_alert("Min number of files: {x@min_number_of_files}")
-    cli::cli_alert("Max number of files: {x@max_number_of_files}")
-  }
+  dta_print_file_count(x)
   invisible(x)
 }
 
@@ -561,7 +612,7 @@ method(print_info, DTAFile) <- function(x) {
 #' @return The input object \code{x}, returned invisibly.
 #'
 #' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound leaves that side blank, e.g. "(2-)".
 #'
 #' @examples
 #' dta_file <- DTAFileCSV(filename = "data.csv")
@@ -574,14 +625,18 @@ if (!exists("print_short_info", mode = "function")) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAFile) <- function(x, ...) {
-  if (
-    !x@pattern || (x@pattern && x@min_number_of_files == x@max_number_of_files)
-  ) {
-    cli::cli_alert("{x@filename} ({x@min_number_of_files})")
+  min_n <- x@min_number_of_files
+  max_n <- x@max_number_of_files
+
+  # Comparing a number to NULL with `==` yields a zero-length logical, which
+  # `if` refuses outright ("argument is of length zero") -- guard the
+  # equality check itself rather than the branch that follows it.
+  if (!is.null(min_n) && !is.null(max_n) && min_n == max_n) {
+    cli::cli_alert("{x@filename} ({min_n})")
   } else {
-    cli::cli_alert(
-      "{x@filename} ({x@min_number_of_files}-{x@max_number_of_files})"
-    )
+    min_label <- if (is.null(min_n)) "" else min_n
+    max_label <- if (is.null(max_n)) "" else max_n
+    cli::cli_alert("{x@filename} ({min_label}-{max_label})")
   }
 
   invisible(x)

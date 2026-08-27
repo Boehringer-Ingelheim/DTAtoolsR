@@ -512,6 +512,106 @@ test_that("a pattern description survives the factory and a YAML round trip", {
     columns = list(list(id = "STUDYID", type = "SAS Char"))
   ))
 
+
+  # ---------------------------------------------------------------------------
+  # DTAFileAny class
+  # ---------------------------------------------------------------------------
+
+  test_that("DTAFileAny constructs and carries its properties", {
+    h <- DTAFileAny(filename = "study_report.pdf")
+
+    expect_s3_class(h, "DTAtools::DTAFile")
+    expect_s3_class(h, "DTAtools::DTAFileAny")
+    # DTAFileAny is NOT a DTAFileTabular
+    expect_false(inherits(h, "DTAtools::DTAFileTabular"))
+    expect_equal(h@filename, "study_report.pdf")
+    expect_null(h@extensions)
+  })
+
+  test_that("DTAFileAny normalises extensions on construction", {
+    # Leading dot stripped, lower-cased, de-duplicated
+    h <- DTAFileAny(filename = "report.pdf", extensions = c(".PDF", "pdf"))
+    expect_equal(h@extensions, "pdf")
+  })
+
+  test_that("DTAFileAny normalises upper-case extension", {
+    h <- DTAFileAny(filename = "report.pdf", extensions = "PDF")
+    expect_equal(h@extensions, "pdf")
+  })
+
+  test_that("DTAFileAny flattens a YAML-style list of extensions", {
+    # YAML sequences parse to lists; the normaliser must unlist them
+    h <- DTAFileAny(filename = "x", extensions = list("PDF", "zip"))
+    expect_equal(h@extensions, c("pdf", "zip"))
+  })
+
+  test_that("DTAFileAny collapses all-blank extensions to NULL", {
+    h1 <- DTAFileAny(filename = "x", extensions = c("", " "))
+    expect_null(h1@extensions)
+
+    h2 <- DTAFileAny(filename = "x", extensions = NULL)
+    expect_null(h2@extensions)
+
+    h3 <- DTAFileAny(filename = "x", extensions = character(0))
+    expect_null(h3@extensions)
+  })
+
+  test_that("matches_filename(DTAFileAny) accepts any ending when extensions is NULL", {
+    # Use a pattern so various endings can match the same base pattern
+    h <- DTAFileAny(filename = "^report\\..*", pattern = TRUE)
+
+    expect_true(any(matches_filename(h, "report.pdf")))
+    expect_true(any(matches_filename(h, "report.csv")))
+    expect_true(any(matches_filename(h, "report.xpt")))
+  })
+
+  test_that("matches_filename(DTAFileAny) accepts only listed extensions", {
+    h <- DTAFileAny(filename = "report.pdf", extensions = c("pdf", "zip"))
+
+    expect_true(matches_filename(h, "report.pdf"))
+    expect_false(matches_filename(h, "report.csv"))
+    expect_false(matches_filename(h, "report.xpt"))
+  })
+
+  test_that("matches_filename(DTAFileAny) satisfies extension via compressed basename", {
+    # report.pdf.gz carries the pdf ending underneath the .gz wrapper
+    h <- DTAFileAny(filename = "report.pdf", extensions = "pdf")
+
+    expect_true(matches_filename(h, "report.pdf.gz"))
+    # but .csv.gz does NOT satisfy extensions = "pdf"
+    expect_false(matches_filename(h, "report.csv.gz"))
+  })
+
+  test_that("matches_filename(DTAFileAny) returns a vector with one element per name/pattern", {
+    # A handler carrying TWO patterns must return length 2, not a scalar TRUE/FALSE.
+    # This is load-bearing: the Shiny app reduces with any(), not isTRUE().
+    h <- DTAFileAny(
+      filename = c("report_a.pdf", "report_b.pdf"),
+      pattern = TRUE
+    )
+    result <- matches_filename(h, "report_a.pdf")
+
+    expect_length(result, 2)
+    expect_true(result[[1]])
+    expect_false(result[[2]])
+  })
+
+  test_that("DTAFileFactory(type='any') returns a DTAFileAny", {
+    h <- DTAFileFactory(type = "any", filename = "audit.log")
+
+    expect_s3_class(h, "DTAtools::DTAFileAny")
+    expect_equal(h@filename, "audit.log")
+  })
+
+  test_that("DTAFileFactory rejects an unsupported type", {
+    expect_error(DTAFileFactory(type = "xls", filename = "x.xls"), "supported")
+  })
+
+  test_that("DTAFileAny is NOT a DTAFileTabular", {
+    h <- DTAFileAny(filename = "raw.zip")
+    expect_false(inherits(h, "DTAtools::DTAFileTabular"))
+  })
+
   expect_equal(ds@files[[1]]@pattern_description, "one file per batch")
 })
 
@@ -652,4 +752,40 @@ test_that("a pattern handler may still declare a range", {
     paste(capture_messages(print_info(ranged)), collapse = ""),
     "Min number of files"
   )
+})
+
+
+# ---------------------------------------------------------------------------
+# read_file()'s namecheck reduces a multi-pattern match with any() -- section
+# P11 of the code review fixes
+# ---------------------------------------------------------------------------
+# matches_filename() returns one logical PER declared name or pattern.
+# read_file()'s namecheck used to feed that vector straight into `if
+# (!matches_filename(...))`, which dies with R's own "the condition has
+# length > 1" the moment a handler declares more than one name/pattern and the
+# file matches only one of them.
+
+test_that("read_file() reads a file matching only the second of two patterns", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV(
+    filename = c("^nonexistent_pattern$", "^clinical_data[.]csv$"),
+    pattern = TRUE,
+    number_of_files = 2
+  )
+
+  x <- read_file(file_info, path)
+
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 14)
+})
+
+test_that("read_file() still aborts with 'does not match' when neither pattern matches", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  file_info <- DTAFileCSV(
+    filename = c("^nope_a$", "^nope_b$"),
+    pattern = TRUE,
+    number_of_files = 2
+  )
+
+  expect_error(read_file(file_info, path), "does not match")
 })

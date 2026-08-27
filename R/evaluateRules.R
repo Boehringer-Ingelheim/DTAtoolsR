@@ -71,13 +71,24 @@ dta_as_numeric_strict <- function(x) {
     ))
   }
 
-  # `raw_chr` is deliberately the UNTRIMMED text: `trimmed` is what is parsed,
-  # but the text reported back to the user must be what the file actually held.
   raw_chr <- as.character(raw)
-  trimmed <- trimws(raw_chr)
-  # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
-  missing <- is.na(raw_chr) | trimmed %in% ""
-  values <- suppressWarnings(as.numeric(trimmed))
+  # Parsed untrimmed: as.numeric() itself skips surrounding whitespace, so
+  # trimming first changes no value -- it only mattered for telling a blank
+  # string (missing) from text that failed to parse (unconvertible). That
+  # distinction is needed only where parsing yielded NA, which on real data is
+  # a handful of rows, so the trimws() pass -- two regex substitutions and a
+  # full character-vector reallocation per numeric column per batch on the
+  # streaming path -- runs on that subset instead of the whole column.
+  values <- suppressWarnings(as.numeric(raw_chr))
+  missing <- is.na(raw_chr)
+  failed <- is.na(values) & !missing
+  if (any(failed)) {
+    idx <- which(failed)
+    # A blank ("" or whitespace-only) value never parses, so blank rows are a
+    # subset of `failed` -- reclassifying them here reproduces the old
+    # whole-column `trimws(raw_chr) %in% ""` exactly.
+    missing[idx[trimws(raw_chr[idx]) %in% ""]] <- TRUE
+  }
 
   list(
     values = values,
@@ -222,6 +233,54 @@ dta_numeric_operands <- function(x, value, converted = NULL) {
   list(x = values, value = bound)
 }
 
+#' @title Bound of an Equality or Set Operator Against a Numeric Column
+#' @description
+#' `equals`/`not_equals`/`in`/`not_in` compare `value` against the raw
+#' column, so R's implicit coercion decides the outcome whenever the column
+#' is numeric: `1e6 == "1000000"` renders the left side via `as.character()`
+#' first and is `FALSE`, while `1000000L == "1000000"` is `TRUE` -- the
+#' verdict then depends on int-vs-double storage, which legitimately differs
+#' between the streamed (per-batch) and eager (whole-table) narrowing
+#' decisions. This coerces `value` to numeric first, but only against a
+#' numeric column, and only when every element of `value` parses; a bound
+#' that does not parse, or a non-numeric column, is returned unchanged so the
+#' comparison stays textual exactly as before.
+#' @param x The column vector taken from the table.
+#' @param value The bound supplied for `equals`, `not_equals`, `in`, or
+#'   `not_in`.
+#' @return `value` as numeric when `x` is numeric and every element of
+#'   `value` parses as a number; `value` unchanged otherwise.
+#' @keywords internal
+dta_equality_bound <- function(x, value) {
+  if (!is.numeric(x)) {
+    return(value)
+  }
+
+  # bit64::integer64 answers TRUE to is.numeric() but its values do not
+  # survive as.numeric() beyond 2^53 -- parsing the bound would round it and
+  # break an equality that bit64's own comparison kept exact
+  # ("9007199254740993" matched its cell before; the parsed double cannot).
+  # Mirrors dta_row_key()'s integer64 guard.
+  if (inherits(x, "integer64")) {
+    return(value)
+  }
+  values <- unlist(value, use.names = FALSE)
+  if (is.numeric(values)) {
+    return(values)
+  }
+  if (!is.character(values) && !is.factor(values)) {
+    return(value)
+  }
+  parsed <- suppressWarnings(as.numeric(as.character(values)))
+  # All-or-nothing: only when EVERY non-missing element parses does the
+  # comparison go numeric. A mixed set like c("1", "UNK") keeps today's
+  # string behaviour, which is predictable and backward compatible.
+  if (any(is.na(parsed) & !is.na(values))) {
+    return(value)
+  }
+  parsed
+}
+
 #' @title Rule: check_range
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
@@ -257,6 +316,23 @@ rule_check_range <- function(rule, df, numeric_cache = NULL) {
   }
 }
 
+#' @title Target Columns of a Rule, However They Are Spelled
+#' @description
+#' A rule may name its target under `column` or `columns`. Four call sites used
+#' to restate that fallback independently; this is the one place that resolves
+#' it, so a new spelling (or a change in precedence) is a one-line change.
+#' @param rule A rule object.
+#' @return The slot's value -- a character vector -- or `NULL` when the rule
+#'   names no target either way.
+#' @keywords internal
+dta_rule_target_columns <- function(rule) {
+  cols <- rule_get_slot(rule, "column")
+  if (is.null(cols)) {
+    cols <- rule_get_slot(rule, "columns")
+  }
+  cols
+}
+
 #' @title Resolved Column and Bounds of a Range Rule
 #' @description
 #' A range rule may state its bounds as `range` or as `min`/`max`, and its
@@ -266,10 +342,7 @@ rule_check_range <- function(rule, df, numeric_cache = NULL) {
 #' @return A list with `col` and `range`.
 #' @keywords internal
 dta_range_target <- function(rule) {
-  col <- rule_get_slot(rule, "column")
-  if (is.null(col)) {
-    col <- rule_get_slot(rule, "columns")
-  }
+  col <- dta_rule_target_columns(rule)
 
   if (length(col) != 1) {
     cli::cli_abort("Range rules require exactly one target column.")
@@ -334,9 +407,12 @@ dta_range_violated <- function(rule, df, numeric_cache = NULL) {
 #' @return A single string.
 #' @keywords internal
 dta_range_violation_message <- function(id, n, col, range) {
+  # dta_format_count(), not %d: the streaming path hands in a double counter,
+  # and sprintf("%d", <double past .Machine$integer.max>) errors rather than
+  # rendering -- after the whole scan has already run.
   sprintf(
-    "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
-    id, n, col, range[1], range[2]
+    "Rule '%s' violated: %s rows where %s not in range [%s, %s]",
+    id, dta_format_count(n), col, range[1], range[2]
   )
 }
 
@@ -358,10 +434,7 @@ dta_range_violation_message <- function(id, n, col, range) {
 #' @export
 rule_check_unique <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
-  cols <- rule_get_slot(rule, "column")
-  if (is.null(cols)) {
-    cols <- rule_get_slot(rule, "columns")
-  }
+  cols <- dta_unique_columns(rule)
 
   missing_cols <- setdiff(cols, names(df))
   if (length(missing_cols) > 0) {
@@ -499,12 +572,25 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # Numeric comparisons must compare numbers. Applied to the raw column, `>` on
   # a character vector coerces the bound to character and compares by locale
   # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
-  # after "65". `pattern` and the equality/set operators are unaffected and
+  # after "65". Equality and set operators go through the same treatment, but
+  # only conditionally (see below); `pattern` and `empty` are unaffected and
   # deliberately stay on the raw column.
   if (operator %in% dta_numeric_condition_operators()) {
     operands <- dta_numeric_operands(x, value, converted)
     x <- operands$x
     value <- operands$value
+  }
+
+  # The equality and set operators compare numbers as numbers when both sides
+  # are numbers. Left to R's implicit coercion, `x == "1000000"` renders x via
+  # as.character(), so a double 1e6 fails a bound its integer twin passes --
+  # the verdict then depends on int-vs-double storage, which legitimately
+  # differs between the streamed (per-batch) and eager (whole-table)
+  # narrowing decisions. A bound that does not parse as a number keeps the
+  # string comparison exactly as before, and non-numeric columns (Char ids
+  # with leading zeros above all) are never touched.
+  if (operator %in% c("equals", "equal", "not_equals", "not_equal", "in", "not_in")) {
+    value <- dta_equality_bound(x, value)
   }
 
   switch(operator,
@@ -553,9 +639,11 @@ dta_condition_operators <- function() {
 
 #' @title Condition Operators That Compare Numbers
 #' @description
-#' The subset of `dta_condition_operators()` whose operands are numeric. Only
-#' these go through `dta_numeric_operands()`; the equality, set, text and
-#' emptiness operators keep comparing the raw column.
+#' The subset of `dta_condition_operators()` that always go through
+#' `dta_numeric_operands()`. Equality and set operators (`equals`,
+#' `not_equals`, `in`, `not_in`) also compare numerically, but only
+#' conditionally -- see `dta_equality_bound()`; text (`pattern`) and
+#' emptiness (`empty`) operators always compare the raw column.
 #' @return A character vector of operator names.
 #' @keywords internal
 dta_numeric_condition_operators <- function() {
@@ -651,11 +739,7 @@ dta_rule_numeric_columns <- function(rule) {
   )
 
   if (identical(type, "check_range")) {
-    col <- rule_get_slot(rule, "column")
-    if (is.null(col)) {
-      col <- rule_get_slot(rule, "columns")
-    }
-    return(as.character(col))
+    return(as.character(dta_rule_target_columns(rule)))
   }
 
   if (identical(type, "check_col_condition")) {
@@ -895,6 +979,11 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #' - Text: `pattern` (a regular expression; row passes when the value matches)
 #' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
 #'
+#' Against a numeric column, `equals`/`not_equals`/`in`/`not_in` compare
+#' numerically when the supplied value parses as a number (so `equals: "18"`
+#' and `equals: 18` agree); otherwise, and for non-numeric columns, the
+#' comparison is textual.
+#'
 #' Both `@condition` and `@then` may also be written as a YAML sequence of
 #' single-column mappings; they are normalised to the named form.
 #'
@@ -950,9 +1039,10 @@ dta_condition_violated <- function(rule, df, numeric_cache = NULL) {
 #' @return A single string.
 #' @keywords internal
 dta_condition_violation_message <- function(id, n) {
+  # dta_format_count(), not %d: see dta_range_violation_message().
   sprintf(
-    "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
-    id, n
+    "Rule '%s' violated: %s rows failed the THEN conditions after meeting the IF conditions.",
+    id, dta_format_count(n)
   )
 }
 
@@ -963,9 +1053,10 @@ dta_condition_violation_message <- function(id, n) {
 #' @return A single string.
 #' @keywords internal
 dta_unique_violation_message <- function(id, n, cols) {
+  # dta_format_count(), not %d: see dta_range_violation_message().
   sprintf(
-    "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
-    id, n, paste(cols, collapse = ", ")
+    "Rule '%s' violated: %s duplicate row found when selecting column(s): %s",
+    id, dta_format_count(n), paste(cols, collapse = ", ")
   )
 }
 
@@ -986,16 +1077,22 @@ dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
   if (total == 0) {
     return("none")
   }
-  head_rows <- sort(unique(as.integer(head_rows)))
+  # No as.integer() here: the streaming path keeps row numbers as doubles past
+  # .Machine$integer.max on purpose (see the row_offset comments in
+  # R/streamingValidation.R), and narrowing turned exactly those rows into NAs
+  # that sort() then silently dropped -- the message reported empty row
+  # evidence while the verdict still read authoritative. dta_format_count()
+  # renders integers and whole doubles identically, in plain digits.
+  head_rows <- sort(unique(head_rows))
   if (total > max_show) {
     paste0(
-      paste(head_rows[seq_len(min(max_show, length(head_rows)))], collapse = ","),
+      paste(dta_format_count(head_rows[seq_len(min(max_show, length(head_rows)))]), collapse = ","),
       " (+",
-      total - max_show,
+      dta_format_count(total - max_show),
       " more)"
     )
   } else {
-    paste(head_rows, collapse = ",")
+    paste(dta_format_count(head_rows), collapse = ",")
   }
 }
 
@@ -1058,7 +1155,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
 
   format_rows <- function(rows, max_show = 10L) {
-    rows <- sort(unique(as.integer(rows)))
+    # No as.integer(): dta_format_group_rows() renders doubles safely, and the
+    # narrowing is what dropped row evidence past .Machine$integer.max.
+    rows <- sort(unique(rows))
     dta_format_group_rows(rows, length(rows), max_show)
   }
 
@@ -1093,11 +1192,14 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   # with tabulate(), rather than copying every column of `df` per group as
   # `df[row_idx, , drop = FALSE]` used to.
   #
-  # `factor(split_key)` sorts its levels the same way `split()` orders its
-  # groups, so iterating group ids in that order reproduces the group order
-  # (and therefore the assembled violation message order) of the previous
-  # split()-based implementation exactly.
-  kf <- factor(split_key)
+  # Levels sorted with method = "radix", i.e. C-locale byte order, NOT the
+  # session locale: group order decides the assembled violation message order,
+  # and locale collation made the same file report groups in a different order
+  # on a de_DE dev machine than under CI's C collation (and could even split
+  # ties differently from the streaming finaliser). The streaming path sorts
+  # its keys the same way -- change the two together or the documented
+  # streamed/materialised message identity breaks.
+  kf <- factor(split_key, levels = sort(unique(split_key), method = "radix"))
   gid <- as.integer(kf)
   n_groups <- nlevels(kf)
   n_seen <- tabulate(gid, nbins = n_groups)
@@ -1125,7 +1227,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
     row <- first_row[g]
     paste(
       vapply(group_by, function(col) {
-        paste0(col, "=", as.character(grouped[[col]][row]))
+        # dta_group_label_value(), not as.character(): must render identically
+        # to the streaming site in dta_group_stream_update() (streamingValidation.R).
+        paste0(col, "=", dta_group_label_value(grouped[[col]][row]))
       }, character(1)),
       collapse = ", "
     )
@@ -1139,7 +1243,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
         cli::cli_abort(c(
           "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
           x = "{conditionMessage(cnd)}",
-          i = "Condition {.field {cond_name}} is defined as: {.val {paste(capture.output(str(spec, give.attr = FALSE)), collapse = ' ')}}"
+          i = "Condition {.field {cond_name}} is defined as: {.val {paste(utils::capture.output(utils::str(spec, give.attr = FALSE)), collapse = ' ')}}"
         ), class = "dta_rule_not_applicable")
       }
     )

@@ -44,17 +44,20 @@ Reads a data file using the parameters specified in a
 implemented in derived classes like \code{DTAFileTSV},
 \code{DTAFileCSV} or \code{DTAFileDelim}.
 
-Reads a CSV file using the parameters specified in a
-\code{DTAFileCSV} object. This method uses \code{arrow::read_csv_arrow}
-for efficient CSV parsing.
+Reads a CSV file using the parameters specified in a \code{DTAFileCSV}
+object, via \code{dta_read_delim_normalized()}. Any values declared in
+\code{missing_values} are honoured as missing, in addition to the empty
+string, which is always treated as missing.
 
-Reads a TSV file using the parameters specified in a
-\code{DTAFileDelim} object. This method uses \code{arrow::read_delim_arrow}
-for efficient TSV parsing.
+Reads a delimited file using the parameters specified in a
+\code{DTAFileDelim} object, via \code{dta_read_delim_normalized()}. Any
+values declared in \code{missing_values} are honoured as missing, in
+addition to the empty string, which is always treated as missing.
 
-Reads a TSV file using the parameters specified in a
-\code{DTAFileTSV} object. This method uses \code{arrow::read_delim_arrow}
-for efficient TSV parsing.
+Reads a TSV file using the parameters specified in a \code{DTAFileTSV}
+object, via \code{dta_read_delim_normalized()}. Any values declared in
+\code{missing_values} are honoured as missing, in addition to the empty
+string, which is always treated as missing.
 }
 \section{Methods}{
 
@@ -64,8 +67,3 @@ as it must be implemented by a subclass.}
 }
 }
 
-\seealso{
-Uses \code{arrow::read_delim_arrow()} for parsing.
-
-Uses \code{arrow::read_tsv_arrow()} for parsing.
-}

@@ -49,10 +49,40 @@ clean_session_file <- function() {
   invisible(f)
 }
 
+# The rendered HTML of a renderUI output, as one string.
+#
+# renderUI yields list(html=, deps=); NULL from the render function leaves no
+# html at all, so collapse both shapes to a plain string. A renderUI output is
+# never evaluated unless a test reads it, so anything asserted about a UI gate
+# has to go through here.
+ui_text <- function(out) {
+  if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
+}
+
+# The markup of ONE control out of a rendered button group, sliced out so a
+# per-button assertion cannot be satisfied by a sibling's markup.
+#
+# Do NOT assert on the string "disabled" here: shiny renders every
+# downloadButton with class "disabled" and aria-disabled, and only its
+# client-side binding clears them. The server-side tell is the binding class
+# itself -- `shiny-download-link` present means a live download, absent means
+# the app's inert stand-in.
+btn_html <- function(out, id) {
+  parts <- strsplit(ui_text(out), "<(a|button) ", perl = TRUE)[[1]]
+  hit <- parts[grepl(paste0('id="', id, '"'), parts, fixed = TRUE)]
+  expect_length(hit, 1)
+  hit[[1]]
+}
+
 test_that("the server starts with an empty workspace", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     expect_null(rv$dta)
     expect_null(rv$active)
     expect_null(rv$yaml_text)
@@ -78,6 +108,11 @@ test_that("nothing is autosaved until the browser reports an id", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     expect_null(client_id())
     expect_null(session_file())
 
@@ -93,6 +128,11 @@ test_that("a malformed browser id is refused instead of reaching the filesystem"
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     # input$dta_client_id is client-supplied and can be any string, so it is
     # re-validated server-side; only 32 lowercase hex chars are accepted, which
     # also makes it path-safe by construction.
@@ -129,6 +169,11 @@ test_that("a browser restores the workspace from its own autosave", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_client_id = strrep("b", 32))
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     expect_true(file.exists(session_file()))
@@ -149,6 +194,11 @@ test_that("an autosave carrying a different browser id is not restored", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_client_id = strrep("c", 32))
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
 
@@ -172,6 +222,11 @@ test_that("loading a DTA YAML populates the workspace and marks datasets pending
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
 
     expect_s3_class(rv$dta, "DTAtools::DTA")
@@ -194,6 +249,11 @@ test_that("a standalone dataset YAML is wrapped into a full DTA workspace", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("gf_dataset.yaml"))
 
     # gf_dataset.yaml has no metadata/datasets keys — the app wraps it in a new
@@ -212,6 +272,11 @@ test_that("binding a data file registers an upload against its dataset slot", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
 
@@ -230,6 +295,11 @@ test_that("check_all moves a clean dataset from pending to pass", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(rv$status, c(clinical_data = "pending"))
@@ -243,6 +313,11 @@ test_that("check_all reports fail for data that violates the spec", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data_error_all.csv"))
 
@@ -263,6 +338,11 @@ test_that("applying malformed YAML reports an error and leaves the DTA untouched
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     loaded <- rv$dta
     yaml_before <- rv$yaml_text
@@ -281,6 +361,11 @@ test_that("applying valid YAML replaces the loaded DTA", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     # NB: in R's default regex engine `.` matches newlines too, so the character
     # class is what keeps this edit to a single line.
@@ -302,6 +387,11 @@ test_that("reverting the YAML editor discards the pending error", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(raw_yaml_editor = "datasets: [unclosed", apply_yaml = 1)
     expect_true(nzchar(rv$yaml_msg$error))
@@ -315,6 +405,11 @@ test_that("confirming a reset clears every piece of workspace state", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -334,6 +429,11 @@ test_that("opening the column editor targets the active dataset", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     expect_null(rv$editor_dataset)
 
@@ -355,6 +455,11 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -393,6 +498,11 @@ test_that("saving a group_condition rule from the rule editor updates spec and Y
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
 
     before_n <- length(DTAtools::datasets(rv$dta, "clinical_data")@specs@rules)
@@ -449,6 +559,11 @@ test_that("group_condition constraint selectors follow condition name changes", 
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
 
     session$setInputs(edit_rules = 1)
@@ -494,6 +609,11 @@ test_that("a column save with an incomplete type is rejected without touching th
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -548,6 +668,11 @@ test_that("adding a file handler adds a slot and keeps the loaded files", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
@@ -568,6 +693,11 @@ test_that("a file-handler change resets the dataset's validation", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -585,6 +715,11 @@ test_that("removing an empty file handler needs no confirmation", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     add_second_handler(session)
     expect_length(rv$structure$clinical_data$handlers, 2)
@@ -601,6 +736,11 @@ test_that("removing a handler with loaded files asks first and does nothing unti
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(edit_files = 1)
@@ -625,6 +765,11 @@ test_that("confirming the removal unloads the files that were loaded into that s
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(edit_files = 1)
@@ -648,6 +793,11 @@ test_that("removing the first of two handlers re-keys the second one's uploads",
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     add_second_handler(session, filename = "clinical_data2.csv")
 
@@ -676,6 +826,11 @@ test_that("reordering handlers moves the upload records with them", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_2 = app_file_input("clinical_data2.csv"))
@@ -696,6 +851,11 @@ test_that("a rejected file-handler form leaves the specification untouched", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
@@ -722,6 +882,11 @@ test_that("the count controls cannot smuggle a bad count past a non-pattern entr
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
@@ -749,6 +914,11 @@ test_that("applying raw YAML that changes files: keeps the loaded files", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -782,6 +952,11 @@ test_that("applying raw YAML that deletes a slot unloads only that slot's files"
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
@@ -812,6 +987,11 @@ test_that("applying raw YAML that reorders files: moves the loaded file with its
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_2 = app_file_input("clinical_data2.csv"))
@@ -841,6 +1021,11 @@ test_that("applying raw YAML that rewrites a slot unloads the file it no longer 
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
@@ -867,6 +1052,11 @@ test_that("raw YAML that removes every file handler unloads that dataset's data"
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
@@ -890,6 +1080,11 @@ test_that("HTML validation report download handler produces parseable HTML", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     # Load a DTA the same way other tests do
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     # Bind valid data to the dataset so that results() and messages() work
@@ -917,19 +1112,22 @@ test_that("HTML validation report download handler produces parseable HTML", {
     doc <- xml2::read_html(report_file)
     expect_true(!is.na(doc))
 
-    # Verify wiring exists by reading app.R source and confirming both
-    # downloadButton and downloadHandler are present
-    app_source <- readLines(
-      file.path(app_server_dir(), "app.R"),
-      warn = FALSE
+    # The button really is rendered, and enabled -- a check has just run.
+    # Read the live output rather than grepping app.R for a downloadButton()
+    # call: that stopped being the wiring when the dock's buttons moved into
+    # output$msgs_dock_dl.
+    expect_match(
+      btn_html(output$msgs_dock_dl, "dl_msgs_html"),
+      "shiny-download-link",
+      fixed = TRUE
     )
-    app_source_str <- paste(app_source, collapse = "\n")
+
     expect_true(
-      grepl('downloadButton("dl_msgs_html"', app_source_str, fixed = TRUE),
-      info = "downloadButton wiring for dl_msgs_html not found in app.R"
-    )
-    expect_true(
-      grepl("output$dl_msgs_html <- downloadHandler", app_source_str, fixed = TRUE),
+      grepl(
+        "output$dl_msgs_html <- downloadHandler",
+        app_source("app.R"),
+        fixed = TRUE
+      ),
       info = "downloadHandler wiring for dl_msgs_html not found in app.R"
     )
   })
@@ -941,6 +1139,11 @@ test_that("opening the metadata editor targets the active dataset and pre-fills 
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     expect_null(rv$editor_dataset)
 
@@ -963,6 +1166,11 @@ test_that("the metadata modal body renders every field, pre-filled, and no type 
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(edit_meta = 1)
 
@@ -987,6 +1195,11 @@ test_that("editing only the description leaves a passed check passed", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -1004,9 +1217,10 @@ test_that("editing only the description leaves a passed check passed", {
     session$setInputs(meta_save = 1)
 
     expect_null(rv$meta_msg)
-    # rv$structure is left alone: output$main depends on it and nothing else,
-    # so reassigning it re-renders the entire workspace and resets the active
-    # tab and every file input. Only a rename has to pay that price.
+    # rv$structure is left alone: reassigning it re-renders every
+    # structure-dependent output (dataset nav, detail panel and its file
+    # inputs) for no reason -- nothing name-keyed changed. Only a rename has
+    # to pay that price.
     expect_identical(rv$structure, structure_before)
     expect_equal(
       DTAtools::datasets(rv$dta, "clinical_data")@description,
@@ -1023,6 +1237,11 @@ test_that("renaming a dataset migrates every piece of name-keyed state", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -1058,6 +1277,11 @@ test_that("renaming a dataset clears its validation", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
@@ -1080,6 +1304,11 @@ test_that("a rejected metadata save leaves the workspace untouched", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
     session$setInputs(edit_meta = 1)
     session$setInputs(
@@ -1096,5 +1325,165 @@ test_that("a rejected metadata save leaves the workspace untouched", {
       DTAtools::datasets(rv$dta, "clinical_data")@description,
       "Clinical data table"
     )
+  })
+})
+
+# --- the Validation summary button ------------------------------------------
+#
+# The button is the only route to dta_build_validation_report() in the app, and
+# it now carries a claim of its own: green means "this certifies a pass", amber
+# means "you can have the summary, but it will say the run is incomplete". A
+# renderUI output is never evaluated unless a test reads it, so without this the
+# gate could invert and CI would stay green.
+
+test_that("the Validation summary button is green only when nothing is left unvalidated", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    # Every dataset validated and passed: the summary really would certify one.
+    rv$status <- c(clinical_data = "pass")
+    session$flushReact()
+    html <- ui_text(output$validation_report_ui)
+    expect_match(html, "Validation summary", fixed = TRUE)
+    expect_match(html, "btn-success", fixed = TRUE)
+    expect_false(grepl("btn-warning", html, fixed = TRUE))
+
+    # A second dataset skipped for missing data. The summary is still offered --
+    # it is a summary, not a certificate -- but the button says so up front.
+    rv$status <- c(clinical_data = "pass", lab_data = "nodata")
+    session$flushReact()
+    html <- ui_text(output$validation_report_ui)
+    expect_match(html, "Validation summary", fixed = TRUE)
+    expect_match(html, "btn-warning", fixed = TRUE)
+    expect_match(html, "incomplete rather than passed", fixed = TRUE)
+    expect_false(grepl("btn-success", html, fixed = TRUE))
+  })
+})
+
+test_that("no Validation summary is offered while a dataset has failed", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+
+    rv$status <- c(clinical_data = "fail")
+    session$flushReact()
+    expect_false(grepl("Validation summary", ui_text(output$validation_report_ui), fixed = TRUE))
+
+    # Nor before anything has been checked at all.
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+    expect_false(grepl("Validation summary", ui_text(output$validation_report_ui), fixed = TRUE))
+  })
+})
+
+# --- the Validation messages dock download buttons ---------------------------
+#
+# Before a check has been run there is nothing to export, and the CSV/TSV/XLSX
+# handlers would happily write a file whose single row reads "No validation
+# messages for this dataset." -- indistinguishable from a clean result. The
+# buttons are therefore disabled until a check has actually happened. A
+# renderUI output is never evaluated unless a test reads it, so without these
+# the gate could invert and CI would stay green.
+
+test_that("the dock download buttons are disabled until a check has been run", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+
+    ids <- c("dl_msgs_csv", "dl_msgs_tsv", "dl_msgs_xlsx", "dl_msgs_html")
+
+    # Data bound, never validated: every button is present but inert.
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+    for (id in ids) {
+      btn <- btn_html(output$msgs_dock_dl, id)
+      expect_false(grepl("shiny-download-link", btn, fixed = TRUE), info = id)
+      expect_match(btn, "disabled", fixed = TRUE)
+      expect_match(btn, "Run a check", fixed = TRUE)
+    }
+
+    # A dataset skipped for missing data is not a check either.
+    rv$status <- c(clinical_data = "nodata")
+    session$flushReact()
+    expect_false(
+      grepl(
+        "shiny-download-link",
+        btn_html(output$msgs_dock_dl, "dl_msgs_csv"),
+        fixed = TRUE
+      )
+    )
+
+    # Checked -- pass or fail, both are a result worth exporting.
+    for (st in c("pass", "fail")) {
+      rv$status <- stats::setNames(st, "clinical_data")
+      session$flushReact()
+      for (id in ids) {
+        btn <- btn_html(output$msgs_dock_dl, id)
+        expect_match(btn, "shiny-download-link", fixed = TRUE, info = paste(id, st))
+        expect_match(btn, "Download the", fixed = TRUE, info = paste(id, st))
+      }
+    }
+  })
+})
+
+test_that("the dock's Report follows the whole DTA, the table exports the active dataset", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+
+    # Another dataset has been checked, the active one has not. The per-dataset
+    # exports have nothing to give; the whole-DTA report does.
+    rv$active <- "clinical_data"
+    rv$status <- c(clinical_data = "pending", other_data = "pass")
+    session$flushReact()
+    expect_false(
+      grepl(
+        "shiny-download-link",
+        btn_html(output$msgs_dock_dl, "dl_msgs_csv"),
+        fixed = TRUE
+      )
+    )
+    expect_match(
+      btn_html(output$msgs_dock_dl, "dl_msgs_html"),
+      "shiny-download-link",
+      fixed = TRUE
+    )
+  })
+})
+
+test_that("the dock download handlers refuse to write before a check", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    rv$status <- c(clinical_data = "pending")
+    session$flushReact()
+
+    # The disabled button is a client-side courtesy; the handler URL stays
+    # reachable, so the gate has to hold on the server too. req() aborts the
+    # download with a silent shiny.silent.error rather than writing a file.
+    expect_error(
+      output$dl_msgs_csv,
+      class = "shiny.silent.error"
+    )
+    expect_error(
+      output$dl_msgs_html,
+      class = "shiny.silent.error"
+    )
+
+    # Once checked, the same download produces a real file.
+    session$setInputs(check_all = 1)
+    session$flushReact()
+    csv <- output$dl_msgs_csv
+    expect_true(file.exists(csv))
+    expect_gt(length(readLines(csv, warn = FALSE)), 0)
   })
 })

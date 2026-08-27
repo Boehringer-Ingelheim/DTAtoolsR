@@ -113,8 +113,9 @@ DTA                              ← top-level agreement container
     │       └── <table_name>     ← populated via load_file() or constructor
     │
     └── DTADataSetFile           ← non-tabular: file presence/readability check
-        ├── file_paths           ← character vector of expected file paths
-        └── files (list)         ← DTAFile descriptors (derived from file_paths)
+        ├── file_paths           ← bound file paths (via load_file() or paths=)
+        └── files (list)         ← DTAFileAny descriptors (type: any), which
+                                          may restrict the allowed endings
 ```
 
 **Three ways to build any object, from most to least common:**
@@ -1158,14 +1159,17 @@ options(DTAtools.stream = "always") # or "never" / "auto"
 options(DTAtools.stream_threshold = 2 * 1024^3) # bytes; default 512 MB
 ```
 
-One caveat on `"auto"`: it compares the size of the file *on disk*. A `.csv.gz`
-is much smaller compressed than materialised, so `"auto"` under-triggers on
-compressed input — pass `stream = "always"` explicitly there.
+`"auto"` accounts for compression: a `.csv.gz`'s on-disk size is multiplied by
+an expansion estimate (4×) before the comparison, so a compressed table large
+enough to matter streams by default. Either explicit `stream` value still
+overrides the guess.
 
 `check()` takes the two scan knobs, both ignored for a table already in memory:
 `batch_rows` (rows per batch, default
-`getOption("DTAtools.stream_batch_rows", 131072L)`) and `max_errors` (a cap on
-retained per-cell detail, which changes neither the counts nor the verdict).
+`getOption("DTAtools.stream_batch_rows", 131072L)`) and `max_errors` (how much
+per-cell detail is held in RAM — it changes neither the counts nor the
+verdict, and rows past the cap spill to a session-temporary store that
+`collect_full_errors()` reassembles).
 
 ### Choosing between them
 
@@ -1174,7 +1178,7 @@ retained per-cell detail, which changes neither the counts nor the verdict).
 | The file fits in memory comfortably | `"never"`, or the default | About twice as fast, and import errors are reported at load |
 | The file is larger than memory, or close to it | `"always"` | The only option that works at all |
 | You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
-| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` reads the *on-disk* size and under-triggers |
+| A large compressed file (`.csv.gz`) | `"auto"` handles it | The size test multiplies a `.gz`'s on-disk bytes by an expansion estimate |
 | You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan, without the object model |
 | You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
 
@@ -1225,9 +1229,10 @@ Nothing in the scan grows with the number of rows:
 |------|------------|
 | column-spec checks | the batch size |
 | range and if/then rules | the batch size |
-| uniqueness rules | the number of distinct keys |
+| uniqueness rules (text keys) | Arrow's engine — the distinct keys never enter R |
+| uniqueness rules (other keys) | the number of distinct keys |
 | grouped rules | the number of distinct groups |
-| retained error detail | `max_errors` |
+| error detail held in RAM | `max_errors` (the rest spills to disk, nothing is lost) |
 
 Measured across a sixteen-fold increase in input, the working set held by the
 scan stayed flat at about 19 MB, while the in-memory path's grew from 51 MB to
@@ -1411,6 +1416,52 @@ results(ds_missing) # one row fails
 # The message explains exactly why
 messages(ds_missing)[, c("target", "rule_id", "message")]
 ```
+
+### Declaring the expected files, and binding them as they arrive
+
+`paths =` is the shortcut for files you already have. A specification written
+ahead of the delivery instead declares what it *expects*, and each file is bound
+with `load_file()` as it turns up — exactly as a tabular dataset is loaded.
+
+The handler for a file that is never parsed is `DTAFileAny` (`type: any` in
+YAML). Unlike `DTAFileCSV`/`DTAFileTSV` it carries no reader, which is what lets
+a file dataset accept a PDF, an archive or raw instrument output without
+pretending it is a table.
+
+Its optional `extensions` restricts which endings are accepted. The list is
+**open**, so a delivery of `.xpt` or `.sas7bdat` files needs no change to this
+package, and the restriction is applied when the file is offered rather than at
+validation time.
+
+```{r dataset_file_load}
+ds_declared <- DTADataSetFile(
+  name = "declared_delivery",
+  files = list(
+    DTAFileAny(filename = "clinical_data.csv", extensions = c("csv", "tsv"))
+  )
+)
+
+ds_declared <- load_file(ds_declared, file = delivered_csv, handler_index = 1)
+ds_declared <- check(ds_declared, quiet = TRUE)
+validation_status(ds_declared)[, c("table", "status", "ok")]
+```
+
+Note the bound target is keyed by the file's **full** name, extension included
+(`clinical_data.csv`), which is the name every `results()`, `messages()` and
+`inspect()` row for a file dataset reports.
+
+A file whose ending is not allowed is refused up front:
+
+```{r dataset_file_extensions}
+pdf_only <- DTAFileAny(filename = ".*", pattern = TRUE, extensions = "pdf")
+
+matches_filename(pdf_only, "study_report.pdf")
+matches_filename(pdf_only, "clinical_data.csv")
+```
+
+A `DTAFileAny` is only meaningful in a `DTADataSetFile`. A `DTADataSetTabular`
+parses everything it is given, so it requires handlers that can actually read
+and rejects a reader-less one at construction.
 
 ### Mixing `DTADataSetTabular` and `DTADataSetFile` in one `DTA`
 
@@ -2053,6 +2104,7 @@ datasets:
 | `DTAFileCSV`              | CSV file handler for `read_file()`                          |
 | `DTAFileTSV`              | TSV file handler for `read_file()`                          |
 | `DTAFileDelim`            | Generic delimited-text file handler for `read_file()`        |
+| `DTAFileAny`              | Handler for a file that is never parsed; optional `extensions` |
 
 ### Key Functions
 

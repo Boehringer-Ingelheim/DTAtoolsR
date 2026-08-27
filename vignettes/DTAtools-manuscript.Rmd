@@ -1,0 +1,356 @@
+---
+title: "Manuscript draft: DTAtools (Nature Methods format)"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 2
+vignette: >
+  %\VignetteIndexEntry{Manuscript draft: DTAtools (Nature Methods format)}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+<!--
+This vignette is a manuscript draft in the structure of a Nature Methods
+Brief Communication / Article. It is a working document, not a submission:
+
+  * The RESULTS benchmark subsections and the DISCUSSION are placeholders.
+    They are marked with "[TO BE FILLED IN ...]" and their code chunks are
+    `eval = FALSE`. Fill them in once the benchmark campaign has run.
+  * Everything else (Abstract, Introduction, Methods, availability
+    statements) is prose that should survive into the submission largely
+    unchanged, modulo journal-specific word limits.
+
+Nature Methods Brief Communication limits, for reference while editing:
+~3 pages, title <= 10 words, abstract <= 70 words (3 sentences),
+main text ~1000-1500 words (no headings in print; kept here for drafting),
+2 display items (figures/tables), Online Methods unlimited.
+-->
+
+# Title
+
+**DTAtools: declarative validation of clinical data transfers in R**
+
+Thomas Schwarzl^1,\*^ and Daniel Schreyer^1^
+
+^1^ Boehringer Ingelheim, Global Computational Biology and Digital Sciences.
+^\*^ Correspondence: thomas.schwarzl\@boehringer-ingelheim.com
+
+# Abstract
+
+<!-- Nature Methods Brief Communication: <= 70 words, 3 sentences, no
+     references. Current draft is intentionally slightly over; trim at
+     submission. -->
+
+Data transfers between research organisations, vendors, and sponsors fail
+routinely because delivered files silently deviate from the agreed
+specification. DTAtools encodes Data Transfer Agreements as human-readable
+YAML and validates tabular deliveries against them in R — column types,
+nullability, controlled vocabularies, regular expressions, and cross-column
+logic — reporting every deviation on three independent axes. A streaming
+validation mode checks files larger than memory with a bounded working set.
+
+# Introduction
+
+Regulated research runs on files that change hands. A contract research
+organisation transmits laboratory measurements to a sponsor; a genomics vendor
+delivers sample manifests to a pharma company; a biomarker lab returns derived
+endpoints for a clinical study. Each transfer is governed by a **Data Transfer
+Agreement (DTA)** and its technical annex, the **Data Transfer Specification
+(DTS)**: the column names, types, controlled vocabularies, and inter-column
+rules the delivered tables must satisfy.
+
+In practice these specifications live in Word documents, and conformance is
+checked by hand — or discovered downstream, when an analysis pipeline breaks on
+`"unknown"` in a numeric column. Manual review is error-prone and unrepeatable;
+every failed delivery costs a resubmission cycle measured in days to weeks.
+General-purpose validation frameworks exist for R — `pointblank`, `validate`,
+and `arsenal` among them — but none speaks the language of a DTA: none pairs a
+document-shaped, signable specification with programmatic enforcement of
+exactly that specification, and none addresses deliveries too large to load
+into memory.
+
+DTAtools closes this gap. The agreement itself — metadata, contacts,
+transmission schedule, and one or more dataset specifications — is a single
+YAML document that is at once human-readable, diff-able under version control,
+and directly executable as a validation program. One function call reads a
+delivered file *in the types the specification declares* and reports every
+deviation with row, column, offending value, and violated constraint. The same
+YAML renders to a formatted Word or PDF agreement for signature, so the
+document the parties sign and the program the machines run can never drift
+apart. Validation scales from interactive checks of small tables to a
+streaming scan of files larger than memory, and a bundled Shiny application
+gives non-programmers the identical validation engine in a browser.
+
+# Results
+
+## A single YAML document is both the agreement and the validation program
+
+A DTA in DTAtools is one YAML file with a `metadata:` block (title, version,
+receiver and supplier contacts, transmission schedule) and a `datasets:` list.
+Each dataset declares its expected files, per-column specifications (SAS-style
+`type`, `nullable`, optional `values`, `pattern`, `length`, `format`), and
+cross-column rules. Reading the file yields an S7 object graph mirroring that
+structure; validating a delivery is three calls:
+
+```{r quickstart}
+library(DTAtools)
+
+dta <- read_dta_from_yaml(
+  system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+)
+dta <- load_file(
+  dta,
+  dataset = "clinical_data",
+  file = system.file("extdata", "clinical_data.csv", package = "DTAtools")
+)
+dta <- check(dta, quiet = TRUE)
+
+results(dta)
+```
+
+Validation reports on three independent axes, and a failure on any one of them
+fails the table: **schema** errors (a value breaks a column constraint),
+**rule** errors (a row breaks inter-column logic), and **import** errors (a
+value cannot be represented in the type its column declares — the text
+`"unknown"` in a numeric column, for example). Import errors are the class of
+defect that silent type coercion hides; DTAtools surfaces them as first-class
+failures, retaining the original text for inspection:
+
+```{r import-errors}
+specs <- DTAColumnSpecCollection(columns = list(
+  SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", nullable = FALSE),
+  AGE        = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+))
+
+ds <- DTADataSetTabular(
+  name = "import_demo",
+  specs = specs,
+  tables = list(demo = data.frame(
+    SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
+    AGE        = c("34", "unknown")
+  ))
+)
+ds <- check(ds, quiet = TRUE)
+
+validation_status(ds)[, c("ok", "n_columnspec_errors", "n_rule_errors", "n_import_errors")]
+```
+
+Every reported error carries an `id`; `inspect()` resolves it to the full
+story — the row in context, the JSON Schema constraint that failed, or the
+original text of a value that would not import. The same objects export the
+signable agreement (`write_dta()`, Word/PDF/Markdown), a self-contained HTML
+validation report (`write_validation_report()`), and validated data with MD5
+checksums (`write_table_to_file()`).
+
+## Rules capture the cross-column logic of real agreements
+
+Beyond per-column constraints, four declarative rule types cover the
+inter-column logic that real DTAs contain: `col_condition` (row-wise if/then),
+`col_range`, `col_unique` (single or composite key), and `group_condition`,
+which groups rows by one or more key columns and enforces constraints across
+each whole group — "if any row for a subject records consent, every row for
+that subject must carry a consent date". Rules are written in the same YAML
+document, evaluated by the same `check()` call, and reported on the same
+`messages()`/`inspect()` surface as column errors.
+
+## Validation of files larger than memory
+
+`load_file(stream = "always")` holds a delivery as a lazy Arrow Dataset
+instead of an in-memory table; `check()` then scans it in batches, and
+`validate_file_stream()` performs the same scan without constructing the
+object model at all. Nothing in the scan grows with the number of rows: memory
+is bounded by the batch size for column checks, by the number of distinct keys
+for uniqueness rules, and by the number of distinct groups for grouped rules.
+Both paths find the same errors and reach the same verdict.
+
+<!-- ============================================================ -->
+<!-- BENCHMARK PLACEHOLDER — the subsections below are scaffolds. -->
+<!-- Run the benchmark campaign, then replace the bracketed        -->
+<!-- placeholders with measured numbers and set the chunks to      -->
+<!-- eval = TRUE (or paste in pre-computed result tables).         -->
+<!-- ============================================================ -->
+
+## Benchmark: throughput and memory across delivery sizes
+
+**[TO BE FILLED IN — benchmark results.]** *This subsection will report
+wall-clock time, CPU time, R heap peak, and Arrow pool peak for the in-memory
+and streaming validation paths across delivery sizes spanning [N] orders of
+magnitude ([sizes to be specified], uncompressed and gzip-compressed), on
+[hardware/OS to be specified]. Metrics are collected with the package's
+built-in instrumentation (Methods); the exact code is below, so filling in
+this section is a matter of running it on the benchmark machine and pasting
+the resulting table.*
+
+```{r benchmark-scaffold, eval = FALSE}
+# Scaffold for the benchmark campaign. Point `files` at the generated
+# delivery files (Methods) and run on the benchmark machine.
+files <- c(
+  # "delivery_1e5_rows.csv", "delivery_1e6_rows.csv", ...
+)
+
+bench_one <- function(file, stream) {
+  dta <- read_dta_from_yaml("benchmark_dta.yaml")
+  dta <- load_file(dta, dataset = 1, file = file, stream = stream)
+  dta <- check(dta, quiet = TRUE, benchmark = TRUE)
+  cbind(file = basename(file), stream = stream, validation_benchmark(dta))
+}
+
+benchmarks <- do.call(rbind, c(
+  lapply(files, bench_one, stream = "never"), # in-memory path
+  lapply(files, bench_one, stream = "always") # streaming path
+))
+benchmarks
+```
+
+**Placeholder for Figure 2** *(throughput and peak memory vs. delivery size,
+in-memory vs. streaming; one panel per metric)*: **[TO BE FILLED IN once the
+benchmark table above exists.]**
+
+## Benchmark: comparison with existing validation frameworks
+
+**[TO BE FILLED IN — comparative benchmark results.]** *This subsection will
+compare DTAtools with [`pointblank`, `validate`, and other frameworks to be
+finalised] on an equivalent constraint set: features first (which DTA
+constraint classes each framework can express at all — declared column types
+at read time, import-error detection, grouped cross-row rules, larger-than-
+memory input), then runtime and memory on the subset of constraints every
+framework supports. The feature matrix is drafted in the Methods; the numbers
+await the campaign.*
+
+# Discussion
+
+**[TO BE FILLED IN — conclusion depends on the benchmark outcome.]** *Drafting
+notes for the eventual text: interpret the benchmark results (does the
+streaming path hold its bounded-memory promise at every tested size? where is
+the throughput crossover between the in-memory and streaming paths? how does
+constraint evaluation cost compare with parsing cost?); position DTAtools
+against the compared frameworks based on the measured feature and performance
+matrix, not on claims; state the limitations that the results reveal; close
+with the practice implication — specification-first validation at the point of
+transfer, before submission rather than after failure.*
+
+# Methods
+
+## Software architecture
+
+DTAtools is an R package (R ≥ 4.1.0) built on the S7 object system. A
+top-level `DTA` object holds a `DTAMetaData` (title, version, contacts,
+transmission schedule) and a named list of datasets. Two dataset classes
+implement the two kinds of deliverable found in agreements:
+`DTADataSetTabular` carries file handlers, a `DTAColumnSpecCollection`
+(per-column `DTAColumnSpec` objects plus a list of `DTARule` objects), and the
+delivered tables as Arrow Tables; `DTADataSetFile` checks only that declared
+files arrived, are non-empty, and are readable — for PDFs, archives, and raw
+instrument output that are never parsed. File handlers (`DTAFileCSV`,
+`DTAFileTSV`, `DTAFileDelim`, `DTAFileAny`) encapsulate delivery-name
+matching — including filename regular expressions, expected file counts, and
+transparent acceptance of gzip-compressed uploads — and reading.
+
+## Typed import and the three validation axes
+
+A column's declared SAS-style type (`SAS Char`, `SAS Num`, `SAS Int`,
+`SAS Date`, `SAS Time`, `SAS DateTime`) is applied when the data is *read*,
+not merely when it is validated: `SAS Char` pins a column to text (so `"007"`
+stays `"007"`), numeric types store numbers, and date/time types keep the text
+as written and validate it by pattern. A source value that cannot be
+represented in its declared type becomes `NA`, and the event is recorded as an
+**import error** carrying the original text and the reason — a validation
+failure in its own right, independent of the schema and rule axes. Column
+constraints are compiled to JSON Schema and evaluated row-wise; rule
+evaluation runs after column validation on the typed table. `check()` skips
+tables whose data and specifications are unchanged since the last run, and
+`force = TRUE` overrides.
+
+## Streaming validation
+
+For deliveries larger than memory, `check()` on a lazily-opened dataset and
+`validate_file_stream()` scan the file in batches of
+`getOption("DTAtools.stream_batch_rows", 131072L)` rows (Arrow record
+batches), evaluating column constraints per batch and maintaining bounded
+state across batches: a distinct-key map for uniqueness rules, per-group flag
+aggregates for grouped rules, and a `max_errors` cap on retained per-cell
+detail. None of these grow with row count. `fail_fast = TRUE` stops at the
+first problem and marks the result as an explicitly partial scan, reporting
+`NA` rather than `TRUE` for any axis it could not settle.
+
+## Benchmark instrumentation
+
+All timings and memory figures **[will be]** collected with the package's
+built-in instrumentation: `check(benchmark = TRUE)` and
+`validate_file_stream(benchmark = TRUE)` attach a one-row metrics frame
+retrievable with `validation_benchmark()`, reporting elapsed and CPU seconds
+(`proc.time()`), R heap peak (via `gc(reset = TRUE)` at call start), process
+RSS at start and end, and Arrow memory-pool figures. Because Arrow's default
+memory pool exposes only a session-lifetime high-water mark,
+`arrow_pool_peak_mb` reports that absolute peak, `arrow_call_mb` the
+difference observed across the call, and `arrow_call_exact` whether this call
+actually set a new high-water mark — when `FALSE`, `arrow_call_mb` is a lower
+bound, not a measurement. On Windows, `proc.time()` does not measure
+child-process CPU, so cross-platform CPU comparisons use the elapsed column.
+
+**[TO BE FILLED IN — benchmark design.]** *Hardware, OS, R and package
+versions, Arrow version and thread settings, delivery-file generator (row
+counts, column mix, error injection rates), number of repetitions, and
+warm/cold cache protocol — to be recorded from the actual campaign. The
+comparative feature matrix (which constraint classes each compared framework
+expresses) is to be finalised together with the framework list.*
+
+## Data availability
+
+The package bundles a complete example agreement
+(`inst/extdata/clinical_dta.yaml`) and matching example deliveries, used
+throughout this manuscript. **[Benchmark input files are generated
+synthetically by the script referenced above; the generator and its seed will
+be published with the benchmark results.]**
+
+## Code availability
+
+DTAtools is open source under LGPL (≥ 3) at
+<https://github.com/Boehringer-Ingelheim/DTAtoolsR>. All analyses in this
+manuscript are contained in the package vignettes and run with
+`R CMD check`.
+
+## Author contributions
+
+T.S. conceived the project and wrote the package. D.S. contributed to the
+package. **[To be completed and confirmed by all authors.]**
+
+## Competing interests
+
+Both authors are or were employees of Boehringer Ingelheim.
+
+# References
+
+<!-- Placeholder reference list — replace with the journal's citation
+     format and a curated bibliography at submission. -->
+
+1. R Core Team. *R: A Language and Environment for Statistical Computing*
+   (R Foundation for Statistical Computing).
+2. Richardson, N. et al. *arrow: Integration to Apache Arrow*
+   (CRAN package).
+3. Vaughan, D., Wickham, H. & Henry, L. *S7: An Object Oriented System Meant
+   to Become a Successor to S3 and S4* (CRAN package).
+4. Iannone, R. *pointblank: Data Validation and Organization of Metadata for
+   Local and Remote Tables* (CRAN package).
+5. van der Loo, M. & de Jonge, E. Data validation infrastructure for R.
+   *J. Stat. Softw.* **97**, 10 (2021).
+6. **[Further references to be added with the Results.]**
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```
