@@ -1142,6 +1142,19 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
 # beyond that they say "(+N more)". So each condition keeps a capped head of the
 # row numbers it saw and a count of the rest.
 #
+# The accumulator is COLUMNAR, not one nested R list per group. Every distinct
+# group is a dense integer id, and every per-group fact -- rows seen, any_true,
+# all_true, true_n, the row-number heads -- lives at position `id` in a shared
+# vector or matrix, one such vector per condition (and, for the row-number
+# heads, per side). Folding a batch is then a handful of vectorised indexed
+# assignments across every group the batch touched at once (`state$any_true[[
+# cond]][gids] <- ...`), rather than an interpreted R-level loop revisiting one
+# group -- and, inside it, one condition -- at a time. Measured, the state
+# costs roughly 294 bytes per group per condition (the two 10-wide double head
+# matrices are 160 of them) plus the rendered label, against 1.1-3 KB/group for
+# the old per-group lists: about 2.5-3x less, and without the interpreted
+# loop's per-batch cost.
+#
 # Memory is therefore proportional to the number of distinct GROUPS times the
 # number of conditions, not to the number of rows. That is the same class as
 # uniqueness, and unbounded in group cardinality rather than in file size -- an
@@ -1150,35 +1163,40 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
 
 DTA_GROUP_ROW_HEAD <- 10L
 
-dta_group_cond_state <- function() {
-  list(
-    any_true = FALSE,
-    all_true = TRUE,
-    # Doubles, not integers. All three count rows, without a cap -- `n_seen`
-    # counts every row of the group, `true_n`/`false_n` every row on each side
-    # of the condition -- and the streaming path is built for files past
-    # `.Machine$integer.max` rows. Integer accumulation there yields `NA` with a
-    # warning rather than an error, and `n_seen` gone `NA` is not cosmetic:
-    # `dta_group_stream_truth()` reads `cond$n_seen > 0 && cond$all_true` for an
-    # "all" scope, so the `NA` flows through the constraint into
-    # `isTRUE(constraint_viol[[ci]][g])`, which is then `FALSE` -- a group that
-    # genuinely violates the constraint is reported as passing. Doubles
-    # represent whole numbers exactly to 2^53.
-    n_seen = 0,
-    true_head = integer(0),
-    true_n = 0,
-    false_head = integer(0),
-    false_n = 0
-  )
-}
-
-dta_group_fold_rows <- function(head, count, new_rows) {
-  count <- count + length(new_rows)
-  room <- DTA_GROUP_ROW_HEAD - length(head)
-  if (room > 0 && length(new_rows) > 0) {
-    head <- c(head, new_rows[seq_len(min(room, length(new_rows)))])
+# Doubles a per-id vector's or matrix's capacity, so that appending ids across
+# a scan is amortised O(1) rather than an O(groups) reallocation on every new
+# group. A plain vector grows through `length<-`, which pads with NA of the
+# vector's own storage mode and, unlike `c()`, keeps the class of any vector
+# whose class ships a `length<-` method (Date, POSIXct, factor, difftime and
+# integer64 all do). A class without one is silently unclassed -- which costs
+# nothing here, because every vector this grows is a plain character, double,
+# logical or integer.
+# A matrix (the row-number heads) grows by rows only; its column count
+# (DTA_GROUP_ROW_HEAD) never changes. Growth only guarantees CAPACITY -- its
+# padding is NA and otherwise meaningless -- every field a freshly created id
+# needs is set explicitly by the caller (see the new-id initialisation block
+# in dta_group_stream_update()), so growth itself carries no initialisation
+# contract.
+dta_group_grow <- function(x, needed) {
+  if (is.matrix(x)) {
+    cur <- nrow(x)
+    if (cur >= needed) {
+      return(x)
+    }
+    new_cap <- max(needed, if (cur == 0L) 16L else cur * 2L)
+    grown <- matrix(NA_real_, nrow = new_cap, ncol = ncol(x))
+    if (cur > 0L) {
+      grown[seq_len(cur), ] <- x
+    }
+    return(grown)
   }
-  list(head = head, count = count)
+  cur <- length(x)
+  if (cur >= needed) {
+    return(x)
+  }
+  new_cap <- max(needed, if (cur == 0L) 16L else cur * 2L)
+  length(x) <- new_cap
+  x
 }
 
 #' @title Start Accumulating a Grouped Rule
@@ -1190,13 +1208,80 @@ dta_group_stream_init <- function(rule) {
   # fastmap rather than an environment, for the symbol-table reason given in
   # dta_rule_stream_init(). A grouped rule leaks the same way a keyed one does:
   # the key is the group label instead of the row key, but it is interned just
-  # the same.
-  state$groups <- fastmap::fastmap()
+  # the same. It maps a group's key to its dense integer id -- the columnar
+  # state below is then addressed by that id, never by the key directly.
+  state$ids <- fastmap::fastmap()
+  state$n <- 0L
+  state$keys <- character(0)
+  # The RENDERED label, built when a group is first seen -- not the group's
+  # raw values. Storing the values instead would freeze their storage mode to
+  # whichever batch happened to arrive first: a later batch of a different
+  # type coerces the whole vector, silently re-rendering labels already
+  # recorded (a numeric column promoted to character by an all-missing batch
+  # renders 1e+05 again, the very thing dta_group_label_value() exists to
+  # prevent) and, for a factor column, matching by label against the first
+  # batch's level set and yielding NA. Rendering once, at first sight, is
+  # also what the eager path does.
+  state$labels <- character(0)
+  # Rows seen per group. ONE vector, not one copy per condition: every
+  # condition sees every row of the group, so the old per-condition n_seen
+  # copies were always identical to each other. A double, not an integer --
+  # the streaming path is built for files past `.Machine$integer.max` rows,
+  # and integer accumulation there yields `NA` with a warning rather than an
+  # error. An `n_seen` gone `NA` is not cosmetic: `scope_truth_vec()` in
+  # dta_group_stream_finalise() reads `n_seen > 0 & all_true` for an "all"
+  # scope, so the `NA` would flow through the constraint and read as `FALSE`
+  # -- a group that genuinely violates the constraint reported as passing.
+  # Doubles represent whole numbers exactly to 2^53.
+  state$n_seen <- double(0)
+
   state$condition_names <- names(rule_get_slot(rule, "conditions"))
   # Slots resolved once per scan rather than re-materialised (rule_get_slot
   # converts the whole S7 object to a list per call) on every batch.
   state$group_by <- rule_get_slot(rule, "group_by")
   state$conditions <- rule_get_slot(rule, "conditions")
+
+  # One vector (or, for the row-number heads, one matrix) per condition, by
+  # id. false counts are deliberately not stored: they are DERIVED at read
+  # time as `n_seen - true_n`, because per batch a false-side count is always
+  # `n_seen_batch - true_count_batch` -- storing both was redundant by
+  # construction in the old per-group state too.
+  state$any_true <- stats::setNames(
+    lapply(state$condition_names, function(...) logical(0)),
+    state$condition_names
+  )
+  state$all_true <- stats::setNames(
+    lapply(state$condition_names, function(...) logical(0)),
+    state$condition_names
+  )
+  state$true_n <- stats::setNames(
+    lapply(state$condition_names, function(...) double(0)),
+    state$condition_names
+  )
+  # DOUBLE matrices, [capacity x DTA_GROUP_ROW_HEAD]: row numbers stay double
+  # past 2^31 on purpose, for the same reason `n_seen` is a double above.
+  # dta_group_stream_finalise() narrows them back to integer, when they fit,
+  # only once, on the assembled `rows` field of each violation.
+  state$true_head <- stats::setNames(
+    lapply(state$condition_names, function(...) {
+      matrix(NA_real_, nrow = 0, ncol = DTA_GROUP_ROW_HEAD)
+    }),
+    state$condition_names
+  )
+  state$false_head <- stats::setNames(
+    lapply(state$condition_names, function(...) {
+      matrix(NA_real_, nrow = 0, ncol = DTA_GROUP_ROW_HEAD)
+    }),
+    state$condition_names
+  )
+  state$true_head_n <- stats::setNames(
+    lapply(state$condition_names, function(...) integer(0)),
+    state$condition_names
+  )
+  state$false_head_n <- stats::setNames(
+    lapply(state$condition_names, function(...) integer(0)),
+    state$condition_names
+  )
 
   # `fail_fast` needs to know mid-scan that a group has already lost, which is
   # only sound for a constraint no later batch can rescue. `mutually_exclusive`
@@ -1212,6 +1297,7 @@ dta_group_stream_init <- function(rule) {
     },
     rule_get_slot(rule, "constraints")
   )
+  state$certain_flag <- logical(0)
   state$certain <- 0L
   state
 }
@@ -1260,11 +1346,11 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   # that agree with `local_levels`, and building a factor additionally sorts
   # the levels, which this loop does not need. Visiting groups in order of
   # first appearance rather than in sorted order is safe ONLY because the
-  # groups are keyed by string in `state$groups` and
+  # groups are keyed by string in `state$ids` and
   # `dta_group_stream_finalise()` sorts those keys before assembling the
   # message -- that is what keeps the streamed message identical to the
   # materialised one, which sees groups in `split()`'s sorted order. Do not
-  # report violations straight out of this loop without restoring the sort.
+  # report violations straight out of this function without restoring the sort.
   local_levels <- unique(split_key)
   gid <- match(split_key, local_levels)
   n_groups <- length(local_levels)
@@ -1295,76 +1381,175 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   names(cond_hit) <- state$condition_names
 
   cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
-  # Rows matching / not matching, split by group -- with all `n_groups` levels
-  # represented (even when empty), so each is addressable by group position.
-  cond_true_rows <- lapply(cond_hit, function(hit) {
-    split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
-  })
-  cond_false_rows <- lapply(cond_hit, function(hit) {
-    split(which(!hit), factor(gid[!hit], levels = seq_len(n_groups)))
-  })
 
-  for (g in seq_len(n_groups)) {
-    key <- local_levels[g]
-    local_first <- first_row[g]
+  # ---- local group -> dense global id --------------------------------------
+  #
+  # `local_levels` mixes groups this batch is the first to see (which need a
+  # fresh id and their group_by values recorded) with groups an earlier batch
+  # already assigned an id to (which need neither). `has()` answers that for
+  # every local group in one vectorised fastmap call.
+  new_mask <- !state$ids$has(local_levels)
+  if (any(new_mask)) {
+    new_keys <- local_levels[new_mask]
+    new_ids <- state$n + seq_len(length(new_keys))
+    needed <- state$n + length(new_keys)
 
-    entry <- state$groups$get(key, missing = NULL)
-    if (is.null(entry)) {
-      entry <- list(
-        label = paste(
-          vapply(group_by, function(col) {
-            paste0(col, "=", as.character(grouped[[col]][local_first]))
-          }, character(1)),
-          collapse = ", "
-        ),
-        conds = stats::setNames(
-          lapply(state$condition_names, function(...) dta_group_cond_state()),
-          state$condition_names
-        ),
-        certain = FALSE
-      )
-    }
-
-    n_seen_g <- n_seen_batch[g]
-
+    state$keys <- dta_group_grow(state$keys, needed)
+    state$labels <- dta_group_grow(state$labels, needed)
+    state$n_seen <- dta_group_grow(state$n_seen, needed)
+    state$certain_flag <- dta_group_grow(state$certain_flag, needed)
     for (cond_name in state$condition_names) {
-      cond <- entry$conds[[cond_name]]
-      n_true_g <- cond_n_true[[cond_name]][g]
-
-      cond$any_true <- cond$any_true || (n_true_g > 0)
-      cond$all_true <- cond$all_true && (n_seen_g > 0 && n_true_g == n_seen_g)
-      cond$n_seen <- cond$n_seen + n_seen_g
-
-      true_local <- cond_true_rows[[cond_name]][[g]]
-      false_local <- cond_false_rows[[cond_name]][[g]]
-
-      folded_true <- dta_group_fold_rows(
-        cond$true_head, cond$true_n, dta_narrow_rows(true_local + row_offset)
-      )
-      cond$true_head <- folded_true$head
-      cond$true_n <- folded_true$count
-
-      folded_false <- dta_group_fold_rows(
-        cond$false_head, cond$false_n, dta_narrow_rows(false_local + row_offset)
-      )
-      cond$false_head <- folded_false$head
-      cond$false_n <- folded_false$count
-
-      entry$conds[[cond_name]] <- cond
+      state$any_true[[cond_name]] <- dta_group_grow(state$any_true[[cond_name]], needed)
+      state$all_true[[cond_name]] <- dta_group_grow(state$all_true[[cond_name]], needed)
+      state$true_n[[cond_name]] <- dta_group_grow(state$true_n[[cond_name]], needed)
+      state$true_head[[cond_name]] <- dta_group_grow(state$true_head[[cond_name]], needed)
+      state$false_head[[cond_name]] <- dta_group_grow(state$false_head[[cond_name]], needed)
+      state$true_head_n[[cond_name]] <- dta_group_grow(state$true_head_n[[cond_name]], needed)
+      state$false_head_n[[cond_name]] <- dta_group_grow(state$false_head_n[[cond_name]], needed)
     }
 
-    if (!isTRUE(entry$certain) && length(state$monotone) > 0) {
-      lost <- vapply(state$monotone, function(constraint) {
-        isTRUE(entry$conds[[constraint$left]]$any_true) &&
-          isTRUE(entry$conds[[constraint$right]]$any_true)
-      }, logical(1))
-      if (any(lost)) {
-        entry$certain <- TRUE
-        state$certain <- state$certain + 1L
+    # New-id initialisation, set explicitly rather than relied on from growth
+    # (whose padding is NA and otherwise meaningless): unseen so far, so no
+    # row has made anything true (`any_true` FALSE), and vacuously every row
+    # seen so far satisfies each condition (`all_true` TRUE, matching
+    # `all(logical(0))`).
+    state$keys[new_ids] <- new_keys
+    state$n_seen[new_ids] <- 0
+    state$certain_flag[new_ids] <- FALSE
+    for (cond_name in state$condition_names) {
+      state$any_true[[cond_name]][new_ids] <- FALSE
+      state$all_true[[cond_name]][new_ids] <- TRUE
+      state$true_n[[cond_name]][new_ids] <- 0
+      state$true_head_n[[cond_name]][new_ids] <- 0L
+      state$false_head_n[[cond_name]][new_ids] <- 0L
+    }
+    # Rendered here, from THIS batch's own columns and this group's first row
+    # in scan order -- the same value, rendered the same way, that the eager
+    # group_label_for() in rule_check_group_condition() (evaluateRules.R)
+    # produces. Values are rendered one at a time on purpose: `format()` over
+    # a vector chooses one common layout for all of it, which would pad
+    # unrelated groups' labels to a shared width.
+    new_first_rows <- first_row[new_mask]
+    state$labels[new_ids] <- vapply(
+      seq_along(new_ids),
+      function(j) {
+        row <- new_first_rows[[j]]
+        paste(
+          vapply(
+            group_by,
+            function(col) paste0(col, "=", dta_group_label_value(grouped[[col]][row])),
+            character(1)
+          ),
+          collapse = ", "
+        )
+      },
+      character(1)
+    )
+
+    state$ids$mset(.list = stats::setNames(as.list(new_ids), new_keys))
+    state$n <- needed
+  }
+
+  # Aligned with `local_levels` (and so with `gid`'s levels) position for
+  # position: `gids[g]` is the dense id of the group at `local_levels[g]`.
+  gids <- unlist(state$ids$mget(local_levels), use.names = FALSE)
+
+  for (cond_name in state$condition_names) {
+    nt <- cond_n_true[[cond_name]]
+    state$any_true[[cond_name]][gids] <- state$any_true[[cond_name]][gids] | (nt > 0)
+    state$all_true[[cond_name]][gids] <- state$all_true[[cond_name]][gids] &
+      (n_seen_batch > 0 & nt == n_seen_batch)
+    state$true_n[[cond_name]][gids] <- state$true_n[[cond_name]][gids] + nt
+  }
+  state$n_seen[gids] <- state$n_seen[gids] + n_seen_batch
+
+  # ---- row-number heads, built lazily ---------------------------------------
+  #
+  # The `which()` + `split()` work below runs only for a (condition, side)
+  # that has, in THIS batch, at least one group still short of
+  # DTA_GROUP_ROW_HEAD rows with matching rows to offer it. On a long scan
+  # every group's heads fill within the first few batches it appears in,
+  # after which this is a no-op for the rest of the file -- unlike the split
+  # it replaces, which the old code built for every condition and side on
+  # every batch regardless of whether any head still had room.
+  for (cond_name in state$condition_names) {
+    hit <- cond_hit[[cond_name]]
+    nt <- cond_n_true[[cond_name]]
+
+    # The head matrix and its counts are pulled into locals for the whole loop
+    # and stored back ONCE. Writing through `state$true_head[[cond]][id, ]`
+    # inside the loop instead duplicates the entire capacity-sized matrix (and
+    # the count vector) on every iteration -- `state` is a function argument,
+    # so the nested replacement has no in-place path -- which made a batch
+    # cost O(groups accumulated) rather than O(groups touched) and turned the
+    # scan quadratic in group cardinality: measured 71s vs 0.8s at 40,000
+    # groups. Do not inline these back into the loop.
+    needy_true <- which(state$true_head_n[[cond_name]][gids] < DTA_GROUP_ROW_HEAD & nt > 0)
+    if (length(needy_true) > 0) {
+      head_matrix <- state$true_head[[cond_name]]
+      head_counts <- state$true_head_n[[cond_name]]
+      rows_by_group <- split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
+      for (g in needy_true) {
+        id <- gids[g]
+        local_rows <- rows_by_group[[g]]
+        hn <- head_counts[id]
+        k <- min(DTA_GROUP_ROW_HEAD - hn, length(local_rows))
+        if (k > 0) {
+          head_matrix[id, hn + seq_len(k)] <- local_rows[seq_len(k)] + row_offset
+          head_counts[id] <- hn + k
+        }
       }
+      state$true_head[[cond_name]] <- head_matrix
+      state$true_head_n[[cond_name]] <- head_counts
     }
 
-    state$groups$set(key, entry)
+    needy_false <- which(
+      state$false_head_n[[cond_name]][gids] < DTA_GROUP_ROW_HEAD & (n_seen_batch - nt) > 0
+    )
+    if (length(needy_false) > 0) {
+      head_matrix <- state$false_head[[cond_name]]
+      head_counts <- state$false_head_n[[cond_name]]
+      rows_by_group <- split(which(!hit), factor(gid[!hit], levels = seq_len(n_groups)))
+      for (g in needy_false) {
+        id <- gids[g]
+        local_rows <- rows_by_group[[g]]
+        hn <- head_counts[id]
+        k <- min(DTA_GROUP_ROW_HEAD - hn, length(local_rows))
+        if (k > 0) {
+          head_matrix[id, hn + seq_len(k)] <- local_rows[seq_len(k)] + row_offset
+          head_counts[id] <- hn + k
+        }
+      }
+      state$false_head[[cond_name]] <- head_matrix
+      state$false_head_n[[cond_name]] <- head_counts
+    }
+  }
+
+  # ---- monotone certainty ----------------------------------------------------
+  #
+  # See dta_group_stream_init(): once a group has made both sides of a
+  # `mutually_exclusive` ANY/ANY constraint true, no later batch can undo
+  # that, so `fail_fast` can call it mid-scan. Judged AFTER the fold above, on
+  # the post-batch truth -- matching the old per-group loop, which updated
+  # `entry$conds` before checking `state$monotone`.
+  #
+  # Looped per CONSTRAINT rather than per group: there are normally a handful
+  # of constraints against thousands of groups, so this is the cheap order to
+  # put the interpreted loop on. Processing constraints one at a time, rather
+  # than all of them in one vectorised pass over an unmodified snapshot, means
+  # a group that satisfies two monotone constraints within the same batch is
+  # still counted into `certain` exactly once -- the `!state$certain_flag[
+  # gids]` guard sees the FIRST constraint's update before the second
+  # constraint is evaluated, matching the old `any()`-over-constraints,
+  # increment-by-one-per-group semantics.
+  for (constraint in state$monotone) {
+    lost <- !state$certain_flag[gids] &
+      state$any_true[[constraint$left]][gids] &
+      state$any_true[[constraint$right]][gids]
+    if (any(lost)) {
+      state$certain_flag[gids[lost]] <- TRUE
+      state$certain <- state$certain + sum(lost)
+    }
   }
 
   # There is deliberately no group budget any more: the old DTAtools.max_groups
@@ -1375,29 +1560,6 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   state
 }
 
-# Whether a violation's `rows` are only the head of a longer list. The capped
-# head is what keeps memory proportional to groups rather than to rows, so the
-# streamed `rows` can be shorter than the materialising path's -- but silently
-# shorter is a trap, and both paths therefore carry this flag.
-dta_group_head_truncated <- function(cond, which = "true") {
-  if (identical(which, "true")) {
-    length(cond$true_head) < cond$true_n
-  } else {
-    length(cond$false_head) < cond$false_n
-  }
-}
-
-# Whether a condition holds for a group under the given scope. "all" requires
-# the group to have had at least one row, matching the materialising path where
-# all(logical(0)) would otherwise be vacuously TRUE.
-dta_group_stream_truth <- function(cond, scope) {
-  if (identical(scope, "all")) {
-    cond$n_seen > 0 && cond$all_true
-  } else {
-    cond$any_true
-  }
-}
-
 #' @title Turn a Grouped Rule's Accumulator into a Result
 #' @param state An accumulator that has seen every batch.
 #' @param rule The grouped rule.
@@ -1406,15 +1568,10 @@ dta_group_stream_truth <- function(cond, scope) {
 #' @keywords internal
 dta_group_stream_finalise <- function(state, rule) {
   constraints <- rule_get_slot(rule, "constraints")
+  group_by <- state$group_by
   violations <- list()
 
-  fmt <- function(cond, which = "true") {
-    if (identical(which, "true")) {
-      dta_format_group_rows(cond$true_head, cond$true_n, DTA_GROUP_ROW_HEAD)
-    } else {
-      dta_format_group_rows(cond$false_head, cond$false_n, DTA_GROUP_ROW_HEAD)
-    }
-  }
+  n_groups <- state$n
 
   # The materialising path orders groups by radix-sorted key (C-locale byte
   # order -- see the factor() levels in rule_check_group_condition()), so the
@@ -1422,17 +1579,76 @@ dta_group_stream_finalise <- function(state, rule) {
   # the session locale, because locale collation ordered the same violations
   # differently on a de_DE dev machine than under CI's C collation, and a
   # non-stable locale sort could even split collation ties differently
-  # between the two paths. Change the two sites together.
-  sorted_keys <- sort(state$groups$keys(), method = "radix")
-  n_groups <- length(sorted_keys)
-  entries <- state$groups$mget(sorted_keys)
+  # between the two paths. Change the two sites together. `state$keys` is
+  # sliced to `state$n` first: its backing vector can be geometrically
+  # over-allocated past the number of ids actually assigned (see
+  # dta_group_grow()), and an unassigned slot's content is undefined.
+  sorted <- order(state$keys[seq_len(n_groups)], method = "radix")
+
+  # A (condition, side)'s row-number head as a plain double vector, or
+  # `double(0)` for a group that never matched on that side.
+  # `dta_format_group_rows()` reads `total == 0` before ever looking at the
+  # head, so an empty vector here is never actually rendered -- and a
+  # `true_n`/`false_n` of 0 is exactly when `true_head_n`/`false_head_n` is
+  # also 0 (see the "needy" gate in dta_group_stream_update(): a head only
+  # ever grows when this batch has at least one matching row to offer it).
+  head_vec <- function(cond_name, id, which) {
+    if (identical(which, "true")) {
+      hn <- state$true_head_n[[cond_name]][id]
+      if (hn == 0L) {
+        return(double(0))
+      }
+      state$true_head[[cond_name]][id, seq_len(hn)]
+    } else {
+      hn <- state$false_head_n[[cond_name]][id]
+      if (hn == 0L) {
+        return(double(0))
+      }
+      state$false_head[[cond_name]][id, seq_len(hn)]
+    }
+  }
+
+  # The false count is derived, not stored: see dta_group_stream_init().
+  side_total <- function(cond_name, id, which) {
+    if (identical(which, "true")) {
+      state$true_n[[cond_name]][id]
+    } else {
+      state$n_seen[id] - state$true_n[[cond_name]][id]
+    }
+  }
+
+  # Whether a violation's `rows` are only the head of a longer list. The
+  # capped head is what keeps memory proportional to groups rather than to
+  # rows, so the streamed `rows` can be shorter than the materialising
+  # path's -- but silently shorter is a trap, and both paths therefore carry
+  # this flag.
+  side_truncated <- function(cond_name, id, which) {
+    hn <- if (identical(which, "true")) {
+      state$true_head_n[[cond_name]][id]
+    } else {
+      state$false_head_n[[cond_name]][id]
+    }
+    hn < side_total(cond_name, id, which)
+  }
+
+  fmt <- function(cond_name, id, which = "true") {
+    dta_format_group_rows(
+      head_vec(cond_name, id, which), side_total(cond_name, id, which), DTA_GROUP_ROW_HEAD
+    )
+  }
 
   # Vectorised per-(condition, scope) truth across ALL groups at once -- one
-  # lookup per group, not the label/row-evidence assembly -- mirroring the
-  # materialising path's `cond_any_true`/`cond_all_true`. This is what lets
-  # the loop below only ever do per-group work (building labels, formatting
-  # row evidence, composing messages) for groups that actually violate
-  # something, instead of for every group seen in the stream.
+  # indexed lookup per group, not the label/row-evidence assembly --
+  # mirroring the materialising path's `cond_any_true`/`cond_all_true`. This
+  # is what lets the loop below only ever do per-group work (building
+  # labels, formatting row evidence, composing messages) for groups that
+  # actually violate something, instead of for every group seen in the
+  # stream. "all" requires the group to have had at least one row, matching
+  # the materialising path where all(logical(0)) would otherwise be
+  # vacuously TRUE. Indexing by `sorted` both selects the valid ids (its
+  # values never exceed `n_groups`, so the vector's own possible
+  # over-allocation past `state$n` is never read) and reorders into the
+  # radix-sorted group order in the same step.
   scope_truth_vec <- function(cond_name, scope) {
     if (!cond_name %in% state$condition_names) {
       cli::cli_abort(
@@ -1444,9 +1660,11 @@ dta_group_stream_finalise <- function(state, rule) {
         class = "dta_rule_not_applicable"
       )
     }
-    vapply(entries, function(entry) {
-      dta_group_stream_truth(entry$conds[[cond_name]], scope)
-    }, logical(1))
+    if (identical(scope, "all")) {
+      (state$n_seen[sorted] > 0) & state$all_true[[cond_name]][sorted]
+    } else {
+      state$any_true[[cond_name]][sorted]
+    }
   }
 
   constraint_viol <- vector("list", length(constraints))
@@ -1470,8 +1688,12 @@ dta_group_stream_finalise <- function(state, rule) {
   violating_groups <- sort(unique(unlist(lapply(constraint_viol, which), use.names = FALSE)))
 
   for (g in violating_groups) {
-    entry <- entries[[g]]
-    conds <- entry$conds
+    id <- sorted[g]
+    # Rendered when the group was first seen (see dta_group_stream_update()),
+    # through dta_group_label_value() -- the renderer the eager
+    # group_label_for() in rule_check_group_condition() (evaluateRules.R)
+    # also uses, so the two paths' labels are identical by construction.
+    label <- state$labels[[id]]
 
     for (ci in seq_along(constraints)) {
       if (!isTRUE(constraint_viol[[ci]][g])) {
@@ -1486,19 +1708,20 @@ dta_group_stream_finalise <- function(state, rule) {
         message <- constraint$message %||%
           sprintf(
             "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
-            entry$label,
+            label,
             left,
             right,
-            left, fmt(conds[[left]]),
-            right, fmt(conds[[right]])
+            left, fmt(left, id, "true"),
+            right, fmt(right, id, "true")
           )
         violations[[length(violations) + 1L]] <- list(
           constraint_id = constraint$id,
-          group = entry$label,
+          group = label,
           message = message,
-          rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head))),
-          rows_truncated = dta_group_head_truncated(conds[[left]], "true") ||
-            dta_group_head_truncated(conds[[right]], "true")
+          rows = dta_narrow_rows(sort(unique(c(
+            head_vec(left, id, "true"), head_vec(right, id, "true")
+          )))),
+          rows_truncated = side_truncated(left, id, "true") || side_truncated(right, id, "true")
         )
       } else if (identical(ctype, "requires")) {
         if_name <- constraint[["if"]]
@@ -1506,32 +1729,31 @@ dta_group_stream_finalise <- function(state, rule) {
         then_scope <- constraint$then_scope %||% "any"
 
         then_scope_reason <- if (identical(then_scope, "all")) {
-          sprintf("rows %s do not satisfy \"%s\"", fmt(conds[[then_name]], "false"), then_name)
+          sprintf("rows %s do not satisfy \"%s\"", fmt(then_name, id, "false"), then_name)
         } else {
           sprintf("no row in the group satisfies \"%s\"", then_name)
         }
         message <- constraint$message %||%
           sprintf(
             "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
-            entry$label,
+            label,
             if_name,
-            fmt(conds[[if_name]]),
+            fmt(if_name, id, "true"),
             then_name,
             then_scope_reason
           )
         then_failed <- if (identical(then_scope, "all")) {
-          conds[[then_name]]$false_head
+          head_vec(then_name, id, "false")
         } else {
-          integer(0)
+          double(0)
         }
         violations[[length(violations) + 1L]] <- list(
           constraint_id = constraint$id,
-          group = entry$label,
+          group = label,
           message = message,
-          rows = sort(unique(c(conds[[if_name]]$true_head, then_failed))),
-          rows_truncated = dta_group_head_truncated(conds[[if_name]], "true") ||
-            (identical(then_scope, "all") &&
-              dta_group_head_truncated(conds[[then_name]], "false"))
+          rows = dta_narrow_rows(sort(unique(c(head_vec(if_name, id, "true"), then_failed)))),
+          rows_truncated = side_truncated(if_name, id, "true") ||
+            (identical(then_scope, "all") && side_truncated(then_name, id, "false"))
         )
       }
     }

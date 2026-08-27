@@ -102,6 +102,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Equality and set operators compare numbers as numbers.** In rule
+  conditions, `equals`/`not_equals`/`in`/`not_in` against a numeric column
+  now coerce a bound that parses as a number, exactly as the numeric
+  comparison operators always have — so `equals: "1000000"` and
+  `equals: 1000000` agree, and the verdict no longer depends on R's
+  scientific rendering of a double (`1e+06`) or on the int-vs-double storage
+  decision, which legitimately differs between the streamed and in-memory
+  paths (this closes the divergence previously pinned as a KNOWN DEFECT).
+  The path-parity guarantee applies to spec-declared columns, which both
+  paths type identically; an *undeclared* column is still inference-typed
+  in memory but text when streamed, so a quoted bound there takes the
+  numeric branch on one path and the textual one on the other — as before,
+  declare the column to pin its semantics. `integer64` columns are exempt
+  from bound parsing: `as.numeric()` would round past 2^53 and break an
+  equality bit64's own comparison keeps exact.
+  A bound that does not parse (`equals: "UNK"`), and every non-numeric
+  column — `Char` ids with leading zeros above all — keep the textual
+  comparison unchanged; `in`/`not_in` switch only when every element of the
+  set parses. Grouped-rule labels likewise render numeric group values
+  canonically (`SITE=1000000`, never `SITE=1e+06`), identically on both
+  paths.
+
+- **Grouped-rule accumulation is columnar.** The streaming scan used to hold
+  one nested R list per distinct group (a label string plus seven fields per
+  condition, ~1–2 KB each) and update it through an interpreted per-group
+  loop — the remaining scale lever after the uniqueness rework. Group state
+  now lives in parallel vectors indexed by a dense group id: per-batch
+  updates are vectorized indexed assignments, redundant fields are derived
+  instead of stored (`false` counts from `n_seen − true_n`), each group's
+  label is rendered once when the group is first seen rather than rebuilt,
+  and the row-evidence extraction short-circuits once a group's capped heads
+  are full. Verdicts, messages, and group order are byte-identical.
+  Measured: memory per group falls by about 2.5–3× (roughly 294 bytes per
+  group per condition, against 1.1–3 KB before), per-batch cost stays flat as
+  groups accumulate, and folding 40,000 groups takes about a third of the
+  accumulator time it used to.
+
 - **The streaming resource budgets are gone.** `DTAtools.max_unique_keys`
   (50 million) and `DTAtools.max_groups` (5 million) aborted the entire scan
   with `dta_stream_budget_exceeded` once an accumulator crossed the line —

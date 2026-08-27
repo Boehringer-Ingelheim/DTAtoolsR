@@ -233,6 +233,54 @@ dta_numeric_operands <- function(x, value, converted = NULL) {
   list(x = values, value = bound)
 }
 
+#' @title Bound of an Equality or Set Operator Against a Numeric Column
+#' @description
+#' `equals`/`not_equals`/`in`/`not_in` compare `value` against the raw
+#' column, so R's implicit coercion decides the outcome whenever the column
+#' is numeric: `1e6 == "1000000"` renders the left side via `as.character()`
+#' first and is `FALSE`, while `1000000L == "1000000"` is `TRUE` -- the
+#' verdict then depends on int-vs-double storage, which legitimately differs
+#' between the streamed (per-batch) and eager (whole-table) narrowing
+#' decisions. This coerces `value` to numeric first, but only against a
+#' numeric column, and only when every element of `value` parses; a bound
+#' that does not parse, or a non-numeric column, is returned unchanged so the
+#' comparison stays textual exactly as before.
+#' @param x The column vector taken from the table.
+#' @param value The bound supplied for `equals`, `not_equals`, `in`, or
+#'   `not_in`.
+#' @return `value` as numeric when `x` is numeric and every element of
+#'   `value` parses as a number; `value` unchanged otherwise.
+#' @keywords internal
+dta_equality_bound <- function(x, value) {
+  if (!is.numeric(x)) {
+    return(value)
+  }
+
+  # bit64::integer64 answers TRUE to is.numeric() but its values do not
+  # survive as.numeric() beyond 2^53 -- parsing the bound would round it and
+  # break an equality that bit64's own comparison kept exact
+  # ("9007199254740993" matched its cell before; the parsed double cannot).
+  # Mirrors dta_row_key()'s integer64 guard.
+  if (inherits(x, "integer64")) {
+    return(value)
+  }
+  values <- unlist(value, use.names = FALSE)
+  if (is.numeric(values)) {
+    return(values)
+  }
+  if (!is.character(values) && !is.factor(values)) {
+    return(value)
+  }
+  parsed <- suppressWarnings(as.numeric(as.character(values)))
+  # All-or-nothing: only when EVERY non-missing element parses does the
+  # comparison go numeric. A mixed set like c("1", "UNK") keeps today's
+  # string behaviour, which is predictable and backward compatible.
+  if (any(is.na(parsed) & !is.na(values))) {
+    return(value)
+  }
+  parsed
+}
+
 #' @title Rule: check_range
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
@@ -524,12 +572,25 @@ dta_condition_mask <- function(column_name, operator, value, x, converted = NULL
   # Numeric comparisons must compare numbers. Applied to the raw column, `>` on
   # a character vector coerces the bound to character and compares by locale
   # collation, so AGE = c("9", "700") passed `greater: 65` because "9" sorts
-  # after "65". `pattern` and the equality/set operators are unaffected and
+  # after "65". Equality and set operators go through the same treatment, but
+  # only conditionally (see below); `pattern` and `empty` are unaffected and
   # deliberately stay on the raw column.
   if (operator %in% dta_numeric_condition_operators()) {
     operands <- dta_numeric_operands(x, value, converted)
     x <- operands$x
     value <- operands$value
+  }
+
+  # The equality and set operators compare numbers as numbers when both sides
+  # are numbers. Left to R's implicit coercion, `x == "1000000"` renders x via
+  # as.character(), so a double 1e6 fails a bound its integer twin passes --
+  # the verdict then depends on int-vs-double storage, which legitimately
+  # differs between the streamed (per-batch) and eager (whole-table)
+  # narrowing decisions. A bound that does not parse as a number keeps the
+  # string comparison exactly as before, and non-numeric columns (Char ids
+  # with leading zeros above all) are never touched.
+  if (operator %in% c("equals", "equal", "not_equals", "not_equal", "in", "not_in")) {
+    value <- dta_equality_bound(x, value)
   }
 
   switch(operator,
@@ -578,9 +639,11 @@ dta_condition_operators <- function() {
 
 #' @title Condition Operators That Compare Numbers
 #' @description
-#' The subset of `dta_condition_operators()` whose operands are numeric. Only
-#' these go through `dta_numeric_operands()`; the equality, set, text and
-#' emptiness operators keep comparing the raw column.
+#' The subset of `dta_condition_operators()` that always go through
+#' `dta_numeric_operands()`. Equality and set operators (`equals`,
+#' `not_equals`, `in`, `not_in`) also compare numerically, but only
+#' conditionally -- see `dta_equality_bound()`; text (`pattern`) and
+#' emptiness (`empty`) operators always compare the raw column.
 #' @return A character vector of operator names.
 #' @keywords internal
 dta_numeric_condition_operators <- function() {
@@ -916,6 +979,11 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #' - Text: `pattern` (a regular expression; row passes when the value matches)
 #' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
 #'
+#' Against a numeric column, `equals`/`not_equals`/`in`/`not_in` compare
+#' numerically when the supplied value parses as a number (so `equals: "18"`
+#' and `equals: 18` agree); otherwise, and for non-numeric columns, the
+#' comparison is textual.
+#'
 #' Both `@condition` and `@then` may also be written as a YAML sequence of
 #' single-column mappings; they are normalised to the named form.
 #'
@@ -1159,7 +1227,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
     row <- first_row[g]
     paste(
       vapply(group_by, function(col) {
-        paste0(col, "=", as.character(grouped[[col]][row]))
+        # dta_group_label_value(), not as.character(): must render identically
+        # to the streaming site in dta_group_stream_update() (streamingValidation.R).
+        paste0(col, "=", dta_group_label_value(grouped[[col]][row]))
       }, character(1)),
       collapse = ", "
     )

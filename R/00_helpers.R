@@ -94,6 +94,28 @@ dta_format_count <- function(n) {
   format(n, scientific = FALSE, trim = TRUE, big.mark = "")
 }
 
+#' @title Render a Group-Label Value
+#' @description
+#' Group-condition messages render each grouping column's value with
+#' `as.character()`, e.g. `"AGE=1000000"`. For a numeric column that used to
+#' show `"1e+06"` where its integer twin showed `"1000000"` -- and which one
+#' you got depended on the int-vs-double narrowing decision, which
+#' legitimately differs between the streamed (per-batch) and eager
+#' (whole-table) paths. `digits = 15` mirrors `as.character()`'s precision,
+#' so the rendering matches `as.character()` wherever that form is
+#' non-scientific; a value whose `as.character()` form IS scientific (very
+#' small or very large magnitudes) expands to plain digits instead, which can
+#' be long for extreme values -- identical on both paths either way.
+#' @param x A single group-column value.
+#' @return A length-1 character string.
+#' @keywords internal
+dta_group_label_value <- function(x) {
+  if (is.numeric(x)) {
+    return(format(x, digits = 15L, scientific = FALSE, trim = TRUE, big.mark = ""))
+  }
+  as.character(x)
+}
+
 #' @title Narrow Reported Row Numbers Back to Integer
 #' @description
 #' The streaming driver turns a batch-local row number into a global one by
