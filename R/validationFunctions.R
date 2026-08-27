@@ -310,15 +310,15 @@ dta_collect_import_errors <- function(rule_results, specs = NULL) {
   # Two rules reading the same column report the same unrepresentable value.
   # That is one import error, not one per rule.
   out <- out[!duplicated(out[, c("row", "column"), drop = FALSE]), , drop = FALSE]
-  out <- out[order(out$row, out$column), , drop = FALSE]
+  # method = "radix": the column tiebreak is a character sort, and locale
+  # collation ordered this same frame differently on a de_DE dev machine than
+  # under CI's C collation. Radix is byte order, identical everywhere.
+  out <- out[order(out$row, out$column, method = "radix"), , drop = FALSE]
 
-  declared <- vapply(
-    out$column,
-    function(column) dta_spec_declared_type(specs, column),
-    character(1),
-    USE.NAMES = FALSE
-  )
-  out$declared_type <- ifelse(is.na(declared), out$declared_type, declared)
+  # Shared with the streaming path's collection step -- see
+  # dta_apply_spec_declared_types() in R/streamingValidation.R -- so the two
+  # cannot drift on how a column's declared type replaces the observed one.
+  out <- dta_apply_spec_declared_types(out, specs)
 
   rownames(out) <- NULL
   out

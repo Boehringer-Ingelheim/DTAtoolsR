@@ -77,6 +77,45 @@ dta_narrow_count <- function(n) {
   n
 }
 
+#' @title Render a Count (or Row Number) for a Message
+#' @description
+#' Counts and row numbers are deliberately kept as doubles past
+#' `.Machine$integer.max` (see `dta_narrow_count()`), but `sprintf("%d", ...)`
+#' does not render such a double -- it errors -- and `as.character()`/`paste()`
+#' render it in scientific notation (`3e+09`). Both failure modes surfaced at
+#' exactly the scale the doubles exist for: a message assembled after a
+#' multi-hour scan either crashed or reported unreadable evidence. This is the
+#' one renderer every message builder shares: plain digits at any magnitude,
+#' identical to `%d` for values that fit an integer.
+#' @param n A numeric vector of whole numbers.
+#' @return A character vector of the numbers in plain (non-scientific) digits.
+#' @keywords internal
+dta_format_count <- function(n) {
+  format(n, scientific = FALSE, trim = TRUE, big.mark = "")
+}
+
+#' @title Render a Group-Label Value
+#' @description
+#' Group-condition messages render each grouping column's value with
+#' `as.character()`, e.g. `"AGE=1000000"`. For a numeric column that used to
+#' show `"1e+06"` where its integer twin showed `"1000000"` -- and which one
+#' you got depended on the int-vs-double narrowing decision, which
+#' legitimately differs between the streamed (per-batch) and eager
+#' (whole-table) paths. `digits = 15` mirrors `as.character()`'s precision,
+#' so the rendering matches `as.character()` wherever that form is
+#' non-scientific; a value whose `as.character()` form IS scientific (very
+#' small or very large magnitudes) expands to plain digits instead, which can
+#' be long for extreme values -- identical on both paths either way.
+#' @param x A single group-column value.
+#' @return A length-1 character string.
+#' @keywords internal
+dta_group_label_value <- function(x) {
+  if (is.numeric(x)) {
+    return(format(x, digits = 15L, scientific = FALSE, trim = TRUE, big.mark = ""))
+  }
+  as.character(x)
+}
+
 #' @title Narrow Reported Row Numbers Back to Integer
 #' @description
 #' The streaming driver turns a batch-local row number into a global one by
@@ -119,6 +158,15 @@ dta_narrow_rows <- function(v) {
 # is already a multi-gigabyte object.
 `__DTAtools_stream_threshold_default__` <- 512 * 1024^2
 
+# What a gzip-compressed delimited file typically expands to. Text tables
+# compress well, so comparing the on-disk size of a .gz against the threshold
+# made "auto" read multi-gigabyte tables into memory -- the inversion of its
+# purpose, on exactly the inputs large enough to be shipped compressed. A
+# fixed factor rather than gzip's ISIZE trailer, because ISIZE is the size
+# modulo 2^32 and lies for members past 4 GB -- the very files that matter
+# here.
+`__DTAtools_gz_expansion_ratio__` <- 4
+
 #' @title Decide Whether to Stream a File
 #' @description
 #' Turns the user-facing `stream` argument into the single yes/no the readers
@@ -135,10 +183,11 @@ dta_narrow_rows <- function(v) {
 #' @details
 #' The `"auto"` threshold is `getOption("DTAtools.stream_threshold")`, in bytes.
 #'
-#' Note that the size compared is the size *on disk*. For a compressed file --
-#' `.csv.gz` -- that is the compressed size, which can be several times smaller
-#' than what materialising it would cost, so `"auto"` under-triggers there. Pass
-#' `stream = "always"` for a large compressed input.
+#' For a gzip-compressed file the on-disk size is multiplied by a fixed
+#' expansion estimate (4x) before the comparison, so a compressed table large
+#' enough to blow up an R session streams by default. The estimate is coarse
+#' on purpose -- gzip's own ISIZE trailer is the size modulo 2^32 and lies for
+#' members past 4 GB -- and either `stream` override still wins.
 #' @keywords internal
 dta_resolve_stream_mode <- function(
   stream = getOption("DTAtools.stream", "auto"),
@@ -190,9 +239,24 @@ dta_resolve_stream_mode <- function(
     return(FALSE)
   }
 
+  # Compare an ESTIMATE of the materialised size, not the bytes on disk: a
+  # compressed file is several times smaller on disk than in memory, so the
+  # raw comparison under-triggered for exactly the large inputs "auto" exists
+  # to protect.
+  if (tolower(tools::file_ext(file)) %in% dta_compression_extensions()) {
+    size <- size * `__DTAtools_gz_expansion_ratio__`
+  }
+
   size > threshold
 }
-`__DTAtools_supported_file_types__` <- c("csv", "tsv") # TODO: "sas7bdat", ..
+# All file types this package's `DTAFileFactory()` knows how to construct a
+# handler for. This list is deliberately just the union -- it does not by
+# itself keep `type: any` out of a tabular dataset or `type: csv` out of a
+# file dataset; that per-dataset-type enforcement lives in the dataset
+# validators, e.g. `DTADataSetTabular`'s, which requires every handler to
+# inherit from `DTAtools::DTAFileTabular` rather than checking against a type
+# string here.
+`__DTAtools_supported_file_types__` <- c("any", "csv", "tsv") # TODO: "sas7bdat", ..
 
 #' @title Check Generic
 #' @description
@@ -435,8 +499,18 @@ dta_file_handlers_from_list <- function(files) {
 #' Constructs a DTAFile object for a specified backend (e.g., SAS or R),
 #' based on the provided type and file path.
 #'
+#' `type` may name any format in either supported list: the readable formats a
+#' tabular dataset needs (`csv`, `tsv`) or `any`, the reader-less handler a
+#' \code{\link{DTADataSetFile}} uses for a deliverable that is never parsed.
+#' Which of those a given dataset will accept is enforced by the dataset itself
+#' -- \code{\link{DTADataSetTabular}} requires every handler to be readable --
+#' so this factory builds what it is asked for and the dataset has the final
+#' say.
+#'
 #' @param type Character. The type specification, potentially prefixed with a backend identifier.
 #' @param ... Additional arguments passed to the specific backend constructor.
+#'   For `type = "any"` this includes the optional `extensions` restriction; see
+#'   \code{\link{DTAFileAny}}.
 #'
 #' @return An object derived from class \code{DTAFile}, depending on the backend specified.
 #'
@@ -444,7 +518,15 @@ dta_file_handlers_from_list <- function(files) {
 #' library(DTAtools)
 #' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
-#' @seealso \code{\link{DTAFile}}
+#' # A deliverable that is never parsed, restricted to two endings.
+#' DTAFileFactory(
+#'   type = "any",
+#'   filename = ".*",
+#'   pattern = TRUE,
+#'   extensions = c("pdf", "zip")
+#' )
+#'
+#' @seealso \code{\link{DTAFile}}, \code{\link{DTAFileAny}}
 #' @export
 DTAFileFactory <- function(
   type,
@@ -465,6 +547,9 @@ DTAFileFactory <- function(
       ...
     ),
     tsv = DTAFileTSV(
+      ...
+    ),
+    any = DTAFileAny(
       ...
     ),
     cli_abort("Filetype '{type}' not implemented.")

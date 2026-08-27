@@ -4,6 +4,681 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-08-27
+
+### Added
+
+- **Uniqueness at any scale: eligible `check_unique` rules now run inside
+  Arrow's engine.** On a streamed table, a uniqueness rule whose key columns
+  are text is answered by Arrow's grouped aggregation over the lazy dataset —
+  one extra streaming pass over just the key columns, with the distinct keys
+  held compactly in C++ instead of as R strings in a hash that grew with key
+  cardinality. This is what makes a per-row-unique subject ID checkable on a
+  hundreds-of-millions-of-rows file without either an abort or an
+  out-of-memory kill, and it removes the per-key R loop that dominated scan
+  time on such rules. Non-text keys and consumable readers keep the per-batch
+  accumulator. `options(DTAtools.stream_arrow_unique = FALSE)` opts out; the
+  path is on by default (unlike `DTAtools.use_arrow_compute`) because text
+  grouping is byte-exact equality with no floating-point latitude, and the
+  streamed and in-memory verdicts are corpus-tested to agree.
+
+- **Error detail past `max_errors` spills to disk instead of being lost.**
+  The sinks still hold at most `max_errors` rows in memory (default 10000),
+  but overflow now lands in a session-temporary spill, and the new
+  `collect_full_errors(details, axis = )` reassembles the complete per-cell
+  detail — head plus spill — for the column-spec or import axis. Counts and
+  verdicts were always exact; now the row-level identities survive too, for
+  the lifetime of the R session.
+
+- **Column projection for streamed scans.** The scan now reads only the
+  columns the specs and rules actually consult; everything else is never
+  parsed, converted, or materialised into R. On a wide file with a narrow
+  specification this removes most of the per-batch work outright. Projection
+  disables itself when a rule's column set cannot be enumerated.
+
+- **Declared `missing_values` are finally honored.** A tabular handler's
+  `missing_values` property was stored but never consulted — a handler
+  declaring the SAS convention `"."` got one spurious import error per `.`
+  cell in every numeric column. Both the eager reader and the lazy open now
+  forward the declared markers (in addition to the empty string) to Arrow's
+  reader.
+
+- **`stream = "auto"` understands compression.** The size test now compares
+  an estimate of the materialised size (on-disk bytes × 4 for `.gz`) against
+  the threshold, so a large compressed table streams by default instead of
+  being read into memory — previously "auto" under-triggered on exactly the
+  inputs big enough to be shipped compressed.
+
+- **A manuscript-draft vignette in Nature Methods format**
+  (`vignette("DTAtools-manuscript")`). Abstract, introduction, and a full
+  methods section are drafted; the benchmark subsections of the results and
+  the discussion are explicit `[TO BE FILLED IN]` placeholders, with
+  `eval = FALSE` scaffold chunks wired to the package's own instrumentation
+  (`check(benchmark = TRUE)` / `validation_benchmark()`) so the campaign's
+  numbers can be dropped in without restructuring the text.
+
+- **A file handler for deliverables that are never parsed: `DTAFileAny`,
+  written `type: any` in YAML.** A `DTADataSetFile` exists to confirm that
+  PDFs, archives, reports and raw instrument output arrived intact, but the
+  only handler types on offer were `csv` and `tsv` — so such a file had to be
+  declared as something it was not.
+
+  The handler optionally carries `extensions`, an **open** allow-list of file
+  endings (`extensions: [pdf, zip]`). Left unset, any ending is accepted.
+  Because the list is open rather than a fixed enum, a delivery of `.xpt` or
+  `.sas7bdat` files needs no change to this package. Entries are normalised on
+  construction — lower-cased, leading dot removed — so `.PDF` and `pdf` declare
+  the same thing, and a compressed delivery satisfies the ending underneath it
+  (`report.pdf.gz` passes `extensions: [pdf]`, exactly as `data.csv.gz` already
+  matches a handler declared `data.csv`).
+
+  The restriction is enforced by `matches_filename()`, so a file with the wrong
+  ending is refused as it is offered rather than at validation time.
+
+- **`load_file()` for `DTADataSetFile`.** A file dataset can now be populated
+  the same way a tabular one is, binding each file to a declared handler as it
+  arrives, instead of only through the `paths =` constructor shortcut.
+
+  Nothing is read or stat-ed when a file is bound: whether it exists, is
+  non-empty and can be opened remains the whole contract of `check()`, which is
+  what lets a specification bind a file that has not arrived yet and report it
+  as missing. The delivered name is still checked against the handler, as it is
+  for a tabular dataset.
+
+- **`clear_validation()` for `DTADataSetFile`**, matching the tabular method.
+
+- **A bundled example that validates a file dataset alongside a tabular one:
+  `inst/extdata/clinical_dta_with_file_dataset.yaml`.** `DTADataSetFile` and
+  `type: any` had no worked example — all three shipped specifications were
+  pure `type: tabular` — so the Shiny app's *Load example DTA* dialog could not
+  show one either.
+
+  The new specification carries the familiar `clinical_data` table plus a
+  second dataset, `raw_export`, declared `type: file` with a `type: any`
+  handler naming the bundled `clinical_data2.csv.gz`. Both deliverables are
+  files that ship with the package, so the example validates end to end:
+  the table is parsed and rule-checked as usual, while the export is only
+  confirmed to have arrived, be readable and be non-empty.
+
+### Changed
+
+- **Equality and set operators compare numbers as numbers.** In rule
+  conditions, `equals`/`not_equals`/`in`/`not_in` against a numeric column
+  now coerce a bound that parses as a number, exactly as the numeric
+  comparison operators always have — so `equals: "1000000"` and
+  `equals: 1000000` agree, and the verdict no longer depends on R's
+  scientific rendering of a double (`1e+06`) or on the int-vs-double storage
+  decision, which legitimately differs between the streamed and in-memory
+  paths (this closes the divergence previously pinned as a KNOWN DEFECT).
+  The path-parity guarantee applies to spec-declared columns, which both
+  paths type identically; an *undeclared* column is still inference-typed
+  in memory but text when streamed, so a quoted bound there takes the
+  numeric branch on one path and the textual one on the other — as before,
+  declare the column to pin its semantics. `integer64` columns are exempt
+  from bound parsing: `as.numeric()` would round past 2^53 and break an
+  equality bit64's own comparison keeps exact.
+  A bound that does not parse (`equals: "UNK"`), and every non-numeric
+  column — `Char` ids with leading zeros above all — keep the textual
+  comparison unchanged; `in`/`not_in` switch only when every element of the
+  set parses. Grouped-rule labels likewise render numeric group values
+  canonically (`SITE=1000000`, never `SITE=1e+06`), identically on both
+  paths.
+
+- **Grouped-rule accumulation is columnar.** The streaming scan used to hold
+  one nested R list per distinct group (a label string plus seven fields per
+  condition, ~1–2 KB each) and update it through an interpreted per-group
+  loop — the remaining scale lever after the uniqueness rework. Group state
+  now lives in parallel vectors indexed by a dense group id: per-batch
+  updates are vectorized indexed assignments, redundant fields are derived
+  instead of stored (`false` counts from `n_seen − true_n`), each group's
+  label is rendered once when the group is first seen rather than rebuilt,
+  and the row-evidence extraction short-circuits once a group's capped heads
+  are full. Verdicts, messages, and group order are byte-identical.
+  Measured: memory per group falls by about 2.5–3× (roughly 294 bytes per
+  group per condition, against 1.1–3 KB before), per-batch cost stays flat as
+  groups accumulate, and folding 40,000 groups takes about a third of the
+  accumulator time it used to.
+
+- **The streaming resource budgets are gone.** `DTAtools.max_unique_keys`
+  (50 million) and `DTAtools.max_groups` (5 million) aborted the entire scan
+  with `dta_stream_budget_exceeded` once an accumulator crossed the line —
+  discarding hours of work at exactly the per-row-unique-key scale streaming
+  exists for, with "raise the option and re-scan" as the only remedy. Both
+  options, the condition class, and the aborts are removed: uniqueness memory
+  is now handled inside Arrow's engine for the common (text-key) case, and
+  the remaining accumulator growth is documented at the entry points instead
+  of enforced mid-scan.
+
+- **Streamed scans read every column as text.** Only spec-declared columns
+  were pinned to `utf8`; undeclared columns kept Arrow's first-block type
+  inference, so a value that no longer fit the inferred type — `"0.01"` in a
+  column that looked like integers, 300 million rows in — aborted the whole
+  scan with an uncatchable `CSV conversion error`. Every scanned column is
+  now pinned, all typing happens in R against the specs, and a malformed
+  value is a reportable finding rather than a mid-scan crash. (One knowable
+  consequence: a string-comparison rule against an undeclared numeric-looking
+  column now compares the file's own text rather than a re-rendered number.)
+
+- **Grouped-rule violations report in byte order, identically everywhere.**
+  Group ordering (and the import-error frame's column tiebreak) used locale
+  collation, so the same file assembled its violation text in a different
+  order on a `de_DE` machine than under CI's C locale. Both the streamed and
+  materialised paths now sort with `method = "radix"`, which also removes a
+  collation-tie edge where the two paths could disagree with each other.
+
+- **`check()` on a `DTA` no longer certifies a run with unchecked targets.**
+  Datasets whose specs declare zero columns (and any other `ok = NA` target)
+  previously vanished from the rollup, so an all-unspecified DTA printed
+  "Validation PASSED: All datasets are valid" with `last_validation_ok =
+  TRUE`. The summary now carries an `n_unchecked` column, the banner reports
+  "Validation INCOMPLETE" when anything was skipped over, and
+  `last_validation_ok` is `TRUE` only when every target was actually checked
+  and clean.
+
+- **`write_table_to_file()` defaults to `overwrite = FALSE`,** matching what
+  its documentation always claimed; an existing file now requires the
+  explicit flag instead of being silently clobbered. It also no longer
+  mangles non-syntactic column names (`Subject ID` was written as
+  `Subject.ID`) on the way out.
+
+- **`fail_fast` reports only failures no unread batch could overturn.** A
+  grouped `requires` constraint that looked violated in the batches read can
+  still be satisfied by a later row; the partial report previously asserted
+  it as a definite failure. Partial results now list only settled failures,
+  and everything else stays `NA`, as the partial-scan contract always said.
+
+- **The *Load example DTA* dialog lists the bundled examples in a taught
+  order** — one tabular dataset, then one dataset fed by several files, then a
+  never-parsed file dataset alongside a tabular one, then the genomics
+  specification. The list was plain alphabetical, which made the sequence a
+  coincidence of the filenames and of the reader's collation locale; it is now
+  stated explicitly, and any example not named in that list is appended in
+  C-collation order.
+
+- **The generated Raw YAML is laid out in blank-line separated sections.** A
+  serialised specification ran to several hundred unbroken lines, so finding
+  where `metadata:` ended and `datasets:` began — or where one dataset stopped
+  and the next started — meant counting indentation.
+
+  A blank line now surrounds every block down to a dataset's own sections:
+  `metadata:` separates from `datasets:`, `receiver:`/`supplier:`/
+  `transmission:` from each other, each dataset from the next, and
+  `files:`/`columns:`/`rules:` from what follows. Column entries, rule entries
+  and `values:` lists stay tight, where blank lines would only add noise. The
+  single-dataset serialisation gets the same layout at its own root.
+
+  This is cosmetic and additive: nothing but whitespace changes, the documents
+  parse identically, and an **uploaded or hand-edited** YAML is still shown and
+  kept exactly as the user wrote it — only generated text is laid out.
+
+- `__DTAtools_supported_file_types__` gains `any`, and stays a single list.
+  `DTAFileFactory()` builds what it is asked for; **which handler a given
+  dataset may hold is enforced by the dataset itself**, not by this list — a
+  tabular dataset requires a readable `DTAFileTabular` (see below), and a file
+  dataset normalises whatever it is given to a `DTAFileAny`. Judging the
+  handler by the dataset that holds it is what avoids threading a dataset type
+  down into the factory.
+
+- `DTADataSetTabular` now requires every file handler to be readable (a
+  `DTAFileTabular`). A tabular dataset parses everything it is given, so a
+  reader-less handler used to construct happily and then abort deep inside the
+  read, naming the wrong problem long after the document that caused it was
+  accepted. This is also what keeps `type: any` out of a tabular dataset without
+  threading the dataset's type through the YAML reader.
+
+- `DTADataSetFile(paths = ...)` builds `DTAFileAny` handlers rather than bare
+  `DTAFile` ones, so a dataset built that way round-trips through YAML.
+
+- **The Shiny app no longer lets a Files dataset's handler be declared `csv` or
+  `tsv`.** Adding a file to such a dataset offered a choice of `any`, `csv` and
+  `tsv`; a `DTADataSetFile` never reads a row, so the two parsing types
+  described a parse that never happens and invited a PDF or an archive to be
+  declared as something it was not. The type is now fixed at *Any file (not
+  parsed)* and shown read-only, and a `csv`/`tsv` save is refused with a
+  sentence saying why. Tabular datasets are unaffected — they still choose
+  between `csv` and `tsv`, and are still never offered `any`.
+
+  A document written by hand that declares a parsing handler inside a file
+  dataset still loads and still works; opening that handler in the editor and
+  saving it will retype it to `any`.
+
+- The bare `stop()` in the `load_file()` fallback is now a `cli::cli_abort()`
+  naming the class it could not dispatch on.
+
+### Fixed
+
+- **An empty-string value in a uniqueness or grouping key no longer crashes
+  the streaming scan.** The key set rejects `""` as a hash key, and the error
+  escaped every handler, so one blank cell in a key column (or a zero-column
+  key) aborted `check()` outright while the in-memory path returned a normal
+  verdict. The empty key is remapped to a byte the encoding can never produce,
+  so equal rows still compare equal.
+
+- **Violation messages no longer crash — and no longer lose row evidence —
+  past 2³¹.** The message builders formatted the deliberately-double stream
+  counters with `sprintf("%d", ...)`, which errors for doubles beyond the
+  integer range, so a rule violated on more than ~2.1 billion rows completed
+  its multi-hour scan and then died while composing its own message; grouped
+  row evidence was separately narrowed through `as.integer()`, whose `NA`s
+  `sort()` silently dropped. Both now render through a plain-digit formatter
+  at any magnitude, and `validation_status()` stopped forcing the import
+  count through `as.integer()` (which turned an over-range count into `NA`
+  that summed as zero).
+
+- **Header cleaning and type pinning now agree on every entry point.** The
+  eager readers pinned declared columns against the raw header before names
+  were cleaned, so a padded or quoted header (` SUBJECT_ID`) silently lost
+  its `Char` pinning and `"007"` arrived as `7` with no import issue under
+  `stream = "never"`; `validate_file_stream()` and `cache_as_parquet()`
+  never cleaned names at all, so the same file reported its clean column as
+  missing — and the Parquet cache persisted the dirty names. All entry
+  points now share the normalized open/read.
+
+- **A header-only file no longer certifies rules on absent columns.** With
+  zero rows, no batch ever ran, so a rule naming a column the table lacks
+  finalised as passed on the streaming path while the in-memory path failed
+  it. The stream driver now evaluates rule applicability once against the
+  source's real column set when no rows arrive.
+
+- **Import-error counts stopped inflating k-fold past the retention cap.**
+  Every rule pushed its own copy of a shared column's unconvertible cells
+  into the sink, and deduplication ran only over the retained rows — 20000
+  bad cells read by two rules reported as ≈40000 once the cap hid the
+  duplicates. Duplicates are now removed per batch, before anything is
+  counted.
+
+- **`fail_fast` / structural results are no longer served as full totals.**
+  The validation index recorded partial counts with no marker, so a later
+  plain `check()` reported the table as "skipped" with a first-bad-batch
+  count presented as its total. Partial results are marked in the index and
+  never satisfy the unchanged-skip; the next `check()` rescans.
+
+- **A streamed table's `@import_issues` is populated after `check()`.** The
+  lazy `load_file()` branch promised the issues would be "found later", but
+  `check()` never wrote them back, so the property stayed empty forever and
+  the Shiny app showed no import issues for streamed tables.
+
+- **The `DTADataSetTabular` constructor no longer materialises lazy
+  tables.** Passing an Arrow `Dataset`, query, or reader through `tables =`
+  collected it into memory at construction (draining readers, skipping spec
+  typing) — defeating the validator's documented reason for admitting lazy
+  holdings. Lazy inputs now pass through untouched, typed at scan time.
+
+- **Re-`check()`ing a consumed `RecordBatchReader` no longer records a
+  hollow pass**, and `.zip` inputs are refused with a clear message naming
+  gzip as the supported transport instead of Arrow's opaque "Is this a 'csv'
+  file?" schema error.
+
+- Assorted smaller repairs found in the same review: `print()` on a handler
+  declaring only a minimum or maximum file count no longer errors;
+  `DTAFileTabular(sep = NA)` reports the intended validator message instead
+  of a bare condition error; `get_table()` rejects fractional and vector
+  indices instead of silently truncating; the streamed grouped
+  "could not be evaluated" message carries the same condition-definition
+  bullet as the in-memory one; the export writer and structural gate reuse
+  the shared helpers they had drifted from.
+
+- **A file dataset stopped reporting the deliverables that never arrived, and
+  certified the delivery as passed.** `dta_file_dataset_targets()`
+  short-circuited on `@file_paths`, so the *first* `load_file()` switched the
+  dataset from "the handlers it declares" to "the paths it holds" and every
+  undelivered handler silently stopped being a target. A dataset declaring
+  `report.pdf`, `audit.log` and `raw.zip` with only the first one delivered
+  reported **one** target, `n_valid = 1, n_invalid = 0`, and the app rendered it
+  green and offered a summary reading *VALIDATION PASSED* — for a delivery that
+  was two thirds missing. Before any file was bound the same dataset correctly
+  reported all three as missing, so binding one file made the other two
+  disappear.
+
+  Targets are now the **union**: every delivered path, plus every declared name
+  no delivered file satisfies, carried as `NA` rather than as a path. Two
+  further defects fall out of the same rewrite. A declared filename is no
+  longer handed to the filesystem, so a same-named file in the process's
+  working directory can no longer stand in for one that was never delivered
+  (a deployed app's working directory is its own app folder, which makes names
+  like `report.pdf` a realistic collision). And a handler declaring several
+  names no longer aborts `check()` with a `vapply` length error — the app's own
+  Files editor accepts several names per handler, so that was one form
+  submission away.
+
+- **A tabular dataset with no column specification validated as a clean pass.**
+  Since `specs_from_list()` began accepting an absent `columns:` key, a dataset
+  with zero columns ran through `check()`, found zero errors on every axis, and
+  reported `ok = TRUE`. That is the starting state of every dataset created by
+  the app's *+ Add dataset* button, so: add a dataset, declare a file, upload
+  it, press Check, and the app issues a green certificate covering **zero
+  checks**.
+
+  Such a table now reports status `unspecified` with `ok = NA`. `NA` rather
+  than `FALSE` is deliberate: it makes both `n_valid` and `n_invalid` skip the
+  row, so the dataset reads as *incomplete* rather than as a data failure, and
+  the summary can no longer say *PASSED*. `check()` also says so on the console
+  instead of printing "N tables passed validation".
+
+- **`load_file()` on a file dataset could unbind a different file, or append
+  forever.** `name` was matched against keys derived from the bound paths but
+  never stored, so `load_file(ds, file = "b.pdf", name = "a.pdf")` overwrote
+  a.pdf's slot — a.pdf silently vanished from the dataset and b.pdf was keyed
+  as b.pdf anyway. Separately, once two bound paths shared a basename the keys
+  became full paths, the basename never matched again, and every re-delivery
+  appended, minting phantom `x.pdf_1` targets in every report. A divergent
+  `name` is now refused outright, and a re-delivery is matched on the path
+  first, so it replaces in both cases.
+
+- **`read_file()` and `open_file()` aborted with R's "the condition has length
+  > 1"** when a handler declared several patterns, because they tested
+  `matches_filename()`'s per-name result without reducing it. Both now reduce
+  with `any()`, as the file-dataset path already did.
+
+- **An ending restriction could not express a multi-part ending, and a YAML
+  boolean silently became one.** `extensions: [tar.gz]` never matched
+  `arch.tar.gz`, because only the final segment was compared — the same for
+  `nii.gz` and `sas7bdat.gz`, and the resulting rejection blamed the *filename*.
+  Endings are now matched as suffixes. And because `no`, `off`, `y` and `n` are
+  ordinary YAML booleans, `extensions: [no]` parsed to `FALSE` and was stored as
+  the unmatchable string `"false"`, refusing every upload; a non-character entry
+  is now refused with a message telling the author to quote it. Assigning
+  `@extensions` directly is validated too, instead of quietly producing a
+  handler that matches nothing.
+
+- **`clear_validation()` on a file dataset aborted for a target that exists.**
+  It resolved `tables` against the *validated* entries rather than the dataset's
+  targets, so naming a bound-but-unchecked target raised "Table not found",
+  where the tabular method is a harmless no-op. The app hit this on **every**
+  overwrite of a file upload and swallowed the error silently.
+
+- **`DTAFileAny` printed as `<DTAFile>` and never showed its ending
+  restriction**, so a handler that refuses every `.csv` was indistinguishable
+  from one that accepts anything. It now prints its own class and an
+  `Allowed endings` line.
+
+- **A file dataset accepted a reader handler.** `type: file` with `type: csv`
+  handlers constructed happily and loaded from YAML, contradicting the app,
+  which offers only `any` there — and opening such a handler in the editor
+  rewrote it to `any` on save, silently discarding `has_header` and `quote`.
+  Reader handlers are now normalised to `DTAFileAny` on construction, so
+  existing documents keep loading and converge on the honest declaration, and
+  the editor no longer discards a prefilled type.
+
+- **`handler_index` was compared as a string.** A character index — which the
+  `load_file()` generic documents as supported — made `"2" > 12` true, so a
+  valid index was rejected while an invalid one slipped through to fail much
+  deeper. `NULL`, `NA` and length-2 values raised raw base-R conditions rather
+  than the package's own errors.
+
+- **Removing the last dataset produced a document the app could not read back.**
+  `dta_from_list()` aborted with a base subscript error on a missing, `NULL` or
+  empty `datasets:` key, so *Apply changes* on the resulting YAML — or
+  reopening an export of it — failed with a message naming nothing the user
+  did. A zero-dataset document now round-trips.
+
+- **The app's column and rule editors were reachable on a file dataset.**
+  `ds_edit_menu()` only *hides* those two rows for a dataset with no `@specs`;
+  the observers behind them checked edit mode but never the dataset type, and
+  an input that is not on screen can still be driven over the websocket. Doing
+  so opened an empty editor and surfaced raw S7 internals — `Can't find
+  property <DTAtools::DTADataSetFile>@specs` — to the user. Both the open and
+  the save observers now re-check the type, matching the double-gating every
+  other editing surface already used.
+
+- **Read-only mode left the Raw YAML editor fully typeable.** The Ace editor
+  was created without `readOnly`, and the only thing that set it was an
+  observer depending solely on the edit-mode switch — which last fired before
+  the editor existed, since it is only drawn once a document is loaded. The
+  pane said *read-only*, hid Apply and Revert, and accepted typing anyway; the
+  edits were then silently discarded. The editor is now born in the correct
+  state.
+
+- **The ending restriction leaked into the exported specification document.**
+  The display suffix was appended inside the shared `handler_expected()`
+  accessor, so the Word/PDF/HTML export rendered
+  `- ^report_.* (pdf, zip) (3 files) — ...`: two adjacent parenthesised groups
+  in a formal deliverable, from which the declared filename could no longer be
+  read back verbatim. The filename is verbatim again and the endings have their
+  own labelled field.
+
+- **A contact field holding several values showed only the first.** In
+  read-only mode a two-line `address:` rendered as one line, and an empty one
+  could render the literal text `NULL` — and read-only is the only place these
+  fields appear, so the dropped lines were unreachable.
+
+- **The remove-dataset confirmation could delete a dataset other than the one
+  it named.** The dialog captured the dataset when it opened but the confirm
+  handler re-read the active dataset at click time, on an irreversible action
+  with no undo. It now acts on the name the dialog actually displayed.
+
+- **The "this dataset expects no files at all" warning is back** in the Files
+  editor — it was dropped in the same change that made zero handlers the
+  starting state of every newly added dataset.
+- **Removing a dataset could blank the Shiny app's sidebar — the workspace
+  overview and the Datasets list disappeared until the window was resized.**
+  The removal itself was sound; what vanished was the render. Adding or
+  removing a dataset rebuilds the whole workspace (`output$main`), and when
+  the browser re-binds the sidebar's dynamic outputs it snapshots their
+  visibility — a snapshot that can race the DOM swap and misreport a visible
+  output as hidden. Shiny then suspends the render server-side
+  (`suspendWhenHidden`, the default) and never sends the HTML, and unlike a
+  tab pane, nothing in the sidebar ever triggers the re-check that would have
+  healed it. The five sidebar outputs are now excluded from
+  `suspendWhenHidden`, so the server pushes them regardless of what the
+  visibility snapshot claimed; the race can still misreport, but it can no
+  longer blank the panel.
+
+- **Editing the document no longer rebuilds the Shiny app's whole workspace.**
+  Adding, removing or renaming a dataset, editing its file handlers, and
+  applying Raw YAML all replaced the entire workspace DOM — snapping the view
+  back to the Datasets tab, clearing every file-picker's displayed name, and
+  re-opening for every main-content output the same visibility race the
+  sidebar had to be immunised against. The main layout now re-renders only
+  when the document itself changes identity (a load, *Start over*, a restored
+  session); everything inside it already updates through its own outputs, and
+  the Raw YAML editor is synced in place after each edit as before. The active
+  tab and the file inputs now survive all of the mutations above.
+
+- **The Shiny app offered the Validation messages downloads before any check
+  had been run.** The dock's CSV, TSV, XLSX and Report buttons were live from
+  the moment a DTA was loaded, and exporting produced a file whose only row
+  read *No validation messages for this dataset.* — indistinguishable from the
+  clean result of a check that really did run.
+
+  The buttons are now inert until there is something to export, and say why on
+  hover. The three table exports are scoped to the active dataset and follow
+  its status; *Report* is the whole-DTA report and follows whether any dataset
+  has been checked, so the two can legitimately disagree. Neither *pending*
+  (data bound, never validated) nor *No data* (skipped for missing files)
+  counts as a check. The handlers refuse the request server-side as well, so
+  the rule holds even though a download URL stays reachable whatever the
+  button looks like.
+
+- **The Shiny app's downloadable validation summary announced *VALIDATION
+  PASSED* while a dataset was still missing its data.** With several datasets
+  in a DTA, checking them all leaves any dataset whose files never arrived at
+  *No data* — it is skipped, not validated. The summary counted only the
+  datasets that were actually validated, found no failures among them, and
+  certified the whole DTA as passed; the skipped dataset appeared in the table
+  below the banner, contradicting it.
+
+  The banner is now three-state and is only green when **every** dataset in the
+  DTA was validated and passed. A dataset that is *No data* or *Not validated*
+  yields *VALIDATION INCOMPLETE* (amber) together with a line naming what is
+  missing, and any failure yields *VALIDATION FAILED* — previously a failure
+  was also reported as merely "incomplete". The counts line now includes
+  datasets still awaiting validation, not just those without data.
+
+- **Two different downloads were both called the validation report.** The
+  sidebar button is now **"Validation summary"** — the whole-DTA outcome, one
+  row per dataset, downloading as `validation_summary_<timestamp>.html` — and
+  is styled amber rather than green when it would report an incomplete run. The
+  **"Report"** button in the Validation messages dock is unchanged and remains
+  the message-level `write_validation_report()` output; both now carry tooltips
+  saying which is which.
+
+- **Uploading into a Files dataset reported *"subscript out of bounds"* in the
+  Loaded files panel, and the file was bound anyway.** The upload itself
+  succeeded — which is why a second attempt offered to overwrite a file the
+  user had never seen arrive — and the panel then threw while drawing the
+  per-file pass/fail tick.
+
+  The tick looks a bound item up in the dataset's status map, defaulting to
+  *pending* when it is absent, and absent is the normal state for a file that
+  has just arrived: a file dataset's `validation_status()` is empty until
+  `check()` runs, where a tabular dataset already carries a pending row per
+  loaded table. That default was written `map[[name]] %||% "pending"`, which
+  cannot work — the status map is an atomic character vector, `[[` on an atomic
+  vector *throws* for an absent name rather than returning `NULL`, and the
+  error is raised while evaluating the left operand, so `%||%` never runs. On a
+  list the same expression is fine, which is why only the file datasets broke.
+
+  Every read of a status map now goes through one helper that is null-safe for
+  both shapes. Only the Loaded files panel was reachable from the reported
+  steps; the other five reads — the dataset nav's per-dataset icon, the dataset
+  status line, two in the Raw YAML apply and the validation report builder —
+  spell the lookup the same way and are safe only because each happens to
+  iterate the map's own names. Nothing enforced that, so they go through the
+  helper too.
+
+  The suite drove this whole journey already — add a Files dataset, declare a
+  file, upload, validate, overwrite — and still missed it, because it only ever
+  inspected the reactive state afterwards and never asked for the output. The
+  Loaded files panel is now rendered by two tests, one either side of
+  `check()`.
+
+- **Files could not be uploaded into a Files dataset in the Shiny app.**
+  Dropping a file reported *"This method needs to be implemented in derived
+  classes"* — the text of the unimplemented `load_file()` stub, surfaced
+  verbatim to the user. Three further defects sat behind it, each of which would
+  have surfaced as soon as the first was fixed:
+
+  - `clear_validation()` had no `DTADataSetFile` method either, so the *second*
+    upload of a file, and every specification edit, would still have failed.
+  - The app keyed a bound file by its basename *without* the extension, while
+    the package keys it *with* — silently breaking overwrite detection, the
+    per-file pass/fail tick and the remove button. Both sides now agree, through
+    one helper.
+  - `validation_status()` returned `NULL` rather than an empty table for a
+    dataset with nothing validated yet, which `check()` then measured with
+    `nrow()`.
+
+- The Files editor announced *"This dataset expects no files at all, so nothing
+  can be loaded into it"* in the red styling used for save failures, for a
+  dataset the user had merely not finished configuring — and neither the Columns
+  nor the Rules editor has any equivalent. The empty state now sits in the table
+  where the eye already is, and the dataset page points at the editor rather
+  than stating a dead end.
+
+- A dataset that could not report its results made every *other* dataset look
+  unvalidated. The app asks `results()` for the whole document at once, and that
+  call aborts outright if any one dataset cannot answer — a tabular dataset with
+  no data loaded raises *"No tables found in dataset."* — so checking a dataset
+  that passed left nothing turning green. Each dataset is now asked separately
+  when the combined call fails, keeping the failure local to the dataset that
+  actually cannot report.
+
+- `load_file()` on a `DTA` chose the name a bound item is stored under before it
+  knew which kind of dataset it was dispatching to, always stripping the file's
+  extension. That is right for a tabular dataset, whose tables are named after
+  the file, and wrong for a file dataset, which keys by the delivered name in
+  full — so a file re-delivered through the `DTA` API was *appended* rather than
+  replaced, growing `file_paths` on every call and leaving the duplicate entries
+  disambiguated as `<path>_1`, `<path>_2`. The name is now left to whichever
+  dataset method receives it, each of which already had the right default.
+
+## [0.21.0] - 2026-08-24
+
+### Added
+
+- **Datasets can be added and removed in the Shiny app.** A new
+  **+ Add dataset** button under the dataset list creates an empty dataset,
+  choosing between a **Tabular** dataset (validated column by column against a
+  specification) and a **Files** dataset (which only checks that the expected
+  files arrive). Tabular is the default. A dataset is removed through
+  **Edit → Remove dataset**, below a divider and styled as destructive because
+  it deletes the dataset and unloads its files rather than opening an editor.
+
+  A dataset's `type` is fixed when it is created. The property is a plain
+  character whose validator only checks set membership, so assigning it would
+  produce an object claiming to be file-backed while still carrying `@specs`
+  and `@tables` — everything downstream dispatches on the S7 class, not the
+  string. Changing a type therefore means adding a new dataset and removing the
+  old one, and no control offers to do it in place.
+
+  New datasets are appended to the end of the list. Every nav button, upload
+  slot and example picker is keyed by a dataset's *position* and resolves its
+  name only at click time, so appending is the one way the list can grow
+  without silently repointing an existing control at the wrong dataset.
+
+- **An Edit mode switch in the header, off by default.** Until it is turned on
+  the document is read-only: the dataset **Edit** menu is hidden, the Metadata
+  tab renders its values as plain text instead of form controls (contacts
+  included, with no add/edit/remove controls), the Raw YAML editor is read-only
+  with no **Apply changes** button, and datasets can be neither added nor
+  removed.
+
+  Every surface that writes to the specification is gated twice — the control
+  is not rendered, *and* the observer behind it re-checks. Hiding a control is
+  not sufficient on its own: an input that is off screen can still be driven
+  over the websocket, the contact observers are registered for every contact
+  the moment a document loads, and the Metadata tab's fields save through a
+  700ms debounce that would otherwise flush after the switch was already turned
+  off. Turning Edit mode off also closes any open editor and clears the dataset
+  it targeted, so a save handler armed earlier in the session cannot fire
+  against a document that has since become read-only.
+
+  What Edit mode gates is the *specification* — columns, rules, file handlers,
+  dataset and document metadata, contacts, the raw YAML, and adding or removing
+  datasets. It deliberately does not gate working with *data* against that
+  specification: loading a document, uploading and unloading files, and running
+  checks all stay available, since validating a transfer is what most users
+  open the app to do.
+
+  While read-only, a contact is shown in full — email, department, phone,
+  address and the signature/reviewer flags. Editable mode keeps those one click
+  away behind the edit modal, but read-only has no click to offer, so the
+  information would otherwise be unreachable.
+
+### Changed
+
+- The dataset Edit menu's **Metadata** entry is now called **Details**, and the
+  modal it opens is titled to match. The input id is unchanged.
+- The **+ Add dataset** button is quieter — it sat directly above "Check all
+  datasets" and read as a competing primary action rather than a small addition
+  to the list above it.
+- The Edit mode switch is vertically centred against the "Report issues" and
+  "About" links. `.app-actions` had no `align-items`, so it defaulted to
+  `stretch` and the switch, which has no vertical padding of its own, sat off
+  the pills' centre line.
+
+### Fixed
+
+- **The Columns and Rules editors are no longer offered for a file dataset.**
+  Both act on `ds@specs`, which only `DTADataSetTabular` has. This was not
+  merely a redundant menu entry: `dta_column_ids()` swallows the missing
+  property with `tryCatch(...) %||% list()` rather than erroring, so on a
+  `DTADataSetFile` the column editor opened *empty* and let the user add a
+  column that had nowhere to be stored. The Edit menu now takes the dataset's
+  type and offers Files, Details and Remove for both kinds, Columns and Rules
+  for tabular only.
+
+- **The Raw YAML editor can be resized, and Ace follows.** The editor is taller
+  (70vh, down to 30vh) and the box has a drag handle. A CSS `resize` handle
+  alone is not enough twice over: `shinyAce::aceEditor(height =)` writes a fixed
+  inline style that only `!important` overrides, and Ace does not observe its
+  own container, so its canvas has to be told to re-lay-out. The
+  `ResizeObserver` that does that is now started on `DOMContentLoaded` — the
+  script is registered in `tags$head()`, where `document.body` is still `null`,
+  and `MutationObserver.observe(document.body)` threw there and aborted the
+  whole script silently, leaving the editor permanently unwired.
+
+- **A tabular dataset with no columns can be read back after being written.**
+  `specs_from_list()` rejected an absent `columns:` key outright, while the
+  serializer omits that key entirely for a dataset that has none — so the
+  package could not parse YAML it had itself just produced. Reaching it needed
+  no new feature: deleting a dataset's last column in the column editor was
+  enough, after which **Apply changes** on the Raw YAML tab, and reloading an
+  exported document, both failed with `` `columns` must be a list. `` An absent
+  key is now read as "no columns declared", which is also what every newly
+  added dataset starts as.
+
 ## [0.20.1] - 2026-08-24
 
 ### Fixed

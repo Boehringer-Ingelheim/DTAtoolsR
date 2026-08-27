@@ -144,7 +144,7 @@ test_that("a quoted or padded header is trimmed on the lazy path too", {
   expect_false(is.null(dta_table_change_signal(dataset)))
 })
 
-test_that("a header needing no cleaning is opened once and left alone", {
+test_that("a header needing no cleaning keeps its names through the pinned re-open", {
   path <- extdata_file("clinical_data.csv")
   dataset <- dta_open_normalized_dataset(path, delim = ",", quote = '"', has_header = TRUE)
 

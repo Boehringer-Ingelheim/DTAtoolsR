@@ -13,7 +13,7 @@ write_table_to_file(
   sep = "\\t",
   na = "",
   row.names = FALSE,
-  overwrite = TRUE,
+  overwrite = FALSE,
   quote = FALSE,
   compression = c("none", "gzip"),
   get_md5sum = TRUE,
@@ -39,7 +39,8 @@ write_table_to_file(
 
 \item{row.names}{Logical. Row names provided.}
 
-\item{overwrite}{Logical. Whether to overwrite the file if it exists. Default is FALSE.}
+\item{overwrite}{Logical. Whether to overwrite the file if it exists. Default
+is FALSE, so a call against an existing path aborts unless \code{overwrite = TRUE} is passed explicitly.}
 
 \item{quote}{Logical. Use of quotes}
 

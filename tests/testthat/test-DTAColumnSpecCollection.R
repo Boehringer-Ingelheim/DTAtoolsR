@@ -79,3 +79,46 @@ test_that("permitted values a YAML parser turned into numbers are flagged", {
   columns_quoted[[1]]$values <- c("1.10", "2.00")
   expect_no_warning(specs_from_list(columns_quoted))
 })
+
+test_that("specs_from_list(NULL) means no columns declared, not an error", {
+  # An absent `columns:` key is not a specification error -- it is what the
+  # serializer itself writes for a dataset with no columns (see
+  # dta_dataset_to_list() in the Shiny app). Rejecting NULL here made the
+  # package unable to read YAML it had itself just produced.
+  specs <- specs_from_list(NULL)
+
+  expect_s3_class(specs, "DTAtools::DTAColumnSpecCollection")
+  expect_length(specs@columns, 0)
+})
+
+test_that("dta_dataset_from_list() builds a tabular dataset with no columns", {
+  # Reachable by deleting a dataset's last column in the app's column editor,
+  # and by every newly added dataset, which starts with none.
+  ds <- dta_dataset_from_list(list(name = "d", type = "tabular"))
+
+  expect_s3_class(ds, "DTAtools::DTADataSetTabular")
+  expect_length(ds@specs@columns, 0)
+})
+
+test_that("a tabular dataset with no columns survives a full DTA YAML round trip", {
+  # Regression guard: serialize the list shape a columnless dataset actually
+  # produces (no `columns:` key at all, matching dta_dataset_to_list() in
+  # inst/shiny/dta_app/R/utils_dta.R) and confirm the package can read its own
+  # output back.
+  dta_list <- list(
+    metadata = list(title = "Round trip", version = "1.0"),
+    datasets = list(
+      list(name = "empty_ds", type = "tabular")
+    )
+  )
+  yaml_text <- yaml::as.yaml(dta_list)
+
+  expect_false(grepl("columns", yaml_text, fixed = TRUE))
+
+  dta <- dta_from_list(yaml::yaml.load(yaml_text))
+
+  expect_s3_class(dta, "DTAtools::DTA")
+  ds <- datasets(dta, "empty_ds")
+  expect_s3_class(ds, "DTAtools::DTADataSetTabular")
+  expect_length(ds@specs@columns, 0)
+})

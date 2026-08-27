@@ -437,7 +437,10 @@ method(load_file, DTADataSet) <- function(
   name = tools::file_path_sans_ext(basename(file)),
   ...
 ) {
-  stop("This method needs to be implemented in derived classes.")
+  cli::cli_abort(c(
+    "{.fn load_file} is not implemented for {.cls {class(x)[[1]]}}.",
+    i = "Use a {.cls DTADataSetTabular} or {.cls DTADataSetFile}, or add a method for this subclass."
+  ))
 }
 
 
@@ -491,24 +494,37 @@ dta_new_validation_run_id <- function() {
 }
 
 #' @keywords internal
-dta_validation_result_to_row <- function(table_name, status, index_entry, target_type = "table") {
+dta_validation_result_to_row <- function(table_name, status, index_entry, target_type = "table",
+                                         ok = NULL) {
+  # `ok` overrides the entry's own verdict, and exists for exactly one caller:
+  # the "unspecified" status, whose verdict is NA rather than TRUE or FALSE.
+  # NA is load-bearing -- it makes both n_valid (sum(ok == TRUE)) and n_invalid
+  # (sum(ok == FALSE)) skip the row, so a dataset with no column specification
+  # reports as incomplete rather than as either a pass or a data failure. The
+  # isTRUE() below would silently flatten that NA to FALSE, which is why the
+  # override is a parameter here rather than a second copy of this data.frame:
+  # the COLUMN SET stays defined in one place.
   data.frame(
     table = table_name,
     target_type = target_type,
     status = status,
-    ok = isTRUE(index_entry$ok),
+    ok = if (is.null(ok)) isTRUE(index_entry$ok) else ok,
     validated_at = as.character(index_entry$validated_at),
     run_id = index_entry$run_id,
     validation_run = if (!is.null(index_entry$validation_run)) index_entry$validation_run else index_entry$run_id,
-    n_columnspec_errors = index_entry$n_columnspec_errors,
-    n_rule_errors = index_entry$n_rule_errors,
+    # All three counts are narrowed via dta_narrow_count(), never as.integer()'d,
+    # so a count past .Machine$integer.max stays a double instead of becoming NA
+    # -- an as.integer()'d NA is exactly what the DTA-level sum(..., na.rm = TRUE)
+    # rollup silently drops, under-reporting the affected axis as 0.
+    n_columnspec_errors = dta_narrow_count(index_entry$n_columnspec_errors),
+    n_rule_errors = dta_narrow_count(index_entry$n_rule_errors),
     # An index entry recorded before the import axis existed knows nothing
     # about it. NA ("unknown") is the honest value; 0 would claim a clean
     # import axis that was never checked.
     n_import_errors = if (is.null(index_entry$n_import_errors)) {
       NA_integer_
     } else {
-      as.integer(index_entry$n_import_errors)
+      dta_narrow_count(index_entry$n_import_errors)
     },
     stringsAsFactors = FALSE
   )

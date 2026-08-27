@@ -76,9 +76,15 @@ DTAFileTabular <- S7::new_class(
     # blocks would silently discard all but the last one.
     problems <- character()
 
+    # `nchar(NA_character_)` is `NA`, not an error -- but `NA != 1` is also
+    # `NA`, and handing that to the `||` chain's `if` aborts with the opaque
+    # "missing value where TRUE/FALSE needed" instead of this check's own
+    # message. `is.na()` is checked first (after the length-1 guard makes it
+    # safe to call), so `nchar()` never runs on a value it cannot answer for.
     if (
       !is.character(self@sep) ||
         length(self@sep) != 1 ||
+        is.na(self@sep) ||
         nchar(self@sep) != 1
     ) {
       problems <- c(problems, "'sep' must be a single character.")
@@ -91,6 +97,7 @@ DTAFileTabular <- S7::new_class(
     if (
       !is.character(self@quote) ||
         length(self@quote) != 1 ||
+        is.na(self@quote) ||
         nchar(self@quote) != 1
     ) {
       problems <- c(problems, "'quote' must be a single character.")
@@ -225,22 +232,41 @@ dta_clean_column_names <- function(x) {
 
 #' @title Open a Delimited File Lazily, With Clean Column Names
 #' @description
-#' The lazy counterpart of `dta_normalize_column_names()`, and the reason it
-#' cannot simply be reused: an Arrow `Dataset` has no `names<-` method, so the
-#' cleaned names have to be supplied when the dataset is *opened* rather than
-#' assigned afterwards.
+#' The lazy counterpart of `dta_read_delim_normalized()`: both pin every
+#' column to `utf8` and apply the same column-name cleaning, differing only in
+#' when the file is read. An Arrow `Dataset` has no `names<-` method, though,
+#' so here the cleaned names have to be supplied when the dataset is *opened*
+#' rather than assigned afterwards -- which is why this cannot simply share
+#' the eager function's code.
 #'
-#' The file is opened twice in the rare case that cleaning changes something.
-#' That is cheap -- opening a dataset reads the header, not the data -- and it
-#' buys the thing the alternative loses: renaming through `dplyr` would return
-#' an `arrow_dplyr_query`, which has no `$files`, so
+#' Every column -- not only the ones a specification declares -- is pinned to
+#' `utf8`. A declared column is pinned so the specification, not Arrow's own
+#' inference, decides its type. An undeclared column is pinned for a different
+#' reason: a lazy dataset's schema is inferred from only its first block and
+#' then locked in for the whole scan, so a column that looks integer-only
+#' early on but holds `"0.01"` far down aborts the entire read -- `CSV
+#' conversion error to int64: invalid value '0.01'` -- potentially hours into
+#' a multi-hundred-million-row scan. Reading as text can never fail that way.
+#' The per-batch coercion ([dta_coerce_table_to_specs()]) and the rules' own
+#' strict numeric conversion do all the real typing in R, so nothing
+#' downstream changes for data that was already well-typed.
+#'
+#' The file is opened twice, unconditionally: the first open exists only to
+#' learn the column names from the header; the second pins every column to
+#' `utf8`, whether or not the header needed cleaning. That is cheap --
+#' opening a dataset reads the header, not the data -- and it buys the thing
+#' the alternative loses: renaming through `dplyr` would return an
+#' `arrow_dplyr_query`, which has no `$files`, so
 #' `dta_table_change_signal()` could not fingerprint it and `check()` would
 #' revalidate the table on every run. Re-opening keeps a true `Dataset`.
 #'
 #' @param path Character path to the delimited file.
-#' @param specs A `DTAColumnSpecCollection` or `NULL`, used to pin declared
-#'   column types at parse time exactly as the eager reader does.
+#' @param specs A `DTAColumnSpecCollection` or `NULL`. Only consulted for the
+#'   first, header-only open -- the final schema pins every column to `utf8`
+#'   regardless of what `specs` declares; see Description.
 #' @param delim,quote,has_header Delimited-text parse options.
+#' @param na Character vector of strings to read as missing, or `NULL`
+#'   (the default) to keep Arrow's own default (`c("", "NA")`) unchanged.
 #' @return An `arrow::Dataset`.
 #' @keywords internal
 dta_open_normalized_dataset <- function(
@@ -248,8 +274,11 @@ dta_open_normalized_dataset <- function(
   specs = NULL,
   delim = ",",
   quote = '"',
-  has_header = TRUE
+  has_header = TRUE,
+  na = NULL
 ) {
+  # First open reads only the header, to learn the raw column names -- opening
+  # a dataset never scans the data, so discarding this one below is cheap.
   dataset <- dta_open_delimited_dataset(
     path,
     specs = specs,
@@ -258,35 +287,157 @@ dta_open_normalized_dataset <- function(
     has_header = has_header
   )
 
-  # With no header Arrow generates the names itself (f0, f1, ...), so there is
-  # nothing to clean and nothing to skip.
-  if (!isTRUE(has_header)) {
-    return(dataset)
-  }
-
   raw_names <- names(dataset)
-  cleaned_names <- dta_clean_column_names(raw_names)
+  # With no header there is nothing to clean: Arrow's generated names (f0,
+  # f1, ...) are used as-is, exactly as before this rework.
+  cleaned <- if (isTRUE(has_header)) dta_clean_column_names(raw_names) else raw_names
 
-  if (identical(raw_names, cleaned_names)) {
-    return(dataset)
+  full_types <- do.call(
+    arrow::schema,
+    setNames(rep(list(arrow::utf8()), length(cleaned)), cleaned)
+  )
+
+  # `col_names = TRUE` lets Arrow keep reading the file's own header line, and
+  # that only works because `full_types` is keyed by `cleaned`, which equals
+  # `raw_names` whenever nothing needed cleaning (including the no-header
+  # case, where `cleaned` was never touched). Once cleaning changed something,
+  # the header text no longer matches the schema's keys, so the clean names
+  # must be supplied explicitly and the header row skipped instead of parsed a
+  # second time as a data row.
+  reopen_args <- list(
+    path,
+    delim = delim,
+    quote = quote,
+    col_names = if (identical(raw_names, cleaned) && has_header) TRUE else cleaned,
+    skip = if (!identical(raw_names, cleaned) && has_header) 1 else 0,
+    col_types = full_types
+  )
+
+  if (!is.null(na)) {
+    reopen_args$na <- na
   }
 
-  # Past here the header needed cleaning, which means the open above matched no
-  # column types at all: `col_types` is keyed by the clean spec ids, and the
-  # names it was matching against still carried their quotes and padding. That
-  # first open is therefore only good for reading the header, which is all it is
-  # used for -- the re-open below is where the declared types actually land.
+  do.call(arrow::open_delim_dataset, reopen_args)
+}
 
-  # `skip = 1` discards the header row, which the explicit `col_names` has now
-  # replaced. Without it the header would be returned as a data row.
-  arrow::open_delim_dataset(
+#' @title Read a Delimited File Eagerly, With Clean Column Names
+#' @description
+#' The eager counterpart of `dta_open_normalized_dataset()`: reads the whole
+#' file into memory rather than opening it as a lazy `Dataset`, sharing the
+#' same declared-type pinning and column-name cleaning so the two paths type a
+#' column identically -- the "same column-type pinning" contract documented on
+#' `open_file()`.
+#'
+#' Unlike the lazy opener, only the columns a specification declares are
+#' pinned to `utf8` ([dta_reader_col_types()]); an undeclared column is left to
+#' Arrow's inference, as it always was for this reader. The lazy path pins
+#' every column because a dataset scan can run for hours over hundreds of
+#' millions of rows and cannot afford Arrow locking in a wrong type partway
+#' through; an eager read is bounded by what fits in memory, so that risk does
+#' not arise here in the same way.
+#'
+#' @param path Character path to the delimited file.
+#' @param delim,quote,has_header Delimited-text parse options.
+#' @param specs A `DTAColumnSpecCollection` or `NULL`, used to pin declared
+#'   column types at parse time.
+#' @param na Character vector of strings to read as missing, or `NULL`
+#'   (the default) to keep Arrow's own default (`c("", "NA")`) unchanged.
+#' @return An Arrow `Table`.
+#' @keywords internal
+dta_read_delim_normalized <- function(
+  path,
+  delim,
+  quote,
+  has_header,
+  specs = NULL,
+  na = NULL
+) {
+  read_args <- list(
+    path,
+    delim = delim,
+    quote = quote,
+    # col_names = FALSE makes arrow generate names and keep the first row as
+    # data; skipping a row would instead discard the first data row.
+    col_names = has_header,
+    # NULL, the reader's own default, means "infer every column".
+    col_types = dta_reader_col_types(specs, has_header),
+    as_data_frame = FALSE
+  )
+
+  if (!is.null(na)) {
+    read_args$na <- na
+  }
+
+  table_obj <- do.call(arrow::read_delim_arrow, read_args)
+  raw_names <- names(table_obj)
+  table_obj <- dta_normalize_column_names(table_obj)
+
+  # `col_types` above is keyed by the *clean* spec ids, but this first read
+  # matched it against the still-quoted, padded header -- so it pinned
+  # nothing, and a declared column was silently inferred, exactly the failure
+  # this whole scheme exists to prevent (a quoted "007" id already arrived as
+  # the integer 7 by the time dta_normalize_column_names() ran, above).
+  # Re-reading with the header skipped and the clean names supplied explicitly
+  # is the only way to get the declared types matched against a header that
+  # needed cleaning. That costs a second pass, but only for files in that
+  # position -- and it is what makes this eager reader honour the same
+  # declared-type pinning as the lazy one.
+  needs_reread <- isTRUE(has_header) &&
+    !identical(raw_names, names(table_obj)) &&
+    !is.null(specs)
+
+  if (!needs_reread) {
+    return(table_obj)
+  }
+
+  cleaned_names <- names(table_obj)
+
+  reread_args <- list(
     path,
     delim = delim,
     quote = quote,
     col_names = cleaned_names,
     skip = 1,
-    col_types = dta_reader_col_types(specs, has_header)
+    col_types = dta_reader_col_types(specs, has_header),
+    as_data_frame = FALSE
   )
+
+  if (!is.null(na)) {
+    reread_args$na <- na
+  }
+
+  # Normalizing again is a no-op -- `cleaned_names` is already clean -- but
+  # applying it keeps this branch returning through the same shape as the
+  # first, rather than a table that skipped a step the other one did not.
+  dta_normalize_column_names(do.call(arrow::read_delim_arrow, reread_args))
+}
+
+#' @title Missing-Value Markers for a Tabular Handler
+#' @description
+#' Maps a `DTAFileTabular` handler's declared `missing_values` onto the `na`
+#' argument the readers expect. An empty cell is always treated as missing
+#' regardless of what a handler declares; anything in `missing_values` adds to
+#' that rather than replacing it.
+#' @param x A `DTAFileTabular` object (or subclass).
+#' @return A character vector to pass as `na`, or `NULL` when the handler
+#'   declares no missing-value markers -- `NULL` lets the reader keep Arrow's
+#'   own default (`c("", "NA")`) rather than narrowing it.
+#' @keywords internal
+dta_reader_na_values <- function(x) {
+  declared <- x@missing_values
+
+  # The property DEFAULTS to "" on every handler, so a bare "" (or NA) is
+  # "nothing declared", not a declaration that only the empty cell is missing.
+  # Without this filter every existing handler would silently narrow Arrow's
+  # default missing set (`""` and `"NA"`) down to just `""`, turning literal
+  # "NA" text into values -- a global behaviour change no one asked for.
+  declared <- declared[!is.na(declared) & nzchar(declared)]
+
+  if (length(declared) == 0) {
+    return(NULL)
+  }
+
+  unique(c("", declared))
 }
 
 
@@ -301,7 +452,7 @@ dta_open_normalized_dataset <- function(
 #' @return The input object \code{x}, returned invisibly.
 #'
 #' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
 #'
 #' @examples
 #' dta_file <- DTAFileCSV(filename = "data.csv")
@@ -314,17 +465,14 @@ if (!exists("print_info", mode = "function")) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTAFileTabular) <- function(x) {
-  # TODO This does not work, currently a workaround
-  # super(print_info, x)
-  # method(print_info, DTAFile)(x)
+  # S7::super() is unused throughout this codebase (see
+  # dta_matches_filename_base()), so the parent's filename/pattern lines are
+  # repeated here rather than reached through it. The number-of-files logic
+  # is NOT repeated, though -- that one is buggy enough (NULL-unsafe) to be
+  # worth sharing instead of copying; see dta_print_file_count().
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
-  if (x@min_number_of_files == x@max_number_of_files) {
-    cli::cli_alert("Number of files: {x@min_number_of_files}")
-  } else {
-    cli::cli_alert("Min number of files: {x@min_number_of_files}")
-    cli::cli_alert("Max number of files: {x@max_number_of_files}")
-  }
+  dta_print_file_count(x)
   cli::cli_alert("Separator: {x@sep}")
   cli::cli_alert("Has header: {x@has_header}")
   cli::cli_alert("Quote: {x@quote}")

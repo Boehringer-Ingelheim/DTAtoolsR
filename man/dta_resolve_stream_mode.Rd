@@ -29,9 +29,10 @@ because a logical is the first thing most callers will try.
 \details{
 The \code{"auto"} threshold is \code{getOption("DTAtools.stream_threshold")}, in bytes.
 
-Note that the size compared is the size \emph{on disk}. For a compressed file --
-\code{.csv.gz} -- that is the compressed size, which can be several times smaller
-than what materialising it would cost, so \code{"auto"} under-triggers there. Pass
-\code{stream = "always"} for a large compressed input.
+For a gzip-compressed file the on-disk size is multiplied by a fixed
+expansion estimate (4x) before the comparison, so a compressed table large
+enough to blow up an R session streams by default. The estimate is coarse
+on purpose -- gzip's own ISIZE trailer is the size modulo 2^32 and lies for
+members past 4 GB -- and either \code{stream} override still wins.
 }
 \keyword{internal}

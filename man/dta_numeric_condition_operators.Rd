@@ -10,8 +10,10 @@ dta_numeric_condition_operators()
 A character vector of operator names.
 }
 \description{
-The subset of \code{dta_condition_operators()} whose operands are numeric. Only
-these go through \code{dta_numeric_operands()}; the equality, set, text and
-emptiness operators keep comparing the raw column.
+The subset of \code{dta_condition_operators()} that always go through
+\code{dta_numeric_operands()}. Equality and set operators (\code{equals},
+\code{not_equals}, \verb{in}, \code{not_in}) also compare numerically, but only
+conditionally -- see \code{dta_equality_bound()}; text (\code{pattern}) and
+emptiness (\code{empty}) operators always compare the raw column.
 }
 \keyword{internal}

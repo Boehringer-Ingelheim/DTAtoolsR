@@ -118,7 +118,10 @@ dta_row_key <- function(df, cols) {
     # sees: `duplicated(df[, character(0), drop = FALSE])` is TRUE from the
     # second row on. Returning `character(0)` here -- what `paste()` with no
     # arguments would give -- would instead report no rows at all.
-    return(rep("", nrow(df)))
+    # DTA_KEY_ESC, not "": fastmap rejects "" as a key outright, so the empty
+    # key crashed the whole streaming scan. See the remap below for why the
+    # substitution is collision-free.
+    return(rep(DTA_KEY_ESC, nrow(df)))
   }
 
   parts <- lapply(cols, function(column_name) {
@@ -195,7 +198,22 @@ dta_row_key <- function(df, cols) {
     }
     text
   })
-  do.call(paste, c(parts, sep = DTA_KEY_SEP))
+  out <- do.call(paste, c(parts, sep = DTA_KEY_SEP))
+
+  # fastmap rejects "" as a key ('key must be not be "" or NA'), and that
+  # error is not classed dta_rule_not_applicable, so a single empty-string
+  # value in a key or grouping column aborted the entire streaming scan. The
+  # empty key is remapped to a lone ESC byte, which the encoding can never
+  # produce for any real value (a literal ESC field encodes to "ESC e", and a
+  # multi-column key always contains the separator), so the remap is
+  # injective and equal rows still key equally. Only a single-column key over
+  # an empty string can be "" here -- with two or more columns the separator
+  # alone makes the key non-empty -- so the scan is the cheap common path.
+  empty <- !nzchar(out)
+  if (any(empty)) {
+    out[empty] <- DTA_KEY_ESC
+  }
+  out
 }
 
 # A key that reproduces `duplicated()`'s notion of an identical row. See
@@ -229,8 +247,18 @@ dta_rule_stream_init <- function(rule) {
     # key permanently -- measured -- and that is unrecoverable even after the
     # accumulator is dropped and gc() runs. fastmap is a C++ hash map that does
     # not touch the symbol table, so its memory is actually reclaimed.
+    #
+    # This per-batch accumulator is the FALLBACK: a Dataset-backed scan
+    # answers eligible uniqueness rules through Arrow's own grouped
+    # aggregation instead (see dta_stream_unique_precompute()), which holds
+    # the distinct keys in the C++ engine rather than as R strings. There is
+    # deliberately no key budget here any more: the old
+    # DTAtools.max_unique_keys abort discarded a multi-hour scan at exactly
+    # the per-row-unique-ID scale streaming exists for, which is worse than
+    # the memory growth it guarded -- that growth is now the exception (non-
+    # text keys, reader sources), not the rule, and it is documented instead
+    # of enforced.
     state$seen <- fastmap::fastmap()
-    state$max_keys <- getOption("DTAtools.max_unique_keys", 50000000L)
   }
   if (kind == "grouped") {
     state$grouped <- dta_group_stream_init(rule)
@@ -253,7 +281,9 @@ dta_rule_stream_init <- function(rule) {
 #' @return The accumulator, updated in place.
 #' @keywords internal
 dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
-  if (!state$applicable || state$kind == "unsupported") {
+  # "precomputed": the rule's verdict was already reached over the whole
+  # source (Arrow-side uniqueness); batches carry no further information.
+  if (!state$applicable || state$kind %in% c("unsupported", "precomputed")) {
     return(state)
   }
 
@@ -289,27 +319,18 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
           state$count <- state$count + sum(already | !first_here)
 
           new_keys <- keys[!already & first_here]
-          # A plain loop over `set()`, not `mset()`: `mset()` needs the keys
-          # rendered as the names of a fully materialised list, which allocates
-          # a second copy of every new key in the batch for no benefit.
-          for (k in new_keys) {
-            state$seen$set(k, TRUE)
-          }
-
-          # dta_stream_budget_exceeded must not be caught by the surrounding
-          # tryCatch, which catches only dta_rule_not_applicable. A resource
-          # failure is not a data verdict, and degrading a uniqueness check to
-          # "not applicable" would report a clean-looking result for a
-          # constraint that was never actually checked.
-          if (state$seen$size() > state$max_keys) {
-            cli::cli_abort(
-              c(
-                "Rule {.val {rule@id}} exceeded the uniqueness key budget.",
-                x = "Tracking {state$seen$size()} distinct keys, over the limit of {state$max_keys}.",
-                i = "Raise {.code options(DTAtools.max_unique_keys = )} if the machine has the memory for it."
-              ),
-              class = "dta_stream_budget_exceeded"
-            )
+          # `mset(.list = )`, not a per-key `set()` loop: the loop cost one
+          # interpreted closure call per distinct key (~3 us measured; hours
+          # of pure dispatch on a per-row-unique key over billions of rows).
+          # The names attribute of the list shares the existing CHARSXPs, so
+          # the feared "second copy of every key" is a pointer vector, not a
+          # copy of the strings.
+          if (length(new_keys) > 0) {
+            # rep(list(TRUE), n) is n pointers to one shared TRUE, not n
+            # copies of anything.
+            state$seen$mset(.list = stats::setNames(
+              rep(list(TRUE), length(new_keys)), new_keys
+            ))
           }
         },
         grouped = {
@@ -337,6 +358,10 @@ dta_rule_stream_update <- function(state, rule, df, numeric_cache = NULL) {
 #'   materialising rule functions return.
 #' @keywords internal
 dta_rule_stream_finalise <- function(state, rule) {
+  if (state$kind == "precomputed") {
+    return(state$result)
+  }
+
   if (state$kind == "unsupported") {
     return(list(
       id = rule@id,
@@ -414,6 +439,11 @@ dta_rule_stream_failing <- function(state) {
   if (state$kind == "unsupported" || !state$applicable) {
     return(TRUE)
   }
+  if (state$kind == "precomputed") {
+    # A precomputed verdict covered the whole source, so its failure is as
+    # settled as any full scan's.
+    return(!isTRUE(state$result$valid))
+  }
   if (state$kind == "grouped") {
     return(state$grouped$certain > 0L)
   }
@@ -425,11 +455,7 @@ dta_rule_stream_failing <- function(state) {
 #' @return A character vector of column names.
 #' @keywords internal
 dta_unique_columns <- function(rule) {
-  cols <- rule_get_slot(rule, "column")
-  if (is.null(cols)) {
-    cols <- rule_get_slot(rule, "columns")
-  }
-  cols
+  dta_rule_target_columns(rule)
 }
 
 # ---- the streaming driver ----------------------------------------------------
@@ -438,8 +464,12 @@ dta_unique_columns <- function(rule) {
 #
 # Both the schema and import axes can produce one error per bad cell, so on a
 # dirty file the error frame is O(rows) and exhausts memory as surely as the
-# data would. Retention is capped; counting is not, so the reported totals stay
-# exact and the pass/fail verdict is never an artefact of truncation.
+# data would. In-memory retention is capped; counting is not, so the reported
+# totals stay exact and the pass/fail verdict is never an artefact of
+# truncation. Rows past the cap are no longer discarded, though: they SPILL to
+# a session-temporary directory, one RDS part per overflowing addition, so the
+# full detail stays recoverable (see collect_full_errors()) while memory stays
+# bounded by the cap.
 dta_error_sink <- function(max_errors) {
   sink <- new.env(parent = emptyenv())
   sink$parts <- list()
@@ -452,7 +482,34 @@ dta_error_sink <- function(max_errors) {
   sink$total <- 0
   sink$truncated <- FALSE
   sink$max <- max_errors
+  # Created lazily on first overflow; NULL means nothing was ever spilled.
+  sink$spill_dir <- NULL
+  sink$spill_parts <- 0L
+  sink$spilled <- 0
+  # A zero-row copy of the first frame ever added, so collect() can hand back
+  # a correctly-shaped frame carrying the spill pointer even when the
+  # in-memory cap retained nothing at all (max_errors = 0): returning NULL
+  # there would silently strand the spilled rows on disk.
+  sink$prototype <- NULL
   sink
+}
+
+# One overflowing frame to disk. tempfile() scopes the spill to the R session:
+# the counts in the collected frame stay exact forever, but row-level detail
+# past the in-memory cap is recoverable for as long as the session's tempdir
+# lives -- which is the honest trade against holding O(rows) of detail in RAM.
+dta_error_sink_spill <- function(sink, errs) {
+  if (nrow(errs) == 0) {
+    return(invisible(sink))
+  }
+  if (is.null(sink$spill_dir)) {
+    sink$spill_dir <- tempfile("dta_error_spill_")
+    dir.create(sink$spill_dir, recursive = TRUE)
+  }
+  sink$spill_parts <- sink$spill_parts + 1L
+  saveRDS(errs, file.path(sink$spill_dir, sprintf("part-%06d.rds", sink$spill_parts)))
+  sink$spilled <- sink$spilled + nrow(errs)
+  invisible(sink)
 }
 
 #' @param sink Environment. An error sink created by `dta_error_sink()`.
@@ -474,6 +531,10 @@ dta_error_sink_add <- function(sink, errs, n_total = NULL) {
     return(sink)
   }
 
+  if (is.null(sink$prototype)) {
+    sink$prototype <- errs[0, , drop = FALSE]
+  }
+
   arriving <- if (is.null(n_total)) nrow(errs) else max(n_total, nrow(errs))
   sink$total <- sink$total + arriving
   if (arriving > nrow(errs)) {
@@ -490,9 +551,11 @@ dta_error_sink_add <- function(sink, errs, n_total = NULL) {
   room <- sink$max - sink$retained
   if (room <= 0) {
     sink$truncated <- TRUE
+    dta_error_sink_spill(sink, errs)
     return(sink)
   }
   if (nrow(errs) > room) {
+    dta_error_sink_spill(sink, errs[-seq_len(room), , drop = FALSE])
     errs <- errs[seq_len(room), , drop = FALSE]
     sink$truncated <- TRUE
   }
@@ -503,6 +566,18 @@ dta_error_sink_add <- function(sink, errs, n_total = NULL) {
 
 dta_error_sink_collect <- function(sink) {
   if (length(sink$parts) == 0) {
+    if (sink$spilled > 0 && !is.null(sink$prototype)) {
+      # Nothing was retained in memory, but rows WERE spilled: a NULL here
+      # would strand them -- the caller could not tell "no errors" from
+      # "every error is on disk". A zero-row frame of the right shape carries
+      # the spill pointer instead.
+      out <- sink$prototype
+      rownames(out) <- NULL
+      attr(out, "truncated") <- TRUE
+      attr(out, "spilled_rows") <- sink$spilled
+      attr(out, "spill_dir") <- sink$spill_dir
+      return(out)
+    }
     return(NULL)
   }
   out <- do.call(rbind, sink$parts)
@@ -510,6 +585,113 @@ dta_error_sink_collect <- function(sink) {
   if (sink$truncated) {
     attr(out, "truncated") <- TRUE
   }
+  if (sink$spilled > 0) {
+    # The frame holds the head; the rest is on disk. collect_full_errors()
+    # reassembles the two.
+    attr(out, "spilled_rows") <- sink$spilled
+    attr(out, "spill_dir") <- sink$spill_dir
+  }
+  out
+}
+
+#' @title Every Retained and Spilled Error Row of a Validation Result
+#' @description
+#' A streaming scan keeps at most `max_errors` per-cell error rows in memory
+#' and spills the rest to a session-temporary directory, so the reported
+#' counts are always exact while memory stays bounded. This reassembles the
+#' complete detail frame -- the in-memory head plus every spilled row -- for
+#' the requested axis.
+#'
+#' The spill lives in the R session's temporary directory: it survives for the
+#' session, not beyond it. Reading a persisted `details` artifact in a later
+#' session still yields the exact counts and the retained head; if the spill
+#' directory is gone, this warns and returns the head rather than failing.
+#' @param details A validation details list, as returned by
+#'   [validate_file_stream()] or stored by `check()`.
+#' @param axis One of `"columnspec"` or `"import"`: which error frame to
+#'   reassemble.
+#' @return A data frame with one row per error, or `NULL` when the axis has
+#'   none. For the import axis, rows flagged by more than one source are
+#'   deduplicated by (row, column), matching how the counts were taken.
+#' @examples
+#' specs <- DTAtools::DTAColumnSpecCollection(
+#'   columns = list(
+#'     ID = DTAtools::DTAColumnSpec(
+#'       id = "ID", type = "SAS Char", length = 2, nullable = FALSE
+#'     )
+#'   )
+#' )
+#'
+#' path <- file.path(tempdir(), "dta_spill_example.csv")
+#' utils::write.csv(
+#'   data.frame(ID = c("TOOLONG1", "TOOLONG2", "TOOLONG3")),
+#'   path,
+#'   row.names = FALSE
+#' )
+#'
+#' # Hold at most one error row in memory; the other two spill to disk.
+#' details <- validate_file_stream(specs, path, max_errors = 1, verbose = FALSE)
+#' nrow(collect_full_errors(details, axis = "columnspec"))
+#'
+#' unlink(path)
+#' @export
+collect_full_errors <- function(details, axis = c("columnspec", "import")) {
+  axis <- match.arg(axis)
+
+  frame <- if (identical(axis, "columnspec")) {
+    tryCatch(details$columnspec_errors$full_error, error = function(e) NULL)
+  } else {
+    tryCatch(details$import_errors, error = function(e) NULL)
+  }
+
+  if (is.null(frame)) {
+    return(NULL)
+  }
+
+  dirs <- if (identical(axis, "columnspec")) {
+    attr(frame, "spill_dir", exact = TRUE)
+  } else {
+    attr(frame, "spill_dirs", exact = TRUE)
+  }
+  dirs <- dirs[!is.na(dirs)]
+
+  if (length(dirs) == 0) {
+    return(frame)
+  }
+
+  existing <- dirs[dir.exists(dirs)]
+  if (length(existing) < length(dirs)) {
+    cli::cli_warn(c(
+      "Some spilled error detail is no longer on disk; returning what remains.",
+      i = "Spilled rows live in the R session's temporary directory and do not survive the session. The reported counts are unaffected."
+    ))
+  }
+
+  parts <- unlist(
+    lapply(existing, function(d) {
+      sort(list.files(d, pattern = "^part-\\d+\\.rds$", full.names = TRUE), method = "radix")
+    }),
+    use.names = FALSE
+  )
+
+  if (length(parts) == 0) {
+    return(frame)
+  }
+
+  out <- do.call(rbind, c(list(frame), lapply(parts, readRDS)))
+  attr(out, "truncated") <- NULL
+  attr(out, "spilled_rows") <- NULL
+  attr(out, "spill_dir") <- NULL
+  attr(out, "spill_dirs") <- NULL
+
+  if (identical(axis, "import")) {
+    # A cell flagged by both the typing and the rule axis is one error; the
+    # in-memory merge deduplicated the retained rows, and this is the same
+    # dedup extended over the spilled ones.
+    out <- out[!duplicated(out[, c("row", "column"), drop = FALSE]), , drop = FALSE]
+    out <- out[order(out$row, out$column, method = "radix"), , drop = FALSE]
+  }
+  rownames(out) <- NULL
   out
 }
 
@@ -547,6 +729,19 @@ dta_error_sink_collect <- function(sink) {
 #' @param fail_fast Logical. Stop at the first batch that shows any problem
 #'   instead of scanning to the end. The result then carries a `partial_scan`
 #'   attribute and axes that could not be settled report `NA`.
+#' @param precomputed A list parallel to `specs@rules`: entry `i` is a
+#'   finalise-shaped result (`id`/`valid`/`message`) for a rule already
+#'   answered outside the batch loop -- today, a uniqueness rule computed by
+#'   Arrow's grouped aggregation over the whole dataset (see
+#'   [dta_stream_unique_precompute()]) -- or `NULL` for a rule this scan must
+#'   still accumulate. Precomputed rules are skipped per batch and their
+#'   result is spliced in at finalise, in rule order.
+#' @param known_columns Character. The source's full column names, when the
+#'   caller can read them without consuming the source. Used only when the
+#'   stream yields no rows: rules are then evaluated once against an empty
+#'   table with these columns, so a rule naming a column the table lacks
+#'   still reports "could not be evaluated" exactly as the materialising path
+#'   does -- previously a header-only file certified such rules as passed.
 #' @return A `details` list of the same shape `validate_table_detailed()`
 #'   returns.
 #' @keywords internal
@@ -555,13 +750,25 @@ dta_validate_table_stream <- function(specs,
                                       verbose = FALSE,
                                       max_errors = getOption("DTAtools.max_errors", 10000L),
                                       coerce = TRUE,
-                                      fail_fast = FALSE) {
+                                      fail_fast = FALSE,
+                                      precomputed = list(),
+                                      known_columns = character(0)) {
   rules_list <- tryCatch(specs@rules, error = function(e) NULL)
   if (is.null(rules_list)) {
     rules_list <- list()
   }
 
-  states <- lapply(rules_list, dta_rule_stream_init)
+  states <- lapply(seq_along(rules_list), function(i) {
+    pre <- if (i <= length(precomputed)) precomputed[[i]] else NULL
+    if (is.null(pre)) {
+      return(dta_rule_stream_init(rules_list[[i]]))
+    }
+    state <- new.env(parent = emptyenv())
+    state$kind <- "precomputed"
+    state$applicable <- TRUE
+    state$result <- pre
+    state
+  })
   # Which columns each rule reads numerically, computed once for the whole
   # scan rather than re-derived (by re-parsing the rule's clause structure)
   # on every batch.
@@ -573,6 +780,8 @@ dta_validate_table_stream <- function(specs,
   # for the whole scan rather than re-derived (through several S7 dispatches)
   # on every batch.
   columnspec_schemas <- dta_compile_columnspec_schemas(specs)
+  # Likewise each column's target R type for the coercion axis.
+  spec_type_map <- dta_compile_spec_types(specs)
 
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
@@ -620,7 +829,13 @@ dta_validate_table_stream <- function(specs,
     # once and hangs the issues on it as an attribute; with no single table to
     # hang anything on, the issues accumulate here instead.
     if (isTRUE(coerce)) {
-      coerced <- dta_coerce_table_to_specs(df, specs)
+      # max_rows_per_column = Inf: nothing is dropped before it reaches the
+      # sink, whose cap now spills overflow to disk instead of losing it. A
+      # single batch bounds the frame anyway.
+      coerced <- dta_coerce_table_to_specs(
+        df, specs,
+        type_map = spec_type_map, max_rows_per_column = Inf
+      )
       df <- coerced$table
       issues <- coerced$issues
       # coerced is no longer needed once df and issues have been extracted; drop
@@ -670,24 +885,51 @@ dta_validate_table_stream <- function(specs,
       columns = unique(unlist(rule_numeric_columns, use.names = FALSE))
     )
 
+    batch_rule_errs <- vector("list", length(rules_list))
     for (i in seq_along(rules_list)) {
       dta_rule_stream_update(states[[i]], rules_list[[i]], df, numeric_cache)
 
       # Sourced from the same columns the rule just read as numbers, so an
       # unrepresentable value is reported on both axes rather than moved
-      # from one to the other.
-      rule_errs <- tryCatch(
-        dta_rule_import_errors(
-          rules_list[[i]], df,
-          numeric_cache = numeric_cache,
-          columns = rule_numeric_columns[[i]]
-        ),
-        error = function(e) NULL
+      # from one to the other. Called unguarded, exactly as apply_rules()
+      # calls it: the old tryCatch(error = NULL) was vestigial (everything
+      # that can genuinely throw runs in the unguarded cache build above, on
+      # both paths) and would have silently reported import_valid = TRUE for
+      # an input that makes the materialising path abort loudly.
+      rule_errs <- dta_rule_import_errors(
+        rules_list[[i]], df,
+        numeric_cache = numeric_cache,
+        columns = rule_numeric_columns[[i]]
       )
       if (is.data.frame(rule_errs) && nrow(rule_errs) > 0) {
-        rule_errs$row <- dta_narrow_rows(rule_errs$row + row_offset)
-        dta_error_sink_add(rule_import_sink, rule_errs)
+        batch_rule_errs[[i]] <- rule_errs
       }
+    }
+
+    # Deduplicated PER BATCH, before the sink counts anything: two rules
+    # reading the same column report the same unrepresentable cell, and every
+    # such duplicate is batch-local (row numbers are unique across batches).
+    # Counting per rule and deduplicating only the retained rows inflated
+    # n_import_errors k-fold once the retention cap hid the duplicates -- the
+    # materialising path, which dedups its full frame, reported half as many
+    # errors for the same file.
+    batch_rule_errs <- Filter(Negate(is.null), batch_rule_errs)
+    if (length(batch_rule_errs) > 0) {
+      rule_errs <- if (length(batch_rule_errs) == 1) {
+        batch_rule_errs[[1]]
+      } else {
+        do.call(rbind, batch_rule_errs)
+      }
+      rule_errs <- rule_errs[
+        !duplicated(rule_errs[, c("row", "column"), drop = FALSE]), ,
+        drop = FALSE
+      ]
+      # Declared types stamped per batch, before the sink: rows the cap sends
+      # to the spill would otherwise carry the placeholder storage type
+      # forever, with no later chance to resolve it against the specs.
+      rule_errs <- dta_apply_spec_declared_types(rule_errs, specs)
+      rule_errs$row <- dta_narrow_rows(rule_errs$row + row_offset)
+      dta_error_sink_add(rule_import_sink, rule_errs)
     }
 
     row_offset <- row_offset + n_batch_rows
@@ -721,6 +963,26 @@ dta_validate_table_stream <- function(specs,
     }
   }
 
+  # A stream that yielded no rows never ran a single rule update, so a rule
+  # naming a column the table lacks was never discovered and finalised as
+  # PASSED -- while the materialising path checks column presence regardless
+  # of rows and fails the rule. One update against an empty table with the
+  # source's real columns reproduces exactly the eager presence checks (every
+  # rule function tests its columns before looking at rows), contributes no
+  # counts, and costs nothing on the ordinary non-empty scan.
+  if (row_offset == 0 && length(known_columns) > 0 && length(rules_list) > 0) {
+    empty_df <- as.data.frame(
+      stats::setNames(
+        rep(list(character(0)), length(known_columns)),
+        known_columns
+      ),
+      optional = TRUE, stringsAsFactors = FALSE
+    )
+    for (i in seq_along(rules_list)) {
+      dta_rule_stream_update(states[[i]], rules_list[[i]], empty_df, NULL)
+    }
+  }
+
   full_error <- dta_error_sink_collect(columnspec_sink)
   summarised_error <- dta_summarise_columnspec_errors(full_error)
   has_columnspec_errors <- columnspec_sink$total > 0
@@ -741,20 +1003,20 @@ dta_validate_table_stream <- function(specs,
   }
   rule_import <- dta_error_sink_collect(rule_import_sink)
 
-  # Rows the retained-error cap threw away, counted before any deduplication so
-  # the two are not confused: a duplicate is one error counted once, a capped
-  # row is one error whose identity is gone. The carried axis needs this only
-  # when the cap left nothing at all for the merge to count.
+  # Rows the retained-error cap kept out of the collected frames, counted so
+  # the totals stay exact: a capped row is one error whose identity is gone
+  # from the frame but not from the count. The rule sink's rows were already
+  # deduplicated per batch (see the batch loop), so its total counts each
+  # cell once -- the k-fold inflation this arithmetic used to bake in is
+  # fixed at the source. The carried axis needs its term only when the cap
+  # left nothing at all for the merge to count.
   carried_capped <- if (is.null(carried)) carried_sink$total else 0
   rule_capped <- rule_import_sink$total - NROW(rule_import)
 
-  if (!is.null(rule_import)) {
-    rule_import <- rule_import[
-      !duplicated(rule_import[, c("row", "column"), drop = FALSE]), ,
-      drop = FALSE
-    ]
-    rule_import <- dta_apply_spec_declared_types(rule_import, specs)
-  }
+  # No re-deduplication or type stamping here: cross-rule duplicates are
+  # batch-local and were removed before the sink counted them, global row
+  # numbers make cross-batch duplicates impossible, and declared types were
+  # stamped per batch so spilled rows carry them too.
 
   import_errors <- dta_merge_import_errors(carried, rule_import)
   # dta_merge_import_errors() is the only place that knows a cell flagged on
@@ -769,6 +1031,18 @@ dta_validate_table_stream <- function(specs,
   import_valid <- n_import_errors == 0L
   if (n_import_errors == 0L) {
     import_errors <- NULL
+  }
+
+  # The merged frame lost the per-sink spill attributes in rbind; put the
+  # pointers back so collect_full_errors() can reassemble the full detail.
+  if (!is.null(import_errors) &&
+    (carried_sink$spilled > 0 || rule_import_sink$spilled > 0)) {
+    attr(import_errors, "spilled_rows") <-
+      carried_sink$spilled + rule_import_sink$spilled
+    attr(import_errors, "spill_dirs") <- c(
+      carried_sink$spill_dir %||% NA_character_,
+      rule_import_sink$spill_dir %||% NA_character_
+    )
   }
 
   details <- list(
@@ -795,10 +1069,24 @@ dta_validate_table_stream <- function(specs,
     # in the file was simply never seen -- so the axes that could not be
     # settled report NA rather than a reassuring TRUE. `ok` is unaffected:
     # dta_details_ok() requires all three to be TRUE, and NA is not.
+    #
+    # Reported failures are filtered to the CERTAIN ones -- exactly the
+    # predicate dta_rule_stream_failing() encodes as "no later batch could
+    # overturn this". A grouped `requires` constraint that looked violated in
+    # the batches read can still be satisfied by an unread row, and reporting
+    # it as a definite failure asserted the opposite of what a full scan
+    # concludes; only monotone grouped losses (and counted, unsupported, or
+    # not-applicable failures) are settled mid-scan.
+    certain <- vapply(states, dta_rule_stream_failing, logical(1))
+    details$rule_errors <- lapply(
+      which(certain),
+      function(i) dta_rule_stream_finalise(states[[i]], rules_list[[i]])
+    )
+    details$n_rule_errors <- length(details$rule_errors)
     details$rules_valid <- if (length(details$rule_errors) > 0) FALSE else NA
     details$import_valid <- if (n_import_errors > 0L) FALSE else NA
-    # Only rules that actually failed are reported. Their failures are real;
-    # the silence of the others is not evidence.
+    # Only rules whose failure is certain are reported. Their failures are
+    # real; the silence of the others is not evidence.
     details$rule_results <- details$rule_errors
     attr(details, "partial_scan") <- TRUE
   }
@@ -854,6 +1142,19 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
 # beyond that they say "(+N more)". So each condition keeps a capped head of the
 # row numbers it saw and a count of the rest.
 #
+# The accumulator is COLUMNAR, not one nested R list per group. Every distinct
+# group is a dense integer id, and every per-group fact -- rows seen, any_true,
+# all_true, true_n, the row-number heads -- lives at position `id` in a shared
+# vector or matrix, one such vector per condition (and, for the row-number
+# heads, per side). Folding a batch is then a handful of vectorised indexed
+# assignments across every group the batch touched at once (`state$any_true[[
+# cond]][gids] <- ...`), rather than an interpreted R-level loop revisiting one
+# group -- and, inside it, one condition -- at a time. Measured, the state
+# costs roughly 294 bytes per group per condition (the two 10-wide double head
+# matrices are 160 of them) plus the rendered label, against 1.1-3 KB/group for
+# the old per-group lists: about 2.5-3x less, and without the interpreted
+# loop's per-batch cost.
+#
 # Memory is therefore proportional to the number of distinct GROUPS times the
 # number of conditions, not to the number of rows. That is the same class as
 # uniqueness, and unbounded in group cardinality rather than in file size -- an
@@ -862,35 +1163,40 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
 
 DTA_GROUP_ROW_HEAD <- 10L
 
-dta_group_cond_state <- function() {
-  list(
-    any_true = FALSE,
-    all_true = TRUE,
-    # Doubles, not integers. All three count rows, without a cap -- `n_seen`
-    # counts every row of the group, `true_n`/`false_n` every row on each side
-    # of the condition -- and the streaming path is built for files past
-    # `.Machine$integer.max` rows. Integer accumulation there yields `NA` with a
-    # warning rather than an error, and `n_seen` gone `NA` is not cosmetic:
-    # `dta_group_stream_truth()` reads `cond$n_seen > 0 && cond$all_true` for an
-    # "all" scope, so the `NA` flows through the constraint into
-    # `isTRUE(constraint_viol[[ci]][g])`, which is then `FALSE` -- a group that
-    # genuinely violates the constraint is reported as passing. Doubles
-    # represent whole numbers exactly to 2^53.
-    n_seen = 0,
-    true_head = integer(0),
-    true_n = 0,
-    false_head = integer(0),
-    false_n = 0
-  )
-}
-
-dta_group_fold_rows <- function(head, count, new_rows) {
-  count <- count + length(new_rows)
-  room <- DTA_GROUP_ROW_HEAD - length(head)
-  if (room > 0 && length(new_rows) > 0) {
-    head <- c(head, new_rows[seq_len(min(room, length(new_rows)))])
+# Doubles a per-id vector's or matrix's capacity, so that appending ids across
+# a scan is amortised O(1) rather than an O(groups) reallocation on every new
+# group. A plain vector grows through `length<-`, which pads with NA of the
+# vector's own storage mode and, unlike `c()`, keeps the class of any vector
+# whose class ships a `length<-` method (Date, POSIXct, factor, difftime and
+# integer64 all do). A class without one is silently unclassed -- which costs
+# nothing here, because every vector this grows is a plain character, double,
+# logical or integer.
+# A matrix (the row-number heads) grows by rows only; its column count
+# (DTA_GROUP_ROW_HEAD) never changes. Growth only guarantees CAPACITY -- its
+# padding is NA and otherwise meaningless -- every field a freshly created id
+# needs is set explicitly by the caller (see the new-id initialisation block
+# in dta_group_stream_update()), so growth itself carries no initialisation
+# contract.
+dta_group_grow <- function(x, needed) {
+  if (is.matrix(x)) {
+    cur <- nrow(x)
+    if (cur >= needed) {
+      return(x)
+    }
+    new_cap <- max(needed, if (cur == 0L) 16L else cur * 2L)
+    grown <- matrix(NA_real_, nrow = new_cap, ncol = ncol(x))
+    if (cur > 0L) {
+      grown[seq_len(cur), ] <- x
+    }
+    return(grown)
   }
-  list(head = head, count = count)
+  cur <- length(x)
+  if (cur >= needed) {
+    return(x)
+  }
+  new_cap <- max(needed, if (cur == 0L) 16L else cur * 2L)
+  length(x) <- new_cap
+  x
 }
 
 #' @title Start Accumulating a Grouped Rule
@@ -902,10 +1208,80 @@ dta_group_stream_init <- function(rule) {
   # fastmap rather than an environment, for the symbol-table reason given in
   # dta_rule_stream_init(). A grouped rule leaks the same way a keyed one does:
   # the key is the group label instead of the row key, but it is interned just
-  # the same.
-  state$groups <- fastmap::fastmap()
+  # the same. It maps a group's key to its dense integer id -- the columnar
+  # state below is then addressed by that id, never by the key directly.
+  state$ids <- fastmap::fastmap()
+  state$n <- 0L
+  state$keys <- character(0)
+  # The RENDERED label, built when a group is first seen -- not the group's
+  # raw values. Storing the values instead would freeze their storage mode to
+  # whichever batch happened to arrive first: a later batch of a different
+  # type coerces the whole vector, silently re-rendering labels already
+  # recorded (a numeric column promoted to character by an all-missing batch
+  # renders 1e+05 again, the very thing dta_group_label_value() exists to
+  # prevent) and, for a factor column, matching by label against the first
+  # batch's level set and yielding NA. Rendering once, at first sight, is
+  # also what the eager path does.
+  state$labels <- character(0)
+  # Rows seen per group. ONE vector, not one copy per condition: every
+  # condition sees every row of the group, so the old per-condition n_seen
+  # copies were always identical to each other. A double, not an integer --
+  # the streaming path is built for files past `.Machine$integer.max` rows,
+  # and integer accumulation there yields `NA` with a warning rather than an
+  # error. An `n_seen` gone `NA` is not cosmetic: `scope_truth_vec()` in
+  # dta_group_stream_finalise() reads `n_seen > 0 & all_true` for an "all"
+  # scope, so the `NA` would flow through the constraint and read as `FALSE`
+  # -- a group that genuinely violates the constraint reported as passing.
+  # Doubles represent whole numbers exactly to 2^53.
+  state$n_seen <- double(0)
+
   state$condition_names <- names(rule_get_slot(rule, "conditions"))
-  state$max_groups <- getOption("DTAtools.max_groups", 5000000L)
+  # Slots resolved once per scan rather than re-materialised (rule_get_slot
+  # converts the whole S7 object to a list per call) on every batch.
+  state$group_by <- rule_get_slot(rule, "group_by")
+  state$conditions <- rule_get_slot(rule, "conditions")
+
+  # One vector (or, for the row-number heads, one matrix) per condition, by
+  # id. false counts are deliberately not stored: they are DERIVED at read
+  # time as `n_seen - true_n`, because per batch a false-side count is always
+  # `n_seen_batch - true_count_batch` -- storing both was redundant by
+  # construction in the old per-group state too.
+  state$any_true <- stats::setNames(
+    lapply(state$condition_names, function(...) logical(0)),
+    state$condition_names
+  )
+  state$all_true <- stats::setNames(
+    lapply(state$condition_names, function(...) logical(0)),
+    state$condition_names
+  )
+  state$true_n <- stats::setNames(
+    lapply(state$condition_names, function(...) double(0)),
+    state$condition_names
+  )
+  # DOUBLE matrices, [capacity x DTA_GROUP_ROW_HEAD]: row numbers stay double
+  # past 2^31 on purpose, for the same reason `n_seen` is a double above.
+  # dta_group_stream_finalise() narrows them back to integer, when they fit,
+  # only once, on the assembled `rows` field of each violation.
+  state$true_head <- stats::setNames(
+    lapply(state$condition_names, function(...) {
+      matrix(NA_real_, nrow = 0, ncol = DTA_GROUP_ROW_HEAD)
+    }),
+    state$condition_names
+  )
+  state$false_head <- stats::setNames(
+    lapply(state$condition_names, function(...) {
+      matrix(NA_real_, nrow = 0, ncol = DTA_GROUP_ROW_HEAD)
+    }),
+    state$condition_names
+  )
+  state$true_head_n <- stats::setNames(
+    lapply(state$condition_names, function(...) integer(0)),
+    state$condition_names
+  )
+  state$false_head_n <- stats::setNames(
+    lapply(state$condition_names, function(...) integer(0)),
+    state$condition_names
+  )
 
   # `fail_fast` needs to know mid-scan that a group has already lost, which is
   # only sound for a constraint no later batch can rescue. `mutually_exclusive`
@@ -921,6 +1297,7 @@ dta_group_stream_init <- function(rule) {
     },
     rule_get_slot(rule, "constraints")
   )
+  state$certain_flag <- logical(0)
   state$certain <- 0L
   state
 }
@@ -936,8 +1313,10 @@ dta_group_stream_init <- function(rule) {
 #' @return The accumulator, updated in place.
 #' @keywords internal
 dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_cache = NULL) {
-  group_by <- rule_get_slot(rule, "group_by")
-  conditions <- rule_get_slot(rule, "conditions")
+  # Resolved once at init: rule_get_slot() re-materialises the whole S7 rule
+  # per call, which is pure per-batch overhead over thousands of batches.
+  group_by <- state$group_by
+  conditions <- state$conditions
 
   missing_group_cols <- setdiff(group_by, names(df))
   if (length(missing_group_cols) > 0) {
@@ -967,11 +1346,11 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   # that agree with `local_levels`, and building a factor additionally sorts
   # the levels, which this loop does not need. Visiting groups in order of
   # first appearance rather than in sorted order is safe ONLY because the
-  # groups are keyed by string in `state$groups` and
+  # groups are keyed by string in `state$ids` and
   # `dta_group_stream_finalise()` sorts those keys before assembling the
   # message -- that is what keeps the streamed message identical to the
   # materialised one, which sees groups in `split()`'s sorted order. Do not
-  # report violations straight out of this loop without restoring the sort.
+  # report violations straight out of this function without restoring the sort.
   local_levels <- unique(split_key)
   gid <- match(split_key, local_levels)
   n_groups <- length(local_levels)
@@ -983,10 +1362,15 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
     mask <- tryCatch(
       evaluate_conditions(spec, df, numeric_cache),
       dta_rule_not_applicable = function(cnd) {
+        # Word-for-word the abort rule_check_group_condition() raises for the
+        # same failure, "defined as" bullet included: the two paths' rule
+        # failure messages are documented as identical, and this one had
+        # silently drifted (the streamed message lacked the definition text).
         cli::cli_abort(
           c(
             "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
-            x = "{conditionMessage(cnd)}"
+            x = "{conditionMessage(cnd)}",
+            i = "Condition {.field {cond_name}} is defined as: {.val {paste(utils::capture.output(utils::str(spec, give.attr = FALSE)), collapse = ' ')}}"
           ),
           class = "dta_rule_not_applicable"
         )
@@ -997,118 +1381,183 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
   names(cond_hit) <- state$condition_names
 
   cond_n_true <- lapply(cond_hit, function(hit) tabulate(gid[hit], nbins = n_groups))
-  # Rows matching / not matching, split by group -- with all `n_groups` levels
-  # represented (even when empty), so each is addressable by group position.
-  cond_true_rows <- lapply(cond_hit, function(hit) {
-    split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
-  })
-  cond_false_rows <- lapply(cond_hit, function(hit) {
-    split(which(!hit), factor(gid[!hit], levels = seq_len(n_groups)))
-  })
 
-  for (g in seq_len(n_groups)) {
-    key <- local_levels[g]
-    local_first <- first_row[g]
+  # ---- local group -> dense global id --------------------------------------
+  #
+  # `local_levels` mixes groups this batch is the first to see (which need a
+  # fresh id and their group_by values recorded) with groups an earlier batch
+  # already assigned an id to (which need neither). `has()` answers that for
+  # every local group in one vectorised fastmap call.
+  new_mask <- !state$ids$has(local_levels)
+  if (any(new_mask)) {
+    new_keys <- local_levels[new_mask]
+    new_ids <- state$n + seq_len(length(new_keys))
+    needed <- state$n + length(new_keys)
 
-    entry <- state$groups$get(key, missing = NULL)
-    if (is.null(entry)) {
-      entry <- list(
-        label = paste(
-          vapply(group_by, function(col) {
-            paste0(col, "=", as.character(grouped[[col]][local_first]))
-          }, character(1)),
-          collapse = ", "
-        ),
-        conds = stats::setNames(
-          lapply(state$condition_names, function(...) dta_group_cond_state()),
-          state$condition_names
-        ),
-        certain = FALSE
-      )
-    }
-
-    n_seen_g <- n_seen_batch[g]
-
+    state$keys <- dta_group_grow(state$keys, needed)
+    state$labels <- dta_group_grow(state$labels, needed)
+    state$n_seen <- dta_group_grow(state$n_seen, needed)
+    state$certain_flag <- dta_group_grow(state$certain_flag, needed)
     for (cond_name in state$condition_names) {
-      cond <- entry$conds[[cond_name]]
-      n_true_g <- cond_n_true[[cond_name]][g]
-
-      cond$any_true <- cond$any_true || (n_true_g > 0)
-      cond$all_true <- cond$all_true && (n_seen_g > 0 && n_true_g == n_seen_g)
-      cond$n_seen <- cond$n_seen + n_seen_g
-
-      true_local <- cond_true_rows[[cond_name]][[g]]
-      false_local <- cond_false_rows[[cond_name]][[g]]
-
-      folded_true <- dta_group_fold_rows(
-        cond$true_head, cond$true_n, dta_narrow_rows(true_local + row_offset)
-      )
-      cond$true_head <- folded_true$head
-      cond$true_n <- folded_true$count
-
-      folded_false <- dta_group_fold_rows(
-        cond$false_head, cond$false_n, dta_narrow_rows(false_local + row_offset)
-      )
-      cond$false_head <- folded_false$head
-      cond$false_n <- folded_false$count
-
-      entry$conds[[cond_name]] <- cond
+      state$any_true[[cond_name]] <- dta_group_grow(state$any_true[[cond_name]], needed)
+      state$all_true[[cond_name]] <- dta_group_grow(state$all_true[[cond_name]], needed)
+      state$true_n[[cond_name]] <- dta_group_grow(state$true_n[[cond_name]], needed)
+      state$true_head[[cond_name]] <- dta_group_grow(state$true_head[[cond_name]], needed)
+      state$false_head[[cond_name]] <- dta_group_grow(state$false_head[[cond_name]], needed)
+      state$true_head_n[[cond_name]] <- dta_group_grow(state$true_head_n[[cond_name]], needed)
+      state$false_head_n[[cond_name]] <- dta_group_grow(state$false_head_n[[cond_name]], needed)
     }
 
-    if (!isTRUE(entry$certain) && length(state$monotone) > 0) {
-      lost <- vapply(state$monotone, function(constraint) {
-        isTRUE(entry$conds[[constraint$left]]$any_true) &&
-          isTRUE(entry$conds[[constraint$right]]$any_true)
-      }, logical(1))
-      if (any(lost)) {
-        entry$certain <- TRUE
-        state$certain <- state$certain + 1L
-      }
+    # New-id initialisation, set explicitly rather than relied on from growth
+    # (whose padding is NA and otherwise meaningless): unseen so far, so no
+    # row has made anything true (`any_true` FALSE), and vacuously every row
+    # seen so far satisfies each condition (`all_true` TRUE, matching
+    # `all(logical(0))`).
+    state$keys[new_ids] <- new_keys
+    state$n_seen[new_ids] <- 0
+    state$certain_flag[new_ids] <- FALSE
+    for (cond_name in state$condition_names) {
+      state$any_true[[cond_name]][new_ids] <- FALSE
+      state$all_true[[cond_name]][new_ids] <- TRUE
+      state$true_n[[cond_name]][new_ids] <- 0
+      state$true_head_n[[cond_name]][new_ids] <- 0L
+      state$false_head_n[[cond_name]][new_ids] <- 0L
     }
-
-    state$groups$set(key, entry)
-  }
-
-  # Check group budget after the loop completes but while still in
-  # dta_group_stream_update, before state is returned. dta_stream_budget_exceeded
-  # must not be caught by the surrounding tryCatch in dta_rule_stream_update,
-  # which catches only dta_rule_not_applicable. A resource failure is not a data
-  # verdict.
-  if (state$groups$size() > state$max_groups) {
-    cli::cli_abort(
-      c(
-        "Rule {.val {rule@id}} exceeded the group budget.",
-        x = "Tracking {state$groups$size()} distinct groups, over the limit of {state$max_groups}.",
-        i = "Raise {.code options(DTAtools.max_groups = )} if the machine has the memory for it."
-      ),
-      class = "dta_stream_budget_exceeded"
+    # Rendered here, from THIS batch's own columns and this group's first row
+    # in scan order -- the same value, rendered the same way, that the eager
+    # group_label_for() in rule_check_group_condition() (evaluateRules.R)
+    # produces. Values are rendered one at a time on purpose: `format()` over
+    # a vector chooses one common layout for all of it, which would pad
+    # unrelated groups' labels to a shared width.
+    new_first_rows <- first_row[new_mask]
+    state$labels[new_ids] <- vapply(
+      seq_along(new_ids),
+      function(j) {
+        row <- new_first_rows[[j]]
+        paste(
+          vapply(
+            group_by,
+            function(col) paste0(col, "=", dta_group_label_value(grouped[[col]][row])),
+            character(1)
+          ),
+          collapse = ", "
+        )
+      },
+      character(1)
     )
+
+    state$ids$mset(.list = stats::setNames(as.list(new_ids), new_keys))
+    state$n <- needed
   }
 
+  # Aligned with `local_levels` (and so with `gid`'s levels) position for
+  # position: `gids[g]` is the dense id of the group at `local_levels[g]`.
+  gids <- unlist(state$ids$mget(local_levels), use.names = FALSE)
+
+  for (cond_name in state$condition_names) {
+    nt <- cond_n_true[[cond_name]]
+    state$any_true[[cond_name]][gids] <- state$any_true[[cond_name]][gids] | (nt > 0)
+    state$all_true[[cond_name]][gids] <- state$all_true[[cond_name]][gids] &
+      (n_seen_batch > 0 & nt == n_seen_batch)
+    state$true_n[[cond_name]][gids] <- state$true_n[[cond_name]][gids] + nt
+  }
+  state$n_seen[gids] <- state$n_seen[gids] + n_seen_batch
+
+  # ---- row-number heads, built lazily ---------------------------------------
+  #
+  # The `which()` + `split()` work below runs only for a (condition, side)
+  # that has, in THIS batch, at least one group still short of
+  # DTA_GROUP_ROW_HEAD rows with matching rows to offer it. On a long scan
+  # every group's heads fill within the first few batches it appears in,
+  # after which this is a no-op for the rest of the file -- unlike the split
+  # it replaces, which the old code built for every condition and side on
+  # every batch regardless of whether any head still had room.
+  for (cond_name in state$condition_names) {
+    hit <- cond_hit[[cond_name]]
+    nt <- cond_n_true[[cond_name]]
+
+    # The head matrix and its counts are pulled into locals for the whole loop
+    # and stored back ONCE. Writing through `state$true_head[[cond]][id, ]`
+    # inside the loop instead duplicates the entire capacity-sized matrix (and
+    # the count vector) on every iteration -- `state` is a function argument,
+    # so the nested replacement has no in-place path -- which made a batch
+    # cost O(groups accumulated) rather than O(groups touched) and turned the
+    # scan quadratic in group cardinality: measured 71s vs 0.8s at 40,000
+    # groups. Do not inline these back into the loop.
+    needy_true <- which(state$true_head_n[[cond_name]][gids] < DTA_GROUP_ROW_HEAD & nt > 0)
+    if (length(needy_true) > 0) {
+      head_matrix <- state$true_head[[cond_name]]
+      head_counts <- state$true_head_n[[cond_name]]
+      rows_by_group <- split(which(hit), factor(gid[hit], levels = seq_len(n_groups)))
+      for (g in needy_true) {
+        id <- gids[g]
+        local_rows <- rows_by_group[[g]]
+        hn <- head_counts[id]
+        k <- min(DTA_GROUP_ROW_HEAD - hn, length(local_rows))
+        if (k > 0) {
+          head_matrix[id, hn + seq_len(k)] <- local_rows[seq_len(k)] + row_offset
+          head_counts[id] <- hn + k
+        }
+      }
+      state$true_head[[cond_name]] <- head_matrix
+      state$true_head_n[[cond_name]] <- head_counts
+    }
+
+    needy_false <- which(
+      state$false_head_n[[cond_name]][gids] < DTA_GROUP_ROW_HEAD & (n_seen_batch - nt) > 0
+    )
+    if (length(needy_false) > 0) {
+      head_matrix <- state$false_head[[cond_name]]
+      head_counts <- state$false_head_n[[cond_name]]
+      rows_by_group <- split(which(!hit), factor(gid[!hit], levels = seq_len(n_groups)))
+      for (g in needy_false) {
+        id <- gids[g]
+        local_rows <- rows_by_group[[g]]
+        hn <- head_counts[id]
+        k <- min(DTA_GROUP_ROW_HEAD - hn, length(local_rows))
+        if (k > 0) {
+          head_matrix[id, hn + seq_len(k)] <- local_rows[seq_len(k)] + row_offset
+          head_counts[id] <- hn + k
+        }
+      }
+      state$false_head[[cond_name]] <- head_matrix
+      state$false_head_n[[cond_name]] <- head_counts
+    }
+  }
+
+  # ---- monotone certainty ----------------------------------------------------
+  #
+  # See dta_group_stream_init(): once a group has made both sides of a
+  # `mutually_exclusive` ANY/ANY constraint true, no later batch can undo
+  # that, so `fail_fast` can call it mid-scan. Judged AFTER the fold above, on
+  # the post-batch truth -- matching the old per-group loop, which updated
+  # `entry$conds` before checking `state$monotone`.
+  #
+  # Looped per CONSTRAINT rather than per group: there are normally a handful
+  # of constraints against thousands of groups, so this is the cheap order to
+  # put the interpreted loop on. Processing constraints one at a time, rather
+  # than all of them in one vectorised pass over an unmodified snapshot, means
+  # a group that satisfies two monotone constraints within the same batch is
+  # still counted into `certain` exactly once -- the `!state$certain_flag[
+  # gids]` guard sees the FIRST constraint's update before the second
+  # constraint is evaluated, matching the old `any()`-over-constraints,
+  # increment-by-one-per-group semantics.
+  for (constraint in state$monotone) {
+    lost <- !state$certain_flag[gids] &
+      state$any_true[[constraint$left]][gids] &
+      state$any_true[[constraint$right]][gids]
+    if (any(lost)) {
+      state$certain_flag[gids[lost]] <- TRUE
+      state$certain <- state$certain + sum(lost)
+    }
+  }
+
+  # There is deliberately no group budget any more: the old DTAtools.max_groups
+  # abort threw away a multi-hour scan wholesale once group cardinality crossed
+  # a line, which proved strictly worse than the memory growth it guarded.
+  # Memory here is proportional to distinct groups times conditions and is
+  # documented at the entry points instead of enforced mid-scan.
   state
-}
-
-# Whether a violation's `rows` are only the head of a longer list. The capped
-# head is what keeps memory proportional to groups rather than to rows, so the
-# streamed `rows` can be shorter than the materialising path's -- but silently
-# shorter is a trap, and both paths therefore carry this flag.
-dta_group_head_truncated <- function(cond, which = "true") {
-  if (identical(which, "true")) {
-    length(cond$true_head) < cond$true_n
-  } else {
-    length(cond$false_head) < cond$false_n
-  }
-}
-
-# Whether a condition holds for a group under the given scope. "all" requires
-# the group to have had at least one row, matching the materialising path where
-# all(logical(0)) would otherwise be vacuously TRUE.
-dta_group_stream_truth <- function(cond, scope) {
-  if (identical(scope, "all")) {
-    cond$n_seen > 0 && cond$all_true
-  } else {
-    cond$any_true
-  }
 }
 
 #' @title Turn a Grouped Rule's Accumulator into a Result
@@ -1119,29 +1568,87 @@ dta_group_stream_truth <- function(cond, scope) {
 #' @keywords internal
 dta_group_stream_finalise <- function(state, rule) {
   constraints <- rule_get_slot(rule, "constraints")
+  group_by <- state$group_by
   violations <- list()
 
-  fmt <- function(cond, which = "true") {
+  n_groups <- state$n
+
+  # The materialising path orders groups by radix-sorted key (C-locale byte
+  # order -- see the factor() levels in rule_check_group_condition()), so the
+  # same sort here keeps the assembled message identical. Radix rather than
+  # the session locale, because locale collation ordered the same violations
+  # differently on a de_DE dev machine than under CI's C collation, and a
+  # non-stable locale sort could even split collation ties differently
+  # between the two paths. Change the two sites together. `state$keys` is
+  # sliced to `state$n` first: its backing vector can be geometrically
+  # over-allocated past the number of ids actually assigned (see
+  # dta_group_grow()), and an unassigned slot's content is undefined.
+  sorted <- order(state$keys[seq_len(n_groups)], method = "radix")
+
+  # A (condition, side)'s row-number head as a plain double vector, or
+  # `double(0)` for a group that never matched on that side.
+  # `dta_format_group_rows()` reads `total == 0` before ever looking at the
+  # head, so an empty vector here is never actually rendered -- and a
+  # `true_n`/`false_n` of 0 is exactly when `true_head_n`/`false_head_n` is
+  # also 0 (see the "needy" gate in dta_group_stream_update(): a head only
+  # ever grows when this batch has at least one matching row to offer it).
+  head_vec <- function(cond_name, id, which) {
     if (identical(which, "true")) {
-      dta_format_group_rows(cond$true_head, cond$true_n, DTA_GROUP_ROW_HEAD)
+      hn <- state$true_head_n[[cond_name]][id]
+      if (hn == 0L) {
+        return(double(0))
+      }
+      state$true_head[[cond_name]][id, seq_len(hn)]
     } else {
-      dta_format_group_rows(cond$false_head, cond$false_n, DTA_GROUP_ROW_HEAD)
+      hn <- state$false_head_n[[cond_name]][id]
+      if (hn == 0L) {
+        return(double(0))
+      }
+      state$false_head[[cond_name]][id, seq_len(hn)]
     }
   }
 
-  # split() orders groups by sorted key, so the materialising path reports
-  # violations in that order. Sorting here keeps the assembled message
-  # identical.
-  sorted_keys <- sort(state$groups$keys())
-  n_groups <- length(sorted_keys)
-  entries <- state$groups$mget(sorted_keys)
+  # The false count is derived, not stored: see dta_group_stream_init().
+  side_total <- function(cond_name, id, which) {
+    if (identical(which, "true")) {
+      state$true_n[[cond_name]][id]
+    } else {
+      state$n_seen[id] - state$true_n[[cond_name]][id]
+    }
+  }
+
+  # Whether a violation's `rows` are only the head of a longer list. The
+  # capped head is what keeps memory proportional to groups rather than to
+  # rows, so the streamed `rows` can be shorter than the materialising
+  # path's -- but silently shorter is a trap, and both paths therefore carry
+  # this flag.
+  side_truncated <- function(cond_name, id, which) {
+    hn <- if (identical(which, "true")) {
+      state$true_head_n[[cond_name]][id]
+    } else {
+      state$false_head_n[[cond_name]][id]
+    }
+    hn < side_total(cond_name, id, which)
+  }
+
+  fmt <- function(cond_name, id, which = "true") {
+    dta_format_group_rows(
+      head_vec(cond_name, id, which), side_total(cond_name, id, which), DTA_GROUP_ROW_HEAD
+    )
+  }
 
   # Vectorised per-(condition, scope) truth across ALL groups at once -- one
-  # lookup per group, not the label/row-evidence assembly -- mirroring the
-  # materialising path's `cond_any_true`/`cond_all_true`. This is what lets
-  # the loop below only ever do per-group work (building labels, formatting
-  # row evidence, composing messages) for groups that actually violate
-  # something, instead of for every group seen in the stream.
+  # indexed lookup per group, not the label/row-evidence assembly --
+  # mirroring the materialising path's `cond_any_true`/`cond_all_true`. This
+  # is what lets the loop below only ever do per-group work (building
+  # labels, formatting row evidence, composing messages) for groups that
+  # actually violate something, instead of for every group seen in the
+  # stream. "all" requires the group to have had at least one row, matching
+  # the materialising path where all(logical(0)) would otherwise be
+  # vacuously TRUE. Indexing by `sorted` both selects the valid ids (its
+  # values never exceed `n_groups`, so the vector's own possible
+  # over-allocation past `state$n` is never read) and reorders into the
+  # radix-sorted group order in the same step.
   scope_truth_vec <- function(cond_name, scope) {
     if (!cond_name %in% state$condition_names) {
       cli::cli_abort(
@@ -1153,9 +1660,11 @@ dta_group_stream_finalise <- function(state, rule) {
         class = "dta_rule_not_applicable"
       )
     }
-    vapply(entries, function(entry) {
-      dta_group_stream_truth(entry$conds[[cond_name]], scope)
-    }, logical(1))
+    if (identical(scope, "all")) {
+      (state$n_seen[sorted] > 0) & state$all_true[[cond_name]][sorted]
+    } else {
+      state$any_true[[cond_name]][sorted]
+    }
   }
 
   constraint_viol <- vector("list", length(constraints))
@@ -1179,8 +1688,12 @@ dta_group_stream_finalise <- function(state, rule) {
   violating_groups <- sort(unique(unlist(lapply(constraint_viol, which), use.names = FALSE)))
 
   for (g in violating_groups) {
-    entry <- entries[[g]]
-    conds <- entry$conds
+    id <- sorted[g]
+    # Rendered when the group was first seen (see dta_group_stream_update()),
+    # through dta_group_label_value() -- the renderer the eager
+    # group_label_for() in rule_check_group_condition() (evaluateRules.R)
+    # also uses, so the two paths' labels are identical by construction.
+    label <- state$labels[[id]]
 
     for (ci in seq_along(constraints)) {
       if (!isTRUE(constraint_viol[[ci]][g])) {
@@ -1195,19 +1708,20 @@ dta_group_stream_finalise <- function(state, rule) {
         message <- constraint$message %||%
           sprintf(
             "In group [%s]: \"%s\" and \"%s\" must not both occur, but both were found (rows matching \"%s\": %s; rows matching \"%s\": %s).",
-            entry$label,
+            label,
             left,
             right,
-            left, fmt(conds[[left]]),
-            right, fmt(conds[[right]])
+            left, fmt(left, id, "true"),
+            right, fmt(right, id, "true")
           )
         violations[[length(violations) + 1L]] <- list(
           constraint_id = constraint$id,
-          group = entry$label,
+          group = label,
           message = message,
-          rows = sort(unique(c(conds[[left]]$true_head, conds[[right]]$true_head))),
-          rows_truncated = dta_group_head_truncated(conds[[left]], "true") ||
-            dta_group_head_truncated(conds[[right]], "true")
+          rows = dta_narrow_rows(sort(unique(c(
+            head_vec(left, id, "true"), head_vec(right, id, "true")
+          )))),
+          rows_truncated = side_truncated(left, id, "true") || side_truncated(right, id, "true")
         )
       } else if (identical(ctype, "requires")) {
         if_name <- constraint[["if"]]
@@ -1215,32 +1729,31 @@ dta_group_stream_finalise <- function(state, rule) {
         then_scope <- constraint$then_scope %||% "any"
 
         then_scope_reason <- if (identical(then_scope, "all")) {
-          sprintf("rows %s do not satisfy \"%s\"", fmt(conds[[then_name]], "false"), then_name)
+          sprintf("rows %s do not satisfy \"%s\"", fmt(then_name, id, "false"), then_name)
         } else {
           sprintf("no row in the group satisfies \"%s\"", then_name)
         }
         message <- constraint$message %||%
           sprintf(
             "In group [%s]: when \"%s\" occurs (rows: %s), \"%s\" must also hold, but it does not (%s).",
-            entry$label,
+            label,
             if_name,
-            fmt(conds[[if_name]]),
+            fmt(if_name, id, "true"),
             then_name,
             then_scope_reason
           )
         then_failed <- if (identical(then_scope, "all")) {
-          conds[[then_name]]$false_head
+          head_vec(then_name, id, "false")
         } else {
-          integer(0)
+          double(0)
         }
         violations[[length(violations) + 1L]] <- list(
           constraint_id = constraint$id,
-          group = entry$label,
+          group = label,
           message = message,
-          rows = sort(unique(c(conds[[if_name]]$true_head, then_failed))),
-          rows_truncated = dta_group_head_truncated(conds[[if_name]], "true") ||
-            (identical(then_scope, "all") &&
-              dta_group_head_truncated(conds[[then_name]], "false"))
+          rows = dta_narrow_rows(sort(unique(c(head_vec(if_name, id, "true"), then_failed)))),
+          rows_truncated = side_truncated(if_name, id, "true") ||
+            (identical(then_scope, "all") && side_truncated(then_name, id, "false"))
         )
       }
     }
@@ -1370,13 +1883,15 @@ dta_table_column_names <- function(table) {
 #' @param table An Arrow `Table`, `Dataset`, or reader.
 #' @param verbose Logical. Print progress.
 #' @param batch_rows Integer. Rows per batch when scanning.
-#' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
-#'   per-cell error detail, defaulting to 10000 and configurable via
-#'   `options(DTAtools.max_errors = )`. The default is finite because the error
-#'   sinks retain one row per bad cell: on a large dirty file, unbounded
-#'   retention exhausts memory exactly as holding the data would. Counting is
-#'   unaffected, so the totals and the pass/fail verdict stay exact even when the
-#'   retained detail is truncated, and a truncated frame is flagged as such.
+#' @param max_errors Integer, or `NULL` to hold everything in memory. Cap on
+#'   the per-cell error detail held in RAM, defaulting to 10000 and
+#'   configurable via `options(DTAtools.max_errors = )`. The default is finite
+#'   because the error sinks hold one row per bad cell: on a large dirty file,
+#'   unbounded retention exhausts memory exactly as holding the data would.
+#'   Nothing is lost, though: rows past the cap spill to a session-temporary
+#'   directory and [collect_full_errors()] reassembles the complete detail;
+#'   counts and the pass/fail verdict are exact either way, and a frame whose
+#'   in-memory head is incomplete is flagged as such.
 #' @param use_threads Logical. Whether Arrow's Scanner should use multiple
 #'   threads for I/O and decompression. Arrow buffers batches ahead of R in its
 #'   own C++ pool, outside the R heap, so single-threaded scanning is the lever
@@ -1430,10 +1945,50 @@ dta_validate_any_table <- function(specs,
     return(validate_table_detailed(specs, as.data.frame(table), verbose = verbose))
   }
 
+  rules_list <- tryCatch(specs@rules, error = function(e) NULL)
+  if (is.null(rules_list)) {
+    rules_list <- list()
+  }
+
+  # The source's full column names, read without consuming it: they drive the
+  # empty-stream rule presence check inside the driver, and they are taken
+  # BEFORE any projection so a rule naming an unprojected column is still
+  # judged against what the file really has.
+  column_names <- dta_table_column_names(table)
+
+  # Eligible uniqueness rules are answered by Arrow's grouped aggregation over
+  # the whole source before the batch scan -- the distinct keys then live in
+  # the C++ engine instead of an R hash that grows with key cardinality.
+  # Never for a reader: it is consumable, and the precompute would spend it.
+  precomputed <- if (inherits(table, "RecordBatchReader")) {
+    list()
+  } else {
+    dta_stream_unique_precompute(specs, table, rules_list)
+  }
+
   reader <- if (inherits(table, "RecordBatchReader")) {
     table
   } else {
-    arrow::Scanner$create(table, batch_size = batch_rows, use_threads = use_threads)$ToRecordBatchReader()
+    # Projection: columns nothing reads are never parsed, converted, or
+    # materialised into R. NULL means "cannot narrow" (unknown rule shape, or
+    # nothing to gain) and scans every column exactly as before.
+    projection <- if (inherits(table, "Dataset")) {
+      dta_scan_projection(specs, rules_list, names(table$schema))
+    } else {
+      NULL
+    }
+    if (is.null(projection)) {
+      arrow::Scanner$create(
+        table,
+        batch_size = batch_rows, use_threads = use_threads
+      )$ToRecordBatchReader()
+    } else {
+      arrow::Scanner$create(
+        table,
+        projection = projection,
+        batch_size = batch_rows, use_threads = use_threads
+      )$ToRecordBatchReader()
+    }
   }
 
   dta_validate_table_stream(
@@ -1442,7 +1997,9 @@ dta_validate_any_table <- function(specs,
     verbose = verbose,
     max_errors = max_errors,
     coerce = TRUE,
-    fail_fast = fail_fast
+    fail_fast = fail_fast,
+    precomputed = precomputed,
+    known_columns = column_names
   )
 }
 
@@ -1473,11 +2030,26 @@ dta_validate_any_table <- function(specs,
 #' @keywords internal
 dta_structure_findings <- function(specs, column_names) {
   columns <- tryCatch(specs@columns, error = function(e) NULL)
-  declared <- if (is.null(columns)) {
+  declared <- if (is.null(columns) || length(columns) == 0) {
     character(0)
   } else {
+    # Per-column fallback, not all-or-nothing: a PARTIALLY named collection
+    # (reachable only by validator bypass, but defended against by every
+    # sibling lookup) would otherwise contribute "" as a declared column and
+    # reject a sound file with "must have required property ''".
     nm <- names(columns)
-    if (is.null(nm)) vapply(columns, function(s) s@id, character(1)) else nm
+    if (is.null(nm)) {
+      nm <- rep("", length(columns))
+    }
+    ids <- vapply(
+      columns,
+      function(s) tryCatch(as.character(s@id)[[1]], error = function(e) NA_character_),
+      character(1),
+      USE.NAMES = FALSE
+    )
+    fallback <- is.na(nm) | !nzchar(nm)
+    nm[fallback] <- ids[fallback]
+    nm[!is.na(nm) & nzchar(nm)]
   }
 
   missing <- setdiff(declared, column_names)
@@ -1572,7 +2144,12 @@ dta_open_validation_dataset <- function(path,
     return(arrow::open_dataset(path, format = "parquet"))
   }
 
-  dta_open_delimited_dataset(
+  # The normalized opener, exactly as load_file()'s lazy path uses: without it
+  # this entry point kept a padded header's raw names, so the spec-keyed type
+  # pinning matched nothing and the structural gate reported the clean name
+  # missing plus the padded name unexpected -- for a file that validated clean
+  # through load_file().
+  dta_open_normalized_dataset(
     path,
     specs = specs,
     delim = delim,
@@ -1647,7 +2224,10 @@ cache_as_parquet <- function(specs,
     cache_path <- paste0(tools::file_path_sans_ext(path), "_parquet")
   }
 
-  dataset <- dta_open_delimited_dataset(
+  # Normalized, like every other opener: a cache written from raw padded
+  # header names would persist the dirty names forever, and the spec-keyed
+  # typing would have silently matched nothing during the conversion.
+  dataset <- dta_open_normalized_dataset(
     path,
     specs = specs,
     delim = delim,
@@ -1698,13 +2278,15 @@ cache_as_parquet <- function(specs,
 #' @param has_header Logical. Whether the first line names the columns.
 #' @param batch_rows Integer. Rows per batch. Larger batches trade memory for
 #'   fewer per-batch overheads.
-#' @param max_errors Integer, or `NULL` to retain everything. Cap on retained
-#'   per-cell error detail, defaulting to 10000 and configurable via
-#'   `options(DTAtools.max_errors = )`. The default is finite because the error
-#'   sinks retain one row per bad cell: on a large dirty file, unbounded
-#'   retention exhausts memory exactly as holding the data would. Counting is
-#'   unaffected, so the totals and the pass/fail verdict stay exact even when the
-#'   retained detail is truncated, and a truncated frame is flagged as such.
+#' @param max_errors Integer, or `NULL` to hold everything in memory. Cap on
+#'   the per-cell error detail held in RAM, defaulting to 10000 and
+#'   configurable via `options(DTAtools.max_errors = )`. The default is finite
+#'   because the error sinks hold one row per bad cell: on a large dirty file,
+#'   unbounded retention exhausts memory exactly as holding the data would.
+#'   Nothing is lost, though: rows past the cap spill to a session-temporary
+#'   directory and [collect_full_errors()] reassembles the complete detail;
+#'   counts and the pass/fail verdict are exact either way, and a frame whose
+#'   in-memory head is incomplete is flagged as such.
 #' @param fail_fast Logical. Stop at the first batch that shows any problem,
 #'   instead of scanning to the end. Answers "is this file valid?" without
 #'   costing a full pass, which on a large file that fails early is the
@@ -1730,20 +2312,24 @@ cache_as_parquet <- function(specs,
 #'   `details`. Defaults to `getOption("DTAtools.benchmark", FALSE)`. Opt-in
 #'   because measuring accurately resets R's `gc()` peak counters; see
 #'   [validation_benchmark()] for the metrics shape and caveats.
-#' @section Resource budgets:
-#' Two accumulators are bounded by the data rather than by the batch size, and
-#' each has a budget that aborts the scan instead of exhausting memory:
+#' @section Memory at scale:
+#' Nothing in the scan aborts on a resource budget any more (the old
+#' `DTAtools.max_unique_keys` / `DTAtools.max_groups` options are gone: they
+#' discarded multi-hour scans at exactly the per-row-unique-key scale streaming
+#' exists for). What bounds memory instead:
 #'
-#' * `options(DTAtools.max_unique_keys = )`, default 50,000,000 — distinct keys
-#'   held by a `check_unique` rule. A key that is unique per row makes this grow
-#'   with the file.
-#' * `options(DTAtools.max_groups = )`, default 5,000,000 — distinct groups held
-#'   by a `check_group_condition` rule.
-#'
-#' Exceeding either raises a condition of class `dta_stream_budget_exceeded`.
-#' This aborts rather than reporting a rule failure on purpose: a resource limit
-#' is not a verdict about the data, and recording it as one would present a
-#' clean-looking result for a constraint that was never actually checked.
+#' * `check_unique` rules whose key columns are text are answered by Arrow's
+#'   own grouped aggregation over the dataset, in one extra streaming pass over
+#'   just the key columns -- the distinct keys live compactly in the C++
+#'   engine, not as R strings. `options(DTAtools.stream_arrow_unique = FALSE)`
+#'   restores the per-batch accumulator.
+#' * A uniqueness rule that cannot take that path (non-text keys, or a
+#'   consumable reader as the source) falls back to an R-side key set whose
+#'   memory grows with the number of distinct keys (roughly 100 bytes per
+#'   key). Grouped rules likewise hold state per distinct group.
+#' * Columns nothing reads are projected out of the scan entirely, and every
+#'   scanned column is read as text and typed in R, so a malformed value can
+#'   never abort the scan mid-file.
 #' @return A validation details list. It always carries an `n_rows_scanned`
 #'   attribute (rows actually read; `0` for a structural early return). When
 #'   `benchmark = TRUE` it additionally carries a `"benchmark"` attribute; see
@@ -1834,7 +2420,33 @@ validate_file_stream <- function(specs,
     return(structural_details)
   }
 
-  reader <- arrow::Scanner$create(dataset, batch_size = batch_rows, use_threads = use_threads)$ToRecordBatchReader()
+  rules_list <- tryCatch(specs@rules, error = function(e) NULL)
+  if (is.null(rules_list)) {
+    rules_list <- list()
+  }
+
+  # Eligible uniqueness rules are answered by Arrow's grouped aggregation
+  # before the batch scan (see dta_stream_unique_precompute()); the batch loop
+  # then skips them entirely.
+  precomputed <- dta_stream_unique_precompute(specs, dataset, rules_list)
+
+  # Projection pushes "which columns does validation read" into the scan:
+  # unused columns are never parsed, converted, or materialised into R. The
+  # structural findings above already used the full schema, so nothing about
+  # missing/unexpected column reporting changes.
+  projection <- dta_scan_projection(specs, rules_list, names(dataset$schema))
+  reader <- if (is.null(projection)) {
+    arrow::Scanner$create(
+      dataset,
+      batch_size = batch_rows, use_threads = use_threads
+    )$ToRecordBatchReader()
+  } else {
+    arrow::Scanner$create(
+      dataset,
+      projection = projection,
+      batch_size = batch_rows, use_threads = use_threads
+    )$ToRecordBatchReader()
+  }
 
   details <- dta_validate_table_stream(
     specs,
@@ -1842,7 +2454,9 @@ validate_file_stream <- function(specs,
     verbose = verbose,
     max_errors = max_errors,
     coerce = TRUE,
-    fail_fast = fail_fast
+    fail_fast = fail_fast,
+    precomputed = precomputed,
+    known_columns = names(dataset$schema)
   )
 
   # Arrow buffers batches ahead of R in a C++ pool that gc() cannot see, so
@@ -1891,7 +2505,11 @@ dta_structural_failure_details <- function(findings) {
     n_rule_errors = 0L,
     n_import_errors = 0L,
     columnspec_errors = list(
-      summarised_error = unique(full_error[, c("keyword", "message"), drop = FALSE]),
+      # The shared summariser, not an inline unique(): the inline copy had
+      # already drifted (it kept rownames the helper resets), and a change to
+      # how required-column errors summarise must reach structural early
+      # returns too.
+      summarised_error = dta_summarise_columnspec_errors(full_error),
       full_error = full_error
     ),
     rule_results = list(),
