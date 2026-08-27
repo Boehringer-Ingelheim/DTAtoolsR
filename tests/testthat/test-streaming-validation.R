@@ -1945,9 +1945,9 @@ test_that("a grouped scan is never interrupted by the retired group budget", {
 })
 
 test_that("grouped violations are reported in the same order after the accumulator swap", {
-  # Group keys moved from a separate state$keys vector to being read back from
-  # the fastmap. The order matters: the assembled message must match the
-  # materialising path, which builds violations in sorted-key order.
+  # Group keys live in a state$keys vector, radix-sorted at finalise. The
+  # order matters: the assembled message must match the materialising path,
+  # which builds violations in the same byte order.
   rule <- DTARuleGroupCondition(
     id = "grp_order",
     group_by = "SUBJ",
@@ -1977,6 +1977,131 @@ test_that("grouped violations are reported in the same order after the accumulat
   # Messages must be identical, including the group order.
   expect_equal(streamed$message, expected$message)
   expect_equal(streamed$valid, expected$valid)
+})
+
+test_that("a high-cardinality grouped rule streams identically to the eager oracle over interleaved, mixed-case keys", {
+  # 150 groups, not pre-sorted and not case-uniform: "aNNN" and "BNNN" labels
+  # differ in their first byte's case, which radix (C-locale byte) order and a
+  # typical alphabetic locale collation disagree on -- 'B' (0x42) sorts before
+  # 'a' (0x61) in radix order, the opposite of almost every locale, which
+  # treats "a" as coming before "b"/"B". Both paths are required to sort
+  # groups by RADIX (see the comments in dta_group_stream_finalise() and
+  # rule_check_group_condition()), so data where the two orders actually
+  # diverge is what would catch either path drifting onto the session locale.
+  n_groups <- 150L
+  ids <- seq_len(n_groups)
+  labels <- ifelse(ids %% 2 == 1, sprintf("a%03d", ids), sprintf("B%03d", ids))
+
+  violating <- c("a015", "B030", "a045", "B090", "a133")
+
+  # Two rows per group. The first pass visits the groups in ascending id
+  # order and the second pass in descending order, so no group's two rows are
+  # adjacent and the table as a whole is not sorted by group at all.
+  row1_status <- rep("FAILED", n_groups)
+  row1_result <- rep(NA_character_, n_groups)
+  row2_status <- rep("OK", n_groups)
+  row2_result <- ifelse(labels %in% violating, "12", NA_character_)
+
+  df <- data.frame(
+    SUBJ = c(labels, rev(labels)),
+    STATUS = c(row1_status, rev(row2_status)),
+    RESULT = c(row1_result, rev(row2_result)),
+    stringsAsFactors = FALSE
+  )
+
+  rule <- DTARuleGroupCondition(
+    id = "high_card_interleaved",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+
+  expected <- rule_check_group_condition(rule, df)
+  expect_false(expected$valid)
+  # Guards the fixture against being vacuous: exactly the intended groups
+  # violate -- not more (a labelling slip above) and not fewer (a masking bug
+  # in the setup).
+  expect_length(expected$details, length(violating))
+
+  for (batch_rows in c(1L, 7L, 1000L)) {
+    streamed <- vs_stream_rule(rule, df, batch_rows)
+    expect_identical(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_identical(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("a group_by value of NA forms one group, labelled COL=NA, identically on both paths", {
+  # dta_group_key()/dta_row_key() give NA a marker of its own so repeated NAs
+  # key as ONE group rather than each getting distinct identity or being
+  # silently dropped, and the label is built with paste0(), which renders a
+  # missing value as the literal text "NA" rather than quoting or omitting it
+  # -- there is no canonical string for "no value". Both are pinned together
+  # here because the label is only ever exercised by an actual violation.
+  rule <- DTARuleGroupCondition(
+    id = "grp_na_key",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+  table <- data.frame(
+    SUBJ = c(NA_character_, NA_character_, "S1"),
+    STATUS = c("FAILED", "OK", "OK"),
+    RESULT = c(NA_character_, "12", NA_character_),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+  expect_false(expected$valid)
+  expect_length(expected$details, 1)
+  expect_match(expected$message, "SUBJ=NA", fixed = TRUE)
+
+  for (batch_rows in c(1L, 2L)) {
+    streamed <- vs_stream_rule(rule, table, batch_rows)
+    expect_identical(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_identical(streamed$message, expected$message, info = paste("batch", batch_rows))
+    expect_match(streamed$message, "SUBJ=NA", fixed = TRUE, info = paste("batch", batch_rows))
+  }
+})
+
+test_that("a numeric group_by column renders its label canonically on both paths", {
+  # The canonical renderer (dta_group_label_value()) is shared between the two
+  # sites that build a group label, so this does not pin the whole message --
+  # only that a value like 1e6 never surfaces as scientific notation, and that
+  # the two paths agree byte for byte on whatever they do produce.
+  rule <- DTARuleGroupCondition(
+    id = "grp_numeric_key",
+    group_by = "SITE",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c_failed", right = "c_reported"))
+  )
+  table <- data.frame(
+    SITE = c(1000000, 1000000, 2.5, 2.5),
+    STATUS = c("FAILED", "OK", "FAILED", "OK"),
+    RESULT = c(NA_character_, "12", NA_character_, "34"),
+    stringsAsFactors = FALSE
+  )
+
+  expected <- rule_check_group_condition(rule, table)
+  expect_false(expected$valid)
+  expect_length(expected$details, 2)
+  expect_match(expected$message, "=1000000", fixed = TRUE)
+  expect_match(expected$message, "=2.5", fixed = TRUE)
+  expect_no_match(expected$message, "1e+06", fixed = TRUE)
+
+  for (batch_rows in c(1L, 2L)) {
+    streamed <- vs_stream_rule(rule, table, batch_rows)
+    expect_identical(streamed$valid, expected$valid, info = paste("batch", batch_rows))
+    expect_identical(streamed$message, expected$message, info = paste("batch", batch_rows))
+  }
 })
 
 test_that("the retained-error cap truncates detail without changing the counts", {
@@ -2123,39 +2248,101 @@ test_that("counts are reported as integers until they cannot be", {
 # None of this can be reproduced by building a 2.1-billion-row file, so the
 # arithmetic is tested directly at the boundary instead.
 
-test_that("group condition counters are doubles that survive the integer limit", {
-  cond <- dta_group_cond_state()
+test_that("a grouped violation's row evidence is capped at the head but the count and truncation flag are exact", {
+  # The internal accumulator used to be pinned directly through
+  # dta_group_fold_rows(): memory is bounded by keeping only the first
+  # DTA_GROUP_ROW_HEAD row numbers per condition, while the COUNT stays exact
+  # and unbounded. Pinned here through the public API instead -- the
+  # finalised message and its `rows_truncated` flag -- against the eager path
+  # as the oracle, since the eager side never truncates ("the whole table is
+  # in hand") and so its message is the ground truth for what the numbers
+  # ought to be.
+  rule <- DTARuleGroupCondition(
+    id = "grp_head_cap",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(REASND = list(empty = FALSE)),
+      c_reported = list(REASND = list(empty = TRUE), ORRES = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "c_failed", right = "c_reported")
+    )
+  )
+  n_failed <- 15L
+  n_reported <- 5L
+  table <- data.frame(
+    SUBJ = rep("S1", n_failed + n_reported),
+    REASND = c(rep("BROKEN", n_failed), rep(NA_character_, n_reported)),
+    ORRES = c(rep(NA_character_, n_failed), rep("12", n_reported)),
+    stringsAsFactors = FALSE
+  )
 
-  # The type is the fix. `0L` here is what made the counters overflow, so
-  # asserting the values alone would let the defect back in unnoticed.
-  expect_type(cond$n_seen, "double")
-  expect_type(cond$true_n, "double")
-  expect_type(cond$false_n, "double")
+  expected <- rule_check_group_condition(rule, table)
+  expect_false(expected$valid)
 
-  # A group whose rows span the integer boundary: the same arithmetic on
-  # integers is `NA`, which is what the "all"-scope verdict below reads.
-  expect_true(is.na(suppressWarnings(2147400000L + 2000000L)))
+  # More than ten rows spread across batches, so the head cap and the
+  # "(+N more)" branch are actually exercised rather than trivially unused.
+  streamed <- vs_stream_rule(rule, table, batch_rows = 4L)
 
-  expect_no_warning({
-    cond$n_seen <- cond$n_seen + 2147400000
-    cond$n_seen <- cond$n_seen + 2000000
-  })
-  expect_false(is.na(cond$n_seen))
-  expect_true(is.finite(cond$n_seen))
-  expect_equal(cond$n_seen, 2149400000)
+  expect_identical(streamed$valid, expected$valid)
+  expect_identical(streamed$message, expected$message)
+
+  # The exact contract: DTA_GROUP_ROW_HEAD rows, earliest-first (scan order),
+  # then the true remainder -- not an approximate count, and not some other
+  # ten rows out of the fifteen that matched.
+  expect_match(
+    streamed$message,
+    paste0(
+      "rows matching \"c_failed\": ",
+      paste(seq_len(DTA_GROUP_ROW_HEAD), collapse = ","),
+      " (+", n_failed - DTA_GROUP_ROW_HEAD, " more)"
+    ),
+    fixed = TRUE
+  )
+  # The condition that never crossed the cap is reported in full, unmarked.
+  expect_match(
+    streamed$message,
+    paste0(
+      "rows matching \"c_reported\": ",
+      paste(n_failed + seq_len(n_reported), collapse = ",")
+    ),
+    fixed = TRUE
+  )
+
+  expect_true(isTRUE(streamed$details[[1]]$rows_truncated))
 })
 
-test_that("folding row numbers keeps counting past the integer limit", {
-  # `dta_group_fold_rows()` caps the head it retains but not the count, exactly
-  # as the error sink caps retention and not counting. The count is therefore
-  # unbounded in file size, and `count + length(new_rows)` on an integer count
-  # is the overflow. The head is capped at ten, so only the count can move here.
-  folded <- dta_group_fold_rows(1:10, 2147483000, 1:1000)
+test_that("a grouped violation's row numbers stay plain digits past 2^31, offset in a single update", {
+  # None of this can be reproduced by building a 2.1-billion-row table, so the
+  # offset arithmetic is exercised directly: one batch, folded in through the
+  # public per-batch entry point with a row_offset already past
+  # .Machine$integer.max. An offset that overflowed to NA, or that rendered in
+  # scientific notation, would corrupt every row number in the message while
+  # the verdict still looked authoritative.
+  rule <- DTARuleGroupCondition(
+    id = "grp_offset",
+    group_by = "SUBJ",
+    conditions = list(
+      c_failed = list(STATUS = list(equals = "FAILED")),
+      c_reported = list(RESULT = list(empty = FALSE))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "c_failed", right = "c_reported")
+    )
+  )
+  df <- data.frame(
+    SUBJ = "S1", STATUS = "FAILED", RESULT = "12",
+    stringsAsFactors = FALSE
+  )
 
-  expect_false(is.na(folded$count))
-  expect_true(is.finite(folded$count))
-  expect_equal(folded$count, 2147484000)
-  expect_identical(folded$head, 1:10)
+  state <- dta_group_stream_init(rule)
+  dta_group_stream_update(state, rule, df, row_offset = 2147483650)
+  result <- dta_group_stream_finalise(state, rule)
+
+  expect_false(result$valid)
+  expect_match(result$message, "2147483651", fixed = TRUE)
+  expect_no_match(result$message, "NA", fixed = TRUE)
+  expect_no_match(result$message, "e+", fixed = TRUE)
 })
 
 test_that("reported row numbers stay integer until they cannot", {
@@ -2181,55 +2368,71 @@ test_that("reported row numbers stay integer until they cannot", {
   })
 })
 
-test_that("an all-scope group verdict is still reached past the integer limit", {
-  # The reason this task exists. `dta_group_stream_truth()` reads
-  # `cond$n_seen > 0 && cond$all_true` for an "all" scope. With `n_seen`
-  # overflowed to `NA` that expression is `NA` (whenever `all_true` is TRUE),
-  # the `NA` flows through `if_truth & !then_truth` into `constraint_viol`, and
-  # the finaliser's `isTRUE(constraint_viol[[ci]][g])` is then FALSE -- so a
-  # group that really does violate the constraint is silently reported as
-  # passing. That is a wrong verdict, not a wrong message.
-  huge <- 2149400000
+test_that("a requires constraint folds all/any scope truth across batches, not from the first one alone", {
+  # `all` needs every row of the group to satisfy THEN, so a row that fails it
+  # in a LATER batch than the one where it held must still flip the verdict to
+  # invalid. `any` is the mirror: a row that satisfies THEN in a later batch
+  # must still rescue the group, even though the row seen first looked like a
+  # violation on its own. Both are cross-batch folding questions that only
+  # settle once the scan is complete, so both are asserted against the eager
+  # oracle, which sees the whole table at once and has nothing to fold.
+  base_conditions <- list(
+    c_if = list(STATUS = list(equals = "FAILED")),
+    c_then = list(RESULT = list(empty = FALSE))
+  )
 
-  # A condition that held for every one of a group's 2.1-billion-plus rows.
-  all_rows <- dta_group_cond_state()
-  all_rows$n_seen <- huge
-  all_rows$any_true <- TRUE
-  all_rows$all_true <- TRUE
+  # THEN holds in batch 1 (row 1) but fails on a row in a later batch (row 2).
+  # Under then_scope = "all" that is a violation, and the message must name
+  # the row that failed it.
+  rule_all <- DTARuleGroupCondition(
+    id = "grp_scope_all",
+    group_by = "SUBJ",
+    conditions = base_conditions,
+    constraints = list(
+      list(type = "requires", `if` = "c_if", then = "c_then", then_scope = "all")
+    )
+  )
+  table_all <- data.frame(
+    SUBJ = c("S1", "S1"),
+    STATUS = c("FAILED", "OK"),
+    RESULT = c("12", NA_character_),
+    stringsAsFactors = FALSE
+  )
 
-  # And one that held for some row but not for all of them.
-  some_rows <- dta_group_cond_state()
-  some_rows$n_seen <- huge
-  some_rows$any_true <- TRUE
-  some_rows$all_true <- FALSE
+  expected_all <- rule_check_group_condition(rule_all, table_all)
+  expect_false(expected_all$valid)
+  expect_match(expected_all$message, "rows 2 do not satisfy \"c_then\"", fixed = TRUE)
 
-  expect_identical(dta_group_stream_truth(all_rows, "all"), TRUE)
-  expect_identical(dta_group_stream_truth(some_rows, "all"), FALSE)
-  expect_identical(dta_group_stream_truth(some_rows, "any"), TRUE)
+  streamed_all <- vs_stream_rule(rule_all, table_all, batch_rows = 1L)
+  expect_identical(streamed_all$valid, expected_all$valid)
+  expect_identical(streamed_all$message, expected_all$message)
 
-  # The `requires` reduction exactly as the finaliser computes it, with an
-  # `if_scope` of "all" so the verdict actually depends on `n_seen`: the IF
-  # condition holds for every row, the THEN condition does not hold for all of
-  # them, so the group is in violation and the finaliser must see a hard TRUE.
-  if_truth <- dta_group_stream_truth(all_rows, "all")
-  then_truth <- dta_group_stream_truth(some_rows, "all")
-  constraint_viol <- if_truth & !then_truth
+  # The mirror: THEN FAILS on the row seen first (batch 1) but HOLDS on a row
+  # seen later (batch 2). A verdict decided from batch 1 alone would wrongly
+  # call this a violation; under then_scope = "any" the later row rescues the
+  # group, so the streamed result must not settle for less than the whole
+  # scan.
+  rule_any <- DTARuleGroupCondition(
+    id = "grp_scope_any",
+    group_by = "SUBJ",
+    conditions = base_conditions,
+    constraints = list(
+      list(type = "requires", `if` = "c_if", then = "c_then", then_scope = "any")
+    )
+  )
+  table_any <- data.frame(
+    SUBJ = c("S1", "S1"),
+    STATUS = c("FAILED", "OK"),
+    RESULT = c(NA_character_, "12"),
+    stringsAsFactors = FALSE
+  )
 
-  expect_false(is.na(constraint_viol))
-  expect_true(isTRUE(constraint_viol))
+  expected_any <- rule_check_group_condition(rule_any, table_any)
+  expect_true(expected_any$valid)
 
-  # The overflowed counterpart, kept alongside so the mechanism is pinned and
-  # not merely its absence: this is the same violating group as above, seen
-  # through an integer `n_seen`. The violation is real and the finaliser drops
-  # it, because `isTRUE(NA)` is FALSE.
-  overflowed <- dta_group_cond_state()
-  overflowed$n_seen <- NA_real_
-  overflowed$any_true <- TRUE
-  overflowed$all_true <- TRUE
-
-  overflowed_truth <- dta_group_stream_truth(overflowed, "all")
-  expect_true(is.na(overflowed_truth))
-  expect_false(isTRUE(overflowed_truth & !then_truth))
+  streamed_any <- vs_stream_rule(rule_any, table_any, batch_rows = 1L)
+  expect_identical(streamed_any$valid, expected_any$valid)
+  expect_identical(streamed_any$message, expected_any$message)
 })
 
 
@@ -2417,4 +2620,102 @@ test_that("scan progress is throttled by wall time, not printed per batch", {
     type = "message"
   )
   expect_gt(progress_lines(loud_out), 0L)
+})
+
+test_that("a group label survives a batch whose group column arrives as a different type", {
+  # The label is rendered when the group is first seen. Storing the raw value
+  # instead froze its storage mode to the first batch's: an all-missing batch
+  # leaves that column as the reader delivered it (text) while other batches
+  # are coerced to numeric, and the promotion re-rendered already-recorded
+  # labels through as.character() -- reviving the "SITE=1e+05" the canonical
+  # renderer exists to prevent.
+  rule <- DTARuleGroupCondition(
+    id = "grp_label_type",
+    group_by = "SITE",
+    conditions = list(
+      a = list(STATUS = list(equals = "X")),
+      b = list(STATUS = list(equals = "Y"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "a", right = "b")
+    )
+  )
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "SITE", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "STATUS", type = "SAS Char", length = 4, nullable = TRUE)
+    ),
+    list(rule)
+  )
+
+  # Rows 3-4 hold the all-missing batch that used to promote the column.
+  tab <- data.frame(
+    SITE = c("100000", "100000", NA, NA, "7", "7"),
+    STATUS = c("X", "Y", "X", "Y", "X", "Y"),
+    stringsAsFactors = FALSE
+  )
+
+  coerced <- dta_coerce_table_to_specs(tab, specs)
+  expected <- rule_check_group_condition(rule, as.data.frame(coerced$table))
+
+  streamed <- dta_validate_table_stream(
+    specs, dta_as_batch_reader(arrow::as_arrow_table(tab), batch_rows = 2L),
+    verbose = FALSE
+  )
+  expect_false(streamed$rules_valid)
+  expect_identical(streamed$rule_errors[[1]]$message, expected$message)
+  expect_true(grepl("SITE=100000", streamed$rule_errors[[1]]$message, fixed = TRUE))
+  expect_false(grepl("1e+05", streamed$rule_errors[[1]]$message, fixed = TRUE))
+})
+
+test_that("folding a batch costs what the batch touched, not what the scan has accumulated", {
+  # The columnar state is only a win if a batch's cost stays flat as groups
+  # accumulate. Writing through `state$true_head[[cond]][id, ]` inside the
+  # per-group loop copied the whole capacity-sized matrix per iteration, which
+  # made a scan quadratic in group cardinality (measured: 71s vs 0.8s at
+  # 40,000 groups) while every fixture in this file stayed too small to show
+  # it. This pins the shape: the last batch of a long scan must not cost
+  # dramatically more than the first, with identical per-batch work.
+  skip_on_cran()
+  rule <- DTARuleGroupCondition(
+    id = "grp_scale",
+    group_by = "G",
+    conditions = list(
+      a = list(S = list(equals = "X")),
+      b = list(S = list(equals = "Y"))
+    ),
+    constraints = list(
+      list(type = "mutually_exclusive", left = "a", right = "b")
+    )
+  )
+
+  per_batch <- 2000L
+  n_batches <- 12L
+  batch_of <- function(i) {
+    ids <- sprintf("g%06d", (i - 1L) * per_batch + seq_len(per_batch))
+    data.frame(
+      G = rep(ids, each = 2L),
+      S = rep(c("X", "Y"), times = per_batch),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  state <- dta_group_stream_init(rule)
+  timings <- numeric(n_batches)
+  for (i in seq_len(n_batches)) {
+    df <- batch_of(i)
+    timings[[i]] <- system.time(
+      dta_group_stream_update(state, rule, df, row_offset = (i - 1) * nrow(df))
+    )[["elapsed"]]
+  }
+
+  # Every batch introduces the same number of new groups and the same rows.
+  expect_identical(state$n, as.integer(per_batch) * n_batches)
+
+  early <- max(sum(timings[1:3]), 0.01)
+  late <- sum(timings[(n_batches - 2L):n_batches])
+  # Quadratic growth put this ratio in the double digits; linear folding keeps
+  # it near 1. The bound is deliberately loose -- this is a shape guard, not a
+  # benchmark, and it must not flake on a loaded CI machine.
+  expect_lt(late / early, 6)
 })
