@@ -6,8 +6,7 @@
 \alias{print_info}
 \title{print info}
 \usage{
-## S7 method for class <DTAtools::DTAFileAny>
-print_info(x)
+print_info(x, ...)
 }
 \arguments{
 \item{x}{An object of class DTAMetadata}

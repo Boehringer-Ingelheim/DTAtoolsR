@@ -288,6 +288,7 @@ method(print, DTAFileAny) <- function(x, ...) {
 #' library(DTAtools)
 #' print_info(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
 #'
+#' @usage print_info(x, ...)
 #' @name print_info
 #' @export
 method(print_info, DTAFileAny) <- function(x) {
