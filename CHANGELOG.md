@@ -124,6 +124,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   canonically (`SITE=1000000`, never `SITE=1e+06`), identically on both
   paths.
 
+- **Grouped-rule accumulation is columnar.** The streaming scan used to hold
+  one nested R list per distinct group (a label string plus seven fields per
+  condition, ~1–2 KB each) and update it through an interpreted per-group
+  loop — the remaining scale lever after the uniqueness rework. Group state
+  now lives in parallel vectors indexed by a dense group id: per-batch
+  updates are vectorized indexed assignments, redundant fields are derived
+  instead of stored (`false` counts from `n_seen − true_n`), each group's
+  label is rendered once when the group is first seen rather than rebuilt,
+  and the row-evidence extraction short-circuits once a group's capped heads
+  are full. Verdicts, messages, and group order are byte-identical.
+  Measured: memory per group falls by about 2.5–3× (roughly 294 bytes per
+  group per condition, against 1.1–3 KB before), per-batch cost stays flat as
+  groups accumulate, and folding 40,000 groups takes about a third of the
+  accumulator time it used to.
+
 - **The streaming resource budgets are gone.** `DTAtools.max_unique_keys`
   (50 million) and `DTAtools.max_groups` (5 million) aborted the entire scan
   with `dta_stream_budget_exceeded` once an accumulator crossed the line —
