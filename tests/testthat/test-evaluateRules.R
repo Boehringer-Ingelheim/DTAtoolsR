@@ -1894,3 +1894,142 @@ test_that("the streaming and materialising conditional paths agree on scope", {
   expect_false(anyNA(violated))
   expect_equal(which(violated), c(1L, 2L))
 })
+
+# ---- quoted numeric bounds compare numerically (equals/in and negations) ---
+
+test_that("equals against a numeric column compares numerically, quoted or unquoted", {
+  # A quoted bound that parses as a number ("1000000") now matches a numeric
+  # column the same way the unquoted number would -- exactly one row of
+  # c(1e6, 2.5) is 1000000.
+  x <- c(1e6, 2.5)
+  quoted_mask <- dta_condition_mask("NUM", "equals", "1000000", x)
+  unquoted_mask <- dta_condition_mask("NUM", "equals", 1000000, x)
+  expect_identical(quoted_mask, c(TRUE, FALSE))
+  expect_identical(quoted_mask, unquoted_mask)
+
+  # The same equivalence holds through the full rule: a THEN that fails only
+  # on the IF-matching row proves the IF applied to exactly that one row,
+  # under both spellings of the bound.
+  df <- data.frame(NUM = x, FLAG = c("miss", "irrelevant"), stringsAsFactors = FALSE)
+  make_rule <- function(bound) {
+    DTARuleColCondition(
+      id = "quoted_numeric_equals",
+      condition = list(NUM = list(equals = bound)),
+      then = list(FLAG = list(equals = "hit"))
+    )
+  }
+  quoted_result <- rule_check_col_condition(make_rule("1000000"), df)
+  unquoted_result <- rule_check_col_condition(make_rule(1000000), df)
+
+  expect_false(quoted_result$valid)
+  expect_match(quoted_result$message, "violated: 1 rows")
+  expect_identical(quoted_result$valid, unquoted_result$valid)
+  expect_identical(quoted_result$message, unquoted_result$message)
+})
+
+test_that("a quoted bound with leading zeros matches numerically on a numeric column, verbatim on a character one", {
+  # "007" parses to the number 7, so it matches a numeric 7 exactly as the
+  # unquoted "7" no longer would.
+  numeric_mask <- dta_condition_mask("N", "equals", "007", c(7, 8))
+  expect_identical(numeric_mask, c(TRUE, FALSE))
+
+  # A character column is untouched: leading zeros are part of the value, so
+  # "7" and "007" are two distinct, non-numeric strings.
+  char_x <- c("007", "7")
+  expect_identical(dta_condition_mask("CODE", "equals", "7", char_x), c(FALSE, TRUE))
+  expect_identical(dta_condition_mask("CODE", "equals", "007", char_x), c(TRUE, FALSE))
+})
+
+test_that("an unparseable bound on a numeric column keeps string comparison and never errors", {
+  # "UNK" does not parse as a number, so a numeric column falls back to the
+  # old string comparison rather than aborting -- and, being numeric, never
+  # equals a non-numeric string, so it matches nothing.
+  expect_no_error(mask <- dta_condition_mask("N", "equals", "UNK", c(7, 8, 9)))
+  expect_identical(mask, c(FALSE, FALSE, FALSE))
+})
+
+test_that("in against a numeric column compares numerically only when every element parses", {
+  x <- c(1, 3)
+  expect_identical(dta_condition_mask("N", "in", c("1", "2"), x), c(TRUE, FALSE))
+
+  # One unparseable element ("UNK") makes the whole set fall back to the old,
+  # all-or-nothing string comparison -- computed here rather than hardcoded,
+  # so this pins whatever that fallback actually does today.
+  mixed_bound <- c("1", "UNK")
+  expect_identical(
+    dta_condition_mask("N", "in", mixed_bound, x),
+    x %in% mixed_bound
+  )
+})
+
+test_that("not_equals with a quoted numeric bound is the negation of equals", {
+  x <- c(1e6, 2.5, 7)
+  eq <- dta_condition_mask("N", "equals", "1000000", x)
+  neq <- dta_condition_mask("N", "not_equals", "1000000", x)
+  expect_identical(neq, !eq)
+})
+
+# ---- dta_group_label_value() and its use in grouped-rule labels ------------
+
+test_that("dta_group_label_value renders numeric group values canonically", {
+  expect_identical(dta_group_label_value(1e6), "1000000")
+  expect_identical(dta_group_label_value(2.5), "2.5")
+  expect_identical(dta_group_label_value(1 / 3), as.character(1 / 3))
+  expect_identical(dta_group_label_value("A"), "A")
+  # NA renders the way paste0() itself would render a bare NA -- there is no
+  # canonical numeric string for "no value".
+  expect_identical(paste0("x=", dta_group_label_value(NA_real_)), "x=NA")
+})
+
+test_that("a numeric group-by value renders canonically in the violation label, on both paths", {
+  # Both rows fall in the SAME group (GRP = 1e6): one satisfies c1, the other
+  # c2, so mutually_exclusive fires and the group label is rendered into the
+  # message. Before dta_group_label_value(), that label read "GRP=1e+06".
+  df <- data.frame(
+    GRP = c(1e6, 1e6),
+    FLAG = c(1, 2),
+    stringsAsFactors = FALSE
+  )
+  rule <- DTARuleGroupCondition(
+    id = "numeric_group_label",
+    group_by = "GRP",
+    conditions = list(
+      c1 = list(FLAG = list(equals = 1)),
+      c2 = list(FLAG = list(equals = 2))
+    ),
+    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+  )
+
+  eager <- rule_check_group_condition(rule, df)
+  expect_false(eager$valid)
+  expect_match(eager$message, "=1000000", fixed = TRUE)
+  expect_false(grepl("1e+06", eager$message, fixed = TRUE))
+
+  state <- dta_rule_stream_init(rule)
+  reader <- dta_as_batch_reader(df, batch_rows = 1L)
+  repeat {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) break
+    dta_rule_stream_update(state, rule, as.data.frame(batch))
+  }
+  streamed <- dta_rule_stream_finalise(state, rule)
+
+  expect_false(streamed$valid)
+  expect_match(streamed$message, "=1000000", fixed = TRUE)
+  expect_false(grepl("1e+06", streamed$message, fixed = TRUE))
+  expect_identical(streamed$message, eager$message)
+})
+
+test_that("integer64 columns are exempt from equality-bound parsing", {
+  # is.numeric(integer64) is TRUE, but as.numeric() rounds past 2^53: parsing
+  # the bound would turn "9007199254740993" into 9007199254740992 and break an
+  # equality that bit64's own comparison keeps exact.
+  skip_if_not_installed("bit64")
+  x <- bit64::as.integer64(c("9007199254740993", "9007199254740992"))
+
+  exact <- dta_condition_mask("B", "equals", "9007199254740993", x)
+  expect_identical(exact %in% TRUE, c(TRUE, FALSE))
+
+  other <- dta_condition_mask("B", "equals", "9007199254740992", x)
+  expect_identical(other %in% TRUE, c(FALSE, TRUE))
+})

@@ -55,6 +55,11 @@ Supported operators per column:
 \item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, or \code{""}; FALSE means not empty)
 }
 
+Against a numeric column, \code{equals}/\code{not_equals}/\verb{in}/\code{not_in} compare
+numerically when the supplied value parses as a number (so \code{equals: "18"}
+and \code{equals: 18} agree); otherwise, and for non-numeric columns, the
+comparison is textual.
+
 Both \verb{@condition} and \verb{@then} may also be written as a YAML sequence of
 single-column mappings; they are normalised to the named form.
 

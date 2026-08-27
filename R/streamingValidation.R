@@ -1313,7 +1313,10 @@ dta_group_stream_update <- function(state, rule, df, row_offset = 0L, numeric_ca
       entry <- list(
         label = paste(
           vapply(group_by, function(col) {
-            paste0(col, "=", as.character(grouped[[col]][local_first]))
+            # dta_group_label_value(), not as.character(): must render identically
+            # to the eager site in group_label_for() inside
+            # rule_check_group_condition() (evaluateRules.R).
+            paste0(col, "=", dta_group_label_value(grouped[[col]][local_first]))
           }, character(1)),
           collapse = ", "
         ),

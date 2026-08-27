@@ -401,14 +401,15 @@ test_that("a .zip input is refused with a clear message", {
   )
 })
 
-test_that("per-batch integer narrowing still diverges from the whole-table decision (KNOWN DEFECT, pinned rather than endorsed)", {
-  # A declared-Int column is narrowed to R integer per BATCH on the streaming
-  # path but per TABLE on the eager path. With a whole value in one batch and
-  # a fractional one in another, the streamed batch renders "1000000" where
-  # the eager double renders "1e+06", so a string-typed equals bound matches
-  # on one path only. When the narrowing decision (or the rendering used by
-  # string comparisons) is unified, flip the streamed expectation below to
-  # expect_true(streamed$rules_valid) to match the eager verdict.
+test_that("quoted numeric bounds compare numerically on both paths", {
+  # equals/not_equals/in/not_in against a numeric column now compare
+  # numerically when the supplied bound parses as a number, so the quoted
+  # bound "1000000" matches the value 1000000 exactly as the unquoted number
+  # would -- regardless of whether a declared-Int column happened to get
+  # narrowed to R integer for this batch/table, or stayed double. The IF
+  # clause therefore fires on the row holding 1000000 on BOTH the eager and
+  # the streamed path, and its THEN (equals "999") fails there, so both now
+  # report rules_valid = FALSE with an identical message.
   specs <- vc_specs(
     list(DTAColumnSpec(id = "NUM", type = "SAS Int", nullable = TRUE)),
     list(DTARuleColCondition(
@@ -423,10 +424,15 @@ test_that("per-batch integer narrowing still diverges from the whole-table decis
 
   coerced <- dta_coerce_table_to_specs(df, specs)
   eager <- validate_table_detailed(specs, coerced$table, verbose = FALSE)
-  expect_true(eager$rules_valid)
+  expect_false(eager$rules_valid)
 
   streamed <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
   expect_false(streamed$rules_valid)
+
+  expect_identical(
+    streamed$rule_errors[[1]]$message,
+    eager$rule_errors[[1]]$message
+  )
 })
 
 test_that("validate_file_stream cleans a padded header like every other entry point", {
