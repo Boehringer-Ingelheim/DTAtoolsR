@@ -280,10 +280,21 @@ dta_compile_columnspec_schemas <- function(specs) {
     return(list())
   }
 
+  # Per-column fallback rather than all-or-nothing: a PARTIALLY named
+  # collection (reachable only by validator bypass) would otherwise pair a
+  # schema with the name "", which can never match a table column.
   spec_names <- names(columns)
   if (is.null(spec_names)) {
-    spec_names <- vapply(columns, function(s) s@id, character(1))
+    spec_names <- rep("", length(columns))
   }
+  ids <- vapply(
+    columns,
+    function(s) tryCatch(as.character(s@id)[[1]], error = function(e) NA_character_),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  fallback <- is.na(spec_names) | !nzchar(spec_names)
+  spec_names[fallback] <- ids[fallback]
 
   lapply(seq_along(columns), function(i) {
     list(

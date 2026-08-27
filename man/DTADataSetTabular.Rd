@@ -20,8 +20,11 @@ DTADataSetTabular(
 
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
-\item{tables}{A named list of tabular objects; each table is converted to an
-Arrow Table and stored in the dataset.}
+\item{tables}{A named list of tabular objects. A materialised entry
+(data.frame or Arrow Table) is typed by \code{specs} and converted to an Arrow
+Table before storage. A lazy entry (Arrow Dataset, \code{arrow_dplyr_query}, or
+RecordBatchReader) is stored exactly as given -- it is typed and checked
+for import issues later, at scan time, in \code{check()}.}
 
 \item{files}{A list of DTAFile objects specifying input file information.}
 

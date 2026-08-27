@@ -8,6 +8,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Uniqueness at any scale: eligible `check_unique` rules now run inside
+  Arrow's engine.** On a streamed table, a uniqueness rule whose key columns
+  are text is answered by Arrow's grouped aggregation over the lazy dataset —
+  one extra streaming pass over just the key columns, with the distinct keys
+  held compactly in C++ instead of as R strings in a hash that grew with key
+  cardinality. This is what makes a per-row-unique subject ID checkable on a
+  hundreds-of-millions-of-rows file without either an abort or an
+  out-of-memory kill, and it removes the per-key R loop that dominated scan
+  time on such rules. Non-text keys and consumable readers keep the per-batch
+  accumulator. `options(DTAtools.stream_arrow_unique = FALSE)` opts out; the
+  path is on by default (unlike `DTAtools.use_arrow_compute`) because text
+  grouping is byte-exact equality with no floating-point latitude, and the
+  streamed and in-memory verdicts are corpus-tested to agree.
+
+- **Error detail past `max_errors` spills to disk instead of being lost.**
+  The sinks still hold at most `max_errors` rows in memory (default 10000),
+  but overflow now lands in a session-temporary spill, and the new
+  `collect_full_errors(details, axis = )` reassembles the complete per-cell
+  detail — head plus spill — for the column-spec or import axis. Counts and
+  verdicts were always exact; now the row-level identities survive too, for
+  the lifetime of the R session.
+
+- **Column projection for streamed scans.** The scan now reads only the
+  columns the specs and rules actually consult; everything else is never
+  parsed, converted, or materialised into R. On a wide file with a narrow
+  specification this removes most of the per-batch work outright. Projection
+  disables itself when a rule's column set cannot be enumerated.
+
+- **Declared `missing_values` are finally honored.** A tabular handler's
+  `missing_values` property was stored but never consulted — a handler
+  declaring the SAS convention `"."` got one spurious import error per `.`
+  cell in every numeric column. Both the eager reader and the lazy open now
+  forward the declared markers (in addition to the empty string) to Arrow's
+  reader.
+
+- **`stream = "auto"` understands compression.** The size test now compares
+  an estimate of the materialised size (on-disk bytes × 4 for `.gz`) against
+  the threshold, so a large compressed table streams by default instead of
+  being read into memory — previously "auto" under-triggered on exactly the
+  inputs big enough to be shipped compressed.
+
 - **A manuscript-draft vignette in Nature Methods format**
   (`vignette("DTAtools-manuscript")`). Abstract, introduction, and a full
   methods section are drafted; the benchmark subsections of the results and
@@ -60,6 +101,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   confirmed to have arrived, be readable and be non-empty.
 
 ### Changed
+
+- **The streaming resource budgets are gone.** `DTAtools.max_unique_keys`
+  (50 million) and `DTAtools.max_groups` (5 million) aborted the entire scan
+  with `dta_stream_budget_exceeded` once an accumulator crossed the line —
+  discarding hours of work at exactly the per-row-unique-key scale streaming
+  exists for, with "raise the option and re-scan" as the only remedy. Both
+  options, the condition class, and the aborts are removed: uniqueness memory
+  is now handled inside Arrow's engine for the common (text-key) case, and
+  the remaining accumulator growth is documented at the entry points instead
+  of enforced mid-scan.
+
+- **Streamed scans read every column as text.** Only spec-declared columns
+  were pinned to `utf8`; undeclared columns kept Arrow's first-block type
+  inference, so a value that no longer fit the inferred type — `"0.01"` in a
+  column that looked like integers, 300 million rows in — aborted the whole
+  scan with an uncatchable `CSV conversion error`. Every scanned column is
+  now pinned, all typing happens in R against the specs, and a malformed
+  value is a reportable finding rather than a mid-scan crash. (One knowable
+  consequence: a string-comparison rule against an undeclared numeric-looking
+  column now compares the file's own text rather than a re-rendered number.)
+
+- **Grouped-rule violations report in byte order, identically everywhere.**
+  Group ordering (and the import-error frame's column tiebreak) used locale
+  collation, so the same file assembled its violation text in a different
+  order on a `de_DE` machine than under CI's C locale. Both the streamed and
+  materialised paths now sort with `method = "radix"`, which also removes a
+  collation-tie edge where the two paths could disagree with each other.
+
+- **`check()` on a `DTA` no longer certifies a run with unchecked targets.**
+  Datasets whose specs declare zero columns (and any other `ok = NA` target)
+  previously vanished from the rollup, so an all-unspecified DTA printed
+  "Validation PASSED: All datasets are valid" with `last_validation_ok =
+  TRUE`. The summary now carries an `n_unchecked` column, the banner reports
+  "Validation INCOMPLETE" when anything was skipped over, and
+  `last_validation_ok` is `TRUE` only when every target was actually checked
+  and clean.
+
+- **`write_table_to_file()` defaults to `overwrite = FALSE`,** matching what
+  its documentation always claimed; an existing file now requires the
+  explicit flag instead of being silently clobbered. It also no longer
+  mangles non-syntactic column names (`Subject ID` was written as
+  `Subject.ID`) on the way out.
+
+- **`fail_fast` reports only failures no unread batch could overturn.** A
+  grouped `requires` constraint that looked violated in the batches read can
+  still be satisfied by a later row; the partial report previously asserted
+  it as a definite failure. Partial results now list only settled failures,
+  and everything else stays `NA`, as the partial-scan contract always said.
 
 - **The *Load example DTA* dialog lists the bundled examples in a taught
   order** — one tabular dataset, then one dataset fed by several files, then a
@@ -120,6 +209,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   naming the class it could not dispatch on.
 
 ### Fixed
+
+- **An empty-string value in a uniqueness or grouping key no longer crashes
+  the streaming scan.** The key set rejects `""` as a hash key, and the error
+  escaped every handler, so one blank cell in a key column (or a zero-column
+  key) aborted `check()` outright while the in-memory path returned a normal
+  verdict. The empty key is remapped to a byte the encoding can never produce,
+  so equal rows still compare equal.
+
+- **Violation messages no longer crash — and no longer lose row evidence —
+  past 2³¹.** The message builders formatted the deliberately-double stream
+  counters with `sprintf("%d", ...)`, which errors for doubles beyond the
+  integer range, so a rule violated on more than ~2.1 billion rows completed
+  its multi-hour scan and then died while composing its own message; grouped
+  row evidence was separately narrowed through `as.integer()`, whose `NA`s
+  `sort()` silently dropped. Both now render through a plain-digit formatter
+  at any magnitude, and `validation_status()` stopped forcing the import
+  count through `as.integer()` (which turned an over-range count into `NA`
+  that summed as zero).
+
+- **Header cleaning and type pinning now agree on every entry point.** The
+  eager readers pinned declared columns against the raw header before names
+  were cleaned, so a padded or quoted header (` SUBJECT_ID`) silently lost
+  its `Char` pinning and `"007"` arrived as `7` with no import issue under
+  `stream = "never"`; `validate_file_stream()` and `cache_as_parquet()`
+  never cleaned names at all, so the same file reported its clean column as
+  missing — and the Parquet cache persisted the dirty names. All entry
+  points now share the normalized open/read.
+
+- **A header-only file no longer certifies rules on absent columns.** With
+  zero rows, no batch ever ran, so a rule naming a column the table lacks
+  finalised as passed on the streaming path while the in-memory path failed
+  it. The stream driver now evaluates rule applicability once against the
+  source's real column set when no rows arrive.
+
+- **Import-error counts stopped inflating k-fold past the retention cap.**
+  Every rule pushed its own copy of a shared column's unconvertible cells
+  into the sink, and deduplication ran only over the retained rows — 20000
+  bad cells read by two rules reported as ≈40000 once the cap hid the
+  duplicates. Duplicates are now removed per batch, before anything is
+  counted.
+
+- **`fail_fast` / structural results are no longer served as full totals.**
+  The validation index recorded partial counts with no marker, so a later
+  plain `check()` reported the table as "skipped" with a first-bad-batch
+  count presented as its total. Partial results are marked in the index and
+  never satisfy the unchanged-skip; the next `check()` rescans.
+
+- **A streamed table's `@import_issues` is populated after `check()`.** The
+  lazy `load_file()` branch promised the issues would be "found later", but
+  `check()` never wrote them back, so the property stayed empty forever and
+  the Shiny app showed no import issues for streamed tables.
+
+- **The `DTADataSetTabular` constructor no longer materialises lazy
+  tables.** Passing an Arrow `Dataset`, query, or reader through `tables =`
+  collected it into memory at construction (draining readers, skipping spec
+  typing) — defeating the validator's documented reason for admitting lazy
+  holdings. Lazy inputs now pass through untouched, typed at scan time.
+
+- **Re-`check()`ing a consumed `RecordBatchReader` no longer records a
+  hollow pass**, and `.zip` inputs are refused with a clear message naming
+  gzip as the supported transport instead of Arrow's opaque "Is this a 'csv'
+  file?" schema error.
+
+- Assorted smaller repairs found in the same review: `print()` on a handler
+  declaring only a minimum or maximum file count no longer errors;
+  `DTAFileTabular(sep = NA)` reports the intended validator message instead
+  of a bare condition error; `get_table()` rejects fractional and vector
+  indices instead of silently truncating; the streamed grouped
+  "could not be evaluated" message carries the same condition-definition
+  bullet as the in-memory one; the export writer and structural gate reuse
+  the shared helpers they had drifted from.
 
 - **A file dataset stopped reporting the deliverables that never arrived, and
   certified the delivery as passed.** `dta_file_dataset_targets()`

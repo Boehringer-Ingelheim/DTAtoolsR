@@ -136,8 +136,8 @@ specs <- DTAColumnSpecCollection(columns = list(
 ))
 
 ds <- DTADataSetTabular(
-  name   = "import_demo",
-  specs  = specs,
+  name = "import_demo",
+  specs = specs,
   tables = list(demo = data.frame(
     SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
     AGE        = c("34", "unknown")

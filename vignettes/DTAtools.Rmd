@@ -1159,14 +1159,17 @@ options(DTAtools.stream = "always") # or "never" / "auto"
 options(DTAtools.stream_threshold = 2 * 1024^3) # bytes; default 512 MB
 ```
 
-One caveat on `"auto"`: it compares the size of the file *on disk*. A `.csv.gz`
-is much smaller compressed than materialised, so `"auto"` under-triggers on
-compressed input — pass `stream = "always"` explicitly there.
+`"auto"` accounts for compression: a `.csv.gz`'s on-disk size is multiplied by
+an expansion estimate (4×) before the comparison, so a compressed table large
+enough to matter streams by default. Either explicit `stream` value still
+overrides the guess.
 
 `check()` takes the two scan knobs, both ignored for a table already in memory:
 `batch_rows` (rows per batch, default
-`getOption("DTAtools.stream_batch_rows", 131072L)`) and `max_errors` (a cap on
-retained per-cell detail, which changes neither the counts nor the verdict).
+`getOption("DTAtools.stream_batch_rows", 131072L)`) and `max_errors` (how much
+per-cell detail is held in RAM — it changes neither the counts nor the
+verdict, and rows past the cap spill to a session-temporary store that
+`collect_full_errors()` reassembles).
 
 ### Choosing between them
 
@@ -1175,7 +1178,7 @@ retained per-cell detail, which changes neither the counts nor the verdict).
 | The file fits in memory comfortably | `"never"`, or the default | About twice as fast, and import errors are reported at load |
 | The file is larger than memory, or close to it | `"always"` | The only option that works at all |
 | You will validate the same table many times | `"never"` | Every scan re-parses from disk; an in-memory table is parsed once |
-| A large compressed file (`.csv.gz`) | `"always"`, explicitly | `"auto"` reads the *on-disk* size and under-triggers |
+| A large compressed file (`.csv.gz`) | `"auto"` handles it | The size test multiplies a `.gz`'s on-disk bytes by an expansion estimate |
 | You just want a verdict, with no `DTA` object | `validate_file_stream()` | Same scan, without the object model |
 | You do not know, and sizes vary | `"auto"` (the default) | Small files stay fast; a file that would not fit switches by itself |
 
@@ -1226,9 +1229,10 @@ Nothing in the scan grows with the number of rows:
 |------|------------|
 | column-spec checks | the batch size |
 | range and if/then rules | the batch size |
-| uniqueness rules | the number of distinct keys |
+| uniqueness rules (text keys) | Arrow's engine — the distinct keys never enter R |
+| uniqueness rules (other keys) | the number of distinct keys |
 | grouped rules | the number of distinct groups |
-| retained error detail | `max_errors` |
+| error detail held in RAM | `max_errors` (the rest spills to disk, nothing is lost) |
 
 Measured across a sixteen-fold increase in input, the working set held by the
 scan stayed flat at about 19 MB, while the in-memory path's grew from 51 MB to

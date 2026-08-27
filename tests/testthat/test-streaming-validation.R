@@ -840,18 +840,33 @@ test_that("a stopped scan does not claim the axes it never finished are clean", 
   path <- vs_write_csv(data.frame(ID = ids, K = ks, stringsAsFactors = FALSE))
   on.exit(unlink(path), add = TRUE)
 
+  # With the Arrow uniqueness precompute (the default), the rule's verdict is
+  # reached over the WHOLE dataset before the batch loop, so even a stopped
+  # scan reports the far duplicate -- a complete answer, not a claim about
+  # batches never read.
   quick <- validate_file_stream(
     specs, path,
     batch_rows = 5L, fail_fast = TRUE, verbose = FALSE
   )
 
   expect_true(isTRUE(attr(quick, "partial_scan")))
-  # Not TRUE, and not FALSE: unknown.
-  expect_true(is.na(quick$rules_valid))
+  expect_false(quick$rules_valid)
+  expect_match(quick$rule_errors[[1]]$message, "1 duplicate row")
   expect_false(quick$ok)
 
-  # The full scan does find the duplicate, which is exactly why the quick one
-  # must not have claimed there was none.
+  # On the per-batch fallback the duplicate sits past where the scan stopped,
+  # so the axis must report unknown -- not TRUE, and not FALSE.
+  withr::local_options(DTAtools.stream_arrow_unique = FALSE)
+  quick_fallback <- validate_file_stream(
+    specs, path,
+    batch_rows = 5L, fail_fast = TRUE, verbose = FALSE
+  )
+  expect_true(isTRUE(attr(quick_fallback, "partial_scan")))
+  expect_true(is.na(quick_fallback$rules_valid))
+  expect_false(quick_fallback$ok)
+
+  # The full scan does find the duplicate, which is exactly why the stopped
+  # fallback must not have claimed there was none.
   full <- validate_file_stream(specs, path, batch_rows = 5L, verbose = FALSE)
   expect_false(full$rules_valid)
 })
@@ -1854,14 +1869,16 @@ test_that("a duplicate is counted the same however the batches fall", {
   }
 })
 
-test_that("a uniqueness scan that exceeds its key budget aborts rather than reporting a verdict", {
-  # When a uniqueness scan hits the key budget, it aborts with dta_stream_budget_exceeded,
-  # not by reporting a rule failure. A resource limit must not be dressed up as a data
-  # verdict, which would present a clean-looking result for a constraint never checked.
+test_that("a uniqueness scan is never interrupted by the retired key budget", {
+  # DTAtools.max_unique_keys used to abort the whole scan with
+  # dta_stream_budget_exceeded once the accumulator crossed it -- discarding a
+  # multi-hour scan at exactly the per-row-unique-key scale streaming exists
+  # for. The option is retired: setting it must be inert, the scan must run to
+  # completion, and the verdict must be the data's, not a resource artefact.
   rule <- DTARuleColUnique(id = "k_budget", columns = "K")
 
   table <- data.frame(
-    K = c("key1", "key2", "key3", "key4"),
+    K = c("key1", "key2", "key3", "key4", "key2"),
     stringsAsFactors = FALSE
   )
 
@@ -1869,43 +1886,26 @@ test_that("a uniqueness scan that exceeds its key budget aborts rather than repo
   on.exit(options(DTAtools.max_unique_keys = old), add = TRUE)
   options(DTAtools.max_unique_keys = 2L)
 
-  reader <- vs_reader(table, batch_rows = 1L)
-  state <- dta_rule_stream_init(rule)
-
-  # Advance through batches until the budget is exceeded.
-  expect_error(
-    {
-      repeat {
-        batch <- reader$read_next_batch()
-        if (is.null(batch)) break
-        dta_rule_stream_update(state, rule, as.data.frame(batch))
-      }
-    },
-    class = "dta_stream_budget_exceeded"
-  )
-
-  # The point of the test. Run the SAME fixture through the production driver,
-  # which wraps every rule update in a tryCatch for dta_rule_not_applicable: the
-  # budget condition must escape that handler and abort the run. If it were
-  # caught, the driver would return a details object reporting the rule as an
-  # ordinary failure, and a caller could not tell "this key is duplicated" from
-  # "this constraint was never actually checked".
   specs <- vc_specs(
     list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = FALSE)),
     list(rule)
   )
-  expect_error(
-    dta_validate_table_stream(
-      specs, vs_reader(table, batch_rows = 1L),
-      verbose = FALSE, coerce = FALSE
-    ),
-    class = "dta_stream_budget_exceeded"
+  details <- dta_validate_table_stream(
+    specs, vs_reader(table, batch_rows = 1L),
+    verbose = FALSE, coerce = FALSE
   )
+
+  # Five keys crossed the pretend budget of 2 without any abort, and the one
+  # real duplicate is what the verdict reports.
+  expect_false(details$rules_valid)
+  expect_length(details$rule_errors, 1)
+  expect_match(details$rule_errors[[1]]$message, "1 duplicate row")
 })
 
-test_that("a grouped scan that exceeds its group budget aborts", {
-  # Grouped rules track distinct groups and conditions. When the group count exceeds
-  # the budget, the scan aborts with dta_stream_budget_exceeded, not a rule failure.
+test_that("a grouped scan is never interrupted by the retired group budget", {
+  # DTAtools.max_groups aborted a PASSING scan once group cardinality crossed
+  # it. The option is retired: setting it must be inert and the clean verdict
+  # must come through.
   rule <- DTARuleGroupCondition(
     id = "grp_budget",
     group_by = "SUBJ",
@@ -1918,9 +1918,6 @@ test_that("a grouped scan that exceeds its group budget aborts", {
     )
   )
 
-  # Three groups, none of which actually violates the constraint. The abort must
-  # come from the group budget alone, so that a passing scan is what the budget
-  # interrupts -- not a scan that was going to fail anyway.
   table <- data.frame(
     SUBJ = c("S1", "S2", "S3"),
     STATUS = c("OK", "OK", "OK"),
@@ -1931,20 +1928,20 @@ test_that("a grouped scan that exceeds its group budget aborts", {
   on.exit(options(DTAtools.max_groups = old), add = TRUE)
   options(DTAtools.max_groups = 1L)
 
-  reader <- vs_reader(table, batch_rows = 1L)
-  state <- dta_rule_stream_init(rule)
-
-  # Advance through batches; the second distinct group should trigger the budget.
-  expect_error(
-    {
-      repeat {
-        batch <- reader$read_next_batch()
-        if (is.null(batch)) break
-        dta_rule_stream_update(state, rule, as.data.frame(batch))
-      }
-    },
-    class = "dta_stream_budget_exceeded"
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "SUBJ", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "STATUS", type = "SAS Char", length = 8, nullable = FALSE)
+    ),
+    list(rule)
   )
+  details <- dta_validate_table_stream(
+    specs, vs_reader(table, batch_rows = 1L),
+    verbose = FALSE, coerce = FALSE
+  )
+
+  expect_true(details$rules_valid)
+  expect_length(details$rule_errors, 0)
 })
 
 test_that("grouped violations are reported in the same order after the accumulator swap", {

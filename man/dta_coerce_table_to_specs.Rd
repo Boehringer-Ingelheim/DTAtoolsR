@@ -4,12 +4,29 @@
 \alias{dta_coerce_table_to_specs}
 \title{Type a Table by Its Column Specs at Import Time}
 \usage{
-dta_coerce_table_to_specs(table, specs)
+dta_coerce_table_to_specs(
+  table,
+  specs,
+  type_map = NULL,
+  max_rows_per_column = dta_import_max_rows_per_column
+)
 }
 \arguments{
 \item{table}{An Arrow Table or a data.frame.}
 
 \item{specs}{A \code{DTAColumnSpecCollection}, or \code{NULL}.}
+
+\item{type_map}{Named character vector from \code{\link[=dta_compile_spec_types]{dta_compile_spec_types()}}, or
+\code{NULL}. When supplied, a column's target type is looked up in this map
+instead of being freshly derived via \code{\link[=dta_spec_r_type]{dta_spec_r_type()}} -- the same
+answer, precomputed once for the whole scan rather than once per column
+per batch.}
+
+\item{max_rows_per_column}{Integer, or \code{Inf} to retain every offending row
+for every column. Cap on the number of per-column import issues retained.
+Defaults to \code{dta_import_max_rows_per_column} so every existing caller is
+unaffected. A caller that spills retained detail to disk instead of
+holding it in memory passes \code{Inf}.}
 }
 \value{
 A list with \code{table} (the typed table, same class as the input, with

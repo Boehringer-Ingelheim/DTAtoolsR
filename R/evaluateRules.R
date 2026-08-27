@@ -71,13 +71,24 @@ dta_as_numeric_strict <- function(x) {
     ))
   }
 
-  # `raw_chr` is deliberately the UNTRIMMED text: `trimmed` is what is parsed,
-  # but the text reported back to the user must be what the file actually held.
   raw_chr <- as.character(raw)
-  trimmed <- trimws(raw_chr)
-  # `trimws(NA) %in% ""` is FALSE, so the is.na() term is what catches NA here.
-  missing <- is.na(raw_chr) | trimmed %in% ""
-  values <- suppressWarnings(as.numeric(trimmed))
+  # Parsed untrimmed: as.numeric() itself skips surrounding whitespace, so
+  # trimming first changes no value -- it only mattered for telling a blank
+  # string (missing) from text that failed to parse (unconvertible). That
+  # distinction is needed only where parsing yielded NA, which on real data is
+  # a handful of rows, so the trimws() pass -- two regex substitutions and a
+  # full character-vector reallocation per numeric column per batch on the
+  # streaming path -- runs on that subset instead of the whole column.
+  values <- suppressWarnings(as.numeric(raw_chr))
+  missing <- is.na(raw_chr)
+  failed <- is.na(values) & !missing
+  if (any(failed)) {
+    idx <- which(failed)
+    # A blank ("" or whitespace-only) value never parses, so blank rows are a
+    # subset of `failed` -- reclassifying them here reproduces the old
+    # whole-column `trimws(raw_chr) %in% ""` exactly.
+    missing[idx[trimws(raw_chr[idx]) %in% ""]] <- TRUE
+  }
 
   list(
     values = values,
@@ -257,6 +268,23 @@ rule_check_range <- function(rule, df, numeric_cache = NULL) {
   }
 }
 
+#' @title Target Columns of a Rule, However They Are Spelled
+#' @description
+#' A rule may name its target under `column` or `columns`. Four call sites used
+#' to restate that fallback independently; this is the one place that resolves
+#' it, so a new spelling (or a change in precedence) is a one-line change.
+#' @param rule A rule object.
+#' @return The slot's value -- a character vector -- or `NULL` when the rule
+#'   names no target either way.
+#' @keywords internal
+dta_rule_target_columns <- function(rule) {
+  cols <- rule_get_slot(rule, "column")
+  if (is.null(cols)) {
+    cols <- rule_get_slot(rule, "columns")
+  }
+  cols
+}
+
 #' @title Resolved Column and Bounds of a Range Rule
 #' @description
 #' A range rule may state its bounds as `range` or as `min`/`max`, and its
@@ -266,10 +294,7 @@ rule_check_range <- function(rule, df, numeric_cache = NULL) {
 #' @return A list with `col` and `range`.
 #' @keywords internal
 dta_range_target <- function(rule) {
-  col <- rule_get_slot(rule, "column")
-  if (is.null(col)) {
-    col <- rule_get_slot(rule, "columns")
-  }
+  col <- dta_rule_target_columns(rule)
 
   if (length(col) != 1) {
     cli::cli_abort("Range rules require exactly one target column.")
@@ -334,9 +359,12 @@ dta_range_violated <- function(rule, df, numeric_cache = NULL) {
 #' @return A single string.
 #' @keywords internal
 dta_range_violation_message <- function(id, n, col, range) {
+  # dta_format_count(), not %d: the streaming path hands in a double counter,
+  # and sprintf("%d", <double past .Machine$integer.max>) errors rather than
+  # rendering -- after the whole scan has already run.
   sprintf(
-    "Rule '%s' violated: %d rows where %s not in range [%s, %s]",
-    id, n, col, range[1], range[2]
+    "Rule '%s' violated: %s rows where %s not in range [%s, %s]",
+    id, dta_format_count(n), col, range[1], range[2]
   )
 }
 
@@ -358,10 +386,7 @@ dta_range_violation_message <- function(id, n, col, range) {
 #' @export
 rule_check_unique <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
-  cols <- rule_get_slot(rule, "column")
-  if (is.null(cols)) {
-    cols <- rule_get_slot(rule, "columns")
-  }
+  cols <- dta_unique_columns(rule)
 
   missing_cols <- setdiff(cols, names(df))
   if (length(missing_cols) > 0) {
@@ -651,11 +676,7 @@ dta_rule_numeric_columns <- function(rule) {
   )
 
   if (identical(type, "check_range")) {
-    col <- rule_get_slot(rule, "column")
-    if (is.null(col)) {
-      col <- rule_get_slot(rule, "columns")
-    }
-    return(as.character(col))
+    return(as.character(dta_rule_target_columns(rule)))
   }
 
   if (identical(type, "check_col_condition")) {
@@ -950,9 +971,10 @@ dta_condition_violated <- function(rule, df, numeric_cache = NULL) {
 #' @return A single string.
 #' @keywords internal
 dta_condition_violation_message <- function(id, n) {
+  # dta_format_count(), not %d: see dta_range_violation_message().
   sprintf(
-    "Rule '%s' violated: %d rows failed the THEN conditions after meeting the IF conditions.",
-    id, n
+    "Rule '%s' violated: %s rows failed the THEN conditions after meeting the IF conditions.",
+    id, dta_format_count(n)
   )
 }
 
@@ -963,9 +985,10 @@ dta_condition_violation_message <- function(id, n) {
 #' @return A single string.
 #' @keywords internal
 dta_unique_violation_message <- function(id, n, cols) {
+  # dta_format_count(), not %d: see dta_range_violation_message().
   sprintf(
-    "Rule '%s' violated: %d duplicate row found when selecting column(s): %s",
-    id, n, paste(cols, collapse = ", ")
+    "Rule '%s' violated: %s duplicate row found when selecting column(s): %s",
+    id, dta_format_count(n), paste(cols, collapse = ", ")
   )
 }
 
@@ -986,16 +1009,22 @@ dta_format_group_rows <- function(head_rows, total, max_show = 10L) {
   if (total == 0) {
     return("none")
   }
-  head_rows <- sort(unique(as.integer(head_rows)))
+  # No as.integer() here: the streaming path keeps row numbers as doubles past
+  # .Machine$integer.max on purpose (see the row_offset comments in
+  # R/streamingValidation.R), and narrowing turned exactly those rows into NAs
+  # that sort() then silently dropped -- the message reported empty row
+  # evidence while the verdict still read authoritative. dta_format_count()
+  # renders integers and whole doubles identically, in plain digits.
+  head_rows <- sort(unique(head_rows))
   if (total > max_show) {
     paste0(
-      paste(head_rows[seq_len(min(max_show, length(head_rows)))], collapse = ","),
+      paste(dta_format_count(head_rows[seq_len(min(max_show, length(head_rows)))]), collapse = ","),
       " (+",
-      total - max_show,
+      dta_format_count(total - max_show),
       " more)"
     )
   } else {
-    paste(head_rows, collapse = ",")
+    paste(dta_format_count(head_rows), collapse = ",")
   }
 }
 
@@ -1058,7 +1087,9 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
 
   format_rows <- function(rows, max_show = 10L) {
-    rows <- sort(unique(as.integer(rows)))
+    # No as.integer(): dta_format_group_rows() renders doubles safely, and the
+    # narrowing is what dropped row evidence past .Machine$integer.max.
+    rows <- sort(unique(rows))
     dta_format_group_rows(rows, length(rows), max_show)
   }
 
@@ -1093,11 +1124,14 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
   # with tabulate(), rather than copying every column of `df` per group as
   # `df[row_idx, , drop = FALSE]` used to.
   #
-  # `factor(split_key)` sorts its levels the same way `split()` orders its
-  # groups, so iterating group ids in that order reproduces the group order
-  # (and therefore the assembled violation message order) of the previous
-  # split()-based implementation exactly.
-  kf <- factor(split_key)
+  # Levels sorted with method = "radix", i.e. C-locale byte order, NOT the
+  # session locale: group order decides the assembled violation message order,
+  # and locale collation made the same file report groups in a different order
+  # on a de_DE dev machine than under CI's C collation (and could even split
+  # ties differently from the streaming finaliser). The streaming path sorts
+  # its keys the same way -- change the two together or the documented
+  # streamed/materialised message identity breaks.
+  kf <- factor(split_key, levels = sort(unique(split_key), method = "radix"))
   gid <- as.integer(kf)
   n_groups <- nlevels(kf)
   n_seen <- tabulate(gid, nbins = n_groups)
@@ -1139,7 +1173,7 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
         cli::cli_abort(c(
           "Rule {.val {rule@id}} cannot evaluate condition {.field {cond_name}}.",
           x = "{conditionMessage(cnd)}",
-          i = "Condition {.field {cond_name}} is defined as: {.val {paste(capture.output(str(spec, give.attr = FALSE)), collapse = ' ')}}"
+          i = "Condition {.field {cond_name}} is defined as: {.val {paste(utils::capture.output(utils::str(spec, give.attr = FALSE)), collapse = ' ')}}"
         ), class = "dta_rule_not_applicable")
       }
     )

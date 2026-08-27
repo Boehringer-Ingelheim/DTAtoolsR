@@ -232,38 +232,33 @@ test_that("check(benchmark = TRUE) resets the nesting guard when the call body e
 test_that("validate_file_stream(benchmark = TRUE) resets the nesting guard when the call body errors", {
   on.exit(dta_benchmark_env$active <- FALSE, add = TRUE)
 
-  # dta_open_validation_dataset()/dta_validate_table_stream() both run after
-  # dta_benchmark_begin(), so a rule that blows its resource budget aborts
-  # from inside that window -- unlike the file.exists() check at the top of
-  # validate_file_stream(), which aborts BEFORE begin() and so cannot
-  # exercise this guard.
-  rule <- DTARuleColUnique(id = "k_budget", columns = "K")
+  # dta_open_validation_dataset() runs after dta_benchmark_begin(), so a path
+  # that fails to open aborts from inside the measured window -- unlike the
+  # file.exists() check at the top of validate_file_stream(), which aborts
+  # BEFORE begin() and so cannot exercise this guard. A file that claims to be
+  # Parquet but is not fails inside arrow's open. (The abort vehicle used to
+  # be the uniqueness key budget, which no longer exists.)
   specs <- vc_specs(
-    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = FALSE)),
-    list(rule)
+    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = FALSE))
   )
+  bad_parquet <- file.path(tempdir(), "bm-not-really.parquet")
+  writeLines("not a parquet file", bad_parquet)
+  on.exit(unlink(bad_parquet), add = TRUE)
+
+  # The regexp pins WHERE the abort came from: arrow's Parquet open, i.e.
+  # inside the measured window, not some earlier guard.
+  expect_error(
+    validate_file_stream(specs, bad_parquet, verbose = FALSE, benchmark = TRUE),
+    regexp = "[Pp]arquet"
+  )
+  expect_false(dta_benchmark_env$active)
+
+  # The behaviour that actually matters: benchmarking must still work
+  # afterwards, not merely report the flag as FALSE.
   path <- bm_write_csv(data.frame(
     K = c("key1", "key2", "key3", "key4"), stringsAsFactors = FALSE
   ))
   on.exit(unlink(path), add = TRUE)
-
-  old <- getOption("DTAtools.max_unique_keys")
-  on.exit(options(DTAtools.max_unique_keys = old), add = TRUE)
-  options(DTAtools.max_unique_keys = 2L)
-
-  expect_error(
-    validate_file_stream(specs, path, verbose = FALSE, benchmark = TRUE, batch_rows = 1L),
-    class = "dta_stream_budget_exceeded"
-  )
-  expect_false(dta_benchmark_env$active)
-
-  options(DTAtools.max_unique_keys = old)
-
-  # The behaviour that actually matters: benchmarking must still work
-  # afterwards, not merely report the flag as FALSE.
-  no_rules_specs <- vc_specs(
-    list(DTAColumnSpec(id = "K", type = "SAS Char", length = 8, nullable = FALSE))
-  )
-  after <- validate_file_stream(no_rules_specs, path, verbose = FALSE, benchmark = TRUE)
+  after <- validate_file_stream(specs, path, verbose = FALSE, benchmark = TRUE)
   bm_expect_valid_metrics(attr(after, "benchmark"))
 })

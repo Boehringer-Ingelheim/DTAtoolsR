@@ -14,7 +14,8 @@ DTAFileCSV(
   max_number_of_files = NULL,
   info = NULL,
   has_header = TRUE,
-  quote = "\\""
+  quote = "\\"",
+  missing_values = ""
 )
 }
 \arguments{
@@ -43,6 +44,11 @@ is \code{TRUE}.}
 
 \item{quote}{Character or \code{NULL}; quoting character for fields. Default
 is \code{'"'}.}
+
+\item{missing_values}{Character. Values the file writes for a missing cell
+(for instance \code{"."} in the SAS convention), honoured in addition to
+the empty string. The default \code{""} declares nothing and keeps the
+reader's own missing set.}
 }
 \value{
 An object of class \code{DTAFileCSV}.

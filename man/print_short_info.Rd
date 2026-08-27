@@ -36,7 +36,7 @@ Print short info method for DTAMetadata objects.
 \details{
 This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
 
-The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal.
+The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound leaves that side blank, e.g. "(2-)".
 
 This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
 }

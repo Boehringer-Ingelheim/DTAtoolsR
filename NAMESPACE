@@ -33,6 +33,7 @@ export(as_r_type)
 export(cache_as_parquet)
 export(check)
 export(clear_validation)
+export(collect_full_errors)
 export(colspec)
 export(column_preview)
 export(columns)
@@ -112,12 +113,7 @@ export(write_validation_report)
 if (getRversion() < "4.3.0") importFrom("S7", "@")
 import(S7)
 importFrom(R.utils,gzip)
-importFrom(arrow,
-  arrow_table,
-  read_csv_arrow,
-  read_delim_arrow,
-  read_tsv_arrow
-)
+importFrom(arrow,arrow_table)
 importFrom(cli,
   cli_abort,
   cli_alert,

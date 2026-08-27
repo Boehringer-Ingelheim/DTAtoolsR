@@ -170,6 +170,70 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 }
 
 
+#' @title Compile Every Spec Column's Target Type Once
+#' @description
+#' A named character vector mapping every spec column key to the R type
+#' [dta_spec_r_type()] would return for it, derived once per scan instead of
+#' once per column per batch.
+#'
+#' Mirrors [dta_compile_columnspec_schemas()], but for the coercion axis. A
+#' column's target type is a pure function of its spec and does not change
+#' while a table is being validated, but deriving it is several
+#' `tryCatch()`/S7 hops deep (`dta_spec_column_structure()` walks the
+#' collection to find the column's structure, then `as_r_type()` dispatches on
+#' that structure). [dta_coerce_table_to_specs()] runs once per batch on the
+#' streaming path, so looking the type up per column inside that call repeats
+#' the whole derivation once per column per batch across a scan's thousands of
+#' batches, to obtain one answer per column every time. Compiling the map once
+#' and passing it in makes that cost proportional to the spec rather than to
+#' the data.
+#' @param specs A `DTAColumnSpecCollection`, or `NULL`.
+#' @return A named character vector, keyed exactly as [dta_reader_col_types()]
+#'   derives its keys (`unique(c(names(columns), ids))`, with `NA`/`""` keys
+#'   dropped), with values from [dta_spec_r_type()]. `character(0)` when
+#'   `specs` is `NULL` or declares no columns.
+#' @keywords internal
+dta_compile_spec_types <- function(specs) {
+  empty <- character(0)
+
+  if (is.null(specs)) {
+    return(empty)
+  }
+
+  columns <- tryCatch(specs@columns, error = function(e) NULL)
+
+  if (!is.list(columns) || length(columns) == 0) {
+    return(empty)
+  }
+
+  ids <- vapply(
+    columns,
+    function(spec) tryCatch(as.character(spec@id)[[1]], error = function(e) NA_character_),
+    character(1),
+    USE.NAMES = FALSE
+  )
+
+  # Same key derivation as dta_reader_col_types(): a collection is normally
+  # named by column id, but one built by another route may not be, so both are
+  # offered and deduplicated.
+  keys <- unique(c(names(columns), ids))
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+
+  if (length(keys) == 0) {
+    return(empty)
+  }
+
+  values <- vapply(
+    keys,
+    function(key) dta_spec_r_type(specs, key),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  names(values) <- keys
+  values
+}
+
+
 #' @title Coerce One Column to Its Declared R Type
 #' @description
 #' Converts a single column to the type its spec declares, reporting the values
@@ -274,12 +338,22 @@ dta_coerce_column <- function(values, target) {
 #' data they describe.
 #' @param table An Arrow Table or a data.frame.
 #' @param specs A `DTAColumnSpecCollection`, or `NULL`.
+#' @param type_map Named character vector from [dta_compile_spec_types()], or
+#'   `NULL`. When supplied, a column's target type is looked up in this map
+#'   instead of being freshly derived via [dta_spec_r_type()] -- the same
+#'   answer, precomputed once for the whole scan rather than once per column
+#'   per batch.
+#' @param max_rows_per_column Integer, or `Inf` to retain every offending row
+#'   for every column. Cap on the number of per-column import issues retained.
+#'   Defaults to `dta_import_max_rows_per_column` so every existing caller is
+#'   unaffected. A caller that spills retained detail to disk instead of
+#'   holding it in memory passes `Inf`.
 #' @return A list with `table` (the typed table, same class as the input, with
 #'   the issues attached) and `issues` (a data.frame in the shape of
 #'   [dta_empty_import_errors()], carrying the exact error count in its
 #'   `"n_import_errors"` attribute).
 #' @keywords internal
-dta_coerce_table_to_specs <- function(table, specs) {
+dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_per_column = dta_import_max_rows_per_column) {
   was_arrow <- inherits(table, "Table") || inherits(table, "ArrowTabular")
   df <- if (was_arrow) as.data.frame(table) else table
 
@@ -295,7 +369,14 @@ dta_coerce_table_to_specs <- function(table, specs) {
   changed <- FALSE
 
   for (column in names(df)) {
-    target <- dta_spec_r_type(specs, column)
+    # A precompiled map is just dta_spec_r_type(specs, column), looked up
+    # rather than re-derived -- see dta_compile_spec_types() for why that
+    # matters on the streaming path, where this runs once per batch.
+    target <- if (!is.null(type_map)) {
+      if (column %in% names(type_map)) type_map[[column]] else NA_character_
+    } else {
+      dta_spec_r_type(specs, column)
+    }
 
     # No spec for this column: it is left exactly as read, not dropped.
     if (is.na(target)) {
@@ -320,7 +401,13 @@ dta_coerce_table_to_specs <- function(table, specs) {
     # The count is accumulated before the cap is applied, so `ok` is decided by
     # how many values failed, never by how many were retained.
     n_total <- n_total + n_offending
-    kept <- coerced$offending[seq_len(min(n_offending, dta_import_max_rows_per_column))]
+    # A caller wanting everything retained (one that spills detail to disk
+    # instead of holding it) passes `max_rows_per_column = Inf`. min() against
+    # the always-finite `n_offending` yields `n_offending` itself in that case,
+    # so the length handed to seq_len() below is never Inf even though the cap
+    # may be.
+    n_kept <- min(n_offending, max_rows_per_column)
+    kept <- coerced$offending[seq_len(n_kept)]
 
     declared <- dta_spec_declared_type(specs, column)
     if (is.na(declared)) {
@@ -341,7 +428,10 @@ dta_coerce_table_to_specs <- function(table, specs) {
     dta_empty_import_errors()
   } else {
     out <- do.call(rbind, parts)
-    out <- out[order(out$row, out$column), , drop = FALSE]
+    # method = "radix": the column tiebreak is a character sort, and locale
+    # collation ordered this same frame differently on a de_DE dev machine than
+    # under CI's C collation. Radix is byte order, identical everywhere.
+    out <- out[order(out$row, out$column, method = "radix"), , drop = FALSE]
     rownames(out) <- NULL
     out
   }
@@ -451,7 +541,7 @@ dta_merge_import_errors <- function(carried, rule_errors) {
   )
 
   if (nrow(out) > 0) {
-    out <- out[order(out$row, out$column), , drop = FALSE]
+    out <- out[order(out$row, out$column, method = "radix"), , drop = FALSE]
     rownames(out) <- NULL
   }
 

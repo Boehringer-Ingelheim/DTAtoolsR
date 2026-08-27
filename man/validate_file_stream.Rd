@@ -34,13 +34,15 @@ written by \code{\link[=cache_as_parquet]{cache_as_parquet()}}. The format is ch
 \item{batch_rows}{Integer. Rows per batch. Larger batches trade memory for
 fewer per-batch overheads.}
 
-\item{max_errors}{Integer, or \code{NULL} to retain everything. Cap on retained
-per-cell error detail, defaulting to 10000 and configurable via
-\code{options(DTAtools.max_errors = )}. The default is finite because the error
-sinks retain one row per bad cell: on a large dirty file, unbounded
-retention exhausts memory exactly as holding the data would. Counting is
-unaffected, so the totals and the pass/fail verdict stay exact even when the
-retained detail is truncated, and a truncated frame is flagged as such.}
+\item{max_errors}{Integer, or \code{NULL} to hold everything in memory. Cap on
+the per-cell error detail held in RAM, defaulting to 10000 and
+configurable via \code{options(DTAtools.max_errors = )}. The default is finite
+because the error sinks hold one row per bad cell: on a large dirty file,
+unbounded retention exhausts memory exactly as holding the data would.
+Nothing is lost, though: rows past the cap spill to a session-temporary
+directory and \code{\link[=collect_full_errors]{collect_full_errors()}} reassembles the complete detail;
+counts and the pass/fail verdict are exact either way, and a frame whose
+in-memory head is incomplete is flagged as such.}
 
 \item{fail_fast}{Logical. Stop at the first batch that shows any problem,
 instead of scanning to the end. Answers "is this file valid?" without
@@ -105,22 +107,26 @@ For a file that fits in memory comfortably, \code{validate_table()} is the faste
 choice and there is nothing to gain here.
 }
 
-\section{Resource budgets}{
+\section{Memory at scale}{
 
-Two accumulators are bounded by the data rather than by the batch size, and
-each has a budget that aborts the scan instead of exhausting memory:
+Nothing in the scan aborts on a resource budget any more (the old
+\code{DTAtools.max_unique_keys} / \code{DTAtools.max_groups} options are gone: they
+discarded multi-hour scans at exactly the per-row-unique-key scale streaming
+exists for). What bounds memory instead:
 \itemize{
-\item \code{options(DTAtools.max_unique_keys = )}, default 50,000,000 — distinct keys
-held by a \code{check_unique} rule. A key that is unique per row makes this grow
-with the file.
-\item \code{options(DTAtools.max_groups = )}, default 5,000,000 — distinct groups held
-by a \code{check_group_condition} rule.
+\item \code{check_unique} rules whose key columns are text are answered by Arrow's
+own grouped aggregation over the dataset, in one extra streaming pass over
+just the key columns -- the distinct keys live compactly in the C++
+engine, not as R strings. \code{options(DTAtools.stream_arrow_unique = FALSE)}
+restores the per-batch accumulator.
+\item A uniqueness rule that cannot take that path (non-text keys, or a
+consumable reader as the source) falls back to an R-side key set whose
+memory grows with the number of distinct keys (roughly 100 bytes per
+key). Grouped rules likewise hold state per distinct group.
+\item Columns nothing reads are projected out of the scan entirely, and every
+scanned column is read as text and typed in R, so a malformed value can
+never abort the scan mid-file.
 }
-
-Exceeding either raises a condition of class \code{dta_stream_budget_exceeded}.
-This aborts rather than reporting a rule failure on purpose: a resource limit
-is not a verdict about the data, and recording it as one would present a
-clean-looking result for a constraint that was never actually checked.
 }
 
 \examples{

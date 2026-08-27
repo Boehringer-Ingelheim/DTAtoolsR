@@ -7,8 +7,11 @@
 #' @param name Character. Name of the container.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
-#' @param tables A named list of tabular objects; each table is converted to an
-#'   Arrow Table and stored in the dataset.
+#' @param tables A named list of tabular objects. A materialised entry
+#'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
+#'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
+#'   RecordBatchReader) is stored exactly as given -- it is typed and checked
+#'   for import issues later, at scan time, in `check()`.
 #' @param description Character or NA. Free-text description of the dataset.
 #' @param template_source Character or NA. Source of the template used to
 #'   generate the dataset specification.
@@ -51,10 +54,25 @@ DTADataSetTabular <- S7::new_class(
     # type -- not the reader's per-column inference -- decides what each column
     # holds. Values that cannot be represented become NA and are recorded as
     # import issues, both here and on the table itself.
-    coerced <- lapply(tables, function(tbl) dta_coerce_table_to_specs(tbl, specs))
+    #
+    # A lazy holding (Dataset / arrow_dplyr_query / RecordBatchReader -- the same
+    # set the class validator admits, via dta_table_is_lazy()) is passed through
+    # UNTOUCHED: neither coerced nor collected. dta_coerce_table_to_specs()
+    # materialises its input with as.data.frame(), and arrow::as_arrow_table()
+    # COLLECTS a Dataset/query and DRAINS a RecordBatchReader -- so doing either
+    # here would silently pull a table too large for memory into memory at
+    # construction time, which is exactly what admitting a lazy holding exists to
+    # avoid. Nothing is lost by skipping it: the lazy load_file() path already
+    # pins column types when it opens the file, and check() applies
+    # dta_coerce_table_to_specs() itself, per batch, while scanning -- so the
+    # table is typed at scan time either way.
+    is_lazy <- vapply(tables, dta_table_is_lazy, logical(1))
 
-    # Transform to arrow tables
-    tables <- lapply(coerced, function(result) arrow::as_arrow_table(result$table))
+    coerced <- lapply(tables[!is_lazy], function(tbl) dta_coerce_table_to_specs(tbl, specs))
+
+    # Transform the materialised entries to arrow tables; lazy entries keep the
+    # class they arrived with.
+    tables[!is_lazy] <- lapply(coerced, function(result) arrow::as_arrow_table(result$table))
 
     import_issues <- lapply(coerced, function(result) result$issues)
     import_issues <- import_issues[
@@ -253,10 +271,6 @@ get_table <- new_generic("get_table", "x", function(x, id = 1, ...) {
 
 #' @export
 method(get_table, DTADataSetTabular) <- function(x, id = 1) {
-  if (!inherits(x, "DTAtools::DTADataSetTabular")) {
-    cli::cli_abort("Input must be a DTADataSetTabular object.")
-  }
-
   tables <- x@tables
 
   if (length(tables) == 0) {
@@ -271,6 +285,14 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
   }
 
   if (is.numeric(id)) {
+    # A single, non-missing whole number. Without this, `[[` on a fractional
+    # index truncates silently (id = 1.9 would return table 1), `id < 1 ||
+    # id > length(tables)` on `id = NA` raises an opaque "missing value where
+    # TRUE/FALSE needed", and a length-2 id raises a generic "length > 1"
+    # condition error that names none of the above as the actual problem.
+    if (length(id) != 1 || is.na(id) || id != trunc(id)) {
+      cli::cli_abort("Argument 'id' must be a single, non-missing whole number.")
+    }
     if (id < 1 || id > length(tables)) {
       cli::cli_abort("Index {id} is out of bounds.")
     }
@@ -337,7 +359,9 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #' @param na Character. The string to use for missing values in the data. Default is "".
 #' @param row.names Logical. Row names provided.
 #' @param quote Logical. Use of quotes
-#' @param overwrite Logical. Whether to overwrite the file if it exists. Default is FALSE.
+#' @param overwrite Logical. Whether to overwrite the file if it exists. Default
+#'   is FALSE, so a call against an existing path aborts unless `overwrite =
+#'   TRUE` is passed explicitly.
 #' @param compression Character. Compression method, either "none" or "gzip". Default is "none".
 #' @param get_md5sum Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
 #' @param write_md5sum_to_file Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
@@ -364,7 +388,7 @@ write_table_to_file <- function(
   sep = "\t",
   na = "",
   row.names = FALSE,
-  overwrite = TRUE,
+  overwrite = FALSE,
   quote = FALSE,
   compression = c("none", "gzip"),
   get_md5sum = TRUE,
@@ -411,6 +435,19 @@ write_table_to_file <- function(
       }
     }
   }
+
+  # Materialise explicitly, with the original column names preserved.
+  # write.table()'s own `if (!is.data.frame(x) && !is.matrix(x)) x <-
+  # data.frame(x)` would otherwise coerce an Arrow Table/arrow_dplyr_query by
+  # calling base data.frame() on it directly, whose default check.names = TRUE
+  # rewrites a non-syntactic column name ("Subject ID" -> "Subject.ID",
+  # "2024 VAL" -> "X2024.VAL") -- so the written header would silently stop
+  # matching the specs the dataset was validated against. Arrow's own
+  # as.data.frame() method does not mangle names (it builds the frame via
+  # `$to_data_frame()`, not via `data.frame()`), but check.names = FALSE is
+  # passed anyway to say so explicitly. Once table_data is already a
+  # data.frame, write.table()'s guard above is a no-op.
+  table_data <- as.data.frame(table_data, check.names = FALSE)
 
   # Check if the file exists and handle overwrite
   if (file.exists(filename) && !overwrite) {
@@ -812,18 +849,26 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
   rows <- lapply(target_tables, function(table_name) {
     entry <- x@validation_index[[table_name]]
     if (is.null(entry)) {
-      return(data.frame(
-        table = table_name,
-        target_type = "table",
+      # Delegates to the shared row builder rather than a fourth inline copy of
+      # this column set -- see dta_unspecified_validation_row(), which the call
+      # below mirrors exactly (only the status string differs). `ok = NA` is
+      # passed explicitly for the same reason it is there: the builder's
+      # default is isTRUE(index_entry$ok), which would flatten this NA to
+      # FALSE and misreport "never checked" as "failed".
+      return(dta_validation_result_to_row(
+        table_name = table_name,
         status = "not_validated",
+        target_type = "table",
         ok = NA,
-        validated_at = NA_character_,
-        run_id = NA_character_,
-        validation_run = NA_character_,
-        n_columnspec_errors = NA_integer_,
-        n_rule_errors = NA_integer_,
-        n_import_errors = NA_integer_,
-        stringsAsFactors = FALSE
+        index_entry = list(
+          ok = NA,
+          validated_at = NA_character_,
+          run_id = NA_character_,
+          validation_run = NA_character_,
+          n_columnspec_errors = NA_integer_,
+          n_rule_errors = NA_integer_,
+          n_import_errors = NA_integer_
+        )
       ))
     }
 
@@ -996,14 +1041,15 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. Larger batches
 #'       are faster but hold more rows in memory at once.}
-#'     \item{max_errors}{Integer, or NULL to retain everything. Cap on the
-#'       number of per-cell errors whose detail is retained while scanning.
-#'       Defaults to \code{getOption("DTAtools.max_errors", 10000L)}; the
-#'       default is finite because retention is one row per bad cell, so an
+#'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
+#'       the number of per-cell errors whose detail is held in RAM while
+#'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
+#'       the default is finite because retention is one row per bad cell, so an
 #'       unbounded cap exhausts memory on a large dirty file exactly as holding
-#'       the data would. The reported \emph{counts} and the verdict are
-#'       unaffected; only how many individual failures are kept for inspection
-#'       is. Ignored for a table held in memory.}
+#'       the data would. The reported \emph{counts} and the verdict are exact
+#'       either way, and rows past the cap spill to a session-temporary store
+#'       that \code{\link{collect_full_errors}()} reassembles. Ignored for a
+#'       table held in memory.}
 #'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
 #'       shows any problem instead of scanning to the end. On a table large
 #'       enough to take hours, this answers \emph{is this valid?} without paying
@@ -1149,13 +1195,34 @@ S7::method(check, DTADataSetTabular) <- function(
     table_hash <- dta_table_change_signal(current_table)
 
     previous <- x@validation_index[[table_name]]
+
+    # A RecordBatchReader is consumed by its first scan. Re-validating one
+    # yields zero batches, and a zero-batch stream is indistinguishable from
+    # clean data -- so the second check() would silently overwrite a real
+    # verdict with a hollow ok = TRUE. Refusing is the only honest answer.
+    if (inherits(current_table, "RecordBatchReader") && !is.null(previous)) {
+      cli::cli_abort(c(
+        "Table {.field {table_name}} is held as a {.cls RecordBatchReader}, which its previous validation consumed.",
+        i = "Re-load the table (or hold it as an Arrow Table or Dataset) to check it again; a reader can be scanned exactly once."
+      ))
+    }
+
     # A NULL signal means identity could not be established, so the table is
     # assumed changed. Without the explicit NULL guard two unidentifiable
     # tables would compare equal and the second would be skipped.
+    #
+    # `!isTRUE(previous$partial)` closes a second gap: a run that stopped early
+    # (fail_fast) or never read a row (on_missing_column = "stop") records real
+    # counts, but they are the counts of a PARTIAL scan, not the whole table.
+    # Without this, a later plain check() would see an unchanged table hash and
+    # skip outright -- reporting status "skipped" with those partial counts
+    # presented as if they were the final totals. A partial result therefore
+    # never satisfies the skip, so the next check() always rescans in full.
     unchanged <- !is.null(previous) &&
       !is.null(table_hash) &&
       identical(previous$table_hash, table_hash) &&
-      identical(previous$specs_hash, specs_hash)
+      identical(previous$specs_hash, specs_hash) &&
+      !isTRUE(previous$partial)
 
     if (!force && unchanged) {
       previous$validation_run <- validation_run
@@ -1190,6 +1257,26 @@ S7::method(check, DTADataSetTabular) <- function(
       fail_fast = fail_fast,
       on_missing_column = on_missing_column
     )
+
+    # A materialised table has its import issues recorded already, at import
+    # time (load_file() / the constructor). A lazy table does not -- its
+    # load_file() branch documents that they are "found later" by check(), but
+    # until this is written that promise was never kept and @import_issues
+    # stayed empty forever, which is what left the Shiny app (which reads
+    # ds@import_issues) showing nothing for a streamed table with bad cells.
+    # `details$import_errors` is in the same row/column/raw/declared_type/
+    # reason shape dta_coerce_table_to_specs() produces for the eager path, so
+    # it drops in as the same kind of value.
+    if (dta_table_is_lazy(current_table)) {
+      x@import_issues[[table_name]] <- if (
+        is.data.frame(details$import_errors) && nrow(details$import_errors) > 0
+      ) {
+        details$import_errors
+      } else {
+        NULL
+      }
+    }
+
     artifact_path <- NULL
     validated_at <- Sys.time()
     run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")
@@ -1212,7 +1299,12 @@ S7::method(check, DTADataSetTabular) <- function(
       n_import_errors = details$n_import_errors,
       run_id = run_id,
       validation_run = validation_run,
-      artifact_path = artifact_path
+      artifact_path = artifact_path,
+      # Whether this result came from a fail_fast run that stopped at the first
+      # problem, or an on_missing_column = "stop" run that read no rows at all.
+      # Read by the skip gate above: a partial result must never be mistaken
+      # for a complete one on the next check().
+      partial = isTRUE(attr(details, "partial_scan")) || isTRUE(attr(details, "structural_only"))
     )
 
     x@validation_index[[table_name]] <- index_entry
