@@ -237,3 +237,197 @@ contact_detail_block <- function(person) {
     }
   )
 }
+
+# The click guard: an immediate busy state on every button, and the swallowing
+# of the repeat clicks that a slow server invites.
+#
+# WHY THIS CANNOT BE DONE FROM THE SERVER. Two failure modes, neither fixable
+# in R:
+#
+#   * actionButton. A click sets an input over the websocket, and R is
+#     single-threaded -- so a click landing while an observer runs is queued
+#     and replayed once it finishes. Three impatient clicks on "Check all" are
+#     three full validations. Disabling the button from inside the observer
+#     does not close the window: the observer only starts after the round-trip
+#     the user is already tired of waiting for, and the extra clicks have been
+#     recorded by then.
+#   * downloadButton. Shiny renders it as <a href="session/.../download/id">
+#     and the click is native browser navigation -- it never reaches the
+#     websocket at all. The server cannot see the second click, let alone
+#     ignore it. Two clicks are two downloads, always. (This is the same
+#     property that makes a downloadButton un-disableable from the server;
+#     see the dl_btn() comment in app.R.)
+#
+# A server-side re-entrancy flag is not an alternative, either: by the time a
+# duplicate's observer runs, the first has already RETURNED, so any "in
+# flight" flag is clear again. The only server-side option is a wall-clock
+# debounce, which cannot tell an accidental double-click from a deliberate
+# repeat -- it would silently discard real work. So the guard belongs in the
+# browser, in the capture phase, ahead of Shiny's own click binding: a capture
+# listener on document runs before the target, and stopPropagation() there
+# keeps the event from ever reaching the element's own (bubble-phase)
+# handlers.
+#
+# WHEN A BUTTON IS RELEASED. shiny.js keeps a `shiny-busy` class on <html> and
+# fires shiny:busy / shiny:idle from a message the SERVER sends: shiny's
+# Observer increments a session busy count when an observer is INVALIDATED --
+# i.e. before the slow work starts -- and decrements it in the observer's
+# finally, and the session writes those messages straight to the websocket
+# rather than waiting for the reactive flush. Two consequences this design
+# leans on: the browser learns the server is busy before the work begins, and
+# shiny:idle cannot arrive before this click's own work has finished. That
+# makes idle an exact release signal, never an early one.
+#
+# Download links get no such signal -- nothing about an HTTP file download is
+# reported back to the page -- so they fall back to a fixed cooldown. Two
+# seconds absorbs a double-click without fighting a user who genuinely wants
+# the file twice.
+#
+# FAILING SAFE IS THE POINT. A guard that can stick is worse than no guard, so
+# every hold carries two independent releases besides shiny:idle:
+#   * a sanity release, taken only if the server never went busy at ALL since
+#     the click. Not every button has an observer bound to it, and one that
+#     has none produces no busy/idle pair -- without this it would sit dead
+#     until the ceiling. It compares a busy-transition counter rather than
+#     sampling `shiny-busy` at a deadline, so a click still travelling to a
+#     slow server is not mistaken for one nothing will answer.
+#   * a 30s ceiling for a lost idle (an error escaping shiny's handler). It
+#     re-arms while <html> still carries shiny-busy, so a genuinely long
+#     export is never released early by it -- but only a bounded number of
+#     times, because the stuck thing can BE `shiny-busy`.
+#   * a release on shiny:disconnected: once the socket is gone, no idle is
+#     coming for anything still held.
+#
+# isTrusted is load-bearing rather than hygiene: download_trigger_js in app.R
+# starts the export download by calling .click() on a hidden downloadButton.
+# That synthetic event matches .shiny-download-link, and swallowing it would
+# break the export outright. Only real user gestures are guarded, which also
+# leaves any shinyjs::click() untouched.
+#
+# The busy LOOK is delayed by 120ms while the swallowing starts immediately: a
+# dropdown item that opens a modal in 30ms should not flash a spinner, and a
+# five-second export must show one.
+click_guard_script <- function() {
+  tags$script(HTML("
+(function(){
+  var GUARD_SELECTOR = '.action-button, .shiny-download-link';
+  var SPINNER_DELAY  = 120;   // ms before the busy look appears
+  // Long enough to outlast a click's round trip on a slow link. A shorter
+  // deadline is the trap: it can fire while the click is still in flight,
+  // see an idle server, conclude no observer exists, and re-open the very
+  // double-click window this guard is for. It only ever delays the release
+  // of a button that has NO observer behind it, which costs nothing.
+  var SANITY_HOLD    = 1500;
+  var DOWNLOAD_HOLD  = 2000;  // ms a download link stays guarded
+  var CEILING        = 30000; // ms failsafe release
+  var CEILING_TRIES  = 4;     // ...re-armed at most this often while busy
+
+  // Action buttons awaiting shiny:idle. Download links are never in here --
+  // they have no idle to wait for.
+  var pending = [];
+
+  // Count of shiny:busy transitions seen. Compared against the value stamped
+  // on a button when it was held, this answers 'did the server ever start
+  // work for this click?' without racing the round trip.
+  var busyTicks = 0;
+
+  function serverBusy() {
+    return document.documentElement.classList.contains('shiny-busy');
+  }
+
+  function clearTimer(el, name) {
+    if (el[name]) { clearTimeout(el[name]); el[name] = null; }
+  }
+
+  function release(el) {
+    if (!el) return;
+    clearTimer(el, 'dtaBusyShow');
+    clearTimer(el, 'dtaBusySanity');
+    clearTimer(el, 'dtaBusyCeiling');
+    el.classList.remove('dta-busy', 'dta-busy-shown');
+    el.removeAttribute('aria-busy');
+    var i = pending.indexOf(el);
+    if (i > -1) pending.splice(i, 1);
+  }
+
+  function releaseAll() {
+    pending.slice().forEach(function(el){ release(el); });
+  }
+
+  function armCeiling(el, tries) {
+    el.dtaBusyCeiling = setTimeout(function(){
+      el.dtaBusyCeiling = null;
+      // Still demonstrably working: give it another window rather than
+      // releasing a button whose job has not finished. BOUNDED, because the
+      // scenario this failsafe exists for can be one where `shiny-busy` is
+      // itself what is stuck -- a socket dropped after the busy message
+      // arrived but before idle could. An unbounded re-arm would defer
+      // forever in exactly the case it is meant to cover.
+      if (serverBusy() && tries < CEILING_TRIES) { armCeiling(el, tries + 1); return; }
+      release(el);
+    }, CEILING);
+  }
+
+  function hold(el, isDownload) {
+    el.classList.add('dta-busy');
+    el.setAttribute('aria-busy', 'true');
+    el.dtaBusyShow = setTimeout(function(){
+      el.dtaBusyShow = null;
+      el.classList.add('dta-busy-shown');
+    }, SPINNER_DELAY);
+
+    if (isDownload) {
+      el.dtaBusyCeiling = setTimeout(function(){ release(el); }, DOWNLOAD_HOLD);
+      return;
+    }
+
+    pending.push(el);
+    el.dtaBusyTick = busyTicks;
+    el.dtaBusySanity = setTimeout(function(){
+      el.dtaBusySanity = null;
+      // No busy transition since this click, and nothing running now: there
+      // is no observer behind this button, so no idle is ever coming.
+      if (busyTicks === el.dtaBusyTick && !serverBusy()) release(el);
+    }, SANITY_HOLD);
+    armCeiling(el, 0);
+  }
+
+  document.addEventListener('click', function(ev){
+    // Synthetic clicks -- download_trigger_js, shinyjs::click() -- must pass
+    // through untouched. See the comment on this function.
+    if (!ev.isTrusted) return;
+    var el = ev.target && ev.target.closest ? ev.target.closest(GUARD_SELECTOR) : null;
+    if (!el) return;
+    if (el.classList.contains('dta-busy')) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    hold(el, el.classList.contains('shiny-download-link'));
+  }, true);
+
+  // These are jQuery-triggered events: a native addEventListener would never
+  // see them. jQuery is a shiny dependency and is in <head> before this
+  // script, but the DOMContentLoaded fallback means a load order that put it
+  // after would degrade to the sanity/ceiling releases rather than leaving
+  // buttons stuck.
+  function onShiny(name, fn) {
+    if (window.jQuery) { window.jQuery(document).on(name, fn); return; }
+    document.addEventListener('DOMContentLoaded', function(){
+      if (window.jQuery) window.jQuery(document).on(name, fn);
+    });
+  }
+  onShiny('shiny:busy', function(){ busyTicks++; });
+  // Releasing every held button on ONE session-wide idle is exact only
+  // because this app does no async work: R is single-threaded and the app
+  // uses no promises/future/ExtendedTask, so observers run to completion in
+  // turn and the session busy count reaches zero only once the queue --
+  // including this click's own observer -- is empty. Introducing async work
+  // would break that: a fast button could then be held until unrelated slow
+  // work finished, and this would need to become per-button.
+  onShiny('shiny:idle', releaseAll);
+  // A dropped connection means no idle is coming for anything in flight.
+  onShiny('shiny:disconnected', releaseAll);
+})();
+"))
+}

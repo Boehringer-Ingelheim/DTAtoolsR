@@ -44,6 +44,26 @@ test_that("the packages run_dta_app() hard-requires are declared in DESCRIPTION"
   expect_true(all(required %in% declared))
 })
 
+# CSS pseudo-elements, whose `::` is not R's namespace operator.
+#
+# The app's sources are not pure R: theme.R carries the entire stylesheet as a
+# string, and a selector like `.dta-busy-shown::after` reads to the scan below
+# as a call into a package named "shown". That is a defect in the scan, not a
+# dependency. It stayed latent until the first rule in theme.R used a
+# pseudo-ELEMENT (the `::` form) rather than a pseudo-class, and it fails both
+# tests below with a package name nobody can find in the source.
+#
+# The list is closed, and none of these is a plausible function name; the
+# negative lookahead below keeps a genuine `pkg::after(...)` call visible
+# anyway, so this narrows the scan to exactly the false positive.
+.css_pseudo_elements <- paste(
+  c(
+    "after", "backdrop", "before", "cue", "first-letter", "first-line",
+    "marker", "placeholder", "selection"
+  ),
+  collapse = "|"
+)
+
 # Every `pkg::` prefix used by the app's own code.
 app_packages_used <- function() {
   code <- unlist(lapply(
@@ -51,7 +71,17 @@ app_packages_used <- function() {
     readLines,
     warn = FALSE
   ))
-  hits <- regmatches(code, gregexpr("\\b[A-Za-z][A-Za-z0-9.]*(?=::)", code, perl = TRUE))
+  # Scan a copy with pseudo-element `::` stripped, so the selector in front of
+  # it stops looking like a namespace prefix. `code` itself is returned
+  # untouched -- the requireNamespace() guard search reads the real source.
+  scanned <- gsub(
+    sprintf("::(%s)\\b(?!\\()", .css_pseudo_elements), "", code,
+    perl = TRUE
+  )
+  hits <- regmatches(
+    scanned,
+    gregexpr("\\b[A-Za-z][A-Za-z0-9.]*(?=::)", scanned, perl = TRUE)
+  )
   list(code = code, used = setdiff(sort(unique(unlist(hits))), "DTAtools"))
 }
 
@@ -71,6 +101,23 @@ test_that("every package the app calls is available at run time", {
   # no other test in the suite would notice: R CMD check does not scan inst/.
   missing <- used[!vapply(used, requireNamespace, logical(1), quietly = TRUE)]
   expect_equal(missing, character(0))
+})
+
+test_that("a CSS pseudo-element is not mistaken for a package", {
+  info <- app_packages_used()
+
+  # Not vacuous: there has to be a pseudo-element in the sources for the
+  # exclusion to be doing anything. If every `::after` is ever removed from
+  # theme.R this fails, and the exclusion above can go with it.
+  expect_true(any(grepl("::after|::before", info$code)))
+
+  # `.dta-busy-shown::after` was reported as a missing package called "shown",
+  # by an error naming neither the file nor the selector.
+  expect_false(any(strsplit(.css_pseudo_elements, "|", fixed = TRUE)[[1]] %in% info$used))
+
+  # ...and the exclusion is narrow enough that real namespaced calls still
+  # register.
+  expect_true(all(c("shiny", "bslib") %in% info$used))
 })
 
 test_that("the app bundle VERSION file matches the package version", {
