@@ -624,6 +624,48 @@ bi_css <- function() {
     .inspect-hl-table td.inspect-hl-row { background: #fff; color: var(--bi-grey); white-space: nowrap; }
     .inspect-details { margin-top: 4px; }
     .inspect-details > summary { cursor: pointer; color: var(--bi-grey); font-size: .82rem; margin-bottom: 6px; }
+
+    /* Busy buttons (see click_guard_script(), ui_components.R).
+       Two classes, because the swallowing of repeat clicks starts on the
+       first click but the LOOK is delayed ~120ms: .dta-busy is the functional
+       state, .dta-busy-shown is the visible one. A button whose work finishes
+       inside that window is released without ever having flashed a spinner.
+
+       Deliberately NOT `pointer-events: none`, which is the obvious way to
+       write this and is wrong: it takes the button out of hit-testing
+       altogether, so the second click of a double-click does not land on the
+       button and get cancelled -- it lands on whatever is BEHIND the button,
+       which in a toolbar can be another control. Measured in the browser: the
+       repeat click arrived retargeted rather than swallowed. Cancelling the
+       event on the button itself, in the capture-phase listener, is what
+       keeps it from reaching anything at all. */
+    .dta-busy { cursor: progress; }
+    .dta-busy-shown {
+      position: relative;
+      /* Hides the label AND the icon (font icons draw with color), leaving
+         the button's own width and background untouched so nothing reflows
+         under the pointer. The spinner below needs its own colour as a
+         result: currentColor is transparent here. */
+      color: transparent !important;
+    }
+    .dta-busy-shown { --dta-busy-ink: var(--bi-ink); }
+    .dta-busy-shown.btn-primary, .dta-busy-shown.btn-secondary,
+    .dta-busy-shown.btn-success, .dta-busy-shown.btn-danger,
+    .dta-busy-shown.btn-warning, .dta-busy-shown.btn-info { --dta-busy-ink: #fff; }
+    .dta-busy-shown::after {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: .9em; height: .9em; margin: -.45em 0 0 -.45em;
+      border: 2px solid var(--dta-busy-ink);
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: dta-busy-spin .6s linear infinite;
+    }
+    @keyframes dta-busy-spin { to { transform: rotate(360deg); } }
+    /* A spinner is the only feedback these buttons give, so it stays visible
+       when motion is reduced -- it just stops turning. */
+    @media (prefers-reduced-motion: reduce) {
+      .dta-busy-shown::after { animation: none; opacity: .55; }
+    }
     "))
 }
 

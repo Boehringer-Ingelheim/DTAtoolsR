@@ -307,7 +307,15 @@ ui <- bslib::page_fluid(
     tags$script(shiny::HTML(msgs_dock_js)),
     tags$script(shiny::HTML(download_trigger_js)),
     tags$script(shiny::HTML(client_id_js)),
-    tags$script(shiny::HTML(yaml_ace_resize_js))
+    tags$script(shiny::HTML(yaml_ace_resize_js)),
+    # Unlike the five above, this one is a function in R/ui_components.R
+    # rather than a string here, because its behaviour is worth testing
+    # separately -- see click_guard_script() there, and the test file, for why
+    # double-click protection cannot live on the server at all. Its position
+    # in this list is not load-bearing: it installs a capture-phase listener
+    # on `document`, which runs ahead of every element's own handler whenever
+    # it was registered.
+    click_guard_script()
   ),
   brandbar,
   div(style = "padding: 18px;", uiOutput("main")),

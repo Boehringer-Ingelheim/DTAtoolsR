@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Buttons now show that they were pressed, and a second click no longer
+  runs the action twice.** Every button and download link in the Shiny app
+  enters a busy state on the first click -- a spinner in place of its label,
+  after a short delay so a fast action never flashes one -- and further
+  clicks on it are ignored until the work finishes. This is what stops an
+  impatient double-click on Export from producing two documents, or a
+  double-click on a download link from saving the file twice.
+
+  The guard runs in the browser, because neither half of the problem can be
+  fixed from the server: an `actionButton` click that lands while R is busy
+  is queued and replayed afterwards, and a `downloadButton` click is native
+  browser navigation that never reaches the server at all. Action buttons are
+  released the moment Shiny reports the session idle, download links after a
+  short fixed cooldown, and every hold carries independent failsafes so a
+  dropped connection can never leave a button stuck.
+
 ## [0.23.0] - 2026-08-27
 
 ### Added
