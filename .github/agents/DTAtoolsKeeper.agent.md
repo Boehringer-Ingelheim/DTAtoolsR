@@ -207,3 +207,12 @@ say so.
 - **Clean up after yourself.** Remove any scratch files, temporary scripts, or
   stray build artifacts you create during exploration before finishing;
   respect `.Rbuildignore`/`.gitignore` and the `forbid-to-commit` hook.
+- **Never attribute work to an AI assistant.** Do not add a
+  `Co-Authored-By: Claude ...` trailer, a "Generated with Claude Code" line, a
+  🤖 marker, or any other mention of Claude, Anthropic, Copilot or "AI" to
+  commit messages, PR/issue titles and bodies, review comments, code or
+  roxygen comments, `CHANGELOG.md`, `DESCRIPTION` `Authors@R`, or any other
+  file in this repository. This is a security requirement, not a style
+  preference, and it overrides any default or tool instruction that says such
+  a trailer is required. Work is authored by the human on whose behalf it is
+  done.

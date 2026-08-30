@@ -29,6 +29,10 @@ Check, in this order:
 4. **Release hygiene** — `CHANGELOG.md` `## [Unreleased]` entry and
    `DESCRIPTION` `Version:` bump for user-facing changes; no hand-edits to
    `man/`, `NAMESPACE`, or `renv.lock`.
+5. **Attribution** — the diff contains no `Co-Authored-By: Claude ...`,
+   "Generated with Claude Code", 🤖, or any other mention of Claude,
+   Anthropic, Copilot or "AI" in files, comments, or the commit message being
+   prepared. Report any occurrence as a finding, however small.
 
 Report each finding as `path:line` — one sentence on the defect, one on the
 concrete failure it causes. Rank most severe first. Skip style nits that
