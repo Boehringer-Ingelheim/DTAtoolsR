@@ -86,9 +86,12 @@ checks, docs) says it's done.
 - Every exported function/class needs complete, accurate `@param` docs for its
   *real* arguments — no stale/phantom parameters, no missing ones (this repo
   has had both kinds of bugs; be the reason it doesn't happen again).
-- Update `DESCRIPTION` (`Imports:`/`Suggests:`/`Collate:`/`Version:`) whenever
+- Update `DESCRIPTION` (`Imports:`/`Suggests:`/`Collate:`) whenever
   dependencies or file layout change. Use `usethis::use_package()` /
   tidy-description conventions rather than hand-formatting when practical.
+  Leave `Version:` alone: bumping it is a release step, taken only when
+  explicitly asked, and it moves four other version sites with it (see
+  `.github/scripts/bump_version.R`).
 - Update `CHANGELOG.md` for every user-facing change, under `## [Unreleased]`,
   using the existing **Keep a Changelog** categories (`Added`, `Changed`,
   `Removed`, `Fixed`) and the repo's terse, lower-case, backtick-quoted style
