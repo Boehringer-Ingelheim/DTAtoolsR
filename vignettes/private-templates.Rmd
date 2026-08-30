@@ -517,6 +517,159 @@ actively chooses always wins over whatever an ancestor document happened to
 have, and a party-profile choice always wins over a carried-over value at the
 same target.
 
+## Controlled vocabularies
+
+A column's permitted values — `values:` — are already enforced: they become a
+JSON-Schema `enum`, and validation fails every row that is not one of them.
+What was missing was a way to write that list *once* and reuse it. A
+**controlled vocabulary** (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) is
+that list, versioned and indexed like everything else in the family. The
+shipped `gf_test.dta-vocabulary.yaml`, in full:
+
+```yaml
+kind: dta_vocabulary
+id: gf_test
+version: "1.0"
+label: Genomic measurement tests
+type: text            # text | number | integer
+terms:
+  - code: TRNSCPTN
+    label: Transcription
+    description: Transcription measurement, reported per reference sequence.
+```
+
+A bare string in `terms:` is shorthand for a term with only a `code`.
+
+A vocabulary is **never referenced by a finished document.** It is expanded
+into an ordinary `values:` list at creation time, so a DTA YAML you hand to a
+supplier is readable without access to your vocabulary library — and nothing
+in the validation engine, or in `DTAColumnSpec`, had to learn a new concept.
+
+### Binding a column to one
+
+`values_from:` on a column, in a dataset template or in a creation template's
+`patch:`:
+
+```yaml
+- id: GFTSTDTL
+  type: SAS Char
+  values_from: gf_tstdtl@1.0
+```
+
+or, spelled out, to restrict the vocabulary for *this* dataset:
+
+```yaml
+values_from:
+  vocabulary: gf_tstdtl@1.0
+  field: code            # code (default) | label
+  include: [FRAGMENT COUNT]   # only these terms
+  exclude: [NORMALIZED LEVEL] # everything but these
+```
+
+An `include:` naming a code the vocabulary does not have is an **error**, not
+a silent no-op — that is the exact shape a typo takes, and its only symptom
+would be a column whose permitted values quietly omit a term, months later,
+against real data.
+
+`field:` is what makes one vocabulary serve a **code/decode pair**, which is
+the norm in this domain. The shipped `gf_smrnaseq` dataset template binds both
+halves to the same vocabulary, so the two columns cannot drift apart:
+
+```yaml
+- id: GFTESTCD
+  values_from: {vocabulary: gf_test@1.0, field: code}    # -> TRNSCPTN
+- id: GFTEST
+  values_from: {vocabulary: gf_test@1.0, field: label}   # -> Transcription
+```
+
+### Extending a vocabulary
+
+One vocabulary can build on another. This is *not* the generic `extends:`
+merge used elsewhere, and could not be: that merge replaces sequences
+wholesale, so "inherit these terms and add one" is not expressible with it.
+Extension is explicit:
+
+```yaml
+kind: dta_vocabulary
+id: visit_oncology
+version: "1.0"
+extends: visit@1.0
+add_terms:
+  - { code: C2D1, label: Cycle 2 Day 1 }
+remove_terms: [EOT]
+```
+
+`add_terms:` naming a code the parent already has **replaces it in place**,
+keeping the parent's position — relabelling an inherited term is the common
+case and must not reorder the list. A child that states its own `terms:`
+replaces the inherited list outright.
+
+### Letting the document's author choose
+
+`values_from:` is the template author's decision. When the choice belongs to
+whoever creates the document instead, offer a **vocabulary slot** — the same
+shape as a party slot, one concept over. `biomarker_gf.dta-template.yaml`
+ships one:
+
+```yaml
+vocabulary_slots:
+  - id: gf_detail
+    label: How are results reported?
+    target: datasets.gf_data_specs_pattern.columns.GFTSTDTL.values
+    vocabulary: gf_tstdtl@1.0
+    mode: closed
+    default: [FRAGMENT COUNT, NORMALIZED LEVEL]
+    min: 1
+```
+
+The "Create new from template" modal renders this as a multi-select of the
+vocabulary's terms. `target:` is always
+`datasets.<dataset>.columns.<column>.values`; a slot whose target names a
+dataset or column the template does not build fails loudly rather than
+silently doing nothing.
+
+**`mode:` is about authoring freedom, not looser validation.** `closed` offers
+exactly the vocabulary's terms and rejects anything else. `open` additionally
+lets the author type a value the vocabulary does not have — "pick from the
+vocabulary, or use your own" — and the terms they end up with are *still* a
+closed `enum` in the produced document. There is deliberately no "advisory"
+mode that would let non-conforming data through: the only way to express that
+today is to emit no `values:` at all, which turns the check for that column
+completely off, and a check that is silently absent is worse than the problem
+it would solve.
+
+### Where a binding may be written
+
+`values_from:` is honoured on a **dataset template's** columns, on columns a
+creation template's `patch:` adds or modifies, and on an **inline** dataset
+body written directly into a creation template's `datasets:`. It is *not*
+honoured in a standalone dataset YAML pulled in with `{source: foo.yaml}` or a
+bare `"foo.yaml"` — those files are read as finished specifications, straight
+into column objects, with no template pass over them. A `values_from:` written
+there fails with a low-level "unused argument" error rather than one of this
+feature's own messages. Put the binding in a dataset template instead.
+
+### Two things worth knowing
+
+**Quote nothing, lose nothing — but know why.** Vocabulary files are parsed
+with a wider set of YAML scalar handlers than the rest of the template family,
+because term codes live in the nastiest corner of YAML 1.1. With an ordinary
+parse, `01` and `007` are read as *octal* and become `1` and `7`; `0x1F`
+becomes `31`; and `Y`, `N` and `NO` become booleans. Zero-padded visit numbers
+and Y/N flags are two of the most common controlled vocabularies there are, so
+codes in a `*.dta-vocabulary.yaml` are kept exactly as written, quoted or not.
+Coercion to a number happens only when the vocabulary asks for it with
+`type: number` or `type: integer`, and a code that cannot be coerced is an
+error naming the offending term.
+
+**A new vocabulary version does not reach documents already created.** Creation
+expands the terms once and the document owns them from then on — the same
+principle as `@latest` for templates (resolve once, record what was chosen,
+never drift). Rebase will not move a document onto a newer vocabulary either:
+rebase is metadata-only and never touches a dataset's columns. Publishing
+`gf_tstdtl@1.1` changes what *new* documents get, and nothing about the old
+ones.
+
 ## Provenance and upgrading
 
 Every document built from a creation template — through the app, or via
@@ -568,12 +721,14 @@ app's own "Create new from template" picker relies on — an unresolvable
 `extends:`, an option `target:` that does not resolve to a real metadata
 field (or, worse, one that names a machine-owned field like
 `metadata.template`), a party slot naming a profile id that does not exist, a
-dataset patch naming an absent column, an unquoted `version:` — and, as a
+dataset patch naming an absent column, an unquoted `version:`, a vocabulary
+that will not read or whose `extends:` chain cycles, a `values_from:` naming a
+vocabulary that is not there or an `include:` code that is not in it — and, as a
 final and most comprehensive check, actually builds a DTA from every
 non-abstract creation template using its own default selections. `path` may
 be a single file or a directory, scanned non-recursively for
-`*.dta-template.yaml`, `*.dta-dataset-template.yaml`, and `*.dta-party.yaml`
-(and their `.yml` spellings).
+`*.dta-template.yaml`, `*.dta-dataset-template.yaml`, `*.dta-party.yaml`, and
+`*.dta-vocabulary.yaml` (and their `.yml` spellings).
 
 ```r
 DTAtools::validate_template(".", strict = TRUE)

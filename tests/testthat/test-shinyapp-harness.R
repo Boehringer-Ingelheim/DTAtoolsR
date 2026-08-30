@@ -34,7 +34,8 @@ test_that("every helper file in the app sources cleanly", {
       "dataset_template.R", "party_profiles.R", "template_core.R",
       "template_create.R", "template_diff.R", "template_index.R",
       "template_inherit.R", "template_sources.R",
-      "theme.R", "ui_components.R", "utils_dta.R", "utils_export.R"
+      "theme.R", "ui_components.R", "utils_dta.R", "utils_export.R",
+      "vocabulary.R"
     )
   )
 

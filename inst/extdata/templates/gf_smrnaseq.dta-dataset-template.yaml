@@ -68,23 +68,25 @@ dataset:
       format: SAS $8.
       nullable: No
       description: Short name of the measurement, test, or examination described in GFTEST, can be up to 8 characters. GFTESTCD and GFTEST should not include genomic names or symbols. SDTM controlled terminology shall be followed. (See Table 2 Measurement Specification) TRNSCPTN
-      values: TRNSCPTN
+      values_from:
+        vocabulary: gf_test@1.0
+        field: code
     - id: GFTEST
       label: Name of Genomic Measurement
       type: SAS Char
       format: SAS $40.
       nullable: No
       description: Name of Genomic Measurement, can be up to 40 characters. GFTESTCD and GFTEST should not include genomic names or symbols. SDTM Controlled Terminology should be followed. (See Table 2 Measurement Specification) Transcription
-      values: Transcription
+      values_from:
+        vocabulary: gf_test@1.0
+        field: label
     - id: GFTSTDTL
       label: Measurement, Test, or Examination Detail
       type: SAS Char
       format: SAS $60.
       nullable: Yes
       description: "Description of a reportable qualifying the assessment in GFTESTCD and GFTEST. (See Table 2 Measurement Specification) toRNA: FRAGMENT COUNT or NORMALIZED LEVEL miRNA: FRAGMENT COUNT, Leave blank when sample is reported as empty"
-      values:
-        - FRAGMENT COUNT
-        - NORMALIZED LEVEL
+      values_from: gf_tstdtl@1.0
     - id: GFCAT
       label: Category for Genomic Finding
       type: SAS Char

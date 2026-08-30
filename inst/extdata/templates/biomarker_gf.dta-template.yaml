@@ -164,6 +164,19 @@ datasets:
   - template: gf_smrnaseq@3.0
     as: gf_data_specs_pattern
 
+vocabulary_slots:
+  - id: gf_detail
+    label: How are results reported?
+    description: >-
+      Narrows GFTSTDTL to the detail levels this study actually collects. Both
+      are offered by default, which is what the dataset template's own
+      gf_tstdtl@1.0 binding would produce on its own.
+    target: datasets.gf_data_specs_pattern.columns.GFTSTDTL.values
+    vocabulary: gf_tstdtl@1.0
+    mode: closed
+    default: [FRAGMENT COUNT, NORMALIZED LEVEL]
+    min: 1
+
 party_slots:
   - id: supplier
     label: Supplier
