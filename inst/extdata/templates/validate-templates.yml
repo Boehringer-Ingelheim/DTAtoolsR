@@ -14,21 +14,22 @@
 #
 # Production for this repository is Bitbucket Data Center, mirrored to GitHub
 # for CI (GitHub Actions has no equivalent running against Bitbucket Data
-# Center directly). To translate this to Bitbucket Pipelines instead:
+# Center directly). Two ready-made translations ship alongside this file, so
+# there is no need to hand-port it -- `create_template_repo(path, ci = ...)`
+# writes whichever you ask for:
 #
-#   image: rocker/r-ver:4.4     # any R image containing (or able to install) yaml/cli/R.utils/rlang and DTAtools itself
-#   pipelines:
-#     default:
-#       - step:
-#           name: validate-templates
-#           script:
-#             - Rscript -e 'install.packages(c("yaml", "cli"))'  # skip if already baked into the image
-#             - Rscript -e '<install DTAtools -- see the placeholder step below for options>'
-#             - Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+#   Jenkinsfile               Bitbucket SERVER / DATA CENTER. This is the one
+#                             that applies to the production deployment above:
+#                             Bitbucket Pipelines is a Bitbucket CLOUD feature
+#                             and Server / Data Center simply does not have it,
+#                             so a Data Center repository needs Jenkins (or
+#                             Bamboo) to run this check at all.
 #
-# There is no other translation needed: validate_template() itself has no
-# GitHub-specific behaviour, so the only difference between the two CI systems
-# is how each one runs an R script inside a container.
+#   bitbucket-pipelines.yml   Bitbucket CLOUD only.
+#
+# validate_template() itself has no GitHub-specific behaviour, so the only
+# difference between any of these CI systems is how each one runs an R script
+# inside a container.
 # -----------------------------------------------------------------------------
 
 on:

@@ -1,0 +1,81 @@
+kind: dta_creation_template
+id: starter
+label: Starter DTS
+version: "1.0"
+description: >-
+  A minimal creation template that ties the other three skeleton files
+  together: it imports starter_dataset as its one dataset and offers
+  starter_supplier through a party slot. Use this as the starting point for
+  your own template family -- copy it, rename the id, and replace the
+  placeholder metadata below with your organisation's own.
+
+base:
+  metadata:
+    title: Starter Data Transfer Specification
+    version: "1.0"
+    # ${today} and ${version} are resolved when a document is actually
+    # created from this template, so the document is dated the day it was
+    # made and its first version-history entry always agrees with the
+    # version its author chose -- see biomarker_gf.dta-template.yaml in the
+    # packaged examples for the same pattern.
+    date: "${today}"
+    header: Starter Organisation
+    version_history:
+      - version: "${version}"
+        date: "${today}"
+        changes: Initial template-generated version
+    receiver:
+      affiliation:
+        name: Our organisation
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+      notification: email
+    error_handling: >-
+      Format or content errors are reported by email to the authorized
+      contacts and corrected in a follow-up transfer.
+    authorized_for_corrections: Data Manager
+
+options:
+  # Every option writes to a real DTAMetaData field via `target:`, so its
+  # value stays visible and editable in the app's metadata editor after
+  # creation. An option with no `default:` inherits the value already in
+  # base.metadata above, so each value is stated once rather than in two
+  # places that could drift apart.
+  - id: title
+    label: Document title
+    type: text
+    target: metadata.title
+    help: Title shown on the document. Pick a suggestion or type your own.
+    choices:
+      - Starter Data Transfer Specification
+      - Starter DTS
+
+  - id: header
+    label: Header / organisation
+    type: text
+    target: metadata.header
+    help: Organisation shown in the document header.
+
+datasets:
+  # {template:, as:} imports a reusable dataset template rather than
+  # inlining a whole column list here -- see starter_dataset.dta-dataset-
+  # template.yaml. `as:` may rename the dataset; it is left identical to
+  # the dataset template's own name here because nothing else in this
+  # family needs it renamed.
+  - template: starter_dataset@1.0
+    as: starter_data
+
+party_slots:
+  # Deliberately supplier only, not receiver: base.metadata.receiver above
+  # already sets a usable default, so this slot demonstrates the OTHER way
+  # a target can be filled -- from a party profile the document's author
+  # picks -- without the file needing two near-identical examples of the
+  # same mechanism. `profiles:` narrows the dropdown to just this skeleton's
+  # own profile; omit it in your own template to offer every profile whose
+  # role matches instead.
+  - id: supplier
+    label: Supplier
+    target: metadata.supplier
+    profiles: [starter_supplier]

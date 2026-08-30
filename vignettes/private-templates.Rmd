@@ -162,6 +162,99 @@ that process's own owner, which is why that is the only place the token ever
 lives — and only for the duration of the one `git` call that needs it; the
 app's own process environment is restored immediately afterwards.
 
+## Starting a new template repository
+
+Before authoring anything, you need a directory laid out the way the app (and
+`validate_template()`) expect. `create_template_repo()` creates one:
+
+```r
+DTAtools::create_template_repo("path/to/my-templates")
+```
+
+This creates `path/to/my-templates` (recursively, if it does not already
+exist) and writes:
+
+- `README.md` — explains the four files below, and how to point
+  `DTATOOLS_TEMPLATE_SOURCES` at the directory.
+- `.gitignore`
+- `starter.dta-template.yaml` — a creation template (`kind:
+  dta_creation_template`).
+- `starter_dataset.dta-dataset-template.yaml` — the dataset it imports
+  (`kind: dta_dataset_template`).
+- `starter_supplier.dta-party.yaml` — a party profile (`kind:
+  dta_party_profile`) offered by one of the creation template's party slots.
+- `starter_terms.dta-vocabulary.yaml` — a controlled vocabulary (`kind:
+  dta_vocabulary`) that one of the dataset's columns binds to with
+  `values_from:`.
+- CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
+  `"github"` only): `"github"` writes `.github/workflows/validate-templates.yml`
+  (GitHub Actions); `"bitbucket"` writes `bitbucket-pipelines.yml`; `"jenkins"`
+  writes `Jenkinsfile`. Pass a character vector to write more than one, e.g.
+  `ci = c("github", "jenkins")`. See "CI for a private template repository"
+  below for what each file is for and which one applies to your Bitbucket.
+
+The four YAML files are a small, cross-referencing worked example, not stubs
+to fill in from nothing — the whole directory already passes
+`validate_template(path, strict = TRUE)` with zero issues, unmodified. Rename
+the four `starter*` ids as you build out your own family and replace the
+placeholder metadata, keeping the `id@version` references between the files
+(`starter_dataset@1.0`, `starter_terms@1.0`, `starter_supplier`) in step with
+whatever you rename.
+
+Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
+whichever CI file(s) `ci` asks for, with none of the four starter template
+files. Pass `ci = FALSE` to skip CI scaffolding entirely. By default,
+`create_template_repo()` refuses to touch a directory where any file it would
+write already exists — it aborts, naming every conflict, and writes nothing at
+all, rather than leave a repository half-written from two different calls
+whose halves a caller cannot tell apart. Pass `overwrite = TRUE` to replace
+them.
+
+### The directory must be flat
+
+Both `validate_template()` and the app's own template loader scan a
+repository **non-recursively**: they list the files directly inside the
+configured directory and go no further. A template file placed in a
+subdirectory is simply invisible to both — not rejected, not warned about by
+the loader, just absent. Organising a growing repository into `by-study/` or
+`by-supplier/` folders is the obvious thing to reach for, and it silently
+empties the picker.
+
+`validate_template()` is the one place that will tell you. It lists the
+directory a second time, recursively, purely to catch what the flat scan
+missed, and reports every hit as `template_in_subdirectory` — severity
+`"warning"`, because keeping an archived or work-in-progress file below the
+root is a legitimate choice and should not fail CI on its own. Keep every
+`.dta-*.yaml` file directly in the directory you point DTAtools at.
+
+### The four file kinds
+
+Every file's `kind:` field and its filename suffix must agree; the suffix is
+what a directory scan actually keys off:
+
+| Kind | Filename suffix |
+| --- | --- |
+| `dta_creation_template` | `*.dta-template.yaml` |
+| `dta_dataset_template` | `*.dta-dataset-template.yaml` |
+| `dta_party_profile` | `*.dta-party.yaml` |
+| `dta_vocabulary` | `*.dta-vocabulary.yaml` |
+
+(The `.yml` spelling of each suffix is accepted too.)
+
+### The loop
+
+From here on, the loop is the one you will use for the rest of this
+repository's life: edit a file, then run
+
+```r
+DTAtools::validate_template(".", strict = TRUE)
+```
+
+from the repository root, fix whatever it reports, and commit only once it
+passes silently. See "CI for a private template repository" below for
+running that same check automatically on every push and pull request — using
+the workflow `create_template_repo()` already wrote for you.
+
 ## Authoring a creation template
 
 A creation template (`kind: dta_creation_template`) builds a whole new DTA.
@@ -740,9 +833,35 @@ a CI job needs. Without it, the function returns a data frame (`file`, `kind`,
 `id`, `version`, `severity`, `code`, `message`) with one row per issue found,
 for a human to inspect interactively.
 
+This is also why an otherwise-empty directory is an `"error"` (code
+`no_templates`), not silence. A workflow pointed at the wrong path — a typo, a
+stale working directory, a checkout that put the templates one level down —
+used to return zero rows and pass `strict = TRUE` cleanly, which is the worst
+outcome a linter can produce: green, having validated nothing. It now fails,
+naming the directory it found nothing in.
+
 A ready-to-copy GitHub Actions workflow — checkout, install DTAtools from your
 internal package source, run the check above — ships at
 `system.file("extdata", "templates", "validate-templates.yml", package =
 "DTAtools")`. Copy it to `.github/workflows/validate-templates.yml` in the
 repository that holds your own templates and fill in the one placeholder step
 that installs DTAtools from wherever your organisation hosts it.
+`create_template_repo()` writes this file for you when `ci` asks for
+`"github"` (the default).
+
+Two more ready-to-copy files ship alongside it in the same directory —
+`bitbucket-pipelines.yml` and `Jenkinsfile` — and **they are not
+interchangeable**, because "Bitbucket" is not one product. Bitbucket
+Pipelines, the feature `bitbucket-pipelines.yml` configures, exists only on
+**Bitbucket Cloud**. **Bitbucket Server / Data Center has no Pipelines
+feature at all** — copying `bitbucket-pipelines.yml` there does not fail
+loudly, it just never runs, since there is nothing on that side reading the
+file. If your Bitbucket is Server or Data Center (as this project's own
+production deployment is — see "Deploying on Posit Connect" above), use the
+`Jenkinsfile` instead: a declarative Jenkins pipeline that installs DTAtools
+and runs the same `validate_template(".", strict = TRUE)` check, triggered by
+a Jenkins job configured against the Bitbucket Server webhook (or a
+Multibranch Pipeline scanning it) rather than an `on:` block in the file
+itself — Jenkinsfiles carry no triggers the way a GitHub Actions workflow
+does. `create_template_repo(ci = c("bitbucket", "jenkins"))` (or any
+combination including `"github"`) writes whichever of the three you ask for.
