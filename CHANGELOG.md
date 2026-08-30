@@ -162,6 +162,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the most common controlled vocabularies there are, so a code in a
   `*.dta-vocabulary.yaml` is now kept exactly as written, quoted or not.
 
+- **`check()` went silent on the axis that failed.** The column spec axis
+  printed one lumped success line -- `Table format, length, pattern, and values
+  are valid` -- and, when a check failed, printed nothing at all. A failing run
+  showed the section heading, then the rules passing, then `0 of 1 table valid`,
+  with no stated cause on the axis that had actually found the errors. On the
+  streaming path the axis reported nothing either way.
+
+  It now reports one line per check kind -- presence, format, length, values,
+  pattern -- naming the check that failed, how many values broke it and which
+  columns they were in, followed by a summary line, exactly as the rule axis
+  already reported one line per rule. Both the materialising and the streaming
+  path render it from the same summary, so they cannot disagree.
+
+  The lumped line was over-broad in the other direction too: it asserted that
+  patterns were valid on a table where no column declared one. A check nothing
+  declares now reports as *not applicable*, and one the run could not settle --
+  a table with no rows, a column the table does not have, a `fail_fast` scan
+  that stopped at the first problem, a structural early return that read no
+  rows -- reports as *not checked*. Neither is a pass.
+
+- **A table with no rows skipped its structure check.** The column spec axis
+  returned before evaluating a single constraint whenever the table had no
+  rows -- column presence included -- so a table that was both empty and
+  missing the columns its specs declare reported completely clean:
+  `columnspec_valid = TRUE`, no errors, `ok = TRUE`. The same missing column on
+  a table with one row failed correctly.
+
+  An empty table is a legitimate result: an analysis that yielded nothing, whose
+  formatted output says the process ran and found no results. That is only true
+  if the table still carries the columns it promised -- a table missing them
+  says something went wrong upstream, and said it silently. Column presence is
+  decidable from the column names alone, so it is now checked whether or not
+  there are rows, on both the materialising and the streaming path. The finding
+  is reported once, with `row = NA`, since there is no row to attach it to.
+
+  The value checks -- type, length, pattern, permitted values -- are properties
+  of values, of which an empty table has none, so they continue to report as
+  `not_checked` rather than as a pass. A well-formed empty table therefore
+  reports `Presence check passed` alongside them, and remains valid.
+
+- The per-check breakdown is carried on the validation result as
+  `columnspec_checks`, so it is written to the persisted artifact and is
+  readable via `validation_errors()`: one row per constraint keyword with its
+  status, how many columns declared it, how many could be checked, how many
+  failed, and the failing column names. On a streamed table the counts are
+  accumulated per batch rather than read off the retained error frame, so the
+  `max_errors` cap cannot deflate them -- without that, a check whose only
+  violations had spilled to disk would have been reported as passed. An
+  artifact written by an earlier version does not carry the field and is not
+  backfilled with a guess: whether a check passed or was never run cannot be
+  recovered from a stored error frame, which is the distinction the field
+  exists to make. Re-run `check(force = TRUE)` to record it.
+
 ## [0.23.0] - 2026-08-27
 
 ### Added

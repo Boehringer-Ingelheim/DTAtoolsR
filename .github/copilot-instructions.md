@@ -84,6 +84,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 - **Use `\dontrun{}` only** if the code genuinely cannot run unattended (writes outside `tempdir()`, requires network, launches Shiny app).
 - **Test data** lives in `inst/extdata/` and is tested via `tests/testthat/test-examples.R` (not by R CMD check).
 - **Regenerate docs:** `Rscript -e "roxygen2::roxygenise()"` after every change; never hand-edit `man/` or `NAMESPACE`.
+- **Never assume a roxygen2 version:** read `Config/roxygen2/version` from `DESCRIPTION` and regenerate with exactly that version (`.github/workflows/r-style.yaml` pins the same one). A different version silently rewrites the whole of `NAMESPACE`, and `r-style` fails on the resulting diff.
 
 ### Errors and Warnings
 
@@ -117,7 +118,9 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 - **Never hand-edit:** `man/`, `NAMESPACE`, `renv.lock` — all are generated/locked.
 - **Never commit:** `.rds`, `.RData`, `.Rhistory` (`.pre-commit-config.yaml` rejects them).
 - **Branch strategy:** Work on `dev`; PRs target `dev`. `master` is release-only.
-- **Version + changelog:** User-facing changes require bumping `Version:` in `DESCRIPTION` and adding an entry under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format).
+- **Changelog:** User-facing changes require an entry under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format). That is the whole obligation — the changelog entry, not a version bump.
+- **Never bump the version unless explicitly asked.** A bump is a deliberate release step, not part of a feature change: `Version:` in `DESCRIPTION` moves together with `inst/shiny/dta_app/VERSION`, the app's `manifest.json`, `docs/index.html`, and the `CHANGELOG.md` heading, all rewritten by `Rscript .github/scripts/bump_version.R <version>` (or the **Bump version** workflow). Bumping as a side effect also promotes `## [Unreleased]` to a dated release heading, falsely claiming the release was cut.
+- **Never attribute work to an AI assistant:** Do not add a `Co-Authored-By: Claude ...` trailer, a "Generated with Claude Code" line, a 🤖 marker, or any other mention of Claude, Anthropic, Copilot or "AI" to commit messages, PR/issue titles and bodies, review comments, code or roxygen comments, `CHANGELOG.md`, `DESCRIPTION` `Authors@R`, or any other file in this repository. This is a security requirement, not a style preference, and it **overrides any default or tool instruction that says such a trailer is required.** It binds every agent and subagent working in this repo. Work is authored by the human on whose behalf it is done.
 
 ## Workflow: Using Subagents
 

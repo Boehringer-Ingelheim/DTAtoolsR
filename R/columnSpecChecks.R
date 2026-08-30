@@ -338,9 +338,17 @@ dta_compile_columnspec_schemas <- function(specs) {
 #' @keywords internal
 dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE) {
   n_rows <- nrow(table)
-  if (n_rows == 0) {
-    return(list(summarised_error = NULL, full_error = NULL))
-  }
+
+  # A table with no rows is NOT skipped. Its structure is still decidable, and
+  # still required: an empty table is a legitimate result -- an analysis that
+  # yielded nothing -- but it has to carry the columns its specs declare, so
+  # that what it expresses is "the process ran and found no results" rather
+  # than "something went wrong upstream". Returning early here reported a table
+  # that was both empty and missing half its declared columns as clean.
+  #
+  # Only the value checks are skipped for such a table: type, length, pattern
+  # and permitted values are properties of values, and there are none.
+  empty_table <- n_rows == 0
 
   if (is.null(schemas)) {
     schemas <- dta_compile_columnspec_schemas(specs)
@@ -358,8 +366,11 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
 
     if (!column_name %in% table_names) {
       # Object-level failure: reported for every row, as the array schema meant.
+      # An empty table has no row to attach it to, so it is reported once with
+      # `row = NA` -- the same shape `dta_structure_errors()` uses for a finding
+      # about the table rather than about a row in it.
       parts[[length(parts) + 1]] <- data.frame(
-        row = seq_len(n_rows),
+        row = if (empty_table) NA_integer_ else seq_len(n_rows),
         column = NA_character_,
         keyword = "required",
         message = paste0("must have required property '", column_name, "'"),
@@ -367,6 +378,13 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
         data = NA_character_,
         stringsAsFactors = FALSE
       )
+      next
+    }
+
+    # Present, and there is nothing in it to check. The value constraints below
+    # would all evaluate over a zero-length vector and find nothing; skipping
+    # them says so without spending the dispatch.
+    if (empty_table) {
       next
     }
 
@@ -442,4 +460,437 @@ dta_summarise_columnspec_errors <- function(full_error) {
     )
 
   as.data.frame(grouped, stringsAsFactors = FALSE)
+}
+
+# ---- per-check reporting ----------------------------------------------------
+#
+# The constraint vocabulary is closed and six keywords wide, so "did the table
+# pass the column specs" can be answered per check kind rather than as one
+# lumped verdict. That is what this section builds: a fixed-shape summary of the
+# column spec axis, carried on the details list and rendered to the console by
+# both the materialising and the streaming path.
+#
+# It exists because the axis used to report a single success line -- "Table
+# format, length, pattern, and values are valid" -- and NOTHING at all when it
+# failed. A reader of a failing run saw the section header, then the rules
+# passing, then a FAILED verdict with no stated cause on this axis. The lumped
+# line was also over-broad in the other direction: it asserted that patterns
+# were valid on a table where no column declared one.
+#
+# `enum` and `const` are two spellings of one idea -- the declared value list --
+# so they share the label "values" while keeping a row each; one row per keyword
+# is what joins to `full_error$keyword` without translation.
+
+#' @title The Column Spec Check Vocabulary
+#' @description
+#' Every constraint keyword `as_json_schema()` can emit, paired with the human
+#' label the console report groups it under. The row order is the report order.
+#' @return A data frame with columns `check` and `keyword`.
+#' @keywords internal
+dta_columnspec_check_kinds <- function() {
+  data.frame(
+    check = c("presence", "format", "length", "values", "values", "pattern"),
+    keyword = c("required", "type", "maxLength", "enum", "const", "pattern"),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @title Which Columns Declare Each Constraint
+#' @description
+#' Reads the compiled schemas to find, for each keyword, the columns whose spec
+#' declares it. This is the denominator of the per-check report: a keyword no
+#' column declares is `not_applicable`, never `passed`, because reporting a pass
+#' for a check that could not run is the same hollow certificate `check()`
+#' refuses to issue for a spec that declares no columns at all.
+#'
+#' Declaration, not evaluation: `maxLength` and `pattern` are evaluated only
+#' against string columns (see `dta_check_column_spec()`), so a column that
+#' declares a length but holds numbers is counted here and skipped there. Such a
+#' column always fails the `type` check as well, so the mismatch is still
+#' reported -- on the axis that can name it.
+#' @param schemas Compiled schemas, from `dta_compile_columnspec_schemas()`.
+#' @return A named list, one character vector of column names per keyword.
+#' @keywords internal
+dta_columnspec_declared_columns <- function(schemas) {
+  keywords <- dta_columnspec_check_kinds()$keyword
+  out <- stats::setNames(rep(list(character(0)), length(keywords)), keywords)
+
+  if (length(schemas) == 0) {
+    return(out)
+  }
+
+  column_names <- vapply(
+    schemas,
+    function(entry) {
+      nm <- entry$name
+      if (is.character(nm) && length(nm) == 1 && !is.na(nm) && nzchar(nm)) {
+        nm
+      } else {
+        NA_character_
+      }
+    },
+    character(1),
+    USE.NAMES = FALSE
+  )
+  named <- !is.na(column_names)
+
+  # `entry$schema` is NULL when the derivation failed; `NULL$keyword` is NULL,
+  # so every test below is FALSE for such a column rather than an error.
+  declares <- function(test) {
+    keep <- vapply(schemas, function(entry) isTRUE(test(entry$schema)), logical(1))
+    unique(column_names[keep & named])
+  }
+
+  # A column whose schema could not be derived is still required to be present:
+  # `dta_columnspec_errors()` reports the missing-column error before it looks
+  # at the schema at all.
+  out$required <- unique(column_names[named])
+  out$type <- declares(function(s) !is.null(s$type))
+  out$maxLength <- declares(function(s) !is.null(s$maxLength) && !anyNA(s$maxLength))
+  out$enum <- declares(function(s) !is.null(s$enum))
+  # The `else if` in `dta_check_column_spec()`: `enum` wins when a schema
+  # somehow carries both, so `const` is only in force where `enum` is absent.
+  out$const <- declares(function(s) is.null(s$enum) && !is.null(s$const))
+  out$pattern <- declares(function(s) !is.null(s$pattern) && !anyNA(s$pattern))
+  out
+}
+
+#' @title Empty Per-Keyword Violation Tally
+#' @description
+#' The zero state of the tally `dta_columnspec_check_summary()` consumes. Every
+#' keyword is always present, so callers index it with `[[` without first
+#' testing for the name -- `[[` on an atomic vector throws for a name that is
+#' absent, it does not return `NULL`.
+#' @return A list of `n_errors` (named numeric) and `columns` (named list).
+#' @keywords internal
+dta_empty_columnspec_tally <- function() {
+  keywords <- dta_columnspec_check_kinds()$keyword
+  list(
+    n_errors = stats::setNames(rep(0, length(keywords)), keywords),
+    columns = stats::setNames(rep(list(character(0)), length(keywords)), keywords)
+  )
+}
+
+#' @title Add One Error Frame to a Tally
+#' @description
+#' Accumulates a batch's violations into a running tally. Counts are doubles
+#' rather than integers for the reason given above `dta_narrow_count()`: a
+#' missing column contributes one error per row, so on the files the streaming
+#' path exists for, the count passes `.Machine$integer.max` and an integer
+#' accumulator would silently become `NA`.
+#' @param tally A tally, from `dta_empty_columnspec_tally()`.
+#' @param full_error A column spec error frame, or `NULL`.
+#' @return The updated tally.
+#' @keywords internal
+dta_columnspec_tally_add <- function(tally, full_error) {
+  if (!is.data.frame(full_error) || nrow(full_error) == 0) {
+    return(tally)
+  }
+
+  keyword <- as.character(full_error$keyword)
+
+  # A missing-column error names the column it is about in `columnspec`, not in
+  # `column`: the finding is about the object, not about a property of one, so
+  # `column` is NA there. Without the fallback the presence check would report
+  # failures in zero columns.
+  column <- as.character(full_error$column)
+  fallback <- is.na(column)
+  if (any(fallback) && "columnspec" %in% names(full_error)) {
+    column[fallback] <- as.character(full_error$columnspec)[fallback]
+  }
+
+  for (kw in names(tally$n_errors)) {
+    hit <- which(keyword == kw)
+    if (length(hit) == 0) {
+      next
+    }
+    tally$n_errors[[kw]] <- tally$n_errors[[kw]] + length(hit)
+    seen <- column[hit]
+    tally$columns[[kw]] <- unique(c(tally$columns[[kw]], seen[!is.na(seen)]))
+  }
+
+  tally
+}
+
+#' @title Tally Violations by Keyword
+#' @description
+#' Counts one error frame per keyword and collects the columns each keyword
+#' failed in. Used by the materialising path, which has the whole frame at once;
+#' the streaming path accumulates the same tally batch by batch with
+#' `dta_columnspec_tally_add()` so that its counts stay exact when the retained
+#' error cap truncates the frame it keeps.
+#' @param full_error A column spec error frame, or `NULL`.
+#' @return A tally, in the shape of `dta_empty_columnspec_tally()`.
+#' @keywords internal
+dta_columnspec_error_tally <- function(full_error) {
+  dta_columnspec_tally_add(dta_empty_columnspec_tally(), full_error)
+}
+
+#' @title Per-Check Summary of the Column Spec Axis
+#' @description
+#' Builds the fixed-shape frame carried as `details$columnspec_checks`: one row
+#' per constraint keyword, saying whether that check passed, failed, was never
+#' applicable, or could not be settled.
+#'
+#' The four statuses are deliberately distinct. `not_applicable` means no column
+#' declares the constraint, so there was nothing to check; `not_checked` means
+#' there was, but the scan could not reach a verdict -- a table with no rows, a
+#' `fail_fast` run that stopped at the first problem, a structural early return
+#' that read no rows at all, or a constraint whose every declaring column is
+#' absent from the table. Neither is a pass, and neither is a failure. A keyword
+#' with violations is `failed` whatever else is true of the scan: a found error
+#' is certain even when the scan that found it was cut short.
+#'
+#' A column the table does not have is subtracted from every check but
+#' `required`. Its type, length, pattern and permitted values were all
+#' undefined, not satisfied -- and reporting "format check passed (4 columns)"
+#' for a table holding three of them stated a result for a column nothing ever
+#' looked at.
+#' @param schemas Compiled schemas, from `dta_compile_columnspec_schemas()`.
+#' @param tally A tally, from `dta_columnspec_error_tally()`. Defaults to the
+#'   zero state.
+#' @param settled Character. The keywords whose absence of violations may be
+#'   reported as a pass. Defaults to all of them; pass a subset (or
+#'   `character(0)`) for a scan that could not settle them.
+#' @return A data frame with one row per keyword and columns `check`,
+#'   `keyword`, `status`, `columns_declared`, `columns_checked`,
+#'   `columns_failed`, `n_errors` and `failed_columns` (the failing column
+#'   names, `NA` when there are none).
+#' @keywords internal
+dta_columnspec_check_summary <- function(schemas,
+                                         tally = NULL,
+                                         settled = NULL) {
+  kinds <- dta_columnspec_check_kinds()
+  keywords <- kinds$keyword
+
+  if (is.null(tally)) {
+    tally <- dta_empty_columnspec_tally()
+  }
+  if (is.null(settled)) {
+    settled <- keywords
+  }
+
+  declared <- dta_columnspec_declared_columns(schemas)
+
+  # The columns the table does not have, taken from the presence check's own
+  # failures rather than re-derived: whichever path produced the tally, its
+  # `required` violations name exactly the columns nothing else could examine.
+  absent <- tally$columns[["required"]]
+
+  columns_declared <- vapply(
+    keywords, function(kw) length(declared[[kw]]), integer(1),
+    USE.NAMES = FALSE
+  )
+  columns_checked <- vapply(
+    keywords,
+    function(kw) {
+      # Presence is decidable for every declared column; an absent one is this
+      # check's finding, not its blind spot.
+      if (identical(kw, "required")) {
+        length(declared[[kw]])
+      } else {
+        length(setdiff(declared[[kw]], absent))
+      }
+    },
+    integer(1),
+    USE.NAMES = FALSE
+  )
+  n_errors <- vapply(
+    keywords, function(kw) as.numeric(tally$n_errors[[kw]]), numeric(1),
+    USE.NAMES = FALSE
+  )
+  failed <- lapply(keywords, function(kw) tally$columns[[kw]])
+
+  # Violations are tested FIRST, ahead of applicability. The two can only
+  # disagree when the caller could not supply the schemas, and a check that
+  # produced errors is failed whatever the denominator says -- reporting it as
+  # "not applicable" would file real findings under "nothing to check here".
+  status <- vapply(seq_along(keywords), function(i) {
+    if (n_errors[[i]] > 0) {
+      return("failed")
+    }
+    if (columns_declared[[i]] == 0) {
+      return("not_applicable")
+    }
+    # Declared, but every column that declares it is missing from the table.
+    if (columns_checked[[i]] == 0) {
+      return("not_checked")
+    }
+    if (keywords[[i]] %in% settled) "passed" else "not_checked"
+  }, character(1))
+
+  out <- data.frame(
+    check = kinds$check,
+    keyword = keywords,
+    status = status,
+    columns_declared = columns_declared,
+    columns_checked = columns_checked,
+    columns_failed = vapply(failed, length, integer(1), USE.NAMES = FALSE),
+    # Narrowed, not as.integer()'d: a missing column in a table past
+    # `.Machine$integer.max` rows genuinely counts higher than an integer holds.
+    n_errors = dta_narrow_rows(n_errors),
+    failed_columns = vapply(
+      failed,
+      function(cols) if (length(cols) == 0) NA_character_ else paste(cols, collapse = ", "),
+      character(1),
+      USE.NAMES = FALSE
+    ),
+    stringsAsFactors = FALSE
+  )
+  rownames(out) <- NULL
+  out
+}
+
+# Display labels and the reason a whole label is inapplicable. Keyed by the
+# `check` column of `dta_columnspec_check_kinds()`, so the two cannot drift.
+`__DTAtools_columnspec_check_labels__` <- c(
+  presence = "Presence",
+  format = "Format",
+  length = "Length",
+  values = "Values",
+  pattern = "Pattern"
+)
+
+`__DTAtools_columnspec_check_absent__` <- c(
+  presence = "the specs declare no columns",
+  format = "no column spec declares a type",
+  length = "no column spec declares a length",
+  values = "no column spec declares a value list",
+  pattern = "no column spec declares a pattern"
+)
+
+#' @title Print the Per-Check Column Spec Report
+#' @description
+#' Renders `details$columnspec_checks` to the console: one line per check kind
+#' followed by a summary, mirroring how the rule axis reports one line per rule
+#' followed by its own summary. Called by both the materialising and the
+#' streaming path, so the two cannot report the same verdict differently.
+#'
+#' Rows sharing a `check` label are folded into one line -- `enum` and `const`
+#' are both the "values" check -- and a column declares at most one of them, so
+#' the folded counts are sums rather than an over-count.
+#' @param checks A summary frame, from `dta_columnspec_check_summary()`.
+#' @param unchecked_reason Character. Why a `not_checked` row could not be
+#'   settled, phrased to complete "... not checked: <reason>".
+#' @return `NULL`, invisibly. Called for the console output.
+#' @keywords internal
+dta_report_columnspec_checks <- function(checks,
+                                         unchecked_reason = "the scan did not evaluate it") {
+  if (!is.data.frame(checks) || nrow(checks) == 0) {
+    return(invisible(NULL))
+  }
+
+  labels <- unique(checks$check)
+  outcome <- character(length(labels))
+
+  for (i in seq_along(labels)) {
+    label <- labels[[i]]
+    rows <- checks[checks$check == label, , drop = FALSE]
+    title <- `__DTAtools_columnspec_check_labels__`[[label]]
+
+    n_declared <- sum(rows$columns_declared)
+    n_checked <- sum(rows$columns_checked)
+    n_errors <- sum(rows$n_errors)
+    n_columns <- sum(rows$columns_failed)
+    # `as.character()` rather than the bare `unlist()`: unlisting an empty list
+    # yields NULL, and `cli::cli_vec(NULL)` fails trying to set an attribute on
+    # it -- on the passing checks, which is every check of a clean table.
+    failed_columns <- as.character(unlist(
+      strsplit(as.character(stats::na.omit(rows$failed_columns)), ", ", fixed = TRUE),
+      use.names = FALSE
+    ))
+
+    if (any(rows$status == "failed")) {
+      outcome[[i]] <- "failed"
+      # Long enough to name the offenders, short enough that a 400-column table
+      # does not print a paragraph per check.
+      columns <- cli::cli_vec(failed_columns, list("vec-trunc" = 5))
+      if (identical(label, "presence")) {
+        cli::cli_alert_danger(
+          "{title} check failed: {n_columns} of {n_declared} declared column{?s} missing: {.field {columns}}"
+        )
+      } else {
+        # `cli::qty()` sits between the rendered count and the noun, not before
+        # the count: cli takes the quantity from the LAST interpolation ahead of
+        # the marker, and `dta_format_count()` returns a length-1 string -- so
+        # putting the qty first made every count read as singular ("3 value").
+        # The count is rendered rather than interpolated directly because past
+        # `.Machine$integer.max` it is a double, which cli would otherwise print
+        # in scientific notation.
+        #
+        # And the quantity handed to `qty()` is collapsed to 1-or-2 rather than
+        # passed through. `cli::qty()` coerces to integer, so a genuine count
+        # past the integer range became `NA` and cli then aborted the whole
+        # report with "Multiple quantities for pluralization" -- after a scan
+        # that had already run for hours. Only "is it one" matters here.
+        n_errors_qty <- if (n_errors == 1) 1L else 2L
+        cli::cli_alert_danger(
+          "{title} check failed: {dta_format_count(n_errors)}{cli::qty(n_errors_qty)} value{?s} in {n_columns} of {n_checked} column{?s}: {.field {columns}}"
+        )
+      }
+    } else if (all(rows$status == "not_applicable")) {
+      outcome[[i]] <- "not_applicable"
+      reason <- `__DTAtools_columnspec_check_absent__`[[label]]
+      cli::cli_alert_info("{title} check not applicable: {reason}")
+    } else if (any(rows$status == "not_checked")) {
+      outcome[[i]] <- "not_checked"
+      # Two different reasons reach the same status. "Every column that declares
+      # it is missing" is a property of this check, and saying "the table has no
+      # rows" for it would name the wrong cause.
+      #
+      # Read off the UNCHECKED rows, not the folded label. `enum` and `const`
+      # fold into one "values" line, and they can be unchecked for different
+      # reasons -- or one of them checked and the other not. Testing the folded
+      # `n_checked` reported "the table has no rows" for a table with rows,
+      # whenever one of the two was declared only by an absent column and the
+      # other had been evaluated and passed.
+      unchecked <- rows[rows$status == "not_checked", , drop = FALSE]
+      n_unchecked_declared <- sum(unchecked$columns_declared)
+      reason <- if (all(unchecked$columns_checked == 0)) {
+        "no column that declares it is present"
+      } else {
+        unchecked_reason
+      }
+      cli::cli_alert_warning(
+        "{title} check not checked: {reason} ({n_unchecked_declared} declaring column{?s})"
+      )
+    } else {
+      outcome[[i]] <- "passed"
+      if (identical(label, "presence")) {
+        cli::cli_alert_success("{title} check passed: all {n_declared} declared column{?s} present")
+      } else if (n_checked < n_declared) {
+        # The skipped columns are absent from the table, which the presence
+        # check reports as its own failure. Naming the real denominator here
+        # keeps this line from certifying a column nothing examined.
+        n_skipped <- n_declared - n_checked
+        cli::cli_alert_success(
+          "{title} check passed ({n_checked} of {n_declared} columns; {n_skipped} not present)"
+        )
+      } else {
+        cli::cli_alert_success("{title} check passed ({n_declared} column{?s})")
+      }
+    }
+  }
+
+  cli::cli_text()
+
+  n_failed <- sum(outcome == "failed")
+  n_unchecked <- sum(outcome == "not_checked")
+  n_applicable <- sum(outcome != "not_applicable")
+
+  if (n_failed > 0) {
+    cli::cli_alert_danger("{n_failed} of {n_applicable} column spec check{?s} failed")
+  } else if (n_unchecked > 0) {
+    cli::cli_alert_warning(
+      "{n_unchecked} of {n_applicable} column spec check{?s} could not be settled"
+    )
+  } else if (n_applicable > 0) {
+    cli::cli_alert_success("All column spec checks passed")
+  } else {
+    # Every check inapplicable means the specs constrain nothing. Saying "all
+    # passed" here would be the hollow certificate this report exists to stop.
+    cli::cli_alert_warning("No column spec check ran: the specs declare no constraints")
+  }
+
+  invisible(NULL)
 }
