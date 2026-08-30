@@ -275,6 +275,11 @@ dta_file_validation_details <- function(validation_result) {
     n_rule_errors = if (ok) 0L else 1L,
     n_import_errors = 0L,
     columnspec_errors = list(summarised_error = NULL, full_error = NULL),
+    # A file target has no columns, so every column spec check is inapplicable
+    # rather than passed. The frame is present, and full-width, so that one
+    # reader can walk `details$columnspec_checks` for any target type without
+    # first asking which kind it is looking at.
+    columnspec_checks = dta_columnspec_check_summary(list()),
     rule_results = if (ok) {
       list(list(id = "file_presence", valid = TRUE, message = NULL))
     } else {
