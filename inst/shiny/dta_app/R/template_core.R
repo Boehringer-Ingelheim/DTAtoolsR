@@ -86,11 +86,29 @@ read_dta_creation_template <- function(template_path) {
     if (!identical(kind, "dta_creation_template")) {
       stop("Template 'kind' must be 'dta_creation_template'.")
     }
-    if (!is.list(def$base)) stop("Template must contain a 'base' section.")
+    # A template that `extends:` another inherits its parent's `base:` and its
+    # parent's `datasets:`, so requiring either of its own would make the most
+    # useful kind of deviation template impossible to write.
+    #
+    # This is not hypothetical. Without it, a child that only overrides an
+    # option has NO legal way to say "inherit the base verbatim": omitting
+    # `base:` fails the check below, and writing `base: {}` is an EXPLICITLY
+    # empty child section, which dta_template_merge_section() correctly treats
+    # as "replace the parent's with nothing" -- silently wiping every field the
+    # parent set. Absent and empty must stay distinguishable, so absent has to
+    # be legal here.
+    inherits_from <- nzchar(as.character(def$extends %||% ""))
+
+    if (!is.list(def$base) && !inherits_from) {
+      stop("Template must contain a 'base' section.")
+    }
+    if (!is.null(def$base) && !is.list(def$base)) {
+      stop("Template 'base' must be a mapping/object.")
+    }
     # Accept dataset definitions in either base.datasets (legacy) or top-level
     # datasets (preferred, explicit and reusable across templates).
     datasets_def <- def$datasets %||% def$base$datasets %||% list()
-    if (length(datasets_def) == 0) {
+    if (length(datasets_def) == 0 && !inherits_from) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
     # Normalize optional pieces so server/UI code can rely on shape.
@@ -103,19 +121,115 @@ read_dta_creation_template <- function(template_path) {
   })
 }
 
+# yaml handlers that keep every scalar number as the text the author wrote.
+#
+# THE TRAP this exists to close: an unquoted `version: 1.0` in YAML is a
+# double, and R renders a double 1.0 as "1" -- so as.character() silently
+# turns version 1.0 into version 1. Worse, an unquoted `version: 1.10` is the
+# double 1.1 by the time any R code sees it, and 1.10 and 1.1 are different
+# versions; once parsed, nothing can tell them apart.
+#
+# yaml::read_yaml() can hand the RAW TEXT to a handler before that conversion
+# happens -- but ONLY under libyaml's own scalar-subtype tag names. A handler
+# registered under the obvious name "float" is NEVER invoked, which makes this
+# look impossible if you probe it with the wrong name. The tags that actually
+# fire are "int", "float#fix" and "float#exp".
+#
+#   yaml   1.0   -> "1.0"    exact
+#   yaml   1.10  -> "1.10"   exact, and distinct from 1.9
+#   yaml  "1.10" -> "1.10"   unchanged
+#
+# Booleans, dates and strings are untouched, so this is safe to apply to a
+# whole header document.
+dta_template_yaml_handlers <- function() {
+  list(
+    "int" = as.character,
+    "float#fix" = as.character,
+    "float#exp" = as.character
+  )
+}
+
+# Read one top-level scalar field from a template file EXACTLY as written.
+#
+# Used where the rest of the document must be parsed normally -- a dataset
+# template's `dataset:` body needs its real numeric types -- but a single
+# header field must survive verbatim. Re-parsing a small header file twice is
+# far cheaper than getting a version number wrong.
+#
+# Returns NA_character_ when the file cannot be read or the field is absent;
+# the caller reports that with its own file name in hand.
+dta_template_read_field_exact <- function(path, field) {
+  out <- tryCatch(
+    yaml::read_yaml(path, handlers = dta_template_yaml_handlers()),
+    error = function(e) NULL
+  )
+  if (!is.list(out) || is.null(out[[field]]) || length(out[[field]]) == 0) {
+    return(NA_character_)
+  }
+  as.character(out[[field]][[1]])
+}
+
+# Normalise an ALREADY-PARSED `version:` value to a character string.
+#
+# The reader above is the correct route and loses nothing. This is the fallback
+# for a value that has already been through a plain parse -- a definition built
+# in R, or a file that could not be re-read -- where the damage is already done
+# and only a best effort is possible. It warns rather than guessing silently,
+# because at this point 1.10 and 1.1 really are indistinguishable.
+#
+# `what` names the file or id in the warning so the author can find it.
+dta_template_version_string <- function(version, what = "template") {
+  if (is.null(version) || length(version) == 0) {
+    return(NA_character_)
+  }
+  v <- version[[1]]
+  if (is.character(v)) {
+    return(v)
+  }
+  if (is.numeric(v)) {
+    out <- format(v, nsmall = 1L, trim = TRUE, scientific = FALSE)
+    cli::cli_warn(c(
+      "Unquoted version {.val {v}} in {.field {what}} was read as a number.",
+      "i" = "Using {.val {out}}. Quote it as {.code version: \"{out}\"} to be exact.",
+      "!" = "An unquoted {.code 1.10} is read as {.code 1.1} and cannot be recovered."
+    ))
+    return(out)
+  }
+  as.character(v)
+}
+
+# Is this version exact as written, i.e. was it quoted in the YAML?
+#
+# Split out from dta_template_version_string() so validate_template() can fail
+# on an ambiguous version without having to re-parse the file or catch a
+# warning.
+dta_template_version_is_exact <- function(version) {
+  !is.null(version) && length(version) > 0 && is.character(version[[1]])
+}
+
 # The DTAMetaData S7 property definitions, keyed by property name.
 dta_metadata_properties <- function() {
   attr(DTAtools::DTAMetaData, "properties") %||% list()
 }
 
+# Metadata fields the engine owns and a specification author must never set.
+#
+# `import_issues` records how a file was read; `template` records which template
+# produced the document. Both are written by machinery, and a template that
+# could set either could forge its own provenance -- which is exactly what the
+# rebase feature would then trust.
+dta_metadata_machine_fields <- function() {
+  c("import_issues", "template")
+}
+
 # Allowed top-level fields of DTAMetaData for template metadata payloads.
 #
 # Derived from the S7 class rather than mirrored by hand, so a new DTAMetaData
-# property cannot silently become un-settable from a template. `import_issues`
-# is excluded deliberately: it records how a file was read, not something a
-# template author writes.
+# property cannot silently become un-settable from a template. The
+# machine-owned fields (see dta_metadata_machine_fields()) are excluded
+# deliberately: they are written by machinery, not a template author.
 dta_template_metadata_fields <- function() {
-  setdiff(names(dta_metadata_properties()), "import_issues")
+  setdiff(names(dta_metadata_properties()), dta_metadata_machine_fields())
 }
 
 # Which of those fields hold a container, and so accept a nested key path.
@@ -460,8 +574,56 @@ apply_template_expressions <- function(dta) {
 }
 
 # Build a new DTA object from a creation template + selected option values.
-# `selections` is a named list keyed by option id.
-create_dta_from_template <- function(template_def, template_path, selections = list()) {
+#
+# `selections` is a named list keyed by option id (unchanged from before this
+# function grew the four arguments below).
+#
+# The four new arguments each default to exactly what reproduces the ORIGINAL
+# behaviour of this function -- every one of the 55 tests that predate them
+# calls this with none of the four set, and must keep passing unmodified:
+#
+#   index            when supplied, `datasets:` entries are built via
+#                    build_template_datasets() (template_create.R), which
+#                    additionally understands a `template:` entry (built from
+#                    a dataset template resolved through `index`) on top of
+#                    the three legacy forms. When NULL (the default), dataset
+#                    building takes the ORIGINAL inline code path below,
+#                    verbatim -- so a `template:` entry is simply unreachable
+#                    without an index, exactly as it always has been.
+#   carry_over       list(metadata = <DTAMetaData>, fields = <character>) --
+#                    an ancestor document's metadata to carry onto this one
+#                    (see apply_metadata_carry_over(), template_create.R).
+#                    NULL (default) carries nothing over.
+#   party_selections named list, slot id -> chosen party-profile id. NULL
+#                    (default) selects nothing; harmless even when the
+#                    template DOES declare `party_slots:`, since
+#                    apply_party_selections() (party_profiles.R) leaves an
+#                    unselected slot untouched.
+#   provenance       the already-built `metadata.template` record (see
+#                    template_provenance(), template_create.R) to stamp onto
+#                    the finished document. NULL (default) stamps nothing, so
+#                    a document built without one carries no @template at
+#                    all -- exactly the pre-existing behaviour, since
+#                    @template did not exist as a settable concept before this
+#                    file's own history.
+#
+# The ORDER these six steps run in is the contract, and is deliberately NOT
+# "whatever order was easiest to bolt on":
+#
+#   1. datasets   2. base.metadata   3. carry-over   4. party slots
+#   5. options    6. ${version}      7. provenance (LAST)
+#
+# Carry-over (3) runs before party slots (4) and options (5) so that a value
+# THIS document's own author actively chooses always beats whatever an
+# ancestor document happened to have -- carrying the old value over first and
+# letting the current author's choices overwrite it is what makes "the
+# current choice wins" true without a separate precedence table anywhere.
+# Provenance (7) is last because it is a RECORD of what steps 1-6 decided
+# (which dataset templates were used, which party profile was picked, which
+# options were chosen) -- it cannot be written before those decisions exist.
+create_dta_from_template <- function(template_def, template_path, selections = list(),
+                                     index = NULL, carry_over = NULL,
+                                     party_selections = NULL, provenance = NULL) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
     # ${today} is known upfront and has to be resolved BEFORE base metadata is
@@ -471,41 +633,88 @@ create_dta_from_template <- function(template_def, template_path, selections = l
     base <- resolve_template_expressions(template_def$base %||% list(), today_env)
 
     # 1) Build datasets from the template datasets section.
-    ds_refs <- template_def$datasets %||% base$datasets %||% list()
-    ds_list <- list()
-    for (i in seq_along(ds_refs)) {
-      ref <- ds_refs[[i]]
-      ds <- NULL
-
-      # accepted forms:
-      # - "gf_dataset.yaml"
-      # - { source: "gf_dataset.yaml" }
-      # - full inline dataset object (name/type/columns/...)
-      if (is.character(ref)) {
-        src <- ref
-        p <- resolve_template_dataset_path(src, template_path)
-        if (!nzchar(p)) {
-          stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
-        }
-        ds <- DTAtools::read_dataset_from_yaml(p)
-      } else if (is.list(ref) && nzchar(as.character(ref$source %||% ""))) {
-        src <- as.character(ref$source %||% "")
-        p <- resolve_template_dataset_path(src, template_path)
-        if (!nzchar(p)) {
-          stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
-        }
-        ds <- DTAtools::read_dataset_from_yaml(p)
-      } else if (is.list(ref)) {
-        tf <- tempfile(fileext = ".yaml")
-        yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
-        writeLines(yaml_txt, tf, useBytes = TRUE)
-        ds <- DTAtools::read_dataset_from_yaml(tf)
+    #
+    # A `template:` dataset entry can only be resolved through the index, so a
+    # caller that did not supply one gets it built on demand rather than an
+    # error. WHY this is not merely a convenience: the moment ANY template --
+    # including a packaged one -- imports a reusable dataset template, every
+    # existing caller that legitimately passes no index (the standalone
+    # readers, the examples, the pre-existing tests) would otherwise break.
+    # Requiring every call site to learn about the index in order for a
+    # template AUTHOR to refactor their file is the wrong coupling.
+    #
+    # A template using only the three legacy dataset forms never triggers this,
+    # so no existing caller pays for the index scan.
+    ds_refs_probe <- template_def$datasets %||% base$datasets %||% list()
+    if (is.null(index) && length(ds_refs_probe) > 0) {
+      needs_index <- any(vapply(
+        ds_refs_probe,
+        function(r) identical(template_dataset_entry_kind(r), "template"),
+        logical(1)
+      ))
+      if (needs_index) {
+        index <- dta_template_index_cached()
       }
+    }
 
-      if (is.null(ds)) {
-        stop(sprintf("Invalid dataset definition at index %s in template '%s'.", i, template_def$label %||% ""))
+    if (!is.null(index)) {
+      # New path: routes a `template:` dataset entry through the dataset-
+      # template machinery, and reproduces the three legacy forms exactly (see
+      # build_template_datasets(), template_create.R). `source_label = NULL`:
+      # create_dta_from_template() has no notion of "this document was
+      # uploaded vs. drawn from a template" the way the standalone "add a
+      # dataset from a template" UI flow will -- that label is for THAT flow
+      # to supply when it exists, not something this function can infer.
+      built <- build_template_datasets(
+        template_def, index, selections,
+        source_label = NULL, template_path = template_path
+      )
+      ds_list <- built$datasets
+      # Keep the provenance the ACTUAL build produced. Step 7 stamps this over
+      # whatever the caller precomputed, so the recorded dataset lineage and
+      # deviations can never describe a different build than the one that
+      # happened -- see the comment there.
+      built_ds_provenance <- built$provenance
+    } else {
+      # Original path, UNCHANGED: every pre-existing caller (none of which
+      # passes `index`) must keep taking exactly this code, not a
+      # reimplementation of it that merely intends to behave the same way.
+      ds_refs <- template_def$datasets %||% base$datasets %||% list()
+      ds_list <- list()
+      for (i in seq_along(ds_refs)) {
+        ref <- ds_refs[[i]]
+        ds <- NULL
+
+        # accepted forms:
+        # - "gf_dataset.yaml"
+        # - { source: "gf_dataset.yaml" }
+        # - full inline dataset object (name/type/columns/...)
+        if (is.character(ref)) {
+          src <- ref
+          p <- resolve_template_dataset_path(src, template_path)
+          if (!nzchar(p)) {
+            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
+          }
+          ds <- DTAtools::read_dataset_from_yaml(p)
+        } else if (is.list(ref) && nzchar(as.character(ref$source %||% ""))) {
+          src <- as.character(ref$source %||% "")
+          p <- resolve_template_dataset_path(src, template_path)
+          if (!nzchar(p)) {
+            stop(sprintf("Could not resolve dataset source '%s' for template '%s'.", src, template_def$label %||% ""))
+          }
+          ds <- DTAtools::read_dataset_from_yaml(p)
+        } else if (is.list(ref)) {
+          tf <- tempfile(fileext = ".yaml")
+          yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
+          writeLines(yaml_txt, tf, useBytes = TRUE)
+          ds <- DTAtools::read_dataset_from_yaml(tf)
+        }
+
+        if (is.null(ds)) {
+          stop(sprintf("Invalid dataset definition at index %s in template '%s'.", i, template_def$label %||% ""))
+        }
+        ds_list[[length(ds_list) + 1L]] <- ds
       }
-      ds_list[[length(ds_list) + 1L]] <- ds
     }
 
     dta <- DTAtools::DTA(datasets = ds_list)
@@ -530,7 +739,24 @@ create_dta_from_template <- function(template_def, template_path, selections = l
       }
     }
 
-    # 3) Apply option-driven effects.
+    # 3) Carry over metadata from an ancestor document (rebase), BEFORE party
+    # slots and options so that anything THIS creation actively decides
+    # (below) overwrites whatever the ancestor had, never the other way round.
+    if (!is.null(carry_over)) {
+      dta <- apply_metadata_carry_over(dta, carry_over$metadata, carry_over$fields)
+    }
+
+    # 4) Party slots: a profile chosen FOR THIS document overrides whatever
+    # carry-over (3) just wrote to the same target, for the identical reason
+    # options (5) are applied after this -- the current author's active choice
+    # always wins over an inherited one.
+    party_slots <- normalise_party_slots(template_def$party_slots)
+    if (length(party_slots) > 0) {
+      party_profiles <- if (!is.null(index)) template_party_profiles(index) else list()
+      dta <- apply_party_selections(dta, party_slots, party_selections %||% list(), party_profiles)
+    }
+
+    # 5) Apply option-driven effects.
     opts <- resolve_template_expressions(
       template_def$options %||% list(),
       today_env
@@ -566,8 +792,38 @@ create_dta_from_template <- function(template_def, template_path, selections = l
       }
     }
 
-    # 4) Resolve ${version} now that the options have settled what it is.
+    # 6) Resolve ${version} now that the options have settled what it is.
     dta <- apply_template_expressions(dta)
+
+    # 7) Provenance, LAST: it records what steps 1-6 decided, so it cannot be
+    # written before they run. Assigned directly onto the property, NOT
+    # through apply_template_metadata_path() -- that function validates
+    # against dta_template_metadata_fields(), which deliberately EXCLUDES
+    # `template` (dta_metadata_machine_fields(), above): that gate exists
+    # precisely so a template AUTHOR can never set this field from
+    # `base.metadata` or an option effect, and routing the ENGINE's own write
+    # through the same gate would defeat the very check it exists to enforce.
+    if (!is.null(provenance)) {
+      # The caller assembles the provenance record BEFORE calling this
+      # function, which means its `datasets` section was computed from a
+      # separate build. Overwrite it with what step 1 actually produced.
+      #
+      # WHY this matters more than the duplicated work it papers over: the
+      # rebase feature reconstructs a document's ancestor from this record. A
+      # provenance block describing datasets that were never built is worse
+      # than no provenance at all, because rebase would trust it and merge
+      # against the wrong ancestor. Making the stamp read from the real build
+      # means the two cannot disagree even if a caller passes a stale record.
+      if (exists("built_ds_provenance", inherits = FALSE)) {
+        provenance$datasets <- built_ds_provenance
+        if (length(provenance$datasets) == 0) {
+          provenance$datasets <- NULL
+        }
+      }
+      md <- DTAtools::metadata(dta)
+      S7::prop(md, "template") <- provenance
+      dta@metadata <- md
+    }
 
     dta
   })

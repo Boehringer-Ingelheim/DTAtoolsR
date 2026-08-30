@@ -1,0 +1,31 @@
+kind: dta_creation_template
+id: biomarker_gf_acme
+label: Biomarker GF DTS (ACME Labs)
+version: "1.0"
+extends: biomarker_gf@1.0
+description: >-
+  ACME Labs supplier deviation of biomarker_gf: names ACME as the vendor,
+  clarifies GFNAM for ACME, and adds ACME's own internal sample identifier
+  column. Everything else -- base metadata, the other 11 options, the party
+  slots -- is inherited unchanged from the parent.
+
+options:
+  - id: header
+    default: ACME Labs
+
+datasets:
+  - template: gf_smrnaseq@3.0
+    as: gf_data_specs_pattern
+    options:
+      vendor_name: ACME Labs
+    patch:
+      modify_columns:
+        - id: GFNAM
+          description: Name of the ACME sequencing facility supplying the results.
+      add_columns:
+        - id: ACMEID
+          label: ACME internal identifier
+          type: SAS Char
+          format: SAS $20.
+          nullable: Yes
+          description: ACME's internal sample identifier, for query resolution.
