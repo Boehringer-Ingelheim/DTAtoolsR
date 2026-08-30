@@ -413,6 +413,82 @@ test_that("a coherent template:/patch: dataset entry does not fire patch_incoher
   expect_no_code_row(result, "instantiate_failed")
 })
 
+# ---- dataset_missing: def$dataset / def$datasets partial-matching guard ----
+
+test_that("dataset_missing fires, as an error, when a dta_dataset_template carries 'datasets:' instead of 'dataset:'", {
+  # PINNED BUG: .dta_template_check_dataset_tpl() used to read def$dataset,
+  # and R's `$` on a list falls back to partial matching. 'dataset' is a
+  # strict prefix of 'datasets' -- a DIFFERENT, equally legitimate top-level
+  # key (a dta_creation_template's own datasets: array) -- so a
+  # dta_dataset_template file that was slipped a 'datasets:' array instead
+  # (the obvious mistake when converting one kind of template into the other)
+  # had def$dataset silently return that array, and every check downstream
+  # walked it as if it were the real dataset body: zero issues reported for a
+  # file with no usable dataset at all. Fixed by reading def[["dataset"]],
+  # which matches exactly, and reporting the absence explicitly.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: slipped",
+      "version: \"1.0\"",
+      "datasets:",
+      "  - name: one",
+      "    type: tabular",
+      "    files:",
+      "      filename: one.tsv",
+      "    columns:",
+      "      - id: C1",
+      "        type: SAS Char"
+    ),
+    file.path(dir, "slipped.dta-dataset-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "dataset_missing", "error")
+  # The specific hint distinguishing "absent entirely" from "the sibling
+  # plural key was used instead" -- the exact, actionable diagnosis for the
+  # mistake this test pins.
+  expect_match(rows$message, "datasets:", fixed = TRUE)
+})
+
+test_that("a well-formed dta_dataset_template with a proper 'dataset:' body validates clean", {
+  # The positive control for the guard above: dataset_missing must not fire
+  # (or anything else) for a template that correctly uses the singular key,
+  # so the new check cannot be satisfied by rejecting every dataset template.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: has_dataset_body",
+      "version: \"1.0\"",
+      "dataset:",
+      "  name: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: COL1, type: SAS Char}"
+    ),
+    file.path(dir, "has_dataset_body.dta-dataset-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("a dta_creation_template's own 'datasets:' key is correct and must not trip dataset_missing", {
+  # The guard against over-firing: 'datasets:' (plural) is the CORRECT,
+  # documented key for a dta_creation_template -- dataset_missing is scoped to
+  # dta_dataset_template's .dta_template_check_dataset_tpl() only, and must
+  # never fire for the kind where 'datasets:' genuinely belongs.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "dataset_missing")
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
 # ---- party_slot_invalid ------------------------------------------------------
 
 test_that("party_slot_invalid fires for a slot target that is not metadata.supplier/receiver", {
