@@ -382,7 +382,19 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # .template_provenance_is_empty()), so a document built from a plain local
 # "dir:" source -- no lineage, no dataset-template entries, no ancestor -- gets
 # a clean, minimal provenance block instead of a wall of NA/empty keys.
-template_provenance <- function(def, meta, selections, lineage = character(0),
+# `lineage` defaults to whatever `meta` already carries, rather than to
+# character(0).
+#
+# `meta` is load_template_definition()'s own return value, which resolves the
+# `extends:` chain and reports it as `$lineage` -- so the right answer is
+# already sitting in the argument next door. Defaulting to character(0) meant a
+# caller who simply forgot the argument silently produced provenance with NO
+# inheritance trail, and nothing downstream could tell that apart from a
+# template that genuinely extends nothing. An explicit `lineage =` still wins,
+# which is what rebase_plan() relies on to keep a document's OWN trail rather
+# than adopting the target template's.
+template_provenance <- function(def, meta, selections,
+                                lineage = meta$lineage %||% character(0),
                                 ds_provenance = list(), carried_over_from = NULL) {
   full <- list(
     id = as.character(meta$id %||% def$id %||% ""),

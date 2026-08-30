@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A deviation template can follow the standard it deviates from.**
+  `extends: biomarker_gf@latest` (or a bare `extends: biomarker_gf`) resolves
+  to the newest version of the parent, so publishing a new release of a
+  standard no longer means editing every supplier's deviation file to pick it
+  up. Finished documents do not drift: creation resolves `@latest` once and
+  records the concrete version in `metadata.template`, so a specification stays
+  pinned to what it was actually built from and still rebases against the right
+  ancestor. The shipped `biomarker_gf_acme` example now uses it, while keeping
+  its `datasets:` import pinned — a `patch:` names specific columns and is only
+  known to be coherent against a dataset template it has been checked against.
+
 - **Private templates: the Shiny app's "Create new from template" family can
   now live outside the package entirely.** `DTATOOLS_TEMPLATE_SOURCES`
   (`"[name=]scheme:locator[#ref]; ..."`) points the picker at one or more

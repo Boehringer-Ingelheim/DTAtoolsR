@@ -398,6 +398,51 @@ Every template — creation, dataset, or party profile — declares its own
 "biomarker_gf@latest" # same as above, written explicitly
 ```
 
+### Pinning versus following
+
+A deviation template usually wants to **follow** the standard it deviates from,
+so that publishing a new version of the standard does not mean editing every
+supplier's file to pick it up. Write `extends: biomarker_gf@latest`, and the
+shipped `biomarker_gf_acme.dta-template.yaml` does exactly that:
+
+```yaml
+# follows the current standard; no edit needed when biomarker_gf is republished
+extends: biomarker_gf@latest
+```
+
+This does **not** make finished documents drift. Creation resolves `@latest`
+once and records the concrete version it chose in `metadata.template`, so a
+specification that was built from `biomarker_gf@1.0` still says so after `1.1`
+is published, and rebasing it later still reconstructs the right ancestor. Only
+*new* documents follow the parent forward.
+
+Pin an exact version instead when a deviation has been agreed against one
+specific release of the standard and must not move until it is re-agreed:
+
+```yaml
+extends: biomarker_gf@1.0
+```
+
+The same choice applies to a `datasets:` import. There the default leans the
+other way: a `patch:` names specific columns, so it is only known to be
+coherent against a dataset template whose column set it has actually been
+checked against. The shipped ACME example therefore follows the *document*
+standard with `@latest` but pins the *dataset* template it patches:
+
+```yaml
+datasets:
+  - template: gf_smrnaseq@3.0     # pinned: the patch below names its columns
+    as: gf_data_specs_pattern
+    patch:
+      add_columns:
+        - { id: ACMEID, label: ACME internal identifier, type: SAS Char }
+```
+
+Whichever you choose, `validate_template()` is the safety net: its dry-run
+instantiation builds every non-abstract template, so a deviation that
+`@latest` has quietly carried onto an incompatible parent fails your private
+repository's CI rather than surfacing when someone creates a document.
+
 **Always quote the version:** `version: "1.0"`, never `version: 1.0`. YAML
 parses an unquoted `1.10` as the number 1.1 — the trailing zero that
 distinguishes "one point ten" from "one point one" simply does not survive an
