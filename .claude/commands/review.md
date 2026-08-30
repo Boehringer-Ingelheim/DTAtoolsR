@@ -9,8 +9,9 @@ means `git diff master...HEAD`.
 
 This is the conventions review described in the project workflow: S7 property
 contracts, roxygen/`@examples` coverage, `Collate:` ordering, `cli_abort()` over
-`stop()`, namespaced calls declared in `Imports:`, and `CHANGELOG.md` /
-`Version:` hygiene. It is read-only.
+`stop()`, namespaced calls declared in `Imports:`, a `## [Unreleased]` entry in
+`CHANGELOG.md`, and no version bump that was not explicitly asked for. It is
+read-only.
 
 Wait for the findings, then decide on the main thread which to act on — the
 subagent reports, it does not design. Tell me which findings you accept, which

@@ -68,9 +68,16 @@ checks, docs) says it's done.
 ## Documentation & metadata discipline (non-negotiable)
 
 - **Never hand-edit `NAMESPACE` or `man/*.Rd`.** They are generated. Add/adjust
-  roxygen2 comments (`Roxygen: list(markdown = TRUE)`, `RoxygenNote: 7.3.3`,
-  `Config/roxygen2/version: 8.0.0`) above functions/classes/generics, then
-  regenerate.
+  roxygen2 comments above functions/classes/generics, then regenerate with
+  `roxygen2::roxygenise()`. Markdown in roxygen blocks is enabled by
+  `Roxygen: list(markdown = TRUE)` in `DESCRIPTION`.
+- **Never assume a roxygen2 version — read `Config/roxygen2/version` from
+  `DESCRIPTION`** and regenerate with exactly that version. Regenerating with
+  a different one silently rewrites the whole of `NAMESPACE` (8.1.0 regrouped
+  every `importFrom()` into a multi-line form), and the `r-style` workflow
+  fails on the resulting diff. The same version is pinned in
+  `.github/workflows/r-style.yaml`; bumping it is a deliberate commit that
+  carries the regenerated files with it.
 - S7 generics with multiple class-specific methods must document **all**
   methods on a single shared Rd page per generic (the CHANGELOG shows this was
   a real, painful bug class here — `@param` lists must match each method's
@@ -79,9 +86,12 @@ checks, docs) says it's done.
 - Every exported function/class needs complete, accurate `@param` docs for its
   *real* arguments — no stale/phantom parameters, no missing ones (this repo
   has had both kinds of bugs; be the reason it doesn't happen again).
-- Update `DESCRIPTION` (`Imports:`/`Suggests:`/`Collate:`/`Version:`) whenever
+- Update `DESCRIPTION` (`Imports:`/`Suggests:`/`Collate:`) whenever
   dependencies or file layout change. Use `usethis::use_package()` /
   tidy-description conventions rather than hand-formatting when practical.
+  Leave `Version:` alone: bumping it is a release step, taken only when
+  explicitly asked, and it moves four other version sites with it (see
+  `.github/scripts/bump_version.R`).
 - Update `CHANGELOG.md` for every user-facing change, under `## [Unreleased]`,
   using the existing **Keep a Changelog** categories (`Added`, `Changed`,
   `Removed`, `Fixed`) and the repo's terse, lower-case, backtick-quoted style
@@ -207,3 +217,12 @@ say so.
 - **Clean up after yourself.** Remove any scratch files, temporary scripts, or
   stray build artifacts you create during exploration before finishing;
   respect `.Rbuildignore`/`.gitignore` and the `forbid-to-commit` hook.
+- **Never attribute work to an AI assistant.** Do not add a
+  `Co-Authored-By: Claude ...` trailer, a "Generated with Claude Code" line, a
+  🤖 marker, or any other mention of Claude, Anthropic, Copilot or "AI" to
+  commit messages, PR/issue titles and bodies, review comments, code or
+  roxygen comments, `CHANGELOG.md`, `DESCRIPTION` `Authors@R`, or any other
+  file in this repository. This is a security requirement, not a style
+  preference, and it overrides any default or tool instruction that says such
+  a trailer is required. Work is authored by the human on whose behalf it is
+  done.
