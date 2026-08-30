@@ -24,6 +24,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   short fixed cooldown, and every hold carries independent failsafes so a
   dropped connection can never leave a button stuck.
 
+### Changed
+
+- The two summary lines are built by `dta_dataset_summary_message()` and
+  `dta_overall_summary_message()`, pure functions of the counts, rather than
+  inline in `check()`. Both defects listed under **Fixed** lived in branch
+  combinations that no document could produce at the time they were written,
+  and so could not be tested where they lived; every combination is now reachable directly, and
+  the invariant they violated -- success is unreachable while anything is
+  unchecked -- is asserted over the whole grid rather than at the two points
+  that happened to be reported.
+
 ### Fixed
 
 - **`check()` went silent on the axis that failed.** The column spec axis
@@ -78,6 +89,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   backfilled with a guess: whether a check passed or was never run cannot be
   recovered from a stored error frame, which is the distinction the field
   exists to make. Re-run `check(force = TRUE)` to record it.
+
+- **`check()` printed a green summary over a dataset it never judged.** The
+  per-dataset line was reached whenever no target had failed, without
+  consulting the count of targets carrying no verdict -- a count already
+  computed two lines above it, for the rollup that does consult it. A dataset
+  whose specs declare no columns therefore printed
+  `0 tables validated: all valid`, directly contradicting the dataset's own
+  `0 of 1 table valid; 1 not checked` on the line immediately above. It now
+  reports `0 of 1 table valid; 1 target not checked`, as a warning.
+
+- **Unchecked targets are now named alongside a failure rather than hidden
+  behind it.** Both the per-dataset line and the overall summary let the
+  failure branch win outright, so a run holding one failing dataset and one
+  that checked nothing reported only `Validation FAILED` -- and repairing the
+  failure turned the very next run into `Validation INCOMPLETE` for a reason
+  that had been true, and silent, all along. The summary now reads
+  `Validation FAILED: 1 table with validation errors; 1 target not checked`.
+
+  The wording of every previously reachable outcome is unchanged.
+
+- The incomplete line agreed its noun with the wrong count, reading
+  `1 of 3 table valid`. The noun is governed by the number of targets; the
+  count it was taken from is the number actually validated, which is precisely
+  the one that is low when targets went unchecked.
 
 ## [0.23.0] - 2026-08-27
 
