@@ -270,7 +270,25 @@ dta_resolve_stream_mode <- function(
 #' @return Depends on the method implementation.
 #' @name check
 #' @export
-if (!exists("check", mode = "function")) {
+# `inherits = FALSE` is load-bearing, not tidiness.
+#
+# Without it, exists() searches the whole SEARCH PATH, not just this package.
+# Attach any package exporting a plain function called `check` -- devtools does
+# -- and this guard finds THAT, decides the generic already exists, and creates
+# nothing. Every later `method(check, <class>) <- ...` then tries to register a
+# method on devtools::check and fails with:
+#
+#   `generic` is a function, but not an S3 generic function:
+#   function (pkg = ".", document = NULL, build_args = NULL, ...)
+#
+# which is how `devtools::load_all()` came to fail while
+# `pkgload::load_all()` in a clean session succeeded: the two differ only in
+# whether devtools is on the search path.
+#
+# Scoped to this namespace, the guard asks the question it actually means --
+# "has this package already defined check?" -- which is answered correctly
+# whatever else happens to be attached.
+if (!exists("check", mode = "function", inherits = FALSE)) {
   check <- S7::new_generic("check", "x")
 }
 
