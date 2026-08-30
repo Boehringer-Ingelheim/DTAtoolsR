@@ -1,0 +1,61 @@
+// -----------------------------------------------------------------------------
+// CI for a PRIVATE DTAtools template repository -- Jenkins declarative
+// pipeline.
+//
+// This is the one to use for Bitbucket SERVER / DATA CENTER (or any other
+// Bitbucket deployment with no Pipelines feature) -- see the
+// bitbucket-pipelines.yml shipped alongside this file for Bitbucket CLOUD
+// instead. This repository's own production is Bitbucket Data Center, so
+// this Jenkinsfile is the one that actually mirrors what runs there; see the
+// GitHub Actions workflow for the CI running against the GitHub-hosted
+// mirror.
+//
+// Copy this file to `Jenkinsfile` at the root of the repository that holds
+// your own `*.dta-template.yaml` / `*.dta-dataset-template.yaml` /
+// `*.dta-party.yaml` files.
+//
+// Unlike a GitHub Actions workflow, this file has no `on:` block -- Jenkins
+// does not read triggers from a Jenkinsfile. On Bitbucket Data Center, the
+// trigger is configured on the Jenkins job itself (the Bitbucket Server
+// webhook, or a Multibranch Pipeline scanning Bitbucket Server via the
+// Bitbucket Server Source plugin); a reader coming from GitHub Actions will
+// look for an `on:` block here and not find one.
+// -----------------------------------------------------------------------------
+
+pipeline {
+    // Runs inside a container with R already present, so the Jenkins host
+    // itself needs nothing but Docker. An organisation with a hardened build
+    // image should swap this `image` for their own rather than pulling from
+    // Docker Hub on every run.
+    agent {
+        docker { image 'rocker/r-ver:4.4' }
+    }
+
+    stages {
+        stage('Install dependencies') {
+            steps {
+                sh 'Rscript -e \'install.packages(c("yaml", "cli"))\'' // skip if already baked into the image
+
+                /* -----------------------------------------------------------
+                 * PLACEHOLDER: install DTAtools from your internal package
+                 * repository. This is deliberately NOT filled in -- the
+                 * source (an internal Artifactory/RSPM mirror, a Bitbucket
+                 * Data Center remote via remotes::install_git(), or a
+                 * pre-built package baked into a custom build image) is
+                 * specific to your organisation. Replace the line below with
+                 * whichever of those applies. A couple of common shapes:
+                 *
+                 *   Rscript -e 'remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
+                 *   Rscript -e 'install.packages("DTAtools", repos = "https://internal-rspm.example.com")'
+                 * ----------------------------------------------------------- */
+                sh 'Rscript -e \'stop("Replace this step with an install of DTAtools from your internal package repository.")\''
+            }
+        }
+
+        stage('Validate templates') {
+            steps {
+                sh 'Rscript -e \'DTAtools::validate_template(".", strict = TRUE)\''
+            }
+        }
+    }
+}

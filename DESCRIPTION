@@ -91,6 +91,7 @@ Collate:
     'arrowCompute.R'
     'benchmarking.R'
     'columnSpecChecks.R'
+    'createTemplateRepo.R'
     'documentBuilders.R'
     'evaluateRules.R'
     'exportDocuments.R'

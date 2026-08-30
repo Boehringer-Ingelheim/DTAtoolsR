@@ -792,6 +792,29 @@ test_that("values_and_values_from warns when one literal column authors both", {
   expect_code_row(result, "values_and_values_from", "warning")
 })
 
+# ---- values_and_values_from: partial-matching regression guard -------------
+
+test_that("a column authoring only values_from: produces no values_and_values_from row", {
+  # PINNED BUG: the check used to read col$values, and R's `$` on a list
+  # falls back to partial matching -- so on a column that authored ONLY
+  # `values_from:`, col$values returned that same value instead of NULL, and
+  # this fired for every column using a binding correctly (6 times on this
+  # package's own shipped templates). Fixed by reading col[["values"]], which
+  # matches exactly. Written alongside the positive case above so a
+  # regression that deleted the check entirely -- not just broke its
+  # accessor -- would also be caught.
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from: visit@1.0"
+  ))
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "values_and_values_from")
+})
+
 test_that("values_from_invalid fires for a malformed binding", {
   dir <- withr::local_tempdir()
   write_vocab_file(dir)
@@ -805,6 +828,113 @@ test_that("values_from_invalid fires for a malformed binding", {
 
   result <- validate_template(dir)
   expect_code_row(result, "values_from_invalid", "error")
+})
+
+# ---- no_templates -------------------------------------------------------------
+
+test_that("no_templates fires for an empty directory, naming the suffixes and the non-recursive scan", {
+  dir <- withr::local_tempdir()
+
+  result <- validate_template(dir)
+
+  # Exactly one row: an empty directory has nothing else to report on.
+  expect_equal(nrow(result), 1)
+  rows <- expect_code_row(result, "no_templates", "error")
+  expect_match(rows$message, "dta-template.yaml", fixed = TRUE)
+  expect_match(rows$message, "dta-dataset-template.yaml", fixed = TRUE)
+  expect_match(rows$message, "dta-party.yaml", fixed = TRUE)
+  expect_match(rows$message, "dta-vocabulary.yaml", fixed = TRUE)
+  expect_match(rows$message, "non-recursively", fixed = TRUE)
+})
+
+test_that("strict = TRUE aborts on an empty directory instead of passing silently", {
+  # The regression guard for the CI false-negative no_templates exists to
+  # catch: before this check existed, a directory that scanned to zero rows
+  # sailed through strict = TRUE, so a CI job pointed at a typo'd or stale
+  # path went green having validated nothing.
+  dir <- withr::local_tempdir()
+  expect_error(validate_template(dir, strict = TRUE), class = "rlang_error")
+})
+
+test_that("no_templates does not fire when path names a single file", {
+  # A single explicitly named file is never "empty" by definition.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+
+  result <- validate_template(file.path(dir, "clean.dta-template.yaml"))
+  expect_no_code_row(result, "no_templates")
+})
+
+test_that("no_templates does not fire when kinds filters out every file present", {
+  # no_templates is about what is IN the directory, not what was SELECTED for
+  # reporting -- a directory holding only vocabularies, validated with
+  # kinds = "dta_creation_template", has nothing to REPORT, not nothing IN IT.
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+
+  result <- validate_template(dir, kinds = "dta_creation_template")
+  expect_no_code_row(result, "no_templates")
+})
+
+# ---- template_in_subdirectory --------------------------------------------------
+
+test_that("template_in_subdirectory fires, as a warning, for a template kept one level down", {
+  dir <- withr::local_tempdir()
+  sub <- file.path(dir, "by-study")
+  dir.create(sub)
+  write_clean_template(sub, filename = "nested.dta-template.yaml", id = "nested_tpl")
+
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "template_in_subdirectory", "warning")
+  expect_match(rows$file, "nested.dta-template.yaml", fixed = TRUE)
+})
+
+test_that("strict = TRUE stays silent when the only OTHER issue is a nested template", {
+  # A directory holding ONLY a nested template also trips no_templates (its
+  # top-level scan is empty), so this needs a valid top-level template too --
+  # otherwise it would not be testing template_in_subdirectory "alone".
+  # template_in_subdirectory itself must not turn CI red on its own: keeping
+  # an archived or work-in-progress file below the root is a legitimate
+  # choice.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
+  sub <- file.path(dir, "by-study")
+  dir.create(sub)
+  write_clean_template(sub, filename = "nested.dta-template.yaml", id = "nested_tpl")
+
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("a top-level template alongside a nested one is validated normally, the nested one is reported, and no_templates does not fire", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
+  sub <- file.path(dir, "archive")
+  dir.create(sub)
+  write_clean_template(sub, filename = "old.dta-template.yaml", id = "old_tpl")
+
+  result <- validate_template(dir)
+
+  expect_code_row(result, "template_in_subdirectory", "warning")
+  expect_no_code_row(result, "no_templates")
+  # The top-level file's own row set stays empty -- it is a fully valid
+  # template, so anything else reported against it would be a false positive.
+  top_rows <- result[result$file == file.path(dir, "top.dta-template.yaml"), , drop = FALSE]
+  expect_equal(nrow(top_rows), 0)
+})
+
+test_that("files under a dot-directory are not reported as nested templates", {
+  # A cloned repository's .git/ (or an IDE's .Rproj.user/) must not produce
+  # noise just because it happens to contain something matching a template
+  # filename suffix.
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, filename = "top.dta-template.yaml", id = "top_tpl")
+  dotdir <- file.path(dir, ".git", "refs")
+  dir.create(dotdir, recursive = TRUE)
+  write_clean_template(dotdir, filename = "phantom.dta-template.yaml", id = "phantom_tpl")
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "template_in_subdirectory")
+  expect_false(any(grepl("phantom", result$file, fixed = TRUE)))
 })
 
 # ---- Regression guard: the bundled templates -------------------------------

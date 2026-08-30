@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A new private template repository is now one function call, not a
+  newcomer reverse-engineering the four file kinds from the vignette.**
+  `create_template_repo(path)` creates `path` and writes a small,
+  cross-referencing worked example of all four template kinds (a creation
+  template, a dataset template, a party profile, a controlled vocabulary)
+  plus a `README.md` explaining them and a `.gitignore` — and, by default, a
+  ready-to-run `.github/workflows/validate-templates.yml` that lints the
+  repository on every push and pull request. `ci` now also accepts
+  `"bitbucket"` and `"jenkins"` — singly or combined as a character vector,
+  e.g. `ci = c("github", "jenkins")` — to scaffold `bitbucket-pipelines.yml`
+  and a declarative `Jenkinsfile` alongside or instead of the GitHub
+  workflow. The Jenkins option matters on its own: Bitbucket Pipelines only
+  exists on Bitbucket **Cloud**, so a **Server / Data Center** deployment —
+  this project's own production — has nothing to run
+  `bitbucket-pipelines.yml` at all, and the `Jenkinsfile` is what actually
+  works there instead. The result already passes
+  `validate_template(path, strict = TRUE)` with zero issues, unmodified, so
+  it is a starting point to edit rather than a stub to fill in from nothing.
+  `examples = FALSE` gives the bare scaffold with no template files;
+  `overwrite = FALSE` (the default) refuses to touch a directory where any
+  target file already exists, and writes nothing at all rather than leave a
+  repository half-written from two different calls whose halves a caller
+  cannot tell apart.
+
 - **Editing a loaded specification now starts by cutting a new version.** A DTA
   opened from an existing file — an upload, a bundled example, or a restored
   session — arrives read-only, and where the Edit-mode switch normally sits the
@@ -153,6 +177,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   dropped connection can never leave a button stuck.
 
 ### Fixed
+
+- **A private template repository's CI can no longer go green having
+  validated nothing.** An otherwise-empty directory used to report zero
+  issues and pass `validate_template(path, strict = TRUE)` silently — a
+  workflow pointed at the wrong path (a typo, a stale working directory, a
+  checkout that put the templates one level down) went green without ever
+  checking a single file. `strict = TRUE` now fails on such a directory: a
+  new `no_templates` error names exactly where it looked and found nothing.
+
+- **A template kept below the top level of its repository is now flagged
+  instead of silently ignored.** Both `validate_template()`'s directory scan
+  and the Shiny app's own template loader are non-recursive, so a file placed
+  in a subdirectory was invisible to both — not an error, not a warning,
+  simply never found. `validate_template()` now walks the directory a second
+  time to catch exactly that, reporting each such file as
+  `template_in_subdirectory` (a warning, since keeping an archived or
+  work-in-progress file below the root is a legitimate choice).
+
+- **A column that only ever set `values_from:` was wrongly reported as also
+  setting `values:`.** The `values_and_values_from` check read a column's
+  `values` field with `col$values`, and R's `$` on a list falls back to
+  partial-name matching — for a column with no literal `values:` of its own,
+  that silently returned the `values_from` value the check already knew was
+  present, so it fired on every column that used a vocabulary binding
+  correctly. It fired six times against the package's own shipped example
+  templates; with the fix (`col[["values"]]`, which matches only the exact
+  name), those now validate with zero issues.
 
 - **Zero-padded and Y/N term codes are no longer silently destroyed by the
   YAML parser.** Vocabulary files are read with a wider set of scalar handlers

@@ -167,6 +167,44 @@
   sort(unique(files), method = "radix")
 }
 
+# Recursive counterpart to .dta_template_list_dir(), used ONLY to find files a
+# non-recursive scan misses (.dta_template_check_nested(), below) -- never for
+# anything that resolves a cross-file reference, where "the directory being
+# validated is flat" is the documented contract.
+#
+# Same per-kind patterns as the non-recursive scan, so the two listings stay
+# comparable by exact path, but with `recursive = TRUE` and a filter dropping
+# any hit under a dot-led directory component (`.git`, `renv`, `.Rproj.user`,
+# or any other dotfile-style directory a clone or an IDE leaves behind) --
+# none of those ever holds an authored template, and `.git` in particular can
+# be large enough that walking it on every call would be a real cost for no
+# benefit.
+.dta_template_list_nested <- function(dir, kinds) {
+  hits <- lapply(kinds, function(k) {
+    pat <- .dta_template_engine_get("dta_template_kind_pattern")(k)
+    rel <- list.files(dir, pattern = pat, ignore.case = TRUE, recursive = TRUE)
+    if (length(rel) == 0) {
+      return(NULL)
+    }
+    data.frame(rel = rel, kind = k, stringsAsFactors = FALSE)
+  })
+  hits <- hits[!vapply(hits, is.null, logical(1))]
+  if (length(hits) == 0) {
+    return(data.frame(file = character(0), kind = character(0), stringsAsFactors = FALSE))
+  }
+  out <- do.call(rbind, hits)
+
+  # `rel` is relative to `dir`, so its OWN directory components -- never
+  # anything above `dir` -- are what decide "is this file inside a dot
+  # directory"; a `dir` argument that itself sits below a dotfile must not
+  # disqualify every file it contains.
+  parts <- strsplit(out$rel, "[/\\]")
+  under_dotdir <- vapply(parts, function(p) any(grepl("^[.]", utils::head(p, -1L))), logical(1))
+  out <- out[!under_dotdir, , drop = FALSE]
+
+  data.frame(file = file.path(dir, out$rel), kind = out$kind, stringsAsFactors = FALSE)
+}
+
 # ---- Reading one file exactly, without engine-level normalisation ------
 
 # Parse ONE candidate file with the version-preserving handlers
@@ -764,7 +802,16 @@
     # a `values_from:` from a patch look exactly the same, and that combination
     # is legitimate. A warning, not an error, because the build is still
     # deterministic (the binding wins).
-    if (!is.null(col$values)) {
+    #
+    # `col[["values"]]`, NOT `col$values`: `$` on a list falls back to PARTIAL
+    # matching, so `col$values` returns the `values_from` this branch has
+    # already established is present whenever no literal `values:` was
+    # authored. That made this warning fire for every column that used a
+    # vocabulary binding correctly -- six times on this package's own shipped
+    # templates, telling the author they had written something they had not.
+    # `[[` matches exactly and is the only safe accessor for a name that is a
+    # prefix of a sibling.
+    if (!is.null(col[["values"]])) {
       add(
         "warning", "values_and_values_from",
         sprintf("column '%s' sets both 'values' and 'values_from'; the binding wins and 'values' is ignored.", col_id)
@@ -967,6 +1014,74 @@
   .dta_template_bind_rows(rows)
 }
 
+# ---- Cross-file: directory scanned has no template files at all ----------
+
+# Fires only when `path` is a DIRECTORY: a single explicitly named file is
+# never "empty" by definition. Checked against ALL_FILES (every kind), not
+# the `kinds`-filtered report_files -- a directory holding only vocabularies,
+# validated with kinds = "dta_creation_template", has nothing to REPORT, not
+# nothing IN IT, and must not trip this.
+#
+# Severity "error", not "warning": inst/extdata/templates/validate-
+# templates.yml's whole CI job is `validate_template(".", strict = TRUE)`,
+# and strict = TRUE only aborts on an error row. Point that job at the wrong
+# path -- a typo, a stale working directory, a checkout that put the
+# templates one level down -- and, without this check, the job goes green
+# having validated nothing: exactly the failure a repository linter exists
+# to catch.
+.dta_template_check_no_templates <- function(path, is_dir, all_files) {
+  if (!is_dir || length(all_files) > 0) {
+    return(.dta_template_validation_empty())
+  }
+  .dta_template_bind_rows(list(.dta_template_row(
+    path, NA_character_, NA_character_, NA_character_, "error", "no_templates",
+    sprintf(
+      "No template files found in %s: looked for *.dta-template.yaml, *.dta-dataset-template.yaml, *.dta-party.yaml and *.dta-vocabulary.yaml (and their .yml spellings), non-recursively. A typo'd path, a stale working directory, and templates kept one level down in a subdirectory all look exactly like this.",
+      path
+    )
+  )))
+}
+
+# ---- Cross-file: a template kept below the scanned directory's top level -
+
+# The non-recursive scan (.dta_template_list_dir(), mirroring the app's own
+# build_template_index() in template_index.R:215-219) means a template
+# organised into a subfolder -- "by-study/", an archive -- is invisible to
+# BOTH this validator and the Shiny app's picker. That is consistent, not a
+# bug in either place, but nothing currently says so; this turns the silence
+# into one row per offending file, so an author notices before wondering why
+# a template never shows up in the app.
+#
+# Warning, not error: keeping an archived or work-in-progress file below the
+# root is a legitimate choice, and this must not turn CI red on its own.
+.dta_template_check_nested <- function(path, is_dir, all_files, all_kinds) {
+  if (!is_dir) {
+    return(.dta_template_validation_empty())
+  }
+
+  # Diffed against ALL_FILES, matching .dta_template_check_no_templates()'s
+  # own reasoning: whether a file is missed by the flat scan does not depend
+  # on which kinds the caller asked for a report row on.
+  nested <- .dta_template_list_nested(path, all_kinds)
+  nested <- nested[!(nested$file %in% all_files), , drop = FALSE]
+  if (nrow(nested) == 0) {
+    return(.dta_template_validation_empty())
+  }
+  nested <- nested[order(nested$file, method = "radix"), , drop = FALSE]
+
+  rows <- lapply(seq_len(nrow(nested)), function(i) {
+    .dta_template_row(
+      nested$file[[i]], nested$kind[[i]], NA_character_, NA_character_,
+      "warning", "template_in_subdirectory",
+      sprintf(
+        "%s is not validated (the scan is non-recursive) and the Shiny app's template loader will not see it either -- move it to the top level of the template directory.",
+        nested$file[[i]]
+      )
+    )
+  })
+  .dta_template_bind_rows(rows)
+}
+
 # ---- strict = TRUE --------------------------------------------------------
 
 .dta_template_strict_check <- function(result) {
@@ -996,15 +1111,26 @@
 #' Runs the structural checks the bundled Shiny app's "Create new from
 #' template" picker relies on -- unresolvable `extends:`, an option target
 #' that does not resolve to a real metadata field, a party slot naming a
-#' profile that does not exist, a dataset patch naming an absent column, and
-#' (as a final, comprehensive check) actually building a DTA from every
-#' non-abstract creation template with its own default selections -- WITHOUT
-#' starting the app. This lets a template repository (kept private, on
-#' Bitbucket Data Center in production and mirrored to GitHub for CI) run its
-#' own continuous integration against the templates it authors, with nothing
-#' more than an R installation of DTAtools. See
-#' `system.file("extdata", "templates", "validate-templates.yml", package =
-#' "DTAtools")` for a ready-to-copy GitHub Actions workflow.
+#' profile that does not exist, a dataset patch naming an absent column, a
+#' scanned directory with no template files in it at all, a template kept
+#' below the scanned directory's top level, and (as a final, comprehensive
+#' check) actually building a DTA from every non-abstract creation template
+#' with its own default selections -- WITHOUT starting the app. This lets a
+#' template repository (kept private, on Bitbucket Data Center in production
+#' and mirrored to GitHub for CI) run its own continuous integration against
+#' the templates it authors, with nothing more than an R installation of
+#' DTAtools. See `system.file("extdata", "templates", "validate-templates.yml",
+#' package = "DTAtools")` for a ready-to-copy GitHub Actions workflow.
+#'
+#' @details
+#' An otherwise-empty directory is reported as an `"error"` (code
+#' `"no_templates"`), not accepted silently: the packaged
+#' `validate-templates.yml` workflow's entire CI job is
+#' `validate_template(".", strict = TRUE)`, and `strict = TRUE` only aborts on
+#' an error row. Point that job at the wrong path -- a typo, a stale working
+#' directory, a checkout that put the templates one level down -- and, without
+#' this check, the job goes green having validated nothing: exactly the
+#' failure a repository linter exists to catch.
 #'
 #' @param path A single template file, or a directory. A directory is scanned
 #'   NON-RECURSIVELY for `*.dta-template.yaml`, `*.dta-dataset-template.yaml`,
@@ -1015,6 +1141,9 @@
 #'   those files get a report row of their OWN; it never changes how many
 #'   files are considered when resolving a cross-file reference (an
 #'   `extends:`, a `datasets[].template`, a party slot's profile allow-list).
+#'   A template found below the scanned directory's top level is not read at
+#'   all -- it is reported as `template_in_subdirectory` rather than silently
+#'   ignored.
 #' @param strict A single `TRUE`/`FALSE`. When `TRUE`, `validate_template()`
 #'   raises an error via [cli::cli_abort()] summarising every row of severity
 #'   `"error"` (and stays silent when there are none), instead of just
@@ -1071,8 +1200,13 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
     .dta_template_check_file(p, records[[p]], index_df, resolve_extends)
   })
   dup_rows <- .dta_template_check_duplicates(records[report_files])
+  no_templates_rows <- .dta_template_check_no_templates(path, is_dir, all_files)
+  nested_rows <- .dta_template_check_nested(path, is_dir, all_files, all_kinds)
 
-  result <- do.call(rbind, c(list(.dta_template_validation_empty()), file_rows, list(dup_rows)))
+  result <- do.call(rbind, c(
+    list(.dta_template_validation_empty()), file_rows,
+    list(dup_rows, no_templates_rows, nested_rows)
+  ))
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation
     # diverges from CI" lesson referenced in .dta_template_list_dir().
