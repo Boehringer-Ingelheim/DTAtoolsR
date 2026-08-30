@@ -43,10 +43,12 @@ Runs the structural checks the bundled Shiny app's "Create new from
 template" picker relies on -- unresolvable \verb{extends:}, an option target
 that does not resolve to a real metadata field, a party slot naming a
 profile that does not exist, a dataset patch naming an absent column, a
-scanned directory with no template files in it at all, a template kept
-below the scanned directory's top level, and (as a final, comprehensive
-check) actually building a DTA from every non-abstract creation template
-with its own default selections -- WITHOUT starting the app. This lets a
+\code{dta_dataset_template} with no \verb{dataset:} body (code \code{"dataset_missing"},
+also caught when a \verb{datasets:} array was authored instead), a scanned
+directory with no template files in it at all, a template kept below the
+scanned directory's top level, and (as a final, comprehensive check)
+actually building a DTA from every non-abstract creation template with its
+own default selections -- WITHOUT starting the app. This lets a
 template repository (kept private, on Bitbucket Data Center in production
 and mirrored to GitHub for CI) run its own continuous integration against
 the templates it authors, with nothing more than an R installation of
