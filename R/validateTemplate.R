@@ -235,13 +235,18 @@
 # tested (the instantiate dry-run, an `extends:` parent lookup).
 .dta_template_read_raw <- function(path) {
   handlers <- .dta_template_engine_get("dta_template_yaml_handlers")()
-  def <- tryCatch(yaml::read_yaml(path, handlers = handlers), error = function(e) e)
-  if (inherits(def, "error")) {
+  # Borrowed from the engine like every other read here, and for one reason
+  # beyond consistency: it muffles the connection warning a file that cannot be
+  # opened raises BEFORE the error, which tryCatch(error = ) never intercepted.
+  # A validator that returns findings must not also signal them.
+  read <- .dta_template_engine_get("dta_template_read_yaml_quiet")(path, handlers = handlers)
+  if (!read$ok) {
     return(list(
       ok = FALSE, kind = NA_character_, id = NA_character_, version = NA_character_,
-      def = NULL, error = conditionMessage(def)
+      def = NULL, error = read$error
     ))
   }
+  def <- read$value
   if (!is.list(def)) {
     return(list(
       ok = FALSE, kind = NA_character_, id = NA_character_, version = NA_character_,
@@ -273,7 +278,7 @@
 # quoted" out of the handler-preserved text, which cannot be done: the
 # handlers hand back the same string either way.
 .dta_template_version_plain_is_exact <- function(path) {
-  raw <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
+  raw <- .dta_template_engine_get("dta_template_read_yaml_quiet")(path)$value
   if (!is.list(raw)) {
     return(TRUE) # cannot tell; do not manufacture a false positive
   }

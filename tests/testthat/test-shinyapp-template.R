@@ -777,9 +777,53 @@ test_that("dta_template_read_field_exact() reads a version verbatim from the fil
   expect_identical(fn(path, "version"), "1.10")
   expect_identical(fn(path, "id"), "demo")
   # A missing field and an unreadable file are the caller's problem to report
-  # with a file name in hand, not an error thrown from inside a reader.
+  # with a file name in hand, not an error thrown from inside a reader -- and
+  # not a warning from inside one either. This assertion used to pass while the
+  # reader raised base R's connection warning on its way to returning NA:
+  # `tryCatch(error = )` does not intercept the warning channel, so a reader
+  # documented as reporting by return value signalled anyway. Asserted as the
+  # ABSENCE of a warning rather than by matching its text, which arrives in the
+  # session language.
   expect_identical(fn(path, "nope"), NA_character_)
-  expect_identical(fn(file.path(tempdir(), "no-such-file-xyz.yaml"), "version"), NA_character_)
+  expect_no_warning(
+    expect_identical(fn(file.path(tempdir(), "no-such-file-xyz.yaml"), "version"), NA_character_)
+  )
+})
+
+test_that("dta_template_read_yaml_quiet() reports failure by value, never by signal", {
+  fn <- app_fn("dta_template_read_yaml_quiet")
+
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("id: demo", "version: 1.10"), path)
+
+  ok <- fn(path)
+  expect_true(ok$ok)
+  expect_identical(ok$value$id, "demo")
+  expect_null(ok$error)
+
+  # A path that does not exist, and one that exists but is not a readable file.
+  # Both raise a connection warning before the error; neither may escape.
+  for (bad in list(file.path(tempdir(), "no-such-file-xyz.yaml"), tempdir())) {
+    res <- expect_no_warning(fn(bad))
+    expect_false(res$ok)
+    expect_null(res$value)
+    # The message is kept for the caller to report with its own file name in
+    # hand -- it is simply not signalled from here.
+    expect_true(is.character(res$error) && nzchar(res$error))
+  }
+})
+
+test_that("dta_template_read_yaml_quiet() still applies the version-preserving handlers", {
+  fn <- app_fn("dta_template_read_yaml_quiet")
+  handlers <- app_fn("dta_template_yaml_handlers")()
+
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines("version: 1.10", path)
+
+  # Muffling the warning channel must not disturb what the read produces:
+  # 1.10 is a later release than 1.9 and a plain parse collapses it to 1.1.
+  expect_identical(fn(path, handlers = handlers)$value$version, "1.10")
+  expect_identical(fn(path)$value$version, 1.1)
 })
 
 test_that("dta_template_version_string() reports a missing version as NA, not an error", {

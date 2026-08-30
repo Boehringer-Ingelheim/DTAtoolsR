@@ -1026,3 +1026,66 @@ test_that("the bundled inst/extdata/templates directory validates with no error 
   errors <- result[result$severity == "error", , drop = FALSE]
   expect_equal(nrow(errors), 0, info = paste(utils::capture.output(print(errors)), collapse = "\n"))
 })
+
+
+# ---- The readers report by value, never by signal ---------------------------
+#
+# Both helpers below are documented as reporting failure through their return
+# value: `.dta_template_read_raw()` hands the message back for the caller to
+# attach to a file name, and `.dta_template_version_plain_is_exact()` says
+# "cannot tell; do not manufacture a false positive". Each wrapped its read in
+# `tryCatch(error = )` to achieve that, which does not intercept the warning a
+# connection raises before it fails -- so a validator built to return findings
+# also emitted one, in the session language, where nothing could match on it.
+#
+# Asserted as the ABSENCE of a warning. The text itself is base R's and is
+# translated, so matching on it would pass in English and fail in German.
+
+test_that(".dta_template_read_raw() does not signal on a file it cannot open", {
+  for (bad in list(file.path(tempdir(), "no-such-template-xyz.yaml"), tempdir())) {
+    res <- expect_no_warning(.dta_template_read_raw(bad))
+
+    expect_false(res$ok)
+    expect_null(res$def)
+    # The message survives for the caller to report; it is only not signalled.
+    expect_true(is.character(res$error) && nzchar(res$error))
+  }
+})
+
+
+test_that(".dta_template_read_raw() still reads a real template unchanged", {
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "clean.dta-template.yaml")
+  write_clean_template(dir)
+
+  res <- expect_no_warning(.dta_template_read_raw(path))
+
+  expect_true(res$ok)
+  expect_identical(res$id, "clean_tpl")
+  expect_identical(res$version, "1.0")
+  expect_true(is.list(res$def))
+})
+
+
+test_that(".dta_template_version_plain_is_exact() does not signal on an unreadable file", {
+  # TRUE is the documented "cannot tell" answer, chosen so an unreadable file
+  # never manufactures a false positive.
+  expect_true(
+    expect_no_warning(
+      .dta_template_version_plain_is_exact(file.path(tempdir(), "no-such-template-xyz.yaml"))
+    )
+  )
+})
+
+
+test_that(".dta_template_version_plain_is_exact() still tells quoted from unquoted", {
+  dir <- withr::local_tempdir()
+
+  quoted <- file.path(dir, "quoted.yaml")
+  writeLines(c("kind: dta_creation_template", "id: q", 'version: "1.10"'), quoted)
+  expect_true(.dta_template_version_plain_is_exact(quoted))
+
+  unquoted <- file.path(dir, "unquoted.yaml")
+  writeLines(c("kind: dta_creation_template", "id: u", "version: 1.10"), unquoted)
+  expect_false(.dta_template_version_plain_is_exact(unquoted))
+})
