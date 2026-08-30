@@ -969,8 +969,10 @@ dta_pandoc_pdf_engine <- function() {
     "pdflatex", "xelatex", "lualatex", "tectonic",
     "wkhtmltopdf", "weasyprint", "typst", "context", "pdfroff"
   )
-  for (eng in engines) if (nzchar(Sys.which(eng))) {
-    return(eng)
+  for (eng in engines) {
+    if (nzchar(Sys.which(eng))) {
+      return(eng)
+    }
   }
   if (requireNamespace("tinytex", quietly = TRUE) &&
     isTRUE(tryCatch(tinytex::is_tinytex(), error = function(e) FALSE))) {

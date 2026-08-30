@@ -121,6 +121,22 @@ jobs:
             scope = "tokens",
             dry = "fail"
           )
+          # style_pkg() visits R/, tests/, vignettes/ and top-level .R files
+          # ONLY -- it never descends into inst/. That is where this project's
+          # entire Shiny app and template engine live: 15 files, ~17k lines,
+          # more R code than R/ itself. Without this second call all of it is
+          # permanently invisible to this check, which is exactly how an
+          # unstyled `for (eng in engines) if (...) {` survived in
+          # utils_dta.R until someone happened to run style_file() by hand.
+          # style_dir() takes the same arguments and the same tidyverse_style,
+          # so the two calls cannot drift apart in what they enforce.
+          styler::style_dir(
+            "inst",
+            style = styler::tidyverse_style,
+            scope = "tokens",
+            dry = "fail",
+            recursive = TRUE
+          )
 
       # Parity with roxygenize -- and the one that matters most: this project
       # has twice had an export silently disappear from NAMESPACE (a helper
