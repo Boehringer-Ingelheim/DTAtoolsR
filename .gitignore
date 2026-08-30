@@ -39,6 +39,14 @@ graphify-out/
 dta-templates/
 *.dta-party.yaml
 # ...except the packaged, anonymised worked examples under
-# inst/extdata/templates/, which are shipped package data, not private
-# information -- keep them trackable.
+# inst/extdata/templates/ and the starter set create_template_repo() copies
+# from inst/extdata/template-repo-skeleton/, which are shipped package data,
+# not private information -- keep them trackable.
+#
+# Forgetting the second of these is not a cosmetic mistake: the file stays on
+# disk, so pkgload::load_all() and the whole local test suite keep passing
+# while the BUILT package ships a skeleton whose creation template references
+# a party profile that is not there. That reached CI as a party_slot_invalid
+# failure on all five platforms and nothing before it.
 !inst/extdata/templates/*.dta-party.yaml
+!inst/extdata/template-repo-skeleton/*.dta-party.yaml
