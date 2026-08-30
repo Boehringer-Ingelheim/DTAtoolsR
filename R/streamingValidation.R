@@ -786,6 +786,13 @@ dta_validate_table_stream <- function(specs,
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
+  # Which constraint each violation broke, accumulated per batch rather than
+  # read off the collected frame at the end. The sink's cap spills rows past
+  # `max_errors` to disk, so a tally taken from what it kept in memory would
+  # under-report exactly on the dirty files the cap exists for -- and would then
+  # report a check as passed because its only violations were the truncated
+  # ones.
+  columnspec_tally <- dta_empty_columnspec_tally()
   # A double, not an integer. This is the number of rows already consumed, and
   # the streaming path is built for files past `.Machine$integer.max` rows. An
   # integer accumulator returns `NA` with a warning rather than erroring, and
@@ -869,6 +876,9 @@ dta_validate_table_stream <- function(specs,
     columnspec_errs <- schema_result$full_error
     if (!is.null(columnspec_errs) && nrow(columnspec_errs) > 0) {
       columnspec_errs$row <- dta_narrow_rows(columnspec_errs$row + row_offset)
+      # Tallied from the batch's whole frame, before the sink decides how much
+      # of it to keep.
+      columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, columnspec_errs)
       dta_error_sink_add(columnspec_sink, columnspec_errs)
     }
 
@@ -987,6 +997,29 @@ dta_validate_table_stream <- function(specs,
   summarised_error <- dta_summarise_columnspec_errors(full_error)
   has_columnspec_errors <- columnspec_sink$total > 0
 
+  # A check with no violations is only a pass when the scan that looked for them
+  # ran to the end over rows that existed. A `fail_fast` run stopped at the
+  # first problem and a stream that yielded no rows never evaluated a
+  # constraint; in both cases the checks that reported nothing reported nothing
+  # about the whole table, which is not the same as reporting a pass.
+  columnspec_settled <- if (partial_scan || row_offset == 0) character(0) else NULL
+  columnspec_checks <- dta_columnspec_check_summary(
+    columnspec_schemas,
+    tally = columnspec_tally,
+    settled = columnspec_settled
+  )
+
+  if (isTRUE(verbose)) {
+    dta_report_columnspec_checks(
+      columnspec_checks,
+      unchecked_reason = if (partial_scan) {
+        "the scan stopped at the first problem"
+      } else {
+        "the stream yielded no rows"
+      }
+    )
+  }
+
   rule_results <- lapply(seq_along(rules_list), function(i) {
     dta_rule_stream_finalise(states[[i]], rules_list[[i]])
   })
@@ -1057,6 +1090,7 @@ dta_validate_table_stream <- function(specs,
       summarised_error = summarised_error,
       full_error = full_error
     ),
+    columnspec_checks = columnspec_checks,
     rule_results = rule_results,
     rule_errors = rule_errors,
     import_errors = import_errors,
@@ -1936,7 +1970,21 @@ dta_validate_any_table <- function(specs,
             "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the table."
           )
         }
-        return(dta_structural_failure_details(findings))
+        structural <- dta_structural_failure_details(
+          findings,
+          schemas = dta_compile_columnspec_schemas(specs)
+        )
+        # The same per-check report the scan paths print. Presence was decided
+        # from the header; the other checks were not reached, and saying so is
+        # the point -- otherwise this early return is the one exit that leaves a
+        # reader guessing what was and was not examined.
+        if (isTRUE(verbose)) {
+          dta_report_columnspec_checks(
+            structural$columnspec_checks,
+            unchecked_reason = "the table was not read"
+          )
+        }
+        return(structural)
       }
     }
   }
@@ -2408,7 +2456,16 @@ validate_file_stream <- function(specs,
         "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the file."
       )
     }
-    structural_details <- dta_structural_failure_details(findings)
+    structural_details <- dta_structural_failure_details(
+      findings,
+      schemas = dta_compile_columnspec_schemas(specs)
+    )
+    if (isTRUE(verbose)) {
+      dta_report_columnspec_checks(
+        structural_details$columnspec_checks,
+        unchecked_reason = "the file was not read"
+      )
+    }
     # No rows were read for a structural early return -- 0 is accurate here,
     # not a stand-in for "unknown".
     attr(structural_details, "n_rows_scanned") <- 0
@@ -2491,9 +2548,14 @@ validate_file_stream <- function(specs,
 #' evaluated -- there is no table to evaluate them against, and claiming a
 #' failure would be as wrong as claiming a pass.
 #' @param findings A list from `dta_structure_findings()`.
+#' @param schemas Compiled schemas, from `dta_compile_columnspec_schemas()`, or
+#'   `NULL`. Only the per-check summary reads them: presence was decided from
+#'   the header, so it reports a verdict, while every other check reports
+#'   `not_checked` rather than borrowing the presence failure or claiming a pass
+#'   over rows that were never read.
 #' @return A validation details list.
 #' @keywords internal
-dta_structural_failure_details <- function(findings) {
+dta_structural_failure_details <- function(findings, schemas = NULL) {
   full_error <- dta_structure_errors(findings)
 
   details <- list(
@@ -2511,6 +2573,11 @@ dta_structural_failure_details <- function(findings) {
       # returns too.
       summarised_error = dta_summarise_columnspec_errors(full_error),
       full_error = full_error
+    ),
+    columnspec_checks = dta_columnspec_check_summary(
+      schemas,
+      tally = dta_columnspec_error_tally(full_error),
+      settled = "required"
     ),
     rule_results = list(),
     rule_errors = list(),

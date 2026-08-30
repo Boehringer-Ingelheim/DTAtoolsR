@@ -377,8 +377,8 @@ test_that("the streamed details object satisfies the published contract", {
     c(
       "ok", "columnspec_valid", "rules_valid", "import_valid",
       "n_columnspec_errors", "n_rule_errors", "n_import_errors",
-      "columnspec_errors", "rule_results", "rule_errors", "import_errors",
-      "result_version"
+      "columnspec_errors", "columnspec_checks", "rule_results", "rule_errors",
+      "import_errors", "result_version"
     )
   )
   expect_named(streamed$columnspec_errors, c("summarised_error", "full_error"))
