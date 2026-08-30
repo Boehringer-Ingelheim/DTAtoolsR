@@ -8,8 +8,9 @@ validate_template(path, strict = FALSE, kinds = NULL)
 }
 \arguments{
 \item{path}{A single template file, or a directory. A directory is scanned
-NON-RECURSIVELY for \verb{*.dta-template.yaml}, \verb{*.dta-dataset-template.yaml}
-and \verb{*.dta-party.yaml} files (and their \code{.yml} spellings) -- the same
+NON-RECURSIVELY for \verb{*.dta-template.yaml}, \verb{*.dta-dataset-template.yaml},
+\verb{*.dta-party.yaml} and \verb{*.dta-vocabulary.yaml} files (and their \code{.yml}
+spellings) -- the same
 filename convention the template engine itself uses
 (\code{dta_template_kind_pattern()}). \code{kinds}, below, only narrows which of
 those files get a report row of their OWN; it never changes how many
@@ -23,7 +24,8 @@ returning them -- the one line a CI job needs.}
 
 \item{kinds}{\code{NULL} (the default: every kind) or a character vector naming
 one or more of \code{"dta_creation_template"}, \code{"dta_dataset_template"},
-\code{"dta_party_profile"}. Restricts which files in a scanned directory get
+\code{"dta_party_profile"}, \code{"dta_vocabulary"}. Restricts which files in a
+scanned directory get
 their own report row; has no effect when \code{path} is a single file (an
 explicitly named file is always checked).}
 }

@@ -27,6 +27,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   overwrites the document's version or its history: a paste edits the
   specification, it does not replace the document's identity.
 
+- **Controlled vocabularies in the template library.** A reusable, versioned
+  term set (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) that a column's
+  permitted `values:` can be drawn from, so a list of visit codes or test
+  codes is written once and shared across datasets and templates instead of
+  being retyped into each one. A column binds to one with
+  `values_from: visit@1.0`, or restricts it for that dataset with
+  `include:`/`exclude:`. One vocabulary can serve both halves of a code/decode
+  pair through `field: code` / `field: label` — the shipped `gf_smrnaseq`
+  dataset template now drives GFTESTCD and GFTEST from a single
+  `gf_test@1.0`, so the two can no longer drift apart. A vocabulary can
+  `extends:` another with `add_terms:`/`remove_terms:`.
+
+  Where the choice belongs to whoever creates the document rather than to the
+  template author, a creation template offers a `vocabulary_slots:` picker —
+  the party-slot shape, one concept over — which the "Create new from
+  template" modal renders as a multi-select. `mode: open` additionally lets
+  the author enter a value the vocabulary does not have. The column editor
+  gained a "Choose from vocabulary…" picker for the same job on an existing
+  document.
+
+  Vocabularies are **expanded into a plain `values:` list at creation time**:
+  nothing in `DTAColumnSpec` or the validation engine changed, and a produced
+  document is still readable without access to the vocabulary library that
+  shaped it. `validate_template()` learned the new kind and the new failure
+  modes (`vocabulary_invalid`, `vocabulary_unresolved`,
+  `vocabulary_extends_failed`, `values_from_unresolved`,
+  `values_from_terms_invalid`, `values_from_pattern`, `vocab_slot_invalid`).
+
 - **A deviation template can follow the standard it deviates from.**
   `extends: biomarker_gf@latest` (or a bare `extends: biomarker_gf`) resolves
   to the newest version of the parent, so publishing a new release of a
@@ -123,6 +151,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   released the moment Shiny reports the session idle, download links after a
   short fixed cooldown, and every hold carries independent failsafes so a
   dropped connection can never leave a button stuck.
+
+### Fixed
+
+- **Zero-padded and Y/N term codes are no longer silently destroyed by the
+  YAML parser.** Vocabulary files are read with a wider set of scalar handlers
+  than the rest of the template family: under an ordinary parse `01` and `007`
+  are read as octal and become `1` and `7`, `0x1F` becomes `31`, and `Y`, `N`
+  and `NO` become booleans. Zero-padded visit numbers and Y/N flags are two of
+  the most common controlled vocabularies there are, so a code in a
+  `*.dta-vocabulary.yaml` is now kept exactly as written, quoted or not.
 
 ## [0.23.0] - 2026-08-27
 

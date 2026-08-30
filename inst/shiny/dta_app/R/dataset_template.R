@@ -343,7 +343,8 @@ dataset_template_selection_values <- function(def, selections = list()) {
 # DTADataSetFactory) from a dataset template + selected option values + an
 # optional patch. Returns dta_try()'s list(ok=, value=, error=) where value is
 # list(dataset = <plain list>, deviations = <list>, provenance = <list>).
-build_dataset_from_template <- function(def, selections = list(), patch = NULL, as_name = NULL, source_label = NULL) {
+build_dataset_from_template <- function(def, selections = list(), patch = NULL, as_name = NULL, source_label = NULL,
+                                        resolve_vocab = NULL) {
   dta_try({
     if (!is.list(def)) stop("Dataset template definition is invalid.")
     if (!is.list(def$dataset)) stop("Dataset template must contain a 'dataset' section.")
@@ -398,14 +399,42 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
     ds <- patched$dataset
     deviations <- patched$deviations
 
-    # 4) Rename, if the caller asked for a name different from the template's
+    # 4) Expand every `values_from:` binding into a plain `values:` vector.
+    #
+    # AFTER the patch, deliberately and load-bearingly: add_columns may
+    # introduce a binding, modify_columns may re-bind or unbind one, and a
+    # `set:` path may address `columns.<id>.values_from`. Expanding earlier
+    # would resolve bindings the patch was still going to change, and would
+    # leave any binding the patch itself added unexpanded -- reaching
+    # DTAColumnSpec as an unused `values_from` argument.
+    #
+    # BEFORE the rename in step 5, though nothing depends on that ordering
+    # today: expansion addresses columns by id, never by dataset name.
+    # A caller that passed no resolver but whose template needs one gets it
+    # built on demand from the cached index, rather than an error. This is the
+    # SAME reasoning create_dta_from_template() gives for building an index on
+    # demand when a `template:` dataset entry needs one: requiring every call
+    # site to learn about the resolver so that a template AUTHOR can bind a
+    # column to a vocabulary is the wrong coupling, and would break every
+    # existing caller the moment a shipped template started using the feature.
+    #
+    # A template with no bindings never reaches this, so nobody pays the index
+    # scan for a feature they are not using.
+    if (is.null(resolve_vocab) && dataset_has_vocabulary_binding(ds)) {
+      resolve_vocab <- vocabulary_resolver(dta_template_index_cached())
+    }
+    if (!is.null(resolve_vocab)) {
+      ds <- expand_column_vocabularies(ds, resolve_vocab, dataset_name = ds$name)
+    }
+
+    # 5) Rename, if the caller asked for a name different from the template's
     # own -- e.g. adding a second dataset built from the same template to one
     # DTA, where both cannot keep the template's literal dataset name.
     if (!is.null(as_name) && is.character(as_name) && nzchar(as_name)) {
       ds$name <- as_name
     }
 
-    # 5) Stamp provenance as PLAIN LIST KEYS on `ds`, not as an S7 property
+    # 6) Stamp provenance as PLAIN LIST KEYS on `ds`, not as an S7 property
     # write -- `ds` is still a plain list at this point, and
     # dta_dataset_from_list() (R/DTADataSet-class.R) does
     # do.call(DTADataSetFactory, x) on exactly this list, so any key present
