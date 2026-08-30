@@ -14,7 +14,8 @@ DTAMetaData(
   supplier = list(),
   transmission = list(),
   error_handling = NULL,
-  authorized_for_corrections = NULL
+  authorized_for_corrections = NULL,
+  template = list()
 )
 }
 \arguments{
@@ -42,6 +43,11 @@ DTAMetaData(
 \item{error_handling}{character description of error handling procedures}
 
 \item{authorized_for_corrections}{character or list indicating BI contact(s) authorized to request corrections}
+
+\item{template}{A machine-owned provenance record written by the template
+engine that generated this document, e.g. \code{list(id = "...", version = "...")}.
+Never set by a specification author. When non-empty, \code{id} and
+\code{version} are each required to be a single non-empty character.}
 }
 \value{
 An object of class DTAMetaData.

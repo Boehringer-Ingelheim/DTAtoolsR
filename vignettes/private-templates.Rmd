@@ -1,0 +1,548 @@
+---
+title: "Private Templates for the DTAtools Shiny App"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Private Templates for the DTAtools Shiny App}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+```{r setup, include = FALSE}
+# Every chunk below is eval = FALSE: authoring or deploying a private template
+# needs a git server, a private package, or a writable cache directory, none
+# of which exist at `R CMD check` time.
+knitr::opts_chunk$set(eval = FALSE, collapse = TRUE, comment = "#>")
+```
+
+## Why private templates
+
+The `dta-template.yaml` files packaged in `inst/extdata/templates` — including
+`biomarker_gf.dta-template.yaml` — are worked *examples*. They ship in an
+open-source repository, which means anyone who installs DTAtools can read
+them. A real Data Transfer Specification names a real supplier, a real
+receiving organisation, and real contact people. That content must never live
+in a public package, and it must never be one accidental commit away from
+being in one either.
+
+The template engine behind `run_dta_app()`'s "Create new from template"
+picker therefore does not require its templates to live inside DTAtools at
+all. It can instead load them from a private git repository, an internal R
+package, or a local directory that is never checked into this repository —
+configured entirely through environment variables, so a Posit Connect
+deployment can point at your organisation's own template family without a
+single code change.
+
+## Deploying on Posit Connect
+
+The headline feature is one content environment variable. Setting it is
+enough to switch the app from the packaged examples to your own private
+template family:
+
+```r
+DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
+```
+
+The full variable reference, with the defaults the code actually falls back
+to when a variable is unset:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DTATOOLS_TEMPLATE_SOURCES` | `""` (none configured) | `"[name=]scheme:locator[#ref]; ..."` — one or more sources, `;`-separated. See "The three source schemes" below. |
+| `DTATOOLS_TEMPLATE_INCLUDE_BUILTIN` | unset (reads as `FALSE` once a private source is configured) | Set to `1`, `true`, or `yes` to keep the packaged/legacy template directories available *alongside* a configured private source. Meaningless — always effectively `TRUE` — when no private source is configured at all. |
+| `DTATOOLS_TEMPLATE_REFRESH_SECONDS` | `900` | How long a cached `git:` checkout (and the in-process template index built from it) is trusted before it is re-fetched/rebuilt. An unparseable or non-positive value is ignored with a warning, falling back to `900`. |
+| `DTATOOLS_TEMPLATE_CACHE_DIR` | unset — falls back to `tools::R_user_dir("DTAtools", "cache")`, and if that is not writable (common on a Connect content sandbox), to a directory under `tempdir()` | Where `git:` clones are cached. |
+| `DTATOOLS_TEMPLATE_GIT_TOKEN` | unset (anonymous clone) | Credential for a private `git:` source. Only ever set as a git child-process environment variable — see "The three source schemes" below for why. |
+| `DTATOOLS_TEMPLATE_GIT_USER` | `"git"` | Basic-auth username sent alongside `DTATOOLS_TEMPLATE_GIT_TOKEN` when `DTATOOLS_TEMPLATE_GIT_AUTH` is `"basic"`. |
+| `DTATOOLS_TEMPLATE_GIT_AUTH` | `"basic"` | `"basic"` or `"bearer"` — which kind of `Authorization` header the token becomes. |
+
+Three behaviours are deliberate and worth knowing before you flip the switch:
+
+- **Setting `DTATOOLS_TEMPLATE_SOURCES` switches the app to private-only.**
+  The packaged/legacy directories (the `biomarker_gf` example among them) are
+  dropped from the search path the moment any private source is configured,
+  unless you explicitly ask to keep them with
+  `DTATOOLS_TEMPLATE_INCLUDE_BUILTIN=1`. An internal deployment that ships a
+  real template family must not let a failed private source silently fall
+  back to the demo — someone would eventually author a genuine specification
+  from an example template without ever finding out the real source was
+  unreachable.
+- **A failed source serves its last-good cache, with a staleness warning.**
+  If a `git:` refresh fails (network blip, expired token, unreachable host)
+  but a previous checkout already exists on disk, the app keeps using that
+  checkout rather than breaking template creation outright. The failure is
+  still surfaced — the resolved source is flagged stale, with the age of the
+  cache and the underlying git error attached.
+- **A cold start with no cache offers NO templates — never the packaged
+  examples.** If a `git:` source has never successfully resolved on this
+  machine (first deployment, or a cache that was wiped), there is nothing to
+  serve, stale or otherwise, and the picker comes up empty rather than
+  quietly substituting the demo template. This is the same reasoning as the
+  point above, taken to its limit: a private-only deployment has decided the
+  packaged example is *never* an acceptable substitute for the real thing, so
+  the failure has to be visible, not merely degraded.
+
+## The three source schemes
+
+`DTATOOLS_TEMPLATE_SOURCES` is a flat string, not YAML or JSON, because it
+lives in a single environment variable set by ops tooling — a Connect "Vars"
+field, a Helm chart, a systemd unit file — where a multi-line or quoted value
+is an easy way to get silently mangled in transit. The grammar is:
+
+```
+[name=]scheme:locator[#ref]; [name=]scheme:locator[#ref]; ...
+```
+
+### `dir:` — a local directory
+
+```r
+DTATOOLS_TEMPLATE_SOURCES = "site=dir:/srv/dta-templates"
+```
+
+The locator is a path that must already exist and be readable; `dir:` sources
+are resolved with no network or credential involved at all. Useful for a
+template family kept on the same host as the app, or mounted into the
+container.
+
+### `pkg:` — a companion R package
+
+```r
+DTATOOLS_TEMPLATE_SOURCES = "acme=pkg:acme.dta.templates"
+```
+
+The locator is an R package name. It must be installed and expose an
+`inst/dta-templates` directory (i.e. `system.file("dta-templates", package =
+"acme.dta.templates")` must resolve). This is the right shape when your
+templates are versioned and released the same way any other internal R
+package is.
+
+### `git:` — a private git repository
+
+```r
+DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
+```
+
+The scheme is always the first token up to the first `:` — this matters here
+specifically because the locator is itself a URL containing `://`. `git:
+https://host/x.git` parses to scheme `git` and locator `https://host/x.git`,
+not a second split on the colon inside `https://`. The optional `#ref` names
+a branch or tag to shallow-clone (`--depth 1`); omitted, it defaults to
+`HEAD`.
+
+Both **Bitbucket Data Center** (production, in this deployment's case) and
+**GitHub** (used to mirror the same repository for CI) are reached the same
+way — plain HTTPS, credential in `DTATOOLS_TEMPLATE_GIT_TOKEN`:
+
+```r
+# Bitbucket Data Center HTTP access token, sent as HTTP Basic auth
+DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
+DTATOOLS_TEMPLATE_GIT_TOKEN = "<bitbucket-http-access-token>"
+DTATOOLS_TEMPLATE_GIT_AUTH  = "basic"    # the default; shown for clarity
+
+# GitHub, same repository mirrored for CI, PAT sent as a bearer token
+DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://github.com/example-org/dta-templates.git#main"
+DTATOOLS_TEMPLATE_GIT_TOKEN = "<github-pat>"
+DTATOOLS_TEMPLATE_GIT_AUTH  = "bearer"
+```
+
+**The token never reaches the command line, a URL, or disk.** It is passed to
+the `git` child process purely as an environment variable
+(`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0`, delivering an `http.extraHeader`),
+never embedded in the clone URL and never passed as a `-c` command-line flag.
+An `https://user:TOKEN@host/repo.git`-style URL would persist the token in
+`.git/config` forever, readable by anyone who later runs `git remote -v`; a
+command-line argument is visible to every other user on the machine via the
+process table. The environment block of a child process is legible only to
+that process's own owner, which is why that is the only place the token ever
+lives — and only for the duration of the one `git` call that needs it; the
+app's own process environment is restored immediately afterwards.
+
+## Authoring a creation template
+
+A creation template (`kind: dta_creation_template`) builds a whole new DTA.
+Here is the real, complete `biomarker_gf.dta-template.yaml` header and one
+representative option, trimmed for length:
+
+```yaml
+kind: dta_creation_template
+id: biomarker_gf
+label: Biomarker GF DTS
+version: "1.0"
+description: >-
+  Creates a new DTA for Biomarker GF transfer specifications using the
+  bundled GF dataset structure, then applies option-driven metadata fields.
+
+base:
+  metadata:
+    title: BIOMARKER GF DATA TRANSFER SPECIFICATIONS (DTS)
+    version: "1.0"
+    date: "${today}"
+    header: Test Company 1
+    version_history:
+      - version: "${version}"
+        date: "${today}"
+        changes: Initial template-generated version
+    receiver:
+      affiliation:
+        name: Our company
+      contacts: []
+    supplier:
+      affiliation:
+        name: External Supplier
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+      notification: email
+      test_upload: true
+      blinded_transfer: true
+      date_first_transfer: 3 weeks after first batch of sample delivery
+      date_last_transfer: 2 weeks after last batch of samples arrive at laboratory
+    error_handling: >-
+      Format or content errors are reported by email to the authorized
+      contacts and corrected in a follow-up transfer.
+    authorized_for_corrections: TDM
+
+options:
+  - id: title
+    label: Document title
+    type: text
+    target: metadata.title
+    help: Title shown on the DTS document. Pick a suggestion or type your own.
+    choices:
+      - BIOMARKER GF DATA TRANSFER SPECIFICATIONS (DTS)
+      - GENOMIC FINDINGS (GF) DATA TRANSFER SPECIFICATIONS
+
+datasets:
+  - template: gf_smrnaseq@3.0
+    as: gf_data_specs_pattern
+
+party_slots:
+  - id: supplier
+    label: Supplier
+    target: metadata.supplier
+  - id: receiver
+    label: Receiver
+    target: metadata.receiver
+```
+
+`${today}` and `${version}` are resolved when the DTA is actually created, so
+a document made from this template is dated the day it was made, and its
+first `version_history` entry always agrees with the version the user chose
+for it. Every `target:` on an option must resolve to a real `DTAMetaData`
+field — `base.metadata`'s own keys are validated the same way, so a typo'd
+field name aborts template creation immediately rather than silently being
+dropped.
+
+## Reusable dataset templates
+
+A creation template does not have to inline its dataset structure. The
+`datasets:` entry above, `{template: gf_smrnaseq@3.0, as: gf_data_specs_pattern}`,
+imports a **dataset template** (`kind: dta_dataset_template`) instead — a
+standalone, reusable column/rule set that can be shared across several
+creation templates, or dropped into an existing DTA as a second dataset. Here
+is the real header and a representative column from
+`gf_smrnaseq.dta-dataset-template.yaml`:
+
+```yaml
+kind: dta_dataset_template
+id: gf_smrnaseq
+version: "3.0"
+label: GF domain smrnaseq
+description: Genomic Findings data table with pattern for filename
+date: 2024-12-17
+
+options:
+  - id: vendor_name
+    label: Vendor name
+    type: text
+    target: dataset.columns.GFNAM.values
+    default: ExternalSupplierName
+    help: Name or identifier of the data supplier who provides the test results.
+
+dataset:
+  name: gf_data_specs_pattern
+  type: tabular
+  files:
+    filename: gf_data_small_smirna.tsv
+    type: tsv
+  columns:
+    - id: GFNAM
+      label: Vendor Name
+      type: SAS Char
+      format: SAS $60.
+      nullable: No
+      description: Name or identifier of the data supplier who provides the test results.
+      values:
+        - ExternalSupplierName
+  rules: []
+```
+
+The `{template:, as:, options:, patch:}` shape a creation template's
+`datasets:` entry uses to import one of these:
+
+- `template:` — the `id@version` (or bare `id`) of the dataset template.
+- `as:` — rename the built dataset, so the same dataset template can be
+  imported twice into one DTA under two different names.
+- `options:` — selections for the dataset template's own `options:` (here,
+  `vendor_name`); anything not selected falls back to that option's
+  `default:`.
+- `patch:` — free-form column add/remove/modify plus general field sets, for
+  a deviation that does not warrant its own dataset-template version.
+
+A patch's four operations always run in this fixed order, and the order is
+load-bearing, not incidental:
+
+1. **`remove_columns`** — shrink first, so a column marked for removal is
+   already gone before anything below tries to address it.
+2. **`add_columns`** — grow second, so a new column exists before
+   `modify_columns` or `set` could otherwise address it by id.
+3. **`modify_columns`** — adjust existing columns third, once the column
+   list has its final membership (the right ids present, the wrong ones
+   already removed).
+4. **`set`** — general dotted-path field sets last, so a `set:` path against
+   `columns.<id>.<field>` always resolves against the *final* column list,
+   never an id an earlier step in the same patch was still going to
+   invalidate.
+
+That ordering is what lets one patch remove a column, add a differently-named
+replacement, tweak an unrelated existing column, and set a top-level field —
+all in the same block — without the steps fighting over which column exists
+yet.
+
+## Deviation templates
+
+A supplier-specific deviation does not need to restate a whole template family
+just to change a handful of fields. `biomarker_gf_acme.dta-template.yaml`, in
+full, `extends:` the base template above:
+
+```yaml
+kind: dta_creation_template
+id: biomarker_gf_acme
+label: Biomarker GF DTS (ACME Labs)
+version: "1.0"
+extends: biomarker_gf@1.0
+description: >-
+  ACME Labs supplier deviation of biomarker_gf: names ACME as the vendor,
+  clarifies GFNAM for ACME, and adds ACME's own internal sample identifier
+  column. Everything else -- base metadata, the other 11 options, the party
+  slots -- is inherited unchanged from the parent.
+
+options:
+  - id: header
+    default: ACME Labs
+
+datasets:
+  - template: gf_smrnaseq@3.0
+    as: gf_data_specs_pattern
+    options:
+      vendor_name: ACME Labs
+    patch:
+      modify_columns:
+        - id: GFNAM
+          description: Name of the ACME sequencing facility supplying the results.
+      add_columns:
+        - id: ACMEID
+          label: ACME internal identifier
+          type: SAS Char
+          format: SAS $20.
+          nullable: Yes
+          description: ACME's internal sample identifier, for query resolution.
+```
+
+The merge is a recursive deep merge, child over parent:
+
+- A mapping key present in both parent and child merges recursively; a
+  sequence, scalar, or a mapping paired with a non-mapping parent is a
+  wholesale replacement (merging a list of column specs by position would
+  silently splice unrelated columns together the moment the child's list is a
+  different length).
+- `options:` and `party_slots:` entries are matched and merged **by `id`**,
+  keeping the parent's position for an inherited entry; a child option can
+  carry `remove: true` to drop an inherited one entirely.
+- `datasets:` entries are matched by identity — `as:`, else `template:` (with
+  any `@version` pin stripped, so `gf@3.0` and `gf@4.0` still name the same
+  slot), else `source:`, else `name:` — so a deviation's `patch:` merges into
+  the *same* dataset entry the parent declared, rather than appending a
+  second, unrelated one.
+- **An explicit `null` in the child removes an inherited key.** `key: ~` or
+  `key: null` in a child mapping is not "leave this at whatever the parent
+  set" (that is what *omitting* the key means) — it is an instruction to
+  delete it from the merged result.
+
+`biomarker_gf_acme` above omits `base:` entirely, and that is deliberate and
+supported: a child that `extends:` another template inherits the parent's
+`base:` (and, by the same rule, its `datasets:`) verbatim when it states
+nothing of its own. **`base: {}` is not the same thing.** An *absent* `base:`
+leaves the parent's section completely untouched; an explicitly empty mapping
+is a real instruction — "replace `base:` with nothing" — and wipes out every
+field the parent set. Absent and empty are deliberately kept distinguishable
+for exactly this reason; write `base:` at all only when you mean to override
+part of it.
+
+## Versioning
+
+Every template — creation, dataset, or party profile — declares its own
+`id` and `version`, and a reference to one is written `id@version`, or a bare
+`id` (equivalently, `id@latest`) to mean "the newest version available":
+
+```r
+# in a `datasets:` entry, an `extends:`, or a rebase target
+"gf_smrnaseq@3.0"     # exact version 3.0
+"biomarker_gf"        # newest version of biomarker_gf, whatever that is today
+"biomarker_gf@latest" # same as above, written explicitly
+```
+
+**Always quote the version:** `version: "1.0"`, never `version: 1.0`. YAML
+parses an unquoted `1.10` as the number 1.1 — the trailing zero that
+distinguishes "one point ten" from "one point one" simply does not survive an
+unquoted numeric scalar, and no code downstream can recover it once that has
+happened. `validate_template()` (see "CI for a private template repository"
+below) fails an unquoted version outright, with the error code
+`version_unquoted` and a message quoting exactly what to write instead — this
+is checked at severity `"error"`, not merely `"warning"`, because the failure
+mode it prevents is silent and irreversible.
+
+## Parties
+
+A creation template can offer a "party slot" — a dropdown bound to
+`metadata.supplier` or `metadata.receiver` — instead of every template author
+retyping (or worse, drifting copies of) the same affiliation/contacts block.
+`biomarker_gf.dta-template.yaml`'s `party_slots:` (shown above) declares two
+slots, one per metadata target; a **party profile** (`kind:
+dta_party_profile`) supplies the actual content one of those dropdowns can
+pick. Here is the real `supplier_acme.dta-party.yaml` in full:
+
+```yaml
+kind: dta_party_profile
+id: supplier_acme
+version: "1.0"
+role: supplier
+label: ACME Labs
+description: Standard ACME Labs supplier block for the biomarker GF template family.
+affiliation:
+  name: ACME Labs
+  address: 1 Example Way, Springfield
+  country: DE
+contacts:
+  - name: Jane Doe
+    role: Data Manager
+    email: jane.doe@example.com
+    signature: true
+  - name: John Roe
+    role: Bioinformatics Lead
+    email: john.roe@example.com
+```
+
+`role:` is `supplier`, `receiver`, or `any`; a slot only ever offers profiles
+whose role matches its own target (derived automatically from the target —
+`metadata.supplier` implies role `supplier` — unless the slot states its own),
+optionally narrowed further by the slot's own `profiles:` allow-list.
+Choosing a profile replaces the slot's whole target block (affiliation and
+contacts together) — never a partial merge, because merging one profile's
+contacts with a different profile's affiliation would silently produce a
+document naming the wrong organisation's contact as a signatory for the
+other.
+
+**Metadata carry-over** (used when a document is created as a continuation of
+an ancestor, e.g. during a version rebase — see the next section) copies a
+fixed, *default-on* set of metadata fields from the ancestor unless the caller
+states its own list:
+
+```r
+c("receiver", "supplier", "transmission", "error_handling",
+  "authorized_for_corrections")
+```
+
+`title`, `version`, `date`, and `version_history` are *default-off* —
+deliberately excluded from that default set. They are the ancestor document's
+own identity and revision history, not properties of the supplier/receiver
+relationship; a new document must state its own title and start its own
+version history rather than impersonating the one it came from.
+
+Carry-over, party slots, and options are applied in a fixed **precedence
+order** — `base` metadata, then carry-over, then the chosen party profile,
+then option effects — so that anything the current document's own author
+actively chooses always wins over whatever an ancestor document happened to
+have, and a party-profile choice always wins over a carried-over value at the
+same target.
+
+## Provenance and upgrading
+
+Every document built from a creation template — through the app, or via
+`create_dta_from_template()` with an `index` and a `provenance` argument — gets
+a `metadata.template` record: which template `id`/`version` built it, which
+source it came from (`source`, `source_kind`, `resolved_commit` for a `git:`
+source), the resolved file path, a content hash of the fully `extends:`-merged
+definition it was built from, the creation date, its `extends:` lineage, the
+`selections` the user actually made, and — for any dataset built from a
+dataset template — that dataset's own template provenance.
+
+`metadata.template` is **machine-owned**: it is one of exactly two metadata
+fields (`import_issues` is the other) that a template author can never set
+from `base.metadata` or an option effect — the allowed-field list used to
+validate both is derived from the same set that excludes it. A template
+author who could set this field could forge a document's own provenance,
+which the rebase feature below would then blindly trust.
+
+**Rebase** moves a document created from template `T@1.0` onto `T@1.1`
+without discarding hand edits made since creation. It reconstructs the
+document's *ancestor* — what `T@1.0` would have produced with the `selections`
+recorded in `metadata.template` — and compares it against both the document
+as it stands today and what `T@1.1` would produce with the same selections. A
+field that changed only in the target is a template edit; a field that
+changed only in the current document is a user edit; a field changed
+identically in both is not a conflict; a field changed differently in both is
+a conflict requiring an explicit choice.
+
+The limits are worth stating plainly, not glossing over:
+
+- **Metadata only.** Rebase never touches a dataset's columns, rules, or
+  files — reconciling those structurally is a substantially different
+  problem than merging metadata fields, and is out of scope today. Dataset
+  differences are still reported for review; nothing acts on them.
+- **`version_history` is never rewritten.** A rebase appends one new entry
+  describing the rebase itself; it never edits the document's existing
+  history to match the template's own, because that would restate the past
+  to match a template the document did not actually come from.
+- **A document with no provenance cannot be rebased.** Any document created
+  before this feature existed — or created without going through a template
+  at all — has no `metadata.template` record and therefore no ancestor to
+  reconstruct. Rebasing such a document fails immediately, naming exactly
+  that reason, rather than guessing at what it might have come from.
+
+## CI for a private template repository
+
+`validate_template(path, strict = TRUE)` runs the same structural checks the
+app's own "Create new from template" picker relies on — an unresolvable
+`extends:`, an option `target:` that does not resolve to a real metadata
+field (or, worse, one that names a machine-owned field like
+`metadata.template`), a party slot naming a profile id that does not exist, a
+dataset patch naming an absent column, an unquoted `version:` — and, as a
+final and most comprehensive check, actually builds a DTA from every
+non-abstract creation template using its own default selections. `path` may
+be a single file or a directory, scanned non-recursively for
+`*.dta-template.yaml`, `*.dta-dataset-template.yaml`, and `*.dta-party.yaml`
+(and their `.yml` spellings).
+
+```r
+DTAtools::validate_template(".", strict = TRUE)
+```
+
+With `strict = TRUE`, `validate_template()` raises a single error naming every
+row of severity `"error"` and stays silent when there are none — the one line
+a CI job needs. Without it, the function returns a data frame (`file`, `kind`,
+`id`, `version`, `severity`, `code`, `message`) with one row per issue found,
+for a human to inspect interactively.
+
+A ready-to-copy GitHub Actions workflow — checkout, install DTAtools from your
+internal package source, run the check above — ships at
+`system.file("extdata", "templates", "validate-templates.yml", package =
+"DTAtools")`. Copy it to `.github/workflows/validate-templates.yml` in the
+repository that holds your own templates and fill in the one placeholder step
+that installs DTAtools from wherever your organisation hosts it.

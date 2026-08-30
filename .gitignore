@@ -30,3 +30,15 @@ IMPLEMENTATION_TECHNICAL_DETAILS.md
 CLAUDE.local.md
 .claude/settings.local.json
 graphify-out/
+.claude/cache/
+
+# Private templates (see vignette("private-templates")) carry real supplier/
+# receiver names and contacts, and must never be committable to this
+# open-source repository by accident: a project-local template checkout, and
+# any party-profile file authored outside the package's own worked examples.
+dta-templates/
+*.dta-party.yaml
+# ...except the packaged, anonymised worked examples under
+# inst/extdata/templates/, which are shipped package data, not private
+# information -- keep them trackable.
+!inst/extdata/templates/*.dta-party.yaml
