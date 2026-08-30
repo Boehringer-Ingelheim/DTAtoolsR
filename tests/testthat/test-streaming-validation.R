@@ -169,11 +169,25 @@ test_that("compiling schemas keeps the branches the refactor moved", {
   expect_equal(nrow(required), nrow(missing_first))
   expect_true(all(required$columnspec == first_name))
 
-  # An empty table short-circuits before any schema is consulted.
+  # An empty table is still checked for the columns its specs declare -- it
+  # simply has no values for the value constraints to judge. A well-formed one
+  # therefore reports nothing.
   expect_equal(
     dta_columnspec_errors(case$specs, case$table[0, , drop = FALSE], schemas = compiled),
     list(summarised_error = NULL, full_error = NULL)
   )
+
+  # ... and the same table with a declared column removed reports it, once,
+  # about the table rather than about a row. Asserted separately from the line
+  # above, which would otherwise pass for the wrong reason: it did when the
+  # function returned before consulting a single schema, and it still would if
+  # presence were dropped again.
+  empty_missing <- missing_first[0, , drop = FALSE]
+  empty_res <- dta_columnspec_errors(case$specs, empty_missing, schemas = compiled)
+  expect_equal(nrow(empty_res$full_error), 1L)
+  expect_equal(empty_res$full_error$keyword, "required")
+  expect_equal(empty_res$full_error$columnspec, first_name)
+  expect_true(is.na(empty_res$full_error$row))
 })
 
 test_that("dta_columnspec_errors(summarise = FALSE) changes only whether the summary is built", {

@@ -132,20 +132,87 @@ test_that("the per-check counts account for every reported violation", {
 })
 
 
-test_that("a table with no rows reports no check as passed", {
+test_that("a table with no rows still has its structure checked", {
+  # An empty table is a legitimate result -- an analysis that yielded nothing --
+  # but only if it carries the columns its specs declare. Presence is decidable
+  # from the column names alone and is therefore settled; the value checks are
+  # properties of values, of which there are none.
   details <- validate_table_detailed(cc_specs(), cc_table()[0, ], verbose = FALSE)
   checks <- details$columnspec_checks
 
-  # Nothing was evaluated: dta_columnspec_errors() returns before it looks at a
-  # single constraint, column presence included. Reporting a pass here would be
-  # a certificate covering zero checks.
-  expect_false(any(checks$status == "passed"))
-  expect_equal(cc_status(checks, "required"), "not_checked")
+  expect_equal(cc_status(checks, "required"), "passed")
+  expect_true(details$columnspec_valid)
+  expect_true(details$ok)
+
   expect_equal(cc_status(checks, "type"), "not_checked")
+  expect_equal(cc_status(checks, "maxLength"), "not_checked")
 
   out <- cc_messages(validate_table_detailed(cc_specs(), cc_table()[0, ], verbose = TRUE))
-  expect_match(out, "not checked", fixed = TRUE)
+  expect_match(out, "Presence check passed", fixed = TRUE)
   expect_match(out, "the table has no rows", fixed = TRUE)
+})
+
+
+test_that("a table that is empty AND missing a declared column fails", {
+  # The gap this closes: dta_columnspec_errors() used to return before the
+  # presence check whenever the table had no rows, so a table that was both
+  # empty and missing half its declared columns reported completely clean --
+  # the one case where "empty" must not mean "nothing to check".
+  empty_missing <- cc_table()[0, c("ID", "SEX"), drop = FALSE]
+  details <- validate_table_detailed(cc_specs(), empty_missing, verbose = FALSE)
+
+  expect_false(details$columnspec_valid)
+  expect_false(details$ok)
+  expect_equal(cc_status(details$columnspec_checks, "required"), "failed")
+  expect_equal(cc_row(details$columnspec_checks, "required")$failed_columns, "CODE")
+
+  # Reported once, about the table, rather than once per row -- there are no
+  # rows to attach it to, so the row is NA, as it is for a structural finding.
+  full_error <- details$columnspec_errors$full_error
+  expect_equal(nrow(full_error), 1L)
+  expect_true(is.na(full_error$row))
+  expect_equal(full_error$keyword, "required")
+  expect_equal(full_error$columnspec, "CODE")
+
+  out <- cc_messages(validate_table_detailed(cc_specs(), empty_missing, verbose = TRUE))
+  expect_match(out, "Presence check failed", fixed = TRUE)
+})
+
+
+test_that("an empty stream has its structure checked too", {
+  # The streaming driver never enters the batch loop for an empty stream, so the
+  # presence check has to come from the source's column names.
+  reader <- function(tbl) dta_as_batch_reader(arrow::as_arrow_table(tbl), batch_rows = 8L)
+
+  well_formed <- dta_validate_any_table(
+    cc_specs(), reader(cc_table()[0, ]),
+    verbose = FALSE
+  )
+  expect_true(well_formed$ok)
+  expect_equal(cc_status(well_formed$columnspec_checks, "required"), "passed")
+  expect_equal(cc_status(well_formed$columnspec_checks, "type"), "not_checked")
+
+  missing_column <- dta_validate_any_table(
+    cc_specs(), reader(cc_table()[0, c("ID", "SEX"), drop = FALSE]),
+    verbose = FALSE
+  )
+  expect_false(missing_column$ok)
+  expect_equal(missing_column$n_columnspec_errors, 1L)
+  expect_equal(cc_status(missing_column$columnspec_checks, "required"), "failed")
+})
+
+
+test_that("presence stays unsettled when the column names cannot be read", {
+  # The driver called without the source's names cannot decide presence, and
+  # says so rather than guessing either way.
+  details <- dta_validate_table_stream(
+    cc_specs(),
+    dta_as_batch_reader(arrow::as_arrow_table(cc_table()[0, ]), batch_rows = 8L),
+    verbose = FALSE, coerce = FALSE
+  )
+
+  expect_equal(cc_status(details$columnspec_checks, "required"), "not_checked")
+  expect_false(any(details$columnspec_checks$status == "passed"))
 })
 
 

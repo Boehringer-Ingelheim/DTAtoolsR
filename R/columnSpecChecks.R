@@ -338,9 +338,17 @@ dta_compile_columnspec_schemas <- function(specs) {
 #' @keywords internal
 dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE) {
   n_rows <- nrow(table)
-  if (n_rows == 0) {
-    return(list(summarised_error = NULL, full_error = NULL))
-  }
+
+  # A table with no rows is NOT skipped. Its structure is still decidable, and
+  # still required: an empty table is a legitimate result -- an analysis that
+  # yielded nothing -- but it has to carry the columns its specs declare, so
+  # that what it expresses is "the process ran and found no results" rather
+  # than "something went wrong upstream". Returning early here reported a table
+  # that was both empty and missing half its declared columns as clean.
+  #
+  # Only the value checks are skipped for such a table: type, length, pattern
+  # and permitted values are properties of values, and there are none.
+  empty_table <- n_rows == 0
 
   if (is.null(schemas)) {
     schemas <- dta_compile_columnspec_schemas(specs)
@@ -358,8 +366,11 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
 
     if (!column_name %in% table_names) {
       # Object-level failure: reported for every row, as the array schema meant.
+      # An empty table has no row to attach it to, so it is reported once with
+      # `row = NA` -- the same shape `dta_structure_errors()` uses for a finding
+      # about the table rather than about a row in it.
       parts[[length(parts) + 1]] <- data.frame(
-        row = seq_len(n_rows),
+        row = if (empty_table) NA_integer_ else seq_len(n_rows),
         column = NA_character_,
         keyword = "required",
         message = paste0("must have required property '", column_name, "'"),
@@ -367,6 +378,13 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
         data = NA_character_,
         stringsAsFactors = FALSE
       )
+      next
+    }
+
+    # Present, and there is nothing in it to check. The value constraints below
+    # would all evaluate over a zero-length vector and find nothing; skipping
+    # them says so without spending the dispatch.
+    if (empty_table) {
       next
     }
 

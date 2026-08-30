@@ -46,6 +46,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   that stopped at the first problem, a structural early return that read no
   rows -- reports as *not checked*. Neither is a pass.
 
+- **A table with no rows skipped its structure check.** The column spec axis
+  returned before evaluating a single constraint whenever the table had no
+  rows -- column presence included -- so a table that was both empty and
+  missing the columns its specs declare reported completely clean:
+  `columnspec_valid = TRUE`, no errors, `ok = TRUE`. The same missing column on
+  a table with one row failed correctly.
+
+  An empty table is a legitimate result: an analysis that yielded nothing, whose
+  formatted output says the process ran and found no results. That is only true
+  if the table still carries the columns it promised -- a table missing them
+  says something went wrong upstream, and said it silently. Column presence is
+  decidable from the column names alone, so it is now checked whether or not
+  there are rows, on both the materialising and the streaming path. The finding
+  is reported once, with `row = NA`, since there is no row to attach it to.
+
+  The value checks -- type, length, pattern, permitted values -- are properties
+  of values, of which an empty table has none, so they continue to report as
+  `not_checked` rather than as a pass. A well-formed empty table therefore
+  reports `Presence check passed` alongside them, and remains valid.
+
 - The per-check breakdown is carried on the validation result as
   `columnspec_checks`, so it is written to the persisted artifact and is
   readable via `validation_errors()`: one row per constraint keyword with its

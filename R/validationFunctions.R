@@ -133,15 +133,20 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   full_error <- schema_result$full_error
   has_columnspec_errors <- !is.null(full_error) && nrow(full_error) > 0
 
-  # A table with no rows is not a table that passed. `dta_columnspec_errors()`
-  # returns early on one without evaluating a single constraint -- not even
-  # column presence -- so every applicable check reports as unsettled rather
-  # than as a pass it never earned.
+  # An empty table settles exactly one check: whether the columns its specs
+  # declare are there. That is decidable from the column names alone, and it is
+  # what makes an empty table meaningful -- a correctly shaped table with no
+  # rows says "the analysis ran and found nothing", where a table missing half
+  # its columns says something went wrong upstream.
+  #
+  # The value checks -- type, length, pattern, permitted values -- are
+  # properties of values, and there are none, so they report as unsettled
+  # rather than as a pass they never earned.
   scanned_rows <- nrow(table) > 0
   columnspec_checks <- dta_columnspec_check_summary(
     columnspec_schemas,
     tally = dta_columnspec_error_tally(full_error),
-    settled = if (scanned_rows) NULL else character(0)
+    settled = if (scanned_rows) NULL else "required"
   )
 
   if (isTRUE(verbose)) {

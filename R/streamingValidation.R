@@ -993,16 +993,45 @@ dta_validate_table_stream <- function(specs,
     }
   }
 
+  # A stream that yielded no rows never entered the batch loop, so nothing
+  # checked whether the columns the specs declare are actually there. They are
+  # decidable from the source's names alone, and they still have to be right: an
+  # empty table is a legitimate result -- an analysis that found nothing -- but
+  # only if it carries the columns it promised. Without this, an empty stream
+  # missing every declared column reported clean.
+  #
+  # `known_columns` is read from the source before any projection and without
+  # consuming it. When it could not be obtained (a reader already spent), the
+  # question stays open rather than being answered by guessing.
+  empty_stream_structure <- row_offset == 0 && length(known_columns) > 0
+  if (empty_stream_structure) {
+    structural_errors <- dta_structure_errors(
+      dta_structure_findings(specs, known_columns)
+    )
+    if (!is.null(structural_errors) && nrow(structural_errors) > 0) {
+      columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, structural_errors)
+      dta_error_sink_add(columnspec_sink, structural_errors)
+    }
+  }
+
   full_error <- dta_error_sink_collect(columnspec_sink)
   summarised_error <- dta_summarise_columnspec_errors(full_error)
   has_columnspec_errors <- columnspec_sink$total > 0
 
   # A check with no violations is only a pass when the scan that looked for them
   # ran to the end over rows that existed. A `fail_fast` run stopped at the
-  # first problem and a stream that yielded no rows never evaluated a
+  # first problem and a stream that yielded no rows evaluated no value
   # constraint; in both cases the checks that reported nothing reported nothing
-  # about the whole table, which is not the same as reporting a pass.
-  columnspec_settled <- if (partial_scan || row_offset == 0) character(0) else NULL
+  # about the whole table, which is not the same as reporting a pass. Column
+  # presence is the exception on an empty stream: it was just settled above,
+  # from the names.
+  columnspec_settled <- if (partial_scan) {
+    character(0)
+  } else if (row_offset == 0) {
+    if (empty_stream_structure) "required" else character(0)
+  } else {
+    NULL
+  }
   columnspec_checks <- dta_columnspec_check_summary(
     columnspec_schemas,
     tally = columnspec_tally,
