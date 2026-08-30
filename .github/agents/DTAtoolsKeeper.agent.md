@@ -68,9 +68,16 @@ checks, docs) says it's done.
 ## Documentation & metadata discipline (non-negotiable)
 
 - **Never hand-edit `NAMESPACE` or `man/*.Rd`.** They are generated. Add/adjust
-  roxygen2 comments (`Roxygen: list(markdown = TRUE)`, `RoxygenNote: 7.3.3`,
-  `Config/roxygen2/version: 8.0.0`) above functions/classes/generics, then
-  regenerate.
+  roxygen2 comments above functions/classes/generics, then regenerate with
+  `roxygen2::roxygenise()`. Markdown in roxygen blocks is enabled by
+  `Roxygen: list(markdown = TRUE)` in `DESCRIPTION`.
+- **Never assume a roxygen2 version — read `Config/roxygen2/version` from
+  `DESCRIPTION`** and regenerate with exactly that version. Regenerating with
+  a different one silently rewrites the whole of `NAMESPACE` (8.1.0 regrouped
+  every `importFrom()` into a multi-line form), and the `r-style` workflow
+  fails on the resulting diff. The same version is pinned in
+  `.github/workflows/r-style.yaml`; bumping it is a deliberate commit that
+  carries the regenerated files with it.
 - S7 generics with multiple class-specific methods must document **all**
   methods on a single shared Rd page per generic (the CHANGELOG shows this was
   a real, painful bug class here — `@param` lists must match each method's

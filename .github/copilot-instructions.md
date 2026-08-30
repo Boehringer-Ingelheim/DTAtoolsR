@@ -84,6 +84,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 - **Use `\dontrun{}` only** if the code genuinely cannot run unattended (writes outside `tempdir()`, requires network, launches Shiny app).
 - **Test data** lives in `inst/extdata/` and is tested via `tests/testthat/test-examples.R` (not by R CMD check).
 - **Regenerate docs:** `Rscript -e "roxygen2::roxygenise()"` after every change; never hand-edit `man/` or `NAMESPACE`.
+- **Never assume a roxygen2 version:** read `Config/roxygen2/version` from `DESCRIPTION` and regenerate with exactly that version (`.github/workflows/r-style.yaml` pins the same one). A different version silently rewrites the whole of `NAMESPACE`, and `r-style` fails on the resulting diff.
 
 ### Errors and Warnings
 

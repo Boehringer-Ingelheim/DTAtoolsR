@@ -122,6 +122,10 @@ contract.
 ## Guardrails
 
 - Never hand-edit `man/`, `NAMESPACE`, or `renv.lock` — they are generated.
+- Regenerate docs with the roxygen2 version named by `Config/roxygen2/version`
+  in `DESCRIPTION` — read it, never assume a number. A different version
+  silently rewrites the whole of `NAMESPACE` and `r-style` CI fails on the
+  diff; `.github/workflows/r-style.yaml` pins the same version.
 - Never commit `.rds`, `.RData`, `.Rhistory` (pre-commit rejects them).
 - Work on `dev`; PRs target `dev`. `master` is release-only.
 - User-facing changes: bump `Version:` in `DESCRIPTION` and add an entry under
