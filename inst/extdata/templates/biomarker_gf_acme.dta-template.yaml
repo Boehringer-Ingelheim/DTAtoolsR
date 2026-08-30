@@ -1,0 +1,48 @@
+kind: dta_creation_template
+id: biomarker_gf_acme
+label: Biomarker GF DTS (ACME Labs)
+version: "1.0"
+# `@latest` rather than a pinned `@1.0`, deliberately: a supplier deviation
+# should follow the current standard, so publishing biomarker_gf 1.1 does not
+# require editing every supplier's file to pick it up. `biomarker_gf` on its
+# own means the same thing.
+#
+# It does NOT make an already-created document drift: creation resolves
+# `@latest` once and records the concrete version it chose in
+# `metadata.template`, so a finished specification stays pinned to what it was
+# actually built from. Only NEW documents follow the parent forward.
+#
+# Pin an exact version instead when a deviation has been agreed against one
+# specific release of the standard and must not move until it is re-agreed.
+extends: biomarker_gf@latest
+description: >-
+  ACME Labs supplier deviation of biomarker_gf: names ACME as the vendor,
+  clarifies GFNAM for ACME, and adds ACME's own internal sample identifier
+  column. Everything else -- base metadata, the other 11 options, the party
+  slots -- is inherited unchanged from the parent, at whatever version of
+  biomarker_gf is current.
+
+options:
+  - id: header
+    default: ACME Labs
+
+datasets:
+  # Pinned, unlike the `extends:` above: this patch names specific columns
+  # (GFNAM) and adds one, so it is only known to be coherent against a dataset
+  # template whose column set it has been checked against. `validate_template()`
+  # verifies that in CI -- against the pinned version.
+  - template: gf_smrnaseq@3.0
+    as: gf_data_specs_pattern
+    options:
+      vendor_name: ACME Labs
+    patch:
+      modify_columns:
+        - id: GFNAM
+          description: Name of the ACME sequencing facility supplying the results.
+      add_columns:
+        - id: ACMEID
+          label: ACME internal identifier
+          type: SAS Char
+          format: SAS $20.
+          nullable: Yes
+          description: ACME's internal sample identifier, for query resolution.

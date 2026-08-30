@@ -1,6 +1,6 @@
 Package: DTAtools
 Title: Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)
-Version: 0.24.0
+Version: 0.26.0
 Authors@R: c(
 	person("Thomas", "Schwarzl", email = "thomas.schwarzl@boehringer-ingelheim.com",
 		role = c("aut", "cre"), comment = c(ORCID = "0000-0001-7697-7000")),
@@ -102,6 +102,7 @@ Collate:
     'run_dta_app.R'
     'streamingScale.R'
     'streamingValidation.R'
+    'validateTemplate.R'
     'validationFunctions.R'
     'zzz.R'
 Config/roxygen2/version: 8.1.0

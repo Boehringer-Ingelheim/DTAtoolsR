@@ -8,6 +8,134 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Editing a loaded specification now starts by cutting a new version.** A DTA
+  opened from an existing file — an upload, a bundled example, or a restored
+  session — arrives read-only, and where the Edit-mode switch normally sits the
+  app offers **Create new version** instead. Confirming the version (the dialog
+  prefills the next minor one, and takes an optional note) bumps
+  `metadata.version`, opens a fresh `version_history` entry for it, and unlocks
+  editing. A document created from a template is new rather than loaded, so it
+  stays directly editable as before.
+
+  The point is the history that falls out of it. When the document is exported
+  or downloaded, that entry's `changes` is filled in with what actually changed
+  between the version that was loaded and the version being written — grouped
+  counts first, then every differing field named individually, so the history
+  reads version by version rather than recording that *something* was edited.
+  The comparison is specification-only, so binding data files to a dataset
+  never shows up as a change. Applying pasted YAML in the Raw tab no longer
+  overwrites the document's version or its history: a paste edits the
+  specification, it does not replace the document's identity.
+
+- **Controlled vocabularies in the template library.** A reusable, versioned
+  term set (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) that a column's
+  permitted `values:` can be drawn from, so a list of visit codes or test
+  codes is written once and shared across datasets and templates instead of
+  being retyped into each one. A column binds to one with
+  `values_from: visit@1.0`, or restricts it for that dataset with
+  `include:`/`exclude:`. One vocabulary can serve both halves of a code/decode
+  pair through `field: code` / `field: label` — the shipped `gf_smrnaseq`
+  dataset template now drives GFTESTCD and GFTEST from a single
+  `gf_test@1.0`, so the two can no longer drift apart. A vocabulary can
+  `extends:` another with `add_terms:`/`remove_terms:`.
+
+  Where the choice belongs to whoever creates the document rather than to the
+  template author, a creation template offers a `vocabulary_slots:` picker —
+  the party-slot shape, one concept over — which the "Create new from
+  template" modal renders as a multi-select. `mode: open` additionally lets
+  the author enter a value the vocabulary does not have. The column editor
+  gained a "Choose from vocabulary…" picker for the same job on an existing
+  document.
+
+  Vocabularies are **expanded into a plain `values:` list at creation time**:
+  nothing in `DTAColumnSpec` or the validation engine changed, and a produced
+  document is still readable without access to the vocabulary library that
+  shaped it. `validate_template()` learned the new kind and the new failure
+  modes (`vocabulary_invalid`, `vocabulary_unresolved`,
+  `vocabulary_extends_failed`, `values_from_unresolved`,
+  `values_from_terms_invalid`, `values_from_pattern`, `vocab_slot_invalid`).
+
+- **A deviation template can follow the standard it deviates from.**
+  `extends: biomarker_gf@latest` (or a bare `extends: biomarker_gf`) resolves
+  to the newest version of the parent, so publishing a new release of a
+  standard no longer means editing every supplier's deviation file to pick it
+  up. Finished documents do not drift: creation resolves `@latest` once and
+  records the concrete version in `metadata.template`, so a specification stays
+  pinned to what it was actually built from and still rebases against the right
+  ancestor. The shipped `biomarker_gf_acme` example now uses it, while keeping
+  its `datasets:` import pinned — a `patch:` names specific columns and is only
+  known to be coherent against a dataset template it has been checked against.
+
+- **Private templates: the Shiny app's "Create new from template" family can
+  now live outside the package entirely.** `DTATOOLS_TEMPLATE_SOURCES`
+  (`"[name=]scheme:locator[#ref]; ..."`) points the picker at one or more
+  `dir:`, `pkg:`, or `git:` sources instead of the packaged examples — a
+  private git repository (Bitbucket Data Center in production, mirrored to
+  GitHub for CI), a companion R package, or a local directory, entirely
+  configured through environment variables so a Posit Connect deployment
+  never has to redeploy to change its template family. A `git:` credential
+  (`DTATOOLS_TEMPLATE_GIT_TOKEN`) is passed to the git child process purely as
+  an environment variable, never as part of the clone URL or a command-line
+  argument, so it cannot persist into `.git/config` or leak via the process
+  table. Configuring any private source switches the app to private-only —
+  the packaged demo is dropped from the search path unless
+  `DTATOOLS_TEMPLATE_INCLUDE_BUILTIN` says otherwise — and a private source
+  that fails to refresh serves its last-good cache with a staleness warning
+  rather than breaking template creation; a cold start with no cache at all
+  offers no templates, deliberately never falling back to the packaged
+  example.
+
+  Templates are addressed `id@version` (bare `id` means the newest version),
+  and a `dta_creation_template` can `extends:` another one — a supplier- or
+  study-specific deviation states only what differs (a changed option
+  default, a patched dataset column, a removed inherited field via an
+  explicit `key: null`) instead of copy-pasting and drifting from a shared
+  parent. A child that inherits is free to omit `base:`/`datasets:` entirely
+  to mean "unchanged from the parent" — `base: {}` is a different, explicit
+  instruction that wipes the parent's section instead.
+
+  A new `dta_dataset_template` kind (`kind: dta_dataset_template`) makes a
+  single dataset's column/rule set reusable across creation templates, or
+  addable to an existing DTA on its own: a creation template's `datasets:`
+  entry can now be `{template: id@version, as:, options:, patch:}`, with the
+  patch's four operations (`remove_columns`, `add_columns`, `modify_columns`,
+  `set`) always applied in that fixed order.
+
+  A new `dta_party_profile` kind (`kind: dta_party_profile`) supplies a
+  reusable supplier/receiver affiliation-and-contacts block a template can
+  offer as a pick-one dropdown via its own `party_slots:`, instead of every
+  template author retyping (or drifting) the same block by hand. Creating a
+  document from an ancestor (e.g. a rebase, below) can additionally carry
+  over a fixed, default-on set of the ancestor's own metadata fields
+  (`receiver`, `supplier`, `transmission`, `error_handling`,
+  `authorized_for_corrections`) — title, version, date, and version history
+  are deliberately excluded, since those describe the ancestor document
+  itself, not the relationship it recorded.
+
+  Every document built from a template now carries a `metadata.template`
+  provenance record (which template, which source, a content hash, the
+  `extends:` lineage, and the selections actually made) — machine-owned, so
+  no template author can set or forge it. That record is what powers
+  **rebase**: moving a document created from template `T@1.0` onto a newer
+  `T@1.1` without discarding hand edits made since creation, by
+  reconstructing the ancestor from the recorded selections and three-way
+  classifying every metadata field as a template change, a user change, an
+  agreement, or a conflict requiring an explicit choice. Rebase is
+  metadata-only (dataset structure is reported, never rewritten),
+  `version_history` is only ever appended to, and a document with no
+  provenance — anything created before this feature, or without a template
+  at all — cannot be rebased.
+
+  `validate_template(path, strict = TRUE)` runs the same structural checks
+  the picker relies on — unresolvable `extends:`, an option target that does
+  not resolve to a real (or is a machine-owned) metadata field, a party slot
+  naming an unknown profile, an incoherent dataset patch, an unquoted
+  `version:` — plus, as a final check, an actual dry-run build of every
+  non-abstract creation template, all without starting the app. A
+  ready-to-copy GitHub Actions workflow for a private template repository's
+  own CI ships at `inst/extdata/templates/validate-templates.yml`. See
+  `vignette("private-templates")` for the full walkthrough.
+
 - **Buttons now show that they were pressed, and a second click no longer
   runs the action twice.** Every button and download link in the Shiny app
   enters a busy state on the first click -- a spinner in place of its label,
@@ -25,6 +153,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   dropped connection can never leave a button stuck.
 
 ### Fixed
+
+- **Zero-padded and Y/N term codes are no longer silently destroyed by the
+  YAML parser.** Vocabulary files are read with a wider set of scalar handlers
+  than the rest of the template family: under an ordinary parse `01` and `007`
+  are read as octal and become `1` and `7`, `0x1F` becomes `31`, and `Y`, `N`
+  and `NO` become booleans. Zero-padded visit numbers and Y/N flags are two of
+  the most common controlled vocabularies there are, so a code in a
+  `*.dta-vocabulary.yaml` is now kept exactly as written, quoted or not.
 
 - **`check()` went silent on the axis that failed.** The column spec axis
   printed one lumped success line -- `Table format, length, pattern, and values

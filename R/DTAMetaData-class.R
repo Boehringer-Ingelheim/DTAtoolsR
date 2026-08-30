@@ -19,6 +19,10 @@
 #' @param transmission list with type, frequency, notification, dates (first/last transfer), and flags
 #' @param error_handling character description of error handling procedures
 #' @param authorized_for_corrections character or list indicating BI contact(s) authorized to request corrections
+#' @param template A machine-owned provenance record written by the template
+#'   engine that generated this document, e.g. \code{list(id = "...", version = "...")}.
+#'   Never set by a specification author. When non-empty, \code{id} and
+#'   \code{version} are each required to be a single non-empty character.
 #' @return An object of class DTAMetaData.
 #'
 #' @details
@@ -54,7 +58,8 @@ DTAMetaData <- S7::new_class(
     supplier = list(),
     transmission = list(),
     error_handling = NULL,
-    authorized_for_corrections = NULL
+    authorized_for_corrections = NULL,
+    template = list()
   ) {
     import_issues <- list()
 
@@ -85,6 +90,7 @@ DTAMetaData <- S7::new_class(
       transmission = transmission,
       error_handling = error_handling,
       authorized_for_corrections = authorized_for_corrections,
+      template = template,
       import_issues = import_issues
     )
   },
@@ -99,6 +105,7 @@ DTAMetaData <- S7::new_class(
     transmission = class_list,
     error_handling = class_character_or_null,
     authorized_for_corrections = class_character_or_list_or_null,
+    template = S7::new_property(S7::class_list, default = list()),
     import_issues = S7::new_property(S7::class_list, default = list())
   ),
   validator = function(self) {
@@ -149,6 +156,20 @@ DTAMetaData <- S7::new_class(
         if (!is.character(val) && !inherits(val, "Date")) {
           errors <- c(errors, "transmission$date_last_transfer must be a Date or character string.")
         }
+      }
+    }
+
+    # Validate template provenance: a partially written record is worse than
+    # none, because the rebase feature trusts it. When present, `id` and
+    # `version` must each be a single non-empty character.
+    if (length(self@template) > 0) {
+      tid <- self@template$id
+      tversion <- self@template$version
+      if (!is.character(tid) || length(tid) != 1 || !nzchar(tid)) {
+        errors <- c(errors, "template$id must be a single non-empty character string.")
+      }
+      if (!is.character(tversion) || length(tversion) != 1 || !nzchar(tversion)) {
+        errors <- c(errors, "template$version must be a single non-empty character string.")
       }
     }
 
@@ -362,7 +383,11 @@ method(print, DTAMetaData) <- function(x, ...) {
 #'
 #' @name print_info
 #' @export
-if (!exists("print_info", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTAMetaData) <- function(x, ...) {
@@ -514,7 +539,7 @@ method(print_info, DTAMetaData) <- function(x, ...) {
 #'
 #' @name print_short_info
 #' @export
-if (!exists("print_short_info", mode = "function")) {
+if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {

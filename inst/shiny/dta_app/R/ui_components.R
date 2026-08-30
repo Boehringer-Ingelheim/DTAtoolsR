@@ -17,8 +17,67 @@
 # independently guards each of those surfaces rather than trusting the
 # client-side toggle state, because a client can be made to send
 # input$edit_mode = TRUE regardless of what is actually drawn on screen.
-edit_mode_switch <- function() {
-  bslib::input_switch("edit_mode", "Edit mode", value = FALSE)
+#
+# `value` exists because the server re-renders this switch into a
+# uiOutput() slot rather than placing it once at startup: a DTA loaded from
+# an existing file shows "Create new version" (create_new_version_button())
+# in that slot instead, and only once the author has created a new version
+# does this switch take its place -- already on, so the document they just
+# versioned is immediately editable without a second click. The default
+# stays FALSE so every other path into the app -- a fresh document, or a
+# reload -- still opens read-only.
+edit_mode_switch <- function(value = FALSE) {
+  bslib::input_switch("edit_mode", "Edit mode", value = isTRUE(value))
+}
+
+# Stands in for edit_mode_switch() in the brandbar's action slot while the
+# loaded DTA has no new version yet -- the switch itself only reappears
+# once the author has committed to one (see the WHY comment above it). This
+# reuses the `.brand-link` pill class (theme.R) rather than inventing a new
+# shape, so the button sits on the same baseline as the other brandbar
+# pills it is swapped in for; `.brand-action` (theme.R) re-states the
+# properties Bootstrap's `<button>` markup does not inherit from the
+# `.brand-link` rule, which was written against an `<a>`.
+create_new_version_button <- function() {
+  actionButton(
+    "create_new_version",
+    "Create new version",
+    class = "brand-link brand-action"
+  )
+}
+
+# The body of the "Create new version" modal opened by
+# create_new_version_button(), kept a pure function of its arguments -- like
+# ds_edit_menu_item() and contact_detail_block() above -- so it is testable
+# without testServer(). `new_version_msg` is rendered separately via
+# uiOutput() rather than folded into this body, because a rejected version
+# (e.g. one that collides with version_history) needs to show an inline
+# error WITHOUT this body re-rendering and wiping the value/note the author
+# already typed -- the same convention the add-dataset modal uses for
+# rv$add_ds_msg (app.R).
+#
+# `current_version` is DTAMetaData@version read straight off the loaded
+# document, and an unset S7 property can read back as NULL, character(0),
+# NA, or "" -- the same shapes .ro_field_value() (this file) already
+# normalises for meta_field_text(), so it is reused here rather than
+# duplicating a bare nzchar() check that would abort on character(0).
+new_version_modal_body <- function(current_version, suggested) {
+  cv <- .ro_field_value(current_version)
+  tagList(
+    p(
+      class = "msg-hint",
+      if (nzchar(cv)) paste0("Current version: ", cv) else "This document has no version yet."
+    ),
+    textInput("new_version_value", "New version", value = suggested, width = "100%"),
+    textAreaInput("new_version_note", "Note (optional)",
+      value = "", width = "100%", rows = 2
+    ),
+    div(
+      class = "msg-hint", style = "margin:-4px 0 8px;",
+      "Prepended to the change summary written into this document's version history."
+    ),
+    uiOutput("new_version_msg")
+  )
 }
 
 # One row of the dataset Edit menu: an icon tile, a title, and a one-line
@@ -430,4 +489,148 @@ click_guard_script <- function() {
   onShiny('shiny:disconnected', releaseAll);
 })();
 "))
+}
+
+# ---- Template picker: source status + diagnostics --------------------------
+#
+# "Create new from template" (app.R) is backed by dta_template_index_cached()
+# (template_index.R), which can draw templates from several configured
+# sources (template_sources.R) at once. These render the parts of that picker
+# that are pure functions of the resolved source records, so they can be
+# exercised without a running server -- matching this file's own stated
+# purpose. The picker's reactive plumbing (the grouped selectInput, the
+# version list, the refresh button) stays in app.R, alongside render_
+# template_option_input() and friends, because it closes over `input`/`rv`.
+
+# Human-readable age for a `stale_age` (seconds, from resolve_git_source(),
+# template_sources.R), rounded to the coarsest unit that keeps the number
+# meaningful ("just now", "5 minutes ago", "3 hours ago", "2 days ago") -- a
+# raw second count is not something an admin reading the picker can act on at
+# a glance.
+format_stale_age <- function(seconds) {
+  s <- suppressWarnings(as.numeric(seconds))
+  if (length(s) == 0 || is.na(s) || s < 0) {
+    return("unknown age")
+  }
+  if (s < 60) {
+    return("just now")
+  }
+  mins <- floor(s / 60)
+  if (mins < 60) {
+    return(sprintf("%d minute%s ago", mins, if (mins == 1) "" else "s"))
+  }
+  hours <- floor(mins / 60)
+  if (hours < 24) {
+    return(sprintf("%d hour%s ago", hours, if (hours == 1) "" else "s"))
+  }
+  days <- floor(hours / 24)
+  sprintf("%d day%s ago", days, if (days == 1) "" else "s")
+}
+
+# One resolved source's status line: its name and a scheme badge, plus --
+# only when it is CURRENTLY being served from a stale cache (a failed git
+# refresh that fell back to the last good checkout, see resolve_git_source())
+# -- a warning naming how old that cache is. A source that failed outright
+# (ok == FALSE) has no status of its own to show here; template_source_
+# diagnostics_ui() below is where that belongs, because a failed source's
+# only useful fact is its error.
+template_source_status_row <- function(source) {
+  if (!isTRUE(source$ok)) {
+    return(NULL)
+  }
+  div(
+    class = "tmpl-source-status",
+    tags$strong(as.character(source$name %||% "")),
+    " ",
+    tags$span(class = "badge bg-secondary", as.character(source$scheme %||% "")),
+    if (isTRUE(source$stale)) {
+      tags$span(
+        class = "msg-hint", style = "color:#b45309;",
+        sprintf(" — serving a stale cache (%s)", format_stale_age(source$stale_age))
+      )
+    }
+  )
+}
+
+# Failed-source diagnostics: name, scheme, and the error -- already redacted
+# by resolve_template_source()/redact_secrets() (template_sources.R) before it
+# ever reaches here, so this never has to know how to strip a credential
+# itself. NULL when nothing failed, so a call site can splice this straight
+# into a tagList() without an extra length() check first.
+template_source_diagnostics_ui <- function(sources) {
+  failed <- Filter(function(s) !isTRUE(s$ok), sources %||% list())
+  if (length(failed) == 0) {
+    return(NULL)
+  }
+  tagList(
+    div(
+      class = "msg-hint", style = "color:#b91c1c;",
+      tags$strong("Some template sources could not be loaded:")
+    ),
+    tags$ul(lapply(failed, function(s) {
+      tags$li(sprintf(
+        "%s (%s): %s",
+        as.character(s$name %||% ""), as.character(s$scheme %||% ""),
+        as.character(s$error %||% "unknown error")
+      ))
+    }))
+  )
+}
+
+# The read-only "where this document came from" block for the Metadata tab
+# (output$metadata_editor, app.R), shown only when `prov` (DTAMetaData@
+# template) is non-empty. Built entirely from meta_field_text() (this file),
+# which never renders an input control -- so this block cannot become
+# editable no matter what mode the tab is in. That is deliberate, not
+# incidental: `template` is machine-owned (dta_metadata_machine_fields(),
+# template_core.R), and neither an option effect nor a carry-over can ever
+# write it (apply_metadata_carry_over() strips it before anything else runs),
+# so a decorative, input-free render is the only thing that may show it here.
+template_provenance_block <- function(prov) {
+  prov <- prov %||% list()
+  if (length(prov) == 0) {
+    return(NULL)
+  }
+  ds_prov <- prov$datasets %||% list()
+  ds_rows <- if (length(ds_prov) > 0) {
+    lapply(ds_prov, function(d) {
+      ndev <- length(d$deviations %||% list())
+      meta_field_text(
+        as.character(d$name %||% ""),
+        sprintf(
+          "%s@%s — %d deviation%s",
+          as.character(d$template %||% ""), as.character(d$version %||% ""),
+          ndev, if (ndev == 1) "" else "s"
+        )
+      )
+    })
+  } else {
+    NULL
+  }
+  tagList(
+    tags$hr(),
+    div(class = "md-section-title", "Template provenance"),
+    div(
+      class = "msg-hint", style = "margin:-4px 0 8px;",
+      "Where this document was created from. Machine-recorded, not editable here."
+    ),
+    meta_field_text(
+      "Template",
+      paste0(as.character(prov$id %||% ""), "@", as.character(prov$version %||% ""))
+    ),
+    meta_field_text("Source", as.character(prov$source %||% "")),
+    meta_field_text(
+      "Created",
+      if (!is.null(prov$created) && length(prov$created) > 0) as.character(prov$created) else ""
+    ),
+    meta_field_text(
+      "Lineage",
+      if (length(prov$lineage %||% character(0)) > 0) {
+        paste(as.character(prov$lineage), collapse = " → ")
+      } else {
+        ""
+      }
+    ),
+    if (length(ds_rows) > 0) tagList(div(class = "section-label", "Datasets"), ds_rows)
+  )
 }

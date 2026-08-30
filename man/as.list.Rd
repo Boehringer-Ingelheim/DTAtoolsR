@@ -100,6 +100,14 @@ straight back through \code{DTAMetaData()}.
 
 \code{@import_issues} is deliberately not exported: it is a runtime record of
 what was lost while coercing the input, not part of the specification.
+\code{@template} IS exported (when non-empty): it is a provenance record that
+must survive a save/reload cycle so the rebase feature can trust it later.
+
+This method is hand-written field by field rather than iterating S7
+properties, so it does NOT pick up a new \code{DTAMetaData} property
+automatically. Adding a property to the class without adding it here means
+it is silently dropped on the next save -- if you add a property, add it
+to this function too.
 }
 \examples{
 x <- create_example_DTAColumnSpecCollection()

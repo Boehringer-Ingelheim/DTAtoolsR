@@ -596,7 +596,11 @@ columns_specs_from_word <- function(
 #' specs <- create_example_DTAColumnSpecCollection()
 #' as_json_schema(specs)
 #' @export
-if (!exists("as_json_schema", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("as_json_schema", mode = "function", inherits = FALSE)) {
   as_json_schema <- new_generic("as_json_schema", "DTAColumnSpecCollection")
 }
 #' @export

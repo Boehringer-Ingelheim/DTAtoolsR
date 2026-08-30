@@ -144,7 +144,11 @@ DTAFile <- S7::new_class(
 )
 
 
-if (!exists("min_number_of_files", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("min_number_of_files", mode = "function", inherits = FALSE)) {
   min_number_of_files <- new_generic("min_number_of_files", "x")
 }
 #' @title Get min number of files
@@ -169,7 +173,7 @@ method(min_number_of_files, DTAFile) <- function(x, ...) {
 }
 
 
-if (!exists("max_number_of_files", mode = "function")) {
+if (!exists("max_number_of_files", mode = "function", inherits = FALSE)) {
   max_number_of_files <- new_generic("max_number_of_files", "x")
 }
 #' @title Get max number of files
@@ -251,7 +255,7 @@ dta_strip_compression_extension <- function(file_name) {
 #' @name matches_filename
 #' @rdname matches_filename
 #' @export
-if (!exists("matches_filename", mode = "function")) {
+if (!exists("matches_filename", mode = "function", inherits = FALSE)) {
   matches_filename <- new_generic("matches_filename", "x")
 }
 
@@ -363,7 +367,7 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
 #' @name read_file_execution
 #' @rdname read_file_execution
 #' @export
-if (!exists("read_file_execution", mode = "function")) {
+if (!exists("read_file_execution", mode = "function", inherits = FALSE)) {
   read_file_execution <- new_generic("read_file_execution", "x")
 }
 
@@ -412,7 +416,7 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #' @name read_file
 #' @rdname read_file
 #' @export
-if (!exists("read_file", mode = "function")) {
+if (!exists("read_file", mode = "function", inherits = FALSE)) {
   read_file <- new_generic("read_file", "x")
 }
 
@@ -446,7 +450,7 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
 #' @name open_file_execution
 #' @rdname open_file_execution
 #' @export
-if (!exists("open_file_execution", mode = "function")) {
+if (!exists("open_file_execution", mode = "function", inherits = FALSE)) {
   open_file_execution <- new_generic("open_file_execution", "x")
 }
 
@@ -496,7 +500,7 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' @name open_file
 #' @rdname open_file
 #' @export
-if (!exists("open_file", mode = "function")) {
+if (!exists("open_file", mode = "function", inherits = FALSE)) {
   open_file <- new_generic("open_file", "x")
 }
 
@@ -585,7 +589,7 @@ dta_print_file_count <- function(x) {
 #' @seealso \code{\link{DTAFile}}
 #' @name print_info
 #' @export
-if (!exists("print_info", mode = "function")) {
+if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 
@@ -621,7 +625,7 @@ method(print_info, DTAFile) <- function(x) {
 #' @seealso \code{\link{DTAFile}}
 #' @name print_short_info
 #' @export
-if (!exists("print_short_info", mode = "function")) {
+if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAFile) <- function(x, ...) {
