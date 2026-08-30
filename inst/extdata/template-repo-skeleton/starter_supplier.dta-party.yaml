@@ -1,0 +1,18 @@
+kind: dta_party_profile
+id: starter_supplier
+version: "1.0"
+role: supplier
+label: Starter Supplier
+description: >-
+  A minimal supplier profile. starter.dta-template.yaml's `party_slots:`
+  offers this profile, so choosing it in the app fills metadata.supplier's
+  affiliation and contacts in one step instead of retyping them.
+affiliation:
+  name: Starter Supplier Inc.
+  address: 1 Example Street, Springfield
+  country: DE
+contacts:
+  - name: Jane Doe
+    role: Data Manager
+    email: jane.doe@example.com
+    signature: true
