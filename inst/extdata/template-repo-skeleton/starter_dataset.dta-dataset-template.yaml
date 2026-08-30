@@ -1,0 +1,60 @@
+kind: dta_dataset_template
+id: starter_dataset
+version: "1.0"
+label: Starter dataset
+description: >-
+  A minimal reusable dataset template: a handful of columns, one of them
+  (STATUS) bound to starter_terms@1.0 via `values_from:` so its permitted
+  values are declared once, in the vocabulary, rather than copied here.
+  starter.dta-template.yaml imports this via `datasets: [{template:
+  starter_dataset@1.0, ...}]`.
+date: "2026-08-30"
+
+options:
+  # Demonstrates a dataset-template option: the creation template importing
+  # this dataset (or a deviation `patch:`) can override the vendor name
+  # without forking the whole column definition, exactly as the shipped
+  # gf_smrnaseq.dta-dataset-template.yaml does for its own vendor column.
+  - id: vendor_name
+    label: Vendor name
+    type: text
+    target: dataset.columns.SOURCE.values
+    default: Starter Vendor
+    help: Name of the organisation supplying this dataset.
+
+dataset:
+  name: starter_data
+  type: tabular
+  description: Example tabular dataset for a new template repository.
+
+  files:
+    filename: starter_data.tsv
+    type: tsv
+
+  columns:
+    - id: SUBJID
+      label: Subject identifier
+      type: SAS Char
+      format: SAS $10.
+      nullable: No
+      description: Unique identifier for a study subject.
+      example: SUBJ0001
+    - id: STATUS
+      label: Record status
+      type: SAS Char
+      format: SAS $4.
+      nullable: No
+      description: >-
+        Quality status of the record. Permitted values come from
+        starter_terms@1.0, not a literal list here, so STATUS and the
+        vocabulary can never drift apart.
+      # No literal `values:` here -- that is the whole point of the binding.
+      values_from: starter_terms@1.0
+    - id: SOURCE
+      label: Data source
+      type: SAS Char
+      format: SAS $40.
+      nullable: No
+      description: Name of the organisation supplying this record.
+      values:
+        - Starter Vendor

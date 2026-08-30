@@ -27,6 +27,21 @@
 # hand-rolled copy of any of that logic would drift from the real one over
 # time and end up validating something other than what the app actually does
 # -- worse than not validating it at all.
+#
+# RULE: every list parsed from (or copied out of) a template author's YAML --
+# `def`, a column, an option, an effect operation, a dataset entry, a
+# vocabulary definition, and so on -- is read with `[[` (exact match), never
+# `$`. `$` on a list falls back to PARTIAL name matching when there is no
+# exact key, so `x$foo` silently returns `x$foobar` when `foo` is absent and
+# `foobar` is the only key starting with `foo`. On YAML with real, adjacent
+# field names (`values`/`values_from`, `dataset`/`datasets`,
+# `effects`/`effects_all`), that turns "this field is absent" into "this
+# field is present, with a different field's value" -- see the
+# `col[["values"]]` and `def[["dataset"]]` call sites below for two field
+# collisions this already bit. `$` stays fine for a list this file's OWN code
+# constructs with a fixed, known key set (an internal record, a `dta_try()`
+# result, the result/index data frames) -- those names are ours, so the hazard
+# does not apply.
 # -----------------------------------------------------------------------------
 
 # ---- Engine access -----------------------------------------------------
@@ -167,6 +182,44 @@
   sort(unique(files), method = "radix")
 }
 
+# Recursive counterpart to .dta_template_list_dir(), used ONLY to find files a
+# non-recursive scan misses (.dta_template_check_nested(), below) -- never for
+# anything that resolves a cross-file reference, where "the directory being
+# validated is flat" is the documented contract.
+#
+# Same per-kind patterns as the non-recursive scan, so the two listings stay
+# comparable by exact path, but with `recursive = TRUE` and a filter dropping
+# any hit under a dot-led directory component (`.git`, `renv`, `.Rproj.user`,
+# or any other dotfile-style directory a clone or an IDE leaves behind) --
+# none of those ever holds an authored template, and `.git` in particular can
+# be large enough that walking it on every call would be a real cost for no
+# benefit.
+.dta_template_list_nested <- function(dir, kinds) {
+  hits <- lapply(kinds, function(k) {
+    pat <- .dta_template_engine_get("dta_template_kind_pattern")(k)
+    rel <- list.files(dir, pattern = pat, ignore.case = TRUE, recursive = TRUE)
+    if (length(rel) == 0) {
+      return(NULL)
+    }
+    data.frame(rel = rel, kind = k, stringsAsFactors = FALSE)
+  })
+  hits <- hits[!vapply(hits, is.null, logical(1))]
+  if (length(hits) == 0) {
+    return(data.frame(file = character(0), kind = character(0), stringsAsFactors = FALSE))
+  }
+  out <- do.call(rbind, hits)
+
+  # `rel` is relative to `dir`, so its OWN directory components -- never
+  # anything above `dir` -- are what decide "is this file inside a dot
+  # directory"; a `dir` argument that itself sits below a dotfile must not
+  # disqualify every file it contains.
+  parts <- strsplit(out$rel, "[/\\]")
+  under_dotdir <- vapply(parts, function(p) any(grepl("^[.]", utils::head(p, -1L))), logical(1))
+  out <- out[!under_dotdir, , drop = FALSE]
+
+  data.frame(file = file.path(dir, out$rel), kind = out$kind, stringsAsFactors = FALSE)
+}
+
 # ---- Reading one file exactly, without engine-level normalisation ------
 
 # Parse ONE candidate file with the version-preserving handlers
@@ -197,9 +250,9 @@
   }
   list(
     ok = TRUE,
-    kind = .dta_template_scalar_chr(def$kind),
-    id = .dta_template_scalar_chr(def$id),
-    version = .dta_template_scalar_chr(def$version),
+    kind = .dta_template_scalar_chr(def[["kind"]]),
+    id = .dta_template_scalar_chr(def[["id"]]),
+    version = .dta_template_scalar_chr(def[["version"]]),
     def = def,
     error = NA_character_
   )
@@ -224,7 +277,7 @@
   if (!is.list(raw)) {
     return(TRUE) # cannot tell; do not manufacture a false positive
   }
-  .dta_template_engine_get("dta_template_version_is_exact")(raw$version)
+  .dta_template_engine_get("dta_template_version_is_exact")(raw[["version"]])
 }
 
 # ---- Cross-file index (extends / datasets[].template / party profile ids) --
@@ -325,12 +378,21 @@
   }
   paths <- character(0)
 
-  target <- as.character(opt$target %||% "")
+  target <- as.character(opt[["target"]] %||% "")
   if (nzchar(target)) {
     paths <- c(paths, target)
   }
 
-  eff <- opt$effects %||% list()
+  # `opt[["effects"]]`, NOT `opt$effects`: 'effects' is a strict prefix of the
+  # sibling key 'effects_all', read separately two lines down. An option
+  # authored with ONLY 'effects_all:' (no 'effects:') would have `opt$effects`
+  # partial-match onto 'effects_all', handing this branch a plain
+  # list-of-operations where it expects either a single {path:,value:} map or
+  # a list keyed by option value -- silently wrong input shape, currently
+  # harmless only by accident (an unnamed list has no "path" name and no
+  # names() to iterate, so this branch happens to contribute zero paths either
+  # way), not by design.
+  eff <- opt[["effects"]] %||% list()
   if (!is.null(eff[["path"]])) {
     # A single operation written directly as a map, not keyed by value --
     # mirrors collect_option_effects()'s own "eff[['path']]" branch
@@ -342,7 +404,7 @@
     }
   }
 
-  paths <- c(paths, .dta_template_effect_op_paths(opt$effects_all %||% list()))
+  paths <- c(paths, .dta_template_effect_op_paths(opt[["effects_all"]] %||% list()))
   unique(paths[nzchar(paths)])
 }
 
@@ -356,10 +418,10 @@
   }
   for (op in ops) {
     if (!is.list(op)) next
-    if (!is.null(op$set) && is.list(op$set)) {
-      paths <- c(paths, names(op$set))
-    } else if (!is.null(op$path)) {
-      paths <- c(paths, as.character(op$path))
+    if (!is.null(op[["set"]]) && is.list(op[["set"]])) {
+      paths <- c(paths, names(op[["set"]]))
+    } else if (!is.null(op[["path"]])) {
+      paths <- c(paths, as.character(op[["path"]]))
     }
   }
   paths
@@ -473,7 +535,7 @@
   machine_fields <- .dta_template_engine_get("dta_metadata_machine_fields")()
 
   # ---- target_invalid / target_machine_owned ------------------------------
-  opts <- def$options %||% list()
+  opts <- def[["options"]] %||% list()
   if (is.list(opts)) {
     for (opt in opts) {
       for (p in .dta_template_option_targets(opt)) {
@@ -492,7 +554,7 @@
 
   # ---- party_slot_invalid --------------------------------------------------
   norm_slots <- tryCatch(
-    .dta_template_engine_get("normalise_party_slots")(def$party_slots %||% list()),
+    .dta_template_engine_get("normalise_party_slots")(def[["party_slots"]] %||% list()),
     error = function(e) e
   )
   if (inherits(norm_slots, "error")) {
@@ -500,11 +562,11 @@
   } else {
     local_profile_ids <- index_df$id[index_df$kind == "dta_party_profile"]
     for (slot in norm_slots) {
-      unknown <- setdiff(slot$profiles, local_profile_ids)
+      unknown <- setdiff(slot[["profiles"]], local_profile_ids)
       if (length(unknown) > 0) {
         add(
           "warning", "party_slot_invalid",
-          sprintf("party slot '%s' names unknown profile id(s): %s.", slot$id, paste(unknown, collapse = ", "))
+          sprintf("party slot '%s' names unknown profile id(s): %s.", slot[["id"]], paste(unknown, collapse = ", "))
         )
       }
     }
@@ -514,11 +576,11 @@
   rows <- c(rows, .dta_template_check_vocab_slots(path, id, version, def, index_df))
 
   # ---- dataset_template_unresolved / patch_incoherent ---------------------
-  ds_entries <- def$datasets %||% def$base$datasets %||% list()
+  ds_entries <- def[["datasets"]] %||% def[["base"]][["datasets"]] %||% list()
   if (is.list(ds_entries)) {
     for (entry in ds_entries) {
       if (!is.list(entry)) next
-      tpl_ref <- as.character(entry$template %||% "")
+      tpl_ref <- as.character(entry[["template"]] %||% "")
       if (!nzchar(tpl_ref)) {
         # An INLINE dataset body, authored in the creation template itself. Its
         # columns can carry a vocabulary binding exactly as a dataset
@@ -539,11 +601,11 @@
         next
       }
 
-      if (!is.null(entry$patch)) {
+      if (!is.null(entry[["patch"]])) {
         ds_read <- .dta_template_engine_get("read_dataset_template")(hit$path[[1]])
         if (isTRUE(ds_read$ok)) {
           patch_res <- tryCatch(
-            .dta_template_engine_get("apply_dataset_patch")(ds_read$value$dataset, entry$patch),
+            .dta_template_engine_get("apply_dataset_patch")(ds_read$value[["dataset"]], entry[["patch"]]),
             error = function(e) e
           )
           if (inherits(patch_res, "error")) {
@@ -574,7 +636,7 @@
   # (reported at "error", since a template that cannot even resolve its own
   # base can never be built, regardless of what lives outside this directory)
   # are raised together.
-  abstract <- isTRUE(def$abstract)
+  abstract <- isTRUE(def[["abstract"]])
   read_res <- .dta_template_engine_get("read_dta_creation_template")(path)
   if (!isTRUE(read_res$ok)) {
     if (!abstract) {
@@ -630,7 +692,7 @@
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_creation_template", id, version, severity, code, message)
   }
 
-  raw <- def$vocabulary_slots %||% list()
+  raw <- def[["vocabulary_slots"]] %||% list()
   if (!is.list(raw) || length(raw) == 0) {
     return(rows)
   }
@@ -646,7 +708,7 @@
 
   resolver <- .dta_template_vocab_resolved(index_df)
   for (slot in slots) {
-    vocab <- tryCatch(resolver(slot$vocabulary), error = function(e) e)
+    vocab <- tryCatch(resolver(slot[["vocabulary"]]), error = function(e) e)
     if (inherits(vocab, "condition")) {
       add("error", "vocab_slot_invalid", conditionMessage(vocab))
       next
@@ -656,14 +718,14 @@
         "warning", "vocab_slot_unresolved",
         sprintf(
           "vocabulary slot '%s' names vocabulary '%s', which does not resolve within the directory being validated.",
-          slot$id, slot$vocabulary
+          slot[["id"]], slot[["vocabulary"]]
         )
       )
       next
     }
 
     terms <- tryCatch(
-      .dta_template_engine_get("vocabulary_terms")(vocab, include = slot$include, exclude = slot$exclude),
+      .dta_template_engine_get("vocabulary_terms")(vocab, include = slot[["include"]], exclude = slot[["exclude"]]),
       error = function(e) e
     )
     if (inherits(terms, "condition")) {
@@ -673,14 +735,14 @@
 
     # A default the slot does not itself offer is dead on arrival: the picker
     # cannot show it, so the slot silently starts empty.
-    codes <- vapply(terms, function(t) as.character(t$code), character(1))
-    stale <- setdiff(slot$default, codes)
+    codes <- vapply(terms, function(t) as.character(t[["code"]]), character(1))
+    stale <- setdiff(slot[["default"]], codes)
     if (length(stale) > 0) {
       add(
         "error", "vocab_slot_invalid",
         sprintf(
           "vocabulary slot '%s' defaults to %s, which this slot does not offer.",
-          slot$id, paste(sprintf("'%s'", stale), collapse = ", ")
+          slot[["id"]], paste(sprintf("'%s'", stale), collapse = ", ")
         )
       )
     }
@@ -699,7 +761,7 @@
 # dry run stands in for a user who picked the minimum, not for one who
 # submitted an empty form.
 .dta_template_vocab_dry_selections <- function(def, index_df) {
-  raw <- def$vocabulary_slots %||% list()
+  raw <- def[["vocabulary_slots"]] %||% list()
   if (!is.list(raw) || length(raw) == 0) {
     return(list())
   }
@@ -714,22 +776,22 @@
   resolver <- .dta_template_vocab_resolved(index_df)
   out <- list()
   for (slot in slots) {
-    sel <- slot$default
-    if (length(sel) < slot$min) {
+    sel <- slot[["default"]]
+    if (length(sel) < slot[["min"]]) {
       terms <- tryCatch(
         .dta_template_engine_get("vocabulary_terms")(
-          resolver(slot$vocabulary),
-          include = slot$include, exclude = slot$exclude
+          resolver(slot[["vocabulary"]]),
+          include = slot[["include"]], exclude = slot[["exclude"]]
         ),
         error = function(e) NULL
       )
       if (!is.null(terms)) {
-        codes <- vapply(terms, function(t) as.character(t$code), character(1))
-        sel <- unique(c(sel, utils::head(codes, slot$min)))
+        codes <- vapply(terms, function(t) as.character(t[["code"]]), character(1))
+        sel <- unique(c(sel, utils::head(codes, slot[["min"]])))
       }
     }
     if (length(sel) > 0) {
-      out[[slot$id]] <- sel
+      out[[slot[["id"]]]] <- sel
     }
   }
   out
@@ -747,31 +809,40 @@
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, kind, id, version, severity, code, message)
   }
 
-  columns <- ds_body$columns %||% list()
+  columns <- ds_body[["columns"]] %||% list()
   if (!is.list(columns) || length(columns) == 0) {
     return(rows)
   }
 
   resolver <- NULL
   for (col in columns) {
-    if (!is.list(col) || is.null(col$values_from)) {
+    if (!is.list(col) || is.null(col[["values_from"]])) {
       next
     }
-    col_id <- as.character(col$id %||% "<unnamed>")
+    col_id <- as.character(col[["id"]] %||% "<unnamed>")
 
     # Authored BOTH in the same literal column. Only detectable here, where the
     # raw per-file YAML is in hand: by build time a `values:` from the base and
     # a `values_from:` from a patch look exactly the same, and that combination
     # is legitimate. A warning, not an error, because the build is still
     # deterministic (the binding wins).
-    if (!is.null(col$values)) {
+    #
+    # `col[["values"]]`, NOT `col$values`: `$` on a list falls back to PARTIAL
+    # matching, so `col$values` returns the `values_from` this branch has
+    # already established is present whenever no literal `values:` was
+    # authored. That made this warning fire for every column that used a
+    # vocabulary binding correctly -- six times on this package's own shipped
+    # templates, telling the author they had written something they had not.
+    # `[[` matches exactly and is the only safe accessor for a name that is a
+    # prefix of a sibling.
+    if (!is.null(col[["values"]])) {
       add(
         "warning", "values_and_values_from",
         sprintf("column '%s' sets both 'values' and 'values_from'; the binding wins and 'values' is ignored.", col_id)
       )
     }
 
-    if (!is.null(col$pattern)) {
+    if (!is.null(col[["pattern"]])) {
       add(
         "error", "values_from_pattern",
         sprintf("column '%s' combines 'values_from' with 'pattern'; a column takes a permitted-value list or a pattern, never both.", col_id)
@@ -780,7 +851,7 @@
     }
 
     binding <- tryCatch(
-      .dta_template_engine_get("normalise_values_from")(col$values_from, col_id),
+      .dta_template_engine_get("normalise_values_from")(col[["values_from"]], col_id),
       error = function(e) e
     )
     if (inherits(binding, "condition")) {
@@ -791,7 +862,7 @@
     if (is.null(resolver)) {
       resolver <- .dta_template_vocab_resolved(index_df)
     }
-    vocab <- tryCatch(resolver(binding$vocabulary), error = function(e) e)
+    vocab <- tryCatch(resolver(binding[["vocabulary"]]), error = function(e) e)
     if (inherits(vocab, "condition")) {
       add("error", "values_from_invalid", conditionMessage(vocab))
       next
@@ -801,7 +872,7 @@
         "warning", "values_from_unresolved",
         sprintf(
           "column '%s' binds to vocabulary '%s', which does not resolve within the directory being validated.",
-          col_id, binding$vocabulary
+          col_id, binding[["vocabulary"]]
         )
       )
       next
@@ -815,7 +886,7 @@
       {
         .dta_template_engine_get("vocabulary_terms")(
           vocab,
-          include = binding$include, exclude = binding$exclude
+          include = binding[["include"]], exclude = binding[["exclude"]]
         )
         NULL
       },
@@ -841,9 +912,33 @@
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_dataset_template", id, version, severity, code, message)
   }
 
-  ds_body <- def$dataset %||% list()
+  # `def[["dataset"]]`, NOT `def$dataset`: 'dataset' is a strict PREFIX of
+  # 'datasets', a DIFFERENT, equally legitimate top-level key -- a
+  # dta_dataset_template carries 'dataset:' (singular), a dta_creation_template
+  # carries 'datasets:' (plural). `$` on a list falls back to PARTIAL name
+  # matching, so a dta_dataset_template file that was slipped a 'datasets:'
+  # array instead -- the obvious mistake when converting one kind of template
+  # into the other -- had `def$dataset` silently return that array, and every
+  # check below then walked it as if it were the dataset body: zero issues
+  # reported for a file that has no usable dataset at all.
+  ds_body <- def[["dataset"]] %||% list()
+  if (length(ds_body) == 0) {
+    # "error", not "warning": with no 'dataset:' body there is nothing this
+    # template could ever produce -- the same "cannot produce anything"
+    # reasoning as vocabulary_invalid/instantiate_failed/no_templates. Further
+    # checks below (bindings, option targets) would either no-op silently
+    # against an empty body or pile confusing target_invalid rows on top of
+    # this same root cause, so this is the only row reported.
+    hint <- if (!is.null(def[["datasets"]])) {
+      " Found 'datasets:' (plural) instead -- that belongs to a dta_creation_template; a dta_dataset_template needs the singular 'dataset:'."
+    } else {
+      ""
+    }
+    add("error", "dataset_missing", paste0("Template is missing a 'dataset' body.", hint))
+    return(rows)
+  }
   rows <- c(rows, .dta_template_check_bindings(path, id, version, ds_body, index_df))
-  opts <- def$options %||% list()
+  opts <- def[["options"]] %||% list()
   if (is.list(opts)) {
     for (opt in opts) {
       for (p in .dta_template_option_targets(opt)) {
@@ -901,7 +996,7 @@
   }
 
   vocab <- read$value
-  ref <- as.character(vocab$extends %||% "")
+  ref <- as.character(vocab[["extends"]] %||% "")
   if (!nzchar(ref)) {
     return(rows)
   }
@@ -967,6 +1062,74 @@
   .dta_template_bind_rows(rows)
 }
 
+# ---- Cross-file: directory scanned has no template files at all ----------
+
+# Fires only when `path` is a DIRECTORY: a single explicitly named file is
+# never "empty" by definition. Checked against ALL_FILES (every kind), not
+# the `kinds`-filtered report_files -- a directory holding only vocabularies,
+# validated with kinds = "dta_creation_template", has nothing to REPORT, not
+# nothing IN IT, and must not trip this.
+#
+# Severity "error", not "warning": inst/extdata/templates/validate-
+# templates.yml's whole CI job is `validate_template(".", strict = TRUE)`,
+# and strict = TRUE only aborts on an error row. Point that job at the wrong
+# path -- a typo, a stale working directory, a checkout that put the
+# templates one level down -- and, without this check, the job goes green
+# having validated nothing: exactly the failure a repository linter exists
+# to catch.
+.dta_template_check_no_templates <- function(path, is_dir, all_files) {
+  if (!is_dir || length(all_files) > 0) {
+    return(.dta_template_validation_empty())
+  }
+  .dta_template_bind_rows(list(.dta_template_row(
+    path, NA_character_, NA_character_, NA_character_, "error", "no_templates",
+    sprintf(
+      "No template files found in %s: looked for *.dta-template.yaml, *.dta-dataset-template.yaml, *.dta-party.yaml and *.dta-vocabulary.yaml (and their .yml spellings), non-recursively. A typo'd path, a stale working directory, and templates kept one level down in a subdirectory all look exactly like this.",
+      path
+    )
+  )))
+}
+
+# ---- Cross-file: a template kept below the scanned directory's top level -
+
+# The non-recursive scan (.dta_template_list_dir(), mirroring the app's own
+# build_template_index() in template_index.R:215-219) means a template
+# organised into a subfolder -- "by-study/", an archive -- is invisible to
+# BOTH this validator and the Shiny app's picker. That is consistent, not a
+# bug in either place, but nothing currently says so; this turns the silence
+# into one row per offending file, so an author notices before wondering why
+# a template never shows up in the app.
+#
+# Warning, not error: keeping an archived or work-in-progress file below the
+# root is a legitimate choice, and this must not turn CI red on its own.
+.dta_template_check_nested <- function(path, is_dir, all_files, all_kinds) {
+  if (!is_dir) {
+    return(.dta_template_validation_empty())
+  }
+
+  # Diffed against ALL_FILES, matching .dta_template_check_no_templates()'s
+  # own reasoning: whether a file is missed by the flat scan does not depend
+  # on which kinds the caller asked for a report row on.
+  nested <- .dta_template_list_nested(path, all_kinds)
+  nested <- nested[!(nested$file %in% all_files), , drop = FALSE]
+  if (nrow(nested) == 0) {
+    return(.dta_template_validation_empty())
+  }
+  nested <- nested[order(nested$file, method = "radix"), , drop = FALSE]
+
+  rows <- lapply(seq_len(nrow(nested)), function(i) {
+    .dta_template_row(
+      nested$file[[i]], nested$kind[[i]], NA_character_, NA_character_,
+      "warning", "template_in_subdirectory",
+      sprintf(
+        "%s is not validated (the scan is non-recursive) and the Shiny app's template loader will not see it either -- move it to the top level of the template directory.",
+        nested$file[[i]]
+      )
+    )
+  })
+  .dta_template_bind_rows(rows)
+}
+
 # ---- strict = TRUE --------------------------------------------------------
 
 .dta_template_strict_check <- function(result) {
@@ -996,15 +1159,28 @@
 #' Runs the structural checks the bundled Shiny app's "Create new from
 #' template" picker relies on -- unresolvable `extends:`, an option target
 #' that does not resolve to a real metadata field, a party slot naming a
-#' profile that does not exist, a dataset patch naming an absent column, and
-#' (as a final, comprehensive check) actually building a DTA from every
-#' non-abstract creation template with its own default selections -- WITHOUT
-#' starting the app. This lets a template repository (kept private, on
-#' Bitbucket Data Center in production and mirrored to GitHub for CI) run its
-#' own continuous integration against the templates it authors, with nothing
-#' more than an R installation of DTAtools. See
-#' `system.file("extdata", "templates", "validate-templates.yml", package =
-#' "DTAtools")` for a ready-to-copy GitHub Actions workflow.
+#' profile that does not exist, a dataset patch naming an absent column, a
+#' `dta_dataset_template` with no `dataset:` body (code `"dataset_missing"`,
+#' also caught when a `datasets:` array was authored instead), a scanned
+#' directory with no template files in it at all, a template kept below the
+#' scanned directory's top level, and (as a final, comprehensive check)
+#' actually building a DTA from every non-abstract creation template with its
+#' own default selections -- WITHOUT starting the app. This lets a
+#' template repository (kept private, on Bitbucket Data Center in production
+#' and mirrored to GitHub for CI) run its own continuous integration against
+#' the templates it authors, with nothing more than an R installation of
+#' DTAtools. See `system.file("extdata", "templates", "validate-templates.yml",
+#' package = "DTAtools")` for a ready-to-copy GitHub Actions workflow.
+#'
+#' @details
+#' An otherwise-empty directory is reported as an `"error"` (code
+#' `"no_templates"`), not accepted silently: the packaged
+#' `validate-templates.yml` workflow's entire CI job is
+#' `validate_template(".", strict = TRUE)`, and `strict = TRUE` only aborts on
+#' an error row. Point that job at the wrong path -- a typo, a stale working
+#' directory, a checkout that put the templates one level down -- and, without
+#' this check, the job goes green having validated nothing: exactly the
+#' failure a repository linter exists to catch.
 #'
 #' @param path A single template file, or a directory. A directory is scanned
 #'   NON-RECURSIVELY for `*.dta-template.yaml`, `*.dta-dataset-template.yaml`,
@@ -1015,6 +1191,9 @@
 #'   those files get a report row of their OWN; it never changes how many
 #'   files are considered when resolving a cross-file reference (an
 #'   `extends:`, a `datasets[].template`, a party slot's profile allow-list).
+#'   A template found below the scanned directory's top level is not read at
+#'   all -- it is reported as `template_in_subdirectory` rather than silently
+#'   ignored.
 #' @param strict A single `TRUE`/`FALSE`. When `TRUE`, `validate_template()`
 #'   raises an error via [cli::cli_abort()] summarising every row of severity
 #'   `"error"` (and stays silent when there are none), instead of just
@@ -1071,8 +1250,13 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
     .dta_template_check_file(p, records[[p]], index_df, resolve_extends)
   })
   dup_rows <- .dta_template_check_duplicates(records[report_files])
+  no_templates_rows <- .dta_template_check_no_templates(path, is_dir, all_files)
+  nested_rows <- .dta_template_check_nested(path, is_dir, all_files, all_kinds)
 
-  result <- do.call(rbind, c(list(.dta_template_validation_empty()), file_rows, list(dup_rows)))
+  result <- do.call(rbind, c(
+    list(.dta_template_validation_empty()), file_rows,
+    list(dup_rows, no_templates_rows, nested_rows)
+  ))
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation
     # diverges from CI" lesson referenced in .dta_template_list_dir().

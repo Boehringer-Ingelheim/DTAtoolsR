@@ -1,0 +1,17 @@
+kind: dta_vocabulary
+id: starter_terms
+version: "1.0"
+label: Starter status terms
+description: >-
+  A minimal controlled vocabulary: two terms, each carrying a code/label
+  pair. starter_dataset.dta-dataset-template.yaml binds its STATUS column to
+  this vocabulary via `values_from:`, so this list is written once and
+  reused rather than retyped into every column that needs it.
+type: text
+terms:
+  - code: PASS
+    label: Pass
+    description: The record passed all quality checks.
+  - code: FAIL
+    label: Fail
+    description: The record failed at least one quality check.

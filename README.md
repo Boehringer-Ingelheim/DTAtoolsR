@@ -628,6 +628,11 @@ enough to switch the app to your own private templates:
 DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
 ```
 
+`create_template_repo()` scaffolds a new private template repository to point
+that variable at — a small, cross-referencing worked example of the four
+template kinds plus a ready-to-run validation CI workflow, not a blank
+directory to fill in from nothing.
+
 See the [private templates vignette](vignettes/private-templates.Rmd)
 (`vignette("private-templates")`) for the full variable reference, the
 `dir:`/`pkg:`/`git:` source grammar, authoring creation and dataset templates,

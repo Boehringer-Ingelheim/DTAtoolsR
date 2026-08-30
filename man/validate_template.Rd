@@ -15,7 +15,10 @@ filename convention the template engine itself uses
 (\code{dta_template_kind_pattern()}). \code{kinds}, below, only narrows which of
 those files get a report row of their OWN; it never changes how many
 files are considered when resolving a cross-file reference (an
-\verb{extends:}, a \verb{datasets[].template}, a party slot's profile allow-list).}
+\verb{extends:}, a \verb{datasets[].template}, a party slot's profile allow-list).
+A template found below the scanned directory's top level is not read at
+all -- it is reported as \code{template_in_subdirectory} rather than silently
+ignored.}
 
 \item{strict}{A single \code{TRUE}/\code{FALSE}. When \code{TRUE}, \code{validate_template()}
 raises an error via \code{\link[cli:cli_abort]{cli::cli_abort()}} summarising every row of severity
@@ -39,14 +42,27 @@ checked file passed every check.
 Runs the structural checks the bundled Shiny app's "Create new from
 template" picker relies on -- unresolvable \verb{extends:}, an option target
 that does not resolve to a real metadata field, a party slot naming a
-profile that does not exist, a dataset patch naming an absent column, and
-(as a final, comprehensive check) actually building a DTA from every
-non-abstract creation template with its own default selections -- WITHOUT
-starting the app. This lets a template repository (kept private, on
-Bitbucket Data Center in production and mirrored to GitHub for CI) run its
-own continuous integration against the templates it authors, with nothing
-more than an R installation of DTAtools. See
-\code{system.file("extdata", "templates", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
+profile that does not exist, a dataset patch naming an absent column, a
+\code{dta_dataset_template} with no \verb{dataset:} body (code \code{"dataset_missing"},
+also caught when a \verb{datasets:} array was authored instead), a scanned
+directory with no template files in it at all, a template kept below the
+scanned directory's top level, and (as a final, comprehensive check)
+actually building a DTA from every non-abstract creation template with its
+own default selections -- WITHOUT starting the app. This lets a
+template repository (kept private, on Bitbucket Data Center in production
+and mirrored to GitHub for CI) run its own continuous integration against
+the templates it authors, with nothing more than an R installation of
+DTAtools. See \code{system.file("extdata", "templates", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
+}
+\details{
+An otherwise-empty directory is reported as an \code{"error"} (code
+\code{"no_templates"}), not accepted silently: the packaged
+\code{validate-templates.yml} workflow's entire CI job is
+\code{validate_template(".", strict = TRUE)}, and \code{strict = TRUE} only aborts on
+an error row. Point that job at the wrong path -- a typo, a stale working
+directory, a checkout that put the templates one level down -- and, without
+this check, the job goes green having validated nothing: exactly the
+failure a repository linter exists to catch.
 }
 \examples{
 library(DTAtools)
