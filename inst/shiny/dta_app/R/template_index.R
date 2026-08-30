@@ -2,11 +2,12 @@
 # Versioned template index over every root returned by
 # dta_template_source_roots() (template_sources.R).
 #
-# Three kinds of file live side by side in the same directories:
+# Four kinds of file live side by side in the same directories:
 #
 #   dta_creation_template  *.dta-template.yaml / .yml
 #   dta_dataset_template   *.dta-dataset-template.yaml / .yml
 #   dta_party_profile      *.dta-party.yaml / .yml
+#   dta_vocabulary         *.dta-vocabulary.yaml / .yml
 #
 # This file turns that filesystem layout into one data frame the picker UI can
 # filter/sort, plus a small `id[@version]` reference resolver so a template can
@@ -22,26 +23,29 @@
 
 # ---- Filename patterns -------------------------------------------------------
 
-# The three kinds indexed here, in no particular order -- build_template_index()
+# The four kinds indexed here, in no particular order -- build_template_index()
 # iterates it once per root.
 dta_template_all_kinds <- function() {
-  c("dta_creation_template", "dta_dataset_template", "dta_party_profile")
+  c("dta_creation_template", "dta_dataset_template", "dta_party_profile", "dta_vocabulary")
 }
 
 # Filename regex for one kind.
 #
-# The three suffixes share a stem ("dta-template" is a literal substring of
+# Two of the suffixes share a stem ("dta-template" is a literal substring of
 # "dta-dataset-template"), so the pattern is anchored on the FULL dotted
 # segment -- "\\.dta-template\\." -- not merely on "template\\." at the end.
 # That is what rules the overlap out structurally rather than by a lookaround:
 # the character immediately after the leading dot differs ("dta-template" vs
 # "dta-dataset-template"), so the creation-template regex cannot match a
 # dataset-template filename no matter how long the rest of the suffix runs.
+# The same anchoring keeps "dta-party" and "dta-vocabulary" disjoint from
+# those two and from each other for free.
 dta_template_kind_pattern <- function(kind) {
   suffix <- switch(kind,
     dta_creation_template = "dta-template",
     dta_dataset_template = "dta-dataset-template",
     dta_party_profile = "dta-party",
+    dta_vocabulary = "dta-vocabulary",
     cli::cli_abort("Unknown template kind {.val {kind}}.")
   )
   paste0("\\.", suffix, "\\.ya?ml$")

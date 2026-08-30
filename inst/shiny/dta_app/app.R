@@ -362,7 +362,8 @@ server <- function(input, output, session) {
     file_prefill = NULL, # list() of the handler fields currently loaded in the form
     file_msg = NULL, # inline file-handler-editor result: NULL | list(ok, error)
     pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
-    col_view = "list", # column editor view: "list" | "form"
+    col_view = "list", # column editor view: "list" | "form" | "vocab"
+    col_vocab_ref = NULL, # last vocabulary picked, so the picker reopens on it
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
     col_prefill = NULL, # list() of the column fields loaded in the form
@@ -677,6 +678,24 @@ server <- function(input, output, session) {
     out
   }
 
+  # The vocabulary-slot counterpart of collect_party_selections(). A slot the
+  # author left empty is OMITTED rather than recorded as character(0), so
+  # vocabulary_slot_values() takes its "fall back to the slot's default"
+  # branch -- the same distinction party slots draw between "no choice made"
+  # and "an explicit choice".
+  collect_vocab_selections <- function(def) {
+    slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) list())
+    out <- list()
+    for (slot in slots) {
+      val <- as.character(input[[paste0("tmpl_vocab_", slot$id)]] %||% character(0))
+      val <- val[!is.na(val) & nzchar(val)]
+      if (length(val) > 0) {
+        out[[slot$id]] <- val
+      }
+    }
+    out
+  }
+
   # The `carried_over_from` provenance field (template_provenance(),
   # template_create.R): the ancestor document's OWN template id/version, if
   # it had one. NULL when the ancestor carries no @template of its own --
@@ -760,6 +779,61 @@ server <- function(input, output, session) {
       )
     }
 
+    # One multi-select per vocabulary slot, seeded with the terms that slot
+    # offers. `create = TRUE` in "open" mode is what makes ONE control serve
+    # both modes: selectize lets the author type a term the vocabulary does
+    # not have, which is exactly "pick from the vocabulary, or use your own",
+    # without a second free-text box to reconcile.
+    #
+    # An unresolvable vocabulary is reported INLINE and leaves the slot out,
+    # rather than aborting the modal: the rest of the template is still
+    # perfectly usable, and a private source that is temporarily unreachable
+    # must not make document creation impossible.
+    vocab_slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) e)
+    vocab_ui <- if (inherits(vocab_slots, "condition")) {
+      tagList(
+        tags$hr(),
+        tags$h6("Controlled vocabularies"),
+        p(paste("This template's vocabulary slots could not be read:", conditionMessage(vocab_slots)),
+          class = "msg-hint"
+        )
+      )
+    } else if (length(vocab_slots) > 0) {
+      resolve_vocab <- vocabulary_resolver(index)
+      tagList(
+        tags$hr(),
+        tags$h6("Controlled vocabularies"),
+        lapply(vocab_slots, function(slot) {
+          choices <- tryCatch(vocabulary_slot_choices(slot, resolve_vocab), error = function(e) e)
+          if (inherits(choices, "condition")) {
+            return(p(paste0(slot$label, ": ", conditionMessage(choices)), class = "msg-hint"))
+          }
+          codes <- vapply(choices$terms, function(t) t$code, character(1))
+          # "CODE — Label" so the picker is readable, while the VALUE stays the
+          # bare code: the label is authoring metadata and must never leak into
+          # a column's permitted values.
+          labels <- vapply(choices$terms, function(t) {
+            lb <- as.character(t$label %||% "")
+            if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
+          }, character(1))
+
+          tagList(
+            selectizeInput(
+              paste0("tmpl_vocab_", slot$id), slot$label,
+              choices = stats::setNames(codes, labels),
+              selected = slot$default,
+              multiple = TRUE, width = "100%",
+              options = list(create = identical(slot$mode, "open"))
+            ),
+            if (nzchar(slot$description)) p(slot$description, class = "msg-hint"),
+            if (identical(slot$mode, "open")) {
+              p("You may also type a value that is not in this vocabulary.", class = "msg-hint")
+            }
+          )
+        })
+      )
+    }
+
     # "From the open document" is offered ONLY when a document is actually
     # open -- there is nothing to carry over from otherwise -- and is the
     # default in that case, since a user who already has a document open and
@@ -817,6 +891,7 @@ server <- function(input, output, session) {
         ))
       },
       party_ui,
+      vocab_ui,
       carry_ui,
       footer = tagList(
         modalButton("Cancel"),
@@ -1145,6 +1220,7 @@ server <- function(input, output, session) {
 
     sels <- collect_template_selections(def)
     party_sel <- collect_party_selections(def)
+    vocab_sel <- collect_vocab_selections(def)
 
     co <- resolve_carry_over()
     if (!isTRUE(co$ok)) {
@@ -1155,13 +1231,15 @@ server <- function(input, output, session) {
     prov <- template_provenance(
       def, loaded$value, sels,
       lineage = loaded$value$lineage,
-      carried_over_from = co$carried_over_from
+      carried_over_from = co$carried_over_from,
+      vocab_selections = vocab_sel
     )
 
     created <- create_dta_from_template(
       def, loaded$value$path, sels,
       index = idx, carry_over = co$carry_over,
-      party_selections = party_sel, provenance = prov
+      party_selections = party_sel, provenance = prov,
+      vocab_selections = vocab_sel
     )
     if (!isTRUE(created$ok)) {
       showNotification(paste("Could not create DTA from template:", created$error),
@@ -2619,6 +2697,53 @@ server <- function(input, output, session) {
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
+    } else if (identical(isolate(rv$col_view), "vocab")) {
+      # A THIRD view of the same modal, not a nested modal: Shiny's showModal()
+      # replaces rather than stacks, so a modal opened from inside this one
+      # would destroy the column form (and every unsaved edit in it) on the way
+      # in and have nothing to return to on the way out. rv$col_view already
+      # exists to switch this body; a third state costs nothing.
+      idx <- dta_template_index_cached()
+      vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+      pf <- isolate(rv$col_prefill) %||% list()
+
+      tagList(
+        tags$h6("Choose permitted values from a controlled vocabulary"),
+        if (is.null(vocabs) || nrow(vocabs) == 0) {
+          p(
+            "No controlled vocabularies are available from the configured template sources.",
+            class = "msg-hint"
+          )
+        } else {
+          tagList(
+            selectInput("col_vocab_ref", "Vocabulary",
+              choices = stats::setNames(
+                paste0(vocabs$id, "@", vocabs$version),
+                paste0(vocabs$label, " (", vocabs$id, "@", vocabs$version, ")")
+              ),
+              selected = isolate(rv$col_vocab_ref), width = "100%"
+            ),
+            uiOutput("col_vocab_terms"),
+            p(
+              paste(
+                "Selected terms replace this column's allowed values.",
+                "Nothing is written until you save the column."
+              ),
+              class = "msg-hint"
+            )
+          )
+        },
+        uiOutput("col_editor_msg"),
+        div(
+          style = "display:flex; justify-content:space-between; margin-top:8px;",
+          actionButton("col_vocab_cancel", HTML("&#x2190; Back to column"),
+            class = "btn btn-outline-secondary"
+          ),
+          if (!is.null(vocabs) && nrow(vocabs) > 0) {
+            actionButton("col_vocab_apply", "Use these values", class = "btn btn-primary")
+          }
+        )
+      )
     } else {
       pf <- isolate(rv$col_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
@@ -2654,8 +2779,13 @@ server <- function(input, output, session) {
           ),
           layout_columns(
             col_widths = c(6, 6),
-            textAreaInput("col_values", "Allowed values (one per line)",
-              value = g("values"), width = "100%", rows = 3
+            tagList(
+              textAreaInput("col_values", "Allowed values (one per line)",
+                value = g("values"), width = "100%", rows = 3
+              ),
+              actionButton("col_vocab_open", "Choose from vocabulary…",
+                class = "btn btn-sm btn-outline-secondary"
+              )
             ),
             textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
           ),
@@ -2728,6 +2858,94 @@ server <- function(input, output, session) {
   observeEvent(input$col_back, {
     rv$col_view <- "list"
     rv$col_msg <- NULL
+    rv$col_token <- rv$col_token + 1
+  })
+
+  # --- column editor: pick permitted values from a controlled vocabulary ---
+  #
+  # The form's CURRENT inputs are snapshotted into rv$col_prefill on the way
+  # into the picker and restored on the way back. Without this, leaving the
+  # form re-renders it from a stale prefill and silently discards everything
+  # typed since the form was opened.
+  snapshot_col_form <- function() {
+    list(
+      id = input$col_id %||% "",
+      label = input$col_label %||% "",
+      backend = input$col_backend %||% "",
+      type = input$col_type %||% "",
+      format = input$col_format %||% "",
+      length = input$col_length %||% "",
+      nullable = isTRUE(input$col_nullable),
+      values = input$col_values %||% "",
+      pattern = input$col_pattern %||% "",
+      description = input$col_desc %||% ""
+    )
+  }
+
+  observeEvent(input$col_vocab_open, {
+    req(editing())
+    rv$col_prefill <- snapshot_col_form()
+    rv$col_msg <- NULL
+    rv$col_view <- "vocab"
+    rv$col_token <- rv$col_token + 1
+  })
+
+  observeEvent(input$col_vocab_cancel, {
+    rv$col_msg <- NULL
+    rv$col_view <- "form"
+    rv$col_token <- rv$col_token + 1
+  })
+
+  # The terms of whichever vocabulary is selected, pre-ticked with any of them
+  # the column already lists -- so re-opening the picker on a column that was
+  # built from this vocabulary shows the current selection rather than a blank
+  # form.
+  output$col_vocab_terms <- renderUI({
+    ref <- input$col_vocab_ref
+    req(ref)
+    resolve <- vocabulary_resolver(dta_template_index_cached())
+    vocab <- tryCatch(resolve(ref), error = function(e) e)
+    if (inherits(vocab, "condition") || is.null(vocab)) {
+      msg <- if (inherits(vocab, "condition")) conditionMessage(vocab) else "could not be resolved."
+      return(p(paste("Vocabulary", ref, msg), class = "msg-hint"))
+    }
+
+    codes <- vapply(vocab$terms, function(t) as.character(t$code), character(1))
+    labels <- vapply(vocab$terms, function(t) {
+      lb <- as.character(t$label %||% "")
+      if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
+    }, character(1))
+
+    current <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
+    selectizeInput("col_vocab_terms_sel", "Terms",
+      choices = stats::setNames(codes, labels),
+      selected = intersect(codes, current[nzchar(current)]),
+      multiple = TRUE, width = "100%",
+      # `create = TRUE`: the column editor is the free-form surface of the app,
+      # so a value the vocabulary does not have is allowed here by default --
+      # "pick from the vocabulary, or use your own". A template's slot is where
+      # a closed list is enforced.
+      options = list(create = TRUE)
+    )
+  })
+
+  observeEvent(input$col_vocab_apply, {
+    sel <- as.character(input$col_vocab_terms_sel %||% character(0))
+    sel <- sel[!is.na(sel) & nzchar(sel)]
+    if (length(sel) == 0) {
+      rv$col_msg <- list(ok = FALSE, error = "Select at least one term, or go back without applying.")
+      return()
+    }
+    rv$col_vocab_ref <- input$col_vocab_ref
+    pf <- isolate(rv$col_prefill) %||% list()
+    pf$values <- paste(sel, collapse = "\n")
+    # Permitted values and a pattern are mutually exclusive on DTAColumnSpec,
+    # so clear the pattern here rather than let the save fail on a conflict the
+    # user cannot see from this view.
+    pf$pattern <- ""
+    rv$col_prefill <- pf
+    rv$col_msg <- NULL
+    rv$col_view <- "form"
     rv$col_token <- rv$col_token + 1
   })
 

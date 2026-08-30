@@ -103,7 +103,7 @@ test_that("strict = TRUE stays silent on a clean directory", {
 
 # ---- kind_unknown ------------------------------------------------------------
 
-test_that("kind_unknown fires for a kind that is not one of the three known values", {
+test_that("kind_unknown fires for a kind that is not one of the four known values", {
   dir <- withr::local_tempdir()
   writeLines(
     c("kind: not_a_real_kind", "id: foo", "version: \"1.0\""),
@@ -569,6 +569,242 @@ test_that("kinds restricts which files get their own report row but not cross-fi
   expect_false(any(grepl("ds_tpl_k[.]dta-dataset-template", result$file)))
   expect_no_code_row(result, "dataset_template_unresolved")
   expect_no_code_row(result, "instantiate_failed")
+})
+
+# ---- Controlled vocabularies ------------------------------------------------
+
+# A valid `dta_vocabulary` file. Parameterised the same way
+# write_clean_template() is, for the same reason.
+write_vocab_file <- function(dir, id = "visit", filename = NULL,
+                             body = c("terms:", "  - code: SCR", "  - code: EOT")) {
+  if (is.null(filename)) {
+    filename <- paste0(id, ".dta-vocabulary.yaml")
+  }
+  writeLines(
+    c(
+      "kind: dta_vocabulary",
+      sprintf("id: %s", id),
+      "version: \"1.0\"",
+      "label: Visits",
+      body
+    ),
+    file.path(dir, filename)
+  )
+}
+
+test_that("a valid vocabulary file yields zero rows", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+test_that("vocabulary_invalid fires, as an error, for a vocabulary that will not read", {
+  dir <- withr::local_tempdir()
+  # A declared type its codes cannot satisfy. Severity is "error", not
+  # "warning": a vocabulary that will not read contributes no terms at all, so
+  # any column bound to it would end up silently unvalidated.
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: broken", "version: \"1.0\"",
+      "type: categorical",
+      "terms:", "  - code: SCR"
+    ),
+    file.path(dir, "broken.dta-vocabulary.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_code_row(result, "vocabulary_invalid", "error")
+})
+
+test_that("vocabulary_unresolved fires when extends: names a vocabulary not in this directory", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(
+    dir,
+    id = "child",
+    body = c("extends: nosuch@1.0", "add_terms: [X]")
+  )
+
+  result <- validate_template(dir)
+  expect_code_row(result, "vocabulary_unresolved", "warning")
+})
+
+test_that("a resolvable extends: chain does not fire either vocabulary code", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir, id = "visit")
+  write_vocab_file(
+    dir,
+    id = "visit_onc",
+    body = c("extends: visit@1.0", "add_terms: [C2D1]", "remove_terms: [EOT]")
+  )
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "vocabulary_unresolved")
+  expect_no_code_row(result, "vocabulary_invalid")
+  expect_no_code_row(result, "vocabulary_extends_failed")
+})
+
+test_that("vocabulary_extends_failed fires, as an error, for a two-node cycle", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir, id = "ping", body = c("extends: pong@1.0", "add_terms: [P]"))
+  write_vocab_file(dir, id = "pong", body = c("extends: ping@1.0", "add_terms: [Q]"))
+
+  result <- validate_template(dir)
+  expect_code_row(result, "vocabulary_extends_failed", "error")
+})
+
+test_that("kinds = 'dta_vocabulary' reports only vocabulary files", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir, id = "broken", body = c("type: categorical", "terms:", "  - code: X"))
+  # A creation template with its own, unrelated problem: it must not be
+  # reported when `kinds` excludes it.
+  writeLines(
+    c("kind: dta_creation_template", "id: nover", "datasets: []"),
+    file.path(dir, "nover.dta-template.yaml")
+  )
+
+  result <- validate_template(dir, kinds = "dta_vocabulary")
+  expect_true(all(result$kind == "dta_vocabulary"))
+  expect_code_row(result, "vocabulary_invalid", "error")
+})
+
+# ---- Column bindings (values_from:) -----------------------------------------
+
+# A dataset template whose single column carries whatever binding the test is
+# exercising.
+write_bound_dataset_tpl <- function(dir, col_lines, filename = "bound.dta-dataset-template.yaml") {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: bound_ds",
+      "version: \"1.0\"",
+      "dataset:",
+      "  name: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      col_lines
+    ),
+    file.path(dir, filename)
+  )
+}
+
+test_that("a resolvable binding yields no binding rows", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from: visit@1.0"
+  ))
+
+  result <- validate_template(dir)
+  expect_no_code_row(result, "values_from_unresolved")
+  expect_no_code_row(result, "values_from_invalid")
+  expect_no_code_row(result, "values_from_terms_invalid")
+})
+
+test_that("an include naming a code the vocabulary INHERITED is accepted", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir, id = "visit")
+  write_vocab_file(
+    dir,
+    id = "visit_onc",
+    body = c("extends: visit@1.0", "add_terms: [C2D1]")
+  )
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from:",
+    "        vocabulary: visit_onc@1.0",
+    "        include: [SCR, C2D1]"
+  ))
+
+  # "SCR" comes from the PARENT. A checker that read the child's own `terms:`
+  # without resolving `extends:` first would report it as an unknown code and
+  # fail a perfectly valid template.
+  result <- validate_template(dir)
+  expect_no_code_row(result, "values_from_terms_invalid")
+  expect_no_code_row(result, "values_from_unresolved")
+})
+
+test_that("values_from_unresolved fires for a vocabulary not in this directory", {
+  dir <- withr::local_tempdir()
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from: nosuch@1.0"
+  ))
+
+  result <- validate_template(dir)
+  expect_code_row(result, "values_from_unresolved", "warning")
+})
+
+test_that("values_from_terms_invalid fires, as an error, for an include naming an unknown code", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from:",
+    "        vocabulary: visit@1.0",
+    "        include: [SCR, SCRN]"
+  ))
+
+  # "SCRN" is the exact shape a typo for "SCR" takes. Silently dropping it
+  # would leave a column whose permitted values quietly omit a visit, and that
+  # only surfaces much later, against real data.
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "values_from_terms_invalid", "error")
+  expect_match(paste(rows$message, collapse = " "), "SCRN", fixed = TRUE)
+})
+
+test_that("values_from_pattern fires, as an error, when a bound column also sets a pattern", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      pattern: \"^S\"",
+    "      values_from: visit@1.0"
+  ))
+
+  result <- validate_template(dir)
+  expect_code_row(result, "values_from_pattern", "error")
+})
+
+test_that("values_and_values_from warns when one literal column authors both", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values: [OLD]",
+    "      values_from: visit@1.0"
+  ))
+
+  # A warning, not an error: the build stays deterministic (the binding wins).
+  # This is only detectable per-file, where the raw YAML shows both in ONE
+  # authored column -- by build time a base `values:` and a patch's
+  # `values_from:` are indistinguishable, and that combination is legitimate.
+  result <- validate_template(dir)
+  expect_code_row(result, "values_and_values_from", "warning")
+})
+
+test_that("values_from_invalid fires for a malformed binding", {
+  dir <- withr::local_tempdir()
+  write_vocab_file(dir)
+  write_bound_dataset_tpl(dir, c(
+    "    - id: VISIT",
+    "      type: SAS Char",
+    "      values_from:",
+    "        vocabulary: visit@1.0",
+    "        field: decode"
+  ))
+
+  result <- validate_template(dir)
+  expect_code_row(result, "values_from_invalid", "error")
 })
 
 # ---- Regression guard: the bundled templates -------------------------------

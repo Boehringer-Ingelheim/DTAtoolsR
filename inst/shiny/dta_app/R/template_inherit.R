@@ -326,6 +326,12 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # options merge costs nothing and honours `remove:` there too if a template
   # author ever writes one -- harmless, not a feature anyone has to maintain
   # separately.
+  # Vocabulary slots merge by id exactly as party slots do, and for the same
+  # reason: a deviation template overriding one slot's default (or dropping it
+  # with `remove: true`) must not have to restate the others.
+  merged$vocabulary_slots <- dta_template_merge_options(
+    parent_def$vocabulary_slots %||% list(), def$vocabulary_slots %||% list()
+  )
   merged$party_slots <- dta_template_merge_options(
     parent_def$party_slots %||% list(), def$party_slots %||% list()
   )
