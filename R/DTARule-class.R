@@ -81,7 +81,12 @@ method(print, DTARule) <- function(x, ...) {
 #' # do not manually create DTARule objects, use derived classes instead
 #' @name check
 #' @export
-if (!exists("check", mode = "function")) {
+# `inherits = FALSE` for the same reason as the guard in 00_helpers.R, which
+# see: unscoped, an attached devtools makes this find devtools::check and skip
+# creating the generic. 00_helpers.R is collated first and always defines it,
+# so in practice this branch is not taken -- but it must not be able to take
+# the WRONG branch either.
+if (!exists("check", mode = "function", inherits = FALSE)) {
   check <- new_generic("check", "x")
 }
 
