@@ -78,16 +78,41 @@ test_that("biomarker_gf, rebuilt through the dataset-template import, is equival
   # skip this test in every worktree checkout.
   skip_if_not(file.exists(file.path(root, ".git")), "not a git checkout")
 
-  orig_lines <- system2(
-    "git",
-    shQuote(c(
-      "-C", root, "show",
-      "HEAD:inst/extdata/templates/biomarker_gf.dta-template.yaml"
-    )),
-    stdout = TRUE, stderr = TRUE
+  # Find the newest revision of this file that STILL had the inline dataset.
+  #
+  # This used to read HEAD, which was correct exactly until the refactor was
+  # committed. After that, HEAD IS the refactored file, so the test compared it
+  # against itself -- passing the equality vacuously and failing the "these two
+  # must differ" provenance assertion. Pinning a literal SHA would not survive
+  # either, since releases reach master as squash merges.
+  #
+  # So walk the file's own history and take the newest revision that still
+  # carries the hand-typed marker and has no `template:` import entry.
+  rel <- "inst/extdata/templates/biomarker_gf.dta-template.yaml"
+  shas <- suppressWarnings(system2(
+    "git", shQuote(c("-C", root, "log", "--format=%H", "--", rel)),
+    stdout = TRUE, stderr = FALSE
+  ))
+  skip_if(length(shas) == 0, "no git history for the bundled template in this clone")
+
+  orig_lines <- NULL
+  for (sha in utils::head(shas, 50L)) {
+    candidate <- suppressWarnings(system2(
+      "git", shQuote(c("-C", root, "show", paste0(sha, ":", rel))),
+      stdout = TRUE, stderr = FALSE
+    ))
+    if (!identical(as.integer(attr(candidate, "status") %||% 0L), 0L)) next
+    is_inline <- any(grepl("GF domain smrnaseq", candidate, fixed = TRUE)) &&
+      !any(grepl("^[[:space:]]*-[[:space:]]*template:", candidate))
+    if (is_inline) {
+      orig_lines <- candidate
+      break
+    }
+  }
+  skip_if(
+    is.null(orig_lines),
+    "pre-refactor template not reachable (shallow clone or squashed history)"
   )
-  status <- attr(orig_lines, "status") %||% 0L
-  expect_equal(status, 0L, info = paste(orig_lines, collapse = "\n"))
   expect_gt(length(orig_lines), 0)
 
   orig_path <- withr::local_tempfile(fileext = ".yaml")
