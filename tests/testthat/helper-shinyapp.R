@@ -158,6 +158,20 @@ app_fixture_char_num_specs <- function() {
   )
 }
 
+# ---- Unlocking a loaded document for editing --------------------------------
+
+# Drive the app's "Create new version" flow, which is what unlocks editing for
+# a document LOADED from an existing one (an upload, a bundled example, or a
+# restored session). Such a document arrives read-only by design -- see the
+# WHY comment on editing() in app.R -- so setting edit_mode = TRUE is no
+# longer sufficient on its own, and every test that loads a fixture and then
+# edits it needs this in between.
+unlock_editing <- function(session, version = "9.9") {
+  session$setInputs(create_new_version = 1)
+  session$setInputs(new_version_value = version)
+  session$setInputs(new_version_confirm = 1)
+}
+
 # ---- Static-source assertions for app-wiring tests --------------------------
 
 # The full text of one app source file, for the few assertions that are about

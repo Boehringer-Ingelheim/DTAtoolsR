@@ -8,6 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Editing a loaded specification now starts by cutting a new version.** A DTA
+  opened from an existing file — an upload, a bundled example, or a restored
+  session — arrives read-only, and where the Edit-mode switch normally sits the
+  app offers **Create new version** instead. Confirming the version (the dialog
+  prefills the next minor one, and takes an optional note) bumps
+  `metadata.version`, opens a fresh `version_history` entry for it, and unlocks
+  editing. A document created from a template is new rather than loaded, so it
+  stays directly editable as before.
+
+  The point is the history that falls out of it. When the document is exported
+  or downloaded, that entry's `changes` is filled in with what actually changed
+  between the version that was loaded and the version being written — grouped
+  counts first, then every differing field named individually, so the history
+  reads version by version rather than recording that *something* was edited.
+  The comparison is specification-only, so binding data files to a dataset
+  never shows up as a change. Applying pasted YAML in the Raw tab no longer
+  overwrites the document's version or its history: a paste edits the
+  specification, it does not replace the document's identity.
+
 - **A deviation template can follow the standard it deviates from.**
   `extends: biomarker_gf@latest` (or a bare `extends: biomarker_gf`) resolves
   to the newest version of the parent, so publishing a new release of a

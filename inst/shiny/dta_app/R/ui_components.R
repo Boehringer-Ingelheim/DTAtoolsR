@@ -17,8 +17,67 @@
 # independently guards each of those surfaces rather than trusting the
 # client-side toggle state, because a client can be made to send
 # input$edit_mode = TRUE regardless of what is actually drawn on screen.
-edit_mode_switch <- function() {
-  bslib::input_switch("edit_mode", "Edit mode", value = FALSE)
+#
+# `value` exists because the server re-renders this switch into a
+# uiOutput() slot rather than placing it once at startup: a DTA loaded from
+# an existing file shows "Create new version" (create_new_version_button())
+# in that slot instead, and only once the author has created a new version
+# does this switch take its place -- already on, so the document they just
+# versioned is immediately editable without a second click. The default
+# stays FALSE so every other path into the app -- a fresh document, or a
+# reload -- still opens read-only.
+edit_mode_switch <- function(value = FALSE) {
+  bslib::input_switch("edit_mode", "Edit mode", value = isTRUE(value))
+}
+
+# Stands in for edit_mode_switch() in the brandbar's action slot while the
+# loaded DTA has no new version yet -- the switch itself only reappears
+# once the author has committed to one (see the WHY comment above it). This
+# reuses the `.brand-link` pill class (theme.R) rather than inventing a new
+# shape, so the button sits on the same baseline as the other brandbar
+# pills it is swapped in for; `.brand-action` (theme.R) re-states the
+# properties Bootstrap's `<button>` markup does not inherit from the
+# `.brand-link` rule, which was written against an `<a>`.
+create_new_version_button <- function() {
+  actionButton(
+    "create_new_version",
+    "Create new version",
+    class = "brand-link brand-action"
+  )
+}
+
+# The body of the "Create new version" modal opened by
+# create_new_version_button(), kept a pure function of its arguments -- like
+# ds_edit_menu_item() and contact_detail_block() above -- so it is testable
+# without testServer(). `new_version_msg` is rendered separately via
+# uiOutput() rather than folded into this body, because a rejected version
+# (e.g. one that collides with version_history) needs to show an inline
+# error WITHOUT this body re-rendering and wiping the value/note the author
+# already typed -- the same convention the add-dataset modal uses for
+# rv$add_ds_msg (app.R).
+#
+# `current_version` is DTAMetaData@version read straight off the loaded
+# document, and an unset S7 property can read back as NULL, character(0),
+# NA, or "" -- the same shapes .ro_field_value() (this file) already
+# normalises for meta_field_text(), so it is reused here rather than
+# duplicating a bare nzchar() check that would abort on character(0).
+new_version_modal_body <- function(current_version, suggested) {
+  cv <- .ro_field_value(current_version)
+  tagList(
+    p(
+      class = "msg-hint",
+      if (nzchar(cv)) paste0("Current version: ", cv) else "This document has no version yet."
+    ),
+    textInput("new_version_value", "New version", value = suggested, width = "100%"),
+    textAreaInput("new_version_note", "Note (optional)",
+      value = "", width = "100%", rows = 2
+    ),
+    div(
+      class = "msg-hint", style = "margin:-4px 0 8px;",
+      "Prepended to the change summary written into this document's version history."
+    ),
+    uiOutput("new_version_msg")
+  )
 }
 
 # One row of the dataset Edit menu: an icon tile, a title, and a one-line

@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.25.0",
+        "Version": "0.26.0",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -3136,10 +3136,10 @@
       "checksum": "264c117393a5c0f08b4d1c5c73d7cff6"
     },
     "R/theme.R": {
-      "checksum": "43ff16c2319149584502df2e3059c2e9"
+      "checksum": "d9b3704aec6246c95fdd55089162b70c"
     },
     "R/ui_components.R": {
-      "checksum": "e984e735d345727ff68748e18c6273dd"
+      "checksum": "64d332d974bc4b6405ce63405d97ebf7"
     },
     "R/utils_dta.R": {
       "checksum": "f05a104b682f025990f6c556a7a5fbd1"
@@ -3147,11 +3147,14 @@
     "R/utils_export.R": {
       "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
     },
+    "R/versioning.R": {
+      "checksum": "113140917979da950121c19dfd1a625f"
+    },
     "VERSION": {
-      "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
+      "checksum": "02e9c2f39ba5915d349833dd263a60df"
     },
     "app.R": {
-      "checksum": "9d19225bdfbec1158192903a593a3f8f"
+      "checksum": "27c9e2ee50f7887db0d887bb71be02b9"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
