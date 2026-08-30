@@ -383,7 +383,11 @@ method(print, DTAMetaData) <- function(x, ...) {
 #'
 #' @name print_info
 #' @export
-if (!exists("print_info", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTAMetaData) <- function(x, ...) {
@@ -535,7 +539,7 @@ method(print_info, DTAMetaData) <- function(x, ...) {
 #'
 #' @name print_short_info
 #' @export
-if (!exists("print_short_info", mode = "function")) {
+if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {

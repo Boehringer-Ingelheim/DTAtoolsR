@@ -46,7 +46,7 @@ test_that("the package still loads when a non-generic `check` is attached", {
       # that ever mattered is a plain function named `check` on the search
       # path. The signature mirrors devtools::check so the failure is the
       # same one users reported.
-      'e <- new.env()',
+      "e <- new.env()",
       'e$check <- function(pkg = ".", document = NULL, build_args = NULL, ...) NULL',
       'attach(e, name = "fake_devtools", warn.conflicts = FALSE)',
       sprintf("pkgload::load_all(%s, quiet = TRUE)", shQuote(pkg)),
@@ -67,20 +67,106 @@ test_that("the package still loads when a non-generic `check` is attached", {
   )
 })
 
-test_that("the generic guards that must stay unscoped are still unscoped", {
-  # names/print/labels deliberately DO resolve to base's S3 generics, so their
-  # methods register against those rather than shadowing them with a new S7
-  # generic. Scoping those guards would silently change dispatch for every
-  # user of the package, so this pins the distinction rather than leaving the
-  # next person to rediscover it by breaking it.
-  helpers <- readLines(testthat::test_path("..", "..", "R", "DTAColumnSpecStructure-class.R"))
-  print_guard <- grep('exists\\("print", mode = "function"', helpers, value = TRUE)
-  expect_length(print_guard, 1)
-  expect_false(grepl("inherits", print_guard))
+test_that("every generic-existence guard in R/ is scoped correctly", {
+  # Whole-package invariant, generalising the two hand-picked spot checks this
+  # test used to be. `names`, `print` and `labels` deliberately resolve to
+  # base R's S3 generics (confirmed empirically: in a clean `--vanilla`
+  # session `exists("print", mode = "function")` is TRUE), so their guards
+  # register methods against the base generic and must stay unscoped --
+  # scoping them would make DTAtools create its own generic that shadows
+  # `base::print`/`base::names`/`base::labels` for every user of the package.
+  # Every other guard name does NOT resolve to anything in a clean session, so
+  # it must carry `inherits = FALSE`: without it, an attached package
+  # exporting a plain function of the same name (e.g. devtools::check) makes
+  # the guard skip creating the generic. See R/00_helpers.R for the full
+  # account.
+  unscoped_names <- c("names", "print", "labels")
 
-  # ...and the ones that must stay scoped, are.
-  core <- readLines(testthat::test_path("..", "..", "R", "00_helpers.R"))
-  check_guard <- grep('exists\\("check", mode = "function"', core, value = TRUE)
-  expect_length(check_guard, 1)
-  expect_match(check_guard, "inherits = FALSE", fixed = TRUE)
+  r_dir <- testthat::test_path("..", "..", "R")
+  r_files <- list.files(r_dir, pattern = "\\.R$", full.names = TRUE)
+
+  guard_pattern <- 'exists\\("([a-zA-Z_.]+)",\\s*mode\\s*=\\s*"function"'
+
+  offenders <- character(0)
+
+  for (f in r_files) {
+    lines <- readLines(f, warn = FALSE)
+    hits <- grep(guard_pattern, lines)
+
+    for (i in hits) {
+      line <- lines[i]
+      name <- regmatches(line, regexec(guard_pattern, line))[[1]][2]
+      is_scoped <- grepl("inherits = FALSE", line, fixed = TRUE)
+      must_stay_unscoped <- name %in% unscoped_names
+
+      ok <- if (must_stay_unscoped) !is_scoped else is_scoped
+
+      if (!ok) {
+        offenders <- c(
+          offenders,
+          sprintf(
+            "%s:%d: exists(\"%s\", ...) is %s but must be %s",
+            basename(f),
+            i,
+            name,
+            if (is_scoped) "scoped (inherits = FALSE)" else "unscoped",
+            if (must_stay_unscoped) "unscoped" else "scoped (inherits = FALSE)"
+          )
+        )
+      }
+    }
+  }
+
+  expect_true(
+    length(offenders) == 0,
+    info = paste(c("Incorrectly scoped generic guard(s):", offenders), collapse = "\n")
+  )
+})
+
+test_that("the package still loads when a non-generic `read_file` is attached", {
+  # read_file is the most exposed remaining unscoped-by-default name --
+  # readr::read_file is a plain function, not a generic -- so it is the guard
+  # most likely to be hit by an attached package in practice. Same pattern as
+  # the `check` subprocess test above: the failure only happens while the
+  # package is being LOADED, so it must be observed from a fresh session.
+  skip_on_cran()
+  skip_if_not_installed("pkgload")
+
+  pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
+  skip_if(
+    !file.exists(file.path(pkg, "DESCRIPTION")),
+    "not running from a package source tree (R CMD check runs from the install)"
+  )
+
+  rscript <- file.path(
+    R.home("bin"),
+    if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript"
+  )
+  skip_if(!file.exists(rscript), "Rscript not found")
+
+  script <- withr::local_tempfile(fileext = ".R")
+  writeLines(
+    c(
+      # Stand in for a package exporting a plain `read_file()`, mirroring
+      # readr::read_file's signature closely enough to be the same shape of
+      # collision.
+      "e <- new.env()",
+      "e$read_file <- function(file, ...) NULL",
+      'attach(e, name = "fake_readr", warn.conflicts = FALSE)',
+      sprintf("pkgload::load_all(%s, quiet = TRUE)", shQuote(pkg)),
+      'g <- get("read_file", envir = asNamespace("DTAtools"))',
+      'stopifnot(inherits(g, "S7_generic"))',
+      'cat("LOADED_OK\\n")'
+    ),
+    script
+  )
+
+  out <- suppressWarnings(
+    system2(rscript, c("--vanilla", shQuote(script)), stdout = TRUE, stderr = TRUE)
+  )
+
+  expect_true(
+    any(grepl("^LOADED_OK$", out)),
+    info = paste(c("subprocess output:", out), collapse = "\n")
+  )
 })
