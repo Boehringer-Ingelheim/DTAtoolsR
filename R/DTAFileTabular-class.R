@@ -461,7 +461,11 @@ dta_reader_na_values <- function(x) {
 #' @name print_info
 #' @seealso \code{\link{DTAFile}}
 #' @export
-if (!exists("print_info", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 method(print_info, DTAFileTabular) <- function(x) {

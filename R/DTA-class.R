@@ -99,7 +99,11 @@ method(metadata, DTA) <- function(x) {
 #' datasets(x, 1)
 #' @name datasets
 #' @export
-if (!exists("datasets", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain `datasets` function would make
+# this guard skip creating the generic. See `R/00_helpers.R` for the full
+# account.
+if (!exists("datasets", mode = "function", inherits = FALSE)) {
   datasets <- new_generic("datasets", "x")
 }
 
