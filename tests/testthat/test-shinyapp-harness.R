@@ -31,8 +31,11 @@ test_that("every helper file in the app sources cleanly", {
   expect_setequal(
     basename(files),
     c(
-      "template_core.R", "theme.R", "ui_components.R", "utils_dta.R",
-      "utils_export.R"
+      "dataset_template.R", "party_profiles.R", "template_core.R",
+      "template_create.R", "template_diff.R", "template_index.R",
+      "template_inherit.R", "template_sources.R",
+      "theme.R", "ui_components.R", "utils_dta.R", "utils_export.R",
+      "versioning.R", "vocabulary.R"
     )
   )
 
@@ -53,7 +56,9 @@ test_that("app_env() exposes the helper functions the app relies on", {
     "dta_read_yaml", "dta_status_map", "dta_to_yaml_text", # utils_dta.R
     "create_dta_from_template", "list_set_path", # template_core.R
     "format_datasets_summary", "embed_yaml_markdown", # utils_export.R
-    "bi_theme", "yaml_highlight_html" # theme.R
+    "bi_theme", "yaml_highlight_html", # theme.R
+    "dta_version_change_summary", # versioning.R
+    "vocabulary_values" # vocabulary.R
   )) {
     expect_true(
       is.function(get0(nm, envir = env, inherits = FALSE)),

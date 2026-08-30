@@ -1,0 +1,18 @@
+kind: dta_party_profile
+id: supplier_acme
+version: "1.0"
+role: supplier
+label: ACME Labs
+description: Standard ACME Labs supplier block for the biomarker GF template family.
+affiliation:
+  name: ACME Labs
+  address: 1 Example Way, Springfield
+  country: DE
+contacts:
+  - name: Jane Doe
+    role: Data Manager
+    email: jane.doe@example.com
+    signature: true
+  - name: John Roe
+    role: Bioinformatics Lead
+    email: john.roe@example.com

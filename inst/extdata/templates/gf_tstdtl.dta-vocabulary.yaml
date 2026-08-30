@@ -1,0 +1,17 @@
+kind: dta_vocabulary
+id: gf_tstdtl
+version: "1.0"
+label: Genomic measurement detail
+description: >-
+  How a Genomic Findings result is reported. A study that collects only one of
+  these narrows the list at the binding site (`include:`) or, when the choice
+  belongs to whoever creates the specification rather than to the template
+  author, through a `vocabulary_slots:` picker.
+type: text
+terms:
+  - code: FRAGMENT COUNT
+    label: Fragment count
+    description: Raw count of fragments assigned to the reference sequence.
+  - code: NORMALIZED LEVEL
+    label: Normalized level
+    description: Count normalised for sequencing depth and reference length.

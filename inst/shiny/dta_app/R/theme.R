@@ -97,6 +97,39 @@ bi_css <- function() {
       border-color: rgba(255,255,255,.7);
       text-decoration: none;
     }
+    /* create_new_version_button() is an actionButton(), which renders
+       <button class='btn btn-default action-button'> -- none of the
+       .brand-link rule above applies to it (that rule targets <a>), and
+       Bootstrap's own .btn supplies a background and border of its own on
+       top. Re-state the .brand-link look property by property so the
+       button reads as the same pill as the links either side of it. */
+    .app-actions .brand-action {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.45);
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: .82rem;
+      line-height: 1.2;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .app-actions .brand-action:hover,
+    .app-actions .brand-action:focus {
+      color: #fff;
+      background: rgba(255,255,255,.18);
+      border-color: rgba(255,255,255,.7);
+    }
+    /* The switch and the 'Create new version' button are now rendered into
+       a uiOutput() slot rather than placed directly, so one is showing at
+       a time (see the WHY comment on edit_mode_switch()'s `value` arg).
+       shiny-html-output's own display is block; left alone that breaks the
+       single centre line .app-actions' align-items: center establishes for
+       its direct children, because the switch/button inside it would then
+       be centred within their own block instead of against their brandbar
+       siblings. */
+    .app-actions > .shiny-html-output { display: flex; align-items: center; }
     /* edit_mode_switch()'s bslib::input_switch() renders
        .form-group.shiny-input-container > .bslib-input-switch.form-switch,
        a wrapper shaped for a standalone form rather than for sitting inline
@@ -122,8 +155,11 @@ bi_css <- function() {
         flex-wrap: wrap;
       }
       /* Keep the switch at its own intrinsic size instead of stretching or
-         shrinking when the actions row wraps onto a second line. */
-      .app-actions .form-switch { flex: 0 0 auto; }
+         shrinking when the actions row wraps onto a second line. Same
+         reasoning applies to the button that replaces it
+         (create_new_version_button()) before a new version exists. */
+      .app-actions .form-switch,
+      .app-actions .brand-action { flex: 0 0 auto; }
     }
 
     /* Status chips */

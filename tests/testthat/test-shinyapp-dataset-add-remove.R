@@ -254,6 +254,7 @@ test_that("removing one of two datasets keeps the sidebar rendered", {
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
     session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(names(rv$structure), c("clinical_data", "second_ds"))
@@ -289,6 +290,7 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
     session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
@@ -337,6 +339,7 @@ test_that("doc_token moves only on load, restore and reset -- not on mutations",
     session$setInputs(dta_client_id = strrep("e", 32))
 
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
+    unlock_editing(session)
     expect_equal(rv$doc_token, 1)
 
     # Mutations of the loaded document: the token must not move.

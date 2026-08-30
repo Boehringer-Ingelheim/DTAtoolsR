@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.24.0",
+        "Version": "0.26.0",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -3111,14 +3111,35 @@
     }
   },
   "files": {
+    "R/dataset_template.R": {
+      "checksum": "cd3c4e5a838f8abd731b243c151484e5"
+    },
+    "R/party_profiles.R": {
+      "checksum": "12fc95df496c0fb9f56f98f76cc1c730"
+    },
     "R/template_core.R": {
-      "checksum": "996c47f79864e81826bc57b3402c1ae4"
+      "checksum": "22773bb7c864a9b0692ff7952969c9b0"
+    },
+    "R/template_create.R": {
+      "checksum": "9ba84319b860fedc77d67274c1c46aa5"
+    },
+    "R/template_diff.R": {
+      "checksum": "2be3277be3b9ca763a18937c3a29c533"
+    },
+    "R/template_index.R": {
+      "checksum": "adec5cff8fccbc212b221e2bc45d6eaf"
+    },
+    "R/template_inherit.R": {
+      "checksum": "efaaa3db4a088e677caa200647400764"
+    },
+    "R/template_sources.R": {
+      "checksum": "264c117393a5c0f08b4d1c5c73d7cff6"
     },
     "R/theme.R": {
-      "checksum": "43ff16c2319149584502df2e3059c2e9"
+      "checksum": "d9b3704aec6246c95fdd55089162b70c"
     },
     "R/ui_components.R": {
-      "checksum": "cc5a22c25c896d85a58fdfb3ee78dc91"
+      "checksum": "64d332d974bc4b6405ce63405d97ebf7"
     },
     "R/utils_dta.R": {
       "checksum": "f05a104b682f025990f6c556a7a5fbd1"
@@ -3126,11 +3147,17 @@
     "R/utils_export.R": {
       "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
     },
+    "R/versioning.R": {
+      "checksum": "113140917979da950121c19dfd1a625f"
+    },
+    "R/vocabulary.R": {
+      "checksum": "03d340e8f95871c9a38d1e62731420bf"
+    },
     "VERSION": {
-      "checksum": "a69680a2ca0f3a0f5ec5b3a4fea80da1"
+      "checksum": "02e9c2f39ba5915d349833dd263a60df"
     },
     "app.R": {
-      "checksum": "bec186681000d9f093d9e72e0c45a6a4"
+      "checksum": "b0e62f856f7cc0a46d7e50941df33bac"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

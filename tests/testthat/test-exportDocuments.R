@@ -920,3 +920,84 @@ test_that("group_condition rules reach the exported documents fully described", 
   # A well-formed pipe row: no stray newline split it into a headless fragment.
   expect_match(rule_rows, "\\|$")
 })
+
+test_that("a generated version-history summary does not break the Markdown table (regression guard)", {
+  # dta_version_change_summary() (inst/shiny/dta_app/R/versioning.R) renders a
+  # version_history entry's `changes` with literal quotes, "->" arrows and
+  # "; "-joined detail lines. Only "|" and a real newline are special to a
+  # GFM pipe table -- dta_version_sanitise() already strips both before this
+  # text goes anywhere near an export -- so this pins that the REST of that
+  # punctuation still leaves the Version History table exactly one row per
+  # history entry, i.e. that .df_to_md_table() (R/exportDocuments.R ~line
+  # 333) is not confused by it.
+  skip_if_not_installed("shiny")
+
+  summary_fn <- app_fn("dta_version_change_summary")
+
+  diff1 <- list(
+    metadata = data.frame(
+      key = c("title", "header"),
+      change = c("changed", "changed"),
+      from = c("Study 'Alpha' Specification", "Acme Corp"),
+      to = c("Study 'Beta' Specification", "Acme Corp Ltd"),
+      stringsAsFactors = FALSE
+    ),
+    datasets = data.frame(
+      key = "clinical_data.columns.AGE.type", change = "changed",
+      from = "SAS Num", to = "SAS Char",
+      stringsAsFactors = FALSE
+    )
+  )
+  diff2 <- list(
+    metadata = data.frame(
+      key = "title", change = "changed",
+      from = "Study 'Beta' Specification", to = "Study 'Gamma' Specification",
+      stringsAsFactors = FALSE
+    ),
+    datasets = data.frame(
+      key = character(0), change = character(0),
+      from = character(0), to = character(0),
+      stringsAsFactors = FALSE
+    )
+  )
+
+  changes1 <- summary_fn(diff1, note = "Initial revision")
+  changes2 <- summary_fn(diff2, note = "Renamed the study")
+
+  # Sanity check on the fixture itself -- this has to actually exercise
+  # quotes, an arrow and a semicolon, not an accidentally plain string.
+  expect_match(changes1, "'", fixed = TRUE)
+  expect_match(changes1, "->", fixed = TRUE)
+  expect_match(changes1, ";", fixed = TRUE)
+
+  dta <- create_example_DTA()
+  md <- metadata(dta)
+  S7::prop(md, "version_history") <- list(
+    list(version = "1.1", date = Sys.Date() - 10, changes = changes1),
+    list(version = "1.2", date = Sys.Date(), changes = changes2)
+  )
+  S7::prop(md, "version") <- "1.2"
+  dta@metadata <- md
+
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md_lines <- readLines(out_md, warn = FALSE)
+
+  # Both version numbers are distinctive enough to key on directly, the same
+  # way the rule-id test above keys on "group_condition_pass_example".
+  v1_rows <- grep("^\\| 1\\.1 \\|", md_lines, value = TRUE)
+  v2_rows <- grep("^\\| 1\\.2 \\|", md_lines, value = TRUE)
+
+  # Exactly one table row per version_history entry -- a summary that broke
+  # the table would instead split one of these into a headless fragment,
+  # changing this count.
+  expect_length(v1_rows, 1)
+  expect_length(v2_rows, 1)
+  expect_match(v1_rows, "Initial revision", fixed = TRUE)
+  expect_match(v2_rows, "Renamed the study", fixed = TRUE)
+  # Well-formed pipe rows: no stray newline split either into a headless
+  # fragment.
+  expect_match(v1_rows, "\\|$")
+  expect_match(v2_rows, "\\|$")
+})
