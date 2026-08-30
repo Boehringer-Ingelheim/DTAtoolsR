@@ -301,6 +301,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   count it was taken from is the number actually validated, which is precisely
   the one that is low when targets went unchecked.
 
+- **Three template readers signalled a warning they were written not to
+  signal.** Each is documented as reporting failure by return value -- "returns
+  `NA` when the file cannot be read", "cannot tell; do not manufacture a false
+  positive", or handing the message back for the caller to attach to a file
+  name -- and each wrapped its read in `tryCatch(error = )` to achieve it.
+  `tryCatch()` intercepts only the condition class it names, and a file that
+  cannot be opened raises a warning from the connection *before* it errors, so
+  base R's `cannot open file '...': No such file or directory` escaped
+  `dta_template_read_field_exact()`, `.dta_template_read_raw()` and
+  `.dta_template_version_plain_is_exact()` regardless.
+
+  It surfaced as an unexplained warning attached to a passing test that
+  deliberately reads a missing file -- the assertion checked the return value
+  and never that the reader stayed silent. In the app it reached the R console,
+  and on a non-English session not even in English, so nothing downstream could
+  match on it either.
+
+  The three now share one `dta_template_read_yaml_quiet()` helper that muffles
+  the read's warning channel and returns `list(ok, value, error)`, so a caller
+  that reports the message still gets it. A path that exists but cannot be read
+  as a file -- a directory, which raises `Permission denied` instead -- is
+  covered by the same fix.
+
+  `dta_try()` is deliberately unchanged. It captures errors from arbitrary
+  expressions, including validation calls whose warnings are the point, so
+  muffling there would trade a cosmetic leak for a silent one.
+
 ## [0.23.0] - 2026-08-27
 
 ### Added

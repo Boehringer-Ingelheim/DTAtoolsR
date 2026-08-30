@@ -149,6 +149,38 @@ dta_template_yaml_handlers <- function() {
   )
 }
 
+# Read a YAML file without signalling anything.
+#
+# The readers below are all documented as reporting failure by RETURN VALUE --
+# "returns NA when the file cannot be read", "cannot tell; do not manufacture a
+# false positive" -- and each wrapped its read in tryCatch(error = ) to achieve
+# that. tryCatch only intercepts the condition class it names, and a file that
+# cannot be opened raises a WARNING from the connection before the error: base
+# R's "cannot open file '...': No such file or directory". That warning escaped
+# every one of them, so a function designed to signal nothing signalled anyway.
+#
+# It surfaced in the test suite as an unexplained warning attached to a test
+# that deliberately reads a missing file. In the app it would reach the R
+# console, untranslated into anything the user asked for, and on a non-English
+# session it is not even in English -- which is the other reason not to let it
+# out: nothing downstream can match on it.
+#
+# Errors are still captured and returned, because callers report them with
+# their own file name in hand.
+dta_template_read_yaml_quiet <- function(path, handlers = NULL) {
+  withCallingHandlers(
+    tryCatch(
+      list(
+        ok = TRUE,
+        value = yaml::read_yaml(path, handlers = handlers),
+        error = NULL
+      ),
+      error = function(e) list(ok = FALSE, value = NULL, error = conditionMessage(e))
+    ),
+    warning = function(w) invokeRestart("muffleWarning")
+  )
+}
+
 # Read one top-level scalar field from a template file EXACTLY as written.
 #
 # Used where the rest of the document must be parsed normally -- a dataset
@@ -159,10 +191,8 @@ dta_template_yaml_handlers <- function() {
 # Returns NA_character_ when the file cannot be read or the field is absent;
 # the caller reports that with its own file name in hand.
 dta_template_read_field_exact <- function(path, field) {
-  out <- tryCatch(
-    yaml::read_yaml(path, handlers = dta_template_yaml_handlers()),
-    error = function(e) NULL
-  )
+  res <- dta_template_read_yaml_quiet(path, handlers = dta_template_yaml_handlers())
+  out <- res$value
   if (!is.list(out) || is.null(out[[field]]) || length(out[[field]]) == 0) {
     return(NA_character_)
   }
