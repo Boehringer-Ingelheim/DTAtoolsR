@@ -266,11 +266,31 @@ test_that("the Raw YAML (Ace) editor is born read-only when edit mode starts off
 
 test_that("the Raw YAML (Ace) editor is born editable when edit mode starts on", {
   # The positive control for the test above.
+  #
+  # A document loaded via load_fixture() is ALWAYS version-locked at the
+  # instant output$main first renders it: apply_loaded() sets
+  # rv$version_locked <- TRUE before the doc_token bump that triggers that
+  # render, so editing() cannot be TRUE at that instant for an upload no
+  # matter what input$edit_mode already was. unlock_editing() alone cannot
+  # reach a born-editable ace editor here -- it does not itself bump
+  # doc_token, and output$main only re-renders on load/reset/restore (see
+  # the WHY comment on doc_token in app.R), so an unlock arriving AFTER the
+  # born-locked render leaves that already-rendered HTML untouched; only a
+  # separate observe() flips the *live* editor via a session message, which
+  # is exactly the mechanism this test exists to NOT rely on (see the
+  # comment above). What DOES produce a document that is already unlocked
+  # the moment output$main renders it is restoring a session that was
+  # autosaved AFTER an unlock -- unlock_editing()'s sync_yaml_text() call
+  # autosaves the unlocked state, and that is a real user journey (reload
+  # the page after creating a new version), not a contrivance.
   skip_if_not_installed("shinyAce")
   clean_session_file()
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
+    session$setInputs(dta_client_id = strrep("f", 32))
     load_fixture(session)
+    unlock_editing(session)
+    session$setInputs(restore_session = 1)
 
     html <- paste(as.character(output$main$html), collapse = "\n")
 
@@ -292,6 +312,7 @@ test_that("with edit mode off, a metadata field value is not written", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(md_header = "Acme Corp")
     session$elapse(1000)
     expect_equal(
@@ -313,6 +334,7 @@ test_that("adding a dataset selects it and marks it as having no data", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
 
     session$setInputs(add_ds_name = "demographics", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
@@ -331,6 +353,7 @@ test_that("several datasets can be added in a row, each of either type", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
 
     session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
@@ -357,6 +380,7 @@ test_that("a duplicate name is refused and leaves the document alone", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
 
     session$setInputs(add_ds_name = "clinical_data", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
@@ -372,6 +396,7 @@ test_that("removing the active dataset moves the selection to a remaining one", 
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(rv$active, "alpha")
@@ -393,6 +418,7 @@ test_that("removing the last dataset leaves an empty but usable workspace", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
 
     # Drive the real flow: opening the modal (remove_dataset) is what stashes
     # the name the confirm handler acts on -- see rv$removing_dataset.
@@ -414,6 +440,7 @@ test_that("removing a dataset unloads the files bound to it", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_true(any(startsWith(names(rv$uploads), "clinical_data||")))
 
@@ -439,6 +466,7 @@ test_that("remove_dataset_confirm removes the dataset the modal named, not whate
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(rv$active, "alpha")
@@ -466,6 +494,7 @@ test_that("cancelling the remove-dataset modal clears the stash", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
@@ -486,6 +515,7 @@ test_that("the Metadata tab renders form controls only while edit mode is on", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(md_token = 1)
     editable <- as.character(output$metadata_editor$html)
 
@@ -523,6 +553,7 @@ test_that("an editor opened while editing stays shut once edit mode is off", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(edit_cols = 1) # arms rv$editor_dataset
     before <- app_fn("dta_column_ids")(rv$dta, "clinical_data")
 
@@ -577,6 +608,7 @@ test_that("a rejected Add dataset keeps what the user typed", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(add_dataset_open = 1)
     token_before <- rv$add_ds_token
 
@@ -609,6 +641,7 @@ test_that("the contact and affiliation sub-outputs follow the switch too", {
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(md_token = 1, contacts_token = 1)
 
     aff_on <- as.character(output$receiver_affiliation$html)
@@ -644,6 +677,7 @@ test_that("a dataset added in the app survives the YAML the app writes for it", 
   shiny::testServer(app_server_dir(), {
     session$setInputs(edit_mode = TRUE)
     load_fixture(session)
+    unlock_editing(session)
     session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
