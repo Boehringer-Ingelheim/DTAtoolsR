@@ -479,7 +479,10 @@ normalise_values_from <- function(x, column_id = "<column>") {
     return(list(vocabulary = ref, field = "code", include = character(0), exclude = character(0)))
   }
 
-  ref <- as.character(x$vocabulary %||% "")
+  # `x[["vocabulary"]]`, NOT `x$vocabulary` -- `x` here is the raw
+  # `values_from:` mapping straight off yaml::read_yaml(); see the `$` vs
+  # `[[` rule in utils_dta.R.
+  ref <- as.character(x[["vocabulary"]] %||% "")
   if (length(ref) != 1 || !nzchar(ref)) {
     cli::cli_abort(
       "Column {.val {column_id}}: {.field values_from} must set {.field vocabulary} to an {.code id[@version]} reference."
@@ -593,7 +596,14 @@ normalise_vocabulary_slots <- function(slots) {
       ))
     }
 
-    vocab_ref <- as.character(slot$vocabulary %||% "")
+    # `slot[["vocabulary"]]`, NOT `slot$vocabulary` -- `slot` here is one raw,
+    # not-yet-normalised entry of the template's own `vocabulary_slots:`
+    # sequence; see the `$` vs `[[` rule in utils_dta.R. (Every OTHER read of
+    # a slot's `$vocabulary` in this file, e.g. in vocabulary_slot_choices(),
+    # is on the NORMALISED record this function builds below -- a fixed,
+    # internal key set `$` is safe on -- so only this one raw read needed
+    # `[[`.)
+    vocab_ref <- as.character(slot[["vocabulary"]] %||% "")
     if (!nzchar(vocab_ref)) {
       cli::cli_abort("Vocabulary slot {.val {id}} must name a {.field vocabulary}.")
     }

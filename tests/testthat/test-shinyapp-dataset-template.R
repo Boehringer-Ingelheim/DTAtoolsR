@@ -160,7 +160,74 @@ test_that("read_dataset_template() rejects a missing 'dataset' section", {
   res <- fn(path)
 
   expect_false(res$ok)
+  # No 'datasets:' present either, so there is nothing to hint at.
   expect_equal(res$error, "Dataset template must contain a 'dataset' section.")
+})
+
+test_that("read_dataset_template() rejects a 'datasets:' (plural) body, naming the real defect", {
+  # PINNED BUG: read_dataset_template() used to read def$dataset, and R's `$`
+  # on a list falls back to partial matching. 'dataset' is a strict PREFIX of
+  # 'datasets' -- a DIFFERENT, equally legitimate top-level key (a
+  # dta_creation_template's own datasets: array) -- so a dta_dataset_template
+  # file that was slipped a 'datasets:' array instead (the obvious mistake
+  # when converting one kind of template into the other) had def$dataset
+  # silently return that array. is.list() on it was still TRUE, so the
+  # 'dataset' section guard passed, and the error that actually surfaced was
+  # the unrelated-looking "'dataset' section must contain a 'name'" -- because
+  # the (nameless) datasets array has no $name of its own -- rather than
+  # anything naming the real problem. Fixed by reading def[["dataset"]], which
+  # matches exactly, and reporting the absence with an explicit hint.
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "template.yaml")
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: gf_smrnaseq",
+      'version: "3.0"',
+      "label: GF domain smrnaseq",
+      "datasets:",
+      "  - name: gf_data_specs_pattern",
+      "    type: tabular",
+      "    files: { filename: gf.tsv, type: tsv }",
+      "    columns:",
+      "      - { id: STUDYID, label: Study Identifier, type: SAS Char }"
+    ),
+    path
+  )
+
+  fn <- app_fn("read_dataset_template")
+  res <- fn(path)
+
+  expect_false(res$ok)
+  # The exact, actionable diagnosis -- not the misleading "must contain a
+  # 'name'" a reader would see if def$dataset silently returned the datasets
+  # array.
+  expect_equal(
+    res$error,
+    paste0(
+      "Dataset template must contain a 'dataset' section. Found 'datasets:' ",
+      "(plural) instead -- that belongs to a dta_creation_template; a ",
+      "dta_dataset_template needs the singular 'dataset:'."
+    )
+  )
+  expect_no_match(res$error, "must contain a 'name'", fixed = TRUE)
+})
+
+test_that("build_dataset_from_template() rejects a hand-built def carrying 'datasets:' instead of 'dataset:'", {
+  # Same `[[` vs `$` hazard as read_dataset_template() above, but exercised
+  # against build_dataset_from_template()'s OWN guard -- it re-checks
+  # `def[["dataset"]]` because a caller (a test, a future direct build path)
+  # may hand it a `def` that never went through read_dataset_template().
+  fn <- app_fn("build_dataset_from_template")
+  def <- list(
+    id = "gf_smrnaseq", version = "3.0",
+    datasets = list(list(name = "gf_data_specs_pattern", type = "tabular"))
+  )
+
+  res <- fn(def)
+
+  expect_false(res$ok)
+  expect_match(res$error, "Found 'datasets:' \\(plural\\) instead")
 })
 
 test_that("read_dataset_template() coerces an unquoted numeric version to character", {

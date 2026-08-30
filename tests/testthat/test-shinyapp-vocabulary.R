@@ -461,6 +461,24 @@ test_that("normalise_values_from() rejects a missing vocabulary and a bad field"
   )
 })
 
+test_that("normalise_values_from() reads 'vocabulary' with [[, not $", {
+  # DEFENSIVE PIN, not a corpus-observed collision: `x` here is the raw
+  # `values_from:` mapping straight off yaml::read_yaml(). Its documented
+  # schema (vocabulary/field/include/exclude) has no OTHER key beginning with
+  # "vocabulary" today, so this is not one of the four live hazards found in
+  # the shipped corpus -- but `$` on a list still falls back to partial name
+  # matching for ANY sibling that starts with "vocabulary", including one a
+  # future field or a typo might introduce. This pins that a decoy sibling is
+  # never silently preferred over an absent 'vocabulary:' key.
+  normalise_values_from <- app_fn("normalise_values_from")
+
+  decoy <- list(vocabulary_deprecated = "should-not-be-used", field = "code")
+  expect_vocab_error_contains(
+    normalise_values_from(decoy, "VISIT"),
+    "must set"
+  )
+})
+
 
 # ---- Expansion --------------------------------------------------------------
 
@@ -798,6 +816,22 @@ test_that("normalise_vocabulary_slots() fills defaults and rejects malformed slo
   )
   expect_warning(dropped <- normalise(list(list(target = "datasets.a.columns.b.values"))), "missing or empty")
   expect_length(dropped, 0L)
+})
+
+test_that("normalise_vocabulary_slots() reads a raw slot's 'vocabulary' with [[, not $", {
+  # DEFENSIVE PIN, not a corpus-observed collision: `slot` here is one raw,
+  # not-yet-normalised entry of the template's own `vocabulary_slots:`
+  # sequence, straight off yaml::read_yaml(). Its documented per-slot fields
+  # (id/label/description/target/vocabulary/mode/field/include/exclude/
+  # default/min) have no OTHER key beginning with "vocabulary" today, so this
+  # is not one of the four live hazards found in the shipped corpus -- but `$`
+  # on a list still falls back to partial name matching for ANY sibling that
+  # starts with "vocabulary". This pins that a decoy sibling is never silently
+  # preferred over an absent 'vocabulary:' key.
+  normalise <- app_fn("normalise_vocabulary_slots")
+
+  decoy <- c(vocab_slot_def(vocabulary = NULL), list(vocabulary_note = "should-not-be-used"))
+  expect_vocab_error_contains(normalise(list(decoy)), "must name a")
 })
 
 test_that("a slot falls back to its default, and enforces min", {

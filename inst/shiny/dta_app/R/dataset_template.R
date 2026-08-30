@@ -37,6 +37,20 @@
 #     rules: []
 # -----------------------------------------------------------------------------
 
+# Message for a missing 'dataset:' section, with a hint when the file
+# instead carries 'datasets:' (plural) -- the obvious slip when converting a
+# creation template into a dataset template, or the reverse. Shared by the two
+# guards below (read_dataset_template(), build_dataset_from_template()) so the
+# wording -- and the hint condition -- cannot drift between them.
+.dataset_template_missing_dataset_msg <- function(def) {
+  hint <- if (!is.null(def[["datasets"]])) {
+    " Found 'datasets:' (plural) instead -- that belongs to a dta_creation_template; a dta_dataset_template needs the singular 'dataset:'."
+  } else {
+    ""
+  }
+  paste0("Dataset template must contain a 'dataset' section.", hint)
+}
+
 # Read and minimally validate a dataset-template YAML.
 #
 # Kept deliberately close to read_dta_creation_template()'s shape (same
@@ -69,10 +83,19 @@ read_dataset_template <- function(path) {
       stop("Dataset template must define a non-empty 'version'.")
     }
 
-    if (!is.list(def$dataset)) {
-      stop("Dataset template must contain a 'dataset' section.")
+    # `def[["dataset"]]`, NOT `def$dataset` -- see the `$` vs `[[` rule in
+    # utils_dta.R. 'dataset' is a strict PREFIX of 'datasets' (a creation
+    # template's own top-level key), so a dta_dataset_template file that was
+    # slipped a 'datasets:' array instead -- the obvious mistake when
+    # converting one kind of template into the other -- used to have
+    # `def$dataset` silently return that array. `is.list()` on it was still
+    # TRUE (it's a list of dataset entries), so this guard passed, and the
+    # only visible symptom was the unrelated-looking "'dataset' section must
+    # contain a 'name'" error three lines below.
+    if (!is.list(def[["dataset"]])) {
+      stop(.dataset_template_missing_dataset_msg(def))
     }
-    if (is.null(def$dataset$name) || !nzchar(as.character(def$dataset$name))) {
+    if (is.null(def[["dataset"]][["name"]]) || !nzchar(as.character(def[["dataset"]][["name"]]))) {
       stop("Dataset template's 'dataset' section must contain a 'name'.")
     }
 
@@ -347,7 +370,11 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
                                         resolve_vocab = NULL) {
   dta_try({
     if (!is.list(def)) stop("Dataset template definition is invalid.")
-    if (!is.list(def$dataset)) stop("Dataset template must contain a 'dataset' section.")
+    # Same `[[` vs `$` hazard as read_dataset_template()'s guard above -- this
+    # second check exists because a caller (a test, a future direct build
+    # path) may hand build_dataset_from_template() a `def` that never went
+    # through read_dataset_template()'s own validation.
+    if (!is.list(def[["dataset"]])) stop(.dataset_template_missing_dataset_msg(def))
 
     # 1) ${today} must be resolved before anything else touches the dataset --
     # mirroring create_dta_from_template()'s ${today} pass over `base` -- since
@@ -355,7 +382,7 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
     # still held a raw token, and there is no later pass here to catch one
     # that survived unresolved into the final dataset.
     today_env <- dta_template_today_env()
-    ds <- resolve_template_expressions(def$dataset, today_env)
+    ds <- resolve_template_expressions(def[["dataset"]], today_env)
     opts <- resolve_template_expressions(def$options %||% list(), today_env)
 
     # 2) Option-driven effects. dataset_template_selection_values() decides

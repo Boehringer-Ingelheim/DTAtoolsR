@@ -3112,7 +3112,7 @@
   },
   "files": {
     "R/dataset_template.R": {
-      "checksum": "cd3c4e5a838f8abd731b243c151484e5"
+      "checksum": "1f7a1ff69678151f15fb64e2efc0e4e1"
     },
     "R/party_profiles.R": {
       "checksum": "12fc95df496c0fb9f56f98f76cc1c730"
@@ -3142,7 +3142,7 @@
       "checksum": "64d332d974bc4b6405ce63405d97ebf7"
     },
     "R/utils_dta.R": {
-      "checksum": "f05a104b682f025990f6c556a7a5fbd1"
+      "checksum": "24a1ab4bc247f88a6debea15e86d2420"
     },
     "R/utils_export.R": {
       "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
@@ -3151,7 +3151,7 @@
       "checksum": "113140917979da950121c19dfd1a625f"
     },
     "R/vocabulary.R": {
-      "checksum": "03d340e8f95871c9a38d1e62731420bf"
+      "checksum": "3b9e1e0117c176a37928557a51f80674"
     },
     "VERSION": {
       "checksum": "02e9c2f39ba5915d349833dd263a60df"
