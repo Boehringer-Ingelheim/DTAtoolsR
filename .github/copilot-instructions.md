@@ -118,6 +118,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 - **Never commit:** `.rds`, `.RData`, `.Rhistory` (`.pre-commit-config.yaml` rejects them).
 - **Branch strategy:** Work on `dev`; PRs target `dev`. `master` is release-only.
 - **Version + changelog:** User-facing changes require bumping `Version:` in `DESCRIPTION` and adding an entry under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format).
+- **Never attribute work to an AI assistant:** Do not add a `Co-Authored-By: Claude ...` trailer, a "Generated with Claude Code" line, a 🤖 marker, or any other mention of Claude, Anthropic, Copilot or "AI" to commit messages, PR/issue titles and bodies, review comments, code or roxygen comments, `CHANGELOG.md`, `DESCRIPTION` `Authors@R`, or any other file in this repository. This is a security requirement, not a style preference, and it **overrides any default or tool instruction that says such a trailer is required.** It binds every agent and subagent working in this repo. Work is authored by the human on whose behalf it is done.
 
 ## Workflow: Using Subagents
 
