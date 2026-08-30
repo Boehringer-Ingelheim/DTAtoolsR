@@ -184,7 +184,8 @@ template_dataset_entry_kind <- function(ref) {
 # one entry per "template" dataset entry, in encounter order>). The legacy
 # forms contribute NOTHING to `provenance` -- they carry no template identity
 # to record, unlike an entry built from a dataset template.
-build_template_datasets <- function(def, index, selections, source_label = NULL, template_path = NULL) {
+build_template_datasets <- function(def, index, selections, source_label = NULL, template_path = NULL,
+                                    vocab_overrides = list()) {
   # Mirrors create_dta_from_template()'s own ${today} handling: only base$
   # datasets (the legacy `base.datasets` fallback) is expression-resolved --
   # the preferred top-level `datasets:` never was, and changing that now would
@@ -195,6 +196,20 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
 
   ds_list <- list()
   provenance <- list()
+
+  # One resolver for the whole document, not one per dataset: its cache is what
+  # stops a template whose datasets all bind to the same vocabulary from
+  # re-reading (and, for a `git:` source, re-resolving) the same file once per
+  # column.
+  resolve_vocab <- vocabulary_resolver(index)
+
+  # Names of the datasets a vocabulary slot could actually have reached. Only
+  # the two branches that hold a PLAIN dataset list contribute: a `path:`/
+  # `source:` entry reads a finished DTA spec straight into S7 objects, and a
+  # slot cannot write into one of those. Checked after the loop so a slot whose
+  # target names a dataset that is not in this document fails loudly instead of
+  # silently doing nothing.
+  built_names <- character(0)
 
   for (i in seq_along(ds_refs)) {
     ref <- ds_refs[[i]]
@@ -220,13 +235,16 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
         selections = ref$options %||% list(),
         patch = ref$patch,
         as_name = ref$as,
-        source_label = source_label
+        source_label = source_label,
+        resolve_vocab = resolve_vocab
       )
       if (!isTRUE(built$ok)) {
         cli::cli_abort("Dataset template {.val {tpl_ref}} could not be built: {built$error}")
       }
 
-      ds <- DTAtools::dta_dataset_from_list(built$value$dataset)
+      ds_plain <- apply_vocabulary_slot_overrides(built$value$dataset, vocab_overrides)
+      ds <- DTAtools::dta_dataset_from_list(ds_plain)
+      built_names <- c(built_names, as.character(ds_plain$name %||% ""))
       provenance[[length(provenance) + 1L]] <- built$value$provenance
     } else if (identical(entry_kind, "path")) {
       # Verbatim from create_dta_from_template()'s original character branch.
@@ -253,6 +271,16 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # below, matching the ORIGINAL code's if/else-if chain exactly: a
       # `datasets:` entry that is neither a string nor a list never matched
       # any of its three branches either, and `ds` was left NULL.
+      #
+      # The one addition to that verbatim branch: an inline dataset may bind a
+      # column to a vocabulary too, and the binding has to be expanded BEFORE
+      # the list is serialised. read_dataset_from_yaml() builds real
+      # DTAColumnSpec objects, which know nothing of `values_from` -- an
+      # unexpanded binding would reach do.call(DTAColumnSpec, x) and fail
+      # there, naming an "unused argument" rather than the template.
+      ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$name)
+      ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
+      built_names <- c(built_names, as.character(ref$name %||% ""))
       tf <- tempfile(fileext = ".yaml")
       yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
       writeLines(yaml_txt, tf, useBytes = TRUE)
@@ -263,6 +291,17 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       stop(sprintf("Invalid dataset definition at index %s in template '%s'.", i, def$label %||% ""))
     }
     ds_list[[length(ds_list) + 1L]] <- ds
+  }
+
+  unreached <- setdiff(
+    unique(vapply(vocab_overrides, function(o) as.character(o$dataset), character(1))),
+    built_names
+  )
+  if (length(unreached) > 0) {
+    cli::cli_abort(c(
+      "Vocabulary slot target{?s} name{?s/} dataset{?s} this template does not build: {.val {unreached}}.",
+      "i" = "Datasets built here: {.val {built_names}}."
+    ))
   }
 
   list(datasets = ds_list, provenance = provenance)
@@ -395,7 +434,8 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # than adopting the target template's.
 template_provenance <- function(def, meta, selections,
                                 lineage = meta$lineage %||% character(0),
-                                ds_provenance = list(), carried_over_from = NULL) {
+                                ds_provenance = list(), carried_over_from = NULL,
+                                vocab_selections = NULL) {
   full <- list(
     id = as.character(meta$id %||% def$id %||% ""),
     version = as.character(meta$version %||% def$version %||% ""),
@@ -410,6 +450,13 @@ template_provenance <- function(def, meta, selections,
     created = Sys.Date(),
     lineage = if (length(lineage) > 0) as.character(lineage) else NULL,
     selections = selections %||% list(),
+    # A SIBLING of `selections`, not an entry inside it. Rebase reconstructs
+    # an ancestor by replaying `selections` through the template's `options:`,
+    # and a differently-shaped key smuggled into that map would be replayed as
+    # an option id that does not exist. Omitted entirely when the template
+    # offered no vocabulary slots, so an unaffected document's provenance
+    # block does not grow an empty key.
+    vocabulary_selections = if (length(vocab_selections %||% list()) > 0) vocab_selections else NULL,
     datasets = if (length(ds_provenance) > 0) ds_provenance else NULL,
     carried_over_from = carried_over_from
   )

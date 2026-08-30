@@ -40,7 +40,7 @@
 # The environment's parent is the PACKAGE namespace (not shiny's, unlike
 # app_env() in the test harness): every function this file actually calls
 # (template_core.R, template_index.R, template_inherit.R, dataset_template.R,
-# party_profiles.R) resolves everything it needs either from its own sibling
+# party_profiles.R, vocabulary.R) resolves everything it needs either from its own sibling
 # file in the same sourced environment, or via a namespaced `pkg::fn()` call --
 # none of them call an unqualified shiny/htmltools UI function at the TOP
 # level of the file (only inside function bodies belonging to the UI-only
@@ -270,6 +270,46 @@
   }
 }
 
+# `resolve_ref` for resolve_vocabulary_inheritance() (vocabulary.R). Same
+# local-directory-only contract as the creation-template resolver above, but a
+# different return shape: that one feeds resolve_template_inheritance(), which
+# wants list(def=, id=, version=), while the vocabulary resolver hands back the
+# parent definition directly.
+.dta_template_vocab_resolver <- function(index_df) {
+  function(ref) {
+    hit <- .dta_template_engine_get("resolve_template_ref")(index_df, ref, kind = "dta_vocabulary")
+    if (is.null(hit) || nrow(hit) == 0) {
+      return(NULL)
+    }
+    parent <- .dta_template_engine_get("read_vocabulary")(hit$path[[1]])
+    if (!isTRUE(parent$ok)) {
+      return(NULL)
+    }
+    parent$value
+  }
+}
+
+# The same lookup, but returning a vocabulary whose `extends:` chain is
+# resolved -- what every consumer that reads `terms` needs.
+#
+# The two are deliberately separate. resolve_vocabulary_inheritance() must be
+# handed the RAW resolver above, because it owns the `.seen`/`.depth` recursion
+# that detects a cycle; a resolver that resolved inheritance itself would reset
+# that bookkeeping at every hop. Anything that then wants the terms -- a
+# `values_from:` include list, a slot's offered menu -- must use THIS one, or a
+# child vocabulary's inherited terms are invisible to the check and a perfectly
+# valid `include:` gets reported as naming an unknown code.
+.dta_template_vocab_resolved <- function(index_df) {
+  lookup <- .dta_template_vocab_resolver(index_df)
+  function(ref) {
+    raw <- lookup(ref)
+    if (is.null(raw)) {
+      return(NULL)
+    }
+    .dta_template_engine_get("resolve_vocabulary_inheritance")(raw, lookup)
+  }
+}
+
 # ---- Target-path extraction (shared by metadata and dataset targets) -----
 
 # Every literal path an option could write, across EVERY branch of its
@@ -412,7 +452,9 @@
   kind_rows <- if (identical(kind, "dta_creation_template")) {
     .dta_template_check_creation(path, id, version, def, index_df, resolve_extends)
   } else if (identical(kind, "dta_dataset_template")) {
-    .dta_template_check_dataset_tpl(path, id, version, def)
+    .dta_template_check_dataset_tpl(path, id, version, def, index_df)
+  } else if (identical(kind, "dta_vocabulary")) {
+    .dta_template_check_vocabulary(path, id, version, index_df)
   } else {
     list()
   }
@@ -468,13 +510,25 @@
     }
   }
 
+  # ---- vocab_slot_invalid / vocab_slot_unresolved -------------------------
+  rows <- c(rows, .dta_template_check_vocab_slots(path, id, version, def, index_df))
+
   # ---- dataset_template_unresolved / patch_incoherent ---------------------
   ds_entries <- def$datasets %||% def$base$datasets %||% list()
   if (is.list(ds_entries)) {
     for (entry in ds_entries) {
       if (!is.list(entry)) next
       tpl_ref <- as.character(entry$template %||% "")
-      if (!nzchar(tpl_ref)) next
+      if (!nzchar(tpl_ref)) {
+        # An INLINE dataset body, authored in the creation template itself. Its
+        # columns can carry a vocabulary binding exactly as a dataset
+        # template's can, and nothing else in this function would look at them.
+        rows <- c(rows, .dta_template_check_bindings(
+          path, id, version, entry, index_df,
+          kind = "dta_creation_template"
+        ))
+        next
+      }
 
       hit <- .dta_template_engine_get("resolve_template_ref")(index_df, tpl_ref, kind = "dta_dataset_template")
       if (is.null(hit) || nrow(hit) == 0) {
@@ -494,6 +548,14 @@
           )
           if (inherits(patch_res, "error")) {
             add("warning", "patch_incoherent", conditionMessage(patch_res))
+          } else {
+            # The PATCHED body, not the template's own: a patch can add a
+            # column with a binding, or re-bind an existing one, and the
+            # post-patch column list is the only place both are visible.
+            rows <- c(rows, .dta_template_check_bindings(
+              path, id, version, patch_res$dataset, index_df,
+              kind = "dta_creation_template"
+            ))
           }
         }
       }
@@ -547,11 +609,220 @@
       # foregone conclusion for every template using this feature.
       build_res <- .dta_template_engine_get("create_dta_from_template")(
         resolved$def, path,
-        index = index_df
+        index = index_df,
+        # Slots are read off the RESOLVED definition, so a slot a child
+        # inherited through `extends:` is driven here too.
+        vocab_selections = .dta_template_vocab_dry_selections(resolved$def, index_df)
       )
       if (!isTRUE(build_res$ok)) {
         add("error", "instantiate_failed", build_res$error)
       }
+    }
+  }
+
+  rows
+}
+
+# Structural checks for a creation template's `vocabulary_slots:`.
+.dta_template_check_vocab_slots <- function(path, id, version, def, index_df) {
+  rows <- list()
+  add <- function(severity, code, message) {
+    rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_creation_template", id, version, severity, code, message)
+  }
+
+  raw <- def$vocabulary_slots %||% list()
+  if (!is.list(raw) || length(raw) == 0) {
+    return(rows)
+  }
+
+  slots <- tryCatch(
+    .dta_template_engine_get("normalise_vocabulary_slots")(raw),
+    error = function(e) e
+  )
+  if (inherits(slots, "condition")) {
+    add("error", "vocab_slot_invalid", conditionMessage(slots))
+    return(rows)
+  }
+
+  resolver <- .dta_template_vocab_resolved(index_df)
+  for (slot in slots) {
+    vocab <- tryCatch(resolver(slot$vocabulary), error = function(e) e)
+    if (inherits(vocab, "condition")) {
+      add("error", "vocab_slot_invalid", conditionMessage(vocab))
+      next
+    }
+    if (is.null(vocab)) {
+      add(
+        "warning", "vocab_slot_unresolved",
+        sprintf(
+          "vocabulary slot '%s' names vocabulary '%s', which does not resolve within the directory being validated.",
+          slot$id, slot$vocabulary
+        )
+      )
+      next
+    }
+
+    terms <- tryCatch(
+      .dta_template_engine_get("vocabulary_terms")(vocab, include = slot$include, exclude = slot$exclude),
+      error = function(e) e
+    )
+    if (inherits(terms, "condition")) {
+      add("error", "vocab_slot_invalid", conditionMessage(terms))
+      next
+    }
+
+    # A default the slot does not itself offer is dead on arrival: the picker
+    # cannot show it, so the slot silently starts empty.
+    codes <- vapply(terms, function(t) as.character(t$code), character(1))
+    stale <- setdiff(slot$default, codes)
+    if (length(stale) > 0) {
+      add(
+        "error", "vocab_slot_invalid",
+        sprintf(
+          "vocabulary slot '%s' defaults to %s, which this slot does not offer.",
+          slot$id, paste(sprintf("'%s'", stale), collapse = ", ")
+        )
+      )
+    }
+  }
+
+  rows
+}
+
+# Selections to drive the instantiate dry-run with.
+#
+# Every slot's own `default:`, topped up to its `min:` from the head of the
+# offered terms when the default does not reach it. WITHOUT this, a slot that
+# legitimately requires a choice (`min: 1`, no default -- "the author must
+# pick") would abort the dry run and be reported as instantiate_failed, which
+# would be wrong: the template is fine, it simply has not been filled in. The
+# dry run stands in for a user who picked the minimum, not for one who
+# submitted an empty form.
+.dta_template_vocab_dry_selections <- function(def, index_df) {
+  raw <- def$vocabulary_slots %||% list()
+  if (!is.list(raw) || length(raw) == 0) {
+    return(list())
+  }
+  slots <- tryCatch(
+    .dta_template_engine_get("normalise_vocabulary_slots")(raw),
+    error = function(e) NULL
+  )
+  if (is.null(slots)) {
+    return(list())
+  }
+
+  resolver <- .dta_template_vocab_resolved(index_df)
+  out <- list()
+  for (slot in slots) {
+    sel <- slot$default
+    if (length(sel) < slot$min) {
+      terms <- tryCatch(
+        .dta_template_engine_get("vocabulary_terms")(
+          resolver(slot$vocabulary),
+          include = slot$include, exclude = slot$exclude
+        ),
+        error = function(e) NULL
+      )
+      if (!is.null(terms)) {
+        codes <- vapply(terms, function(t) as.character(t$code), character(1))
+        sel <- unique(c(sel, utils::head(codes, slot$min)))
+      }
+    }
+    if (length(sel) > 0) {
+      out[[slot$id]] <- sel
+    }
+  }
+  out
+}
+
+# Every `values_from:` binding on a dataset body's columns, checked against the
+# vocabularies available in the directory being validated.
+#
+# Split out from .dta_template_check_dataset_tpl() so a creation template's
+# inline `datasets:` bodies can be run through the identical checks -- a
+# binding is a binding wherever the column was authored.
+.dta_template_check_bindings <- function(path, id, version, ds_body, index_df, kind = "dta_dataset_template") {
+  rows <- list()
+  add <- function(severity, code, message) {
+    rows[[length(rows) + 1L]] <<- .dta_template_row(path, kind, id, version, severity, code, message)
+  }
+
+  columns <- ds_body$columns %||% list()
+  if (!is.list(columns) || length(columns) == 0) {
+    return(rows)
+  }
+
+  resolver <- NULL
+  for (col in columns) {
+    if (!is.list(col) || is.null(col$values_from)) {
+      next
+    }
+    col_id <- as.character(col$id %||% "<unnamed>")
+
+    # Authored BOTH in the same literal column. Only detectable here, where the
+    # raw per-file YAML is in hand: by build time a `values:` from the base and
+    # a `values_from:` from a patch look exactly the same, and that combination
+    # is legitimate. A warning, not an error, because the build is still
+    # deterministic (the binding wins).
+    if (!is.null(col$values)) {
+      add(
+        "warning", "values_and_values_from",
+        sprintf("column '%s' sets both 'values' and 'values_from'; the binding wins and 'values' is ignored.", col_id)
+      )
+    }
+
+    if (!is.null(col$pattern)) {
+      add(
+        "error", "values_from_pattern",
+        sprintf("column '%s' combines 'values_from' with 'pattern'; a column takes a permitted-value list or a pattern, never both.", col_id)
+      )
+      next
+    }
+
+    binding <- tryCatch(
+      .dta_template_engine_get("normalise_values_from")(col$values_from, col_id),
+      error = function(e) e
+    )
+    if (inherits(binding, "condition")) {
+      add("error", "values_from_invalid", conditionMessage(binding))
+      next
+    }
+
+    if (is.null(resolver)) {
+      resolver <- .dta_template_vocab_resolved(index_df)
+    }
+    vocab <- tryCatch(resolver(binding$vocabulary), error = function(e) e)
+    if (inherits(vocab, "condition")) {
+      add("error", "values_from_invalid", conditionMessage(vocab))
+      next
+    }
+    if (is.null(vocab)) {
+      add(
+        "warning", "values_from_unresolved",
+        sprintf(
+          "column '%s' binds to vocabulary '%s', which does not resolve within the directory being validated.",
+          col_id, binding$vocabulary
+        )
+      )
+      next
+    }
+
+    # include/exclude naming a code the vocabulary does not have is the exact
+    # shape a typo takes, and its consequence -- a column whose permitted
+    # values quietly omit a term -- only shows up much later, against real
+    # data. vocabulary_terms() already aborts on it; surface that as a row.
+    err <- tryCatch(
+      {
+        .dta_template_engine_get("vocabulary_terms")(
+          vocab,
+          include = binding$include, exclude = binding$exclude
+        )
+        NULL
+      },
+      error = function(e) e
+    )
+    if (!is.null(err)) {
+      add("error", "values_from_terms_invalid", conditionMessage(err))
     }
   }
 
@@ -564,13 +835,14 @@
 # banner in dataset_template.R: it always needs a caller-chosen `as_name`/
 # patch context that only exists once it is actually used from a creation
 # template, so there is nothing standalone to dry-run build here).
-.dta_template_check_dataset_tpl <- function(path, id, version, def) {
+.dta_template_check_dataset_tpl <- function(path, id, version, def, index_df) {
   rows <- list()
   add <- function(severity, code, message) {
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_dataset_template", id, version, severity, code, message)
   }
 
   ds_body <- def$dataset %||% list()
+  rows <- c(rows, .dta_template_check_bindings(path, id, version, ds_body, index_df))
   opts <- def$options %||% list()
   if (is.list(opts)) {
     for (opt in opts) {
@@ -599,6 +871,62 @@
         }
       }
     }
+  }
+
+  rows
+}
+
+# Structural checks specific to a controlled vocabulary.
+#
+# The file is RE-READ through the engine's own read_vocabulary() rather than
+# checked against the raw `def` the record reader already parsed. That is not
+# redundant: read_vocabulary() applies the wider scalar handlers that keep a
+# zero-padded or Y/N code intact (see dta_vocabulary_yaml_handlers() in
+# vocabulary.R), so checking the plainly-parsed `def` would be checking a
+# different, already-mangled document than the one the app will actually use.
+.dta_template_check_vocabulary <- function(path, id, version, index_df) {
+  rows <- list()
+  add <- function(severity, code, message) {
+    rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_vocabulary", id, version, severity, code, message)
+  }
+
+  read <- .dta_template_engine_get("read_vocabulary")(path)
+  if (!isTRUE(read$ok)) {
+    # "error", not "warning": every other kind can still be USED with a
+    # questionable field, but a vocabulary that will not read contributes no
+    # terms at all, so any column bound to it produces a spec with no
+    # permitted values -- a silently unvalidated column.
+    add("error", "vocabulary_invalid", read$error)
+    return(rows)
+  }
+
+  vocab <- read$value
+  ref <- as.character(vocab$extends %||% "")
+  if (!nzchar(ref)) {
+    return(rows)
+  }
+
+  resolver <- .dta_template_vocab_resolver(index_df)
+  if (is.null(resolver(ref))) {
+    add(
+      "warning", "vocabulary_unresolved",
+      sprintf("extends '%s', which does not resolve within the directory being validated.", ref)
+    )
+    return(rows)
+  }
+
+  # Resolution itself can still abort -- a cycle, or a chain past the depth
+  # limit -- and those are errors, not warnings: neither produces a usable
+  # term list.
+  err <- tryCatch(
+    {
+      .dta_template_engine_get("resolve_vocabulary_inheritance")(vocab, resolver)
+      NULL
+    },
+    error = function(e) e
+  )
+  if (!is.null(err)) {
+    add("error", "vocabulary_extends_failed", conditionMessage(err))
   }
 
   rows
@@ -679,8 +1007,9 @@
 #' "DTAtools")` for a ready-to-copy GitHub Actions workflow.
 #'
 #' @param path A single template file, or a directory. A directory is scanned
-#'   NON-RECURSIVELY for `*.dta-template.yaml`, `*.dta-dataset-template.yaml`
-#'   and `*.dta-party.yaml` files (and their `.yml` spellings) -- the same
+#'   NON-RECURSIVELY for `*.dta-template.yaml`, `*.dta-dataset-template.yaml`,
+#'   `*.dta-party.yaml` and `*.dta-vocabulary.yaml` files (and their `.yml`
+#'   spellings) -- the same
 #'   filename convention the template engine itself uses
 #'   (`dta_template_kind_pattern()`). `kinds`, below, only narrows which of
 #'   those files get a report row of their OWN; it never changes how many
@@ -692,7 +1021,8 @@
 #'   returning them -- the one line a CI job needs.
 #' @param kinds `NULL` (the default: every kind) or a character vector naming
 #'   one or more of `"dta_creation_template"`, `"dta_dataset_template"`,
-#'   `"dta_party_profile"`. Restricts which files in a scanned directory get
+#'   `"dta_party_profile"`, `"dta_vocabulary"`. Restricts which files in a
+#'   scanned directory get
 #'   their own report row; has no effect when `path` is a single file (an
 #'   explicitly named file is always checked).
 #' @return A data frame (`stringsAsFactors = FALSE`) with one row per issue

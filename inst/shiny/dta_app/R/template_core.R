@@ -623,7 +623,8 @@ apply_template_expressions <- function(dta) {
 # options were chosen) -- it cannot be written before those decisions exist.
 create_dta_from_template <- function(template_def, template_path, selections = list(),
                                      index = NULL, carry_over = NULL,
-                                     party_selections = NULL, provenance = NULL) {
+                                     party_selections = NULL, provenance = NULL,
+                                     vocab_selections = NULL) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
     # ${today} is known upfront and has to be resolved BEFORE base metadata is
@@ -651,10 +652,32 @@ create_dta_from_template <- function(template_def, template_path, selections = l
         ds_refs_probe,
         function(r) identical(template_dataset_entry_kind(r), "template"),
         logical(1)
-      ))
+      )) ||
+        # A vocabulary slot, or a column binding inside an inline dataset
+        # body, is resolved through the index too -- same reasoning as the
+        # `template:` probe above: a template AUTHOR adding one must not break
+        # every existing caller that legitimately passes no index.
+        length(template_def$vocabulary_slots %||% list()) > 0 ||
+        any(vapply(ds_refs_probe, function(r) is.list(r) && dataset_has_vocabulary_binding(r), logical(1)))
       if (needs_index) {
         index <- dta_template_index_cached()
       }
+    }
+
+    # Vocabulary slots are resolved BEFORE the datasets are built, because
+    # their effect is written into the plain dataset lists on the way through
+    # build_template_datasets() -- not onto the finished S7 objects, which
+    # would mean column-spec surgery for something the list form expresses
+    # directly.
+    vocab_slots <- normalise_vocabulary_slots(template_def$vocabulary_slots)
+    vocab_overrides <- list()
+    if (length(vocab_slots) > 0) {
+      if (is.null(index)) {
+        stop("This template offers vocabulary slots, which need a template index to resolve.")
+      }
+      vocab_overrides <- resolve_vocabulary_slot_overrides(
+        vocab_slots, vocab_selections %||% list(), vocabulary_resolver(index)
+      )
     }
 
     if (!is.null(index)) {
@@ -667,7 +690,8 @@ create_dta_from_template <- function(template_def, template_path, selections = l
       # to supply when it exists, not something this function can infer.
       built <- build_template_datasets(
         template_def, index, selections,
-        source_label = NULL, template_path = template_path
+        source_label = NULL, template_path = template_path,
+        vocab_overrides = vocab_overrides
       )
       ds_list <- built$datasets
       # Keep the provenance the ACTUAL build produced. Step 7 stamps this over
