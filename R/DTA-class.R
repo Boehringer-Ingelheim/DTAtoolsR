@@ -313,6 +313,186 @@ method(load_file, DTA) <- function(
 }
 
 
+# ---- validation summary lines -----------------------------------------------
+#
+# The two lines `check()` prints to close a run: one per dataset, and one for
+# the DTA as a whole. Extracted from the print blocks so that every combination
+# of counts is testable directly -- including combinations no fixture can
+# currently produce, which is exactly where both of the defects below lived.
+#
+# The shared rule is that a target carrying no verdict is never silently folded
+# into either outcome. It is not a pass, and it is not a failure; it is work
+# that did not happen, and it has to be said out loud in both directions.
+
+# Agreement for a count and the noun it governs. Used rather than cli's `{?s}`
+# because these builders return plain strings for testing, and cli's
+# pluralisation only resolves inside its own interpolation.
+#' @keywords internal
+dta_count_noun <- function(n, singular, plural) {
+  paste0(n, " ", if (n == 1) singular else plural)
+}
+
+#' @title Per-Dataset Validation Summary Line
+#' @description
+#' Decides the line `check()` prints to close one dataset: its severity and its
+#' text.
+#'
+#' Three shapes, in priority order. A failure is the headline whenever there is
+#' one; a run where nothing failed but something was never judged is incomplete
+#' rather than clean; and only a run that judged every target and found no fault
+#' reports success.
+#'
+#' Two defects this encodes against. The success branch used to be reached
+#' whenever `n_invalid == 0`, without consulting `n_unchecked` -- which was
+#' already computed two lines above it for the rollup that does consult it -- so
+#' a dataset whose targets carried no verdict at all printed a green
+#' "0 tables validated: all valid", directly contradicting the dataset's own
+#' "0 of 1 table valid; 1 not checked" on the line above. And unchecked targets
+#' are now reported ALONGSIDE failures rather than behind them: the failure
+#' branch won outright, so a dataset with one invalid and one unjudged target
+#' mentioned only the failure, and fixing that failure flipped the run straight
+#' to incomplete with nothing having warned that anything was outstanding.
+#' @param n_targets Integer. Targets in the dataset.
+#' @param n_validated Integer. Targets actually validated in this run.
+#' @param n_valid Integer. Targets judged a pass.
+#' @param n_invalid Integer. Targets judged a failure.
+#' @param n_unchecked Integer. Targets carrying no verdict either way.
+#' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
+#'   `text`.
+#' @keywords internal
+dta_dataset_summary_message <- function(n_targets,
+                                        n_validated,
+                                        n_valid,
+                                        n_invalid,
+                                        n_unchecked) {
+  unchecked_tail <- if (n_unchecked > 0) {
+    paste0("; ", dta_count_noun(n_unchecked, "target", "targets"), " not checked")
+  } else {
+    ""
+  }
+
+  if (n_invalid > 0) {
+    return(list(
+      severity = "danger",
+      text = paste0(
+        dta_count_noun(n_validated, "table", "tables"), " validated: ",
+        n_valid, " valid, ", n_invalid, " INVALID", unchecked_tail
+      )
+    ))
+  }
+
+  if (n_unchecked > 0) {
+    # The noun agrees with `n_targets`, which governs it. Deriving it from
+    # `n_validated` -- as the neighbouring branches do, correctly, for their own
+    # sentences -- reads "1 of 3 table valid" here, because `n_validated` is
+    # exactly the count that is zero when nothing was checked.
+    return(list(
+      severity = "warning",
+      text = paste0(
+        n_valid, " of ", dta_count_noun(n_targets, "table", "tables"),
+        " valid", unchecked_tail
+      )
+    ))
+  }
+
+  list(
+    severity = "success",
+    text = paste0(dta_count_noun(n_validated, "table", "tables"), " validated: all valid")
+  )
+}
+
+#' @title Overall Validation Summary Line
+#' @description
+#' Decides the closing line for the whole DTA.
+#'
+#' Same rule as the per-dataset line: a failure is the headline, but unchecked
+#' targets are named alongside it rather than hidden behind it. Without that, a
+#' DTA holding one failing dataset and one that checked nothing reported only
+#' "Validation FAILED", and repairing the failure turned the run into
+#' "Validation INCOMPLETE" for a reason that had been true, and silent, all
+#' along.
+#' @param total_invalid Integer. Targets judged a failure, across all datasets.
+#' @param total_import_errors Integer. Values that could not be represented in
+#'   their declared type, including the metadata axis.
+#' @param total_unchecked Integer. Targets carrying no verdict either way.
+#' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
+#'   `text`.
+#' @keywords internal
+dta_overall_summary_message <- function(total_invalid,
+                                        total_import_errors,
+                                        total_unchecked) {
+  unchecked_tail <- if (total_unchecked > 0) {
+    paste0("; ", dta_count_noun(total_unchecked, "target", "targets"), " not checked")
+  } else {
+    ""
+  }
+
+  if (total_invalid > 0) {
+    return(list(
+      severity = "danger",
+      text = paste0(
+        "Validation FAILED: ",
+        dta_count_noun(total_invalid, "table", "tables"),
+        " with validation errors", unchecked_tail
+      )
+    ))
+  }
+
+  if (total_import_errors > 0) {
+    return(list(
+      severity = "danger",
+      text = paste0(
+        "Validation FAILED: ",
+        dta_count_noun(total_import_errors, "value", "values"),
+        " could not be imported in the declared type", unchecked_tail
+      )
+    ))
+  }
+
+  if (total_unchecked > 0) {
+    return(list(
+      severity = "warning",
+      text = paste0(
+        "Validation INCOMPLETE: ",
+        dta_count_noun(total_unchecked, "target", "targets"), " ",
+        if (total_unchecked == 1) "was" else "were", " not checked"
+      )
+    ))
+  }
+
+  list(severity = "success", text = "Validation PASSED: All datasets are valid")
+}
+
+# Renders whichever line the builders above returned. One place that maps a
+# severity onto a cli alert, so the two call sites cannot drift on which
+# severity prints which symbol.
+#
+# The argument is NOT named `message`: that shadows `base::message()`, and a
+# later edit adding a diagnostic call inside this function would silently
+# resolve it to the list instead.
+#
+# Both unknown-severity paths abort rather than falling through. `switch()`
+# without a default arm returns NULL invisibly for an unmatched string, so a
+# severity added to a builder but not here would make that summary line vanish
+# silently -- the same class of defect as the two this change fixes, in the
+# code that fixes them.
+#' @keywords internal
+dta_emit_summary_message <- function(summary_message) {
+  severity <- summary_message$severity
+
+  if (!is.character(severity) || length(severity) != 1 || is.na(severity)) {
+    cli::cli_abort("A validation summary message must carry exactly one severity.")
+  }
+
+  switch(severity,
+    danger = cli::cli_alert_danger(summary_message$text),
+    warning = cli::cli_alert_warning(summary_message$text),
+    success = cli::cli_alert_success(summary_message$text),
+    cli::cli_abort("Unknown validation summary severity {.val {severity}}.")
+  )
+  invisible(NULL)
+}
+
 #' @title Check DTA Object
 #' @description
 #' Validates all datasets within a \code{DTA} object, or a specific dataset.
@@ -523,17 +703,13 @@ method(check, DTA) <- function(
 
     # Print summary for this dataset
     if (!isTRUE(quiet)) {
-      if (n_invalid > 0) {
-        table_word <- if (n_validated == 1) "table" else "tables"
-        cli_alert_danger(
-          paste0(n_validated, " ", table_word, " validated: ", n_valid, " valid, ", n_invalid, " INVALID")
-        )
-      } else {
-        table_word <- if (n_validated == 1) "table" else "tables"
-        cli_alert_success(
-          paste0(n_validated, " ", table_word, " validated: all valid")
-        )
-      }
+      dta_emit_summary_message(dta_dataset_summary_message(
+        n_targets = n_targets,
+        n_validated = n_validated,
+        n_valid = n_valid,
+        n_invalid = n_invalid,
+        n_unchecked = n_unchecked
+      ))
     }
   }
 
@@ -594,17 +770,11 @@ method(check, DTA) <- function(
 
   if (!isTRUE(quiet)) {
     cli::cli_rule("Validation Summary")
-    if (total_invalid > 0) {
-      invalid_word <- if (total_invalid == 1) "table" else "tables"
-      cli_alert_danger(paste0("Validation FAILED: ", total_invalid, " ", invalid_word, " with validation errors"))
-    } else if (total_import_errors > 0) {
-      import_word <- if (total_import_errors == 1) "value" else "values"
-      cli_alert_danger(paste0("Validation FAILED: ", total_import_errors, " ", import_word, " could not be imported in the declared type"))
-    } else if (total_unchecked > 0) {
-      cli_alert_warning(paste0("Validation INCOMPLETE: ", total_unchecked, " target", if (total_unchecked == 1) "" else "s", " ", if (total_unchecked == 1) "was" else "were", " not checked"))
-    } else {
-      cli_alert_success("Validation PASSED: All datasets are valid")
-    }
+    dta_emit_summary_message(dta_overall_summary_message(
+      total_invalid = total_invalid,
+      total_import_errors = total_import_errors,
+      total_unchecked = total_unchecked
+    ))
   }
 
   attr(x, "last_validation_summary") <- summary_df
