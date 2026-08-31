@@ -130,6 +130,19 @@ bi_css <- function() {
        be centred within their own block instead of against their brandbar
        siblings. */
     .app-actions > .shiny-html-output { display: flex; align-items: center; }
+    /* ...but on the landing page edit_gate renders NULL, and Shiny empties
+       the shiny-html-output span without ever removing it: the element
+       stays in the DOM with no children at all. The rule above would then
+       leave a generated, zero-width flex item sitting first in
+       .app-actions, and gap: 8px applies around flex items whether or not
+       they have any width -- so the brandbar would carry 8px of blank space
+       before the Report issues link with nothing in it. display: none
+       removes the box altogether, which is what drops the gap with it.
+       Keep this AFTER the rule above: :empty already outranks it on
+       specificity, but source order is what makes that safe to rely on.
+       NB every line of this CSS block is inside one double-quoted R string
+       -- an apostrophe is fine here, a double quote ends the string. */
+    .app-actions > .shiny-html-output:empty { display: none; }
     /* edit_mode_switch()'s bslib::input_switch() renders
        .form-group.shiny-input-container > .bslib-input-switch.form-switch,
        a wrapper shaped for a standalone form rather than for sitting inline
