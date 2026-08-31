@@ -436,8 +436,13 @@ test_that("quoted numeric bounds compare numerically on both paths", {
 })
 
 test_that("validate_file_stream cleans a padded header like every other entry point", {
+  # AGE is declared as well as ID: the padding is what this test is about, and
+  # an undeclared column would add a second, unrelated structural finding.
   specs <- vc_specs(
-    list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE))
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    )
   )
   path <- file.path(tempdir(), "ss_padded_header.csv")
   writeLines(c("ID ,AGE", "A001,30"), path)

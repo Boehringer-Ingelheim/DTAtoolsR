@@ -14,8 +14,8 @@ A summarised data frame.
 }
 \description{
 Collapses repeated violations of the same constraint into one row spanning
-the affected rows. A missing required column is summarised by constraint
-alone, because reporting a row range for a column that is absent everywhere
-adds nothing.
+the affected rows. An object-level finding -- a missing required column, or a
+column no spec describes -- is summarised by constraint alone, because
+reporting a row range for a fact about the table's shape adds nothing.
 }
 \keyword{internal}

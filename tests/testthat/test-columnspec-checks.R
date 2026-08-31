@@ -297,12 +297,19 @@ test_that("a spec collection declaring nothing reports no check as passed", {
 test_that("the streaming path reports the same per-check summary as the eager one", {
   # The property the streaming path has to earn everywhere: not "it reports
   # something" but "it reports exactly what the materialising path reports".
+  #
+  # `known_columns` is supplied because both production entry points supply it
+  # -- dta_validate_any_table() and dta_validate_file_stream() each read the
+  # source's names before scanning. Withholding them here would compare the
+  # eager path against a streaming call deprived of something it always has,
+  # and the checks decidable from names alone would differ for that reason
+  # rather than for any reason the package cares about.
   for (case in vc_corpus()) {
     eager <- validate_table_detailed(case$specs, case$table, verbose = FALSE)
     streamed <- dta_validate_table_stream(
       case$specs,
       dta_as_batch_reader(arrow::as_arrow_table(case$table), batch_rows = 1L),
-      verbose = FALSE, coerce = FALSE
+      verbose = FALSE, coerce = FALSE, known_columns = names(case$table)
     )
 
     expect_equal(
@@ -389,7 +396,7 @@ test_that("a folded check names the reason its own rows were not checked", {
 })
 
 
-test_that("a structural early return reports presence only", {
+test_that("a structural early return reports the header-decidable checks only", {
   specs <- cc_specs()
   findings <- dta_structure_findings(specs, c("ID", "SEX"))
   details <- dta_structural_failure_details(
@@ -399,8 +406,13 @@ test_that("a structural early return reports presence only", {
   checks <- details$columnspec_checks
 
   expect_equal(cc_status(checks, "required"), "failed")
-  # Not one row was read, so nothing else has a verdict to report.
-  expect_false(any(checks$status == "passed"))
+  # Closedness is settled by the very same header: both columns are declared,
+  # so there is nothing undeclared to find. A verdict, not a guess.
+  expect_equal(cc_status(checks, "additionalProperties"), "passed")
+
+  # Not one row was read, so no check that needs a VALUE has a verdict.
+  value_checks <- checks[!checks$keyword %in% c("required", "additionalProperties"), ]
+  expect_false(any(value_checks$status == "passed"))
   expect_equal(cc_status(checks, "type"), "not_checked")
 })
 
@@ -421,7 +433,12 @@ test_that("stopping on a missing column still says what was not checked", {
   expect_match(out, "Presence check failed", fixed = TRUE)
   expect_match(out, "Format check not checked", fixed = TRUE)
   expect_match(out, "the table was not read", fixed = TRUE)
-  expect_false(any(details$columnspec_checks$status == "passed"))
+  # Closedness is decided from the same header the gate read, so it is the one
+  # other check with a verdict; nothing that needed a value was settled.
+  value_checks <- details$columnspec_checks[
+    !details$columnspec_checks$keyword %in% c("required", "additionalProperties"),
+  ]
+  expect_false(any(value_checks$status == "passed"))
 })
 
 
@@ -442,4 +459,303 @@ test_that("check() names the failing column spec checks for a whole dataset", {
   stored <- validation_errors(ds, table = "tab", source = "memory")
   expect_equal(cc_status(stored$columnspec_checks, "maxLength"), "failed")
   expect_equal(cc_status(stored$columnspec_checks, "pattern"), "passed")
+})
+
+
+# ---- columns the specs do not declare ---------------------------------------
+#
+# The defect these pin: a table carrying a column no spec described validated
+# CLEAN. `dta_structure_findings()` had computed the finding all along -- it is
+# the `unexpected` element -- but `dta_structure_errors()` rendered only the
+# missing half, `findings$ok` was derived from the missing half, and the
+# materialising path never called the gate at all. The streaming path printed a
+# `cli` warning and then returned `ok = TRUE`.
+#
+# A spec describes a transfer. A column nobody agreed to carry is as much a
+# departure from it as a column that was promised and never arrived, so it is
+# reported the same way: as an ordinary column spec error, in `full_error`,
+# counted in `n_columnspec_errors`, and surfaced by `messages()`.
+
+cc_table_extra <- function() {
+  tab <- cc_table()
+  tab$EXTRA <- c("x", "y", "z")
+  tab
+}
+
+
+test_that("an undeclared column fails the materialising path", {
+  details <- validate_table_detailed(cc_specs(), cc_table_extra()[1, ], verbose = FALSE)
+
+  expect_false(details$columnspec_valid)
+  expect_false(details$ok)
+
+  full <- details$columnspec_errors$full_error
+  extra <- full[full$keyword == "additionalProperties", , drop = FALSE]
+  expect_equal(nrow(extra), 1L)
+  # The mirror image of a missing-column finding: the column is really there,
+  # so `column` names it, and no spec describes it, so `columnspec` is NA.
+  expect_equal(extra$column, "EXTRA")
+  expect_true(is.na(extra$columnspec))
+  # About the table's shape, not about any row in it.
+  expect_true(is.na(extra$row))
+  expect_equal(extra$message, "must NOT have additional property 'EXTRA'")
+})
+
+
+test_that("an undeclared column is reported once however many rows there are", {
+  # The count must not scale with the data: this is one fact about the header.
+  wide <- cc_table_extra()[rep(1, 3), , drop = FALSE]
+  details <- validate_table_detailed(cc_specs(), wide, verbose = FALSE)
+
+  full <- details$columnspec_errors$full_error
+  expect_equal(sum(full$keyword == "additionalProperties"), 1L)
+})
+
+
+test_that("the per-check report names the undeclared column", {
+  details <- NULL
+  out <- cc_messages(
+    details <- validate_table_detailed(cc_specs(), cc_table_extra()[1, ], verbose = TRUE)
+  )
+
+  checks <- details$columnspec_checks
+  expect_equal(cc_status(checks, "additionalProperties"), "failed")
+  expect_equal(cc_row(checks, "additionalProperties")$failed_columns, "EXTRA")
+  expect_equal(cc_row(checks, "additionalProperties")$n_errors, 1L)
+
+  expect_match(out, "Extra columns check failed", fixed = TRUE)
+  expect_match(out, "not described by the specs", fixed = TRUE)
+  expect_match(out, "EXTRA", fixed = TRUE)
+  # Presence is a separate verdict, untouched by this: every declared column IS
+  # there, and saying otherwise would name the wrong defect.
+  expect_equal(cc_status(checks, "required"), "passed")
+  expect_match(out, "Presence check passed", fixed = TRUE)
+})
+
+
+test_that("a table whose columns match exactly passes the extra-columns check", {
+  details <- NULL
+  out <- cc_messages(
+    details <- validate_table_detailed(cc_specs(), cc_table()[1, ], verbose = TRUE)
+  )
+
+  expect_equal(cc_status(details$columnspec_checks, "additionalProperties"), "passed")
+  expect_match(out, "Extra columns check passed", fixed = TRUE)
+  expect_match(out, "every column is described by the specs", fixed = TRUE)
+})
+
+
+test_that("an undeclared column reaches messages() as a columnspec error", {
+  ds <- DTADataSetTabular(
+    name = "cc",
+    specs = cc_specs(),
+    tables = list(tab = cc_table_extra()[1, ])
+  )
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  expect_equal(results(ds)$status, "failed")
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  extra <- msgs[msgs$keyword == "additionalProperties", , drop = FALSE]
+
+  expect_equal(nrow(extra), 1L)
+  expect_equal(extra$source, "columnspec")
+  expect_equal(extra$severity, "error")
+  expect_equal(extra$column, "EXTRA")
+  expect_match(extra$message, "must NOT have additional property 'EXTRA'", fixed = TRUE)
+})
+
+
+test_that("an empty table with an undeclared column still fails", {
+  # Emptiness settles nothing about the table's shape: a correctly shaped empty
+  # table is a legitimate result, a wrongly shaped one is not.
+  empty_extra <- cc_table_extra()[0, , drop = FALSE]
+  details <- validate_table_detailed(cc_specs(), empty_extra, verbose = FALSE)
+
+  expect_false(details$columnspec_valid)
+  expect_false(details$ok)
+  expect_equal(cc_status(details$columnspec_checks, "additionalProperties"), "failed")
+  expect_equal(details$columnspec_errors$full_error$keyword, "additionalProperties")
+})
+
+
+test_that("a missing and an undeclared column are both reported", {
+  # Neither finding may mask the other. The summariser folds the object-level
+  # keywords together, and used to return on `required` alone -- which dropped
+  # the undeclared column from the summary entirely.
+  tab <- cc_table()[1, c("ID", "SEX"), drop = FALSE]
+  tab$EXTRA <- "x"
+  details <- validate_table_detailed(cc_specs(), tab, verbose = FALSE)
+
+  full <- details$columnspec_errors$full_error
+  expect_equal(sort(unique(full$keyword)), c("additionalProperties", "required"))
+  expect_equal(cc_status(details$columnspec_checks, "required"), "failed")
+  expect_equal(cc_status(details$columnspec_checks, "additionalProperties"), "failed")
+
+  summarised <- details$columnspec_errors$summarised_error
+  expect_equal(sort(summarised$keyword), c("additionalProperties", "required"))
+})
+
+
+test_that("specs declaring no columns cannot call a column unexpected", {
+  # There is no closed set to be outside of. Failing here would reject every
+  # table on the strength of a spec that constrains nothing, and passing would
+  # be the hollow certificate this axis refuses to issue.
+  empty_specs <- DTAColumnSpecCollection(columns = list())
+  findings <- dta_structure_findings(empty_specs, c("ID", "SEX"))
+
+  expect_length(findings$unexpected, 0)
+  expect_true(findings$ok)
+
+  checks <- dta_columnspec_check_summary(dta_compile_columnspec_schemas(empty_specs))
+  expect_equal(cc_status(checks, "additionalProperties"), "not_applicable")
+})
+
+
+test_that("the streaming and materialising paths agree about an undeclared column", {
+  # The two reach the finding by different routes -- the streaming one from the
+  # source's header, the materialising one from the table's names -- so the risk
+  # is that they disagree.
+  tab <- cc_table_extra()
+  reader <- dta_as_batch_reader(arrow::as_arrow_table(tab), batch_rows = 2L)
+
+  streamed <- dta_validate_table_stream(
+    cc_specs(), reader,
+    verbose = FALSE, coerce = FALSE, known_columns = names(tab)
+  )
+  eager <- validate_table_detailed(cc_specs(), tab, verbose = FALSE)
+
+  expect_false(streamed$ok)
+  expect_false(eager$ok)
+
+  extra_of <- function(d) {
+    full <- d$columnspec_errors$full_error
+    out <- full[full$keyword == "additionalProperties", c("column", "message"), drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }
+  expect_equal(extra_of(streamed), extra_of(eager))
+  expect_equal(
+    cc_status(streamed$columnspec_checks, "additionalProperties"),
+    cc_status(eager$columnspec_checks, "additionalProperties")
+  )
+})
+
+
+test_that("closedness stays unsettled when the column names cannot be read", {
+  # The batch loop iterates the SPECS, so it never sees an undeclared column.
+  # Without the source's names there is nothing else to decide it from, and a
+  # pass would certify a check that never ran.
+  details <- dta_validate_table_stream(
+    cc_specs(),
+    dta_as_batch_reader(arrow::as_arrow_table(cc_table_extra()), batch_rows = 2L),
+    verbose = FALSE, coerce = FALSE
+  )
+
+  expect_equal(cc_status(details$columnspec_checks, "additionalProperties"), "not_checked")
+})
+
+
+test_that("a column named only by a rule is described, not undeclared", {
+  # "Specified in the YAML" is wider than "has a column spec". A rule naming a
+  # column is the specification describing that column -- dta_scan_projection()
+  # already treats the two sources alike when it decides what the scan must
+  # read -- so calling it undeclared would reject a file the specs expect.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+    ),
+    rules = list(
+      DTARuleColRange(id = "age_range", columns = "AGE", range = c(0, 120))
+    )
+  )
+
+  findings <- dta_structure_findings(specs, c("ID", "AGE"))
+  expect_length(findings$unexpected, 0)
+  expect_true(findings$ok)
+
+  # Being named by a rule does not promote a column to a declared one: AGE is
+  # not reported missing when the table lacks it. That absence is the rule
+  # axis's finding, on the axis that can explain it.
+  absent <- dta_structure_findings(specs, "ID")
+  expect_length(absent$missing, 0)
+  expect_length(absent$unexpected, 0)
+
+  # A column neither declared nor named by any rule is still undeclared.
+  stray <- dta_structure_findings(specs, c("ID", "AGE", "STRAY"))
+  expect_equal(stray$unexpected, "STRAY")
+  expect_false(stray$ok)
+})
+
+
+test_that("a scan that stopped early still settles closedness", {
+  # `fail_fast` stops at the first problem, so nothing the BATCHES would have
+  # decided may be reported as a pass. Closedness is not one of those: it is
+  # decided from the source's names before the first batch runs, so a scan that
+  # stopped short did not stop short of it. Reporting it `not_checked` here
+  # understated what the run actually knew.
+  tab <- cc_table()
+  streamed <- dta_validate_table_stream(
+    cc_specs(),
+    dta_as_batch_reader(arrow::as_arrow_table(tab), batch_rows = 1L),
+    verbose = FALSE, coerce = FALSE, fail_fast = TRUE,
+    known_columns = names(tab)
+  )
+  checks <- streamed$columnspec_checks
+
+  expect_equal(cc_status(checks, "additionalProperties"), "passed")
+  # Everything the batches would have settled is still unsettled.
+  expect_equal(cc_status(checks, "required"), "not_checked")
+  expect_equal(cc_status(checks, "type"), "not_checked")
+
+  # Without the names, nothing decided it, and it stays unsettled -- the
+  # exemption is "it was already answered", not "skip the question".
+  blind <- dta_validate_table_stream(
+    cc_specs(),
+    dta_as_batch_reader(arrow::as_arrow_table(tab), batch_rows = 1L),
+    verbose = FALSE, coerce = FALSE, fail_fast = TRUE
+  )
+  expect_equal(
+    cc_status(blind$columnspec_checks, "additionalProperties"),
+    "not_checked"
+  )
+})
+
+
+test_that("an undeclared column does not suppress the per-value summary", {
+  # The summariser's object-level branch discards every per-value finding.
+  # `required` has a story for that: a declared column that is absent makes a
+  # row range for the rest of the table beside the point. An undeclared column
+  # has no such story -- it says nothing about the values in the declared
+  # columns -- and letting it trigger that branch would hide real findings
+  # behind a stray column, which is the commoner defect of the two.
+  tab <- cc_table_extra()[1, , drop = FALSE]
+  tab$ID <- "TOO-LONG"
+  details <- validate_table_detailed(cc_specs(), tab, verbose = FALSE)
+
+  summarised <- details$columnspec_errors$summarised_error
+  expect_true("maxLength" %in% summarised$keyword)
+  expect_true("additionalProperties" %in% summarised$keyword)
+
+  # The undeclared column's row range is NA: the finding is about the header,
+  # so there is no row to point at -- and NA says that, where 1 would lie.
+  extra <- summarised[summarised$keyword == "additionalProperties", , drop = FALSE]
+  expect_true(is.na(extra$first.row.affected))
+  expect_true(is.na(extra$last.row.affected))
+  expect_equal(extra$n.rows.affected, 1L)
+})
+
+
+test_that("a missing column still collapses the summary, as it always has", {
+  # The pre-existing behaviour this change deliberately did NOT alter: when a
+  # declared column is absent, the summary reports the object-level findings
+  # alone. Pinned so that fixing the undeclared-column case above cannot drift
+  # into changing this one by accident.
+  tab <- cc_table()[1, c("ID", "SEX"), drop = FALSE]
+  tab$ID <- "TOO-LONG"
+  details <- validate_table_detailed(cc_specs(), tab, verbose = FALSE)
+
+  summarised <- details$columnspec_errors$summarised_error
+  expect_equal(summarised$keyword, "required")
+  expect_false("maxLength" %in% summarised$keyword)
 })

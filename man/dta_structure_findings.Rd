@@ -12,7 +12,10 @@ dta_structure_findings(specs, column_names)
 \item{column_names}{Character. The columns the file actually has.}
 }
 \value{
-A list with \code{missing}, \code{unexpected} and \code{ok}.
+A list with \code{missing}, \code{unexpected} and \code{ok}. \code{ok} is \code{TRUE} only
+when the table's columns are EXACTLY the declared ones: a spec describes a
+transfer, and a column nobody agreed to carry is as much a departure from
+it as a column that was promised and never arrived.
 }
 \description{
 Compares the columns a spec collection declares against the columns a file
@@ -21,6 +24,7 @@ any scan.
 
 Unexpected columns -- present in the file, absent from the specs -- are
 reported here and nowhere else; the per-row checks have no way to notice a
-column no spec describes.
+column no spec describes. They iterate the SPECS, so a column no spec names
+is not something they can fail to check: it is something they cannot see.
 }
 \keyword{internal}

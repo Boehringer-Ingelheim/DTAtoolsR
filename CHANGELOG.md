@@ -189,6 +189,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A table carrying a column the specification does not describe is now
+  rejected.** It used to validate clean. The check itself had always been
+  computed — `dta_structure_findings()` returns both the declared columns the
+  table lacks and the columns the table has that no spec declares — but only
+  the first half reached a verdict: the error frame rendered the missing
+  columns alone, the structural `ok` flag was derived from the missing columns
+  alone, and the streaming path announced the undeclared ones as a console
+  warning and then returned `ok = TRUE`. The materialising path never asked the
+  question at all, because it evaluates the specs column by column and an
+  undeclared column is not one it visits. A file with a stray column therefore
+  passed, silently, on every path.
+
+  An undeclared column is now an ordinary column spec error: keyword
+  `additionalProperties`, message `must NOT have additional property 'X'`,
+  carried in `full_error`, counted in `n_columnspec_errors`, and reported by
+  `messages()` and `inspect()` like any other. It is reported **once**, about
+  the table, rather than once per row — it is a fact about the header, no more
+  true of the four-hundred-millionth row than of the first. The per-check
+  report gains an **Extra columns** line beside **Presence**, so a passing run
+  now states that the table carried nothing beyond what was declared instead of
+  leaving it unsaid.
+
+  Both halves are independent: a table can be missing a declared column *and*
+  carrying an undeclared one, and both are now reported rather than the first
+  masking the second. `on_missing_column` is unchanged and still decides only
+  what its name says — an undeclared column never triggers its header-only
+  early return, because the rows are still worth reading.
+
+  **This is a behaviour change.** A dataset that passed only because a spare
+  column went unnoticed will now fail, which is the point: a specification
+  describes a transfer, and a column nobody agreed to carry is as much a
+  departure from it as a column that was promised and never arrived.
+
 - **A private template repository's CI can no longer go green having
   validated nothing.** An otherwise-empty directory used to report zero
   issues and pass `validate_template(path, strict = TRUE)` silently — a

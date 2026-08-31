@@ -32,9 +32,11 @@ returned error list additionally carries \code{rules_valid} and \code{rule_error
 any rule violations are raised as a warning so they cannot go unnoticed while
 the column spec errors are being fixed.
 
-The column spec axis is reported per check kind -- presence, format, length,
-values and pattern -- rather than as one verdict, so a failure names the
-check that failed and a pass says which checks actually ran. A check no
+The column spec axis is reported per check kind -- presence, extra columns,
+format, length, values and pattern -- rather than as one verdict, so a
+failure names the check that failed and a pass says which checks actually
+ran. The table's columns must be EXACTLY the declared ones: a column the
+specs do not describe fails the axis just as an absent declared column does. A check no
 column declares reports as \code{not_applicable}; one the run could not settle
 reports as \code{not_checked}. Neither is a pass.
 }
