@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Styling the package no longer breaks the next commit on Windows.** styler
+  writes files through a text-mode connection, so on Windows every file it
+  restyled came back with CRLF line endings; the `mixed-line-ending`
+  pre-commit hook then reverted them and rejected the commit, which had to be
+  staged and run a second time — after every single styling run. The styler
+  calls now live in `.github/scripts/style.R`, which returns the files it
+  touched to LF before the commit ever sees them. A new `.gitattributes`
+  (`* text=auto eol=lf`) makes line endings a property of the repository
+  instead of each contributor's `core.autocrlf` — whose Git-for-Windows
+  installer default, `true`, would otherwise reproduce the same fight on every
+  checkout. It renormalises nothing: no tracked file held a CR byte.
+
+- `.github/scripts/style.R` is also what the `r-style` workflow runs, as
+  `Rscript .github/scripts/style.R --check`, rather than the workflow inlining
+  its own copy of the styler calls. There is now one definition of "styled"
+  shared by the check and the fix, so the two cannot drift apart, and the
+  documented local command covers `inst/` — 15 files and more R code than `R/`
+  itself — which a bare `styler::style_pkg()` never descends into. The check
+  now also names every unstyled file rather than aborting on the first.
+
 ## [0.24.0] - 2026-08-31
 
 ### Added

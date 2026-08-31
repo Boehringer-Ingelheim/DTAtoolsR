@@ -1,0 +1,26 @@
+# Line endings are a property of this repository, not of the machine that
+# cloned it. Without this file the answer depends entirely on each
+# contributor's `core.autocrlf`, and the Git-for-Windows installer's default
+# for that is `true` -- which checks every file out as CRLF and then fights
+# the `mixed-line-ending` pre-commit hook on every single commit. `eol=lf`
+# overrides core.autocrlf in both directions: LF in the index, LF in the
+# working tree, everywhere.
+#
+# This normalises nothing on introduction: no tracked file held a CR byte
+# when it was added (verified with `git grep -I --cached -l $'\r'`).
+* text=auto eol=lf
+
+# inst/extdata holds shipped TEST FIXTURES that some tests read back
+# byte-wise, and in a delimited file whitespace is data rather than
+# formatting -- the same reasoning that excludes this directory from the
+# whitespace hooks in .pre-commit-config.yaml. `-text` tells git to leave
+# these bytes exactly as they are, in both directions. Diffs still work;
+# only end-of-line conversion is switched off.
+inst/extdata/** -text
+
+# Explicit rather than relying on git's content heuristic, so a fixture that
+# happens to start with printable bytes can never be mistaken for text and
+# corrupted by conversion.
+*.png  binary
+*.gz   binary
+*.docx binary
