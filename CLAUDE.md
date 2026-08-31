@@ -12,7 +12,7 @@ Run everything from the repo root; `renv` activates via `.Rprofile`.
 | --- | --- |
 | Load package | `Rscript -e "pkgload::load_all()"` |
 | Tests | `Rscript -e "devtools::test()"` (one file: `devtools::test(filter='DTAFile')`) |
-| Style R code | `Rscript -e "styler::style_pkg()"` |
+| Style R code | `Rscript .github/scripts/style.R` |
 | Regenerate docs | `Rscript -e "roxygen2::roxygenise()"` |
 | Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
 | Fast hooks | `pre-commit run --all-files` (also runs in CI) |
@@ -27,6 +27,17 @@ or roxygenise R code. Run the "Style R code" and "Regenerate docs" commands
 above yourself before committing; both need `Rscript` on `PATH`. CI enforces
 both in the `r-style` workflow and fails (does not auto-fix) on any diff, so a
 PR with unstyled code or stale `man/`/`NAMESPACE` will not go green.
+
+Do not call `styler::style_pkg()` directly. `.github/scripts/style.R` is what
+the `r-style` workflow runs (as `… style.R --check`), so it is the only way to
+find out locally what CI will say, and it does two things the bare call does
+not: it also styles `inst/`, which `style_pkg()` never descends into and which
+holds more R code than `R/` does, and it repairs line endings afterwards.
+styler writes through a text-mode connection, so on Windows every file it
+restyles comes back CRLF — which the `mixed-line-ending` hook then reverts,
+rejecting the commit and making you stage and commit a second time. The script
+returns those files to LF before you ever see them, and `.gitattributes` keeps
+line endings a property of the repository rather than of your `core.autocrlf`.
 
 ## Workflow
 
