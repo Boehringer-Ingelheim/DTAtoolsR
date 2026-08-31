@@ -67,7 +67,14 @@ test_that("read_dta_creation_template() parses the real bundled template", {
   expect_equal(res$value$id, "biomarker_gf")
   expect_equal(res$value$label, "Biomarker GF DTS")
   expect_length(res$value$datasets, 1)
-  expect_equal(res$value$datasets[[1]]$name, "gf_data_specs_pattern")
+  # CHANGED (biomarker_gf refactor, see gf_smrnaseq.dta-dataset-template.yaml):
+  # the ~300-line inline dataset was extracted into a reusable dataset
+  # template, so this entry is now a `{template:, as:}` IMPORT, not an inline
+  # dataset with its own `name:` field -- res$value$datasets[[1]]$name would
+  # be NULL post-refactor. See test-bundled-templates.R for full coverage of
+  # what this import actually builds.
+  expect_equal(res$value$datasets[[1]]$template, "gf_smrnaseq@3.0")
+  expect_equal(res$value$datasets[[1]]$as, "gf_data_specs_pattern")
   expect_length(res$value$options, 12)
 })
 
@@ -158,12 +165,26 @@ test_that("dta_template_metadata_fields() lists the exact allowed DTAMetaData fi
 test_that("dta_template_metadata_fields() is derived from the S7 class, not mirrored", {
   fields <- app_fn("dta_template_metadata_fields")
   props <- app_fn("dta_metadata_properties")
+  machine <- app_fn("dta_metadata_machine_fields")
   # The point of deriving: a new DTAMetaData property becomes settable from a
   # template automatically, instead of silently being rejected until someone
   # remembers to update a hand-written vector.
-  expect_equal(fields(), setdiff(names(props()), "import_issues"))
-  # import_issues records how a file was read; it is not template-settable.
-  expect_false("import_issues" %in% fields())
+  expect_equal(fields(), setdiff(names(props()), machine()))
+  # The machine-owned fields are the deliberate exception, and they are named in
+  # ONE place rather than repeated here -- so this assertion keeps testing that
+  # the set is derived, rather than re-mirroring the exclusion list it exists to
+  # rule out.
+  expect_true(all(machine() %in% names(props())))
+  expect_false(any(machine() %in% fields()))
+})
+
+test_that("the machine-owned metadata fields are exactly import_issues and template", {
+  machine <- app_fn("dta_metadata_machine_fields")
+  # import_issues records how a file was read; template records which template
+  # produced the document. A template that could set either could forge its own
+  # provenance, which is what the rebase feature would then trust. Pinning the
+  # exact set makes adding a third one a deliberate act.
+  expect_setequal(machine(), c("import_issues", "template"))
 })
 
 test_that("dta_template_list_fields() names the container metadata fields", {
@@ -686,4 +707,202 @@ test_that("create_dta_from_template() rejects an unknown base.metadata field wit
   expect_false(result$ok)
   expect_true(nzchar(result$error))
   expect_match(result$error, "Unknown base.metadata field", fixed = TRUE)
+})
+
+test_that("dta_template_version_string() keeps a quoted version exactly as written", {
+  fn <- app_fn("dta_template_version_string")
+  # A quoted version is unambiguous, so it passes through untouched and
+  # silently -- including the multi-part forms numeric_version understands.
+  expect_no_warning(out <- fn("1.10"))
+  expect_identical(out, "1.10")
+  expect_identical(fn("2.5.1"), "2.5.1")
+  expect_identical(fn("1.0"), "1.0")
+})
+
+test_that("dta_template_version_string() restores the trailing zero an unquoted version loses", {
+  fn <- app_fn("dta_template_version_string")
+  # yaml reads an unquoted `version: 1.0` as the double 1.0, and R renders that
+  # as "1" -- so as.character() alone would silently turn version 1.0 into
+  # version 1, which sorts and displays as a different release.
+  expect_identical(as.character(1.0), "1")
+  expect_warning(out <- fn(1.0, what = "demo"), regexp = "Quote it")
+  expect_identical(out, "1.0")
+})
+
+test_that("dta_template_version_string() warns when handed an already-parsed number", {
+  fn <- app_fn("dta_template_version_string")
+  # By the time a value is a double, 1.10 and 1.1 really are the same object
+  # and no coercion can separate them -- so this fallback path warns instead of
+  # pretending it knew. The FIX is not to reach this path at all: read the
+  # field from the file text (see the next test), which loses nothing.
+  expect_identical(yaml::yaml.load("v: 1.10")$v, 1.1)
+  expect_warning(out <- fn(yaml::yaml.load("v: 1.10")$v), regexp = "cannot be recovered")
+  expect_identical(out, "1.1")
+})
+
+test_that("dta_template_yaml_handlers() preserve a number's source text exactly", {
+  handlers <- app_fn("dta_template_yaml_handlers")()
+  y <- "a: 1.0
+b: 1.10
+c: 1.9
+d: 3
+e: true
+f: 1e3
+"
+
+  # The tag names are the whole trick. libyaml never invokes a handler
+  # registered under the obvious name "float" -- probe it with that and the
+  # feature looks impossible. The tags that fire are int, float#fix, float#exp.
+  expect_setequal(names(handlers), c("int", "float#fix", "float#exp"))
+  expect_null(yaml::yaml.load(y, handlers = list(float = as.character))$b |> attr("class"))
+  expect_type(yaml::yaml.load(y, handlers = list(float = as.character))$b, "double")
+
+  out <- yaml::yaml.load(y, handlers = handlers)
+  expect_identical(out$a, "1.0")
+  expect_identical(out$b, "1.10")
+  expect_identical(out$c, "1.9")
+  expect_identical(out$d, "3")
+  expect_identical(out$f, "1e3")
+  # Booleans are left alone, so these handlers are safe on a whole document.
+  expect_true(is.logical(out$e))
+})
+
+test_that("dta_template_read_field_exact() reads a version verbatim from the file", {
+  fn <- app_fn("dta_template_read_field_exact")
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("kind: dta_creation_template", "id: demo", "version: 1.10"), path)
+
+  # 1.10 is a LATER release than 1.9; a plain parse collapses it to 1.1 and
+  # would silently resolve the wrong file.
+  expect_identical(fn(path, "version"), "1.10")
+  expect_identical(fn(path, "id"), "demo")
+  # A missing field and an unreadable file are the caller's problem to report
+  # with a file name in hand, not an error thrown from inside a reader -- and
+  # not a warning from inside one either. This assertion used to pass while the
+  # reader raised base R's connection warning on its way to returning NA:
+  # `tryCatch(error = )` does not intercept the warning channel, so a reader
+  # documented as reporting by return value signalled anyway. Asserted as the
+  # ABSENCE of a warning rather than by matching its text, which arrives in the
+  # session language.
+  expect_identical(fn(path, "nope"), NA_character_)
+  expect_no_warning(
+    expect_identical(fn(file.path(tempdir(), "no-such-file-xyz.yaml"), "version"), NA_character_)
+  )
+})
+
+test_that("dta_template_read_yaml_quiet() reports failure by value, never by signal", {
+  fn <- app_fn("dta_template_read_yaml_quiet")
+
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("id: demo", "version: 1.10"), path)
+
+  ok <- fn(path)
+  expect_true(ok$ok)
+  expect_identical(ok$value$id, "demo")
+  expect_null(ok$error)
+
+  # A path that does not exist, and one that exists but is not a readable file.
+  # Both raise a connection warning before the error; neither may escape.
+  for (bad in list(file.path(tempdir(), "no-such-file-xyz.yaml"), tempdir())) {
+    res <- expect_no_warning(fn(bad))
+    expect_false(res$ok)
+    expect_null(res$value)
+    # The message is kept for the caller to report with its own file name in
+    # hand -- it is simply not signalled from here.
+    expect_true(is.character(res$error) && nzchar(res$error))
+  }
+})
+
+test_that("dta_template_read_yaml_quiet() still applies the version-preserving handlers", {
+  fn <- app_fn("dta_template_read_yaml_quiet")
+  handlers <- app_fn("dta_template_yaml_handlers")()
+
+  path <- withr::local_tempfile(fileext = ".yaml")
+  writeLines("version: 1.10", path)
+
+  # Muffling the warning channel must not disturb what the read produces:
+  # 1.10 is a later release than 1.9 and a plain parse collapses it to 1.1.
+  expect_identical(fn(path, handlers = handlers)$value$version, "1.10")
+  expect_identical(fn(path)$value$version, 1.1)
+})
+
+test_that("dta_template_version_string() reports a missing version as NA, not an error", {
+  fn <- app_fn("dta_template_version_string")
+  # A file with no version is a validation problem for the caller to report
+  # with its own file name in hand, not something to abort deep inside a
+  # coercion helper that has no idea which file it is looking at.
+  expect_identical(fn(NULL), NA_character_)
+  expect_identical(fn(list()), NA_character_)
+})
+
+test_that("dta_template_version_is_exact() distinguishes a quoted version from a parsed number", {
+  fn <- app_fn("dta_template_version_is_exact")
+  # validate_template() uses this to fail a private template repository's CI on
+  # an ambiguous version, without re-parsing the file or catching a warning.
+  expect_true(fn("1.10"))
+  expect_false(fn(1.1))
+  expect_false(fn(NULL))
+})
+
+test_that("a template that extends another may omit base and datasets entirely", {
+  fn <- app_fn("read_dta_creation_template")
+  tmp <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: acme_deviation",
+      'version: "1.0"',
+      "extends: biomarker_gf@1.0",
+      "options:",
+      "  - id: header",
+      "    type: text",
+      "    target: metadata.header",
+      "    default: ACME"
+    ),
+    tmp
+  )
+
+  res <- fn(tmp)
+
+  # A deviation template that only overrides one option inherits its parent's
+  # base and datasets. Requiring it to restate either would make the most
+  # useful kind of child template impossible to write -- and there is no way
+  # to write "inherit verbatim" otherwise: omitting `base:` used to fail this
+  # check, while `base: {}` is an EXPLICITLY empty section that the inheritance
+  # merge correctly reads as "replace the parent's with nothing", silently
+  # wiping every field the parent set.
+  expect_true(res$ok)
+  expect_null(res$value$base)
+  expect_length(res$value$datasets, 0)
+  expect_equal(res$value$id, "acme_deviation")
+})
+
+test_that("a template that extends nothing still must declare base and datasets", {
+  fn <- app_fn("read_dta_creation_template")
+  tmp <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("kind: dta_creation_template", "id: orphan", 'version: "1.0"'), tmp)
+
+  # The relaxation above is scoped to `extends:`. A root template with no base
+  # has nothing to inherit one from, so the original error must still fire.
+  res <- fn(tmp)
+  expect_false(res$ok)
+  expect_equal(res$error, "Template must contain a 'base' section.")
+})
+
+test_that("a non-list base is rejected whether or not the template extends", {
+  fn <- app_fn("read_dta_creation_template")
+  tmp <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: bad", 'version: "1.0"',
+      "extends: parent@1.0", "base: just a string"
+    ),
+    tmp
+  )
+
+  # Absent is now legal; malformed never was. Letting a scalar through here
+  # would push the failure into the merge, far from the file that caused it.
+  res <- fn(tmp)
+  expect_false(res$ok)
+  expect_equal(res$error, "Template 'base' must be a mapping/object.")
 })

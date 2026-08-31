@@ -4,10 +4,16 @@
 \alias{dta_structural_failure_details}
 \title{Details for a File That Failed Structurally}
 \usage{
-dta_structural_failure_details(findings)
+dta_structural_failure_details(findings, schemas = NULL)
 }
 \arguments{
 \item{findings}{A list from \code{dta_structure_findings()}.}
+
+\item{schemas}{Compiled schemas, from \code{dta_compile_columnspec_schemas()}, or
+\code{NULL}. Only the per-check summary reads them: presence and closedness were
+both decided from the header, so they report a verdict, while every other
+check reports \code{not_checked} rather than borrowing their failure or claiming
+a pass over rows that were never read.}
 }
 \value{
 A validation details list.

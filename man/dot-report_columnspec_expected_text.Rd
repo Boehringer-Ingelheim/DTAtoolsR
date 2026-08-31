@@ -15,10 +15,12 @@ A length-1 character string, HTML-escaped.
 }
 \description{
 Every columnspec keyword this package's validator emits (\code{required},
-\code{type}, \code{maxLength}, \code{enum}, \code{const}, \code{pattern} -- see
-\code{dta_columnspec_error_rows()} call sites in \code{R/columnSpecChecks.R}) puts
+\code{additionalProperties}, \code{type}, \code{maxLength}, \code{enum}, \code{const}, \code{pattern} --
+see \code{dta_columnspec_error_rows()} call sites in \code{R/columnSpecChecks.R}) puts
 the constraint's own value in the flattened \code{columnspec_columnspec}
 column (e.g. the allowed values for \code{enum}, the limit for \code{maxLength}).
+\code{additionalProperties} is the exception: there is no spec to quote, which is
+the entire finding, so its sentence is fixed.
 This turns that plus the keyword into one plain-language sentence instead
 of surfacing the validator's generic message.
 }

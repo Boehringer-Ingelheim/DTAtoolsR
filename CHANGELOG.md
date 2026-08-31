@@ -4,6 +4,363 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-08-31
+
+### Added
+
+- **A new private template repository is now one function call, not a
+  newcomer reverse-engineering the four file kinds from the vignette.**
+  `create_template_repo(path)` creates `path` and writes a small,
+  cross-referencing worked example of all four template kinds (a creation
+  template, a dataset template, a party profile, a controlled vocabulary)
+  plus a `README.md` explaining them and a `.gitignore` — and, by default, a
+  ready-to-run `.github/workflows/validate-templates.yml` that lints the
+  repository on every push and pull request. `ci` now also accepts
+  `"bitbucket"` and `"jenkins"` — singly or combined as a character vector,
+  e.g. `ci = c("github", "jenkins")` — to scaffold `bitbucket-pipelines.yml`
+  and a declarative `Jenkinsfile` alongside or instead of the GitHub
+  workflow. The Jenkins option matters on its own: Bitbucket Pipelines only
+  exists on Bitbucket **Cloud**, so a **Server / Data Center** deployment —
+  this project's own production — has nothing to run
+  `bitbucket-pipelines.yml` at all, and the `Jenkinsfile` is what actually
+  works there instead. The result already passes
+  `validate_template(path, strict = TRUE)` with zero issues, unmodified, so
+  it is a starting point to edit rather than a stub to fill in from nothing.
+  `examples = FALSE` gives the bare scaffold with no template files;
+  `overwrite = FALSE` (the default) refuses to touch a directory where any
+  target file already exists, and writes nothing at all rather than leave a
+  repository half-written from two different calls whose halves a caller
+  cannot tell apart.
+
+- **Editing a loaded specification now starts by cutting a new version.** A DTA
+  opened from an existing file — an upload, a bundled example, or a restored
+  session — arrives read-only, and where the Edit-mode switch normally sits the
+  app offers **Create new version** instead. Confirming the version (the dialog
+  prefills the next minor one, and takes an optional note) bumps
+  `metadata.version`, opens a fresh `version_history` entry for it, and unlocks
+  editing. A document created from a template is new rather than loaded, so it
+  stays directly editable as before.
+
+  The point is the history that falls out of it. When the document is exported
+  or downloaded, that entry's `changes` is filled in with what actually changed
+  between the version that was loaded and the version being written — grouped
+  counts first, then every differing field named individually, so the history
+  reads version by version rather than recording that *something* was edited.
+  The comparison is specification-only, so binding data files to a dataset
+  never shows up as a change. Applying pasted YAML in the Raw tab no longer
+  overwrites the document's version or its history: a paste edits the
+  specification, it does not replace the document's identity.
+
+- **Controlled vocabularies in the template library.** A reusable, versioned
+  term set (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) that a column's
+  permitted `values:` can be drawn from, so a list of visit codes or test
+  codes is written once and shared across datasets and templates instead of
+  being retyped into each one. A column binds to one with
+  `values_from: visit@1.0`, or restricts it for that dataset with
+  `include:`/`exclude:`. One vocabulary can serve both halves of a code/decode
+  pair through `field: code` / `field: label` — the shipped `gf_smrnaseq`
+  dataset template now drives GFTESTCD and GFTEST from a single
+  `gf_test@1.0`, so the two can no longer drift apart. A vocabulary can
+  `extends:` another with `add_terms:`/`remove_terms:`.
+
+  Where the choice belongs to whoever creates the document rather than to the
+  template author, a creation template offers a `vocabulary_slots:` picker —
+  the party-slot shape, one concept over — which the "Create new from
+  template" modal renders as a multi-select. `mode: open` additionally lets
+  the author enter a value the vocabulary does not have. The column editor
+  gained a "Choose from vocabulary…" picker for the same job on an existing
+  document.
+
+  Vocabularies are **expanded into a plain `values:` list at creation time**:
+  nothing in `DTAColumnSpec` or the validation engine changed, and a produced
+  document is still readable without access to the vocabulary library that
+  shaped it. `validate_template()` learned the new kind and the new failure
+  modes (`vocabulary_invalid`, `vocabulary_unresolved`,
+  `vocabulary_extends_failed`, `values_from_unresolved`,
+  `values_from_terms_invalid`, `values_from_pattern`, `vocab_slot_invalid`).
+
+- **A deviation template can follow the standard it deviates from.**
+  `extends: biomarker_gf@latest` (or a bare `extends: biomarker_gf`) resolves
+  to the newest version of the parent, so publishing a new release of a
+  standard no longer means editing every supplier's deviation file to pick it
+  up. Finished documents do not drift: creation resolves `@latest` once and
+  records the concrete version in `metadata.template`, so a specification stays
+  pinned to what it was actually built from and still rebases against the right
+  ancestor. The shipped `biomarker_gf_acme` example now uses it, while keeping
+  its `datasets:` import pinned — a `patch:` names specific columns and is only
+  known to be coherent against a dataset template it has been checked against.
+
+- **Private templates: the Shiny app's "Create new from template" family can
+  now live outside the package entirely.** `DTATOOLS_TEMPLATE_SOURCES`
+  (`"[name=]scheme:locator[#ref]; ..."`) points the picker at one or more
+  `dir:`, `pkg:`, or `git:` sources instead of the packaged examples — a
+  private git repository (Bitbucket Data Center in production, mirrored to
+  GitHub for CI), a companion R package, or a local directory, entirely
+  configured through environment variables so a Posit Connect deployment
+  never has to redeploy to change its template family. A `git:` credential
+  (`DTATOOLS_TEMPLATE_GIT_TOKEN`) is passed to the git child process purely as
+  an environment variable, never as part of the clone URL or a command-line
+  argument, so it cannot persist into `.git/config` or leak via the process
+  table. Configuring any private source switches the app to private-only —
+  the packaged demo is dropped from the search path unless
+  `DTATOOLS_TEMPLATE_INCLUDE_BUILTIN` says otherwise — and a private source
+  that fails to refresh serves its last-good cache with a staleness warning
+  rather than breaking template creation; a cold start with no cache at all
+  offers no templates, deliberately never falling back to the packaged
+  example.
+
+  Templates are addressed `id@version` (bare `id` means the newest version),
+  and a `dta_creation_template` can `extends:` another one — a supplier- or
+  study-specific deviation states only what differs (a changed option
+  default, a patched dataset column, a removed inherited field via an
+  explicit `key: null`) instead of copy-pasting and drifting from a shared
+  parent. A child that inherits is free to omit `base:`/`datasets:` entirely
+  to mean "unchanged from the parent" — `base: {}` is a different, explicit
+  instruction that wipes the parent's section instead.
+
+  A new `dta_dataset_template` kind (`kind: dta_dataset_template`) makes a
+  single dataset's column/rule set reusable across creation templates, or
+  addable to an existing DTA on its own: a creation template's `datasets:`
+  entry can now be `{template: id@version, as:, options:, patch:}`, with the
+  patch's four operations (`remove_columns`, `add_columns`, `modify_columns`,
+  `set`) always applied in that fixed order.
+
+  A new `dta_party_profile` kind (`kind: dta_party_profile`) supplies a
+  reusable supplier/receiver affiliation-and-contacts block a template can
+  offer as a pick-one dropdown via its own `party_slots:`, instead of every
+  template author retyping (or drifting) the same block by hand. Creating a
+  document from an ancestor (e.g. a rebase, below) can additionally carry
+  over a fixed, default-on set of the ancestor's own metadata fields
+  (`receiver`, `supplier`, `transmission`, `error_handling`,
+  `authorized_for_corrections`) — title, version, date, and version history
+  are deliberately excluded, since those describe the ancestor document
+  itself, not the relationship it recorded.
+
+  Every document built from a template now carries a `metadata.template`
+  provenance record (which template, which source, a content hash, the
+  `extends:` lineage, and the selections actually made) — machine-owned, so
+  no template author can set or forge it. That record is what powers
+  **rebase**: moving a document created from template `T@1.0` onto a newer
+  `T@1.1` without discarding hand edits made since creation, by
+  reconstructing the ancestor from the recorded selections and three-way
+  classifying every metadata field as a template change, a user change, an
+  agreement, or a conflict requiring an explicit choice. Rebase is
+  metadata-only (dataset structure is reported, never rewritten),
+  `version_history` is only ever appended to, and a document with no
+  provenance — anything created before this feature, or without a template
+  at all — cannot be rebased.
+
+  `validate_template(path, strict = TRUE)` runs the same structural checks
+  the picker relies on — unresolvable `extends:`, an option target that does
+  not resolve to a real (or is a machine-owned) metadata field, a party slot
+  naming an unknown profile, an incoherent dataset patch, an unquoted
+  `version:` — plus, as a final check, an actual dry-run build of every
+  non-abstract creation template, all without starting the app. A
+  ready-to-copy GitHub Actions workflow for a private template repository's
+  own CI ships at `inst/extdata/templates/validate-templates.yml`. See
+  `vignette("private-templates")` for the full walkthrough.
+
+- **Buttons now show that they were pressed, and a second click no longer
+  runs the action twice.** Every button and download link in the Shiny app
+  enters a busy state on the first click -- a spinner in place of its label,
+  after a short delay so a fast action never flashes one -- and further
+  clicks on it are ignored until the work finishes. This is what stops an
+  impatient double-click on Export from producing two documents, or a
+  double-click on a download link from saving the file twice.
+
+  The guard runs in the browser, because neither half of the problem can be
+  fixed from the server: an `actionButton` click that lands while R is busy
+  is queued and replayed afterwards, and a `downloadButton` click is native
+  browser navigation that never reaches the server at all. Action buttons are
+  released the moment Shiny reports the session idle, download links after a
+  short fixed cooldown, and every hold carries independent failsafes so a
+  dropped connection can never leave a button stuck.
+
+### Changed
+
+- The two summary lines are built by `dta_dataset_summary_message()` and
+  `dta_overall_summary_message()`, pure functions of the counts, rather than
+  inline in `check()`. Both defects listed under **Fixed** lived in branch
+  combinations that no document could produce at the time they were written,
+  and so could not be tested where they lived; every combination is now reachable directly, and
+  the invariant they violated -- success is unreachable while anything is
+  unchecked -- is asserted over the whole grid rather than at the two points
+  that happened to be reported.
+
+### Fixed
+
+- **A table carrying a column the specification does not describe is now
+  rejected.** It used to validate clean. The check itself had always been
+  computed — `dta_structure_findings()` returns both the declared columns the
+  table lacks and the columns the table has that no spec declares — but only
+  the first half reached a verdict: the error frame rendered the missing
+  columns alone, the structural `ok` flag was derived from the missing columns
+  alone, and the streaming path announced the undeclared ones as a console
+  warning and then returned `ok = TRUE`. The materialising path never asked the
+  question at all, because it evaluates the specs column by column and an
+  undeclared column is not one it visits. A file with a stray column therefore
+  passed, silently, on every path.
+
+  An undeclared column is now an ordinary column spec error: keyword
+  `additionalProperties`, message `must NOT have additional property 'X'`,
+  carried in `full_error`, counted in `n_columnspec_errors`, and reported by
+  `messages()` and `inspect()` like any other. It is reported **once**, about
+  the table, rather than once per row — it is a fact about the header, no more
+  true of the four-hundred-millionth row than of the first. The per-check
+  report gains an **Extra columns** line beside **Presence**, so a passing run
+  now states that the table carried nothing beyond what was declared instead of
+  leaving it unsaid.
+
+  Both halves are independent: a table can be missing a declared column *and*
+  carrying an undeclared one, and both are now reported rather than the first
+  masking the second. `on_missing_column` is unchanged and still decides only
+  what its name says — an undeclared column never triggers its header-only
+  early return, because the rows are still worth reading.
+
+  **This is a behaviour change.** A dataset that passed only because a spare
+  column went unnoticed will now fail, which is the point: a specification
+  describes a transfer, and a column nobody agreed to carry is as much a
+  departure from it as a column that was promised and never arrived.
+
+- **A private template repository's CI can no longer go green having
+  validated nothing.** An otherwise-empty directory used to report zero
+  issues and pass `validate_template(path, strict = TRUE)` silently — a
+  workflow pointed at the wrong path (a typo, a stale working directory, a
+  checkout that put the templates one level down) went green without ever
+  checking a single file. `strict = TRUE` now fails on such a directory: a
+  new `no_templates` error names exactly where it looked and found nothing.
+
+- **A template kept below the top level of its repository is now flagged
+  instead of silently ignored.** Both `validate_template()`'s directory scan
+  and the Shiny app's own template loader are non-recursive, so a file placed
+  in a subdirectory was invisible to both — not an error, not a warning,
+  simply never found. `validate_template()` now walks the directory a second
+  time to catch exactly that, reporting each such file as
+  `template_in_subdirectory` (a warning, since keeping an archived or
+  work-in-progress file below the root is a legitimate choice).
+
+- **A column that only ever set `values_from:` was wrongly reported as also
+  setting `values:`.** The `values_and_values_from` check read a column's
+  `values` field with `col$values`, and R's `$` on a list falls back to
+  partial-name matching — for a column with no literal `values:` of its own,
+  that silently returned the `values_from` value the check already knew was
+  present, so it fired on every column that used a vocabulary binding
+  correctly. It fired six times against the package's own shipped example
+  templates; with the fix (`col[["values"]]`, which matches only the exact
+  name), those now validate with zero issues.
+
+- **Zero-padded and Y/N term codes are no longer silently destroyed by the
+  YAML parser.** Vocabulary files are read with a wider set of scalar handlers
+  than the rest of the template family: under an ordinary parse `01` and `007`
+  are read as octal and become `1` and `7`, `0x1F` becomes `31`, and `Y`, `N`
+  and `NO` become booleans. Zero-padded visit numbers and Y/N flags are two of
+  the most common controlled vocabularies there are, so a code in a
+  `*.dta-vocabulary.yaml` is now kept exactly as written, quoted or not.
+
+- **`check()` went silent on the axis that failed.** The column spec axis
+  printed one lumped success line -- `Table format, length, pattern, and values
+  are valid` -- and, when a check failed, printed nothing at all. A failing run
+  showed the section heading, then the rules passing, then `0 of 1 table valid`,
+  with no stated cause on the axis that had actually found the errors. On the
+  streaming path the axis reported nothing either way.
+
+  It now reports one line per check kind -- presence, format, length, values,
+  pattern -- naming the check that failed, how many values broke it and which
+  columns they were in, followed by a summary line, exactly as the rule axis
+  already reported one line per rule. Both the materialising and the streaming
+  path render it from the same summary, so they cannot disagree.
+
+  The lumped line was over-broad in the other direction too: it asserted that
+  patterns were valid on a table where no column declared one. A check nothing
+  declares now reports as *not applicable*, and one the run could not settle --
+  a table with no rows, a column the table does not have, a `fail_fast` scan
+  that stopped at the first problem, a structural early return that read no
+  rows -- reports as *not checked*. Neither is a pass.
+
+- **A table with no rows skipped its structure check.** The column spec axis
+  returned before evaluating a single constraint whenever the table had no
+  rows -- column presence included -- so a table that was both empty and
+  missing the columns its specs declare reported completely clean:
+  `columnspec_valid = TRUE`, no errors, `ok = TRUE`. The same missing column on
+  a table with one row failed correctly.
+
+  An empty table is a legitimate result: an analysis that yielded nothing, whose
+  formatted output says the process ran and found no results. That is only true
+  if the table still carries the columns it promised -- a table missing them
+  says something went wrong upstream, and said it silently. Column presence is
+  decidable from the column names alone, so it is now checked whether or not
+  there are rows, on both the materialising and the streaming path. The finding
+  is reported once, with `row = NA`, since there is no row to attach it to.
+
+  The value checks -- type, length, pattern, permitted values -- are properties
+  of values, of which an empty table has none, so they continue to report as
+  `not_checked` rather than as a pass. A well-formed empty table therefore
+  reports `Presence check passed` alongside them, and remains valid.
+
+- The per-check breakdown is carried on the validation result as
+  `columnspec_checks`, so it is written to the persisted artifact and is
+  readable via `validation_errors()`: one row per constraint keyword with its
+  status, how many columns declared it, how many could be checked, how many
+  failed, and the failing column names. On a streamed table the counts are
+  accumulated per batch rather than read off the retained error frame, so the
+  `max_errors` cap cannot deflate them -- without that, a check whose only
+  violations had spilled to disk would have been reported as passed. An
+  artifact written by an earlier version does not carry the field and is not
+  backfilled with a guess: whether a check passed or was never run cannot be
+  recovered from a stored error frame, which is the distinction the field
+  exists to make. Re-run `check(force = TRUE)` to record it.
+
+- **`check()` printed a green summary over a dataset it never judged.** The
+  per-dataset line was reached whenever no target had failed, without
+  consulting the count of targets carrying no verdict -- a count already
+  computed two lines above it, for the rollup that does consult it. A dataset
+  whose specs declare no columns therefore printed
+  `0 tables validated: all valid`, directly contradicting the dataset's own
+  `0 of 1 table valid; 1 not checked` on the line immediately above. It now
+  reports `0 of 1 table valid; 1 target not checked`, as a warning.
+
+- **Unchecked targets are now named alongside a failure rather than hidden
+  behind it.** Both the per-dataset line and the overall summary let the
+  failure branch win outright, so a run holding one failing dataset and one
+  that checked nothing reported only `Validation FAILED` -- and repairing the
+  failure turned the very next run into `Validation INCOMPLETE` for a reason
+  that had been true, and silent, all along. The summary now reads
+  `Validation FAILED: 1 table with validation errors; 1 target not checked`.
+
+  The wording of every previously reachable outcome is unchanged.
+
+- The incomplete line agreed its noun with the wrong count, reading
+  `1 of 3 table valid`. The noun is governed by the number of targets; the
+  count it was taken from is the number actually validated, which is precisely
+  the one that is low when targets went unchecked.
+
+- **Three template readers signalled a warning they were written not to
+  signal.** Each is documented as reporting failure by return value -- "returns
+  `NA` when the file cannot be read", "cannot tell; do not manufacture a false
+  positive", or handing the message back for the caller to attach to a file
+  name -- and each wrapped its read in `tryCatch(error = )` to achieve it.
+  `tryCatch()` intercepts only the condition class it names, and a file that
+  cannot be opened raises a warning from the connection *before* it errors, so
+  base R's `cannot open file '...': No such file or directory` escaped
+  `dta_template_read_field_exact()`, `.dta_template_read_raw()` and
+  `.dta_template_version_plain_is_exact()` regardless.
+
+  It surfaced as an unexplained warning attached to a passing test that
+  deliberately reads a missing file -- the assertion checked the return value
+  and never that the reader stayed silent. In the app it reached the R console,
+  and on a non-English session not even in English, so nothing downstream could
+  match on it either.
+
+  The three now share one `dta_template_read_yaml_quiet()` helper that muffles
+  the read's warning channel and returns `list(ok, value, error)`, so a caller
+  that reports the message still gets it. A path that exists but cannot be read
+  as a file -- a directory, which raises `Permission denied` instead -- is
+  covered by the same fix.
+
+  `dta_try()` is deliberately unchanged. It captures errors from arbitrary
+  expressions, including validation calls whose warnings are the point, so
+  muffling there would trade a cosmetic leak for a silent one.
+
 ## [0.23.0] - 2026-08-27
 
 ### Added
@@ -2464,19 +2821,21 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.23.0...v0.24.0
+[0.23.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.20.1...v0.23.0
+[0.20.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.18.1...v0.20.1
+[0.18.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.17.3...v0.18.0
+[0.17.3]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.17.2...v0.17.3
+[0.17.2]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.17.1...v0.17.2
+[0.17.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.16.0...v0.17.1
+[0.16.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.15.1...v0.16.0
+[0.15.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.13.0...v0.15.1
+[0.13.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.12.2...v0.13.0
+[0.12.2]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.12.1...v0.12.2
+[0.12.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.1...v0.9.0
-[0.8.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.8.0...v0.8.1
-[0.8.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.5...v0.8.0
-[0.7.5]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.4...v0.7.5
-[0.7.4]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.3...v0.7.4
-[0.7.3]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.2...v0.7.3
-[0.7.2]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.1...v0.7.2
-[0.7.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.1.0...v0.2.0

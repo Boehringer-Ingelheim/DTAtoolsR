@@ -1,0 +1,15 @@
+kind: dta_party_profile
+id: receiver_ourco
+version: "1.0"
+role: receiver
+label: OurCo Biostatistics
+description: Standard receiving-organisation block for the biomarker GF template family.
+affiliation:
+  name: OurCo Pharmaceuticals
+  address: 100 Example Avenue, Springfield
+  country: US
+contacts:
+  - name: Alex Receiver
+    role: Trial Data Manager
+    email: alex.receiver@example.com
+    signature: true

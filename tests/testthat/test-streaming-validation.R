@@ -169,11 +169,25 @@ test_that("compiling schemas keeps the branches the refactor moved", {
   expect_equal(nrow(required), nrow(missing_first))
   expect_true(all(required$columnspec == first_name))
 
-  # An empty table short-circuits before any schema is consulted.
+  # An empty table is still checked for the columns its specs declare -- it
+  # simply has no values for the value constraints to judge. A well-formed one
+  # therefore reports nothing.
   expect_equal(
     dta_columnspec_errors(case$specs, case$table[0, , drop = FALSE], schemas = compiled),
     list(summarised_error = NULL, full_error = NULL)
   )
+
+  # ... and the same table with a declared column removed reports it, once,
+  # about the table rather than about a row. Asserted separately from the line
+  # above, which would otherwise pass for the wrong reason: it did when the
+  # function returned before consulting a single schema, and it still would if
+  # presence were dropped again.
+  empty_missing <- missing_first[0, , drop = FALSE]
+  empty_res <- dta_columnspec_errors(case$specs, empty_missing, schemas = compiled)
+  expect_equal(nrow(empty_res$full_error), 1L)
+  expect_equal(empty_res$full_error$keyword, "required")
+  expect_equal(empty_res$full_error$columnspec, first_name)
+  expect_true(is.na(empty_res$full_error$row))
 })
 
 test_that("dta_columnspec_errors(summarise = FALSE) changes only whether the summary is built", {
@@ -377,8 +391,8 @@ test_that("the streamed details object satisfies the published contract", {
     c(
       "ok", "columnspec_valid", "rules_valid", "import_valid",
       "n_columnspec_errors", "n_rule_errors", "n_import_errors",
-      "columnspec_errors", "rule_results", "rule_errors", "import_errors",
-      "result_version"
+      "columnspec_errors", "columnspec_checks", "rule_results", "rule_errors",
+      "import_errors", "result_version"
     )
   )
   expect_named(streamed$columnspec_errors, c("summarised_error", "full_error"))
@@ -581,7 +595,11 @@ test_that("tagging does not lose the partial_scan marker", {
 })
 
 test_that("a structural verdict is tagged and flattens too", {
+  # ID is declared as well as GONE: the file's only structural defect must be
+  # the MISSING column, or these counts would also carry the undeclared-column
+  # finding and stop measuring what they are here to measure.
   specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
     DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
   ))
   path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
@@ -677,7 +695,11 @@ test_that("the default still scans, so existing behaviour is unchanged", {
 test_that("a structural verdict is marked as resting on the header alone", {
   # Without this a caller could read rules_valid = TRUE as "the rules were
   # checked and passed", when in fact nothing was read.
+  # ID is declared as well as GONE: the file's only structural defect must be
+  # the MISSING column, or these counts would also carry the undeclared-column
+  # finding and stop measuring what they are here to measure.
   specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
     DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
   ))
   path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
@@ -698,7 +720,11 @@ test_that("a structural verdict is marked as resting on the header alone", {
 })
 
 test_that("the structural result still satisfies the details contract", {
+  # ID is declared as well as GONE: the file's only structural defect must be
+  # the MISSING column, or these counts would also carry the undeclared-column
+  # finding and stop measuring what they are here to measure.
   specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
     DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
   ))
   path <- vs_write_csv(data.frame(ID = "A001", stringsAsFactors = FALSE))
@@ -2718,4 +2744,152 @@ test_that("folding a batch costs what the batch touched, not what the scan has a
   # it near 1. The bound is deliberately loose -- this is a shape guard, not a
   # benchmark, and it must not flake on a loaded CI machine.
   expect_lt(late / early, 6)
+})
+
+
+# ---- a file carrying a column the specs do not declare -----------------------
+#
+# The scan cannot find these for itself: the batch loop iterates the SPECS, and
+# projection means an undeclared column is never even parsed out of the file. So
+# the header is the only place the finding can come from, and before this it was
+# raised there as a `cli` warning and then discarded.
+
+test_that("a structure with only an undeclared column is not sound", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  findings <- dta_structure_findings(specs, c("ID", "EXTRA"))
+
+  expect_length(findings$missing, 0)
+  expect_equal(findings$unexpected, "EXTRA")
+  # `ok` used to be derived from the missing half alone, so this was TRUE.
+  expect_false(findings$ok)
+})
+
+
+test_that("an undeclared column in a file fails the scan", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(
+    ID = sprintf("A%03d", 1:20),
+    EXTRA = 1:20,
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  res <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_false(res$ok)
+  expect_false(res$columnspec_valid)
+  # Once, from the header -- not once per scanned row.
+  expect_equal(res$n_columnspec_errors, 1)
+
+  full <- res$columnspec_errors$full_error
+  expect_equal(full$keyword, "additionalProperties")
+  expect_equal(full$column, "EXTRA")
+  expect_true(is.na(full$row))
+})
+
+
+test_that("projection does not hide an undeclared column", {
+  # Projection pushes "which columns does validation read" into the scan, so an
+  # undeclared column is never materialised. The finding must therefore be taken
+  # from the schema BEFORE projection, which is the one thing that could quietly
+  # regress here.
+  specs <- vc_specs(
+    list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)),
+    rules = list()
+  )
+  path <- vs_write_csv(data.frame(
+    ID = sprintf("A%03d", 1:8),
+    UNREAD_A = 1:8,
+    UNREAD_B = letters[1:8],
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  res <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_false(res$ok)
+  expect_equal(
+    sort(res$columnspec_errors$full_error$column),
+    c("UNREAD_A", "UNREAD_B")
+  )
+})
+
+
+test_that("on_missing_column = 'stop' does not stop for an undeclared column", {
+  # The argument says what to do about a column that is ABSENT. An undeclared
+  # column is present, the rows are still worth reading, and the scan reports it
+  # -- so this must not take the header-only early return.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(
+    ID = c("A1", "TOO-LONG"),
+    EXTRA = c(1, 2),
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  res <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+
+  expect_null(attr(res, "structural_only"))
+  # The rows were read: the over-long ID is a per-value finding, and only a scan
+  # could have produced it.
+  expect_true(all(c("additionalProperties", "maxLength") %in%
+    res$columnspec_errors$full_error$keyword))
+})
+
+
+test_that("a missing and an undeclared column are both reported by the gate", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "GONE", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(
+    ID = "A001", EXTRA = "x",
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  stopped <- validate_file_stream(
+    specs, path,
+    on_missing_column = "stop", verbose = FALSE
+  )
+
+  expect_true(isTRUE(attr(stopped, "structural_only")))
+  full <- stopped$columnspec_errors$full_error
+  expect_equal(nrow(full), 2)
+  expect_equal(sort(full$keyword), c("additionalProperties", "required"))
+  # Each names its own column, in the field that can carry it: the missing one
+  # exists only as a spec, the undeclared one only as a table column.
+  expect_equal(full$columnspec[full$keyword == "required"], "GONE")
+  expect_equal(full$column[full$keyword == "additionalProperties"], "EXTRA")
+})
+
+
+test_that("the console calls an undeclared column an error, not a caveat", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(
+    ID = "A001", EXTRA = "x",
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  out <- gsub(
+    "\\s+", " ",
+    paste(testthat::capture_messages(
+      validate_file_stream(specs, path, verbose = TRUE)
+    ), collapse = " ")
+  )
+
+  expect_match(out, "not described by the specs", fixed = TRUE)
+  expect_match(out, "Extra columns check failed", fixed = TRUE)
 })

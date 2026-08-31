@@ -344,6 +344,7 @@ test_that("applying malformed YAML reports an error and leaves the DTA untouched
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     loaded <- rv$dta
     yaml_before <- rv$yaml_text
 
@@ -367,6 +368,7 @@ test_that("applying valid YAML replaces the loaded DTA", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     # NB: in R's default regex engine `.` matches newlines too, so the character
     # class is what keeps this edit to a single line.
     edited <- sub("title:[^\n]*", "title: Retitled by test", rv$yaml_text)
@@ -393,6 +395,7 @@ test_that("reverting the YAML editor discards the pending error", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(raw_yaml_editor = "datasets: [unclosed", apply_yaml = 1)
     expect_true(nzchar(rv$yaml_msg$error))
 
@@ -435,6 +438,7 @@ test_that("opening the column editor targets the active dataset", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     expect_null(rv$editor_dataset)
 
     session$setInputs(edit_cols = 1)
@@ -461,6 +465,7 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(rv$status, c(clinical_data = "pass"))
@@ -504,6 +509,7 @@ test_that("saving a group_condition rule from the rule editor updates spec and Y
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
 
     before_n <- length(DTAtools::datasets(rv$dta, "clinical_data")@specs@rules)
 
@@ -565,6 +571,7 @@ test_that("group_condition constraint selectors follow condition name changes", 
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
 
     session$setInputs(edit_rules = 1)
     session$setInputs(rule_add = 1)
@@ -615,6 +622,7 @@ test_that("a column save with an incomplete type is rejected without touching th
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
 
@@ -674,6 +682,7 @@ test_that("adding a file handler adds a slot and keeps the loaded files", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
 
@@ -699,6 +708,7 @@ test_that("a file-handler change resets the dataset's validation", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(unname(rv$status[["clinical_data"]]), "pass")
@@ -721,6 +731,7 @@ test_that("removing an empty file handler needs no confirmation", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     add_second_handler(session)
     expect_length(rv$structure$clinical_data$handlers, 2)
 
@@ -742,6 +753,7 @@ test_that("removing a handler with loaded files asks first and does nothing unti
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(edit_files = 1)
 
@@ -771,6 +783,7 @@ test_that("confirming the removal unloads the files that were loaded into that s
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(edit_files = 1)
     session$setInputs(file_del_click = 1)
@@ -799,6 +812,7 @@ test_that("removing the first of two handlers re-keys the second one's uploads",
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     add_second_handler(session, filename = "clinical_data2.csv")
 
     # Load a file through the SECOND slot only.
@@ -832,6 +846,7 @@ test_that("reordering handlers moves the upload records with them", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_2 = app_file_input("clinical_data2.csv"))
     expect_equal(names(rv$uploads), "clinical_data||2")
@@ -857,6 +872,7 @@ test_that("a rejected file-handler form leaves the specification untouched", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
     session$setInputs(
@@ -888,6 +904,7 @@ test_that("the count controls cannot smuggle a bad count past a non-pattern entr
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(edit_files = 1)
     session$setInputs(file_add = 1)
     session$setInputs(
@@ -920,6 +937,7 @@ test_that("applying raw YAML that changes files: keeps the loaded files", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(unname(rv$status[["clinical_data"]]), "pass")
@@ -958,6 +976,7 @@ test_that("applying raw YAML that deletes a slot unloads only that slot's files"
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(up_1_2 = app_file_input("clinical_data2.csv"))
@@ -993,6 +1012,7 @@ test_that("applying raw YAML that reorders files: moves the loaded file with its
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     add_second_handler(session, filename = "clinical_data2.csv")
     session$setInputs(up_1_2 = app_file_input("clinical_data2.csv"))
     expect_equal(names(rv$uploads), "clinical_data||2")
@@ -1027,6 +1047,7 @@ test_that("applying raw YAML that rewrites a slot unloads the file it no longer 
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
 
@@ -1058,6 +1079,7 @@ test_that("raw YAML that removes every file handler unloads that dataset's data"
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     expect_equal(names(rv$uploads), "clinical_data||1")
 
@@ -1145,6 +1167,7 @@ test_that("opening the metadata editor targets the active dataset and pre-fills 
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     expect_null(rv$editor_dataset)
 
     session$setInputs(edit_meta = 1)
@@ -1172,6 +1195,7 @@ test_that("the metadata modal body renders every field, pre-filled, and no type 
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(edit_meta = 1)
 
     html <- as.character(output$meta_modal_body$html)
@@ -1201,6 +1225,7 @@ test_that("editing only the description leaves a passed check passed", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(rv$status, c(clinical_data = "pass"))
@@ -1243,6 +1268,7 @@ test_that("renaming a dataset migrates every piece of name-keyed state", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(names(rv$uploads), "clinical_data||1")
@@ -1283,6 +1309,7 @@ test_that("renaming a dataset clears its validation", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
     session$setInputs(check_all = 1)
     expect_equal(rv$status, c(clinical_data = "pass"))
@@ -1310,6 +1337,7 @@ test_that("a rejected metadata save leaves the workspace untouched", {
     # test-shinyapp-edit-mode.R.
     session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
     session$setInputs(edit_meta = 1)
     session$setInputs(
       meta_name = "   ", meta_description = "irrelevant",

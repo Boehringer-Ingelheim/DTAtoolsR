@@ -15,9 +15,10 @@ validate_table(specs, table, verbose = TRUE)
 }
 \value{
 Transformed and checked table (a data.frame) if valid. If the table
-has column spec errors, returns a list with \code{summarised_error}, \code{full_error},
-\code{rules_valid} and \code{rule_errors}. If the schema is valid but rules are
-violated, aborts.
+has column spec errors, returns a list with \code{summarised_error},
+\code{full_error}, \code{columnspec_checks} (the per-check breakdown described
+above), \code{rules_valid} and \code{rule_errors}. If the schema is valid but rules
+are violated, aborts.
 }
 \description{
 Validates a data.frame against the constraints declared by its
@@ -30,4 +31,12 @@ and both are reported in a single pass. When the table has column spec errors, t
 returned error list additionally carries \code{rules_valid} and \code{rule_errors}, and
 any rule violations are raised as a warning so they cannot go unnoticed while
 the column spec errors are being fixed.
+
+The column spec axis is reported per check kind -- presence, extra columns,
+format, length, values and pattern -- rather than as one verdict, so a
+failure names the check that failed and a pass says which checks actually
+ran. The table's columns must be EXACTLY the declared ones: a column the
+specs do not describe fails the axis just as an absent declared column does. A check no
+column declares reports as \code{not_applicable}; one the run could not settle
+reports as \code{not_checked}. Neither is a pass.
 }

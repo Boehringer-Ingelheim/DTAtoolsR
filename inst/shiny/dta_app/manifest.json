@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.23.0",
+        "Version": "0.24.0",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -63,12 +63,12 @@
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "master",
-        "RemoteSha": "b17dfd95ffff1cf27603cbb99716adb7c8d01107",
+        "RemoteRef": "dev",
+        "RemoteSha": "7b0773778228b6f33262a9f4a408ea2977605bd9",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "master",
-        "GithubSHA1": "b17dfd95ffff1cf27603cbb99716adb7c8d01107",
+        "GithubRef": "dev",
+        "GithubSHA1": "7b0773778228b6f33262a9f4a408ea2977605bd9",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3111,26 +3111,53 @@
     }
   },
   "files": {
+    "R/dataset_template.R": {
+      "checksum": "1f7a1ff69678151f15fb64e2efc0e4e1"
+    },
+    "R/party_profiles.R": {
+      "checksum": "12fc95df496c0fb9f56f98f76cc1c730"
+    },
     "R/template_core.R": {
-      "checksum": "996c47f79864e81826bc57b3402c1ae4"
+      "checksum": "4e2e41d27b2e298eac22b1e176d40394"
+    },
+    "R/template_create.R": {
+      "checksum": "9ba84319b860fedc77d67274c1c46aa5"
+    },
+    "R/template_diff.R": {
+      "checksum": "2be3277be3b9ca763a18937c3a29c533"
+    },
+    "R/template_index.R": {
+      "checksum": "adec5cff8fccbc212b221e2bc45d6eaf"
+    },
+    "R/template_inherit.R": {
+      "checksum": "efaaa3db4a088e677caa200647400764"
+    },
+    "R/template_sources.R": {
+      "checksum": "264c117393a5c0f08b4d1c5c73d7cff6"
     },
     "R/theme.R": {
-      "checksum": "cab56ccadfb7e16cc9f4504bf16e0522"
+      "checksum": "d9b3704aec6246c95fdd55089162b70c"
     },
     "R/ui_components.R": {
-      "checksum": "d6f2399f5ef4a481e7498c2f297a661b"
+      "checksum": "64d332d974bc4b6405ce63405d97ebf7"
     },
     "R/utils_dta.R": {
-      "checksum": "f05a104b682f025990f6c556a7a5fbd1"
+      "checksum": "5c0902676a66f30d76ba0f532254a25d"
     },
     "R/utils_export.R": {
       "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
     },
+    "R/versioning.R": {
+      "checksum": "113140917979da950121c19dfd1a625f"
+    },
+    "R/vocabulary.R": {
+      "checksum": "3b9e1e0117c176a37928557a51f80674"
+    },
     "VERSION": {
-      "checksum": "69ace87b889cee06496563def38ac28c"
+      "checksum": "a69680a2ca0f3a0f5ec5b3a4fea80da1"
     },
     "app.R": {
-      "checksum": "f516f5e1ee72d2d66026417d34bcb7e5"
+      "checksum": "0718fb7e9a57269da61fc10208a20e38"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

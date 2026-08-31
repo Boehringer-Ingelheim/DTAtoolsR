@@ -786,6 +786,13 @@ dta_validate_table_stream <- function(specs,
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
   rule_import_sink <- dta_error_sink(max_errors)
+  # Which constraint each violation broke, accumulated per batch rather than
+  # read off the collected frame at the end. The sink's cap spills rows past
+  # `max_errors` to disk, so a tally taken from what it kept in memory would
+  # under-report exactly on the dirty files the cap exists for -- and would then
+  # report a check as passed because its only violations were the truncated
+  # ones.
+  columnspec_tally <- dta_empty_columnspec_tally()
   # A double, not an integer. This is the number of rows already consumed, and
   # the streaming path is built for files past `.Machine$integer.max` rows. An
   # integer accumulator returns `NA` with a warning rather than erroring, and
@@ -869,6 +876,9 @@ dta_validate_table_stream <- function(specs,
     columnspec_errs <- schema_result$full_error
     if (!is.null(columnspec_errs) && nrow(columnspec_errs) > 0) {
       columnspec_errs$row <- dta_narrow_rows(columnspec_errs$row + row_offset)
+      # Tallied from the batch's whole frame, before the sink decides how much
+      # of it to keep.
+      columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, columnspec_errs)
       dta_error_sink_add(columnspec_sink, columnspec_errs)
     }
 
@@ -983,9 +993,90 @@ dta_validate_table_stream <- function(specs,
     }
   }
 
+  # A stream that yielded no rows never entered the batch loop, so nothing
+  # checked whether the columns the specs declare are actually there. They are
+  # decidable from the source's names alone, and they still have to be right: an
+  # empty table is a legitimate result -- an analysis that found nothing -- but
+  # only if it carries the columns it promised. Without this, an empty stream
+  # missing every declared column reported clean.
+  #
+  # `known_columns` is read from the source before any projection and without
+  # consuming it. When it could not be obtained (a reader already spent), the
+  # question stays open rather than being answered by guessing.
+  #
+  # A column the specs do NOT declare is decided here on every scan, not only on
+  # an empty one. The batch loop iterates the specs, so a column no spec names is
+  # not something it fails to check -- it is something it cannot see; and under
+  # projection the batches do not even carry such a column. If this does not
+  # report it, nothing does, which is exactly how an undeclared column used to
+  # reach a clean verdict.
+  structure_known <- length(known_columns) > 0
+  empty_stream_structure <- row_offset == 0 && structure_known
+  if (structure_known) {
+    findings <- dta_structure_findings(specs, known_columns)
+    structural_errors <- if (empty_stream_structure) {
+      # No batch ran, so the missing-column half is this path's to report too.
+      dta_structure_errors(findings)
+    } else {
+      # The batch loop already reported every missing column, once per row.
+      dta_unexpected_column_errors(findings)
+    }
+    if (!is.null(structural_errors) && nrow(structural_errors) > 0) {
+      columnspec_tally <- dta_columnspec_tally_add(columnspec_tally, structural_errors)
+      dta_error_sink_add(columnspec_sink, structural_errors)
+    }
+  }
+
   full_error <- dta_error_sink_collect(columnspec_sink)
   summarised_error <- dta_summarise_columnspec_errors(full_error)
   has_columnspec_errors <- columnspec_sink$total > 0
+
+  # A check with no violations is only a pass when the scan that looked for them
+  # ran to the end over rows that existed. A `fail_fast` run stopped at the
+  # first problem and a stream that yielded no rows evaluated no value
+  # constraint; in both cases the checks that reported nothing reported nothing
+  # about the whole table, which is not the same as reporting a pass. Column
+  # presence is the exception on an empty stream: it was just settled above,
+  # from the names.
+  columnspec_settled <- if (partial_scan) {
+    # Closedness is the exception here, for the same reason it is the exception
+    # in the two branches below: it was decided from the source's names BEFORE
+    # the first batch, so a scan that stopped at the first problem did not stop
+    # short of it. Reporting it `not_checked` understated what the run knew --
+    # and understating is not the safe direction when the whole point of these
+    # statuses is to say exactly which questions were answered.
+    if (structure_known) "additionalProperties" else character(0)
+  } else if (row_offset == 0) {
+    if (empty_stream_structure) {
+      c("required", "additionalProperties")
+    } else {
+      character(0)
+    }
+  } else if (structure_known) {
+    NULL
+  } else {
+    # Every per-row constraint was settled by the scan, but closedness is decided
+    # from the source's names and those could not be read. Reporting it as a pass
+    # would certify a check that never ran -- the presence check is held to the
+    # same standard two branches up.
+    setdiff(dta_columnspec_check_kinds()$keyword, "additionalProperties")
+  }
+  columnspec_checks <- dta_columnspec_check_summary(
+    columnspec_schemas,
+    tally = columnspec_tally,
+    settled = columnspec_settled
+  )
+
+  if (isTRUE(verbose)) {
+    dta_report_columnspec_checks(
+      columnspec_checks,
+      unchecked_reason = if (partial_scan) {
+        "the scan stopped at the first problem"
+      } else {
+        "the stream yielded no rows"
+      }
+    )
+  }
 
   rule_results <- lapply(seq_along(rules_list), function(i) {
     dta_rule_stream_finalise(states[[i]], rules_list[[i]])
@@ -1057,6 +1148,7 @@ dta_validate_table_stream <- function(specs,
       summarised_error = summarised_error,
       full_error = full_error
     ),
+    columnspec_checks = columnspec_checks,
     rule_results = rule_results,
     rule_errors = rule_errors,
     import_errors = import_errors,
@@ -1930,13 +2022,32 @@ dta_validate_any_table <- function(specs,
     column_names <- dta_table_column_names(table)
     if (length(column_names) > 0) {
       findings <- dta_structure_findings(specs, column_names)
-      if (!findings$ok) {
+      # The MISSING half specifically, not `findings$ok` -- which now also
+      # covers undeclared columns. `on_missing_column` names what it decides,
+      # and an early return here on an undeclared column alone would both
+      # over-reach that name and print "Missing required column(s):" followed
+      # by nothing. Undeclared columns are reported by the scan instead.
+      if (length(findings$missing) > 0) {
         if (isTRUE(verbose)) {
           cli::cli_alert_danger(
             "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the table."
           )
         }
-        return(dta_structural_failure_details(findings))
+        structural <- dta_structural_failure_details(
+          findings,
+          schemas = dta_compile_columnspec_schemas(specs)
+        )
+        # The same per-check report the scan paths print. Presence was decided
+        # from the header; the other checks were not reached, and saying so is
+        # the point -- otherwise this early return is the one exit that leaves a
+        # reader guessing what was and was not examined.
+        if (isTRUE(verbose)) {
+          dta_report_columnspec_checks(
+            structural$columnspec_checks,
+            unchecked_reason = "the table was not read"
+          )
+        }
+        return(structural)
       }
     }
   }
@@ -2023,10 +2134,14 @@ dta_validate_any_table <- function(specs,
 #'
 #' Unexpected columns -- present in the file, absent from the specs -- are
 #' reported here and nowhere else; the per-row checks have no way to notice a
-#' column no spec describes.
+#' column no spec describes. They iterate the SPECS, so a column no spec names
+#' is not something they can fail to check: it is something they cannot see.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @param column_names Character. The columns the file actually has.
-#' @return A list with `missing`, `unexpected` and `ok`.
+#' @return A list with `missing`, `unexpected` and `ok`. `ok` is `TRUE` only
+#'   when the table's columns are EXACTLY the declared ones: a spec describes a
+#'   transfer, and a column nobody agreed to carry is as much a departure from
+#'   it as a column that was promised and never arrived.
 #' @keywords internal
 dta_structure_findings <- function(specs, column_names) {
   columns <- tryCatch(specs@columns, error = function(e) NULL)
@@ -2053,24 +2168,64 @@ dta_structure_findings <- function(specs, column_names) {
   }
 
   missing <- setdiff(declared, column_names)
-  unexpected <- setdiff(column_names, declared)
+
+  # Closedness is judged against everything the SPECIFICATION references, not
+  # only its column specs. Two cases would otherwise be decided wrongly.
+  unexpected <- if (length(declared) == 0) {
+    # A collection declaring no column offers no closed set to be outside of.
+    # Calling every column unexpected would reject every table on the strength
+    # of a spec that constrains nothing -- the same reason `columns_declared`
+    # of 0 reports `not_applicable` rather than a verdict.
+    character(0)
+  } else {
+    # A rule naming a column is the specification describing that column, so it
+    # is expected. `dta_scan_projection()` already treats the two sources the
+    # same way when it decides what the scan must read; the file has to carry
+    # the columns the rules read.
+    #
+    # Being named by a rule does NOT make a column required: `missing` above is
+    # the column specs alone. A rule over an absent column is the rule axis's
+    # finding to report, not this one's.
+    described <- declared
+    rules_list <- tryCatch(specs@rules, error = function(e) NULL)
+    if (!is.list(rules_list)) {
+      rules_list <- list()
+    }
+    enumerable <- TRUE
+    for (rule in rules_list) {
+      cols <- tryCatch(dta_rule_all_columns(rule), error = function(e) NULL)
+      if (is.null(cols)) {
+        # A rule whose columns cannot be enumerated might name any of them --
+        # the same condition that disables projection entirely. Nothing can be
+        # called undeclared here without guessing, so nothing is.
+        enumerable <- FALSE
+        break
+      }
+      described <- union(described, as.character(cols))
+    }
+    if (enumerable) setdiff(column_names, described) else character(0)
+  }
 
   list(
     missing = missing,
     unexpected = unexpected,
-    ok = length(missing) == 0
+    ok = length(missing) == 0 && length(unexpected) == 0
   )
 }
 
-#' @title Structural Findings as Column Spec Errors
+#' @title Missing Declared Columns as Column Spec Errors
 #' @description
-#' Renders structural findings in the same shape the per-row column spec axis uses,
-#' so a caller that stopped early still receives a recognisable error frame.
-#' Row is `NA`: the finding is about the file, not about any row in it.
+#' Renders the missing half of a structural finding in the shape the per-row
+#' column spec axis uses. Row is `NA`: the finding is about the file, not about
+#' any row in it.
+#'
+#' `column` is `NA` and `columnspec` names the column, because the column does
+#' not exist in the table -- there is no table column to point at, only the spec
+#' that expected one.
 #' @param findings A list from `dta_structure_findings()`.
-#' @return A data frame of errors, or `NULL` when the structure is sound.
+#' @return A data frame of errors, or `NULL` when no declared column is absent.
 #' @keywords internal
-dta_structure_errors <- function(findings) {
+dta_missing_column_errors <- function(findings) {
   if (length(findings$missing) == 0) {
     return(NULL)
   }
@@ -2084,6 +2239,68 @@ dta_structure_errors <- function(findings) {
     data = NA_character_,
     stringsAsFactors = FALSE
   )
+  rownames(out) <- NULL
+  out
+}
+
+#' @title Undeclared Columns as Column Spec Errors
+#' @description
+#' Renders the unexpected half of a structural finding in the shape the per-row
+#' column spec axis uses, so an undeclared column is reported as an ordinary
+#' column spec violation -- carried in `full_error`, counted in
+#' `n_columnspec_errors`, and surfaced by `messages()` -- rather than as a
+#' console warning nothing downstream can act on.
+#'
+#' The mirror image of [dta_missing_column_errors()]: `column` names the column,
+#' because it is really there in the table, and `columnspec` is `NA`, because no
+#' spec describes it. That is the whole finding.
+#'
+#' One row per undeclared column, with `row = NA`. Not one per table row: the
+#' finding is a fact about the table's shape, decided from its names, and it is
+#' no more true of row 400,000,000 than of row 1.
+#' @param findings A list from `dta_structure_findings()`.
+#' @return A data frame of errors, or `NULL` when every column is declared.
+#' @keywords internal
+dta_unexpected_column_errors <- function(findings) {
+  if (length(findings$unexpected) == 0) {
+    return(NULL)
+  }
+
+  out <- data.frame(
+    row = NA_integer_,
+    column = findings$unexpected,
+    keyword = "additionalProperties",
+    message = paste0(
+      "must NOT have additional property '", findings$unexpected, "'"
+    ),
+    columnspec = NA_character_,
+    data = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  rownames(out) <- NULL
+  out
+}
+
+#' @title Structural Findings as Column Spec Errors
+#' @description
+#' Renders structural findings in the same shape the per-row column spec axis uses,
+#' so a caller that stopped early still receives a recognisable error frame.
+#' Both halves of the finding are reported: a declared column the table lacks,
+#' and a column the table carries that no spec declares.
+#' @param findings A list from `dta_structure_findings()`.
+#' @return A data frame of errors, or `NULL` when the structure is sound.
+#' @keywords internal
+dta_structure_errors <- function(findings) {
+  parts <- list(
+    dta_missing_column_errors(findings),
+    dta_unexpected_column_errors(findings)
+  )
+  parts <- Filter(function(p) !is.null(p) && nrow(p) > 0, parts)
+  if (length(parts) == 0) {
+    return(NULL)
+  }
+
+  out <- do.call(rbind, parts)
   rownames(out) <- NULL
   out
 }
@@ -2397,18 +2614,34 @@ validate_file_stream <- function(specs,
   findings <- dta_structure_findings(specs, names(dataset$schema))
 
   if (isTRUE(verbose) && length(findings$unexpected) > 0) {
-    cli::cli_alert_warning(
+    # Danger, not a warning: an undeclared column now fails the run, and the
+    # console must not describe as a caveat what the verdict treats as an error.
+    cli::cli_alert_danger(
       "{length(findings$unexpected)} column{?s} in the file {?is/are} not described by the specs: {.field {findings$unexpected}}"
     )
   }
 
-  if (!findings$ok && identical(on_missing_column, "stop")) {
+  # Gated on the MISSING half specifically, not on `findings$ok` -- which now
+  # also covers undeclared columns. `on_missing_column` says what to do about a
+  # column that is absent, and stretching it to cover a column that is present
+  # would let its name lie. An undeclared column is reported by the scan itself
+  # (see dta_validate_table_stream), so nothing is lost by scanning on.
+  if (length(findings$missing) > 0 && identical(on_missing_column, "stop")) {
     if (isTRUE(verbose)) {
       cli::cli_alert_danger(
         "Missing required column{?s}: {.field {findings$missing}}. Stopping without reading the file."
       )
     }
-    structural_details <- dta_structural_failure_details(findings)
+    structural_details <- dta_structural_failure_details(
+      findings,
+      schemas = dta_compile_columnspec_schemas(specs)
+    )
+    if (isTRUE(verbose)) {
+      dta_report_columnspec_checks(
+        structural_details$columnspec_checks,
+        unchecked_reason = "the file was not read"
+      )
+    }
     # No rows were read for a structural early return -- 0 is accurate here,
     # not a stand-in for "unknown".
     attr(structural_details, "n_rows_scanned") <- 0
@@ -2491,9 +2724,14 @@ validate_file_stream <- function(specs,
 #' evaluated -- there is no table to evaluate them against, and claiming a
 #' failure would be as wrong as claiming a pass.
 #' @param findings A list from `dta_structure_findings()`.
+#' @param schemas Compiled schemas, from `dta_compile_columnspec_schemas()`, or
+#'   `NULL`. Only the per-check summary reads them: presence and closedness were
+#'   both decided from the header, so they report a verdict, while every other
+#'   check reports `not_checked` rather than borrowing their failure or claiming
+#'   a pass over rows that were never read.
 #' @return A validation details list.
 #' @keywords internal
-dta_structural_failure_details <- function(findings) {
+dta_structural_failure_details <- function(findings, schemas = NULL) {
   full_error <- dta_structure_errors(findings)
 
   details <- list(
@@ -2511,6 +2749,12 @@ dta_structural_failure_details <- function(findings) {
       # returns too.
       summarised_error = dta_summarise_columnspec_errors(full_error),
       full_error = full_error
+    ),
+    columnspec_checks = dta_columnspec_check_summary(
+      schemas,
+      tally = dta_columnspec_error_tally(full_error),
+      # Both were decided from the header, which is all this path read.
+      settled = c("required", "additionalProperties")
     ),
     rule_results = list(),
     rule_errors = list(),

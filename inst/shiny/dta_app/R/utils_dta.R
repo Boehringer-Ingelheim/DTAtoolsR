@@ -1,6 +1,33 @@
 # -----------------------------------------------------------------------------
 # Utilities: thin, safe wrappers around the DTAtools API.
 # The app mutates the DTA object ONLY through these helpers.
+#
+# `%||%` and `dta_try()` below are the two primitives every other engine file
+# (template_core.R, template_create.R, template_inherit.R, template_index.R,
+# dataset_template.R, vocabulary.R, party_profiles.R, ...) uses without
+# redefining -- this is the file the rest of the engine most depends on, which
+# is why the rule below lives here once rather than at every call site that
+# follows it.
+#
+# RULE: a list parsed from (or copied out of) a template author's YAML -- a
+# template definition, a dataset body, a column, an option, a vocabulary slot,
+# a `values_from:` binding, and so on -- is read with `[[` (exact match),
+# never `$`. `$` on a list falls back to PARTIAL name matching when there is
+# no exact key, so `x$foo` silently returns `x$foobar` when `foo` is absent
+# and `foobar` is the only key starting with `foo`. On YAML with real, adjacent
+# field names that turns "this field is absent" into "this field is present,
+# with a different field's value" -- four such collisions are real, not
+# theoretical, in this package's own shipped template corpus: `values`/
+# `values_from`, `dataset`/`datasets`, `column`/`columns` and `vocabulary`/
+# `vocabulary_slots`. See dataset_template.R's read_dataset_template()/
+# build_dataset_from_template() and vocabulary.R's normalise_vocabulary_
+# slots()/normalise_values_from() for the fixed call sites, and
+# R/validateTemplate.R (the package-side sibling of this engine) for the same
+# rule applied to its own two independently-discovered collisions.
+#
+# `$` stays fine for a list this engine's OWN code constructs with a fixed,
+# known key set (an internal record, a `dta_try()` result, a normalised slot,
+# a reactive value) -- those names are ours, so the hazard does not apply.
 # -----------------------------------------------------------------------------
 
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0) b else a
@@ -942,8 +969,10 @@ dta_pandoc_pdf_engine <- function() {
     "pdflatex", "xelatex", "lualatex", "tectonic",
     "wkhtmltopdf", "weasyprint", "typst", "context", "pdfroff"
   )
-  for (eng in engines) if (nzchar(Sys.which(eng))) {
-    return(eng)
+  for (eng in engines) {
+    if (nzchar(Sys.which(eng))) {
+      return(eng)
+    }
   }
   if (requireNamespace("tinytex", quietly = TRUE) &&
     isTRUE(tryCatch(tinytex::is_tinytex(), error = function(e) FALSE))) {

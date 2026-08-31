@@ -97,6 +97,39 @@ bi_css <- function() {
       border-color: rgba(255,255,255,.7);
       text-decoration: none;
     }
+    /* create_new_version_button() is an actionButton(), which renders
+       <button class='btn btn-default action-button'> -- none of the
+       .brand-link rule above applies to it (that rule targets <a>), and
+       Bootstrap's own .btn supplies a background and border of its own on
+       top. Re-state the .brand-link look property by property so the
+       button reads as the same pill as the links either side of it. */
+    .app-actions .brand-action {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.45);
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: .82rem;
+      line-height: 1.2;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .app-actions .brand-action:hover,
+    .app-actions .brand-action:focus {
+      color: #fff;
+      background: rgba(255,255,255,.18);
+      border-color: rgba(255,255,255,.7);
+    }
+    /* The switch and the 'Create new version' button are now rendered into
+       a uiOutput() slot rather than placed directly, so one is showing at
+       a time (see the WHY comment on edit_mode_switch()'s `value` arg).
+       shiny-html-output's own display is block; left alone that breaks the
+       single centre line .app-actions' align-items: center establishes for
+       its direct children, because the switch/button inside it would then
+       be centred within their own block instead of against their brandbar
+       siblings. */
+    .app-actions > .shiny-html-output { display: flex; align-items: center; }
     /* edit_mode_switch()'s bslib::input_switch() renders
        .form-group.shiny-input-container > .bslib-input-switch.form-switch,
        a wrapper shaped for a standalone form rather than for sitting inline
@@ -122,8 +155,11 @@ bi_css <- function() {
         flex-wrap: wrap;
       }
       /* Keep the switch at its own intrinsic size instead of stretching or
-         shrinking when the actions row wraps onto a second line. */
-      .app-actions .form-switch { flex: 0 0 auto; }
+         shrinking when the actions row wraps onto a second line. Same
+         reasoning applies to the button that replaces it
+         (create_new_version_button()) before a new version exists. */
+      .app-actions .form-switch,
+      .app-actions .brand-action { flex: 0 0 auto; }
     }
 
     /* Status chips */
@@ -624,6 +660,48 @@ bi_css <- function() {
     .inspect-hl-table td.inspect-hl-row { background: #fff; color: var(--bi-grey); white-space: nowrap; }
     .inspect-details { margin-top: 4px; }
     .inspect-details > summary { cursor: pointer; color: var(--bi-grey); font-size: .82rem; margin-bottom: 6px; }
+
+    /* Busy buttons (see click_guard_script(), ui_components.R).
+       Two classes, because the swallowing of repeat clicks starts on the
+       first click but the LOOK is delayed ~120ms: .dta-busy is the functional
+       state, .dta-busy-shown is the visible one. A button whose work finishes
+       inside that window is released without ever having flashed a spinner.
+
+       Deliberately NOT `pointer-events: none`, which is the obvious way to
+       write this and is wrong: it takes the button out of hit-testing
+       altogether, so the second click of a double-click does not land on the
+       button and get cancelled -- it lands on whatever is BEHIND the button,
+       which in a toolbar can be another control. Measured in the browser: the
+       repeat click arrived retargeted rather than swallowed. Cancelling the
+       event on the button itself, in the capture-phase listener, is what
+       keeps it from reaching anything at all. */
+    .dta-busy { cursor: progress; }
+    .dta-busy-shown {
+      position: relative;
+      /* Hides the label AND the icon (font icons draw with color), leaving
+         the button's own width and background untouched so nothing reflows
+         under the pointer. The spinner below needs its own colour as a
+         result: currentColor is transparent here. */
+      color: transparent !important;
+    }
+    .dta-busy-shown { --dta-busy-ink: var(--bi-ink); }
+    .dta-busy-shown.btn-primary, .dta-busy-shown.btn-secondary,
+    .dta-busy-shown.btn-success, .dta-busy-shown.btn-danger,
+    .dta-busy-shown.btn-warning, .dta-busy-shown.btn-info { --dta-busy-ink: #fff; }
+    .dta-busy-shown::after {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: .9em; height: .9em; margin: -.45em 0 0 -.45em;
+      border: 2px solid var(--dta-busy-ink);
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: dta-busy-spin .6s linear infinite;
+    }
+    @keyframes dta-busy-spin { to { transform: rotate(360deg); } }
+    /* A spinner is the only feedback these buttons give, so it stays visible
+       when motion is reduced -- it just stops turning. */
+    @media (prefers-reduced-motion: reduce) {
+      .dta-busy-shown::after { animation: none; opacity: .55; }
+    }
     "))
 }
 

@@ -550,10 +550,12 @@
 #' @title Human-Readable "Should Be" Text for a Column Spec Violation
 #' @description
 #' Every columnspec keyword this package's validator emits (`required`,
-#' `type`, `maxLength`, `enum`, `const`, `pattern` -- see
-#' `dta_columnspec_error_rows()` call sites in `R/columnSpecChecks.R`) puts
+#' `additionalProperties`, `type`, `maxLength`, `enum`, `const`, `pattern` --
+#' see `dta_columnspec_error_rows()` call sites in `R/columnSpecChecks.R`) puts
 #' the constraint's own value in the flattened `columnspec_columnspec`
 #' column (e.g. the allowed values for `enum`, the limit for `maxLength`).
+#' `additionalProperties` is the exception: there is no spec to quote, which is
+#' the entire finding, so its sentence is fixed.
 #' This turns that plus the keyword into one plain-language sentence instead
 #' of surfacing the validator's generic message.
 #' @param row1 A one-row data.frame: the first row of one message's
@@ -588,6 +590,7 @@
 
   switch(kw,
     required = "The value must be present (not missing).",
+    additionalProperties = "The specs declare no such column; it must not be present.",
     type = paste0("Must be of type: ", gsub(",", ", ", spec_text, fixed = TRUE), "."),
     maxLength = paste0("Must be at most ", spec_text, " character(s)."),
     enum = paste0("Must be one of: ", spec_text_prose, "."),
@@ -607,6 +610,12 @@
   data_val <- if ("columnspec_data" %in% names(row1)) row1[["columnspec_data"]] else NA
 
   if (identical(kw, "required") || is.na(data_val) || !nzchar(as.character(data_val))) {
+    # `additionalProperties` reaches this through the NA `data` test, not the
+    # keyword test, and lands on the same text -- which reads backwards for a
+    # column that is emphatically present. Name what was actually found.
+    if (identical(kw, "additionalProperties")) {
+      return("(an undeclared column)")
+    }
     return("(missing / not present)")
   }
   .report_html_escape(as.character(data_val))

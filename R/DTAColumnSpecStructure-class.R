@@ -99,7 +99,11 @@ method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
 #' @name as_json_schema_type
 #' @param x An object of class DTAColumnSpecStructure.
 #' @export
-if (!exists("as_json_schema_type", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("as_json_schema_type", mode = "function", inherits = FALSE)) {
   as_json_schema_type <- new_generic("as_json_schema_type", "x")
 }
 method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
@@ -112,7 +116,7 @@ method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
 #' @name as_json_schema
 #' @title as_json_schema
 #' @export
-if (!exists("as_json_schema", mode = "function")) {
+if (!exists("as_json_schema", mode = "function", inherits = FALSE)) {
   as_json_schema <- new_generic("as_json_schema", "x")
 }
 
@@ -152,7 +156,7 @@ method(names, DTAColumnSpecStructure) <- function(x) {
 #' prints info of the column spec structure
 #' @name print_info
 #' @export
-if (!exists("print_info", mode = "function")) {
+if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
 }
 #' @export

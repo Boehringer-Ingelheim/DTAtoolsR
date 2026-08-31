@@ -15,6 +15,7 @@ A data frame of errors, or \code{NULL} when the structure is sound.
 \description{
 Renders structural findings in the same shape the per-row column spec axis uses,
 so a caller that stopped early still receives a recognisable error frame.
-Row is \code{NA}: the finding is about the file, not about any row in it.
+Both halves of the finding are reported: a declared column the table lacks,
+and a column the table carries that no spec declares.
 }
 \keyword{internal}

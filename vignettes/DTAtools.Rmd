@@ -716,12 +716,15 @@ validation_status(ds_import)[, c(
 The three axes are independent: `n_columnspec_errors` and `n_rule_errors` are `0`,
 `n_import_errors` is `1`, and `ok` is `FALSE`.
 
-> **Reading the console output.** `check()` prints a per-axis report for the
-> column spec and rule passes but not for the import pass, so a table that fails on
-> the import axis alone shows `Table format, length, pattern, and values are
-> valid` followed by `0 of 1 table valid`. Consult `n_import_errors` — or
-> `messages()` — rather than the banner when a table fails for no visible
-> reason.
+> **Reading the console output.** `check()` reports all three axes, each under
+> its own heading. The column spec axis prints one line per check kind —
+> presence, format, length, values, pattern — so a failure names the check that
+> failed and the columns it failed in, and a pass says which checks actually
+> ran. A check no column declares reports as *not applicable* rather than as a
+> pass; one the scan could not settle — a table with no rows, a column the table
+> does not have, a `fail_fast` run that stopped early — reports as *not
+> checked*. The rule axis prints one line per rule, and the import axis names
+> the row, column, raw text and declared type of every value that did not fit.
 
 ### Finding the value that caused it
 

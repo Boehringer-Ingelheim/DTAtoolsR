@@ -614,6 +614,30 @@ the suggested packages **shiny**, **bslib** and **DT**.
 run_dta_app()
 ```
 
+### Private templates
+
+The `dta-template.yaml` files packaged in `inst/extdata/templates` are
+examples only — a real Data Transfer Specification names a real supplier and
+real contacts, and must never live in an open-source package. `run_dta_app()`
+can instead load its "Create new from template" family from a private git
+repository, an internal R package, or a local directory, configured entirely
+through environment variables. On Posit Connect, one content variable is
+enough to switch the app to your own private templates:
+
+```r
+DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
+```
+
+`create_template_repo()` scaffolds a new private template repository to point
+that variable at — a small, cross-referencing worked example of the four
+template kinds plus a ready-to-run validation CI workflow, not a blank
+directory to fill in from nothing.
+
+See the [private templates vignette](vignettes/private-templates.Rmd)
+(`vignette("private-templates")`) for the full variable reference, the
+`dir:`/`pkg:`/`git:` source grammar, authoring creation and dataset templates,
+party profiles, versioning, and provenance/rebase.
+
 ## YAML Column Format
 
 Column specifications can contain:

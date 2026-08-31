@@ -29,6 +29,14 @@
 #'
 #' \code{@import_issues} is deliberately not exported: it is a runtime record of
 #' what was lost while coercing the input, not part of the specification.
+#' \code{@template} IS exported (when non-empty): it is a provenance record that
+#' must survive a save/reload cycle so the rebase feature can trust it later.
+#'
+#' This method is hand-written field by field rather than iterating S7
+#' properties, so it does NOT pick up a new \code{DTAMetaData} property
+#' automatically. Adding a property to the class without adding it here means
+#' it is silently dropped on the next save -- if you add a property, add it
+#' to this function too.
 #'
 #' @param x An object of class DTAMetaData
 #' @param ... Additional arguments (not used)
@@ -83,6 +91,12 @@ method(as.list, DTAMetaData) <- function(x, ...) {
   # Add authorized_for_corrections if present
   if (!is.null(x@authorized_for_corrections)) {
     result$authorized_for_corrections <- x@authorized_for_corrections
+  }
+
+  # Add template (machine-owned provenance) if present. Unlike import_issues,
+  # this MUST round-trip: it is what the rebase feature will trust.
+  if (length(x@template) > 0) {
+    result$template <- x@template
   }
 
   result

@@ -1,0 +1,77 @@
+# -----------------------------------------------------------------------------
+# CI for a PRIVATE DTAtools template repository.
+#
+# Copy this file to `.github/workflows/validate-templates.yml` in the
+# repository that holds your own `*.dta-template.yaml` /
+# `*.dta-dataset-template.yaml` / `*.dta-party.yaml` files. It checks out that
+# repository, installs DTAtools, and runs `validate_template(".", strict =
+# TRUE)` -- the same structural checks (and, as a final step, an actual
+# dry-run build of every non-abstract creation template) the bundled Shiny
+# app's own "Create new from template" picker relies on, without starting the
+# app. `strict = TRUE` makes `validate_template()` raise an error naming every
+# problem found whenever any of them is severity "error", which is what turns
+# this workflow red.
+#
+# Production for this repository is Bitbucket Data Center, mirrored to GitHub
+# for CI (GitHub Actions has no equivalent running against Bitbucket Data
+# Center directly). Two ready-made translations ship alongside this file, so
+# there is no need to hand-port it -- `create_template_repo(path, ci = ...)`
+# writes whichever you ask for:
+#
+#   Jenkinsfile               Bitbucket SERVER / DATA CENTER. This is the one
+#                             that applies to the production deployment above:
+#                             Bitbucket Pipelines is a Bitbucket CLOUD feature
+#                             and Server / Data Center simply does not have it,
+#                             so a Data Center repository needs Jenkins (or
+#                             Bamboo) to run this check at all.
+#
+#   bitbucket-pipelines.yml   Bitbucket CLOUD only.
+#
+# validate_template() itself has no GitHub-specific behaviour, so the only
+# difference between any of these CI systems is how each one runs an R script
+# inside a container.
+# -----------------------------------------------------------------------------
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+name: validate-templates
+
+jobs:
+  validate-templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: r-lib/actions/setup-r@v2.12.1
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2.12.1
+        with:
+          # DTAtools' own Imports (yaml, cli, tools, stats, utils, R.utils,
+          # rlang, ...) are pulled in automatically by installing DTAtools
+          # itself below; nothing extra is declared here.
+          packages: none
+
+      # ---------------------------------------------------------------------
+      # PLACEHOLDER: install DTAtools from your internal package repository.
+      # This is deliberately NOT filled in -- the source (an internal
+      # Artifactory/RSPM mirror, a private GitHub Enterprise remote via
+      # remotes::install_github(), a Bitbucket Data Center remote via
+      # remotes::install_git(), or a pre-built package baked into a custom
+      # runner image) is specific to your organisation. Replace the line
+      # below with whichever of those applies. A couple of common shapes:
+      #
+      #   Rscript -e 'remotes::install_git("https://bitbucket.example.com/scm/proj/DTAtoolsR.git")'
+      #   Rscript -e 'install.packages("DTAtools", repos = "https://internal-rspm.example.com")'
+      # ---------------------------------------------------------------------
+      - name: Install DTAtools (placeholder -- replace with your internal source)
+        run: |
+          Rscript -e 'stop("Replace this step with an install of DTAtools from your internal package repository.")'
+
+      - name: Validate templates
+        run: Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'

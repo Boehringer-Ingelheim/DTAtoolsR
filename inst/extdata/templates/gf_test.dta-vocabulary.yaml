@@ -1,0 +1,14 @@
+kind: dta_vocabulary
+id: gf_test
+version: "1.0"
+label: Genomic measurement tests
+description: >-
+  Measurements reported in the Genomic Findings domain. Each term carries both
+  halves of an SDTM code/decode pair: the `code` is the short name that belongs
+  in GFTESTCD, and the `label` is the full name that belongs in GFTEST. One
+  vocabulary drives both columns, so the two can never drift apart.
+type: text
+terms:
+  - code: TRNSCPTN
+    label: Transcription
+    description: Transcription measurement, reported per reference sequence.

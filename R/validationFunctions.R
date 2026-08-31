@@ -14,10 +14,19 @@
 #' returned error list additionally carries `rules_valid` and `rule_errors`, and
 #' any rule violations are raised as a warning so they cannot go unnoticed while
 #' the column spec errors are being fixed.
+#'
+#' The column spec axis is reported per check kind -- presence, extra columns,
+#' format, length, values and pattern -- rather than as one verdict, so a
+#' failure names the check that failed and a pass says which checks actually
+#' ran. The table's columns must be EXACTLY the declared ones: a column the
+#' specs do not describe fails the axis just as an absent declared column does. A check no
+#' column declares reports as `not_applicable`; one the run could not settle
+#' reports as `not_checked`. Neither is a pass.
 #' @return Transformed and checked table (a data.frame) if valid. If the table
-#'   has column spec errors, returns a list with `summarised_error`, `full_error`,
-#'   `rules_valid` and `rule_errors`. If the schema is valid but rules are
-#'   violated, aborts.
+#'   has column spec errors, returns a list with `summarised_error`,
+#'   `full_error`, `columnspec_checks` (the per-check breakdown described
+#'   above), `rules_valid` and `rule_errors`. If the schema is valid but rules
+#'   are violated, aborts.
 #' @export
 # TODO: consider moving `validate_table()` into DTADataSet-class.R.
 validate_table <- function(specs, table, verbose = TRUE) {
@@ -32,6 +41,10 @@ validate_table <- function(specs, table, verbose = TRUE) {
 
   if (!isTRUE(details$columnspec_valid)) {
     columnspec_errors <- details$columnspec_errors
+    # The per-check breakdown travels with the errors it summarises, so a caller
+    # holding the returned list can say which checks failed without re-deriving
+    # it from the keyword column.
+    columnspec_errors$columnspec_checks <- details$columnspec_checks
     columnspec_errors$rules_valid <- isTRUE(details$rules_valid)
     columnspec_errors$rule_errors <- details$rule_errors
     columnspec_errors$import_valid <- details$import_valid
@@ -111,14 +124,60 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   # payload handed to the validator bounded. Nothing is serialised now, so
   # neither is needed, and the whole-column form is what a streaming
   # implementation can later push into a scan.
-  schema_result <- dta_columnspec_errors(specs, table)
+  #
+  # Compiled here rather than inside `dta_columnspec_errors()` because the
+  # per-check report needs the same schemas to say which constraints the specs
+  # declare at all; deriving them twice would pay for several S7 dispatches per
+  # column to obtain the identical answer.
+  columnspec_schemas <- dta_compile_columnspec_schemas(specs)
+  schema_result <- dta_columnspec_errors(specs, table, schemas = columnspec_schemas)
   summarised_error <- schema_result$summarised_error
   full_error <- schema_result$full_error
+
+  # A column the specs do not declare. `dta_columnspec_errors()` iterates the
+  # SPECS, so it cannot report one: an undeclared column is not a constraint
+  # that failed, it is a column the loop never visits. Decided here from the
+  # names, exactly as the streaming path decides it from the header, so that
+  # both paths reach the same verdict on the same table.
+  unexpected_error <- dta_unexpected_column_errors(
+    dta_structure_findings(specs, names(table))
+  )
+  if (!is.null(unexpected_error)) {
+    full_error <- if (is.null(full_error)) {
+      unexpected_error
+    } else {
+      rbind(full_error, unexpected_error)
+    }
+    rownames(full_error) <- NULL
+    # Re-derived from the whole frame rather than appended to: the summary folds
+    # the object-level keywords together, so it is not the concatenation of the
+    # two summaries taken separately.
+    summarised_error <- dta_summarise_columnspec_errors(full_error)
+  }
+
   has_columnspec_errors <- !is.null(full_error) && nrow(full_error) > 0
 
-  if (!has_columnspec_errors && isTRUE(verbose)) {
-    cli::cli_alert_success(
-      "Table format, length, pattern, and values are valid."
+  # An empty table settles exactly two checks, both of them about its shape:
+  # whether the columns its specs declare are there, and whether it carries any
+  # the specs do not. Both are decidable from the column names alone, and they
+  # are what make an empty table meaningful -- a correctly shaped table with no
+  # rows says "the analysis ran and found nothing", where a table missing half
+  # its columns says something went wrong upstream.
+  #
+  # The value checks -- type, length, pattern, permitted values -- are
+  # properties of values, and there are none, so they report as unsettled
+  # rather than as a pass they never earned.
+  scanned_rows <- nrow(table) > 0
+  columnspec_checks <- dta_columnspec_check_summary(
+    columnspec_schemas,
+    tally = dta_columnspec_error_tally(full_error),
+    settled = if (scanned_rows) NULL else c("required", "additionalProperties")
+  )
+
+  if (isTRUE(verbose)) {
+    dta_report_columnspec_checks(
+      columnspec_checks,
+      unchecked_reason = "the table has no rows"
     )
   }
 
@@ -211,6 +270,11 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
       summarised_error = summarised_error,
       full_error = full_error
     ),
+    # Which of the column spec checks passed, failed, never applied, or could
+    # not be settled. The aggregate count above says how much went wrong; this
+    # says what kind, and -- for a check with no violations -- whether that is a
+    # pass or the absence of a check.
+    columnspec_checks = columnspec_checks,
     rule_results = rule_results,
     rule_errors = rule_errors,
     import_errors = import_errors,
@@ -354,6 +418,17 @@ dta_migrate_validation_details <- function(details) {
   details$result_version <- 1L
   details
 }
+
+# NOTE on `columnspec_checks`, which is NOT migrated above. It was added under
+# the existing `result_version = 2L`, so an artifact written by an earlier build
+# carries that version and takes the early return without gaining the field. No
+# placeholder is invented for it, deliberately: the per-check breakdown needs the
+# schemas to say which constraints a spec declared at all, and those are not in
+# the artifact. A reconstruction from `full_error` alone could distinguish
+# "failed" from "no violations recorded", but not "passed" from "never checked"
+# -- which is the one distinction the field exists to make. Consumers therefore
+# treat an absent `columnspec_checks` as unknown, and `check(force = TRUE)`
+# produces it.
 
 
 #' @title Tag Validation Details for Coercion

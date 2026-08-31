@@ -56,3 +56,6 @@ CHANGELOG.md
 ^\.claude$
 ^\.claude/
 ^\.graphifyignore$
+
+# Planning directory — never part of the shipped package
+^thoughts$

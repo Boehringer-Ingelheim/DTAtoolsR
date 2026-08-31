@@ -187,7 +187,11 @@ method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
 #' Converts a DTAColumnSpecStructure to a JSON Schema type.
 #' @name as_json_schema_type
 #' @export
-if (!exists("as_json_schema_type", mode = "function")) {
+# `inherits = FALSE` scopes this lookup to this package's namespace; without
+# it, an attached package exporting a plain function of the same name would
+# make this guard skip creating the generic. See `R/00_helpers.R` for the
+# full account.
+if (!exists("as_json_schema_type", mode = "function", inherits = FALSE)) {
   as_json_schema_type <- new_generic("as_json_schema_type", "x")
 }
 method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
@@ -229,7 +233,7 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 #' as_r_type(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
 #' @name as_r_type
 #' @export
-if (!exists("as_r_type", mode = "function")) {
+if (!exists("as_r_type", mode = "function", inherits = FALSE)) {
   as_r_type <- new_generic("as_r_type", "x")
 }
 

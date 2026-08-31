@@ -857,6 +857,16 @@ test_that("YAML round-trip: to_yaml_text -> read_yaml_text preserves dataset/col
     app_fn("dta_rules_overview")(dta2, "clinical_data")$id,
     app_fn("dta_rules_overview")(dta, "clinical_data")$id
   )
+
+  # app_fixture_dta() reads inst/extdata/clinical_dta.yaml, which carries a
+  # full metadata block (title, version, receiver/supplier contacts,
+  # transmission dates, ...), so this is not a vacuous comparison of two empty
+  # lists: it is the gap that would let a new DTAMetaData property silently
+  # fail to round-trip through as.list()/to_yaml_text()/read_yaml_text().
+  expect_equal(
+    as.list(DTAtools::metadata(dta2)),
+    as.list(DTAtools::metadata(dta))
+  )
 })
 
 # ---- column editor read-only helpers ----------------------------------------
