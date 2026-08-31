@@ -3,9 +3,9 @@
 # This replaces the chunk -> jsonlite::toJSON -> ajv-on-V8 loop that previously
 # dominated validation cost (~95% of total runtime, measured; see
 # benchmarks/bench_validation.R). The constraint vocabulary the package can
-# emit is only five keywords wide -- type, maxLength, enum/const, pattern and
-# required -- so the validator was doing a general-purpose job for a closed,
-# small problem.
+# emit is only six keywords wide -- type, maxLength, enum/const, pattern,
+# required and additionalProperties -- so the validator was doing a
+# general-purpose job for a closed, small problem.
 #
 # Constraint DERIVATION is deliberately unchanged: each column's constraints
 # still come from `as_json_schema()`, which remains the single source of truth
@@ -431,9 +431,9 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
 #' @title Group Schema Violations into a Summary
 #' @description
 #' Collapses repeated violations of the same constraint into one row spanning
-#' the affected rows. A missing required column is summarised by constraint
-#' alone, because reporting a row range for a column that is absent everywhere
-#' adds nothing.
+#' the affected rows. An object-level finding -- a missing required column, or a
+#' column no spec describes -- is summarised by constraint alone, because
+#' reporting a row range for a fact about the table's shape adds nothing.
 #' @param full_error A data frame of violations.
 #' @return A summarised data frame.
 #' @importFrom rlang .data
@@ -443,9 +443,22 @@ dta_summarise_columnspec_errors <- function(full_error) {
     return(NULL)
   }
 
+  # `required` alone triggers the object-level summary, exactly as it always
+  # has: a declared column that is absent makes a row range for the rest of the
+  # table beside the point.
+  #
+  # An UNDECLARED column must NOT trigger it. It says nothing about the values
+  # in the declared columns, so suppressing their summary on account of it would
+  # hide real per-value findings behind a stray column -- and a stray column is
+  # far commoner in practice than a missing one. It flows through the grouped
+  # aggregation below instead, where its `NA` row yields an `NA` row range: the
+  # honest answer for a finding about the header rather than about a row.
+  #
+  # It is still listed by name when a required column is also missing, because
+  # that branch reports every object-level finding it has.
   if (any(full_error$keyword == "required")) {
-    required <- full_error[full_error$keyword == "required", c("keyword", "message"), drop = FALSE]
-    out <- unique(required)
+    object_level <- full_error$keyword %in% c("required", "additionalProperties")
+    out <- unique(full_error[object_level, c("keyword", "message"), drop = FALSE])
     rownames(out) <- NULL
     return(out)
   }
@@ -464,8 +477,8 @@ dta_summarise_columnspec_errors <- function(full_error) {
 
 # ---- per-check reporting ----------------------------------------------------
 #
-# The constraint vocabulary is closed and six keywords wide, so "did the table
-# pass the column specs" can be answered per check kind rather than as one
+# The constraint vocabulary is closed and seven keywords wide, so "did the
+# table pass the column specs" can be answered per check kind rather than as one
 # lumped verdict. That is what this section builds: a fixed-shape summary of the
 # column spec axis, carried on the details list and rendered to the console by
 # both the materialising and the streaming path.
@@ -489,8 +502,11 @@ dta_summarise_columnspec_errors <- function(full_error) {
 #' @keywords internal
 dta_columnspec_check_kinds <- function() {
   data.frame(
-    check = c("presence", "format", "length", "values", "values", "pattern"),
-    keyword = c("required", "type", "maxLength", "enum", "const", "pattern"),
+    check = c("presence", "extra", "format", "length", "values", "values", "pattern"),
+    keyword = c(
+      "required", "additionalProperties",
+      "type", "maxLength", "enum", "const", "pattern"
+    ),
     stringsAsFactors = FALSE
   )
 }
@@ -545,6 +561,13 @@ dta_columnspec_declared_columns <- function(schemas) {
   # `dta_columnspec_errors()` reports the missing-column error before it looks
   # at the schema at all.
   out$required <- unique(column_names[named])
+  # Not a per-column declaration: no column spec says "there shall be no other
+  # columns". Closedness is a property of the COLLECTION, in force whenever it
+  # declares any column at all -- so its denominator is every declared column.
+  # That is also what makes a collection declaring nothing report
+  # `not_applicable` here rather than certifying a check that could never have
+  # found anything: a spec naming no column cannot call any column unexpected.
+  out$additionalProperties <- unique(column_names[named])
   out$type <- declares(function(s) !is.null(s$type))
   out$maxLength <- declares(function(s) !is.null(s$maxLength) && !anyNA(s$maxLength))
   out$enum <- declares(function(s) !is.null(s$enum))
@@ -685,8 +708,11 @@ dta_columnspec_check_summary <- function(schemas,
     keywords,
     function(kw) {
       # Presence is decidable for every declared column; an absent one is this
-      # check's finding, not its blind spot.
-      if (identical(kw, "required")) {
+      # check's finding, not its blind spot. Closedness is decidable on the same
+      # terms -- whether the table carries a column no spec describes does not
+      # depend on which declared columns turned up -- so it is not narrowed by
+      # `absent` either.
+      if (kw %in% c("required", "additionalProperties")) {
         length(declared[[kw]])
       } else {
         length(setdiff(declared[[kw]], absent))
@@ -745,6 +771,7 @@ dta_columnspec_check_summary <- function(schemas,
 # `check` column of `dta_columnspec_check_kinds()`, so the two cannot drift.
 `__DTAtools_columnspec_check_labels__` <- c(
   presence = "Presence",
+  extra = "Extra columns",
   format = "Format",
   length = "Length",
   values = "Values",
@@ -753,6 +780,9 @@ dta_columnspec_check_summary <- function(schemas,
 
 `__DTAtools_columnspec_check_absent__` <- c(
   presence = "the specs declare no columns",
+  # Same reason, different consequence: a collection declaring no column cannot
+  # name one missing, and equally cannot call one unexpected.
+  extra = "the specs declare no columns",
   format = "no column spec declares a type",
   length = "no column spec declares a length",
   values = "no column spec declares a value list",
@@ -809,6 +839,14 @@ dta_report_columnspec_checks <- function(checks,
         cli::cli_alert_danger(
           "{title} check failed: {n_columns} of {n_declared} declared column{?s} missing: {.field {columns}}"
         )
+      } else if (identical(label, "extra")) {
+        # Not phrased against `n_declared`: an undeclared column is not one of
+        # the declared ones that went wrong, so "2 of 14" would name the wrong
+        # denominator. The count that means something here is how many columns
+        # the table carries that nothing describes.
+        cli::cli_alert_danger(
+          "{title} check failed: {n_columns} column{?s} in the table {?is/are} not described by the specs: {.field {columns}}"
+        )
       } else {
         # `cli::qty()` sits between the rendered count and the noun, not before
         # the count: cli takes the quantity from the LAST interpolation ahead of
@@ -858,6 +896,14 @@ dta_report_columnspec_checks <- function(checks,
       outcome[[i]] <- "passed"
       if (identical(label, "presence")) {
         cli::cli_alert_success("{title} check passed: all {n_declared} declared column{?s} present")
+      } else if (identical(label, "extra")) {
+        # Not phrased as a count against `n_declared`: a column a RULE names is
+        # described by the specification too, so it is not undeclared -- and
+        # "no column beyond the 3 declared" would misdescribe a sound table
+        # that legitimately carries a fourth.
+        cli::cli_alert_success(
+          "{title} check passed: every column is described by the specs"
+        )
       } else if (n_checked < n_declared) {
         # The skipped columns are absent from the table, which the presence
         # check reports as its own failure. Naming the real denominator here

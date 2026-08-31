@@ -4756,6 +4756,7 @@ server <- function(input, output, session) {
         r[["columnspec_columnspec"]]
       )),
       required = "the value must be present (not missing)",
+      additionalProperties = "no such column to be present: the specs do not declare it",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
     )
   }
@@ -4943,10 +4944,20 @@ server <- function(input, output, session) {
         if (nzchar(smsg)) div(class = "inspect-desc-detail", smsg)
       )
       expected_ui <- div(class = "inspect-should", columnspec_expected_text(r))
-      aval <- .first_nonempty(
-        r[["columnspec_data"]],
-        if (nzchar(col)) r[[paste0("context_", col)]] else NULL
-      )
+      # An undeclared column carries no offending VALUE -- its presence is the
+      # whole finding -- so `columnspec_data` is NA and the fallbacks below find
+      # nothing either. Rendered unguarded that reads "(empty)" for a column
+      # that is emphatically present, which is exactly backwards. Name what was
+      # actually found instead, as .report_columnspec_actual_text() does for the
+      # HTML report.
+      aval <- if (identical(kw, "additionalProperties")) {
+        "(an undeclared column)"
+      } else {
+        .first_nonempty(
+          r[["columnspec_data"]],
+          if (nzchar(col)) r[[paste0("context_", col)]] else NULL
+        )
+      }
       arow <- .first_nonempty(r[["columnspec_row"]], r[["context_.row"]])
       loc <- paste0(
         if (nzchar(col)) paste0("column ", col) else "",

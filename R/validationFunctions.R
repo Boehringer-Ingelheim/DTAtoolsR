@@ -15,9 +15,11 @@
 #' any rule violations are raised as a warning so they cannot go unnoticed while
 #' the column spec errors are being fixed.
 #'
-#' The column spec axis is reported per check kind -- presence, format, length,
-#' values and pattern -- rather than as one verdict, so a failure names the
-#' check that failed and a pass says which checks actually ran. A check no
+#' The column spec axis is reported per check kind -- presence, extra columns,
+#' format, length, values and pattern -- rather than as one verdict, so a
+#' failure names the check that failed and a pass says which checks actually
+#' ran. The table's columns must be EXACTLY the declared ones: a column the
+#' specs do not describe fails the axis just as an absent declared column does. A check no
 #' column declares reports as `not_applicable`; one the run could not settle
 #' reports as `not_checked`. Neither is a pass.
 #' @return Transformed and checked table (a data.frame) if valid. If the table
@@ -131,11 +133,34 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   schema_result <- dta_columnspec_errors(specs, table, schemas = columnspec_schemas)
   summarised_error <- schema_result$summarised_error
   full_error <- schema_result$full_error
+
+  # A column the specs do not declare. `dta_columnspec_errors()` iterates the
+  # SPECS, so it cannot report one: an undeclared column is not a constraint
+  # that failed, it is a column the loop never visits. Decided here from the
+  # names, exactly as the streaming path decides it from the header, so that
+  # both paths reach the same verdict on the same table.
+  unexpected_error <- dta_unexpected_column_errors(
+    dta_structure_findings(specs, names(table))
+  )
+  if (!is.null(unexpected_error)) {
+    full_error <- if (is.null(full_error)) {
+      unexpected_error
+    } else {
+      rbind(full_error, unexpected_error)
+    }
+    rownames(full_error) <- NULL
+    # Re-derived from the whole frame rather than appended to: the summary folds
+    # the object-level keywords together, so it is not the concatenation of the
+    # two summaries taken separately.
+    summarised_error <- dta_summarise_columnspec_errors(full_error)
+  }
+
   has_columnspec_errors <- !is.null(full_error) && nrow(full_error) > 0
 
-  # An empty table settles exactly one check: whether the columns its specs
-  # declare are there. That is decidable from the column names alone, and it is
-  # what makes an empty table meaningful -- a correctly shaped table with no
+  # An empty table settles exactly two checks, both of them about its shape:
+  # whether the columns its specs declare are there, and whether it carries any
+  # the specs do not. Both are decidable from the column names alone, and they
+  # are what make an empty table meaningful -- a correctly shaped table with no
   # rows says "the analysis ran and found nothing", where a table missing half
   # its columns says something went wrong upstream.
   #
@@ -146,7 +171,7 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
   columnspec_checks <- dta_columnspec_check_summary(
     columnspec_schemas,
     tally = dta_columnspec_error_tally(full_error),
-    settled = if (scanned_rows) NULL else "required"
+    settled = if (scanned_rows) NULL else c("required", "additionalProperties")
   )
 
   if (isTRUE(verbose)) {
