@@ -369,6 +369,29 @@ test_that("loading the fixture leaves the document locked, and edit_mode = TRUE 
   })
 })
 
+test_that("output$edit_gate is empty on the landing page, and empties again on Start over", {
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    # Landing page: nothing is loaded, so neither the edit_mode switch nor the
+    # Create-new-version button belongs in the brandbar. renderUI() returning
+    # NULL clears the slot, which is why the output itself is NULL here rather
+    # than an empty tag.
+    expect_null(rv$structure)
+    expect_null(output$edit_gate)
+
+    load_fixture(session)
+    expect_match(render_html(output$edit_gate$html),
+      'id="create_new_version"',
+      fixed = TRUE
+    )
+
+    # "Start over" returns to the landing page; the slot empties with it.
+    session$setInputs(confirm_reset = 1)
+    expect_null(rv$structure)
+    expect_null(output$edit_gate)
+  })
+})
+
 test_that("output$edit_gate renders the Create-new-version button while locked, and the switch once unlocked", {
   clean_session_file()
   shiny::testServer(app_server_dir(), {
