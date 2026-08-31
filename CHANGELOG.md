@@ -28,6 +28,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   itself — which a bare `styler::style_pkg()` never descends into. The check
   now also names every unstyled file rather than aborting on the first.
 
+### Fixed
+
+- **The "Edit mode" switch no longer appears in the brandbar on the landing
+  page.** There is no document there to edit, so the slot now stays empty
+  until a specification is loaded or created, and empties again on "Start
+  over". Nothing changes once a document is open: a loaded document still
+  offers "Create new version" until it is versioned, and the switch after
+  that.
+
 ## [0.24.0] - 2026-08-31
 
 ### Added

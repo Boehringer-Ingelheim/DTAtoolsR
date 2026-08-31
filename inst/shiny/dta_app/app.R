@@ -444,9 +444,25 @@ server <- function(input, output, session) {
     ignoreInit = TRUE
   )
 
-  # The brandbar slot: the edit_mode switch while the document is free to
-  # edit, or the "Create new version" button while it is locked (see the
-  # WHY comment on editing() above).
+  # The brandbar slot: empty on the landing page, then the edit_mode switch
+  # while the document is free to edit, or the "Create new version" button
+  # while it is locked (see the WHY comment on editing() above).
+  #
+  # The landing page has nothing to edit, so neither control means anything
+  # there. rv$structure is the same landing-vs-workspace test output$main
+  # makes, read the same way: under isolate(), behind a dependency on
+  # rv$doc_token, which is bumped by exactly the three assignments that can
+  # change the answer (apply_loaded, confirm_reset, restore_session) and by
+  # nothing that merely mutates a loaded document. Depending on rv$structure
+  # itself would rebuild this control every time a dataset was added,
+  # removed or renamed -- the same mid-click rebuild the isolate() below
+  # avoids.
+  #
+  # Un-rendering the switch does not clear input$edit_mode (Shiny keeps the
+  # value of a removed control), but every path that leaves or enters the
+  # landing page already resets it: confirm_reset and apply_loaded both call
+  # update_switch(value = FALSE). So nothing stale is left armed behind the
+  # empty slot.
   #
   # input$edit_mode is read under isolate() deliberately -- this output must
   # re-render when rv$version_locked changes (a load, a reset, a successful
@@ -455,7 +471,10 @@ server <- function(input, output, session) {
   # so turning the switch on or off would rebuild the control the user's
   # cursor is sitting on, mid-click.
   output$edit_gate <- renderUI({
-    if (isTRUE(rv$version_locked)) {
+    rv$doc_token
+    if (is.null(isolate(rv$structure))) {
+      NULL
+    } else if (isTRUE(rv$version_locked)) {
       create_new_version_button()
     } else {
       edit_mode_switch(value = isolate(isTRUE(input$edit_mode)))
