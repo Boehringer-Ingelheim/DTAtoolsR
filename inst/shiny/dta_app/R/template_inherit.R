@@ -292,22 +292,6 @@ dta_template_section_state <- function(def, key) {
   "value"
 }
 
-# An explicitly empty COLLECTION still inherits today, while an explicitly
-# empty `base:` replaces. Warn on the gesture that is going to change meaning
-# rather than change it underneath a private template repository with no
-# notice; the flip lands a release later.
-dta_template_warn_empty_collection <- function(section, parent_items) {
-  n <- length(parent_items %||% list())
-  if (n == 0) {
-    return(invisible(NULL))
-  }
-  cli::cli_warn(c(
-    "An empty {.field {section}:} currently inherits the parent's {n} entr{?y/ies}.",
-    i = "In a future release it will mean {.emph none}. Write {.code inherit: none} to mean that now, or omit {.field {section}:} to keep inheriting."
-  ))
-  invisible(NULL)
-}
-
 # Drop options (or party_slots -- see below) with no id / an empty id, from
 # ONE side, warning once with a count rather than once per item. An id is how
 # every other rule here identifies an entry -- same-id merge, `remove:`,
@@ -368,10 +352,15 @@ dta_template_merge_options <- function(parent_opts, child_opts, order = NULL,
     if (length(parsed$verbs$order) == 0 && length(order %||% character(0)) > 0) {
       result <- dta_template_reorder_by_id(result, order, key_of = dta_template_option_key)
     }
-    return(result)
+    return(dta_template_assert_unique_keys(result, section, dta_template_option_key))
   }
 
   child_opts <- dta_template_drop_unidentified(parsed$items, "child")
+  # Checked on the CHILD's own entries, before the merge: setNames() below
+  # keys them by id, so a repeated id shadows its twin and the earlier entry
+  # vanishes without trace. Asserting on the merged result alone would never
+  # see it -- there is only one entry left by then.
+  dta_template_assert_unique_keys(child_opts, section, dta_template_option_key)
 
   parent_ids <- vapply(parent_opts, function(o) as.character(o$id), character(1))
   child_ids <- vapply(child_opts, function(o) as.character(o$id), character(1))
@@ -410,7 +399,7 @@ dta_template_merge_options <- function(parent_opts, child_opts, order = NULL,
     result <- dta_template_reorder_by_id(result, order)
   }
 
-  result
+  dta_template_assert_unique_keys(result, section, dta_template_option_key)
 }
 
 # Identity key for one `datasets:` entry, by precedence: `as:`, else
@@ -451,12 +440,19 @@ dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets
 
   parsed <- dta_template_parse_collection(child_ds, section)
   if (identical(parsed$form, "verbs")) {
-    return(dta_template_apply_collection_verbs(
-      parent_ds, parsed$verbs, section, dta_template_dataset_key
+    return(dta_template_assert_unique_keys(
+      dta_template_apply_collection_verbs(
+        parent_ds, parsed$verbs, section, dta_template_dataset_key
+      ),
+      section, dta_template_dataset_key
     ))
   }
 
   child_ds <- parsed$items
+  # Same reason as `options:` above, and the route that actually defeated a
+  # seal: two child entries under one key, the first leaving the sealed value
+  # alone and the second carrying the value the author really wanted.
+  dta_template_assert_unique_keys(child_ds, section, dta_template_dataset_key)
 
   parent_keys <- vapply(parent_ds, dta_template_dataset_key, character(1))
   child_keys <- vapply(child_ds, dta_template_dataset_key, character(1))
@@ -496,16 +492,170 @@ dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets
     result[[length(result) + 1L]] <- c_entry
   }
 
-  result
+  dta_template_assert_unique_keys(result, section, dta_template_dataset_key)
+}
+
+# -----------------------------------------------------------------------------
+# The governance axis: sealed and required.
+#
+# The merge vocabulary says what a child MAY express. These two say what an
+# ancestor may FORBID and DEMAND. That is a permissions concern rather than a
+# merge one, which is why neither is a merge rule and why they are checked at
+# different moments:
+#
+#   sealed:   at MERGE. A descendant changing a sealed path is wrong the moment
+#             the chain resolves, whatever route the change came in by.
+#   required: at INSTANTIATION (see template_core.R). An abstract parent is
+#             ALLOWED to leave a required path unset -- being required of
+#             someone further down is the entire point -- so a merge-time check
+#             would fire on exactly the templates meant to defer it.
+#
+# Both accumulate as a UNION down the chain and are never subtractive: a child
+# cannot unseal what an ancestor sealed, nor drop an inherited requirement. A
+# template's own `sealed:` binds its DESCENDANTS and not itself, since a seal
+# that bound its declarer would forbid it from writing the very field it seals.
+
+# The identity of one collection entry, whichever collection it came from.
+# `options:`/`party_slots:`/`vocabulary_slots:` key on `id`, `datasets:` on the
+# `as:`/`template:`/`source:`/`name:` precedence -- so try the id first and fall
+# back, rather than making every caller know which collection it is holding.
+dta_template_entry_key <- function(entry) {
+  key <- dta_template_option_key(entry)
+  if (is.na(key)) {
+    key <- dta_template_dataset_key(entry)
+  }
+  key
+}
+
+# Read the value at a dotted path in a template definition, or NULL.
+#
+# list_get_path() (template_core.R) already walks a nested MAPPING, but a
+# template is not all mappings: `options.header.default` addresses a field of an
+# entry inside an unnamed SEQUENCE. This walks both, and resolves a sequence
+# segment with the same identity function the merge and the verbs use, so a path
+# names exactly what `modify:` would name. Any miss at any depth is NULL, which
+# is what makes a path that matches nothing a silently dead seal -- the case
+# validate_template() warns about.
+dta_template_path_get <- function(def, path) {
+  keys <- strsplit(as.character(path), ".", fixed = TRUE)[[1]]
+  current <- def
+  for (key in keys) {
+    if (!is.list(current) || length(current) == 0) {
+      return(NULL)
+    }
+    if (dta_template_is_mapping(current)) {
+      current <- current[[key]]
+      next
+    }
+    entry_keys <- vapply(current, dta_template_entry_key, character(1))
+    hit <- which(!is.na(entry_keys) & entry_keys == key)
+    if (length(hit) == 0) {
+      return(NULL)
+    }
+    current <- current[[hit[[1]]]]
+  }
+  current
+}
+
+# The union of a chain-accumulated path list, with an empty result normalised
+# back to absent so a template that seals nothing carries no empty key around.
+dta_template_union_paths <- function(parent_paths, child_paths) {
+  merged <- union(
+    as.character(parent_paths %||% character(0)),
+    as.character(child_paths %||% character(0))
+  )
+  if (length(merged) == 0) {
+    return(NULL)
+  }
+  merged
+}
+
+# Abort if the child changed anything the PARENT CHAIN sealed.
+#
+# One comparison per sealed path, of the value before and after the merge,
+# rather than a guard inside each merge rule. That is deliberate: a child can
+# reach a field by a `base:` override, a `modify:` verb, a `remove:`, an
+# explicit `null`, or a whole-section replacement, and comparing resolved values
+# catches every one of them without the seal knowing which route was taken --
+# including routes added to the merge after this was written.
+dta_template_check_sealed <- function(parent_def, merged, child_id) {
+  for (path in as.character(parent_def$sealed %||% character(0))) {
+    before <- dta_template_path_get(parent_def, path)
+    after <- dta_template_path_get(merged, path)
+    if (!identical(before, after)) {
+      cli::cli_abort(c(
+        "Template {.val {child_id}} changes {.field {path}}, which an ancestor sealed.",
+        i = "A sealed path is fixed for every descendant. Drop the override here, or
+             unseal it in the template that declares the seal."
+      ))
+    }
+  }
+  invisible(NULL)
+}
+
+# Is the value at a required path actually filled?
+#
+# A blank is NOT a fill. The four states let an author write `key: ""` to mean
+# "present but blank", which is a legitimate answer everywhere else -- but the
+# point of `required:` is that somebody made a real choice, so an empty string
+# fails it exactly as an absent key does.
+dta_template_path_is_filled <- function(value) {
+  if (is.null(value) || length(value) == 0) {
+    return(FALSE)
+  }
+  # Recurse into a list rather than calling any non-empty one filled. The
+  # metadata fields most worth requiring -- `supplier`, `receiver`,
+  # `transmission` -- are lists, so a bare length check would accept
+  # `supplier: {affiliation: ""}` as a real answer: present, structurally
+  # non-empty, and carrying no information whatsoever.
+  if (is.list(value)) {
+    return(any(vapply(value, dta_template_path_is_filled, logical(1))))
+  }
+  if (is.character(value)) {
+    return(any(nzchar(value)))
+  }
+  TRUE
+}
+
+# A collection must not end up holding two entries under the same identity key.
+#
+# This is not a tidiness rule. Every rule in this file addresses an entry BY its
+# key and takes the FIRST match -- same-key merge, `remove:`, `order:`, and the
+# path a seal is compared on. A duplicate therefore makes every entry after the
+# first unreachable, and turns a seal into theatre: a child can leave the sealed
+# entry untouched, append a second one under the same key carrying the value it
+# actually wanted, and the before/after comparison sees only the first and
+# passes. Verified reachable through `datasets:` in the bare list form, whose
+# append step matches each child entry to at most one parent entry and appends
+# the rest unconditionally.
+dta_template_assert_unique_keys <- function(items, section, key_of) {
+  keys <- vapply(items %||% list(), key_of, character(1))
+  keys <- keys[!is.na(keys)]
+  duplicates <- unique(keys[duplicated(keys)])
+  if (length(duplicates) > 0) {
+    n <- length(duplicates)
+    shown <- paste(duplicates, collapse = ", ")
+    cli::cli_abort(c(
+      "{n} duplicated entr{?y/ies} in {.field {section}}: {shown}.",
+      i = "Entries are addressed by identity, so all but the first would be unreachable."
+    ))
+  }
+  invisible(items)
 }
 
 # Apply the four states to one COLLECTION section, deferring the actual merge
 # to `merge_fn(parent_items, child_spec)`.
 #
-# Absent and empty both hand the parent's items back through `merge_fn` with an
+# An ABSENT section hands the parent's items back through `merge_fn` with an
 # empty child rather than returning them raw: that keeps the parent running
 # through dta_template_drop_unidentified() exactly as it always has, so a
 # malformed parent entry is still reported at the same point it used to be.
+#
+# An EMPTY one returns nothing, the same way `base: {}` does. The two used to
+# disagree -- an empty collection inherited while an empty mapping replaced --
+# which is the asymmetry this whole vocabulary exists to remove. To keep the
+# parent's entries, omit the section; to take a subset of them, use
+# `inherit: [ids]`.
 dta_template_merge_collection_section <- function(def, key, parent_items, merge_fn) {
   parent_items <- parent_items %||% list()
   state <- dta_template_section_state(def, key)
@@ -514,13 +664,7 @@ dta_template_merge_collection_section <- function(def, key, parent_items, merge_
     return(NULL)
   }
   if (identical(state, "empty")) {
-    # Release A keeps today's meaning -- an explicitly empty collection still
-    # inherits -- and only warns. Release B returns list() here instead, which
-    # is what the four states say it should do; see the migration note in the
-    # vignette. `base: {}` already behaves that way, and that split is the
-    # whole reason this function exists.
-    dta_template_warn_empty_collection(key, parent_items)
-    return(merge_fn(parent_items, list()))
+    return(list())
   }
   if (identical(state, "absent")) {
     return(merge_fn(parent_items, list()))
@@ -648,6 +792,13 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # content -- neither belongs in the merged shape.
   merged$extends <- NULL
   merged$order <- NULL
+
+  # Sealed is checked against `merged` while it still carries only the PARENT's
+  # seals -- the child's own are unioned in below, and binding a template to its
+  # own seal would forbid it from writing the field it is sealing.
+  dta_template_check_sealed(parent_def, merged, as.character(def$id %||% "<unknown>"))
+  merged$sealed <- dta_template_union_paths(parent_def$sealed, def$sealed)
+  merged$required <- dta_template_union_paths(parent_def$required, def$required)
 
   list(
     def = merged,

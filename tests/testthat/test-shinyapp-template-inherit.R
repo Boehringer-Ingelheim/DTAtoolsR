@@ -500,15 +500,16 @@ for (.section in list(
       expect_length(result$def[[sec$key]], 2)
     })
 
-    test_that(paste0("an explicitly empty ", sec$key, ": still inherits, and warns that it will not"), {
+    test_that(paste0("an explicitly empty ", sec$key, ": empties the section"), {
       child <- four_state_child()
       child[[sec$key]] <- list()
 
-      expect_warning(
-        result <- four_state_resolve(child),
-        "currently inherits the parent"
-      )
-      expect_length(result$def[[sec$key]], 1)
+      result <- four_state_resolve(child)
+
+      expect_length(result$def[[sec$key]], 0)
+      # Still PRESENT, though: empty and dropped are different states, and the
+      # section below asserts the drop.
+      expect_true(sec$key %in% names(result$def))
     })
 
     test_that(paste0("a null ", sec$key, ": drops the section entirely"), {
@@ -665,4 +666,212 @@ test_that("a null inherit: is the same instruction as an empty one", {
   result <- verb_resolve("options", list(inherit = NULL))
 
   expect_length(result, 0)
+})
+
+# ---- sealed ------------------------------------------------------------------
+
+# A seal is enforced by comparing the value at the sealed path before and after
+# the merge, so ONE check covers every route a child could take to the field.
+# These tests exercise the routes separately for exactly that reason: if the
+# implementation ever grows a per-rule guard instead, the route it forgets is
+# the one that fails here.
+
+sealed_resolve <- function(sealed, ...) {
+  parent <- four_state_parent()
+  parent$sealed <- sealed
+  app_fn("resolve_template_inheritance")(
+    four_state_child(...), make_resolver(list(parent = parent))
+  )
+}
+
+test_that("dta_template_path_get() addresses a collection entry by its key", {
+  # The path vocabulary has to reach inside an unnamed sequence, which
+  # list_get_path() cannot do -- that is the whole reason this function exists.
+  fn <- app_fn("dta_template_path_get")
+  def <- four_state_parent()
+
+  expect_equal(fn(def, "options.o1.label"), "P option")
+  expect_equal(fn(def, "base.metadata.title"), "P title")
+  # `datasets:` keys on `as:`, not on an id field.
+  expect_equal(fn(def, "datasets.d1.template"), "dt@1.0")
+  expect_null(fn(def, "options.nope.label"))
+  expect_null(fn(def, "base.metadata.title.deeper"))
+})
+
+test_that("a sealed path cannot be changed by a base: override", {
+  expect_error_message_contains(
+    sealed_resolve("base.metadata.title", base = list(metadata = list(title = "C title"))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed path cannot be changed by a modify: verb", {
+  expect_error_message_contains(
+    sealed_resolve(
+      "options.o1.label",
+      options = list(modify = list(list(id = "o1", label = "Changed")))
+    ),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed entry cannot be dropped by a remove: verb", {
+  expect_error_message_contains(
+    sealed_resolve("options.o1", options = list(remove = "o1")),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed field cannot be cancelled by an explicit null", {
+  expect_error_message_contains(
+    sealed_resolve("base.metadata.header", base = list(metadata = list(header = NULL))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("sealing a whole section forbids adding to it, not just editing it", {
+  expect_error_message_contains(
+    sealed_resolve("options", options = list(add = list(list(id = "o2")))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a seal constrains its own path only, leaving siblings free", {
+  result <- sealed_resolve(
+    "base.metadata.title",
+    base = list(metadata = list(header = "C header"))
+  )
+
+  expect_equal(result$def$base$metadata$title, "P title")
+  expect_equal(result$def$base$metadata$header, "C header")
+})
+
+test_that("a template's own sealed: binds its descendants, not itself", {
+  # A seal that bound its declarer would forbid the template from writing the
+  # very field it is sealing, which would make the feature unusable.
+  parent <- four_state_parent()
+  child <- four_state_child(
+    sealed = "base.metadata.title",
+    base = list(metadata = list(title = "C title"))
+  )
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_equal(result$def$base$metadata$title, "C title")
+  expect_equal(result$def$sealed, "base.metadata.title")
+})
+
+test_that("a seal survives two hops and binds a grandchild", {
+  # The union is what carries it: the middle template neither declares nor
+  # violates the seal, and must still pass it down intact.
+  grandparent <- list(
+    id = "gp", version = "1.0",
+    base = list(metadata = list(title = "GP title")),
+    sealed = "base.metadata.title"
+  )
+  parent <- list(
+    id = "p", version = "1.0", extends = "gp",
+    base = list(metadata = list(header = "P header"))
+  )
+  child <- list(
+    id = "c", version = "1.0", extends = "p",
+    base = list(metadata = list(title = "C title"))
+  )
+  resolver <- make_resolver(list(gp = grandparent, p = parent))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, resolver),
+    "which an ancestor sealed"
+  )
+
+  # The middle template itself resolves fine, and carries the seal onward.
+  middle <- app_fn("resolve_template_inheritance")(parent, resolver)
+  expect_equal(middle$def$sealed, "base.metadata.title")
+})
+
+test_that("sealed and required accumulate as a union rather than child-wins", {
+  parent <- four_state_parent()
+  parent$sealed <- "base.metadata.title"
+  parent$required <- "base.metadata.header"
+  child <- four_state_child(sealed = "options.o1", required = "options.o1.label")
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_setequal(result$def$sealed, c("base.metadata.title", "options.o1"))
+  expect_setequal(result$def$required, c("base.metadata.header", "options.o1.label"))
+})
+
+test_that("a template that seals nothing carries no sealed key at all", {
+  result <- four_state_resolve(four_state_child())
+
+  expect_false("sealed" %in% names(result$def))
+  expect_false("required" %in% names(result$def))
+})
+
+test_that("a duplicate dataset key is rejected rather than silently appended", {
+  # SEAL BYPASS, pinned. `datasets:` matched each child entry to at most one
+  # parent entry and appended the rest unconditionally, so a child could write
+  # the SAME key twice: the first entry left the sealed value untouched and the
+  # second smuggled the value it actually wanted. dta_template_path_get() takes
+  # the first match, so the seal compared equal and passed while the merged
+  # definition carried both entries.
+  parent <- four_state_parent()
+  parent$datasets <- list(list(template = "gf@1.0", options = list(retention = 30)))
+  parent$sealed <- "datasets.gf.options.retention"
+  child <- four_state_child(datasets = list(
+    list(template = "gf@1.0"),
+    list(template = "gf@1.0", options = list(retention = 999))
+  ))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = parent))),
+    "duplicated"
+  )
+})
+
+test_that("a duplicate option id is rejected too", {
+  parent <- four_state_parent()
+  child <- four_state_child(options = list(
+    list(id = "o2", label = "first"),
+    list(id = "o2", label = "second")
+  ))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = parent))),
+    "duplicated"
+  )
+})
+
+test_that("entries with no identity key are left alone by the duplicate check", {
+  # A `datasets:` entry may legitimately be unkeyable, and several of them are
+  # not duplicates of one another -- they are simply unaddressable, which the
+  # merge already tolerates.
+  fn <- app_fn("dta_template_assert_unique_keys")
+  key_of <- app_fn("dta_template_dataset_key")
+  items <- list(list(note = "one"), list(note = "two"))
+
+  expect_length(fn(items, "datasets", key_of), 2)
+})
+
+test_that("a required list field is unfilled when everything inside it is blank", {
+  # `supplier`/`receiver`/`transmission` are lists, so a bare length check
+  # accepted `supplier: {affiliation: ""}` as a real answer: present,
+  # structurally non-empty, carrying no information. The vignette's headline
+  # example is `required: [base.metadata.supplier]`, so this was the case the
+  # feature was advertised with.
+  fn <- app_fn("dta_template_path_is_filled")
+
+  expect_false(fn(list(affiliation = "")))
+  expect_false(fn(list(affiliation = list(name = ""), contacts = list())))
+  expect_true(fn(list(affiliation = list(name = "ACME"))))
+  expect_false(fn(list()))
+  expect_false(fn(""))
+  expect_true(fn("ACME"))
+  # A logical or numeric value is a real answer, including the falsy ones.
+  expect_true(fn(FALSE))
+  expect_true(fn(0))
 })
