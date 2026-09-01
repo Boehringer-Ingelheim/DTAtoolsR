@@ -664,6 +664,11 @@
         add("error", "instantiate_failed", msg)
       }
     } else if (!abstract) {
+      # Shape defaults are applied to the RESOLVED definition, never to the
+      # file as read: an absent key is how a child says "inherit", so filling
+      # one in ahead of the merge would turn that into an override. See
+      # dta_template_finalize_def() in template_core.R.
+      resolved$def <- .dta_template_engine_get("dta_template_finalize_def")(resolved$def)
       # `index = index_df`: without it, create_dta_from_template() takes its
       # ORIGINAL dataset-building path, under which a `datasets[].template`
       # entry is simply unreachable (template_core.R's own docstring) and

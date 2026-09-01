@@ -106,19 +106,41 @@ read_dta_creation_template <- function(template_path) {
       stop("Template 'base' must be a mapping/object.")
     }
     # Accept dataset definitions in either base.datasets (legacy) or top-level
-    # datasets (preferred, explicit and reusable across templates).
-    datasets_def <- def$datasets %||% def$base$datasets %||% list()
-    if (length(datasets_def) == 0 && !inherits_from) {
+    # datasets (preferred, explicit and reusable across templates). Fold the
+    # legacy location up ONLY when the top-level key is genuinely absent: to
+    # the inheritance merge, writing `datasets:` and writing nothing at all are
+    # different instructions, and `%||%` cannot tell them apart.
+    if (!("datasets" %in% names(def)) && !is.null(def$base$datasets)) {
+      def$datasets <- def$base$datasets
+    }
+    if (length(def$datasets %||% list()) == 0 && !inherits_from) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
-    # Normalize optional pieces so server/UI code can rely on shape.
+    # `id` is the one field that is never inherited -- every template file must
+    # carry its own -- so defaulting it from the filename here cannot cost the
+    # merge any information. Every OTHER shape default now happens in
+    # dta_template_finalize_def(), AFTER inheritance has resolved: filling them
+    # in here is what used to destroy the absent/empty distinction for
+    # `options:` and `datasets:` before resolve_template_inheritance() ever saw
+    # the definition, which is why those two sections behaved unlike `base:`.
     def$id <- as.character(def$id %||% tools::file_path_sans_ext(basename(template_path)))
-    def$label <- as.character(def$label %||% def$id)
-    def$description <- as.character(def$description %||% "")
-    def$datasets <- datasets_def
-    def$options <- def$options %||% list()
     def
   })
+}
+
+# Shape defaults for a FULLY RESOLVED creation template, so server/UI code can
+# rely on `label`/`description`/`datasets`/`options` being present without
+# every reader repeating a `%||%`.
+#
+# This must run after resolve_template_inheritance(), never before: an absent
+# key is how a child says "inherit", and a default written in ahead of the
+# merge turns that into an override with the default.
+dta_template_finalize_def <- function(def) {
+  def$label <- as.character(def$label %||% def$id %||% "")
+  def$description <- as.character(def$description %||% "")
+  def$datasets <- def$datasets %||% list()
+  def$options <- def$options %||% list()
+  def
 }
 
 # yaml handlers that keep every scalar number as the text the author wrote.

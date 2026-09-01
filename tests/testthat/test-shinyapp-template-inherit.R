@@ -411,3 +411,258 @@ test_that("resolve_template_inheritance() aborts on an unresolvable extends refe
   expect_error_message_contains(fn(child_def, function(ref) NULL), "orphan")
   expect_error_message_contains(fn(child_def, function(ref) NULL), "ghost-parent")
 })
+
+# ---- the four states, in every section --------------------------------------
+
+# absent -> inherit, a value -> override, `{}`/`[]` -> empty, `null` -> drop.
+# These are walked for EVERY section rather than tested once and assumed for
+# the rest: the defect this replaces was exactly one section (`base:`) behaving
+# unlike the others, and only a per-section table can catch that class of bug.
+#
+# Note the fixtures use the `list(key = NULL)` CONSTRUCTOR form for the drop
+# state. That is not incidental: `l$key <- NULL` deletes the element, whereas
+# `list(key = NULL)` keeps the name with a NULL value -- the same shape
+# yaml::read_yaml() produces for `key: ~`, and the only shape that can express
+# "written, as null" rather than "never written".
+
+four_state_parent <- function() {
+  list(
+    id = "parent", version = "1.0",
+    base = list(metadata = list(title = "P title", header = "P header")),
+    options = list(list(id = "o1", label = "P option")),
+    datasets = list(list(as = "d1", template = "dt@1.0")),
+    party_slots = list(list(id = "ps1", target = "metadata.supplier")),
+    vocabulary_slots = list(list(id = "vs1", target = "x"))
+  )
+}
+
+four_state_child <- function(...) {
+  c(list(id = "child", version = "1.0", extends = "parent"), list(...))
+}
+
+four_state_resolve <- function(child) {
+  app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = four_state_parent())))
+}
+
+test_that("an absent base: inherits the parent's section untouched", {
+  result <- four_state_resolve(four_state_child())
+
+  expect_equal(result$def$base$metadata$title, "P title")
+  expect_equal(result$def$base$metadata$header, "P header")
+})
+
+test_that("a base: value deep-merges, leaving keys the child did not mention", {
+  result <- four_state_resolve(
+    four_state_child(base = list(metadata = list(title = "C title")))
+  )
+
+  expect_equal(result$def$base$metadata$title, "C title")
+  expect_equal(result$def$base$metadata$header, "P header")
+})
+
+test_that("an explicitly empty base: replaces the parent's section with nothing", {
+  result <- four_state_resolve(four_state_child(base = list()))
+
+  expect_true("base" %in% names(result$def))
+  expect_length(result$def$base, 0)
+})
+
+test_that("a null base: drops the section entirely rather than emptying it", {
+  result <- four_state_resolve(four_state_child(base = NULL))
+
+  expect_false("base" %in% names(result$def))
+})
+
+# The collections take the same four states. One block, four assertions per
+# section, so a section that drifts out of line fails here rather than being
+# discovered years later in a template that quietly lost its parent's set.
+for (.section in list(
+  list(key = "options", added = list(id = "o2", label = "C option"), inherited = "o1"),
+  list(key = "party_slots", added = list(id = "ps2", target = "metadata.receiver"), inherited = "ps1"),
+  list(key = "vocabulary_slots", added = list(id = "vs2", target = "y"), inherited = "vs1"),
+  list(key = "datasets", added = list(as = "d2", template = "dt2@1.0"), inherited = "d1")
+)) {
+  local({
+    sec <- .section
+
+    test_that(paste0("an absent ", sec$key, ": inherits the parent's entries"), {
+      result <- four_state_resolve(four_state_child())
+
+      expect_length(result$def[[sec$key]], 1)
+    })
+
+    test_that(paste0("a ", sec$key, ": value merges with the inherited entries"), {
+      child <- four_state_child()
+      child[[sec$key]] <- list(sec$added)
+
+      result <- four_state_resolve(child)
+
+      expect_length(result$def[[sec$key]], 2)
+    })
+
+    test_that(paste0("an explicitly empty ", sec$key, ": still inherits, and warns that it will not"), {
+      child <- four_state_child()
+      child[[sec$key]] <- list()
+
+      expect_warning(
+        result <- four_state_resolve(child),
+        "currently inherits the parent"
+      )
+      expect_length(result$def[[sec$key]], 1)
+    })
+
+    test_that(paste0("a null ", sec$key, ": drops the section entirely"), {
+      child <- four_state_child()
+      child[sec$key] <- list(NULL)
+
+      result <- four_state_resolve(child)
+
+      expect_false(sec$key %in% names(result$def))
+    })
+  })
+}
+
+test_that("a blank scalar is kept blank and a null scalar is dropped", {
+  blank <- four_state_resolve(four_state_child(label = ""))
+  dropped <- four_state_resolve(four_state_child(label = NULL))
+  inherited <- four_state_resolve(four_state_child())
+
+  # "" is an override that happens to be empty: present, and blank.
+  expect_identical(blank$def$label, "")
+  # null is not an override at all -- the field is gone.
+  expect_false("label" %in% names(dropped$def))
+  # and an absent key still inherits, which is what makes the other two mean
+  # something distinct.
+  expect_false("label" %in% names(inherited$def))
+})
+
+# ---- collection verbs -------------------------------------------------------
+
+verb_resolve <- function(section, spec) {
+  child <- four_state_child()
+  child[[section]] <- spec
+  four_state_resolve(child)$def[[section]]
+}
+
+test_that("inherit: none replaces the parent's set wholesale", {
+  result <- verb_resolve("options", list(
+    inherit = "none",
+    add = list(list(id = "o2", label = "Only mine"))
+  ))
+
+  expect_length(result, 1)
+  expect_equal(result[[1]]$id, "o2")
+})
+
+test_that("inherit: [ids] keeps only the named subset of the parent's entries", {
+  parent <- four_state_parent()
+  parent$options <- list(
+    list(id = "a"), list(id = "b"), list(id = "c")
+  )
+  child <- four_state_child(options = list(inherit = c("a", "c")))
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_equal(vapply(result$def$options, function(o) o$id, character(1)), c("a", "c"))
+})
+
+test_that("inherit: all is the default, so bare verbs still start from the parent", {
+  result <- verb_resolve("options", list(add = list(list(id = "o2"))))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), c("o1", "o2"))
+})
+
+test_that("remove: drops an inherited entry by id", {
+  result <- verb_resolve("options", list(remove = "o1"))
+
+  expect_length(result, 0)
+})
+
+test_that("remove: aborts on an id that is not inherited rather than no-oping", {
+  expect_error_message_contains(
+    verb_resolve("options", list(remove = "nope")),
+    "unknown id"
+  )
+})
+
+test_that("modify: merges into an inherited entry, keeping its other fields", {
+  result <- verb_resolve("options", list(
+    modify = list(list(id = "o1", description = "added"))
+  ))
+
+  expect_length(result, 1)
+  expect_equal(result[[1]]$label, "P option")
+  expect_equal(result[[1]]$description, "added")
+})
+
+test_that("modify: aborts on an id that is not inherited, naming add as the remedy", {
+  expect_error_message_contains(
+    verb_resolve("options", list(modify = list(list(id = "typo")))),
+    "no such entry is inherited"
+  )
+})
+
+test_that("add: aborts when the id is already inherited, naming modify as the remedy", {
+  # This is the whole reason the verb form exists: in the bare form the same
+  # mistyped id silently becomes an extra entry instead of the modification
+  # that was meant.
+  expect_error_message_contains(
+    verb_resolve("options", list(add = list(list(id = "o1", label = "oops")))),
+    "already inherited"
+  )
+})
+
+test_that("order: sorts the merged set, including entries add: introduced", {
+  result <- verb_resolve("options", list(
+    add = list(list(id = "o2")),
+    order = c("o2", "o1")
+  ))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), c("o2", "o1"))
+})
+
+test_that("an unknown key in the verb form is an error, not a silently ignored entry", {
+  expect_error_message_contains(
+    verb_resolve("options", list(inhrit = "none")),
+    "unknown key"
+  )
+})
+
+test_that("the verb form and the bare form agree wherever both can say the thing", {
+  # The compatibility claim is only worth as much as this assertion: adding a
+  # new entry is expressible either way, and the two spellings must not drift.
+  bare <- verb_resolve("options", list(list(id = "o2", label = "C option")))
+  verbs <- verb_resolve("options", list(add = list(list(id = "o2", label = "C option"))))
+
+  expect_identical(bare, verbs)
+})
+
+test_that("datasets: verbs key on the dataset identity, not on an id field", {
+  # `datasets:` entries have no `id:` -- they are keyed by `as:`/`template:`/
+  # `source:`/`name:` -- so the verbs have to run off the same identity
+  # function the bare form uses, or they would silently match nothing.
+  result <- verb_resolve("datasets", list(remove = "d1"))
+
+  expect_length(result, 0)
+})
+
+test_that("an empty inherit: list means none, not everything", {
+  # `%||%` in this engine treats a zero-length left operand as absent, so a
+  # naive `spec$inherit %||% "all"` turned `inherit: []` into "inherit
+  # everything" -- the exact opposite of what an empty id list says, and
+  # silently, because inheriting the whole parent set looks like success.
+  result <- verb_resolve("options", list(
+    inherit = list(),
+    add = list(list(id = "o2"))
+  ))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), "o2")
+})
+
+test_that("a null inherit: is the same instruction as an empty one", {
+  result <- verb_resolve("options", list(inherit = NULL))
+
+  expect_length(result, 0)
+})

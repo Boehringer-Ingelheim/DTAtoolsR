@@ -77,6 +77,237 @@ dta_template_merge_value <- function(parent, child) {
   child
 }
 
+# -----------------------------------------------------------------------------
+# Collection verbs.
+#
+# A keyed collection -- `options:`, `datasets:`, `party_slots:`,
+# `vocabulary_slots:`, and a dataset patch's columns -- may be written two ways.
+#
+# The BARE form is a plain sequence of entries and carries its intent
+# IMPLICITLY: an entry whose key matches the parent's modifies it, an entry
+# with a key the parent does not have is an addition, and `remove: true` on an
+# entry drops it. That form is unchanged and stays fully supported.
+#
+# The VERB form states the same intents explicitly, and expresses three the
+# bare form cannot:
+#
+#   datasets:
+#     inherit: all          # all (default) | none | [ids]
+#     remove: [gf_legacy]
+#     add:    [{template: acme_extra@1.0}]
+#     modify: [{id: gf_smrnaseq, options: {vendor_name: Acme}}]
+#     order:  [gf_smrnaseq, acme_extra]
+#
+#   * `inherit: [ids]` takes only a named subset -- otherwise a child that wants
+#     two of twenty inherited entries has to write eighteen removals.
+#   * `inherit: none` replaces the parent's set wholesale.
+#   * `add:`/`modify:` are checked against what is actually inherited, so a
+#     mistyped id is an error. In the bare form the same typo silently becomes
+#     an extra entry instead of the modification that was meant -- the failure
+#     mode that motivated the explicit form.
+#
+# The two shapes are told apart at no syntactic cost: a sequence of entries is
+# an unnamed list, a verb mapping is a fully named one, and
+# dta_template_is_mapping() already draws exactly that line.
+dta_template_collection_verbs <- c("inherit", "add", "remove", "modify", "order")
+
+# Coerce one verb's payload to a list of entries. A single entry written as a
+# bare mapping (`add: {id: x}` rather than `add: [{id: x}]`) is the obvious
+# beginner's slip and means one unambiguous thing, so accept it rather than
+# fail on a distinction YAML barely surfaces.
+dta_template_verb_entries <- function(x) {
+  if (is.null(x)) {
+    return(list())
+  }
+  if (dta_template_is_mapping(x)) {
+    return(list(x))
+  }
+  as.list(x)
+}
+
+# Identity key for an id-keyed entry (`options:`, `party_slots:`,
+# `vocabulary_slots:`). The dataset sections key differently -- see
+# dta_template_dataset_key() -- which is exactly why the verb machinery takes
+# the key function as an argument rather than reaching for `$id` itself.
+dta_template_option_key <- function(entry) {
+  value <- if (is.list(entry)) entry$id else NULL
+  if (is.character(value) && length(value) == 1 && nzchar(value)) {
+    return(value)
+  }
+  NA_character_
+}
+
+# Split a collection section into the verb form's five parts, or report that it
+# is the bare sequence form. `section` names the field for error messages.
+dta_template_parse_collection <- function(spec, section) {
+  if (!dta_template_is_mapping(spec)) {
+    return(list(form = "list", items = spec %||% list()))
+  }
+
+  unknown <- setdiff(names(spec), dta_template_collection_verbs)
+  if (length(unknown) > 0) {
+    n <- length(unknown)
+    keys <- paste(unknown, collapse = ", ")
+    verbs <- paste(dta_template_collection_verbs, collapse = "/")
+    cli::cli_abort(c(
+      "{n} unknown key{?s} in {.field {section}}: {keys}.",
+      i = "A collection is either a sequence of entries, or a mapping of {verbs}."
+    ))
+  }
+
+  # `all`/`none` are reserved words here, so an entry whose id is literally
+  # "all" or "none" cannot be named in `inherit:`. Renaming that entry is the
+  # remedy; reserving two words buys a form that reads as prose everywhere else.
+  # NOT `spec$inherit %||% "all"`: this file's `%||%` (utils_dta.R) treats a
+  # ZERO-LENGTH left operand as absent too, so `inherit: []` would come back
+  # "all" -- the exact opposite of what an author writing an empty id list
+  # means, and silently, since inheriting everything looks like success. Ask
+  # names(spec) whether the key was written, then let an empty list say none.
+  inherit <- if ("inherit" %in% names(spec)) as.character(spec$inherit) else "all"
+  if (length(inherit) == 0) {
+    inherit <- "none"
+  }
+
+  list(
+    form = "verbs",
+    verbs = list(
+      inherit = inherit,
+      remove = as.character(spec$remove %||% character(0)),
+      add = dta_template_verb_entries(spec$add),
+      modify = dta_template_verb_entries(spec$modify),
+      order = as.character(spec$order %||% character(0))
+    )
+  )
+}
+
+# Apply the verb form to a parent collection. `key_of` extracts an entry's
+# identity (an id for options, the dataset identity key for datasets) and
+# returns NA for an entry that has none.
+#
+# The verbs run in a fixed order -- inherit, remove, add, modify, order -- and
+# it is the same order apply_dataset_patch() already uses, for the same
+# reasons: shrink before growing so an `add:` may reuse a key the parent had,
+# and adjust last so `modify:` can address an entry `add:` just introduced.
+dta_template_apply_collection_verbs <- function(parent_items, verbs, section, key_of) {
+  parent_items <- parent_items %||% list()
+  keys_of <- function(items) vapply(items, key_of, character(1))
+
+  # 1) inherit -- what the parent contributes before any verb runs.
+  parent_keys <- keys_of(parent_items)
+  if (identical(verbs$inherit, "none")) {
+    result <- list()
+  } else if (identical(verbs$inherit, "all")) {
+    result <- parent_items
+  } else {
+    missing <- setdiff(verbs$inherit, parent_keys[!is.na(parent_keys)])
+    if (length(missing) > 0) {
+      # A NUMERIC quantity has to be in the message for cli to pluralise: with
+      # only `section` and the id list -- two length-1 strings -- cli cannot
+      # tell which drives `{?s}` and aborts with "Multiple quantities for
+      # pluralization" instead of the message you meant to raise. Same trap as
+      # the one documented on dta_template_drop_unidentified() below.
+      n <- length(missing)
+      ids <- paste(missing, collapse = ", ")
+      cli::cli_abort("{n} unknown id{?s} in {.field {section}} inherit: {ids}.")
+    }
+    result <- parent_items[!is.na(parent_keys) & parent_keys %in% verbs$inherit]
+  }
+
+  # 2) remove.
+  if (length(verbs$remove) > 0) {
+    keys <- keys_of(result)
+    missing <- setdiff(verbs$remove, keys[!is.na(keys)])
+    if (length(missing) > 0) {
+      n <- length(missing)
+      ids <- paste(missing, collapse = ", ")
+      cli::cli_abort("{n} unknown id{?s} in {.field {section}} remove: {ids}.")
+    }
+    result <- result[is.na(keys) | !(keys %in% verbs$remove)]
+  }
+
+  # 3) add -- required to be NEW, which is the whole point of writing it out.
+  for (entry in verbs$add) {
+    k <- key_of(entry)
+    if (is.na(k)) {
+      cli::cli_abort("An entry in {.field {section}.add} has no identifying key.")
+    }
+    keys <- keys_of(result)
+    if (k %in% keys[!is.na(keys)]) {
+      cli::cli_abort(c(
+        "Cannot add {.val {k}} to {.field {section}}: it is already inherited.",
+        i = "Use {.field modify} to change an inherited entry."
+      ))
+    }
+    result[[length(result) + 1L]] <- entry
+  }
+
+  # 4) modify -- required to be PRESENT, for the same reason.
+  for (entry in verbs$modify) {
+    k <- key_of(entry)
+    keys <- keys_of(result)
+    idx <- if (is.na(k)) integer(0) else which(!is.na(keys) & keys == k)
+    if (length(idx) == 0) {
+      shown <- if (is.na(k)) "<unkeyed>" else k
+      cli::cli_abort(c(
+        "Cannot modify {.val {shown}} in {.field {section}}: no such entry is inherited.",
+        i = "Use {.field add} to introduce a new entry."
+      ))
+    }
+    result[[idx[[1]]]] <- dta_template_merge_value(result[[idx[[1]]]], entry)
+  }
+
+  # 5) order.
+  if (length(verbs$order) > 0) {
+    result <- dta_template_reorder_by_id(result, verbs$order, key_of = key_of)
+  }
+
+  result
+}
+
+# Which of the four states a child expressed for one section.
+#
+# This takes the child MAPPING and the key name rather than the extracted
+# value, and that is the whole point: `def$base` collapses "never written" and
+# "written as null" into the same NULL the moment it is evaluated, and only
+# `"base" %in% names(def)` can tell them apart. Every section is read through
+# here so the four states mean the same thing in all of them -- the asymmetry
+# this replaces was an accident of one section being normalised at read time
+# and another not.
+#
+#   absent -- key not written        -> inherit the parent's value
+#   value  -- key written, non-empty -> override (mappings merge, sequences replace)
+#   empty  -- `{}` / `[]` / `""`     -> present but blank
+#   drop   -- `null` / `~`           -> gone from the template and from the output
+dta_template_section_state <- function(def, key) {
+  if (!(key %in% names(def))) {
+    return("absent")
+  }
+  value <- def[[key]]
+  if (is.null(value)) {
+    return("drop")
+  }
+  if (length(value) == 0) {
+    return("empty")
+  }
+  "value"
+}
+
+# An explicitly empty COLLECTION still inherits today, while an explicitly
+# empty `base:` replaces. Warn on the gesture that is going to change meaning
+# rather than change it underneath a private template repository with no
+# notice; the flip lands a release later.
+dta_template_warn_empty_collection <- function(section, parent_items) {
+  n <- length(parent_items %||% list())
+  if (n == 0) {
+    return(invisible(NULL))
+  }
+  cli::cli_warn(c(
+    "An empty {.field {section}:} currently inherits the parent's {n} entr{?y/ies}.",
+    i = "In a future release it will mean {.emph none}. Write {.code inherit: none} to mean that now, or omit {.field {section}:} to keep inheriting."
+  ))
+  invisible(NULL)
+}
+
 # Drop options (or party_slots -- see below) with no id / an empty id, from
 # ONE side, warning once with a count rather than once per item. An id is how
 # every other rule here identifies an entry -- same-id merge, `remove:`,
@@ -104,8 +335,9 @@ dta_template_drop_unidentified <- function(items, side) {
 # Reorder a list of id-bearing items to match a requested id order. Ids named
 # in `order` that do not exist are ignored (with a warning); items not named
 # in `order` keep their existing relative order and follow the ones that are.
-dta_template_reorder_by_id <- function(items, order) {
-  ids <- vapply(items, function(it) as.character(it$id), character(1))
+dta_template_reorder_by_id <- function(items, order,
+                                       key_of = function(it) as.character(it$id)) {
+  ids <- vapply(items, key_of, character(1))
   unknown <- setdiff(order, ids)
   n <- length(unknown)
   if (n > 0) {
@@ -122,9 +354,24 @@ dta_template_reorder_by_id <- function(items, order) {
 #
 # `parent_opts`/`child_opts` are both allowed to be missing/empty; `order`, if
 # supplied, is a character vector of ids the RESULT should end up sorted by.
-dta_template_merge_options <- function(parent_opts, child_opts, order = NULL) {
+dta_template_merge_options <- function(parent_opts, child_opts, order = NULL,
+                                       section = "options") {
   parent_opts <- dta_template_drop_unidentified(parent_opts %||% list(), "parent")
-  child_opts <- dta_template_drop_unidentified(child_opts %||% list(), "child")
+
+  parsed <- dta_template_parse_collection(child_opts, section)
+  if (identical(parsed$form, "verbs")) {
+    result <- dta_template_apply_collection_verbs(
+      parent_opts, parsed$verbs, section, dta_template_option_key
+    )
+    # A top-level `order:` still applies when the verb form carries none of its
+    # own: the two spellings are the same instruction, not two competing ones.
+    if (length(parsed$verbs$order) == 0 && length(order %||% character(0)) > 0) {
+      result <- dta_template_reorder_by_id(result, order, key_of = dta_template_option_key)
+    }
+    return(result)
+  }
+
+  child_opts <- dta_template_drop_unidentified(parsed$items, "child")
 
   parent_ids <- vapply(parent_opts, function(o) as.character(o$id), character(1))
   child_ids <- vapply(child_opts, function(o) as.character(o$id), character(1))
@@ -199,9 +446,17 @@ dta_template_dataset_key <- function(entry) {
 }
 
 # Merge two unnamed lists of dataset entries by the identity key above.
-dta_template_merge_datasets <- function(parent_ds, child_ds) {
+dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets") {
   parent_ds <- parent_ds %||% list()
-  child_ds <- child_ds %||% list()
+
+  parsed <- dta_template_parse_collection(child_ds, section)
+  if (identical(parsed$form, "verbs")) {
+    return(dta_template_apply_collection_verbs(
+      parent_ds, parsed$verbs, section, dta_template_dataset_key
+    ))
+  }
+
+  child_ds <- parsed$items
 
   parent_keys <- vapply(parent_ds, dta_template_dataset_key, character(1))
   child_keys <- vapply(child_ds, dta_template_dataset_key, character(1))
@@ -244,23 +499,33 @@ dta_template_merge_datasets <- function(parent_ds, child_ds) {
   result
 }
 
-# Merge one whole-section value (currently only `base:`) with
-# dta_template_merge_value(), while keeping "the child never wrote this
-# section at all" distinct from "the child wrote it as an explicitly empty
-# mapping". Both collapse to the same list() once a bare `%||% list()` has
-# been applied to `child_field`, and dta_template_merge_value() cannot tell
-# them apart from that point on: an ABSENT `base:` must leave the parent's
-# section untouched, while `base: {}` (rare, but distinguishable at the
-# yaml::read_yaml() level -- an absent key parses to NULL, an empty mapping
-# parses to list()) really is an instruction to replace it. Checking
-# is.null() BEFORE normalising the two apart is what preserves that
-# distinction; found the hard way when a template with no `base:` override at
-# all wiped out everything the parent had set.
-dta_template_merge_section <- function(parent_section, child_field) {
-  if (is.null(child_field)) {
-    return(parent_section %||% list())
+# Apply the four states to one COLLECTION section, deferring the actual merge
+# to `merge_fn(parent_items, child_spec)`.
+#
+# Absent and empty both hand the parent's items back through `merge_fn` with an
+# empty child rather than returning them raw: that keeps the parent running
+# through dta_template_drop_unidentified() exactly as it always has, so a
+# malformed parent entry is still reported at the same point it used to be.
+dta_template_merge_collection_section <- function(def, key, parent_items, merge_fn) {
+  parent_items <- parent_items %||% list()
+  state <- dta_template_section_state(def, key)
+
+  if (identical(state, "drop")) {
+    return(NULL)
   }
-  dta_template_merge_value(parent_section %||% list(), child_field)
+  if (identical(state, "empty")) {
+    # Release A keeps today's meaning -- an explicitly empty collection still
+    # inherits -- and only warns. Release B returns list() here instead, which
+    # is what the four states say it should do; see the migration note in the
+    # vignette. `base: {}` already behaves that way, and that split is the
+    # whole reason this function exists.
+    dta_template_warn_empty_collection(key, parent_items)
+    return(merge_fn(parent_items, list()))
+  }
+  if (identical(state, "absent")) {
+    return(merge_fn(parent_items, list()))
+  }
+  merge_fn(parent_items, def[[key]])
 }
 
 # Resolve a template's `extends:` chain into one fully-merged definition.
@@ -314,13 +579,32 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   parent_def <- parent_resolved$def
 
   merged <- parent_def
-  merged$base <- dta_template_merge_section(parent_def$base, def$base)
-  merged$options <- dta_template_merge_options(
-    parent_def$options %||% list(), def$options %||% list(),
-    order = def$order
+
+  # `base:` is a mapping and the rest are keyed sequences, but every one of
+  # them reads the SAME four states off the child. That uniformity is the
+  # point: absent inherits, a value overrides, `{}`/`[]` is empty, `null`
+  # drops -- in every section, at every depth.
+  merged$base <- switch(dta_template_section_state(def, "base"),
+    absent = parent_def$base %||% list(),
+    drop = NULL,
+    empty = list(),
+    value = dta_template_merge_value(parent_def$base %||% list(), def$base)
   )
-  merged$datasets <- dta_template_merge_datasets(
-    parent_def$datasets %||% list(), def$datasets %||% list()
+
+  merged$options <- dta_template_merge_collection_section(
+    def, "options", parent_def$options,
+    function(parent_items, child_spec) {
+      dta_template_merge_options(
+        parent_items, child_spec,
+        order = def$order, section = "options"
+      )
+    }
+  )
+  merged$datasets <- dta_template_merge_collection_section(
+    def, "datasets", parent_def$datasets,
+    function(parent_items, child_spec) {
+      dta_template_merge_datasets(parent_items, child_spec, section = "datasets")
+    }
   )
   # party_slots have no `remove:` requirement in the spec, but reusing the
   # options merge costs nothing and honours `remove:` there too if a template
@@ -329,17 +613,27 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # Vocabulary slots merge by id exactly as party slots do, and for the same
   # reason: a deviation template overriding one slot's default (or dropping it
   # with `remove: true`) must not have to restate the others.
-  merged$vocabulary_slots <- dta_template_merge_options(
-    parent_def$vocabulary_slots %||% list(), def$vocabulary_slots %||% list()
+  merged$vocabulary_slots <- dta_template_merge_collection_section(
+    def, "vocabulary_slots", parent_def$vocabulary_slots,
+    function(parent_items, child_spec) {
+      dta_template_merge_options(parent_items, child_spec, section = "vocabulary_slots")
+    }
   )
-  merged$party_slots <- dta_template_merge_options(
-    parent_def$party_slots %||% list(), def$party_slots %||% list()
+  merged$party_slots <- dta_template_merge_collection_section(
+    def, "party_slots", parent_def$party_slots,
+    function(parent_items, child_spec) {
+      dta_template_merge_options(parent_items, child_spec, section = "party_slots")
+    }
   )
 
+  # The scalars read the same four states, so `label: ""` (blank but present)
+  # and `label: null` (gone) stop being the same instruction.
   for (field in c("label", "description", "abstract", "kind")) {
-    if (!is.null(def[[field]])) {
-      merged[[field]] <- def[[field]]
+    state <- dta_template_section_state(def, field)
+    if (identical(state, "absent")) {
+      next
     }
+    merged[[field]] <- if (identical(state, "drop")) NULL else def[[field]]
   }
 
   # id/version are NEVER inherited: every template file must declare its own,
