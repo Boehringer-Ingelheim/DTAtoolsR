@@ -203,7 +203,13 @@ normalise_party_slots <- function(slots) {
       # No allow-list means "any profile whose role matches" -- an empty
       # character(0) rather than NULL so party_profiles_for_slot() can test
       # length() without a %||% at every call site.
-      profiles = as.character(slot$profiles %||% character(0))
+      profiles = as.character(slot$profiles %||% character(0)),
+      # The party analogue of a vocabulary slot's `min:`: this slot must be
+      # filled before a document can be built. Without it "required-to-fill"
+      # has a hole exactly where a human does the filling -- a template can
+      # oblige a descendant to set a metadata field, but nothing could oblige
+      # the person creating the document to choose a supplier.
+      required = isTRUE(slot$required)
     )
   }
 
@@ -305,6 +311,17 @@ apply_party_selections <- function(dta, slots, selections, profiles) {
     sel <- as.character(selections[[slot$id]] %||% "")
     sel <- sel[!is.na(sel) & nzchar(sel)]
     if (length(sel) == 0) {
+      # A required slot refuses BOTH silences. An explicitly empty selection is
+      # a deliberate "none", which is precisely the answer a required slot
+      # exists to reject -- so it aborts here rather than clearing the target,
+      # and an absent one aborts rather than leaving the template's value to
+      # stand in for a choice nobody made.
+      if (isTRUE(slot$required)) {
+        cli::cli_abort(c(
+          "Party slot {.val {slot$id}} is required, and no profile was selected for it.",
+          i = "Choose a profile for {.field {slot$label %||% slot$id}} before creating the document."
+        ))
+      }
       if (!engaged) {
         next
       }
