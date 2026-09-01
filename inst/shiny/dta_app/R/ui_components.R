@@ -5,49 +5,114 @@
 # helper files: app.R starts with library(shiny) and the test harness sources
 # these files into an environment whose parent is shiny's namespace.
 
-# The single control that takes the app out of read-only mode.
+# The single control that takes a loaded, versioned document into editing --
+# one dropdown standing in for what used to be a button-or-switch swap
+# (create_new_version_button()/edit_mode_switch(), deleted with this menu's
+# introduction). All three routes into editing -- starting a new version,
+# editing the current one in place, or starting a new document from this one
+# -- act on the same object, so they read as one entry point rather than
+# competing controls in the brandbar.
 #
-# The app is read-only by default: every editing surface -- the dataset Edit
-# menu, the Metadata tab, the Raw YAML editor, and adding or removing datasets
-# -- is hidden or disabled until this switch is turned on. It must default to
-# off, so opening (or reloading) the app never leaves a validated dataset
-# editable by accident.
+# `create_new_version` keeps the input id it has always had, so its
+# observer, its modal (new_version_modal_body(), below) and every test that
+# drives it directly are untouched by the move from a standalone button to a
+# menu row -- the same reasoning ds_edit_menu() records for edit_cols and
+# edit_rules, further down this file, when the dataset editors made the
+# equivalent move.
 #
-# This switch is the affordance, not the enforcement: the server
-# independently guards each of those surfaces rather than trusting the
-# client-side toggle state, because a client can be made to send
-# input$edit_mode = TRUE regardless of what is actually drawn on screen.
+# `edit_current_version` is withheld while `entry_open` is TRUE: choosing it
+# then would silently abandon a change summary the author is already
+# part-way through typing, rather than asking them to finish or discard it
+# first.
 #
-# `value` exists because the server re-renders this switch into a
-# uiOutput() slot rather than placing it once at startup: a DTA loaded from
-# an existing file shows "Create new version" (create_new_version_button())
-# in that slot instead, and only once the author has created a new version
-# does this switch take its place -- already on, so the document they just
-# versioned is immediately editable without a second click. The default
-# stays FALSE so every other path into the app -- a fresh document, or a
-# reload -- still opens read-only.
-edit_mode_switch <- function(value = FALSE) {
-  bslib::input_switch("edit_mode", "Edit mode", value = isTRUE(value))
-}
-
-# Stands in for edit_mode_switch() in the brandbar's action slot while the
-# loaded DTA has no new version yet -- the switch itself only reappears
-# once the author has committed to one (see the WHY comment above it). This
-# reuses the `.brand-link` pill class (theme.R) rather than inventing a new
-# shape, so the button sits on the same baseline as the other brandbar
-# pills it is swapped in for; `.brand-action` (theme.R) re-states the
-# properties Bootstrap's `<button>` markup does not inherit from the
-# `.brand-link` rule, which was written against an `<a>`.
-create_new_version_button <- function() {
-  actionButton(
-    "create_new_version",
-    "Create new version",
-    class = "brand-link brand-action"
+# `dropdown-menu-end` -- absent from ds_edit_menu()'s own `dropdown-menu` --
+# is required here specifically because this toggle sits at the right-hand
+# end of the brandbar; a menu opening flush with its trigger's left edge, as
+# ds_edit_menu()'s does, would open past the right edge of the viewport.
+#
+# `create_new_document` sits below a divider with the same danger styling as
+# "Remove dataset" (ds_edit_menu()), and for the same reason: it is
+# destructive -- it discards the loaded document's version history -- and
+# must not read as one more, equally reversible editor.
+#
+# `locked` is deliberately not a parameter here: nothing in this menu
+# currently changes on lock state, and an unused argument would invite a
+# caller to believe it does something. Add it back only once a row's
+# visibility or wording actually needs to depend on it.
+edit_menu <- function(editing = FALSE, entry_open = FALSE) {
+  div(
+    class = "dropdown app-edit",
+    tags$button(
+      id = "app_edit_toggle",
+      class = "brand-action dropdown-toggle",
+      type = "button",
+      `data-bs-toggle` = "dropdown",
+      `data-bs-auto-close` = "true",
+      `aria-expanded` = "false",
+      title = "Edit this specification",
+      HTML("&#x270F;&#xFE0F; Edit")
+    ),
+    tags$ul(
+      class = "dropdown-menu dropdown-menu-end ds-edit-menu",
+      `aria-labelledby` = "app_edit_toggle",
+      tags$li(tags$h6(class = "dropdown-header", "Edit specification")),
+      tags$li(ds_edit_menu_item(
+        "create_new_version", "&#x1F4C8;", "Create new version",
+        "Bump the version and record what you change"
+      )),
+      if (!isTRUE(entry_open)) {
+        tags$li(ds_edit_menu_item(
+          "edit_current_version", "&#x270F;&#xFE0F;", "Edit current version",
+          "Change this document in place. Not recorded in the version history."
+        ))
+      },
+      tags$li(tags$hr(class = "dropdown-divider")),
+      tags$li(ds_edit_menu_item(
+        "create_new_document", "&#x1F4C4;", "Create new from current",
+        "Start a new specification at version 0.1, discarding this history",
+        class = "ds-edit-item-danger"
+      )),
+      if (isTRUE(editing)) {
+        tagList(
+          tags$li(tags$hr(class = "dropdown-divider")),
+          tags$li(ds_edit_menu_item(
+            "stop_editing", "&#x1F441;&#xFE0F;", "Stop editing",
+            "Return to the read-only view"
+          ))
+        )
+      }
+    )
   )
 }
 
-# The body of the "Create new version" modal opened by
-# create_new_version_button(), kept a pure function of its arguments -- like
+# A read-only status pill naming what MODE the document is in. Shown beside
+# edit_menu() rather than inside it, because it is not a control: no click
+# reaches it, and it must never read as one. Deliberately not `.brand-link`
+# (theme.R) -- a pill styled like the links either side of it in the
+# brandbar would look clickable, and this is a label, not one. `role =
+# "status"` gets the mode change announced to a screen reader without
+# asking it to be operated like anything else.
+#
+# This does NOT show the version, even though it once did: the version
+# field on the Metadata tab is written straight to rv$dta by a debounced
+# observer that does not bump rv$md_token (app.R), which is the only signal
+# that rebuilds the uiOutput() slot this tag lives in (see the WHY comment
+# on output$edit_gate, app.R). A version shown here would go stale the
+# moment the author typed a new one, and the only fix would be a dependency
+# that rebuilds this dropdown-adjacent slot under the user's own cursor --
+# the exact trap that comment warns against. The mode is what this tag is
+# for; the version already has a home on the Metadata tab.
+edit_status_tag <- function(kind = NULL) {
+  text <- switch(kind %||% "",
+    new_version = "Editing new version",
+    new_document = "Editing new document",
+    "Edit mode"
+  )
+  span(class = "brand-status", role = "status", text)
+}
+
+# The body of the "Create new version" modal opened by edit_menu()'s
+# create_new_version row, kept a pure function of its arguments -- like
 # ds_edit_menu_item() and contact_detail_block() above -- so it is testable
 # without testServer(). `new_version_msg` is rendered separately via
 # uiOutput() rather than folded into this body, because a rejected version
@@ -77,6 +142,49 @@ new_version_modal_body <- function(current_version, suggested) {
       "Prepended to the change summary written into this document's version history."
     ),
     uiOutput("new_version_msg")
+  )
+}
+
+# The body of the "Create new from current" modal opened by edit_menu()'s
+# create_new_document row. Same shape and idiom as new_version_modal_body()
+# above: a pure function of its arguments, and new_document_msg rendered
+# separately via uiOutput() so a rejected version can show an inline error
+# without this body re-rendering and wiping whatever the author already
+# typed -- the same convention new_version_modal_body() already follows.
+#
+# This is the destructive route (see the WHY comment on edit_menu()): the
+# hint spells out, in prose, that the specification's content is kept but
+# its version history is not. What starting fresh actually means is stated
+# separately, below the version field, rather than folded into the same
+# sentence, so the two facts -- history discarded, new history starts here
+# -- read as what they are: a loss, and its replacement.
+new_document_modal_body <- function(current_title, current_version) {
+  ct <- .ro_field_value(current_title)
+  cv <- .ro_field_value(current_version)
+  from <- if (nzchar(ct) && nzchar(cv)) {
+    sprintf(" from \"%s\" v%s", ct, cv)
+  } else if (nzchar(cv)) {
+    sprintf(" from version %s", cv)
+  } else {
+    ""
+  }
+  tagList(
+    p(
+      class = "msg-hint",
+      sprintf(
+        paste0(
+          "Keeps this specification%s, but starts it as a new document at ",
+          "the version below -- the existing version history is discarded."
+        ),
+        from
+      )
+    ),
+    textInput("new_document_version", "Version", value = "0.1", width = "100%"),
+    div(
+      class = "msg-hint", style = "margin:-4px 0 8px;",
+      "The new document starts with a single history entry recording where it came from."
+    ),
+    uiOutput("new_document_msg")
   )
 }
 
