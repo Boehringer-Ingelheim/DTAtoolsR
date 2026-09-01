@@ -5,7 +5,7 @@
 # built from (see the file header there for the full list). app.R wires them
 # into rv$editing/editing() -- see the WHY comment on that reactive for why a
 # loaded document opens read-only, and the WHY comments on the
-# edit_current_version/create_new_version/create_new_document observers for
+# enable_edit_mode/create_new_version/create_new_document observers for
 # how each route past that either bumps the version or edits it in place.
 
 render_html <- function(tag) {
@@ -425,7 +425,7 @@ load_fixture <- function(session) {
 }
 
 test_that("loading the fixture leaves the document locked, and a pending edit-mode request from before the load changes nothing", {
-  # enter_edit_mode() drives edit_current_version, whose observer req()s
+  # enter_edit_mode() drives enable_edit_mode, whose observer req()s
   # rv$dta -- firing it before anything is loaded is a no-op, and the fixture
   # arrives locked exactly as it would with no such request at all.
   clean_session_file()
@@ -477,21 +477,19 @@ test_that("output$edit_gate offers every route into editing while not editing, a
     # "currently editing" surface (the Stop-editing row, the status tag).
     closed_html <- render_html(output$edit_gate$html)
     expect_match(closed_html, 'id="create_new_version"', fixed = TRUE)
-    expect_match(closed_html, 'id="edit_current_version"', fixed = TRUE)
+    expect_match(closed_html, 'id="enable_edit_mode"', fixed = TRUE)
     expect_match(closed_html, 'id="create_new_document"', fixed = TRUE)
     expect_no_match(closed_html, 'id="stop_editing"', fixed = TRUE)
     expect_no_match(closed_html, 'class="brand-status"', fixed = TRUE)
 
     unlock_editing(session)
 
-    # Editing now, via a version already opened this session
-    # (rv$version_entry_index is set): the status tag and Stop-editing row
-    # replace the menu's "edit current version" row, since a version is
-    # already open.
+    # Editing now: the status tag appears, and the toggle row flips from
+    # "Enable edit mode" to "Stop editing" -- one row, never both.
     editing_html <- render_html(output$edit_gate$html)
     expect_match(editing_html, 'id="stop_editing"', fixed = TRUE)
     expect_match(editing_html, 'class="brand-status"', fixed = TRUE)
-    expect_no_match(editing_html, 'id="edit_current_version"', fixed = TRUE)
+    expect_no_match(editing_html, 'id="enable_edit_mode"', fixed = TRUE)
   })
 })
 
@@ -686,13 +684,13 @@ test_that("binding a data file adds nothing to the export summary -- the diff is
   })
 })
 
-# ---- Server-side: edit_current_version / create_new_document / two-bump ---
+# ---- Server-side: enable_edit_mode / create_new_document / two-bump ------
 # ---- flows -------------------------------------------------------------
 
-test_that("edit_current_version allows edits without opening a version entry, unlike the locked default", {
+test_that("enable_edit_mode allows edits without opening a version entry, unlike the locked default", {
   # The core new guarantee this route adds: editing a LOADED document no
   # longer requires bumping the version first. See the WHY comment on
-  # editing() and on the edit_current_version observer in app.R.
+  # editing() and on the enable_edit_mode observer in app.R.
   clean_session_file()
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
@@ -816,6 +814,73 @@ test_that("stop_editing turns editing off and blocks edits, and enter_edit_mode(
   })
 })
 
+test_that("stopping after a version bump still offers the way back into edit mode", {
+  # THE BUG THIS GUARDS: the menu's enable row was withheld on entry_open,
+  # which stays TRUE for the rest of the session once a version is created,
+  # while editing goes FALSE the moment "Stop editing" is chosen. Creating a
+  # version and then stopping therefore hid every route back in -- the menu
+  # row was gone AND the observer behind it req()d a NULL entry index, so
+  # even driving the input directly did nothing. See the WHY comments on
+  # edit_menu() (ui_components.R) and the enable_edit_mode observer (app.R).
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    load_fixture(session)
+    unlock_editing(session, version = "2.0")
+    expect_false(is.null(rv$version_entry_index))
+
+    leave_edit_mode(session)
+    expect_false(editing())
+
+    # The affordance is on offer again...
+    expect_match(render_html(output$edit_gate$html), 'id="enable_edit_mode"', fixed = TRUE)
+
+    # ... and the observer behind it actually re-enters.
+    enter_edit_mode(session)
+    expect_true(editing())
+
+    session$setInputs(md_header = "Acme Corp Ltd")
+    session$elapse(1000)
+    expect_equal(as.character(S7::prop(DTAtools::metadata(rv$dta), "header")), "Acme Corp Ltd")
+  })
+})
+
+test_that("re-entering edit mode resumes the open version entry rather than orphaning it", {
+  # Re-entry is not a third route into editing: everything the version record
+  # needs -- the open entry, its note, and the baseline the summary diffs
+  # against -- has to survive the round trip, or the version created moments
+  # earlier would export claiming it changed nothing.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    load_fixture(session)
+    session$setInputs(create_new_version = 1)
+    session$setInputs(
+      new_version_value = "2.0",
+      new_version_note = "Survives the round trip"
+    )
+    session$setInputs(new_version_confirm = 1)
+
+    idx <- rv$version_entry_index
+    baseline <- rv$version_baseline_yaml
+
+    leave_edit_mode(session)
+    enter_edit_mode(session)
+
+    expect_equal(rv$version_entry_index, idx)
+    expect_equal(rv$version_note, "Survives the round trip")
+    expect_equal(rv$version_baseline_yaml, baseline)
+
+    session$setInputs(md_header = "Acme Corp Ltd")
+    session$elapse(1000)
+
+    # The edit made AFTER re-entry lands in the entry opened BEFORE stopping.
+    exported <- export_dta()
+    entry <- S7::prop(DTAtools::metadata(exported), "version_history")[[idx]]
+    expect_false(identical(entry$changes, app_fn("dta_version_placeholder")()))
+    expect_match(entry$changes, "metadata.header", fixed = TRUE)
+    expect_match(entry$changes, "Survives the round trip", fixed = TRUE)
+  })
+})
+
 test_that("output$edit_gate's status pill appears only while editing", {
   clean_session_file()
   shiny::testServer(app_server_dir(), {
@@ -827,10 +892,10 @@ test_that("output$edit_gate's status pill appears only while editing", {
   })
 })
 
-# ---- Baseline survival across edit_current_version / create_new_document --
+# ---- Baseline survival across enable_edit_mode / create_new_document -----
 
 test_that("editing in place before deciding on a version leaves that version's baseline intact", {
-  # THE BUG THIS GUARDS: edit_current_version() used to clear
+  # THE BUG THIS GUARDS: enable_edit_mode's observer used to clear
   # rv$version_baseline_yaml even though it never touches rv$dta itself. A
   # later "Create new version" then opened its entry with no baseline left to
   # diff against, and dta_version_finalise()'s missing-baseline guard left

@@ -172,12 +172,14 @@ unlock_editing <- function(session, version = "9.9") {
   session$setInputs(new_version_confirm = 1)
 }
 
-# Enter editing on the CURRENT version, without creating a new one.
+# Enter editing via the app's "Enable edit mode" control, without creating a
+# new version. Works whether or not a version entry is already open -- it
+# resumes an open one rather than starting anything.
 #
 # Wrapping the input id rather than inlining setInputs() at every call site
 # means the id belongs to the app, not to the test: if the app ever renames
-# edit_current_version, only this line changes.
-enter_edit_mode <- function(session) session$setInputs(edit_current_version = 1)
+# enable_edit_mode, only this line changes.
+enter_edit_mode <- function(session) session$setInputs(enable_edit_mode = 1)
 
 # Leave editing via the app's "Stop editing" control.
 #

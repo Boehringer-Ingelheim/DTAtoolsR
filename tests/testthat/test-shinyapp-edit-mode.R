@@ -2,9 +2,11 @@
 #
 # The app is read-only by default. Editing state is server-owned (rv$editing,
 # read through the editing() reactive) rather than a single toggle input; it
-# is entered through one of three input ids -- edit_current_version (edit the
-# loaded version in place), create_new_version (via its modal), or
+# is entered through one of three input ids -- enable_edit_mode (unlock the
+# document as it stands), create_new_version (via its modal), or
 # create_new_document (via its modal) -- and left through stop_editing.
+# enable_edit_mode and stop_editing are the two halves of one menu row that
+# flips (edit_menu()), so exactly one of them is on offer at any moment.
 # Whichever route unlocks it, the same surfaces open up: the dataset Edit
 # menu, the Metadata tab, the Raw YAML editor, and adding or removing
 # datasets. The control (edit_menu()/edit_status_tag(), inst/shiny/dta_app/R/
@@ -184,7 +186,7 @@ test_that("editing starts off for a fresh server session", {
   })
 })
 
-test_that("edit_current_version is a working affordance into edit mode", {
+test_that("enable_edit_mode is a working affordance into edit mode", {
   clean_session_file()
   shiny::testServer(app_server_dir(), {
     load_fixture(session)

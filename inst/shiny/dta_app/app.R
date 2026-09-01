@@ -391,7 +391,6 @@ server <- function(input, output, session) {
     version_note = "", # the optional note typed in the new-version modal
     new_version_msg = NULL, # inline new-version-modal result: NULL | list(ok, error)
     editing = FALSE, # TRUE while the author is in edit mode -- see the WHY on editing() below
-    edit_kind = NULL, # "current" | "new_version" | "new_document" -- wording for the status tag only
     new_document_msg = NULL # inline new-document-modal result: NULL | list(ok, error)
   )
 
@@ -431,8 +430,9 @@ server <- function(input, output, session) {
   # this session, which decides emphasis in the Edit menu (e.g. whether
   # "Create new version" reads as the primary route), not whether editing is
   # possible at all. A loaded document CAN be edited without creating a new
-  # version first -- "Edit current version" is a deliberate route to exactly
-  # that, recording nothing in the version history.
+  # version first -- "Enable edit mode" is a deliberate route to exactly
+  # that, recording nothing in the version history when no version entry is
+  # open.
   editing <- reactive(isTRUE(rv$editing))
 
   # Turning Edit mode off closes whatever editor was open and disarms it.
@@ -466,10 +466,11 @@ server <- function(input, output, session) {
   # mid-click rebuild the isolate() below avoids.
   #
   # rv$editing and rv$version_entry_index are read WITHOUT isolate() here, on
-  # purpose: the menu's own rows (whether "Edit current version" is offered)
-  # and the status tag next to it must follow those two immediately, the
-  # moment either changes -- unlike rv$structure above, which only needs to
-  # be current as of the last load/reset/restore.
+  # purpose: the menu's toggle row (whether it reads "Enable edit mode" or
+  # "Stop editing"), the wording beneath it, and the status tag next to it
+  # must follow those two immediately, the moment either changes -- unlike
+  # rv$structure above, which only needs to be current as of the last
+  # load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
     if (is.null(isolate(rv$structure))) {
@@ -480,7 +481,7 @@ server <- function(input, output, session) {
           editing = isTRUE(rv$editing),
           entry_open = !is.null(rv$version_entry_index)
         ),
-        if (isTRUE(rv$editing)) edit_status_tag(rv$edit_kind)
+        if (isTRUE(rv$editing)) edit_status_tag()
       )
     }
   })
@@ -580,34 +581,58 @@ server <- function(input, output, session) {
     # brought the author back out of edit mode on the very next reload,
     # having just created a version in order to edit.
     rv$editing <- TRUE
-    rv$edit_kind <- "new_version"
     sync_yaml_text()
     removeModal()
     showNotification(sprintf("Version %s created — now editing it.", v), type = "message")
   })
 
-  # --- edit current version (no version bump) ------------------------------
-  # Nothing is written to the document, so export_dta() short-circuits (no
-  # rv$version_entry_index, no baseline) and writes no change summary -- that
-  # is the point of this route, and the Edit menu row's own description says
-  # so. The req(is.null(...)) guard holds even though edit_menu() withholds
-  # this row while an entry is already open: an input can still be driven
-  # over the websocket after its row has left the DOM.
-  observeEvent(input$edit_current_version, {
+  # --- enable edit mode (no version bump) ----------------------------------
+  # The "on" half of edit_menu()'s toggle: it unlocks the document exactly as
+  # it stands and touches NOTHING about the version record.
+  #
+  # It is deliberately usable whether or not a version entry is already open,
+  # because those are two different things happening to the same document and
+  # this observer is only responsible for one of them:
+  #
+  #   No entry open -- nothing is written to the document, so export_dta()
+  #   short-circuits (no rv$version_entry_index, no baseline) and writes no
+  #   change summary. That is the point of this route, and the menu row's own
+  #   description says so.
+  #
+  #   An entry open (a version was created earlier this session, then "Stop
+  #   editing" was chosen) -- this RESUMES that entry rather than starting
+  #   anything. The change summary keeps accumulating into it, which is why
+  #   the row's description says so instead, and why every version field is
+  #   left untouched below.
+  #
+  # THE BUG THIS FIXES: this observer used to carry a
+  # req(is.null(rv$version_entry_index)) guard, matched by edit_menu()
+  # withholding the row on the same condition. But version_entry_index stays
+  # set for the rest of the session once a version is created, while editing
+  # stops the moment the author asks it to -- so creating a version and then
+  # stopping left NO route back into edit mode, neither by the menu nor over
+  # the websocket. The guard is gone and the row now follows rv$editing; see
+  # the WHY comment on edit_menu() (ui_components.R).
+  observeEvent(input$enable_edit_mode, {
     req(rv$dta)
-    req(is.null(rv$version_entry_index))
     rv$version_locked <- FALSE
     # rv$version_baseline_yaml is deliberately LEFT ALONE. Clearing it looked
-    # harmless -- export_dta() writes no summary on this route either way,
-    # because that is gated on version_entry_index, which stays NULL. But the
+    # harmless -- with no entry open, export_dta() writes no summary on this
+    # route either way, because that is gated on version_entry_index. But the
     # author can edit in place and THEN decide the change deserves a version
     # after all, and the summary for that version has to reach back to the
     # document as loaded; a baseline destroyed here could not be recovered,
     # and the new version's entry would keep its placeholder for ever.
-    rv$version_entry_index <- NULL
-    rv$version_note <- ""
+    #
+    # rv$version_entry_index and rv$version_note are left alone for the same
+    # reason, and now that this route is reachable with an entry open it
+    # matters rather than merely being tidy: clearing them would orphan the
+    # open entry on its placeholder and discard the note typed into the
+    # new-version modal. Neither was ever this observer's to write -- with no
+    # entry open they are already NULL and "" (every path that clears one
+    # clears the other), so dropping the two assignments changes nothing on
+    # the route that used to be the only one allowed.
     rv$editing <- TRUE
-    rv$edit_kind <- "current"
     # Nothing about the document changed, so there is no sync_yaml_text() to
     # ride along on -- but the session snapshot still has to learn that edit
     # mode is on, or a reload before the author's first actual edit would
@@ -673,7 +698,6 @@ server <- function(input, output, session) {
     rv$version_baseline_yaml <- if (isTRUE(yres$ok)) yres$value else NULL
     rv$version_note <- ""
     rv$editing <- TRUE
-    rv$edit_kind <- "new_document"
     rv$new_document_msg <- NULL
     rv$md_token <- rv$md_token + 1
     sync_yaml_text()
@@ -687,8 +711,7 @@ server <- function(input, output, session) {
   # clears rv$editor_dataset when this flips to FALSE.
   observeEvent(input$stop_editing, {
     rv$editing <- FALSE
-    rv$edit_kind <- NULL
-    # Persist it for the same reason edit_current_version does, and more
+    # Persist it for the same reason enable_edit_mode does, and more
     # sharply in this direction: without it, deliberately leaving edit mode
     # and then reloading would put the author straight back into it, because
     # the last snapshot still said editing = TRUE.
@@ -784,8 +807,7 @@ server <- function(input, output, session) {
         version_baseline_yaml = isolate(rv$version_baseline_yaml),
         version_entry_index = isolate(rv$version_entry_index),
         version_note = isolate(rv$version_note),
-        editing = isolate(rv$editing),
-        edit_kind = isolate(rv$edit_kind)
+        editing = isolate(rv$editing)
       ),
       target
     ), silent = TRUE)
@@ -829,7 +851,6 @@ server <- function(input, output, session) {
     # just arrived and has not been versioned. A newly loaded document is
     # never mid-edit.
     rv$editing <- FALSE
-    rv$edit_kind <- NULL
     autosave()
   }
 
@@ -1552,15 +1573,15 @@ server <- function(input, output, session) {
       dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE
     )
     # apply_loaded() above always leaves rv$editing FALSE -- correct for a
-    # load, but this is not a load, it is a document just CREATED. With no
-    # switch left to flip, leaving it non-editing would strand the author in
-    # a read-only view of a document they made themselves seconds ago.
+    # load, but this is not a load, it is a document just CREATED. Leaving it
+    # non-editing would strand the author in a read-only view of a document
+    # they made themselves seconds ago, one Edit-menu trip from being able to
+    # touch it.
     rv$editing <- TRUE
-    rv$edit_kind <- "current"
     # apply_loaded() autosaved a moment ago, while rv$editing was still FALSE,
-    # so the snapshot on disk contradicts the two lines above. Persist again
-    # or a reload right after creating the document restores it read-only --
-    # the very outcome the comment above says this code exists to prevent.
+    # so the snapshot on disk contradicts the line above. Persist again or a
+    # reload right after creating the document restores it read-only -- the
+    # very outcome the comment above says this code exists to prevent.
     autosave()
     showNotification(
       paste0("New DTA created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
@@ -6427,7 +6448,6 @@ server <- function(input, output, session) {
     rv$version_note <- ""
     rv$new_version_msg <- NULL
     rv$editing <- FALSE
-    rv$edit_kind <- NULL
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
@@ -6918,7 +6938,6 @@ server <- function(input, output, session) {
     # saved$editing restores as not-editing for free -- the conservative
     # default, with no explicit is.null() check needed.
     rv$editing <- isTRUE(saved$editing)
-    rv$edit_kind <- saved$edit_kind
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1

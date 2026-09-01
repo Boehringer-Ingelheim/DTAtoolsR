@@ -61,6 +61,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The Edit menu's way into editing is a toggle again.** "Edit current
+  version" is now **Enable edit mode**, and it and **Stop editing** are one row
+  that flips: exactly one of them is on offer at any moment, decided only by
+  whether editing is currently on. Previously both could be listed at once
+  while editing in place, and the enable row was withheld whenever a version
+  entry was open — see the fix below for what that cost.
+
+- **The edit-mode status pill says "Edit mode" in every state.** It used to
+  name the route taken in — "Editing new version", "Editing new document",
+  "Edit mode" — three labels for one fact, whether editing is allowed. Every
+  editing surface is gated on a single flag, so the pill now names that flag
+  and nothing else; which version the document is on, and what it has been
+  through, is on the Metadata tab where it can be read in full.
+
 - An explicitly empty collection (`options: []`, `datasets: []`) now means
   *none*, the same way `base: {}` already replaced the parent's section rather
   than inheriting it. It previously inherited the parent's entries, which was
@@ -147,6 +161,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   trap that the landing-page fix below was written for.
 
 ### Fixed
+
+- **Creating a new version no longer strands the document with no way back
+  into edit mode.** The Edit menu withheld its enable-editing row whenever a
+  version entry was open, and the observer behind it refused to fire for the
+  same reason. But an entry stays open for the rest of the session once a
+  version is created, whereas editing stops the moment the author asks it to —
+  so "Create new version", then "Stop editing", left the only remaining route
+  into editing being to create *another* version. The row now follows edit
+  mode itself, and choosing it resumes the open entry rather than starting
+  anything: the entry, its note, and the baseline its change summary diffs
+  against all survive the round trip.
 
 - **A collection can no longer hold two entries under the same identity.**
   `datasets:` matched each child entry to at most one parent entry and appended
