@@ -389,12 +389,15 @@ server <- function(input, output, session) {
     version_baseline_yaml = NULL, # the document exactly as loaded -- the left side of every change summary
     version_entry_index = NULL, # index into metadata@version_history of the entry this session opened
     version_note = "", # the optional note typed in the new-version modal
-    new_version_msg = NULL # inline new-version-modal result: NULL | list(ok, error)
+    new_version_msg = NULL, # inline new-version-modal result: NULL | list(ok, error)
+    editing = FALSE, # TRUE while the author is in edit mode -- see the WHY on editing() below
+    edit_kind = NULL, # "current" | "new_version" | "new_document" -- wording for the status tag only
+    new_document_msg = NULL # inline new-document-modal result: NULL | list(ok, error)
   )
 
-  # The single gate for every editing surface. Off by default: input_switch() is
-  # created with value = FALSE, and isTRUE(NULL) is FALSE, so the app is
-  # read-only from the first frame -- before the client has reported anything.
+  # The single gate for every editing surface. Off by default: rv$editing is
+  # created FALSE (below) and isTRUE(FALSE) is FALSE, so the app is read-only
+  # from the first frame -- before any menu row has been clicked.
   #
   # Each surface is gated TWICE: its control is not rendered, and the observer
   # behind it calls req(editing()). The render is the affordance; the observer
@@ -413,18 +416,24 @@ server <- function(input, output, session) {
   # gating uploads or checks would make the app's default mode useless, since
   # validating a transfer is the thing most users open it to do.
   #
-  # A document LOADED from an existing one -- an upload, a bundled example, or
-  # a restored session -- opens read-only and stays that way until the author
-  # creates a new version (rv$version_locked; see the "Create new version"
-  # flow below). That lock is enforced HERE, in editing() itself, rather than
-  # by simply not rendering the edit_mode switch while locked: Shiny does not
-  # clear an input's value when its control is removed from the DOM, so a
-  # switch that had been turned on and then un-rendered (e.g. by a fresh
-  # locked load replacing an unlocked one) would leave input$edit_mode == TRUE
-  # sitting behind it, armed the moment the switch reappeared. Folding the
-  # lock into editing() means every surface that already calls req(editing())
-  # inherits it automatically, with no further change at the call site.
-  editing <- reactive(isTRUE(input$edit_mode) && !isTRUE(rv$version_locked))
+  # Editing state is server-owned (rv$editing) rather than an input, which is
+  # what removes the trap the previous switch-based design needed four
+  # server-to-client reset calls to work around: an input's value survives
+  # its control leaving the DOM, so a switch that had been turned on and then
+  # un-rendered would leave its old TRUE value sitting behind the empty slot,
+  # armed the moment the control reappeared. A reactiveValues field has no
+  # such afterlife -- it does not exist independently of the server code that
+  # writes it, so there is nothing left to compensate for and none of those
+  # four calls survive this design.
+  #
+  # rv$version_locked survives, but it no longer gates editing. It now only
+  # records that a LOADED document has not yet had a new version created in
+  # this session, which decides emphasis in the Edit menu (e.g. whether
+  # "Create new version" reads as the primary route), not whether editing is
+  # possible at all. A loaded document CAN be edited without creating a new
+  # version first -- "Edit current version" is a deliberate route to exactly
+  # that, recording nothing in the version history.
+  editing <- reactive(isTRUE(rv$editing))
 
   # Turning Edit mode off closes whatever editor was open and disarms it.
   #
@@ -444,40 +453,35 @@ server <- function(input, output, session) {
     ignoreInit = TRUE
   )
 
-  # The brandbar slot: empty on the landing page, then the edit_mode switch
-  # while the document is free to edit, or the "Create new version" button
-  # while it is locked (see the WHY comment on editing() above).
+  # The brandbar slot: empty on the landing page, otherwise the Edit dropdown
+  # (edit_menu()) plus, while editing, the read-only status tag next to it.
   #
-  # The landing page has nothing to edit, so neither control means anything
-  # there. rv$structure is the same landing-vs-workspace test output$main
-  # makes, read the same way: under isolate(), behind a dependency on
-  # rv$doc_token, which is bumped by exactly the three assignments that can
-  # change the answer (apply_loaded, confirm_reset, restore_session) and by
-  # nothing that merely mutates a loaded document. Depending on rv$structure
-  # itself would rebuild this control every time a dataset was added,
-  # removed or renamed -- the same mid-click rebuild the isolate() below
-  # avoids.
+  # The landing page has nothing to edit, so the slot renders nothing there.
+  # rv$structure is the same landing-vs-workspace test output$main makes, read
+  # the same way: under isolate(), behind a dependency on rv$doc_token, which
+  # is bumped by exactly the three assignments that can change the answer
+  # (apply_loaded, confirm_reset, restore_session) and by nothing that merely
+  # mutates a loaded document. Depending on rv$structure itself would rebuild
+  # this slot every time a dataset was added, removed or renamed -- the same
+  # mid-click rebuild the isolate() below avoids.
   #
-  # Un-rendering the switch does not clear input$edit_mode (Shiny keeps the
-  # value of a removed control), but every path that leaves or enters the
-  # landing page already resets it: confirm_reset and apply_loaded both call
-  # update_switch(value = FALSE). So nothing stale is left armed behind the
-  # empty slot.
-  #
-  # input$edit_mode is read under isolate() deliberately -- this output must
-  # re-render when rv$version_locked changes (a load, a reset, a successful
-  # version creation), but NOT on every flip of the switch itself. An
-  # un-isolated read would make this renderUI depend on input$edit_mode too,
-  # so turning the switch on or off would rebuild the control the user's
-  # cursor is sitting on, mid-click.
+  # rv$editing and rv$version_entry_index are read WITHOUT isolate() here, on
+  # purpose: the menu's own rows (whether "Edit current version" is offered)
+  # and the status tag next to it must follow those two immediately, the
+  # moment either changes -- unlike rv$structure above, which only needs to
+  # be current as of the last load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
     if (is.null(isolate(rv$structure))) {
       NULL
-    } else if (isTRUE(rv$version_locked)) {
-      create_new_version_button()
     } else {
-      edit_mode_switch(value = isolate(isTRUE(input$edit_mode)))
+      tagList(
+        edit_menu(
+          editing = isTRUE(rv$editing),
+          entry_open = !is.null(rv$version_entry_index)
+        ),
+        if (isTRUE(rv$editing)) edit_status_tag(rv$edit_kind)
+      )
     }
   })
 
@@ -489,7 +493,6 @@ server <- function(input, output, session) {
   # this mirrors.
   observeEvent(input$create_new_version, {
     req(rv$dta)
-    req(rv$version_locked)
     rv$new_version_msg <- NULL
     current <- tryCatch(S7::prop(DTAtools::metadata(rv$dta), "version"), error = function(e) NULL)
     showModal(modalDialog(
@@ -513,12 +516,6 @@ server <- function(input, output, session) {
 
   observeEvent(input$new_version_confirm, {
     req(rv$dta)
-    # Load-bearing, not defensive dead code: the input can still be driven
-    # over the websocket after the modal that created it is gone (e.g. a
-    # delayed/duplicate message), and by then the document may already be
-    # unlocked -- this is what stops that message from bumping the version a
-    # second time.
-    req(rv$version_locked)
     v <- trimws(as.character(input$new_version_value %||% ""))
     if (!nzchar(v)) {
       rv$new_version_msg <- list(ok = FALSE, error = "Enter a version.")
@@ -529,7 +526,24 @@ server <- function(input, output, session) {
       rv$new_version_msg <- list(ok = FALSE, error = "That is already the current version.")
       return()
     }
-    res <- dta_append_version_entry(rv$dta, v, Sys.Date(), dta_version_placeholder())
+    # The Edit menu is reachable while already editing (there is no
+    # req(rv$version_locked) left to stop it), so a second version bump in
+    # one session is now possible. If an entry from an earlier bump this
+    # session is still open, it has to be closed here first -- otherwise it
+    # would keep dta_version_placeholder() forever, and the version history
+    # would end up claiming nothing happened between the two versions.
+    # dta_version_finalise() is the same "diff against the baseline, write
+    # the summary" step export_dta() runs at download time, pulled out so
+    # both callers share one definition.
+    had_open_entry <- !is.null(rv$version_entry_index)
+    base <- rv$dta
+    if (had_open_entry) {
+      base <- dta_version_finalise(
+        base, rv$version_entry_index, rv$version_baseline_yaml,
+        note = rv$version_note %||% ""
+      )
+    }
+    res <- dta_append_version_entry(base, v, Sys.Date(), dta_version_placeholder())
     if (!isTRUE(res$ok)) {
       rv$new_version_msg <- list(ok = FALSE, error = res$error)
       return()
@@ -538,29 +552,147 @@ server <- function(input, output, session) {
     rv$version_entry_index <- length(S7::prop(DTAtools::metadata(rv$dta), "version_history"))
     rv$version_locked <- FALSE
     rv$version_note <- trimws(as.character(input$new_version_note %||% ""))
+    if (had_open_entry || is.null(rv$version_baseline_yaml)) {
+      # Re-baseline for the entry just opened, in two cases.
+      #
+      # had_open_entry: the earlier baseline (the document as loaded, or as it
+      # stood after the previous bump) is now the LEFT side of the entry
+      # closed above, not of this one.
+      #
+      # No baseline at all: a document that was never loaded from YAML has
+      # none -- one created from a template, or restarted by "Create new from
+      # current". Without this the entry just opened would be summarised
+      # against nothing, and dta_version_finalise()'s missing-baseline guard
+      # would leave its `changes` on the placeholder permanently, so the
+      # exported history would report a version as having changed nothing.
+      #
+      # An existing baseline is otherwise kept: on the first bump of a loaded
+      # document the summary is meant to reach back to the document as
+      # loaded, which is exactly what apply_loaded() put there.
+      yres <- dta_to_yaml_text(rv$dta)
+      if (isTRUE(yres$ok)) rv$version_baseline_yaml <- yres$value
+    }
     rv$new_version_msg <- NULL
     rv$md_token <- rv$md_token + 1
+    # Both of these MUST be set before sync_yaml_text(), which ends in
+    # autosave(): the snapshot it writes is what restore_session() reads back
+    # after a page reload. Setting them afterwards saved editing = FALSE and
+    # brought the author back out of edit mode on the very next reload,
+    # having just created a version in order to edit.
+    rv$editing <- TRUE
+    rv$edit_kind <- "new_version"
     sync_yaml_text()
-    # Turning the switch ON is the visible half of "editing is now unlocked",
-    # and it depends on an ordering guarantee worth naming, because the switch
-    # does not exist yet at the moment this line runs: clearing
-    # rv$version_locked above makes output$edit_gate swap the "Create new
-    # version" button for the switch, and both that re-render and this input
-    # message go out in the SAME flush.
-    #
-    # It lands because Shiny's client awaits its message handlers in
-    # registration order, and "values" (the output HTML, including bindAll())
-    # is registered before "inputMessages" -- so the switch is present AND
-    # bound by the time this message is dispatched. That matters: the
-    # inputMessages handler selects `.shiny-bound-input#<id>` and SILENTLY
-    # DROPS a message for an element that is not yet bound, which is exactly
-    # what would happen if the two were ever reordered. If a future Shiny
-    # changes that, the symptom is a switch that reappears off after creating
-    # a version, and the fix is to render it on (drive edit_gate from a
-    # reactive mirror of the intended state) rather than to message it on.
-    bslib::update_switch("edit_mode", value = TRUE)
     removeModal()
-    showNotification(sprintf("Version %s created — editing unlocked.", v), type = "message")
+    showNotification(sprintf("Version %s created — now editing it.", v), type = "message")
+  })
+
+  # --- edit current version (no version bump) ------------------------------
+  # Nothing is written to the document, so export_dta() short-circuits (no
+  # rv$version_entry_index, no baseline) and writes no change summary -- that
+  # is the point of this route, and the Edit menu row's own description says
+  # so. The req(is.null(...)) guard holds even though edit_menu() withholds
+  # this row while an entry is already open: an input can still be driven
+  # over the websocket after its row has left the DOM.
+  observeEvent(input$edit_current_version, {
+    req(rv$dta)
+    req(is.null(rv$version_entry_index))
+    rv$version_locked <- FALSE
+    # rv$version_baseline_yaml is deliberately LEFT ALONE. Clearing it looked
+    # harmless -- export_dta() writes no summary on this route either way,
+    # because that is gated on version_entry_index, which stays NULL. But the
+    # author can edit in place and THEN decide the change deserves a version
+    # after all, and the summary for that version has to reach back to the
+    # document as loaded; a baseline destroyed here could not be recovered,
+    # and the new version's entry would keep its placeholder for ever.
+    rv$version_entry_index <- NULL
+    rv$version_note <- ""
+    rv$editing <- TRUE
+    rv$edit_kind <- "current"
+    # Nothing about the document changed, so there is no sync_yaml_text() to
+    # ride along on -- but the session snapshot still has to learn that edit
+    # mode is on, or a reload before the author's first actual edit would
+    # bring them back read-only. autosave() is the only thing that persists
+    # it, and it is called at every other state change for the same reason.
+    autosave()
+  })
+
+  # --- create new from current ----------------------------------------------
+  # Same shape as the new-version modal above: an inline error output the
+  # modal body embeds, and a confirm handler that either rejects without
+  # closing the modal (leaving what the author typed on screen) or commits
+  # and closes it.
+  observeEvent(input$create_new_document, {
+    req(rv$dta)
+    rv$new_document_msg <- NULL
+    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
+    cur_v <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
+    cur_t <- tryCatch(S7::prop(md, "title"), error = function(e) NULL)
+    showModal(modalDialog(
+      title = "Create new from current",
+      new_document_modal_body(cur_t, cur_v),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("create_new_document_confirm", "Create document", class = "btn btn-primary")
+      ),
+      easyClose = TRUE
+    ))
+  })
+
+  output$new_document_msg <- renderUI({
+    m <- rv$new_document_msg
+    if (is.null(m) || isTRUE(m$ok)) {
+      return(NULL)
+    }
+    div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+  })
+
+  observeEvent(input$create_new_document_confirm, {
+    req(rv$dta)
+    v <- trimws(as.character(input$new_document_version %||% ""))
+    if (!nzchar(v)) {
+      rv$new_document_msg <- list(ok = FALSE, error = "Enter a version.")
+      return()
+    }
+    res <- dta_restart_version_history(rv$dta, v, Sys.Date())
+    if (!isTRUE(res$ok)) {
+      rv$new_document_msg <- list(ok = FALSE, error = res$error)
+      return()
+    }
+    rv$dta <- res$value
+    rv$version_locked <- FALSE
+    # The seeded history entry dta_restart_version_history() writes is
+    # deliberately left CLOSED (no rv$version_entry_index), so an export does
+    # not overwrite its "Created from ..." text with a diff -- the same
+    # behaviour a template-created document already has.
+    rv$version_entry_index <- NULL
+    # The restarted document is the baseline for whatever version comes after
+    # it. Leaving this NULL would push the re-baseline forward to the moment
+    # of the next bump, and everything the author changed between restarting
+    # and bumping would drop out of that version's summary.
+    yres <- dta_to_yaml_text(res$value)
+    rv$version_baseline_yaml <- if (isTRUE(yres$ok)) yres$value else NULL
+    rv$version_note <- ""
+    rv$editing <- TRUE
+    rv$edit_kind <- "new_document"
+    rv$new_document_msg <- NULL
+    rv$md_token <- rv$md_token + 1
+    sync_yaml_text()
+    removeModal()
+  })
+
+  # --- stop editing ----------------------------------------------------------
+  # Every version field is left alone, so re-entering edit mode resumes
+  # whatever entry was already open rather than starting a new one. The
+  # observeEvent(editing(), ...) above already closes any open modal and
+  # clears rv$editor_dataset when this flips to FALSE.
+  observeEvent(input$stop_editing, {
+    rv$editing <- FALSE
+    rv$edit_kind <- NULL
+    # Persist it for the same reason edit_current_version does, and more
+    # sharply in this direction: without it, deliberately leaving edit mode
+    # and then reloading would put the author straight back into it, because
+    # the last snapshot still said editing = TRUE.
+    autosave()
   })
 
   upload_registry <- new.env(parent = emptyenv())
@@ -651,7 +783,9 @@ server <- function(input, output, session) {
         version_locked = isolate(rv$version_locked),
         version_baseline_yaml = isolate(rv$version_baseline_yaml),
         version_entry_index = isolate(rv$version_entry_index),
-        version_note = isolate(rv$version_note)
+        version_note = isolate(rv$version_note),
+        editing = isolate(rv$editing),
+        edit_kind = isolate(rv$edit_kind)
       ),
       target
     ), silent = TRUE)
@@ -690,10 +824,12 @@ server <- function(input, output, session) {
     rv$version_note <- ""
     rv$new_version_msg <- NULL
     # Load-bearing, not cosmetic: without this, loading a second document
-    # after editing a first would carry the previous input$edit_mode == TRUE
+    # after editing a first would carry the previous document's edit state
     # forward, momentarily unlocking (or leaving unlocked) a document that
-    # just arrived and has not been versioned.
-    bslib::update_switch("edit_mode", value = FALSE)
+    # just arrived and has not been versioned. A newly loaded document is
+    # never mid-edit.
+    rv$editing <- FALSE
+    rv$edit_kind <- NULL
     autosave()
   }
 
@@ -1415,6 +1551,17 @@ server <- function(input, output, session) {
     apply_loaded(created$value, yaml_text,
       dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE
     )
+    # apply_loaded() above always leaves rv$editing FALSE -- correct for a
+    # load, but this is not a load, it is a document just CREATED. With no
+    # switch left to flip, leaving it non-editing would strand the author in
+    # a read-only view of a document they made themselves seconds ago.
+    rv$editing <- TRUE
+    rv$edit_kind <- "current"
+    # apply_loaded() autosaved a moment ago, while rv$editing was still FALSE,
+    # so the snapshot on disk contradicts the two lines above. Persist again
+    # or a reload right after creating the document restores it read-only --
+    # the very outcome the comment above says this code exists to prevent.
+    autosave()
     showNotification(
       paste0("New DTA created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
       type = "message"
@@ -5875,24 +6022,22 @@ server <- function(input, output, session) {
   # the reason an export fails.
   export_dta <- function() {
     dta <- isolate(rv$dta)
-    idx <- isolate(rv$version_entry_index)
-    base_yaml <- isolate(rv$version_baseline_yaml)
-    if (is.null(dta) || is.null(idx) || is.null(base_yaml)) {
+    if (is.null(dta)) {
       return(dta)
     }
-    parsed <- dta_read_yaml_text(base_yaml)
-    if (!isTRUE(parsed$ok)) {
-      return(dta)
-    }
-    built <- dta_try({
-      diff <- dta_diff(parsed$value, dta)
-      summary <- dta_version_change_summary(diff, note = isolate(rv$version_note) %||% "")
-      cur_v <- tryCatch(S7::prop(DTAtools::metadata(dta), "version"), error = function(e) NULL)
-      upd <- dta_set_version_entry_changes(dta, idx, summary, version = cur_v)
-      if (!isTRUE(upd$ok)) stop(upd$error)
-      upd$value
-    })
-    if (isTRUE(built$ok)) built$value else dta
+    # The whole body of this function is dta_version_finalise() -- it lives in
+    # versioning.R because the second-version-bump path in new_version_confirm
+    # has to close an open entry too, and two copies of "diff against the
+    # baseline and write the summary" would drift apart the first time either
+    # was hardened without the other. It already returns the document
+    # untouched for a NULL index, a missing or unparseable baseline, or a diff
+    # that throws, which is exactly this function's own contract.
+    dta_version_finalise(
+      dta,
+      isolate(rv$version_entry_index),
+      isolate(rv$version_baseline_yaml),
+      note = isolate(rv$version_note) %||% ""
+    )
   }
 
   output$dl_yaml <- downloadHandler(
@@ -6281,7 +6426,8 @@ server <- function(input, output, session) {
     rv$version_entry_index <- NULL
     rv$version_note <- ""
     rv$new_version_msg <- NULL
-    bslib::update_switch("edit_mode", value = FALSE)
+    rv$editing <- FALSE
+    rv$edit_kind <- NULL
     try(unlink(session_file() %||% character(0)), silent = TRUE)
     removeModal()
   })
@@ -6767,7 +6913,12 @@ server <- function(input, output, session) {
     rv$version_entry_index <- saved$version_entry_index
     rv$version_note <- saved$version_note %||% ""
     rv$new_version_msg <- NULL
-    if (isTRUE(rv$version_locked)) bslib::update_switch("edit_mode", value = FALSE)
+    # Same fallback as version_locked above, for a session file written
+    # before this field existed: isTRUE(NULL) is FALSE, so an absent
+    # saved$editing restores as not-editing for free -- the conservative
+    # default, with no explicit is.null() check needed.
+    rv$editing <- isTRUE(saved$editing)
+    rv$edit_kind <- saved$edit_kind
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1

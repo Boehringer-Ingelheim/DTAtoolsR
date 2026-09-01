@@ -154,3 +154,85 @@ test_that("the Ace resize script waits for the document before touching body", {
   expect_match(src, "document.readyState === 'loading'", fixed = TRUE)
   expect_match(src, "addEventListener('DOMContentLoaded', start)", fixed = TRUE)
 })
+
+# The Edit dropdown (edit_menu()) that replaced the old "Create new version"
+# button and "Edit mode" switch in the brandbar. See the WHY comment on
+# edit_menu() (ui_components.R) for why all three routes act on the same
+# object, and why edit_current_version is withheld while an entry is open.
+
+test_that("edit_menu() offers all three routes into editing", {
+  html <- render_html(app_fn("edit_menu")())
+
+  expect_match(html, 'id="create_new_version"', fixed = TRUE)
+  expect_match(html, 'id="edit_current_version"', fixed = TRUE)
+  expect_match(html, 'id="create_new_document"', fixed = TRUE)
+})
+
+test_that("edit_menu(entry_open = TRUE) withholds edit_current_version, but keeps the other two routes", {
+  html <- render_html(app_fn("edit_menu")(entry_open = TRUE))
+
+  expect_no_match(html, 'id="edit_current_version"', fixed = TRUE)
+  # The menu is not merely empty -- the other two routes are still there, so
+  # this cannot pass by rendering nothing.
+  expect_match(html, 'id="create_new_version"', fixed = TRUE)
+  expect_match(html, 'id="create_new_document"', fixed = TRUE)
+})
+
+test_that("edit_menu()'s Stop-editing row appears only while editing", {
+  menu <- app_fn("edit_menu")
+
+  expect_match(render_html(menu(editing = TRUE)), 'id="stop_editing"', fixed = TRUE)
+  expect_no_match(render_html(menu(editing = FALSE)), 'id="stop_editing"', fixed = TRUE)
+})
+
+test_that("create_new_document's row carries the danger class marking it destructive", {
+  # Split on </li> rather than grepl() on the whole menu, so the assertion is
+  # tied to THIS row's markup, not merely to the class appearing somewhere in
+  # the menu.
+  html <- render_html(app_fn("edit_menu")())
+  rows <- strsplit(html, "</li>", fixed = TRUE)[[1]]
+  row <- rows[grepl('id="create_new_document"', rows, fixed = TRUE)]
+
+  expect_length(row, 1)
+  expect_match(row, "ds-edit-item-danger", fixed = TRUE)
+})
+
+test_that("edit_menu()'s dropdown opens right-aligned", {
+  # This toggle sits at the right-hand end of the brandbar (unlike
+  # ds_edit_menu()'s own dropdown, which has no dropdown-menu-end) -- a menu
+  # opening flush with its trigger's left edge would run past the right edge
+  # of the viewport from this position. See the WHY comment on edit_menu().
+  html <- render_html(app_fn("edit_menu")())
+  expect_match(html, "dropdown-menu-end", fixed = TRUE)
+})
+
+test_that("edit_status_tag() names the edit kind and is a label, not a control", {
+  tag <- app_fn("edit_status_tag")
+
+  new_version_html <- render_html(tag("new_version"))
+  new_document_html <- render_html(tag("new_document"))
+  default_html <- render_html(tag(NULL))
+
+  expect_match(new_version_html, "Editing new version", fixed = TRUE)
+  expect_match(new_document_html, "Editing new document", fixed = TRUE)
+  expect_match(default_html, "Edit mode", fixed = TRUE)
+
+  # role="status" announces the mode change to a screen reader; brand-link
+  # (the brandbar's clickable pills, theme.R) would make this read as
+  # clickable when nothing reaches it -- see the WHY comment on
+  # edit_status_tag().
+  for (html in list(new_version_html, new_document_html, default_html)) {
+    expect_match(html, 'role="status"', fixed = TRUE)
+    expect_no_match(html, "brand-link", fixed = TRUE)
+  }
+})
+
+test_that("new_document_modal_body() names the current title and version, and prefills the version field with 0.1", {
+  body <- app_fn("new_document_modal_body")
+  html <- render_html(body("Clinical Data Specification", "1.0"))
+
+  expect_match(html, "Clinical Data Specification", fixed = TRUE)
+  expect_match(html, "v1.0", fixed = TRUE)
+  expect_match(html, 'id="new_document_version"', fixed = TRUE)
+  expect_match(html, 'value="0.1"', fixed = TRUE)
+})

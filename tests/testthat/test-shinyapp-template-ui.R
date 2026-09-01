@@ -143,6 +143,20 @@ pick_template_step1 <- function(session, output, id, version) {
   invisible(html)
 }
 
+# Local copy of the autosave-slot cleanup defined in test-shinyapp-server.R /
+# test-shinyapp-versioning.R / test-shinyapp-edit-mode.R -- deliberately
+# duplicated, same rationale as local_clean_template_env() above: this is not
+# part of helper-shinyapp.R, so a test file that needs it owns its own copy
+# rather than depending on another test file's internals. Only the one
+# reload test below (dta_client_id + restore_session) needs it.
+clean_session_file <- function() {
+  f <- list.files(tempdir(),
+    pattern = "^dtatools_app_session.*\\.rds$", full.names = TRUE
+  )
+  unlink(f, force = TRUE)
+  invisible(f)
+}
+
 # ---- Picker: grouping by source, excluding the packaged template ----------
 
 test_that("opening the picker with a dir: source lists the private templates and not the packaged one", {
@@ -450,5 +464,63 @@ test_that("with no private source configured, the picker opens and offers the pa
     expect_gte(count_occurrences(html, "class=\"tmpl-entry"), 1)
     expect_match(html, "id=\"template_select_name\"", fixed = TRUE)
     expect_match(html, "id=\"template_select_version\"", fixed = TRUE)
+  })
+})
+
+# ---- Creating from a template enters edit mode ------------------------------
+
+test_that("creating a document from a template leaves the author editing it", {
+  # THE BUG THIS GUARDS: template_create_confirm() built the document via
+  # apply_loaded(), which always leaves rv$editing FALSE (correct for a real
+  # load) -- but a template-created document is new, not loaded, and there is
+  # no switch left for the author to flip themselves. See the WHY comment on
+  # the template_create_confirm observer in app.R.
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "edit_tpl", version = "1.0", label = "Edit Template")
+
+  shiny::testServer(app_server_dir(), {
+    pick_template_step1(session, output, "edit_tpl", "1.0")
+    session$setInputs(tmpl_carry_source = "none")
+    session$setInputs(template_create_confirm = 1)
+
+    expect_true(editing())
+    expect_equal(rv$edit_kind, "current")
+
+    # Behavioural check, not just the flag: an edit really lands. save_md()
+    # debounces 700ms -- see the identical guard in test-shinyapp-edit-mode.R
+    # for why elapse(1000) is needed to observe it.
+    session$setInputs(md_header = "Acme Corp Ltd")
+    session$elapse(1000)
+    expect_equal(
+      as.character(S7::prop(DTAtools::metadata(rv$dta), "header")), "Acme Corp Ltd"
+    )
+  })
+})
+
+test_that("edit mode from a template-created document survives a reload", {
+  # The direct regression guard: template_create_confirm() used to autosave
+  # BEFORE setting rv$editing <- TRUE, so the snapshot on disk still said
+  # editing = FALSE and a reload right after creating the document dropped
+  # the author into a read-only view of what they had just made.
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "reload_tpl", version = "1.0", label = "Reload Template")
+
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_client_id = strrep("f", 32))
+    pick_template_step1(session, output, "reload_tpl", "1.0")
+    session$setInputs(tmpl_carry_source = "none")
+    session$setInputs(template_create_confirm = 1)
+    expect_true(editing())
+
+    session$setInputs(restore_session = 1)
+
+    expect_true(editing())
   })
 })

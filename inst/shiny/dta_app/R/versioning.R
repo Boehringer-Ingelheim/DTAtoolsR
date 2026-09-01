@@ -323,3 +323,123 @@ dta_set_version_entry_changes <- function(dta, index, changes, version = NULL) {
     }
   })
 }
+
+# ---- Seeding a restarted document's history ---------------------------------
+
+# The `changes` text for the single history entry a document gets when it is
+# restarted from another (see dta_restart_version_history() below). Built
+# from the PREVIOUS document's title/version, not the new one's -- the point
+# of the sentence is to say where this document came from, which only the
+# old values can say.
+#
+# Every interpolated value goes through dta_version_sanitise() first: this
+# string lands straight in a Markdown table cell on export
+# (exportDocuments.R's .df_to_md_table()), and an untouched title containing
+# a `|` would split the cell.
+dta_new_document_seed <- function(title, version) {
+  title <- dta_version_sanitise(title)
+  version <- dta_version_sanitise(version)
+
+  has_title <- nzchar(title)
+  has_version <- nzchar(version)
+
+  if (has_title && has_version) {
+    sprintf("Created from %s version %s.", title, version)
+  } else if (has_version) {
+    sprintf("Created from version %s.", version)
+  } else if (has_title) {
+    sprintf("Created from %s.", title)
+  } else {
+    "Created as a new document."
+  }
+}
+
+# Reset a document's version_history to a single seeded entry, for the
+# "start a new document from this one" flow. Unlike dta_append_version_entry()
+# this REPLACES version_history rather than growing it -- the whole point of
+# restarting is that the new document's history begins clean, with one entry
+# naming where it came from, rather than dragging every entry of the source
+# document along with it.
+#
+# The previous title/version are read BEFORE either property is overwritten,
+# because dta_new_document_seed() needs the OLD values to say what the new
+# document was created from; reading them after the overwrite would just
+# describe the document to itself.
+#
+# Same validation, and the same "A version is required." message, as
+# dta_append_version_entry() -- both are reachable from the same version-bump
+# UI and must reject a blank version identically.
+dta_restart_version_history <- function(dta, version = "0.1", date = Sys.Date(),
+                                        changes = NULL) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+
+    prev_title <- tryCatch(S7::prop(md, "title"), error = function(e) NULL)
+    prev_version <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
+
+    version <- as.character(version)[1]
+    if (is.null(version) || length(version) == 0 || is.na(version) || trimws(version) == "") {
+      stop("A version is required.")
+    }
+
+    if (is.null(changes)) {
+      changes <- dta_new_document_seed(prev_title, prev_version)
+    } else {
+      changes <- dta_version_sanitise(changes)
+      if (!nzchar(changes)) {
+        changes <- dta_version_placeholder()
+      }
+    }
+
+    S7::prop(md, "version") <- version
+    entry <- list(version = version, date = date, changes = changes)
+    S7::prop(md, "version_history") <- list(entry)
+
+    dta@metadata <- md
+    dta
+  })
+}
+
+# ---- Closing the open version_history entry ----------------------------------
+
+# Replace the still-open version_history entry's placeholder `changes` with a
+# real summary of everything that differs between the document as it stood
+# at `baseline_yaml` and `dta` as it now stands.
+#
+# Pulled out of export_dta() (app.R) into its own function because a second
+# caller now needs this identical "close the open entry" step -- bumping the
+# version again, in the same session, before the document is ever exported --
+# and a second inlined copy would drift from this one the moment either was
+# edited without the other.
+#
+# Returns `dta` UNCHANGED on every failure path: no index yet, no baseline to
+# diff against, an unparseable baseline, a diff that throws. None of those may
+# ever be the reason a version bump -- or an export -- fails; a document with
+# a placeholder `changes` string is a worse outcome than not, but a blocked
+# export is worse still.
+dta_version_finalise <- function(dta, index, baseline_yaml, note = "") {
+  # length() before nzchar(), not the other way round: nzchar(character(0)) is
+  # logical(0), and `FALSE || logical(0)` is NA rather than FALSE, so a
+  # zero-length baseline reached `if (NA)` and aborted -- turning the one
+  # function that must never throw into the thing that blocks an export.
+  if (is.null(index) || length(baseline_yaml) != 1 || is.na(baseline_yaml) ||
+    !nzchar(baseline_yaml)) {
+    return(dta)
+  }
+
+  parsed <- dta_read_yaml_text(baseline_yaml)
+  if (!isTRUE(parsed$ok)) {
+    return(dta)
+  }
+
+  built <- dta_try({
+    diff <- dta_diff(parsed$value, dta)
+    summary <- dta_version_change_summary(diff, note = note)
+    cur_v <- tryCatch(S7::prop(DTAtools::metadata(dta), "version"), error = function(e) NULL)
+    upd <- dta_set_version_entry_changes(dta, index, summary, version = cur_v)
+    if (!isTRUE(upd$ok)) stop(upd$error)
+    upd$value
+  })
+
+  if (isTRUE(built$ok)) built$value else dta
+}
