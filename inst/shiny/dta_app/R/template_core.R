@@ -453,6 +453,97 @@ list_set_path <- function(x, keys, value) {
   x
 }
 
+# Read the value at a dotted path in a BUILT DOCUMENT, or NULL.
+#
+# The document's own vocabulary is rooted at `metadata`, and its top level is
+# S7 properties rather than list elements -- so the first hop is S7::prop() and
+# only what lies below it is an ordinary nested list. Anything that is not a
+# `metadata.…` path returns NULL; a template addresses its own sections through
+# dta_template_path_get() (template_inherit.R) instead.
+dta_template_document_path_get <- function(dta, path) {
+  parts <- strsplit(as.character(path %||% ""), ".", fixed = TRUE)[[1]]
+  if (length(parts) == 0 || !identical(parts[[1]], "metadata")) {
+    return(NULL)
+  }
+  md <- DTAtools::metadata(dta)
+  # `base.metadata` with no field after it means "the metadata block as a
+  # whole". Rejecting it for having too few segments would make such a
+  # requirement permanently unsatisfiable rather than merely unusual.
+  if (length(parts) == 1) {
+    return(as.list(md))
+  }
+  value <- tryCatch(S7::prop(md, parts[[2]]), error = function(e) NULL)
+  if (length(parts) == 2) {
+    return(value)
+  }
+  list_get_path(value, parts[-c(1, 2)])
+}
+
+# Warn about a sealed path that matches nothing in the template being built.
+#
+# A dead seal fails SILENTLY -- the path resolves to NULL before and after the
+# merge, so every descendant compares equal and passes -- and only a typo or a
+# since-renamed field ever produces one. validate_template() reports it as
+# `sealed_path_unknown`, but that is opt-in and lives in the template
+# repository's CI; a seal is worth nothing if the guarantee depends on
+# remembering to run a linter. This says the same thing at build time, where it
+# cannot be skipped.
+#
+# A WARNING rather than an error, deliberately: an abstract parent may seal a
+# path that only its descendants create, so an unresolvable seal is not by
+# itself proof of a mistake.
+dta_template_warn_dead_seals <- function(template_def) {
+  dead <- Filter(
+    function(path) is.null(dta_template_path_get(template_def, path)),
+    as.character(template_def$sealed %||% character(0))
+  )
+  if (length(dead) > 0) {
+    n <- length(dead)
+    shown <- paste(dead, collapse = ", ")
+    cli::cli_warn(c(
+      "{n} sealed path{?s} match{?es/} nothing in this template: {shown}.",
+      i = "A sealed path that resolves to nothing protects nothing, because every descendant compares equal to it."
+    ))
+  }
+  invisible(NULL)
+}
+
+# Abort unless every path an ancestor marked `required:` holds a real value.
+#
+# ONE path vocabulary, two places to look it up. A `base.…` path is resolved
+# against the built DOCUMENT with the prefix dropped -- `base.metadata.supplier`
+# becomes `metadata.supplier` -- because `base:` is the metadata seed, so a
+# field the USER filled through a party or vocabulary slot satisfies the
+# requirement exactly as a descendant template setting it would. Anything else
+# (`options.…`, `datasets.…`) has no document counterpart and is resolved
+# against the resolved template definition.
+dta_template_check_required <- function(dta, template_def) {
+  paths <- as.character(template_def$required %||% character(0))
+  if (length(paths) == 0) {
+    return(invisible(NULL))
+  }
+
+  filled <- vapply(paths, function(path) {
+    value <- if (startsWith(path, "base.")) {
+      dta_template_document_path_get(dta, sub("^base\\.", "", path))
+    } else {
+      dta_template_path_get(template_def, path)
+    }
+    dta_template_path_is_filled(value)
+  }, logical(1))
+
+  if (any(!filled)) {
+    n <- sum(!filled)
+    shown <- paste(paths[!filled], collapse = ", ")
+    template_id <- as.character(template_def$id %||% "<unknown>")
+    cli::cli_abort(c(
+      "{n} required field{?s} not filled in template {.val {template_id}}: {shown}.",
+      i = "An ancestor's {.field required:} names them. Set them in this template, or choose a value for them when creating the document."
+    ))
+  }
+  invisible(NULL)
+}
+
 # Apply one metadata path update to DTA object.
 # Supported path root is "metadata".
 apply_template_metadata_path <- function(dta, path, value) {
@@ -870,6 +961,15 @@ create_dta_from_template <- function(template_def, template_path, selections = l
 
     # 6) Resolve ${version} now that the options have settled what it is.
     dta <- apply_template_expressions(dta)
+
+    # 6a) `required:` -- checked HERE, after every selection has been applied
+    # and before provenance records the result. This is the first moment the
+    # document is complete, and it is what lets a required field be satisfied
+    # either by a descendant template setting it or by the person creating the
+    # document choosing it: both have already happened by now, and a check any
+    # earlier could not tell a deferred field from an unfilled one.
+    dta_template_check_required(dta, template_def)
+    dta_template_warn_dead_seals(template_def)
 
     # 7) Provenance, LAST: it records what steps 1-6 decided, so it cannot be
     # written before they run. Assigned directly onto the property, NOT

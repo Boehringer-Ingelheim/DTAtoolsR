@@ -906,3 +906,105 @@ test_that("a non-list base is rejected whether or not the template extends", {
   expect_false(res$ok)
   expect_equal(res$error, "Template 'base' must be a mapping/object.")
 })
+
+# ---- required ----------------------------------------------------------------
+
+# `required:` is checked at INSTANTIATION rather than at merge, because an
+# abstract parent is allowed to leave a required field unset -- being required
+# of someone further down is the whole point. These build a real document to
+# exercise that, since the check runs after every selection has been applied.
+
+required_fixture <- function(dir) {
+  writeLines(
+    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    file.path(dir, "dataset.yaml")
+  )
+  list(
+    path = file.path(dir, "template.yaml"), # need not exist on disk
+    def = list(
+      id = "req_tpl",
+      base = list(),
+      datasets = list("dataset.yaml"),
+      required = "base.metadata.header",
+      options = list(list(
+        id = "header", label = "Header", type = "text", target = "metadata.header"
+      ))
+    )
+  )
+}
+
+test_that("create_dta_from_template() refuses to build while a required field is unfilled", {
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+
+  result <- create_fn(fx$def, fx$path, selections = list())
+
+  expect_false(result$ok)
+  expect_match(result$error, "required field", fixed = TRUE)
+  expect_match(result$error, "base.metadata.header", fixed = TRUE)
+})
+
+test_that("a required field the TEMPLATE fills is satisfied", {
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+  fx$def$base <- list(metadata = list(header = "Set by the template"))
+
+  result <- create_fn(fx$def, fx$path, selections = list())
+
+  expect_true(result$ok)
+  expect_equal(DTAtools::metadata(result$value)@header, "Set by the template")
+})
+
+test_that("a required field only the USER fills is satisfied too", {
+  # This is what the `base.` resolution rule buys, and the assertion that would
+  # fail if `required:` were checked against the template definition instead of
+  # the built document: the template leaves `base:` empty, and the requirement
+  # is met purely by a selection made at creation time.
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+
+  result <- create_fn(fx$def, fx$path, selections = list(header = "Chosen by the user"))
+
+  expect_true(result$ok)
+  expect_equal(DTAtools::metadata(result$value)@header, "Chosen by the user")
+})
+
+test_that("a blank value does not satisfy a required field", {
+  # "" is a legitimate present-but-blank value everywhere else in the four
+  # states, but the point of `required:` is that somebody made a real choice.
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+
+  result <- create_fn(fx$def, fx$path, selections = list(header = ""))
+
+  expect_false(result$ok)
+  expect_match(result$error, "required field", fixed = TRUE)
+})
+
+test_that("a required path outside base. is resolved against the template itself", {
+  # `options.…` and `datasets.…` have no counterpart in the built document, so
+  # they are checked against the resolved definition rather than the DTA.
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+  fx$def$base <- list(metadata = list(header = "h"))
+  fx$def$required <- "options.header.default"
+
+  unset <- create_fn(fx$def, fx$path, selections = list())
+  expect_false(unset$ok)
+  expect_match(unset$error, "options.header.default", fixed = TRUE)
+
+  fx$def$options[[1]]$default <- "A default"
+  expect_true(create_fn(fx$def, fx$path, selections = list())$ok)
+})
+
+test_that("every unfilled required path is named at once, not one per run", {
+  create_fn <- app_fn("create_dta_from_template")
+  fx <- required_fixture(withr::local_tempdir())
+  fx$def$required <- c("base.metadata.header", "options.header.default")
+
+  result <- create_fn(fx$def, fx$path, selections = list())
+
+  expect_false(result$ok)
+  expect_match(result$error, "base.metadata.header", fixed = TRUE)
+  expect_match(result$error, "options.header.default", fixed = TRUE)
+})
