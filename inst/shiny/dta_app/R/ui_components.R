@@ -5,13 +5,13 @@
 # helper files: app.R starts with library(shiny) and the test harness sources
 # these files into an environment whose parent is shiny's namespace.
 
-# The single control that takes a loaded, versioned document into editing --
+# The single control that takes a loaded document into and out of editing --
 # one dropdown standing in for what used to be a button-or-switch swap
 # (create_new_version_button()/edit_mode_switch(), deleted with this menu's
-# introduction). All three routes into editing -- starting a new version,
-# editing the current one in place, or starting a new document from this one
-# -- act on the same object, so they read as one entry point rather than
-# competing controls in the brandbar.
+# introduction). Unlocking the document as it stands, starting a new version,
+# and starting a new document from this one all act on the same object, so
+# they read as one entry point rather than competing controls in the
+# brandbar.
 #
 # `create_new_version` keeps the input id it has always had, so its
 # observer, its modal (new_version_modal_body(), below) and every test that
@@ -20,10 +20,24 @@
 # edit_rules, further down this file, when the dataset editors made the
 # equivalent move.
 #
-# `edit_current_version` is withheld while `entry_open` is TRUE: choosing it
-# then would silently abandon a change summary the author is already
-# part-way through typing, rather than asking them to finish or discard it
-# first.
+# `enable_edit_mode` and `stop_editing` are ONE ROW THAT FLIPS, not two rows
+# that can both be present: exactly one is rendered, chosen by `editing`.
+# That is the toggle this menu replaced, put back -- and putting it back is
+# what closes the trap the previous wording opened. The enable row used to be
+# "Edit current version", withheld whenever `entry_open` was TRUE so that
+# choosing it could not silently abandon a change summary already part-way
+# through. But `entry_open` stays TRUE for the REST OF THE SESSION once a
+# version has been created, whereas `editing` goes FALSE the moment "Stop
+# editing" is chosen -- so after create-new-version, then stop-editing, the
+# menu offered no way back in at all. Re-entering is not a third route into
+# editing; it resumes the entry that is already open, which is why gating on
+# `editing` is both simpler and correct.
+#
+# `entry_open` survives as WORDING ONLY, and no longer decides whether any
+# row is shown. With an entry open, edits are summarised into it; with none,
+# they are recorded nowhere -- a real difference the author is entitled to
+# know before unlocking, and the one thing the old "Edit current version"
+# row got right.
 #
 # `dropdown-menu-end` -- absent from ds_edit_menu()'s own `dropdown-menu` --
 # is required here specifically because this toggle sits at the right-hand
@@ -33,12 +47,8 @@
 # `create_new_document` sits below a divider with the same danger styling as
 # "Remove dataset" (ds_edit_menu()), and for the same reason: it is
 # destructive -- it discards the loaded document's version history -- and
-# must not read as one more, equally reversible editor.
-#
-# `locked` is deliberately not a parameter here: nothing in this menu
-# currently changes on lock state, and an unused argument would invite a
-# caller to believe it does something. Add it back only once a row's
-# visibility or wording actually needs to depend on it.
+# must not read as one more, equally reversible editor. It stays LAST, so
+# the toggle above it is never reached past the destructive row.
 edit_menu <- function(editing = FALSE, entry_open = FALSE) {
   div(
     class = "dropdown app-edit",
@@ -60,38 +70,48 @@ edit_menu <- function(editing = FALSE, entry_open = FALSE) {
         "create_new_version", "&#x1F4C8;", "Create new version",
         "Bump the version and record what you change"
       )),
-      if (!isTRUE(entry_open)) {
-        tags$li(ds_edit_menu_item(
-          "edit_current_version", "&#x270F;&#xFE0F;", "Edit current version",
-          "Change this document in place. Not recorded in the version history."
-        ))
-      },
+      tags$li(if (isTRUE(editing)) {
+        ds_edit_menu_item(
+          "stop_editing", "&#x1F441;&#xFE0F;", "Stop editing",
+          "Return to the read-only view"
+        )
+      } else {
+        ds_edit_menu_item(
+          "enable_edit_mode", "&#x270F;&#xFE0F;", "Enable edit mode",
+          if (isTRUE(entry_open)) {
+            "Unlock this specification. Changes are recorded in the version you created."
+          } else {
+            "Unlock this specification. Not recorded in the version history."
+          }
+        )
+      }),
       tags$li(tags$hr(class = "dropdown-divider")),
       tags$li(ds_edit_menu_item(
         "create_new_document", "&#x1F4C4;", "Create new from current",
         "Start a new specification at version 0.1, discarding this history",
         class = "ds-edit-item-danger"
-      )),
-      if (isTRUE(editing)) {
-        tagList(
-          tags$li(tags$hr(class = "dropdown-divider")),
-          tags$li(ds_edit_menu_item(
-            "stop_editing", "&#x1F441;&#xFE0F;", "Stop editing",
-            "Return to the read-only view"
-          ))
-        )
-      }
+      ))
     )
   )
 }
 
-# A read-only status pill naming what MODE the document is in. Shown beside
+# A read-only status pill saying the document is editable. Shown beside
 # edit_menu() rather than inside it, because it is not a control: no click
 # reaches it, and it must never read as one. Deliberately not `.brand-link`
 # (theme.R) -- a pill styled like the links either side of it in the
 # brandbar would look clickable, and this is a label, not one. `role =
 # "status"` gets the mode change announced to a screen reader without
 # asking it to be operated like anything else.
+#
+# It says ONE thing, "Edit mode", in every state. It once named the route
+# taken in -- "Editing new version", "Editing new document", "Edit mode" --
+# which made three labels out of a single fact: whether editing is allowed.
+# The route is not what a reader of the brandbar needs, and three wordings
+# for one state invited the pill to be read as a mode distinction the rest
+# of the app does not make: every editing surface is gated on the one
+# rv$editing flag, so the pill names that flag and nothing else. Where the
+# document came from, and what versions it has been through, is on the
+# Metadata tab, where it can be read in full.
 #
 # This does NOT show the version, even though it once did: the version
 # field on the Metadata tab is written straight to rv$dta by a debounced
@@ -100,15 +120,9 @@ edit_menu <- function(editing = FALSE, entry_open = FALSE) {
 # on output$edit_gate, app.R). A version shown here would go stale the
 # moment the author typed a new one, and the only fix would be a dependency
 # that rebuilds this dropdown-adjacent slot under the user's own cursor --
-# the exact trap that comment warns against. The mode is what this tag is
-# for; the version already has a home on the Metadata tab.
-edit_status_tag <- function(kind = NULL) {
-  text <- switch(kind %||% "",
-    new_version = "Editing new version",
-    new_document = "Editing new document",
-    "Edit mode"
-  )
-  span(class = "brand-status", role = "status", text)
+# the exact trap that comment warns against.
+edit_status_tag <- function() {
+  span(class = "brand-status", role = "status", "Edit mode")
 }
 
 # The body of the "Create new version" modal opened by edit_menu()'s

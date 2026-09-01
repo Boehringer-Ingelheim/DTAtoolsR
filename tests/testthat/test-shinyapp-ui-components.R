@@ -157,32 +157,62 @@ test_that("the Ace resize script waits for the document before touching body", {
 
 # The Edit dropdown (edit_menu()) that replaced the old "Create new version"
 # button and "Edit mode" switch in the brandbar. See the WHY comment on
-# edit_menu() (ui_components.R) for why all three routes act on the same
-# object, and why edit_current_version is withheld while an entry is open.
+# edit_menu() (ui_components.R) for why every route acts on the same object,
+# and why the enable/stop pair is one row that flips rather than two rows.
 
 test_that("edit_menu() offers all three routes into editing", {
   html <- render_html(app_fn("edit_menu")())
 
   expect_match(html, 'id="create_new_version"', fixed = TRUE)
-  expect_match(html, 'id="edit_current_version"', fixed = TRUE)
+  expect_match(html, 'id="enable_edit_mode"', fixed = TRUE)
   expect_match(html, 'id="create_new_document"', fixed = TRUE)
 })
 
-test_that("edit_menu(entry_open = TRUE) withholds edit_current_version, but keeps the other two routes", {
-  html <- render_html(app_fn("edit_menu")(entry_open = TRUE))
+test_that("edit_menu()'s enable/stop rows are one toggle: exactly one is rendered, chosen by `editing`", {
+  menu <- app_fn("edit_menu")
+  closed <- render_html(menu(editing = FALSE))
+  open <- render_html(menu(editing = TRUE))
 
-  expect_no_match(html, 'id="edit_current_version"', fixed = TRUE)
-  # The menu is not merely empty -- the other two routes are still there, so
-  # this cannot pass by rendering nothing.
-  expect_match(html, 'id="create_new_version"', fixed = TRUE)
-  expect_match(html, 'id="create_new_document"', fixed = TRUE)
+  expect_match(closed, 'id="enable_edit_mode"', fixed = TRUE)
+  expect_no_match(closed, 'id="stop_editing"', fixed = TRUE)
+
+  expect_match(open, 'id="stop_editing"', fixed = TRUE)
+  expect_no_match(open, 'id="enable_edit_mode"', fixed = TRUE)
+
+  # Neither state can pass by rendering nothing: the other routes stay put.
+  for (html in list(closed, open)) {
+    expect_match(html, 'id="create_new_version"', fixed = TRUE)
+    expect_match(html, 'id="create_new_document"', fixed = TRUE)
+  }
 })
 
-test_that("edit_menu()'s Stop-editing row appears only while editing", {
+test_that("edit_menu() keeps offering the way back in once a version entry is open", {
+  # THE BUG THIS GUARDS: the enable row used to be withheld on entry_open,
+  # which stays TRUE for the rest of the session once a version is created.
+  # Creating a version and then stopping left no route back into edit mode.
+  # See the WHY comment on edit_menu() (ui_components.R).
   menu <- app_fn("edit_menu")
 
-  expect_match(render_html(menu(editing = TRUE)), 'id="stop_editing"', fixed = TRUE)
-  expect_no_match(render_html(menu(editing = FALSE)), 'id="stop_editing"', fixed = TRUE)
+  html <- render_html(menu(editing = FALSE, entry_open = TRUE))
+  expect_match(html, 'id="enable_edit_mode"', fixed = TRUE)
+})
+
+test_that("edit_menu()'s enable row says where the changes are recorded", {
+  # entry_open is wording only now, but it is wording that matters: with an
+  # entry open the edits land in that version's change summary, with none
+  # they are recorded nowhere at all.
+  menu <- app_fn("edit_menu")
+
+  expect_match(
+    render_html(menu(editing = FALSE, entry_open = FALSE)),
+    "Not recorded in the version history",
+    fixed = TRUE
+  )
+  expect_match(
+    render_html(menu(editing = FALSE, entry_open = TRUE)),
+    "recorded in the version you created",
+    fixed = TRUE
+  )
 })
 
 test_that("create_new_document's row carries the danger class marking it destructive", {
@@ -206,25 +236,22 @@ test_that("edit_menu()'s dropdown opens right-aligned", {
   expect_match(html, "dropdown-menu-end", fixed = TRUE)
 })
 
-test_that("edit_status_tag() names the edit kind and is a label, not a control", {
-  tag <- app_fn("edit_status_tag")
+test_that("edit_status_tag() says 'Edit mode' and is a label, not a control", {
+  # One wording for one fact -- whether editing is allowed. It used to name
+  # the route taken in ("Editing new version" / "Editing new document"),
+  # three labels for a state the rest of the app treats as one flag. See the
+  # WHY comment on edit_status_tag() (ui_components.R).
+  html <- render_html(app_fn("edit_status_tag")())
 
-  new_version_html <- render_html(tag("new_version"))
-  new_document_html <- render_html(tag("new_document"))
-  default_html <- render_html(tag(NULL))
-
-  expect_match(new_version_html, "Editing new version", fixed = TRUE)
-  expect_match(new_document_html, "Editing new document", fixed = TRUE)
-  expect_match(default_html, "Edit mode", fixed = TRUE)
+  expect_match(html, "Edit mode", fixed = TRUE)
+  expect_no_match(html, "Editing new", fixed = TRUE)
 
   # role="status" announces the mode change to a screen reader; brand-link
   # (the brandbar's clickable pills, theme.R) would make this read as
   # clickable when nothing reaches it -- see the WHY comment on
   # edit_status_tag().
-  for (html in list(new_version_html, new_document_html, default_html)) {
-    expect_match(html, 'role="status"', fixed = TRUE)
-    expect_no_match(html, "brand-link", fixed = TRUE)
-  }
+  expect_match(html, 'role="status"', fixed = TRUE)
+  expect_no_match(html, "brand-link", fixed = TRUE)
 })
 
 test_that("new_document_modal_body() names the current title and version, and prefills the version field with 0.1", {

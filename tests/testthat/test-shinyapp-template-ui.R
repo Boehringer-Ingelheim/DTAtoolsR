@@ -487,7 +487,6 @@ test_that("creating a document from a template leaves the author editing it", {
     session$setInputs(template_create_confirm = 1)
 
     expect_true(editing())
-    expect_equal(rv$edit_kind, "current")
 
     # Behavioural check, not just the flag: an edit really lands. save_md()
     # debounces 700ms -- see the identical guard in test-shinyapp-edit-mode.R
