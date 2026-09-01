@@ -115,6 +115,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   itself — which a bare `styler::style_pkg()` never descends into. The check
   now also names every unstyled file rather than aborting on the first.
 
+- **One "Edit" menu in the app replaces the "Create new version" button and
+  the "Edit mode" switch.** Editing a specification used to have exactly one
+  door: a loaded document was read-only until you created a new version, and
+  only then did a toggle appear. That forced a version bump on anyone who
+  wanted to correct a typo, and it offered no way to start a fresh
+  specification from an existing one. The brandbar now carries a single Edit
+  menu with three routes — **Create new version** (the same dialogue as
+  before), **Edit current version**, and **Create new from current** — plus
+  **Stop editing** to return to the read-only view. While editing, a tag
+  beside the menu names which of them you are in.
+
+  **A loaded document can now be edited without creating a version.** That is
+  the point of "Edit current version", and it is a deliberate relaxation of
+  the rule introduced one release ago: nothing is written to the version
+  history on that route, so an export records no change summary for it. The
+  menu row says so where you choose it. Take "Create new version" instead
+  whenever the change is one the recipient of the specification should be able
+  to see in its history.
+
+  **"Create new from current" keeps the specification and discards its past.**
+  Every dataset, column and rule is carried over; the version becomes 0.1 and
+  the version history is replaced by a single entry recording which document
+  and version it was derived from. The title and date are left alone for you
+  to change. It asks for confirmation first, because the old history cannot be
+  recovered afterwards.
+
+  The switch is gone rather than hidden, and with it the four places the app
+  had to reset it by hand: edit mode is now server-owned state, so it cannot
+  be left armed behind a control that has been removed from the page — the
+  trap that the landing-page fix below was written for.
+
 ### Fixed
 
 - **A collection can no longer hold two entries under the same identity.**
@@ -138,6 +169,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   over". Nothing changes once a document is open: a loaded document still
   offers "Create new version" until it is versioned, and the switch after
   that.
+- **The edit control no longer appears in the brandbar on the landing page.**
+  There is no document there to edit, so the slot stays empty until a
+  specification is loaded or created, and empties again on "Start over".
 
 ## [0.24.0] - 2026-08-31
 

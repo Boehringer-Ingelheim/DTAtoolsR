@@ -75,9 +75,10 @@ bi_css <- function() {
     .app-brandbar .brand-title { font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
     .app-brandbar .brand-sub { opacity: .85; font-size: .85rem; }
     /* align-items: center -- without it a flex container defaults to
-       'stretch', so the switch (edit_mode_switch(), no vertical padding of
-       its own) and the .brand-link pills (padding: 5px 11px below) end up on
-       different baselines instead of one centre line. */
+       'stretch', so the Edit menu toggle and the status pill (whose heights
+       come from their own content) and the .brand-link pills (padding:
+       5px 11px below) end up on different baselines instead of one centre
+       line. */
     .app-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
     .app-actions .brand-link {
       color: #fff; text-decoration: none; font-weight: 600;
@@ -121,15 +122,51 @@ bi_css <- function() {
       background: rgba(255,255,255,.18);
       border-color: rgba(255,255,255,.7);
     }
-    /* The switch and the 'Create new version' button are now rendered into
-       a uiOutput() slot rather than placed directly, so one is showing at
-       a time (see the WHY comment on edit_mode_switch()'s `value` arg).
-       shiny-html-output's own display is block; left alone that breaks the
-       single centre line .app-actions' align-items: center establishes for
-       its direct children, because the switch/button inside it would then
-       be centred within their own block instead of against their brandbar
-       siblings. */
-    .app-actions > .shiny-html-output { display: flex; align-items: center; }
+    /* The edit-menu toggle keeps the .brand-action pill look above, but as
+       a Bootstrap dropdown-toggle it also draws its own caret. Bootstrap
+       colours that caret's border for a light-background dropdown; on the
+       dark brandbar it needs to pick up the pill's own white text instead,
+       or it all but disappears against the green. */
+    .app-actions .dropdown-toggle::after { border-top-color: currentColor; margin-left: 6px; vertical-align: middle; }
+    /* Same pill geometry as .brand-link and .brand-action above, but this
+       one is a label rather than a control: a filled, higher-contrast fill
+       stands in for the pill outline the interactive elements use, and
+       there is no transition and no :hover rule at all. Giving a status
+       pill the interactive pills' hover treatment would make it read as
+       clickable when there is nothing to click. */
+    .app-actions .brand-status {
+      border-radius: 999px;
+      padding: 5px 11px;
+      font-size: .82rem;
+      line-height: 1.2;
+      font-weight: 600;
+      white-space: nowrap;
+      background: rgba(255,255,255,.22);
+      border: 1px solid rgba(255,255,255,.55);
+      color: #fff;
+    }
+    /* The menu body opens over the light page below the dark bar, so it
+       keeps Bootstrap's own light surface -- only stacking and offset need
+       setting here. .app-brandbar casts a box-shadow over the content
+       beneath it (see its rule above); without a z-index this menu would
+       paint under that shadow instead of over it. .app-brandbar also sets
+       no overflow, which is what lets the menu escape the bar's own box at
+       all -- worth recording because giving .app-brandbar an overflow:
+       hidden later would silently clip this menu without this rule itself
+       changing at all. */
+    .app-actions .dropdown-menu { z-index: 1080; margin-top: 6px; }
+    /* edit_gate renders both the edit-menu dropdown and the status pill
+       into this one uiOutput() slot, so unlike a typical single-widget
+       uiOutput() it can hold two flex children side by side (or none at
+       all on the landing page -- see the :empty rule below). shiny-
+       html-output's own display is block; left alone that breaks the
+       single centre line .app-actions' align-items: center establishes
+       for its direct children, because the dropdown/pill inside it would
+       be centred within their own block instead of against their
+       brandbar siblings. gap: 8px separates those two children from each
+       other, matching the gap .app-actions itself uses between its own
+       direct children so the whole row reads as one consistent rhythm. */
+    .app-actions > .shiny-html-output { display: flex; align-items: center; gap: 8px; }
     /* ...but on the landing page edit_gate renders NULL, and Shiny empties
        the shiny-html-output span without ever removing it: the element
        stays in the DOM with no children at all. The rule above would then
@@ -143,22 +180,6 @@ bi_css <- function() {
        NB every line of this CSS block is inside one double-quoted R string
        -- an apostrophe is fine here, a double quote ends the string. */
     .app-actions > .shiny-html-output:empty { display: none; }
-    /* edit_mode_switch()'s bslib::input_switch() renders
-       .form-group.shiny-input-container > .bslib-input-switch.form-switch,
-       a wrapper shaped for a standalone form rather than for sitting inline
-       among the brand-link pills. Drop its block margin, lay the switch and
-       its label out on one line, and give the label the same white,
-       .82rem/1.2 treatment as the pills next to it, so the two read as one
-       row of actions rather than a form floating in the brandbar. */
-    .app-actions .form-group { margin-bottom: 0; }
-    .app-actions .form-switch {
-      display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 0;
-    }
-    .app-actions .form-switch .form-check-input { margin: 0; cursor: pointer; }
-    .app-actions .form-switch .form-check-label {
-      color: #fff; font-weight: 600; font-size: .82rem; line-height: 1.2;
-      white-space: nowrap; cursor: pointer;
-    }
     @media (max-width: 900px) {
       .app-brandbar { flex-wrap: wrap; }
       .app-actions {
@@ -167,12 +188,11 @@ bi_css <- function() {
         justify-content: flex-start;
         flex-wrap: wrap;
       }
-      /* Keep the switch at its own intrinsic size instead of stretching or
-         shrinking when the actions row wraps onto a second line. Same
-         reasoning applies to the button that replaces it
-         (create_new_version_button()) before a new version exists. */
-      .app-actions .form-switch,
-      .app-actions .brand-action { flex: 0 0 auto; }
+      /* Keep the Edit menu toggle and the status pill at their own intrinsic
+         size instead of stretching or shrinking when the actions row wraps
+         onto a second line. Both now share the slot, so both need it. */
+      .app-actions .brand-action,
+      .app-actions .brand-status { flex: 0 0 auto; }
     }
 
     /* Status chips */

@@ -165,3 +165,14 @@ test_that("bi_css hides an empty edit_gate slot, after the rule that would other
     regexpr(empty_rule, txt, fixed = TRUE)[[1]]
   )
 })
+
+test_that("the status pill has a fill rule but no hover rule -- it is a label, not a control", {
+  # .app-actions .brand-status is the status pill edit_status_tag() renders
+  # next to edit_menu() (ui_components.R). It must never gain a :hover rule:
+  # anything hoverable next to the interactive .brand-link/.brand-action
+  # pills either side of it would read as clickable when nothing reaches it.
+  txt <- as.character(app_fn("bi_css")())
+
+  expect_match(txt, ".app-actions .brand-status", fixed = TRUE)
+  expect_no_match(txt, ".app-actions .brand-status:hover", fixed = TRUE)
+})

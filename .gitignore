@@ -9,7 +9,10 @@ testdata
 /Meta/
 example/
 *Rproj
-helper.R
+# Anchored to the repo root: this ignores a root-level scratch file only. Left
+# bare it would match at any depth and silently untrack tests/testthat/helper.R,
+# testthat's canonical helper filename.
+/helper.R
 renv/library
 renv/staging
 renv/settings.json
