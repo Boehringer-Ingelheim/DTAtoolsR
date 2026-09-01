@@ -6,7 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Template collections take verbs, so a deviation can say what it means.**
+  `options:`, `datasets:`, `party_slots:`, `vocabulary_slots:` and a dataset
+  patch's `columns:` now accept an explicit mapping of `inherit:` / `remove:` /
+  `add:` / `modify:` / `order:` alongside the existing bare list of entries,
+  which is unchanged and still supported. Three operations that had no spelling
+  before are now expressible: `inherit: [ids]` keeps only a named subset (a
+  child wanting two of twenty inherited entries no longer writes eighteen
+  removals), `inherit: none` replaces the parent's set wholesale, and `order:`
+  applies to every collection rather than only `options:`. `add:` additionally
+  requires its key to be new and `modify:` requires its key to be inherited, so
+  a mistyped id is an error naming the mistake — in the bare form the same typo
+  silently becomes an extra entry instead of the modification that was meant.
+  `remove_columns:`/`add_columns:`/`modify_columns:` remain the original names
+  for three of these verbs and keep working.
+
+- Template values now have four states rather than two, uniformly in every
+  section and at every depth: an omitted key inherits, a written key overrides,
+  an explicitly empty one (`""`, `{}`, `[]`) is present but blank, and `null`
+  drops the key from the template and from the written DTA. `label: ""` and
+  `label: null` used to be the same instruction; so did an absent and an
+  explicitly empty vocabulary or party selection.
+
 ### Changed
+
+- **`base:` and the other sections now follow the same rules.** The template
+  reader used to fill in `options:`/`datasets:` with an empty list before
+  inheritance ran, which destroyed the difference between "the child wrote
+  nothing" and "the child wrote nothing *deliberately*" — so an empty
+  `options:` inherited the parent's while an empty `base:` replaced it, the
+  same YAML gesture meaning opposite things in different sections. Shape
+  defaults now apply after the merge instead of before it.
+
+- A metadata field that is absent is no longer written to the DTA at all.
+  `as.list()` on `DTAMetaData` wrote four fields unconditionally, so a field
+  nothing had ever set could still reach the file as `header: ~`. NULL is now
+  absent for every property, and an empty list is absent only for the
+  properties whose unset state *is* an empty list (`receiver`, `supplier`,
+  `transmission`, `version_history`, `template`). A field that is present but
+  blank — `""`, or an explicitly empty `authorized_for_corrections`, which
+  defaults to NULL and so can tell the two apart — is still written, blank.
+
+- An explicitly empty vocabulary selection now means *no terms* instead of
+  falling back to the slot's `default:`, and an explicitly empty party-slot
+  selection empties that slot instead of being ignored. A selection that is
+  simply absent still takes the default, as before.
+
+- Dataset patches merge with the same function as the rest of the engine
+  rather than `utils::modifyList()`. The two agreed on every shape a column
+  holds today, but on a sequence of mappings `modifyList()` returned the
+  parent untouched and discarded the child's value in silence.
+
 
 - **Styling the package no longer breaks the next commit on Windows.** styler
   writes files through a text-mode connection, so on Windows every file it
@@ -27,6 +79,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   documented local command covers `inst/` — 15 files and more R code than `R/`
   itself — which a bare `styler::style_pkg()` never descends into. The check
   now also names every unstyled file rather than aborting on the first.
+
+### Deprecated
+
+- An explicitly empty collection (`options: []`, `datasets: []`) still inherits
+  the parent's entries and now warns that it will not. A future release makes
+  it mean *none*, matching every other section. Write `inherit: none` to mean
+  that today, or omit the key to keep inheriting.
 
 ### Fixed
 

@@ -448,35 +448,108 @@ datasets:
           description: ACME's internal sample identifier, for query resolution.
 ```
 
-The merge is a recursive deep merge, child over parent:
+The merge asks two questions, and they have the same answers everywhere.
 
-- A mapping key present in both parent and child merges recursively; a
-  sequence, scalar, or a mapping paired with a non-mapping parent is a
-  wholesale replacement (merging a list of column specs by position would
-  silently splice unrelated columns together the moment the child's list is a
-  different length).
-- `options:` and `party_slots:` entries are matched and merged **by `id`**,
-  keeping the parent's position for an inherited entry; a child option can
-  carry `remove: true` to drop an inherited one entirely.
-- `datasets:` entries are matched by identity — `as:`, else `template:` (with
-  any `@version` pin stripped, so `gf@3.0` and `gf@4.0` still name the same
-  slot), else `source:`, else `name:` — so a deviation's `patch:` merges into
-  the *same* dataset entry the parent declared, rather than appending a
-  second, unrelated one.
-- **An explicit `null` in the child removes an inherited key.** `key: ~` or
-  `key: null` in a child mapping is not "leave this at whatever the parent
-  set" (that is what *omitting* the key means) — it is an instruction to
-  delete it from the merged result.
+### What happens to a value
+
+Every key — a scalar, a mapping, a whole section — is in exactly one of four
+states, and YAML spells all four natively:
+
+| The child writes | What it means |
+| --- | --- |
+| *(nothing at all)* | **inherit** — the parent's value stands |
+| `key: value` | **override** — mappings deep-merge, scalars and sequences replace |
+| `key: ""`, `key: {}`, `key: []` | **empty** — present, but blank |
+| `key: null` or `key: ~` | **drop** — gone from the template, and not written to the DTA |
+
+Omitting a key and writing it as `null` are *different instructions*, and that
+is the distinction the whole scheme rests on: omitting says "I have nothing to
+say about this", `null` says "delete what you gave me". A sequence or scalar
+replaces wholesale rather than merging, because merging a list of column specs
+by position would silently splice unrelated columns together the moment the
+child's list is a different length.
 
 `biomarker_gf_acme` above omits `base:` entirely, and that is deliberate and
-supported: a child that `extends:` another template inherits the parent's
-`base:` (and, by the same rule, its `datasets:`) verbatim when it states
-nothing of its own. **`base: {}` is not the same thing.** An *absent* `base:`
-leaves the parent's section completely untouched; an explicitly empty mapping
-is a real instruction — "replace `base:` with nothing" — and wipes out every
-field the parent set. Absent and empty are deliberately kept distinguishable
-for exactly this reason; write `base:` at all only when you mean to override
-part of it.
+supported: it inherits the parent's `base:` verbatim by saying nothing.
+
+### What happens to a collection
+
+`options:`, `datasets:`, `party_slots:`, `vocabulary_slots:` and a dataset
+patch's columns are *keyed sets*, so they take verbs as well as values. Write
+them either way.
+
+The **bare form** is a plain list of entries, and carries its intent
+implicitly — an entry whose key matches an inherited one modifies it, an entry
+with a new key is added, and `remove: true` drops one:
+
+```yaml
+options:
+  - id: header
+    default: ACME Labs      # modifies the inherited `header` option
+  - id: legacy_flag
+    remove: true            # drops an inherited option
+```
+
+Entries are matched **by `id`**, except `datasets:`, which is matched by
+identity — `as:`, else `template:` (with any `@version` pin stripped, so
+`gf@3.0` and `gf@4.0` still name the same slot), else `source:`, else `name:`.
+That is what makes a deviation's `patch:` merge into the *same* dataset entry
+the parent declared rather than appending a second, unrelated one. An
+inherited entry keeps the parent's position.
+
+The **verb form** says the same things explicitly, and says three more the
+bare form cannot:
+
+```yaml
+datasets:
+  inherit: all            # all (the default) | none | [ids]
+  remove: [gf_legacy]
+  add:    [{template: acme_extra@1.0, as: acme_extra}]
+  modify: [{id: gf_smrnaseq, options: {vendor_name: ACME Labs}}]
+  order:  [gf_smrnaseq, acme_extra]
+```
+
+| To say | Write |
+| --- | --- |
+| inherit everything | omit the section |
+| inherit all, and add one | `add:` (or a new entry in the bare form) |
+| inherit all but two | `remove: [a, b]` |
+| **inherit only two of twenty** | `inherit: [a, b]` |
+| **replace the set wholesale** | `inherit: none` with `add:` |
+| change an inherited entry | `modify:` (or a same-id entry in the bare form) |
+| reorder the result | `order: [...]` |
+
+The verbs run in a fixed order — `inherit`, `remove`, `add`, `modify`, `order`
+— so an `add:` may reuse a key `remove:` just freed, and `modify:` can address
+an entry `add:` just introduced.
+
+Two of these are worth writing out even when the bare form could express them.
+`add:` requires the key to be **new** and `modify:` requires it to be
+**inherited**, so a mistyped id is an error naming the mistake. In the bare
+form that same typo silently becomes an extra entry instead of the
+modification you meant.
+
+A dataset `patch:` uses the same five verbs under `columns:`, and
+`remove_columns:` / `add_columns:` / `modify_columns:` remain the original
+names for three of them:
+
+```yaml
+patch:
+  columns:
+    inherit: all
+    remove: [STUDYID]
+    modify: [{id: GFNAM, description: Name of the ACME sequencing facility.}]
+```
+
+### One thing is about to change
+
+An explicitly empty **collection** (`options: []`) still inherits the parent's
+entries today, and warns that it will not. A future release makes it mean
+*none*, in line with the table above and with `base: {}`, which already
+replaces the parent's section rather than inheriting it.
+
+If you meant *none*, write `inherit: none` — that works now and will not
+change. If you meant *inherit*, omit the key.
 
 ## Versioning
 
