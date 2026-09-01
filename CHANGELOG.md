@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A specification can now be started from nothing.** The app's landing page
+  gains a **Create new** button alongside *Create new from template* and *Load
+  example*. It asks only for a title and a version, then opens the workspace on
+  an empty DTA — metadata only, no datasets — ready to build up by hand with
+  **+ Add dataset** and the Metadata tab. Until now every way into the app read
+  an existing document: a YAML file, the bundled example, or a template
+  expansion. A newly created document arrives in edit mode, because an empty
+  specification is only worth creating if you can immediately start filling
+  it in.
+
 - **An ancestor template can now constrain its descendants.** `sealed:` names
   paths a descendant may not change, and `required:` names paths that must hold
   a value before a document can be built; both take the same dotted paths the

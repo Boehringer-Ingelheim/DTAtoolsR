@@ -384,6 +384,8 @@ server <- function(input, output, session) {
     template_index = NULL, # template index snapshot frozen when "Next" was clicked
     add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
     add_ds_token = 0, # bump to re-render the add-dataset modal body
+    create_new_msg = NULL, # inline create-new-DTA result: NULL | list(ok, error)
+    create_new_token = 0, # bump to re-render the create-new-DTA modal body
     removing_dataset = NULL, # dataset name the remove-dataset confirm modal targets
     version_locked = FALSE, # TRUE while a LOADED document has not yet had a new version created
     version_baseline_yaml = NULL, # the document exactly as loaded -- the left side of every change summary
@@ -814,7 +816,8 @@ server <- function(input, output, session) {
   }
 
   apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE,
-                           wrapped_dataset = FALSE, versioned = FALSE) {
+                           wrapped_dataset = FALSE, versioned = FALSE,
+                           start_editing = FALSE) {
     names_ds <- dta_dataset_names(dta)
     # A standalone dataset wrapped into a new empty DTA: show the full DTA YAML
     # (empty metadata + the dataset) in the Raw view so the state is coherent.
@@ -849,8 +852,17 @@ server <- function(input, output, session) {
     # after editing a first would carry the previous document's edit state
     # forward, momentarily unlocking (or leaving unlocked) a document that
     # just arrived and has not been versioned. A newly loaded document is
-    # never mid-edit.
-    rv$editing <- FALSE
+    # never mid-edit. `start_editing` chooses which way this is written; it
+    # does not skip the write, so that guarantee holds either way.
+    #
+    # Only the landing page's "Create new" passes TRUE. An empty document has
+    # no datasets AND -- because output$add_dataset_ui is gated purely on
+    # editing() -- no "+ Add dataset" control until edit mode is on, so
+    # arriving read-only would leave the user in a workspace with nothing to
+    # do and no visible way forward. Every other caller keeps the default: a
+    # document LOADED from an existing one is read-only until versioned, and a
+    # template-created one still starts read-only.
+    rv$editing <- isTRUE(start_editing)
     autosave()
   }
 
@@ -1292,6 +1304,105 @@ server <- function(input, output, session) {
     )
     showNotification(sprintf("Example \u201c%s\u201d loaded.", sel), type = "message")
   })
+
+  # --- landing: create a new, empty DTA -----------------------------------
+  #
+  # The third way in, alongside uploading a YAML and expanding a template:
+  # start from nothing. The modal asks for a title and a version and nothing
+  # else -- the rest of the metadata is filled in afterwards on the Metadata
+  # tab, and the datasets with "+ Add dataset". Both fields are required:
+  # DTAMetaData()'s validator rejects an empty string outright, and while it
+  # does accept NULL, a document the user has just chosen to name should
+  # carry a name.
+  #
+  # Both observers below refuse to run unless the app is on the landing page
+  # (rv$structure NULL). The button only EXISTS there, but its input id
+  # outlives the landing DOM, so a delayed or duplicated websocket message
+  # could otherwise silently replace a document the user has already loaded
+  # and edited. The document a user has been working on is the one thing in
+  # this app that cannot be recovered from disk, so the cheap guard is worth
+  # it even though the message is unlikely.
+
+  observeEvent(input$create_new, {
+    req(is.null(rv$structure))
+    rv$create_new_msg <- NULL
+    rv$create_new_token <- rv$create_new_token + 1
+    showModal(modalDialog(
+      title = "Create a new DTA",
+      uiOutput("create_new_body"),
+      easyClose = TRUE,
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("create_new_confirm", "Create DTA", class = "btn btn-primary")
+      )
+    ))
+  })
+
+  output$create_new_body <- renderUI({
+    rv$create_new_token
+    tagList(
+      textInput("create_new_title", "Title",
+        value = "", width = "100%",
+        placeholder = "e.g. Clinical Data Transfer"
+      ),
+      textInput("create_new_version", "Version", value = "1.0", width = "100%"),
+      div(
+        class = "msg-hint",
+        HTML("The new DTA starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab.")
+      ),
+      uiOutput("create_new_msg")
+    )
+  })
+
+  output$create_new_msg <- renderUI({
+    m <- rv$create_new_msg
+    if (is.null(m) || isTRUE(m$ok)) {
+      return(NULL)
+    }
+    div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+  })
+
+  observeEvent(input$create_new_confirm, {
+    req(is.null(rv$structure))
+    title <- trimws(as.character(input$create_new_title %||% "")[1])
+    version <- trimws(as.character(input$create_new_version %||% "")[1])
+    # Every failure below leaves the modal open with what the user typed still
+    # in it and changes nothing in rv. Deliberately NOT bumping
+    # rv$create_new_token: that is create_new_body's only dependency, and
+    # re-rendering would blank both fields, making the user retype a title
+    # they can see is wrong rather than correct it in place.
+    # output$create_new_msg reacts to rv$create_new_msg on its own, so the
+    # error still appears. Same contract as add_ds_save below.
+    if (!nzchar(title)) {
+      rv$create_new_msg <- list(ok = FALSE, error = "Enter a title.")
+      return()
+    }
+    if (!nzchar(version)) {
+      rv$create_new_msg <- list(ok = FALSE, error = "Enter a version.")
+      return()
+    }
+    created <- dta_create_empty(title, version)
+    if (!isTRUE(created$ok)) {
+      rv$create_new_msg <- list(ok = FALSE, error = created$error)
+      return()
+    }
+    yres <- dta_to_yaml_text(created$value)
+    yaml_text <- if (isTRUE(yres$ok)) yres$value else ""
+    rv$create_new_msg <- NULL
+    removeModal()
+    # versioned = FALSE: this document is NEW, not loaded from an existing one,
+    # so it is not gated behind the "Create new version" flow. start_editing =
+    # TRUE: an empty document is unusable read-only -- see apply_loaded().
+    apply_loaded(created$value, yaml_text,
+      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE,
+      versioned = FALSE, start_editing = TRUE
+    )
+    showNotification(
+      sprintf("New DTA \u201c%s\u201d created.", title),
+      type = "message"
+    )
+  })
+
 
   # --- landing: create new DTA from a template ----------------------------
   #
@@ -6780,6 +6891,7 @@ server <- function(input, output, session) {
           ),
           div(
             style = "display:flex; gap:10px; margin-top:8px;",
+            actionButton("create_new", "Create new", class = "btn btn-outline-primary"),
             actionButton("create_from_template", "Create new from template", class = "btn btn-primary"),
             actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
             if (restore_available) {
