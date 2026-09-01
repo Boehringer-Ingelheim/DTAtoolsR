@@ -541,15 +541,68 @@ patch:
     modify: [{id: GFNAM, description: Name of the ACME sequencing facility.}]
 ```
 
-### One thing is about to change
+### Constraining what a descendant may do
 
-An explicitly empty **collection** (`options: []`) still inherits the parent's
-entries today, and warns that it will not. A future release makes it mean
-*none*, in line with the table above and with `base: {}`, which already
-replaces the parent's section rather than inheriting it.
+Everything above says what a child *may* express. Two keys say what an ancestor
+**forbids** and **demands** — the governance side, for a house standard that has
+to hold a line across every supplier deviation built on it.
 
-If you meant *none*, write `inherit: none` — that works now and will not
-change. If you meant *inherit*, omit the key.
+```yaml
+sealed:
+  - base.metadata.retention_clause
+  - options.header
+
+required:
+  - base.metadata.supplier
+```
+
+Paths are written in template terms and address exactly what `modify:` would:
+`base.metadata.title` walks the mapping, `options.header.default` reaches a
+field of the `header` entry, `datasets.gf_smrnaseq` names a dataset by the same
+identity the merge uses.
+
+**`sealed:` — this may not change.** A descendant that alters a sealed path
+fails when the chain resolves, whichever way it tried: a `base:` override, a
+`modify:` verb, a `remove:`, an explicit `null`, or replacing the whole section.
+Sealing a section (`sealed: [options]`) fixes its membership *and its order*, so
+adding an entry or reordering with `order:` both fail; sealing
+`options.header.default` leaves every other option free.
+
+**`required:` — this may not be left unset.** Checked when a document is
+created, not when the chain resolves, because an abstract parent is *supposed*
+to be allowed to leave it unset — that is what "required of someone further
+down" means. A path under `base.` is satisfied either by a descendant template
+setting it or by the person creating the document choosing it, since both have
+happened by the time the check runs. A blank (`""`) does not satisfy a
+requirement: the point is that somebody made a real choice.
+
+Both **accumulate down the chain and are never subtractive** — a child cannot
+unseal what an ancestor sealed, nor drop an inherited requirement. A template's
+own `sealed:` binds its descendants and not itself, or it could never write the
+field it was sealing.
+
+A party slot can be required in the same spirit, which is how you oblige the
+*person* rather than the template:
+
+```yaml
+party_slots:
+  - id: supplier_choice
+    target: metadata.supplier
+    required: true
+```
+
+That is the party counterpart of a vocabulary slot's `min:`. A required slot
+refuses both an absent selection and an explicitly empty one — the latter
+matters, because an empty selection means "deliberately none", which is exactly
+the answer a required slot exists to reject.
+
+Two limits worth knowing. A sealed path that matches nothing protects nothing
+and fails silently, because every descendant compares equal to a path that
+resolves to nothing on both sides — creating a document warns about it, and
+`validate_template()` reports it as `sealed_path_unknown`, so run the validator
+in your repository's CI. And rebasing a document onto a new template version
+does not consult `sealed:`, so a seal is a constraint on template *authors*,
+not yet a guarantee about every document.
 
 ## Versioning
 

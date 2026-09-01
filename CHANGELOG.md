@@ -8,6 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **An ancestor template can now constrain its descendants.** `sealed:` names
+  paths a descendant may not change, and `required:` names paths that must hold
+  a value before a document can be built; both take the same dotted paths the
+  merge itself uses, so `options.header.default` addresses exactly what
+  `modify:` would. Both accumulate down the chain and are never subtractive — a
+  child cannot unseal what an ancestor sealed, nor drop an inherited
+  requirement — and a template's own `sealed:` binds its descendants rather than
+  itself, since a seal that bound its declarer would forbid it from writing the
+  field it seals.
+
+  The two are checked at different moments, and deliberately so. A seal is
+  checked when the chain resolves, by comparing the value at each sealed path
+  before and after the merge: one check covers every route a child could take —
+  a `base:` override, a `modify:`, a `remove:`, an explicit `null`, a whole
+  section replaced. A requirement is checked when a document is created, because
+  an abstract parent is *supposed* to be allowed to leave it unset. A `base.`
+  path is satisfied either by a descendant template setting it or by the person
+  creating the document choosing it; a blank does not satisfy it.
+
+  `validate_template()` reports `sealed_violation`, and warns
+  `sealed_path_unknown` for a seal that matches nothing and so protects nothing.
+  Note that rebasing a document does not consult `sealed:` — a seal constrains
+  template authors, not every document.
+
+- Party slots take `required: true`, the counterpart of a vocabulary slot's
+  `min:`. A required slot refuses an absent selection and an explicitly empty
+  one alike — the latter matters, because an empty selection means "deliberately
+  none", which is the answer a required slot exists to reject.
+
 - **Template collections take verbs, so a deviation can say what it means.**
   `options:`, `datasets:`, `party_slots:`, `vocabulary_slots:` and a dataset
   patch's `columns:` now accept an explicit mapping of `inherit:` / `remove:` /
@@ -31,6 +60,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   explicitly empty vocabulary or party selection.
 
 ### Changed
+
+- An explicitly empty collection (`options: []`, `datasets: []`) now means
+  *none*, the same way `base: {}` already replaced the parent's section rather
+  than inheriting it. It previously inherited the parent's entries, which was
+  the last place the sections disagreed. Omit the key to inherit; write
+  `inherit: [ids]` to take a subset.
 
 - **`base:` and the other sections now follow the same rules.** The template
   reader used to fill in `options:`/`datasets:` with an empty list before
@@ -80,14 +115,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   itself — which a bare `styler::style_pkg()` never descends into. The check
   now also names every unstyled file rather than aborting on the first.
 
-### Deprecated
-
-- An explicitly empty collection (`options: []`, `datasets: []`) still inherits
-  the parent's entries and now warns that it will not. A future release makes
-  it mean *none*, matching every other section. Write `inherit: none` to mean
-  that today, or omit the key to keep inheriting.
-
 ### Fixed
+
+- **A collection can no longer hold two entries under the same identity.**
+  `datasets:` matched each child entry to at most one parent entry and appended
+  the rest unconditionally, so a child could write the same key twice; every
+  rule here addresses an entry by key and takes the first match, which made the
+  second entry unreachable — and made it a way past a seal, since the sealed
+  path compared equal on the untouched first entry while the second carried the
+  value the author actually wanted. `options:` collapsed the same mistake the
+  other way, shadowing the earlier entry and losing it silently. Both are now
+  rejected, naming the repeated key.
+
+- A `required:` path pointing at a list field is no longer satisfied by a list
+  that is structurally non-empty but blank throughout — `supplier: {affiliation:
+  ""}` counted as filled, which is precisely the compound-field case the feature
+  is documented with.
 
 - **The "Edit mode" switch no longer appears in the brandbar on the landing
   page.** There is no document there to edit, so the slot now stays empty
