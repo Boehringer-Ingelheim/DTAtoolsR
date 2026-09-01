@@ -64,11 +64,11 @@
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
         "RemoteRef": "dev",
-        "RemoteSha": "2b577b7e95bb022ccb0f0276ad1a66540174313b",
+        "RemoteSha": "0f1a0069f52ec18d983f95d72863d6eaf64c7920",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
         "GithubRef": "dev",
-        "GithubSHA1": "2b577b7e95bb022ccb0f0276ad1a66540174313b",
+        "GithubSHA1": "0f1a0069f52ec18d983f95d72863d6eaf64c7920",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
