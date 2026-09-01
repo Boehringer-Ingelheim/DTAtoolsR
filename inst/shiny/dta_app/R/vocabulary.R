@@ -665,15 +665,25 @@ vocabulary_slot_choices <- function(slot, resolve_vocab) {
 # The permitted-values vector one slot's selection produces, or NULL when the
 # slot was left alone.
 #
-# An absent or empty selection falls back to the slot's `default:`; when that
-# is empty too the result is NULL, meaning "leave the column exactly as the
+# An ABSENT selection (NULL) falls back to the slot's `default:`; when that is
+# empty too the result is NULL, meaning "leave the column exactly as the
 # dataset template left it". Same reasoning as apply_party_selections()
 # skipping an unselected slot: a slot the author did not engage with must not
 # silently rewrite something.
+#
+# An EXPLICITLY EMPTY selection is a different answer and does not fall back:
+# it means no terms. Collapsing the two is what used to make a slot WITH a
+# default impossible to empty on purpose.
 vocabulary_slot_values <- function(slot, selection, resolve_vocab) {
+  # NULL and character(0) are not the same answer, and treating them as one is
+  # what made "deliberately no terms" inexpressible: every empty selection fell
+  # back to `default:`, so a slot with a default could never be emptied. NULL
+  # is silence (the key was never supplied) and still takes the default; an
+  # explicitly empty vector is an engagement that means none.
+  engaged <- !is.null(selection)
   selection <- as.character(selection %||% character(0))
   selection <- selection[!is.na(selection) & nzchar(selection)]
-  if (length(selection) == 0) {
+  if (length(selection) == 0 && !engaged) {
     selection <- slot$default
   }
 

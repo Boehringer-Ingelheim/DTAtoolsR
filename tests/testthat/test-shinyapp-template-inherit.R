@@ -411,3 +411,467 @@ test_that("resolve_template_inheritance() aborts on an unresolvable extends refe
   expect_error_message_contains(fn(child_def, function(ref) NULL), "orphan")
   expect_error_message_contains(fn(child_def, function(ref) NULL), "ghost-parent")
 })
+
+# ---- the four states, in every section --------------------------------------
+
+# absent -> inherit, a value -> override, `{}`/`[]` -> empty, `null` -> drop.
+# These are walked for EVERY section rather than tested once and assumed for
+# the rest: the defect this replaces was exactly one section (`base:`) behaving
+# unlike the others, and only a per-section table can catch that class of bug.
+#
+# Note the fixtures use the `list(key = NULL)` CONSTRUCTOR form for the drop
+# state. That is not incidental: `l$key <- NULL` deletes the element, whereas
+# `list(key = NULL)` keeps the name with a NULL value -- the same shape
+# yaml::read_yaml() produces for `key: ~`, and the only shape that can express
+# "written, as null" rather than "never written".
+
+four_state_parent <- function() {
+  list(
+    id = "parent", version = "1.0",
+    base = list(metadata = list(title = "P title", header = "P header")),
+    options = list(list(id = "o1", label = "P option")),
+    datasets = list(list(as = "d1", template = "dt@1.0")),
+    party_slots = list(list(id = "ps1", target = "metadata.supplier")),
+    vocabulary_slots = list(list(id = "vs1", target = "x"))
+  )
+}
+
+four_state_child <- function(...) {
+  c(list(id = "child", version = "1.0", extends = "parent"), list(...))
+}
+
+four_state_resolve <- function(child) {
+  app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = four_state_parent())))
+}
+
+test_that("an absent base: inherits the parent's section untouched", {
+  result <- four_state_resolve(four_state_child())
+
+  expect_equal(result$def$base$metadata$title, "P title")
+  expect_equal(result$def$base$metadata$header, "P header")
+})
+
+test_that("a base: value deep-merges, leaving keys the child did not mention", {
+  result <- four_state_resolve(
+    four_state_child(base = list(metadata = list(title = "C title")))
+  )
+
+  expect_equal(result$def$base$metadata$title, "C title")
+  expect_equal(result$def$base$metadata$header, "P header")
+})
+
+test_that("an explicitly empty base: replaces the parent's section with nothing", {
+  result <- four_state_resolve(four_state_child(base = list()))
+
+  expect_true("base" %in% names(result$def))
+  expect_length(result$def$base, 0)
+})
+
+test_that("a null base: drops the section entirely rather than emptying it", {
+  result <- four_state_resolve(four_state_child(base = NULL))
+
+  expect_false("base" %in% names(result$def))
+})
+
+# The collections take the same four states. One block, four assertions per
+# section, so a section that drifts out of line fails here rather than being
+# discovered years later in a template that quietly lost its parent's set.
+for (.section in list(
+  list(key = "options", added = list(id = "o2", label = "C option"), inherited = "o1"),
+  list(key = "party_slots", added = list(id = "ps2", target = "metadata.receiver"), inherited = "ps1"),
+  list(key = "vocabulary_slots", added = list(id = "vs2", target = "y"), inherited = "vs1"),
+  list(key = "datasets", added = list(as = "d2", template = "dt2@1.0"), inherited = "d1")
+)) {
+  local({
+    sec <- .section
+
+    test_that(paste0("an absent ", sec$key, ": inherits the parent's entries"), {
+      result <- four_state_resolve(four_state_child())
+
+      expect_length(result$def[[sec$key]], 1)
+    })
+
+    test_that(paste0("a ", sec$key, ": value merges with the inherited entries"), {
+      child <- four_state_child()
+      child[[sec$key]] <- list(sec$added)
+
+      result <- four_state_resolve(child)
+
+      expect_length(result$def[[sec$key]], 2)
+    })
+
+    test_that(paste0("an explicitly empty ", sec$key, ": empties the section"), {
+      child <- four_state_child()
+      child[[sec$key]] <- list()
+
+      result <- four_state_resolve(child)
+
+      expect_length(result$def[[sec$key]], 0)
+      # Still PRESENT, though: empty and dropped are different states, and the
+      # section below asserts the drop.
+      expect_true(sec$key %in% names(result$def))
+    })
+
+    test_that(paste0("a null ", sec$key, ": drops the section entirely"), {
+      child <- four_state_child()
+      child[sec$key] <- list(NULL)
+
+      result <- four_state_resolve(child)
+
+      expect_false(sec$key %in% names(result$def))
+    })
+  })
+}
+
+test_that("a blank scalar is kept blank and a null scalar is dropped", {
+  blank <- four_state_resolve(four_state_child(label = ""))
+  dropped <- four_state_resolve(four_state_child(label = NULL))
+  inherited <- four_state_resolve(four_state_child())
+
+  # "" is an override that happens to be empty: present, and blank.
+  expect_identical(blank$def$label, "")
+  # null is not an override at all -- the field is gone.
+  expect_false("label" %in% names(dropped$def))
+  # and an absent key still inherits, which is what makes the other two mean
+  # something distinct.
+  expect_false("label" %in% names(inherited$def))
+})
+
+# ---- collection verbs -------------------------------------------------------
+
+verb_resolve <- function(section, spec) {
+  child <- four_state_child()
+  child[[section]] <- spec
+  four_state_resolve(child)$def[[section]]
+}
+
+test_that("inherit: none replaces the parent's set wholesale", {
+  result <- verb_resolve("options", list(
+    inherit = "none",
+    add = list(list(id = "o2", label = "Only mine"))
+  ))
+
+  expect_length(result, 1)
+  expect_equal(result[[1]]$id, "o2")
+})
+
+test_that("inherit: [ids] keeps only the named subset of the parent's entries", {
+  parent <- four_state_parent()
+  parent$options <- list(
+    list(id = "a"), list(id = "b"), list(id = "c")
+  )
+  child <- four_state_child(options = list(inherit = c("a", "c")))
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_equal(vapply(result$def$options, function(o) o$id, character(1)), c("a", "c"))
+})
+
+test_that("inherit: all is the default, so bare verbs still start from the parent", {
+  result <- verb_resolve("options", list(add = list(list(id = "o2"))))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), c("o1", "o2"))
+})
+
+test_that("remove: drops an inherited entry by id", {
+  result <- verb_resolve("options", list(remove = "o1"))
+
+  expect_length(result, 0)
+})
+
+test_that("remove: aborts on an id that is not inherited rather than no-oping", {
+  expect_error_message_contains(
+    verb_resolve("options", list(remove = "nope")),
+    "unknown id"
+  )
+})
+
+test_that("modify: merges into an inherited entry, keeping its other fields", {
+  result <- verb_resolve("options", list(
+    modify = list(list(id = "o1", description = "added"))
+  ))
+
+  expect_length(result, 1)
+  expect_equal(result[[1]]$label, "P option")
+  expect_equal(result[[1]]$description, "added")
+})
+
+test_that("modify: aborts on an id that is not inherited, naming add as the remedy", {
+  expect_error_message_contains(
+    verb_resolve("options", list(modify = list(list(id = "typo")))),
+    "no such entry is inherited"
+  )
+})
+
+test_that("add: aborts when the id is already inherited, naming modify as the remedy", {
+  # This is the whole reason the verb form exists: in the bare form the same
+  # mistyped id silently becomes an extra entry instead of the modification
+  # that was meant.
+  expect_error_message_contains(
+    verb_resolve("options", list(add = list(list(id = "o1", label = "oops")))),
+    "already inherited"
+  )
+})
+
+test_that("order: sorts the merged set, including entries add: introduced", {
+  result <- verb_resolve("options", list(
+    add = list(list(id = "o2")),
+    order = c("o2", "o1")
+  ))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), c("o2", "o1"))
+})
+
+test_that("an unknown key in the verb form is an error, not a silently ignored entry", {
+  expect_error_message_contains(
+    verb_resolve("options", list(inhrit = "none")),
+    "unknown key"
+  )
+})
+
+test_that("the verb form and the bare form agree wherever both can say the thing", {
+  # The compatibility claim is only worth as much as this assertion: adding a
+  # new entry is expressible either way, and the two spellings must not drift.
+  bare <- verb_resolve("options", list(list(id = "o2", label = "C option")))
+  verbs <- verb_resolve("options", list(add = list(list(id = "o2", label = "C option"))))
+
+  expect_identical(bare, verbs)
+})
+
+test_that("datasets: verbs key on the dataset identity, not on an id field", {
+  # `datasets:` entries have no `id:` -- they are keyed by `as:`/`template:`/
+  # `source:`/`name:` -- so the verbs have to run off the same identity
+  # function the bare form uses, or they would silently match nothing.
+  result <- verb_resolve("datasets", list(remove = "d1"))
+
+  expect_length(result, 0)
+})
+
+test_that("an empty inherit: list means none, not everything", {
+  # `%||%` in this engine treats a zero-length left operand as absent, so a
+  # naive `spec$inherit %||% "all"` turned `inherit: []` into "inherit
+  # everything" -- the exact opposite of what an empty id list says, and
+  # silently, because inheriting the whole parent set looks like success.
+  result <- verb_resolve("options", list(
+    inherit = list(),
+    add = list(list(id = "o2"))
+  ))
+
+  expect_equal(vapply(result, function(o) o$id, character(1)), "o2")
+})
+
+test_that("a null inherit: is the same instruction as an empty one", {
+  result <- verb_resolve("options", list(inherit = NULL))
+
+  expect_length(result, 0)
+})
+
+# ---- sealed ------------------------------------------------------------------
+
+# A seal is enforced by comparing the value at the sealed path before and after
+# the merge, so ONE check covers every route a child could take to the field.
+# These tests exercise the routes separately for exactly that reason: if the
+# implementation ever grows a per-rule guard instead, the route it forgets is
+# the one that fails here.
+
+sealed_resolve <- function(sealed, ...) {
+  parent <- four_state_parent()
+  parent$sealed <- sealed
+  app_fn("resolve_template_inheritance")(
+    four_state_child(...), make_resolver(list(parent = parent))
+  )
+}
+
+test_that("dta_template_path_get() addresses a collection entry by its key", {
+  # The path vocabulary has to reach inside an unnamed sequence, which
+  # list_get_path() cannot do -- that is the whole reason this function exists.
+  fn <- app_fn("dta_template_path_get")
+  def <- four_state_parent()
+
+  expect_equal(fn(def, "options.o1.label"), "P option")
+  expect_equal(fn(def, "base.metadata.title"), "P title")
+  # `datasets:` keys on `as:`, not on an id field.
+  expect_equal(fn(def, "datasets.d1.template"), "dt@1.0")
+  expect_null(fn(def, "options.nope.label"))
+  expect_null(fn(def, "base.metadata.title.deeper"))
+})
+
+test_that("a sealed path cannot be changed by a base: override", {
+  expect_error_message_contains(
+    sealed_resolve("base.metadata.title", base = list(metadata = list(title = "C title"))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed path cannot be changed by a modify: verb", {
+  expect_error_message_contains(
+    sealed_resolve(
+      "options.o1.label",
+      options = list(modify = list(list(id = "o1", label = "Changed")))
+    ),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed entry cannot be dropped by a remove: verb", {
+  expect_error_message_contains(
+    sealed_resolve("options.o1", options = list(remove = "o1")),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a sealed field cannot be cancelled by an explicit null", {
+  expect_error_message_contains(
+    sealed_resolve("base.metadata.header", base = list(metadata = list(header = NULL))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("sealing a whole section forbids adding to it, not just editing it", {
+  expect_error_message_contains(
+    sealed_resolve("options", options = list(add = list(list(id = "o2")))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a seal constrains its own path only, leaving siblings free", {
+  result <- sealed_resolve(
+    "base.metadata.title",
+    base = list(metadata = list(header = "C header"))
+  )
+
+  expect_equal(result$def$base$metadata$title, "P title")
+  expect_equal(result$def$base$metadata$header, "C header")
+})
+
+test_that("a template's own sealed: binds its descendants, not itself", {
+  # A seal that bound its declarer would forbid the template from writing the
+  # very field it is sealing, which would make the feature unusable.
+  parent <- four_state_parent()
+  child <- four_state_child(
+    sealed = "base.metadata.title",
+    base = list(metadata = list(title = "C title"))
+  )
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_equal(result$def$base$metadata$title, "C title")
+  expect_equal(result$def$sealed, "base.metadata.title")
+})
+
+test_that("a seal survives two hops and binds a grandchild", {
+  # The union is what carries it: the middle template neither declares nor
+  # violates the seal, and must still pass it down intact.
+  grandparent <- list(
+    id = "gp", version = "1.0",
+    base = list(metadata = list(title = "GP title")),
+    sealed = "base.metadata.title"
+  )
+  parent <- list(
+    id = "p", version = "1.0", extends = "gp",
+    base = list(metadata = list(header = "P header"))
+  )
+  child <- list(
+    id = "c", version = "1.0", extends = "p",
+    base = list(metadata = list(title = "C title"))
+  )
+  resolver <- make_resolver(list(gp = grandparent, p = parent))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, resolver),
+    "which an ancestor sealed"
+  )
+
+  # The middle template itself resolves fine, and carries the seal onward.
+  middle <- app_fn("resolve_template_inheritance")(parent, resolver)
+  expect_equal(middle$def$sealed, "base.metadata.title")
+})
+
+test_that("sealed and required accumulate as a union rather than child-wins", {
+  parent <- four_state_parent()
+  parent$sealed <- "base.metadata.title"
+  parent$required <- "base.metadata.header"
+  child <- four_state_child(sealed = "options.o1", required = "options.o1.label")
+
+  result <- app_fn("resolve_template_inheritance")(
+    child, make_resolver(list(parent = parent))
+  )
+
+  expect_setequal(result$def$sealed, c("base.metadata.title", "options.o1"))
+  expect_setequal(result$def$required, c("base.metadata.header", "options.o1.label"))
+})
+
+test_that("a template that seals nothing carries no sealed key at all", {
+  result <- four_state_resolve(four_state_child())
+
+  expect_false("sealed" %in% names(result$def))
+  expect_false("required" %in% names(result$def))
+})
+
+test_that("a duplicate dataset key is rejected rather than silently appended", {
+  # SEAL BYPASS, pinned. `datasets:` matched each child entry to at most one
+  # parent entry and appended the rest unconditionally, so a child could write
+  # the SAME key twice: the first entry left the sealed value untouched and the
+  # second smuggled the value it actually wanted. dta_template_path_get() takes
+  # the first match, so the seal compared equal and passed while the merged
+  # definition carried both entries.
+  parent <- four_state_parent()
+  parent$datasets <- list(list(template = "gf@1.0", options = list(retention = 30)))
+  parent$sealed <- "datasets.gf.options.retention"
+  child <- four_state_child(datasets = list(
+    list(template = "gf@1.0"),
+    list(template = "gf@1.0", options = list(retention = 999))
+  ))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = parent))),
+    "duplicated"
+  )
+})
+
+test_that("a duplicate option id is rejected too", {
+  parent <- four_state_parent()
+  child <- four_state_child(options = list(
+    list(id = "o2", label = "first"),
+    list(id = "o2", label = "second")
+  ))
+
+  expect_error_message_contains(
+    app_fn("resolve_template_inheritance")(child, make_resolver(list(parent = parent))),
+    "duplicated"
+  )
+})
+
+test_that("entries with no identity key are left alone by the duplicate check", {
+  # A `datasets:` entry may legitimately be unkeyable, and several of them are
+  # not duplicates of one another -- they are simply unaddressable, which the
+  # merge already tolerates.
+  fn <- app_fn("dta_template_assert_unique_keys")
+  key_of <- app_fn("dta_template_dataset_key")
+  items <- list(list(note = "one"), list(note = "two"))
+
+  expect_length(fn(items, "datasets", key_of), 2)
+})
+
+test_that("a required list field is unfilled when everything inside it is blank", {
+  # `supplier`/`receiver`/`transmission` are lists, so a bare length check
+  # accepted `supplier: {affiliation: ""}` as a real answer: present,
+  # structurally non-empty, carrying no information. The vignette's headline
+  # example is `required: [base.metadata.supplier]`, so this was the case the
+  # feature was advertised with.
+  fn <- app_fn("dta_template_path_is_filled")
+
+  expect_false(fn(list(affiliation = "")))
+  expect_false(fn(list(affiliation = list(name = ""), contacts = list())))
+  expect_true(fn(list(affiliation = list(name = "ACME"))))
+  expect_false(fn(list()))
+  expect_false(fn(""))
+  expect_true(fn("ACME"))
+  # A logical or numeric value is a real answer, including the falsy ones.
+  expect_true(fn(FALSE))
+  expect_true(fn(0))
+})

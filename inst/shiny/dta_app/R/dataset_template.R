@@ -281,6 +281,46 @@ apply_dataset_patch <- function(ds, patch) {
   ds_name <- as.character(ds$name %||% "?")
   deviations <- list()
 
+  # 0) columns: the same four ops written in the SHARED collection vocabulary
+  # -- inherit/remove/add/modify/order -- that `options:` and `datasets:` use,
+  # so a template author learns one set of words instead of three. The
+  # `remove_columns:`/`add_columns:`/`modify_columns:` spellings below are the
+  # original names for three of these and keep working unchanged; this form
+  # additionally expresses the two things they cannot, `inherit: [ids]` (keep
+  # only a named subset) and `inherit: none` (replace the column list
+  # wholesale), plus `order:`.
+  #
+  # It runs BEFORE the named ops for the same reason remove_columns runs first
+  # among them: it settles MEMBERSHIP, and everything after addresses columns
+  # by id.
+  if (!is.null(patch$columns)) {
+    parsed <- dta_template_parse_collection(patch$columns, "columns")
+    if (!identical(parsed$form, "verbs")) {
+      verbs <- paste(dta_template_collection_verbs, collapse = "/")
+      cli::cli_abort(c(
+        "{.field columns} in the patch for dataset {.val {ds_name}} must be a mapping of {verbs}.",
+        i = "A bare list of column specs belongs in {.field add_columns} or {.field modify_columns}."
+      ))
+    }
+    id_of <- function(x) as.character(x$id %||% "")
+    before <- vapply(ds$columns %||% list(), id_of, character(1))
+    ds$columns <- dta_template_apply_collection_verbs(
+      ds$columns %||% list(), parsed$verbs, "columns", dta_template_option_key
+    )
+    after <- vapply(ds$columns %||% list(), id_of, character(1))
+    # Deviations stay in the `*_columns` vocabulary the UI already reads: the
+    # verbs are a second spelling of these ops, not a second set of them.
+    for (id in setdiff(before, after)) {
+      deviations[[length(deviations) + 1L]] <- list(op = "remove_columns", target = id)
+    }
+    for (entry in parsed$verbs$add) {
+      deviations[[length(deviations) + 1L]] <- list(op = "add_columns", target = id_of(entry))
+    }
+    for (entry in parsed$verbs$modify) {
+      deviations[[length(deviations) + 1L]] <- list(op = "modify_columns", target = id_of(entry))
+    }
+  }
+
   # 1) remove_columns: a character vector of ids. An id that is not present is
   # a hard abort, never a silent no-op -- a caller relying on a column being
   # gone must be told when it never existed to begin with.
@@ -310,15 +350,23 @@ apply_dataset_patch <- function(ds, patch) {
   }
 
   # 3) modify_columns: a list of specs, each `id` plus the fields to change.
-  # utils::modifyList(existing, spec) is exactly "merge, child keys win" --
-  # the spec states only what is changing, and anything it omits is left
+  # The spec states only what is changing, and anything it omits is left
   # untouched on the existing column. `id` itself is stripped from the merge
   # operand first so a patch cannot use modify_columns to silently rename a
   # column's own identity out from under later steps of the SAME patch.
+  #
+  # dta_template_merge_value() (template_inherit.R), not utils::modifyList():
+  # one definition of "merge" for the whole engine. The two agree on every
+  # shape a column actually holds today -- scalars, an atomic `values:`, a
+  # `values_from:` mapping -- and on `field: null` meaning "delete this
+  # property". They part on a sequence of MAPPINGS, where modifyList() recurses
+  # into two unnamed lists, finds no names to walk, and returns the parent
+  # untouched: the child's value is discarded in silence. Nothing shipped hits
+  # that shape, which is exactly why it would have gone unnoticed.
   for (spec in (patch$modify_columns %||% list())) {
     mod_id <- as.character(spec$id %||% "")
     idx <- dataset_item_index_by_id(ds$columns, mod_id, "column", ds_name)
-    ds$columns[[idx]] <- utils::modifyList(ds$columns[[idx]], spec[names(spec) != "id"])
+    ds$columns[[idx]] <- dta_template_merge_value(ds$columns[[idx]], spec[names(spec) != "id"])
     deviations[[length(deviations) + 1L]] <- list(op = "modify_columns", target = mod_id)
   }
 

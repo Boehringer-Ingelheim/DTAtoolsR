@@ -656,6 +656,12 @@
       msg <- conditionMessage(resolved)
       code <- if (grepl("cycle detected", msg, fixed = TRUE) || grepl("exceeds the depth limit", msg, fixed = TRUE)) {
         "extends_cycle"
+      } else if (grepl("which an ancestor sealed", msg, fixed = TRUE)) {
+        # A seal violation is not an unresolvable reference: the chain resolved
+        # fine and the template then broke a rule an ancestor set. Reporting it
+        # as extends_unresolved would send the author looking for a missing
+        # parent that is sitting right there.
+        "sealed_violation"
       } else {
         "extends_unresolved"
       }
@@ -663,7 +669,36 @@
       if (!abstract) {
         add("error", "instantiate_failed", msg)
       }
-    } else if (!abstract) {
+    } else {
+      # A sealed path that matches nothing protects nothing, and it fails
+      # SILENTLY: the seal compares the value before and after the merge, and a
+      # path that resolves to NULL on both sides is identical, so every
+      # descendant passes. Only a typo ever produces that, which is why this is
+      # worth a run of the validator rather than being left to be discovered
+      # when a supplier overrides the clause it was supposed to protect.
+      #
+      # Checked on the RESOLVED definition, and for abstract templates too: an
+      # abstract parent is the most likely place for a seal to be declared, and
+      # it may well be sealing a path it inherited rather than one it wrote.
+      path_get <- .dta_template_engine_get("dta_template_path_get")
+      for (sealed_path in as.character(resolved$def$sealed %||% character(0))) {
+        if (is.null(path_get(resolved$def, sealed_path))) {
+          add(
+            "warning", "sealed_path_unknown",
+            sprintf(
+              "Sealed path '%s' matches nothing in this template, so it protects nothing.",
+              sealed_path
+            )
+          )
+        }
+      }
+    }
+    if (!inherits(resolved, "error") && !abstract) {
+      # Shape defaults are applied to the RESOLVED definition, never to the
+      # file as read: an absent key is how a child says "inherit", so filling
+      # one in ahead of the merge would turn that into an override. See
+      # dta_template_finalize_def() in template_core.R.
+      resolved$def <- .dta_template_engine_get("dta_template_finalize_def")(resolved$def)
       # `index = index_df`: without it, create_dta_from_template() takes its
       # ORIGINAL dataset-building path, under which a `datasets[].template`
       # entry is simply unreachable (template_core.R's own docstring) and
