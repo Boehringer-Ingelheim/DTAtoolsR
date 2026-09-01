@@ -119,6 +119,37 @@ dta_read_yaml_text <- function(text) {
   dta_read_yaml(tmp)
 }
 
+# ---- Creating ------------------------------------------------------------
+
+# Build an EMPTY DTA: metadata only, no datasets. Backs the landing page's
+# "Create new" button, for starting a specification from nothing rather than
+# from a file or a template.
+#
+# `datasets = list()` is load-bearing, not decorative. DTA()'s `datasets`
+# argument defaults to NULL while the @datasets property is declared
+# class_list, so the S7 property check REJECTS DTA(metadata = ...) with no
+# datasets argument -- the constructor never coerces its own default to a
+# list. Passing the empty list explicitly is what makes an empty document
+# constructible at all. The same gap is recorded package-side in
+# tests/testthat/test-DTA.R.
+#
+# A zero-dataset DTA is a state the workspace already supports: build_
+# structure() returns list() (not NULL) for it, which is what keeps the app in
+# the workspace instead of bouncing back to the landing page, and removing the
+# last dataset already reaches the same state.
+dta_create_empty <- function(title, version, date = Sys.Date()) {
+  dta_try({
+    DTAtools::DTA(
+      datasets = list(),
+      metadata = DTAtools::DTAMetaData(
+        title = title,
+        version = version,
+        date = date
+      )
+    )
+  })
+}
+
 # ---- Introspection -------------------------------------------------------
 
 dta_dataset_names <- function(dta) {
