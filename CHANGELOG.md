@@ -175,6 +175,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Editing a metadata field no longer stores the whitespace around it.** A
+  title or version typed with a leading or trailing space was saved exactly as
+  typed, even though the same code already counts a field of nothing but
+  spaces as empty. Those two fields identify the document — they reach the
+  exported Word file, the download filename and the version history — so a
+  stray space registered as a change to a version that renders identically to
+  the one before it. Every metadata field the Metadata tab writes is now
+  stored trimmed. A document already holding a padded value keeps it until
+  that field is next edited, rather than being rewritten on load.
+
 - **Restoring a previous session no longer invents a change baseline.** A
   document created in this session (from a template, or from nothing)
   deliberately has no "as loaded" baseline: the first "Create new version"
