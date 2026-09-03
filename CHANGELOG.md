@@ -12,8 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   gains a **Create new** button alongside *Create new from template* and *Load
   example*. It asks only for a title and a version, then opens the workspace on
   an empty DTA — metadata only, no datasets — ready to build up by hand with
-  **+ Add dataset** and the Metadata tab. Until now every way into the app read
-  an existing document: a YAML file, the bundled example, or a template
+  **+ Add dataset** and the Metadata tab. Its version history opens with a
+  single entry for the version just chosen, so an exported specification
+  records the version it started at rather than first appearing in the history
+  at whatever it is next bumped to. Until now every way into the app read an
+  existing document: a YAML file, the bundled example, or a template
   expansion. A newly created document arrives in edit mode, because an empty
   specification is only worth creating if you can immediately start filling
   it in.
@@ -171,6 +174,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   trap that the landing-page fix below was written for.
 
 ### Fixed
+
+- **Restoring a previous session no longer invents a change baseline.** A
+  document created in this session (from a template, or from nothing)
+  deliberately has no "as loaded" baseline: the first "Create new version"
+  establishes one at the moment of the bump. The restore path could not tell
+  that legitimate NULL from a session file written before the versioning
+  feature existed, and substituted the document as of the last autosave for
+  both. The effect was that the first version's change summary depended on
+  whether the author happened to reload the page before bumping: reload in
+  between, and edits made before the bump were folded into that version's
+  summary; don't, and they were not. Restore now tells the two cases apart
+  the same way it already does when deciding whether the restored document
+  opens read-only.
+
+- **Restoring a specification with no datasets no longer leaves "NA" in the
+  interface.** The restore path took the first dataset name of a document
+  that has none, which in R yields a missing value rather than an empty one,
+  so it reached user-visible text: the validation dock offered to "Run a
+  check on NA", and downloaded files were named "NA_validation_messages". It
+  now leaves no dataset selected, exactly as every other route through the
+  app already does.
+
+- **A specification with no datasets no longer looks broken.** Its workspace
+  opened on an empty panel with nothing to read, and the sidebar's "Check all
+  datasets" button did nothing at all when pressed. The workspace now
+  explains that the specification has no datasets yet and points at "+ Add
+  dataset", and the button, pressed with nothing to check, says so rather
+  than sitting silent. This state was always reachable by removing a
+  specification's last dataset; starting one from nothing makes it the first
+  thing an author sees.
 
 - **Creating a new version no longer strands the document with no way back
   into edit mode.** The Edit menu withheld its enable-editing row whenever a
