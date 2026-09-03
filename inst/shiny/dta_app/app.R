@@ -437,6 +437,26 @@ server <- function(input, output, session) {
   # open.
   editing <- reactive(isTRUE(rv$editing))
 
+  # Is the landing page showing? rv$structure is NULL there, and a list once a
+  # document is open -- often an EMPTY list, for a document with no datasets,
+  # which is why this asks is.null() rather than testing the length. Getting
+  # that wrong sends an author who has just created a specification, or who
+  # has removed its last dataset, straight back to the landing page.
+  #
+  # The same question is asked in five places (output$main, output$edit_gate,
+  # output$floating_msgs, and the two create-new observers below), and was
+  # spelled out by hand at each of them; naming it once means the empty-list
+  # distinction is decided in a single spot rather than re-derived five times.
+  #
+  # Deliberately a plain function and not a reactive. The three renderUI
+  # callers must NOT take a dependency on rv$structure -- see output$main,
+  # where rebuilding the workspace DOM on every dataset add would reset the
+  # active nav tab and every file input -- so they depend on rv$doc_token and
+  # wrap this in isolate() themselves. Isolating in here instead would hide
+  # that decision from the comments that explain it, and would silently deny
+  # a future caller that genuinely wants to follow the value.
+  on_landing <- function() is.null(rv$structure)
+
   # Turning Edit mode off closes whatever editor was open and disarms it.
   #
   # The file/column/rule/dataset-metadata save handlers resolve their target
@@ -475,7 +495,7 @@ server <- function(input, output, session) {
   # load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       NULL
     } else {
       tagList(
@@ -1318,15 +1338,27 @@ server <- function(input, output, session) {
   # carry a name.
   #
   # Both observers below refuse to run unless the app is on the landing page
-  # (rv$structure NULL). The button only EXISTS there, but its input id
-  # outlives the landing DOM, so a delayed or duplicated websocket message
+  # (on_landing(), defined above). The button only EXISTS there, but its input
+  # id outlives the landing DOM, so a delayed or duplicated websocket message
   # could otherwise silently replace a document the user has already loaded
-  # and edited. The document a user has been working on is the one thing in
-  # this app that cannot be recovered from disk, so the cheap guard is worth
-  # it even though the message is unlikely.
+  # and edited. Autosave would leave the last snapshot on disk, but everything
+  # done since it is gone, so the cheap guard is worth it even though the
+  # message is unlikely.
+  #
+  # The app's other landing-only inputs -- the YAML upload, the example
+  # loader, the two template steps, the restore button -- deliberately do NOT
+  # carry this guard, and the asymmetry is a decision rather than an
+  # oversight. None of them is reachable from the workspace either, so the
+  # guard would not fire for any of them today; and req() cancels SILENTLY, so
+  # a future route into one of them from the workspace (drag-and-drop onto an
+  # open document, an "open recent" entry) would then do nothing at all, with
+  # no error to say why. If it ever has to hold for all of them, on_landing()
+  # is the seam to widen -- and the tests that drive those inputs twice in one
+  # session would need a confirm_reset() between the two, which is the only
+  # sequence a user can actually perform.
 
   observeEvent(input$create_new, {
-    req(is.null(rv$structure))
+    req(on_landing())
     rv$create_new_msg <- NULL
     rv$create_new_token <- rv$create_new_token + 1
     showModal(modalDialog(
@@ -1371,7 +1403,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_confirm, {
-    req(is.null(rv$structure))
+    req(on_landing())
     title <- trimws(as.character(input$create_new_title %||% "")[1])
     version <- trimws(as.character(input$create_new_version_value %||% "")[1])
     # Every failure below leaves the modal open with what the user typed still
@@ -4715,7 +4747,7 @@ server <- function(input, output, session) {
   # produced messages.
   output$floating_msgs <- renderUI({
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       return(NULL)
     }
     div(
@@ -6757,8 +6789,8 @@ server <- function(input, output, session) {
   output$dataset_detail <- renderUI({
     # rv$structure is an empty list -- not NULL -- for a document with no
     # datasets, which is exactly what keeps output$main above on the
-    # workspace rather than the landing page (that switch tests
-    # is.null(rv$structure), not its length). So this is the workspace's own
+    # workspace rather than the landing page (on_landing() asks is.null(),
+    # deliberately, and not the length). So this is the workspace's own
     # empty state for the no-datasets case, reached both right after
     # "Create new" and after removing a document's last dataset; without it,
     # req(rv$active) below fails silently and the whole Datasets tab body
@@ -6893,7 +6925,7 @@ server <- function(input, output, session) {
     # assignment that changes THAT answer also bumps rv$doc_token. Live bits
     # live in their own outputs.
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       # Landing. Reference input$dta_client_id directly so this re-renders once
       # the browser reports its id and the restore button can appear.
       restore_available <- {
