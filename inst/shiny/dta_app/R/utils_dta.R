@@ -417,6 +417,27 @@ dta_check <- function(dta, dataset = NULL) {
 # authorized_for_corrections) a blank/empty value UNSETS the property (NULL)
 # instead of storing "" -- so an empty field is "not set at all" in the object
 # (and is omitted from the serialized YAML).
+#
+# A character value is stored TRIMMED. The blank test below already decides
+# that surrounding whitespace is not content -- a field of spaces counts as
+# empty -- so storing the untrimmed string would contradict a rule this
+# function has already applied to the same value. It also matters beyond
+# tidiness for the two fields that identify the document: `title` and
+# `version` reach the exported Word document, the download filename stub and
+# the version-history diff, so a title that gained a trailing space would be
+# reported as a change to a version that renders identically to the one
+# before it. The landing page's "Create new" already trims both before the
+# document exists (see dta_create_empty()'s callers); this is what keeps
+# editing a field afterwards from putting the whitespace back.
+#
+# The is.character() guard is load-bearing: `authorized_for_corrections` is
+# character OR list (class_character_or_list_or_null), and trimws() on a list
+# would corrupt it. `date` is already converted to a Date above and so is
+# untouched here.
+#
+# Normalisation is deliberately LAZY -- a document that already carries a
+# padded value keeps it until that field is next edited. Trimming on load
+# instead would silently modify a document the author never touched.
 dta_set_metadata_field <- function(dta, field, value) {
   dta_try({
     md <- DTAtools::metadata(dta)
@@ -435,6 +456,7 @@ dta_set_metadata_field <- function(dta, field, value) {
     } else if (field %in% unset_when_blank && is_blank) {
       value <- NULL
     }
+    if (is.character(value)) value <- trimws(value)
     S7::prop(md, field) <- value
     dta@metadata <- md
     dta
