@@ -137,14 +137,27 @@ dta_read_yaml_text <- function(text) {
 # structure() returns list() (not NULL) for it, which is what keeps the app in
 # the workspace instead of bouncing back to the landing page, and removing the
 # last dataset already reaches the same state.
+#
+# The single version_history entry seeded below exists for the same reason
+# the other two "new document" routes each seed one: a document created from
+# nothing still has a version the author chose right here, on the create-new
+# dialog, so its history should start with that version rather than first
+# appearing whenever it is next bumped to whatever version comes after it.
+# This mirrors the template route (every bundled creation template declares
+# its own version_history entry in YAML) and the "Create new from current"
+# route (dta_restart_version_history(), versioning.R). The entry is written
+# CLOSED -- this helper never leaves an "open version" recorded in the app --
+# so a later export cannot overwrite its `changes` text with a diff.
 dta_create_empty <- function(title, version, date = Sys.Date()) {
   dta_try({
+    entry <- list(version = version, date = date, changes = "Initial version.")
     DTAtools::DTA(
       datasets = list(),
       metadata = DTAtools::DTAMetaData(
         title = title,
         version = version,
-        date = date
+        date = date,
+        version_history = list(entry)
       )
     )
   })
