@@ -470,11 +470,12 @@ test_that("with no private source configured, the picker opens and offers the pa
 # ---- Creating from a template enters edit mode ------------------------------
 
 test_that("creating a document from a template leaves the author editing it", {
-  # THE BUG THIS GUARDS: template_create_confirm() built the document via
-  # apply_loaded(), which always leaves rv$editing FALSE (correct for a real
-  # load) -- but a template-created document is new, not loaded, and there is
-  # no switch left for the author to flip themselves. See the WHY comment on
-  # the template_create_confirm observer in app.R.
+  # THE BUG THIS GUARDS: apply_loaded() writes rv$editing unconditionally, to
+  # isTRUE(start_editing) -- FALSE unless the caller says otherwise, which is
+  # correct for a real load -- so template_create_confirm() has to pass
+  # start_editing = TRUE itself. A template-created document is new, not
+  # loaded, and there is no switch left for the author to flip themselves.
+  # See the WHY comment on the template_create_confirm observer in app.R.
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
