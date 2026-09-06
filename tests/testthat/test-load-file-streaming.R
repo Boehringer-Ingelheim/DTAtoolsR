@@ -522,7 +522,11 @@ test_that("a quoted line break past the first block needs the handler to declare
     as.data.frame(open_file(plain, path)),
     regexp = "CSV parse error"
   )
-  expect_identical(conditionMessage(eager_error), conditionMessage(lazy_error))
+  # The same diagnosis on both paths -- not the same bytes: Arrow's in-memory
+  # reader reports the row number only when the failing block was parsed on
+  # the thread that counts rows, which differs between platforms.
+  expect_match(conditionMessage(eager_error), "Expected 2 columns, got 1", fixed = TRUE)
+  expect_match(conditionMessage(lazy_error), "Expected 2 columns, got 1", fixed = TRUE)
 
   eager <- as.data.frame(read_file(declaring, path))
   lazy <- as.data.frame(open_file(declaring, path))
