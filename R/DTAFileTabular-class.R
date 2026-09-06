@@ -40,10 +40,35 @@
 #' @param encoding Character; the character encoding of the file, as accepted by
 #'   \code{\link[base]{iconv}}. Default is \code{"UTF-8"}.
 #'
-#'   Anything other than UTF-8 is honoured on the in-memory reader only. Arrow's
-#'   dataset scanner has no re-encoding step, so a non-UTF-8 file cannot be
-#'   validated lazily and \code{\link{open_file}()} says so rather than reading
-#'   the bytes as if they were UTF-8 and disagreeing with the in-memory path.
+#'   Both readers honour it, by different means. The in-memory reader passes it
+#'   to Arrow, which re-encodes by wrapping the input stream it owns. The
+#'   dataset scanner has no such step -- it opens its own files -- so a
+#'   non-UTF-8 file is instead converted once, streaming and in bounded memory,
+#'   to a UTF-8 copy under \code{\link[base]{tempdir}()} that the scan reads;
+#'   the copy is cached for the session, so repeated loads of an unchanged file
+#'   convert once, and a re-delivery replaces it rather than adding to it. Both
+#'   paths therefore produce the same verdict for the same file, which is the
+#'   point -- including for a quoted value containing a line break, which is
+#'   copied byte for byte rather than normalised.
+#'
+#'   The cost is disk and one pass, not memory. Conversion runs at an order of
+#'   20 MB/s -- 21 MB/s measured here on a 172 MiB, 1,000,000 x 20 latin1 CSV,
+#'   and 19 MB/s of decoded output when the source is gzip-compressed -- and the
+#'   copy is the size of the decoded text: roughly the size of the source for latin1
+#'   that is mostly ASCII, up to twice it for text that is wholly accented, and
+#'   the full decoded size for a \code{.gz} source. A very large non-UTF-8
+#'   delivery needs that much free space under \code{tempdir()}; declaring
+#'   \code{"UTF-8"} for a file that really is UTF-8 costs nothing at all. The
+#'   block the conversion works in is
+#'   \code{options(DTAtools.transcode_block_bytes = )}, 4 MiB by default; it
+#'   bounds the buffer and has no effect on the copy.
+#'
+#'   The wide encodings (UTF-16, UTF-32, UCS-2, UCS-4) are the exception: their
+#'   characters can contain a newline byte, so the file cannot be converted in
+#'   blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
+#'   \code{stream = "never"} as the way to read it. A name this platform's
+#'   \code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
+#'   \code{"latin1"}, say) is refused too, before the file is opened.
 #'
 #' @name DTAFileTabular-class
 #' @return An object of class \code{DTAFileTabular}.
@@ -319,6 +344,670 @@ dta_reader_parse_settings <- function(handler = NULL) {
   )
 }
 
+#' @title Is This Encoding Already UTF-8?
+#' @description
+#' The single test every reader uses to decide whether an encoding needs doing
+#' anything about, so that `"utf-8"`, `"UTF-8"` and `"Utf-8"` cannot be
+#' answered three different ways in three places.
+#' @param encoding A single encoding name.
+#' @return `TRUE` when the file needs no conversion.
+#' @keywords internal
+dta_encoding_is_utf8 <- function(encoding) {
+  identical(toupper(encoding), "UTF-8")
+}
+
+#' @title Is This Encoding One That Cannot Be Split on Newline Bytes?
+#' @description
+#' [dta_transcode_to_utf8()] converts a file in blocks cut at their last `0x0A`
+#' byte. That is sound for every ASCII-compatible encoding -- UTF-8, the whole
+#' latin/windows family, and any other single-byte code page -- because `0x0A`
+#' there is always the line feed and never part of another character.
+#'
+#' It is *not* sound for the wide encodings: in UTF-16LE the two bytes of an
+#' ordinary character can be `0x0A 0x00`, so splitting on `0x0A` cuts
+#' characters in half. Such a file is refused rather than converted, because a
+#' plausible-looking wrong answer about someone's data is worse than a clear
+#' no.
+#' @param encoding A single encoding name.
+#' @return `TRUE` for the UTF-16/32 and UCS-2/4 families, in the spellings
+#'   `iconv` accepts for them.
+#' @keywords internal
+dta_encoding_is_wide <- function(encoding) {
+  grepl("^(utf|ucs)[-_]?(16|32|2|4)", tolower(encoding))
+}
+
+# ---- reading a file that is not UTF-8 ---------------------------------------
+
+#' @title A UTF-8 Copy of a File Declared in Another Encoding
+#' @description
+#' Arrow re-encodes by wrapping the INPUT STREAM, which only the in-memory
+#' reader owns: a dataset opens its own files, so `csv_read_options(encoding =)`
+#' is accepted and then silently ignored on the lazy path. This converts the
+#' bytes once instead, into a temporary UTF-8 copy the scanner can read --
+#' replacing the refusal that used to make every non-UTF-8 delivery
+#' unstreamable, however large it was.
+#'
+#' @section Bounded memory:
+#' The file is read through a connection in blocks of
+#' [dta_transcode_block_bytes()] bytes, converted with [base::iconv()] and
+#' written straight back out, so what the peak cost follows is the block, not
+#' the file: linear time, and memory that a 100 GB delivery does not change. A
+#' `.gz` source is read through [base::gzfile()], so a compressed delivery is
+#' never expanded on disk first.
+#'
+#' Measured rather than asserted, against a session baseline of 116 Mb: the
+#' 172 MiB reference input peaked at 254 Mb with a 1 MiB block, 260 Mb at the
+#' 4 MiB default and 488 Mb at 16 MiB -- the block is what moves it. Fifteen
+#' times less input (11 MiB) at the default block peaked at 184 Mb, so what the
+#' file adds is the string cache between collections rather than anything held:
+#' a 15-fold larger source cost 1.4 times the increment, where holding it would
+#' have cost 15. The copy is byte-identical whether the block holds 1 KiB,
+#' 64 KiB or 4 MiB.
+#'
+#' @section What the copy is, exactly:
+#' The same bytes, re-encoded, and nothing else: the header included and
+#' unaltered, every line ending exactly as delivered, no terminator added to a
+#' last line that carried none. The copy is byte-identical to what
+#' `iconv(from = encoding, to = "UTF-8")` of the whole file would produce, and
+#' the two readers therefore see the same value in every cell -- including a
+#' quoted value containing CRLF, or a lone CR, which are the two forms a
+#' line-oriented converter cannot preserve.
+#'
+#' That is what the block boundary is for. Each block is trimmed back to its
+#' last `0x0A` byte and the remainder carried into the next one, so the
+#' converter never cuts a line and never has to decide what a line ending is; a
+#' line longer than one block simply grows the buffer until a newline arrives.
+#' The pieces a block is then converted in (see [dta_transcode_spans()]) are cut
+#' on newline bytes for the same reason, and rejoined verbatim, so they are a
+#' fact about how fast iconv runs and not about what the copy contains.
+#' A block whose bytes are not valid in the declared encoding, or which holds a
+#' `0x00` byte (no delimited file has any use for one, and it is the signature
+#' of a binary file or of a wide encoding declared as a narrow one), aborts the
+#' conversion naming the byte offset at which the trouble starts.
+#'
+#' @section Cost:
+#' One pass, single-threaded, of an order of 20 MB/s. Measured on this
+#' package's reference input -- a 172 MiB, 1,000,000 x 20 latin1 CSV -- it ran
+#' at 21 MB/s (three runs spanning 8.2-8.4 s), against 18-19 MB/s for a
+#' line-based converter over the same file. Byte fidelity is therefore not paid
+#' for in speed, but only because the block is handed to [base::iconv()] in
+#' pieces: iconv is markedly slower on one very long string than on a vector of
+#' short ones (12 MB/s for a 4 MiB string, 33 MB/s for the same bytes as 64 KiB
+#' pieces), and converting a block whole made this the slower of the two.
+#'
+#' A gzip-compressed source is read through [base::gzfile()] and costs about a
+#' tenth more per megabyte of *output* (19 MB/s decoded, from 7 MB/s of
+#' compressed input).
+#'
+#' Rates on another machine will differ; the shape will not. What matters for
+#' sizing is that the pass is linear in the file and pays nothing per column,
+#' and that it happens once per session per file rather than once per
+#' `check()`.
+#'
+#' The copy is the size of the decoded text: about the size of the source for
+#' latin1 that is mostly ASCII, up to twice it for text that is wholly
+#' accented, and the full decoded size for a `.gz` source. Free space under
+#' `tempdir()`, not memory, is therefore what a very large non-UTF-8 delivery
+#' needs.
+#'
+#' @param path Character path to the file, optionally gzip-compressed.
+#' @param encoding The encoding the file is declared to be in, as accepted by
+#'   [base::iconv()]. A name this platform cannot convert from, and a wide
+#'   encoding (see [dta_encoding_is_wide()]), are both refused before the file
+#'   is opened.
+#' @return The path of a UTF-8 copy under `tempdir()`. Cached for the session
+#'   on the source's path, size and modification time together with the
+#'   declared encoding, so repeated loads of an unchanged file convert once; a
+#'   new copy of a re-delivered file supersedes the old one, which is deleted.
+#' @keywords internal
+dta_transcode_to_utf8 <- function(path, encoding) {
+  # Both refusals happen before the file is opened. An encoding name iconv()
+  # cannot use, and one whose characters can contain a newline byte, are
+  # properties of the SPECIFICATION rather than of the delivery: reporting them
+  # costs nothing and needs no I/O to establish.
+  dta_check_encoding_supported(encoding, path)
+
+  if (dta_encoding_is_wide(encoding)) {
+    cli::cli_abort(c(
+      "A file declaring {.val {encoding}} cannot be converted block by block.",
+      "x" = "{.path {path}} would have to be split on the byte {.val 0x0A}, which is part of an ordinary character in this encoding.",
+      "i" = "Load it with {.code stream = \"never\"}, or convert the file to UTF-8 first."
+    ))
+  }
+
+  source <- normalizePath(path, winslash = "/", mustWork = FALSE)
+
+  key <- dta_hash_object(list(
+    path = source,
+    # Metadata, not contents: hashing the bytes to decide whether to convert
+    # them would cost the very read this exists to perform only once.
+    size = file.size(path),
+    mtime = file.mtime(path),
+    encoding = encoding
+  ))
+
+  if (exists(key, envir = `__DTAtools_transcode_cache__`, inherits = FALSE)) {
+    cached <- get(key, envir = `__DTAtools_transcode_cache__`, inherits = FALSE)
+    # The copy lives under tempdir(), which the session owns but does not
+    # police. A cleaner that removed it must send us back to converting, not
+    # to an Arrow error about a file that is not there.
+    if (is.list(cached) && file.exists(cached$copy)) {
+      return(cached$copy)
+    }
+  }
+
+  destination <- tempfile(fileext = ".csv")
+  block <- dta_transcode_block_bytes()
+
+  input <- if (tolower(tools::file_ext(path)) %in% dta_compression_extensions()) {
+    gzfile(path, open = "rb")
+  } else {
+    file(path, open = "rb")
+  }
+  on.exit(close(input), add = TRUE)
+
+  output <- file(destination, open = "wb")
+  on.exit(close(output), add = TRUE)
+
+  # A half-written copy must not outlive the failure that produced it, and must
+  # never be reachable through the cache -- so the entry is recorded only after
+  # the last block has been written.
+  finished <- FALSE
+  on.exit(if (!finished) unlink(destination), add = TRUE)
+
+  # A double, for the reason given above `dta_narrow_count()`: a file long
+  # enough to matter here runs an integer counter past its range.
+  bytes_done <- 0
+
+  # Bytes left over from the previous block because no line ended in them. The
+  # copy is byte-faithful precisely because this is carried rather than
+  # terminated: nothing here decides what a line ending is.
+  carry <- raw(0)
+
+  repeat {
+    chunk <- readBin(input, "raw", n = block)
+    if (length(chunk) == 0) {
+      break
+    }
+
+    buffer <- if (length(carry) == 0) chunk else c(carry, chunk)
+    cut <- dta_last_newline(buffer)
+
+    if (is.na(cut)) {
+      # A single line longer than one block. Hold everything and read on: the
+      # alternative is cutting a line in half, and with it any multi-byte
+      # character that happens to straddle the cut.
+      carry <- buffer
+      next
+    }
+
+    dta_transcode_write_block(
+      buffer[seq_len(cut)], output, encoding, path, bytes_done
+    )
+    bytes_done <- bytes_done + cut
+    carry <- if (cut < length(buffer)) {
+      buffer[(cut + 1L):length(buffer)]
+    } else {
+      raw(0)
+    }
+  }
+
+  # A last line with no terminator: written exactly as it arrived, with none
+  # added. The in-memory reader does not invent one either.
+  if (length(carry) > 0) {
+    dta_transcode_write_block(carry, output, encoding, path, bytes_done)
+  }
+
+  finished <- TRUE
+  # An earlier copy of the SAME delivery is now superseded, whatever fingerprint
+  # or encoding it was made under. Left in place it would keep a second full-size
+  # copy of the file alive under `tempdir()` for the rest of the session, once
+  # per re-delivery.
+  dta_transcode_cache_evict(source)
+  assign(
+    key,
+    list(source = source, copy = destination),
+    envir = `__DTAtools_transcode_cache__`
+  )
+  destination
+}
+
+#' @title Refuse an Encoding Name This Platform Cannot Convert From
+#' @description
+#' A misspelled encoding (`"latin-1"`, `"cp-1252"`) used to surface as
+#' [base::iconv()]'s own error -- rendered in the system language, naming
+#' neither the file nor the handler that declared it, and reaching the user
+#' from somewhere in the middle of a conversion. Asking iconv the question up
+#' front turns it into this package's own message, before the file is opened.
+#' @param encoding The declared encoding name.
+#' @param path The file it was declared for, for the message.
+#' @return `invisible(TRUE)`; aborts otherwise.
+#' @keywords internal
+dta_check_encoding_supported <- function(encoding, path) {
+  # `""` rather than the `character(0)` that reads more naturally: iconv() short
+  # circuits an empty vector without ever asking the platform for a converter,
+  # so `iconv(character(0), from = "cp-1252", to = "UTF-8")` returns
+  # `character(0)` and validates precisely nothing. One empty string is the
+  # smallest input that actually opens the conversion.
+  supported <- tryCatch(
+    {
+      iconv("", from = encoding, to = "UTF-8")
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+
+  if (isTRUE(supported)) {
+    return(invisible(TRUE))
+  }
+
+  cli::cli_abort(c(
+    "{.val {encoding}} is not an encoding this platform can convert from.",
+    "x" = "{.path {path}} is declared as {.val {encoding}}.",
+    "i" = "{.code iconvlist()} lists the names the platform accepts; R also takes its own aliases {.val latin1} and {.val UTF-8}."
+  ))
+}
+
+#' @title The Last Newline Byte in a Block
+#' @description
+#' Where [dta_transcode_to_utf8()] cuts a block so that no line is split. The
+#' search runs backwards in doubling windows rather than over the whole block,
+#' because a block is megabytes and a line is bytes: `which(buffer == 0x0A)`
+#' allocates a logical vector the size of the block to answer a question that a
+#' 64 KiB tail answers for every real delimited file.
+#' @param bytes A raw vector.
+#' @return The index of the last `0x0A`, or `NA_integer_` when there is none.
+#' @keywords internal
+dta_last_newline <- function(bytes) {
+  n <- length(bytes)
+  if (n == 0) {
+    return(NA_integer_)
+  }
+
+  newline <- as.raw(0x0a)
+  window <- min(n, 65536L)
+
+  repeat {
+    from <- n - window + 1L
+    hits <- which(bytes[from:n] == newline)
+    if (length(hits) > 0) {
+      return(from + hits[[length(hits)]] - 1L)
+    }
+    if (window >= n) {
+      return(NA_integer_)
+    }
+    window <- as.integer(min(n, window * 2))
+  }
+}
+
+# How large a piece of a block [base::iconv()] is handed at a time. NOT the
+# block, which is what bounds memory: this is the string length at which iconv
+# is fastest, and the block is cut into pieces of about this size before being
+# converted.
+#
+# The two are separate because iconv's cost is not linear in the length of the
+# string it is given. Measured on the 161 MiB reference input, one 4 MiB string
+# converts at 12 MB/s and the same bytes as 64 KiB pieces at 33 MB/s -- the
+# whole difference between this converter being slower than the line-based one
+# it replaced and being half again faster. The plateau is wide (4 KiB to
+# 256 KiB are all within 10% of each other), so this is not a tuned number and
+# does not want tuning.
+`__DTAtools_transcode_piece_bytes__` <- 65536L
+
+#' @title Where a Block Can Be Cut Without Splitting a Line
+#' @description
+#' Spans of about 64 KiB, each ending at a `0x0A`, covering the block exactly
+#' once (see the constant above). [base::iconv()] is handed the pieces as a
+#' character vector rather than the block as one string, which is much faster,
+#' and their conversions concatenate to exactly the conversion of the whole
+#' block: the cuts fall on newline bytes, which no ASCII-compatible encoding
+#' puts inside a character.
+#'
+#' The last span runs to the end of the block whatever is there, so a block
+#' with no newline in it at all -- a single line longer than the block -- is
+#' one span and is converted as it was before.
+#' @param bytes The raw block.
+#' @return A list of `starts` and `ends`, both integer and the same length.
+#' @keywords internal
+dta_transcode_spans <- function(bytes) {
+  n <- length(bytes)
+  piece <- `__DTAtools_transcode_piece_bytes__`
+
+  if (n <= piece) {
+    return(list(starts = 1L, ends = n))
+  }
+
+  # Bounded by n/piece, so the growth is over tens of elements, not millions.
+  starts <- integer(0)
+  ends <- integer(0)
+  from <- 1L
+
+  while (n - from + 1L > piece) {
+    # Searched in the window rather than over the block: `which(bytes == 0x0a)`
+    # would walk all 4 MiB to answer a question the next 64 KiB answers.
+    at <- dta_last_newline(bytes[from:(from + piece - 1L)])
+
+    if (is.na(at)) {
+      # A line longer than one piece. Rather than cut it, let the remainder of
+      # the block be one span -- the same thing the block loop does with a line
+      # longer than a block.
+      break
+    }
+
+    starts <- c(starts, from)
+    ends <- c(ends, from + at - 1L)
+    from <- from + at
+  }
+
+  list(starts = c(starts, from), ends = c(ends, n))
+}
+
+#' @title Convert One Block and Write It
+#' @description
+#' The body of [dta_transcode_to_utf8()]'s loop: the two ways a block can fail
+#' are both this function's, so that the loop above states only how the file is
+#' cut into blocks.
+#' @param bytes The raw block, ending at a line boundary.
+#' @param output An open binary connection.
+#' @param encoding The declared source encoding.
+#' @param path The source file, for the messages.
+#' @param offset How many source bytes precede this block, so that a failure can
+#'   be located in the file rather than in the block.
+#' @return `invisible(NULL)`; aborts on an undecodable block.
+#' @keywords internal
+dta_transcode_write_block <- function(bytes, output, encoding, path, offset) {
+  spans <- dta_transcode_spans(bytes)
+
+  # rawToChar() is the one thing here that a NUL byte defeats -- an R string
+  # cannot hold one -- and its own error is a base-R message in the system
+  # language about a "raw vector", which says nothing about the delivery. The
+  # scan for the offending byte runs only on this path, where one more pass over
+  # one block costs nothing.
+  text <- tryCatch(
+    vapply(
+      seq_along(spans$starts),
+      function(i) rawToChar(bytes[spans$starts[[i]]:spans$ends[[i]]]),
+      character(1)
+    ),
+    error = function(e) NULL
+  )
+
+  if (is.null(text)) {
+    at <- dta_format_count(offset + which(bytes == as.raw(0x00))[[1]])
+    cli::cli_abort(c(
+      "{.path {path}} holds a {.val 0x00} byte, which text cannot.",
+      "x" = "The first one is at byte {at}.",
+      "i" = "A delimited file has no use for a NUL byte: this is usually a binary file, or a wide encoding declared as a narrow one."
+    ))
+  }
+
+  converted <- iconv(text, from = encoding, to = "UTF-8")
+
+  # iconv() answers NA for text it cannot decode, which means the declared
+  # encoding is wrong for this file. Writing the NA would replace a whole piece
+  # of rows with the two characters "NA" and dropping it would lose them;
+  # neither is a thing to do silently to someone's data.
+  if (anyNA(converted)) {
+    at <- dta_format_count(dta_first_undecodable_byte(bytes, encoding, offset))
+    cli::cli_abort(c(
+      "{.path {path}} cannot be decoded as {.val {encoding}}.",
+      "x" = "The bytes at offset {at} are not valid {.val {encoding}}.",
+      "i" = "A byte offset, not a line number: the file is converted in blocks rather than a line at a time.",
+      "i" = "Declare the encoding the file was actually written in."
+    ))
+  }
+
+  # Written piece by piece rather than pasted back into one string: the
+  # concatenation is what the file gets either way, and one 4 MiB string per
+  # block is an allocation with nothing to show for it.
+  for (piece in converted) {
+    writeBin(charToRaw(piece), output)
+  }
+  invisible(NULL)
+}
+
+#' @title Where in a Block the Decoding First Fails
+#' @description
+#' A block is converted in pieces of tens of thousands of bytes, so
+#' [base::iconv()] answers NA for a whole piece and says nothing about where in
+#' it the trouble is. "Somewhere in a 60 GB file" is not actionable, so the
+#' failed block alone is re-converted a
+#' line at a time to find the first line that does not decode. It runs only
+#' after a conversion has already failed, and it is the last thing that happens
+#' before the abort.
+#' @param bytes The raw block that failed.
+#' @param encoding The declared source encoding.
+#' @param offset How many source bytes precede this block.
+#' @return The 1-based byte offset in the file at which the first undecodable
+#'   line begins, or the block's own first byte when no single line reproduces
+#'   the failure.
+#' @keywords internal
+dta_first_undecodable_byte <- function(bytes, encoding, offset) {
+  breaks <- which(bytes == as.raw(0x0a))
+  starts <- c(1L, breaks + 1L)
+  ends <- c(breaks, length(bytes))
+
+  for (i in seq_along(starts)) {
+    if (starts[[i]] > ends[[i]]) {
+      next
+    }
+    line <- tryCatch(
+      rawToChar(bytes[starts[[i]]:ends[[i]]]),
+      error = function(e) NULL
+    )
+    if (is.null(line)) {
+      next
+    }
+    if (is.na(iconv(line, from = encoding, to = "UTF-8"))) {
+      return(offset + starts[[i]])
+    }
+  }
+
+  offset + 1
+}
+
+#' @title Drop Every Cached Copy of One Delivery
+#' @description
+#' A re-delivered file is a new cache key, and the copy made for the previous
+#' one is then unreachable but still on disk -- a second full-size copy under
+#' `tempdir()` for the rest of the session, once per re-delivery. This deletes
+#' it and drops its entry, so a session holds at most one copy per delivered
+#' path.
+#'
+#' A lazily held Dataset scanning a copy that is evicted this way is not left
+#' broken: `dta_refresh_transcoded_dataset()` re-opens a dataset whose copy has
+#' gone, and it was in any case reading a copy of data that has since been
+#' replaced.
+#' @param source The normalised path of the delivered file.
+#' @return `invisible(NULL)`.
+#' @keywords internal
+dta_transcode_cache_evict <- function(source) {
+  cache <- `__DTAtools_transcode_cache__`
+
+  for (key in ls(envir = cache, all.names = TRUE)) {
+    entry <- get(key, envir = cache, inherits = FALSE)
+    if (!is.list(entry) || !identical(entry$source, source)) {
+      next
+    }
+    unlink(entry$copy)
+    rm(list = key, envir = cache)
+  }
+
+  invisible(NULL)
+}
+
+#' @title Attribute Name Carrying the File a Dataset Was Opened From
+#' @description
+#' The R attribute under which [dta_open_normalized_dataset()] records the
+#' ORIGINAL path when what it actually opened was a transcoded copy.
+#'
+#' `dta_table_change_signal()` fingerprints a lazy dataset by the files behind
+#' it -- their paths, sizes and modification times. Left to `$files`, a
+#' transcoded dataset would be fingerprinted by the temporary copy, whose mtime
+#' is when the conversion ran: the same unchanged delivery would then look like
+#' a different table in every session, and `check()` would revalidate it every
+#' time. The user's file is the thing that has or has not changed, so the
+#' user's file is what the signal must describe.
+#'
+#' An R attribute on the arrow object, exactly as the table content stamp is
+#' (see `dta_table_hash_key`): an arrow `Dataset` is an R6 object, i.e. an
+#' environment, so the attribute is shared by every reference to that dataset
+#' and absent from anything Arrow builds anew from it.
+#' @keywords internal
+dta_dataset_source_key <- "dta_dataset_source"
+
+#' @title Record the File a Dataset Was Really Opened From
+#' @param dataset An `arrow::Dataset`, or any other object (returned
+#'   unchanged).
+#' @param files Character. The path(s) the caller wants the dataset identified
+#'   by.
+#' @return `dataset`, stamped where that was possible.
+#' @keywords internal
+dta_stamp_dataset_source <- function(dataset, files) {
+  if (!inherits(dataset, "Dataset")) {
+    return(dataset)
+  }
+  if (!is.character(files) || length(files) == 0 || any(!nzchar(files))) {
+    return(dataset)
+  }
+
+  # The stamp is an optimisation, never a requirement: an arrow build that
+  # refuses the attribute yields an unstamped dataset, which is identified by
+  # its own `$files` exactly as before this existed.
+  tryCatch(
+    {
+      attr(dataset, dta_dataset_source_key) <- files
+      dataset
+    },
+    error = function(e) dataset
+  )
+}
+
+#' @title The Files a Dataset Should Be Identified By
+#' @description
+#' The stamp left by [dta_stamp_dataset_source()] when there is one, and the
+#' dataset's own `$files` otherwise. This is what `dta_table_change_signal()`
+#' fingerprints, so that a dataset scanning a transcoded copy is recognised by
+#' the delivered file rather than by the copy.
+#' @param x An `arrow::Dataset`.
+#' @return A character vector of paths, empty when none can be determined.
+#' @keywords internal
+dta_dataset_source_files <- function(x) {
+  stamped <- attr(x, dta_dataset_source_key, exact = TRUE)
+
+  if (is.character(stamped) && length(stamped) > 0 && all(nzchar(stamped))) {
+    return(stamped)
+  }
+
+  tryCatch(x$files, error = function(e) character(0))
+}
+
+#' @title Attribute Name Carrying What It Takes to Re-Open a Transcoded Dataset
+#' @description
+#' The R attribute under which [dta_open_normalized_dataset()] records how to
+#' make itself again: the delivered path, the fingerprint (size and
+#' modification time) the copy was converted from, and the argument list the
+#' dataset was opened with.
+#'
+#' It exists because a transcoded dataset is a scan plan over a copy of the
+#' delivery rather than over the delivery itself, and a copy does not follow
+#' what it was copied from. Left to itself, an edited delivery changed the
+#' change signal (which is keyed on the delivery, see [dta_dataset_source_key]),
+#' opened `check()`'s skip gate, and was then answered by rescanning the STALE
+#' copy -- reporting the old data's verdict as a fresh one.
+#'
+#' On the arrow object rather than beside it, for the same reason the source
+#' stamp is: a `Dataset` is an R6 object, so the attribute travels with every
+#' reference to it, including the one held in `x@tables`, and cannot be
+#' separated from the dataset it describes by anything that merely passes the
+#' dataset around.
+#' @keywords internal
+dta_dataset_transcode_key <- "dta_dataset_transcode"
+
+#' @title The Identity of a Delivered File, Cheaply
+#' @description
+#' Size and modification time -- the same two facts the transcode cache keys on
+#' and `dta_table_change_signal()` fingerprints a dataset by. Contents are
+#' deliberately not consulted: reading the file to find out whether it needs
+#' reading is the cost this exists to avoid.
+#' @param path A file path.
+#' @return A list of `size` and `mtime`, both `NA` for a file that is not there.
+#' @keywords internal
+dta_source_fingerprint <- function(path) {
+  list(size = file.size(path), mtime = file.mtime(path))
+}
+
+#' @title Record How to Re-Open a Transcoded Dataset
+#' @param dataset An `arrow::Dataset`, or any other object (returned
+#'   unchanged).
+#' @param plan A list of `path` (the delivered file), `fingerprint` (from
+#'   [dta_source_fingerprint()]) and `args` (the argument list
+#'   [dta_open_normalized_dataset()] was called with).
+#' @return `dataset`, stamped where that was possible.
+#' @keywords internal
+dta_stamp_dataset_transcode <- function(dataset, plan) {
+  if (!inherits(dataset, "Dataset") || !is.list(plan)) {
+    return(dataset)
+  }
+
+  # As with the source stamp: an arrow build that refuses the attribute yields
+  # an unstamped dataset, which behaves exactly as one did before this existed
+  # -- it scans the copy it was opened on and never refreshes.
+  tryCatch(
+    {
+      attr(dataset, dta_dataset_transcode_key) <- plan
+      dataset
+    },
+    error = function(e) dataset
+  )
+}
+
+#' @title Make a Transcoded Dataset Follow Its Delivery
+#' @description
+#' Returns the dataset unchanged unless it is scanning a transcoded copy whose
+#' delivery has since changed, or whose copy has gone; in either case the file
+#' is converted again (through the cache, so an unchanged delivery already
+#' converted in this session costs nothing) and re-opened with the argument list
+#' the first open recorded.
+#'
+#' Called from `check()` after the skip gate, so an unchanged table never
+#' reaches it and the cost on the common path is one `attr()` lookup. Re-opening
+#' rather than patching: the new delivery has its own header, which has to be
+#' read, cleaned and checked for collisions exactly as the first one was, and
+#' its own schema, which the re-opened dataset must carry.
+#'
+#' A delivery that has VANISHED is returned unchanged rather than reported here.
+#' `check()`'s missing-file guard is the one place in the package that answers
+#' for an absent delivery, it answers by the delivered path (see
+#' `dta_missing_table_files()`), and two places reporting the same absence
+#' differently is how the two would drift apart.
+#' @param table A table holding of any kind.
+#' @return The same object, or a freshly opened `arrow::Dataset`.
+#' @keywords internal
+dta_refresh_transcoded_dataset <- function(table) {
+  plan <- attr(table, dta_dataset_transcode_key, exact = TRUE)
+
+  if (!is.list(plan) || !is.character(plan$path) || length(plan$path) != 1) {
+    return(table)
+  }
+
+  if (!file.exists(plan$path)) {
+    return(table)
+  }
+
+  # The copy is under tempdir(), which the session owns but does not police, and
+  # which `dta_transcode_cache_evict()` itself prunes. A dataset whose copy has
+  # gone is re-made rather than left to fail inside the scanner.
+  copies <- tryCatch(table$files, error = function(e) character(0))
+  copy_present <- length(copies) > 0 && all(file.exists(copies))
+
+  if (copy_present && identical(dta_source_fingerprint(plan$path), plan$fingerprint)) {
+    return(table)
+  }
+
+  do.call(dta_open_normalized_dataset, plan$args)
+}
+
 #' @title The Header Names of a Delimited File
 #' @description
 #' Opens the file for its header alone. An `arrow::Dataset` reads its schema
@@ -368,8 +1057,10 @@ dta_delim_header_names <- function(path, parse_options, has_header, encoding = "
   # The dataset reader has no re-encoding step (see dta_open_normalized_dataset())
   # so a non-ASCII header arrives here as raw bytes mislabelled UTF-8. The
   # in-memory reader DOES re-encode, and would otherwise be handed names that
-  # disagree with the ones it read for itself.
-  if (!identical(toupper(encoding), "UTF-8")) {
+  # disagree with the ones it read for itself. The lazy path reaches this with
+  # `encoding = "UTF-8"` and the path of an already-transcoded copy, so its
+  # header is converted exactly once, here or there, never twice.
+  if (!dta_encoding_is_utf8(encoding)) {
     converted <- tryCatch(
       iconv(raw_names, from = encoding, to = "UTF-8"),
       error = function(e) NULL
@@ -436,6 +1127,12 @@ dta_delim_header_names <- function(path, parse_options, has_header, encoding = "
 #'   (the default) to keep Arrow's own default (`c("", "NA")`) unchanged.
 #' @param handler A `DTAFileTabular` (or subclass) whose `newlines_in_values`
 #'   and `encoding` apply, or `NULL` for the defaults.
+#' @param encoding Character or `NULL` (the default). Overrides the encoding
+#'   the handler declares. The one caller that supplies it is
+#'   [dta_open_normalized_dataset()], which has already converted the file to a
+#'   UTF-8 copy and is planning a read of *that*: the handler still says
+#'   `latin1`, and honouring it here would decode the copy's header a second
+#'   time. `NULL` leaves the handler in charge, which is every other route.
 #' @return A list with `path`, `column_names`, `skip`, `col_types`,
 #'   `parse_options`, `encoding` and `na`.
 #' @keywords internal
@@ -446,9 +1143,14 @@ dta_delim_reader_plan <- function(
   quote = '"',
   has_header = TRUE,
   na = NULL,
-  handler = NULL
+  handler = NULL,
+  encoding = NULL
 ) {
   settings <- dta_reader_parse_settings(handler)
+
+  if (!is.null(encoding)) {
+    settings$encoding <- encoding
+  }
 
   # Spelled out rather than left to arrow's readr-flavoured translation, which
   # is what `delim = `/`quote = ` go through: every value below is the one that
@@ -521,6 +1223,29 @@ dta_delim_reader_plan <- function(
 #' comes from [dta_stream_block_size()]; see there for why `batch_rows` cannot
 #' do that job on a delimited file.
 #'
+#' @section A file that is not UTF-8:
+#' Arrow re-encodes by wrapping the INPUT STREAM, which only the in-memory
+#' reader owns: a dataset opens its own files, so `csv_read_options(encoding =)`
+#' is accepted here and then silently ignored -- the bytes come back either as
+#' `binary` or, with UTF-8 checking off, as a string of undecoded bytes. Either
+#' way the same file would validate differently depending on how it was loaded,
+#' which is the one outcome this reader exists to prevent.
+#'
+#' This used to be answered by refusing, which made every non-UTF-8 delivery
+#' unstreamable however large it was. It is now answered by
+#' [dta_transcode_to_utf8()]: the file is converted once, in bounded memory, to
+#' a UTF-8 copy under `tempdir()`, and the scan reads that. The copy is cached
+#' per session, so a second `load_file()` on an unchanged file reuses it.
+#'
+#' The returned dataset is stamped twice. With the ORIGINAL path (see
+#' [dta_dataset_source_key]), so that `dta_table_change_signal()` identifies the
+#' delivered file rather than the temporary copy, whose modification time is
+#' merely when the conversion happened to run; and with everything needed to
+#' open it again (see [dta_dataset_transcode_key]), so that
+#' [dta_refresh_transcoded_dataset()] can make the scan follow a delivery that
+#' changes after it was loaded rather than rescanning a copy of what it used to
+#' hold.
+#'
 #' @param path Character path to the delimited file.
 #' @param specs A `DTAColumnSpecCollection` or `NULL`. When supplied, every
 #'   column is read as text; see [dta_delim_reader_plan()].
@@ -542,20 +1267,19 @@ dta_open_normalized_dataset <- function(
 ) {
   settings <- dta_reader_parse_settings(handler)
 
-  # Checked before the plan does any I/O. Arrow re-encodes by wrapping the
-  # INPUT STREAM, which only the in-memory reader owns; a dataset opens its own
-  # files, so `csv_read_options(encoding = )` is accepted and then silently
-  # ignored here -- the bytes come back either as `binary` or, with UTF-8
-  # checking off, as a string of undecoded bytes. Either way the same file
-  # would validate differently depending on how it was loaded, which is the one
-  # outcome this reader exists to prevent. Refusing is the honest answer.
-  if (!identical(toupper(settings$encoding), "UTF-8")) {
-    encoding <- settings$encoding
-    cli::cli_abort(c(
-      "A file declaring {.val {encoding}} cannot be validated lazily.",
-      "x" = "Arrow's dataset scanner has no re-encoding step, so {.path {path}} would be read as if its bytes were UTF-8.",
-      "i" = "Load it with {.code stream = \"never\"}, or convert the file to UTF-8 first."
-    ))
+  # Decided before the plan does any I/O, because it decides which file the
+  # plan reads.
+  source_path <- path
+  transcoded <- !dta_encoding_is_utf8(settings$encoding)
+  fingerprint <- NULL
+
+  if (transcoded) {
+    # Taken BEFORE the conversion, so that what is recorded is the state of the
+    # delivery the copy was made from. Taken after, a file rewritten while the
+    # conversion ran would be recorded as already converted.
+    source_path <- normalizePath(source_path, winslash = "/", mustWork = FALSE)
+    fingerprint <- dta_source_fingerprint(source_path)
+    path <- dta_transcode_to_utf8(source_path, settings$encoding)
   }
 
   plan <- dta_delim_reader_plan(
@@ -565,7 +1289,10 @@ dta_open_normalized_dataset <- function(
     quote = quote,
     has_header = has_header,
     na = na,
-    handler = handler
+    handler = handler,
+    # The copy is UTF-8 by construction; the handler still declares the
+    # source's encoding, and honouring that here would decode the copy twice.
+    encoding = if (transcoded) "UTF-8" else NULL
   )
 
   open_args <- list(
@@ -583,7 +1310,36 @@ dta_open_normalized_dataset <- function(
     open_args$na <- plan$na
   }
 
-  do.call(arrow::open_delim_dataset, open_args)
+  dataset <- do.call(arrow::open_delim_dataset, open_args)
+
+  if (!transcoded) {
+    # Nothing was substituted, so the dataset's own `$files` already names the
+    # delivered file: leaving it unstamped keeps a UTF-8 load byte-for-byte the
+    # load it was before transcoding existed.
+    return(dataset)
+  }
+
+  dataset <- dta_stamp_dataset_source(dataset, source_path)
+
+  # Everything needed to make this dataset again from whatever the delivery
+  # holds NOW. The argument list is this function's own, not
+  # `arrow::open_delim_dataset()`'s: a re-delivery may have a different header,
+  # and the column names, skip and column types below are all derived from the
+  # header that was there at the time. Re-entering here re-derives them; reusing
+  # the arrow-level arguments would pin the new file to the old file's columns.
+  dta_stamp_dataset_transcode(dataset, list(
+    path = source_path,
+    fingerprint = fingerprint,
+    args = list(
+      path = source_path,
+      specs = specs,
+      delim = delim,
+      quote = quote,
+      has_header = has_header,
+      na = na,
+      handler = handler
+    )
+  ))
 }
 
 #' @title Read a Delimited File Eagerly, With Clean Column Names
@@ -592,8 +1348,13 @@ dta_open_normalized_dataset <- function(
 #' column types as [dta_open_normalized_dataset()] gives the scanner, read into
 #' memory as an Arrow `Table` instead of left on disk.
 #'
-#' Unlike the lazy opener this one CAN honour a non-UTF-8 `encoding`: it reads
-#' through an input stream, which Arrow will re-encode.
+#' A non-UTF-8 `encoding` is honoured here by Arrow itself: this reader owns
+#' the input stream it reads through, and `csv_read_options(encoding = )`
+#' re-encodes that stream. That is the one thing the lazy opener cannot do --
+#' a dataset opens its own files -- which is why it converts the file to a
+#' UTF-8 copy first (see [dta_transcode_to_utf8()]) and reads that instead. Two
+#' mechanisms, one result: the same bytes decode the same way whichever reader
+#' loaded them.
 #'
 #' @param path Character path to the delimited file.
 #' @param delim,quote,has_header Delimited-text parse options.

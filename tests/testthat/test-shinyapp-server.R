@@ -852,6 +852,75 @@ test_that("the count controls cannot smuggle a bad count past a non-pattern entr
   })
 })
 
+test_that("the handler form reaches the encoding and quoted-newline settings", {
+  # Reading output$file_modal_body is the point: a renderUI output is never
+  # evaluated unless a test asks for it, so a control that is only in the
+  # markup -- or a form that errors while building it -- would otherwise ship.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_edit_click = 1)
+
+    html <- ui_text(output$file_modal_body)
+    expect_match(html, "id=\"file_encoding\"")
+    expect_match(html, "id=\"file_newlines_in_values\"")
+    # The shortlist is on offer, and the panel is hidden for an unparsed file.
+    expect_match(html, "value=\"windows-1252\"")
+    expect_match(html, "input.file_type !=", fixed = TRUE)
+
+    session$setInputs(
+      file_filename = "clinical_data.*[.]csv$", file_type = "csv",
+      file_pattern = TRUE, file_count_mode = "exact", file_number_of_files = 1,
+      file_encoding = "latin1", file_newlines_in_values = TRUE
+    )
+    session$setInputs(file_save = 1)
+
+    expect_null(rv$file_msg)
+    h <- DTAtools::datasets(rv$dta, "clinical_data")@files[[1]]
+    expect_equal(h@encoding, "latin1")
+    expect_true(h@newlines_in_values)
+  })
+})
+
+test_that("saving a handler keeps a reader setting the form never shows", {
+  # `has_header` has no control. Before the form carried it, renaming a file
+  # rebuilt the handler on the constructor defaults and the header row silently
+  # became data again.
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    # Seed a handler that declares no header row, through the same helper the
+    # form saves with.
+    seeded <- app_fn("dta_set_handler")(
+      rv$dta, "clinical_data",
+      index = 1, filename = "clinical_data.*[.]csv$", type = "csv",
+      pattern = TRUE, count_mode = "exact", number_of_files = 1,
+      reader_settings = list(has_header = FALSE, quote = "'")
+    )
+    expect_true(seeded$ok)
+    rv$dta <- seeded$value
+
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_edit_click = 1)
+    session$setInputs(
+      file_filename = "renamed.csv", file_type = "csv", file_pattern = FALSE
+    )
+    session$setInputs(file_save = 1)
+
+    expect_null(rv$file_msg)
+    h <- DTAtools::datasets(rv$dta, "clinical_data")@files[[1]]
+    expect_equal(h@filename, "renamed.csv")
+    expect_false(h@has_header)
+    expect_equal(h@quote, "'")
+  })
+})
+
 test_that("applying raw YAML that changes files: keeps the loaded files", {
   # Editing `files:` in the Raw tab used to discard every file loaded into that
   # dataset. It now costs the same as the Edit-files dialog: the data stays, the

@@ -209,10 +209,12 @@ results <- do.call(rbind, lapply(row_counts, function(n) {
   # types the table too - otherwise streaming is charged for work its rival
   # never does.
   eager <- peak_during({
-    tbl <- arrow::read_csv_arrow(
+    tbl <- dta_read_delim_normalized(
       path,
-      col_types = dta_reader_col_types(specs, TRUE),
-      as_data_frame = FALSE
+      delim = ",",
+      quote = "\"",
+      has_header = TRUE,
+      specs = specs
     )
     typed <- dta_coerce_table_to_specs(as.data.frame(tbl), specs)
     validate_table_detailed(specs, typed$table, verbose = FALSE)
@@ -234,10 +236,12 @@ results <- do.call(rbind, lapply(row_counts, function(n) {
   # at these sizes is dominated by transient allocation and by the ~200 MB the
   # loaded package already occupies; retention is what decides whether a file
   # larger than memory can be checked at all.
-  tbl <- arrow::read_csv_arrow(
+  tbl <- dta_read_delim_normalized(
     path,
-    col_types = dta_reader_col_types(specs, TRUE),
-    as_data_frame = FALSE
+    delim = ",",
+    quote = "\"",
+    has_header = TRUE,
+    specs = specs
   )
   eager_hold_mb <- as.numeric(utils::object.size(as.data.frame(tbl))) / 1024^2
   one_batch <- as.data.frame(tbl$Slice(0, min(batch_rows, tbl$num_rows)))

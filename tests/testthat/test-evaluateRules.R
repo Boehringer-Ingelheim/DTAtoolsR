@@ -2033,3 +2033,51 @@ test_that("integer64 columns are exempt from equality-bound parsing", {
   other <- dta_condition_mask("B", "equals", "9007199254740992", x)
   expect_identical(other %in% TRUE, c(FALSE, TRUE))
 })
+
+
+# ---------------------------------------------------------------------------
+# A rule id or column name containing braces is data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("print(DTARuleColUnique) survives braces in the column names", {
+  # print(DTARuleColUnique) pasted every column name into `{.field ...}`
+  # markup with paste0() and handed the assembled string to cli_text(), so a
+  # column called `a{b}` took it down with "Could not evaluate cli `{}`
+  # expression" -- the same defect already fixed for print(DTADataSetTabular).
+  rule <- DTARuleColUnique(id = "u1", columns = c("A{B}", "C{D}"))
+
+  out <- capture.output(print(rule), type = "message")
+  expect_true(any(grepl("A{B}", out, fixed = TRUE)))
+  expect_true(any(grepl("C{D}", out, fixed = TRUE)))
+})
+
+test_that("print() on the other rule classes already survives braces in id/columns", {
+  # None of these build their message text with paste0()/str_c()/sprintf()/
+  # glue() around a dynamic value -- every value is interpolated directly
+  # (`{x@id}`, `{paste(x@columns, collapse = ', ')}`, ...) -- so this pins the
+  # already-correct behaviour against a future regression.
+  cond_rule <- DTARuleColCondition(
+    id = "cc{r}",
+    description = "desc{ription}",
+    condition = list(AGE = list(greater = 18)),
+    then = list(STATUS = list(equals = "adult"))
+  )
+  out_cond <- capture.output(print(cond_rule), type = "message")
+  expect_true(any(grepl("cc{r}", out_cond, fixed = TRUE)))
+  expect_true(any(grepl("desc{ription}", out_cond, fixed = TRUE)))
+
+  range_rule <- DTARuleColRange(id = "range{r}", columns = c("A{B}", "C{D}"), min = 0, max = 10)
+  out_range <- capture.output(print(range_rule), type = "message")
+  expect_true(any(grepl("range{r}", out_range, fixed = TRUE)))
+  expect_true(any(grepl("A{B}, C{D}", out_range, fixed = TRUE)))
+
+  group_rule <- DTARuleGroupCondition(
+    id = "grp{r}",
+    group_by = c("G{1}", "G2"),
+    conditions = list(c1 = list(AGE = list(greater = 18))),
+    constraints = list(list(type = "requires", `if` = "c1", `then` = "c1"))
+  )
+  out_group <- capture.output(print(group_rule), type = "message")
+  expect_true(any(grepl("grp{r}", out_group, fixed = TRUE)))
+  expect_true(any(grepl("G{1}, G2", out_group, fixed = TRUE)))
+})

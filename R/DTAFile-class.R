@@ -383,6 +383,15 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
 #'   \item{\code{DTAFile}}{This is a base implementation that throws an error,
 #'   as it must be implemented by a subclass.}
 #' }
+#' @examples
+#' # The reading half of `read_file()`, called on a concrete handler. It
+#' # dispatches on `x` alone, so the path travels in `...` and is named.
+#' handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#'
+#' table <- read_file_execution(handler, file = path)
+#' dim(table)
+#'
 #' @name read_file_execution
 #' @rdname read_file_execution
 #' @export
@@ -430,6 +439,17 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #'   \item{\code{DTAFile}}{This is a base implementation that throws an error,
 #'   as it must be implemented by a subclass.}
 #' }
+#' @examples
+#' handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#'
+#' table <- read_file(handler, path)
+#' dim(table)
+#' names(table)[1:3]
+#'
+#' # The whole file is in memory now. `open_file()` is the counterpart that
+#' # leaves it on disk to be scanned in batches.
+#'
 #' @importFrom stringr str_glue
 #' @importFrom cli cli_abort
 #' @name read_file
@@ -466,6 +486,16 @@ method(read_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
 #'   \item{\code{DTAFile}}{Base implementation; aborts, because a handler that
 #'   has not declared how it is delimited cannot be scanned.}
 #' }
+#' @examples
+#' # The opening half of `open_file()`, called on a concrete handler. It
+#' # dispatches on `x` alone, so the path travels in `...` and is named.
+#' handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+#'
+#' ds <- open_file_execution(handler, file = path)
+#' # Nothing has been read yet; the columns come from the header alone.
+#' names(ds)
+#'
 #' @name open_file_execution
 #' @rdname open_file_execution
 #' @export
@@ -510,9 +540,15 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' \code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
 #' memory to grow in proportion.
 #'
-#' A non-UTF-8 \code{encoding} declared on the handler is refused here: Arrow's
-#' dataset scanner has no re-encoding step, so such a file can only be read into
-#' memory (\code{stream = "never"}).
+#' A non-UTF-8 \code{encoding} declared on the handler is honoured here too,
+#' although Arrow's dataset scanner has no re-encoding step of its own: the
+#' file is converted once, streaming and in bounded memory, to a UTF-8 copy
+#' under \code{\link[base]{tempdir}()} which the scan then reads. The copy is
+#' cached for the session and costs disk rather than memory; see
+#' \code{\link{DTAFileTabular}}. The wide encodings (UTF-16, UTF-32, UCS-2,
+#' UCS-4) are the exception -- a newline byte is not a character boundary
+#' there, so such a file is refused and must be read with
+#' \code{stream = "never"}.
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.

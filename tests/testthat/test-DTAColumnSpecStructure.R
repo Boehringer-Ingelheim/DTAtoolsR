@@ -213,3 +213,19 @@ test_that("the bundled example collection survives its own write -> read cycle",
     lapply(original@columns, function(c) as.character(unlist(c@values)))
   )
 })
+
+test_that("print and print_info survive braces in type, format and backend", {
+  # Every value here is already interpolated directly (`{x@type}` etc.), so
+  # this pins the already-correct behaviour against a future regression. The
+  # base class -- unlike DTAColumnSpecStructureSAS -- has no fixed vocabulary
+  # for type/format/backend, so a brace is actually reachable here.
+  x <- DTAColumnSpecStructure(type = "Char{X}", format = "$1{2}.", length = 5, backend = "SAS{Y}")
+
+  info <- capture.output(print_info(x), type = "message")
+  expect_true(any(grepl("Char{X}", info, fixed = TRUE)))
+  expect_true(any(grepl("$1{2}.", info, fixed = TRUE)))
+  expect_true(any(grepl("SAS{Y}", info, fixed = TRUE)))
+
+  out <- capture.output(print(x), type = "message")
+  expect_true(any(grepl("DTAColumnSpecStructure", out, fixed = TRUE)))
+})

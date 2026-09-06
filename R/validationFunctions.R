@@ -27,6 +27,15 @@
 #'   `full_error`, `columnspec_checks` (the per-check breakdown described
 #'   above), `rules_valid` and `rule_errors`. If the schema is valid but rules
 #'   are violated, aborts.
+#' @examples
+#' specs <- DTAColumnSpecCollection(
+#'   columns = list(
+#'     ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+#'     AGE = DTAColumnSpec(id = "AGE", type = "SAS Int", nullable = TRUE)
+#'   )
+#' )
+#' df <- data.frame(ID = c("A001", "A002"), AGE = c(30L, 45L), stringsAsFactors = FALSE)
+#' validate_table(specs, df, verbose = FALSE)
 #' @export
 # TODO: consider moving `validate_table()` into DTADataSet-class.R.
 validate_table <- function(specs, table, verbose = TRUE) {

@@ -105,6 +105,29 @@ table large enough to matter streams by default. Either explicit
 \code{stream} value still overrides the guess.
 }
 
+\section{Options a streamed load is subject to}{
+
+\describe{
+\item{\code{DTAtools.stream_threshold}}{The size, in bytes, above which
+\code{stream = "auto"} keeps a file lazy. 512 MB by default.}
+\item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+delimited file, 1 MiB by default. Read during \code{\link{check}()}
+rather than here, and what governs a scan's peak memory.}
+\item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+whose declared \code{encoding} is not UTF-8 is converted, at load time,
+to the UTF-8 copy the scan will read (see
+\code{\link{DTAFileTabular}()}). 4 MiB by default; it bounds the
+converter's buffer and does not change the copy.}
+\item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default. A
+diagnostic switch over how a streamed batch's declared-numeric columns
+are parsed; see \code{\link{check}()}.}
+\item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+The smallest batch for which that Arrow parse is attempted; a smaller
+batch is typed in R, which is cheaper at that size. See
+\code{\link{check}()}.}
+}
+}
+
 \examples{
 file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 ds <- DTADataSetTabular(

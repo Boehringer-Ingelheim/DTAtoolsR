@@ -67,3 +67,13 @@ as it must be implemented by a subclass.}
 }
 }
 
+\examples{
+# The reading half of `read_file()`, called on a concrete handler. It
+# dispatches on `x` alone, so the path travels in `...` and is named.
+handler <- DTAFileCSV(filename = "clinical_data.csv")
+path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+table <- read_file_execution(handler, file = path)
+dim(table)
+
+}

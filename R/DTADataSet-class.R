@@ -260,17 +260,21 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
     file_info <- str_glue("{min_n} to {max_n} files")
   }
 
-  if (max_n == 0) {
-    message <- str_c("Files: none associated, type: {x@type}")
-  } else {
-    message <- paste0(
-      "Files: ",
-      str_c("{.field ", x@name, "}"),
-      str_glue(" ({file_info}, {x@type})")
-    )
-  }
+  # `nm` and `ty` are INTERPOLATED as variables, never pasted into the
+  # markup: cli parses `{...}` in the literal string it is handed, so building
+  # the message with str_c()/paste0() first -- as this used to -- let a
+  # dataset named e.g. "d{x}" take print_short_info() down with "cannot
+  # coerce type 'object' to vector of type 'character'" (cli tried to
+  # evaluate the stray `{x}` as the function argument `x` itself). Braces
+  # inside an interpolated value are escaped by cli itself.
+  nm <- x@name
+  ty <- x@type
 
-  cli_alert(message)
+  if (max_n == 0) {
+    cli_alert("Files: none associated, type: {ty}")
+  } else {
+    cli_alert("Files: {.field {nm}} ({file_info}, {ty})")
+  }
 
   return(invisible(x))
 }

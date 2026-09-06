@@ -113,6 +113,42 @@ the same "Validation PASSED" banner would print over a run that checked
 nothing at all; such targets are instead tallied as \code{n_unchecked} and
 surfaced as "Validation INCOMPLETE".
 }
+\section{Options that tune a scan}{
+
+Three options change how a streamed table is read. None of them changes
+what is reported: a table gets the same verdict, the same counts and the
+same error detail whatever they are set to.
+
+\describe{
+\item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+delimited file, 1 MiB by default. This -- times Arrow's read-ahead --
+is what governs peak memory during a scan; \code{batch_rows} only
+\emph{caps} a batch that is already larger.}
+\item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default.
+Whether a batch whose declared-numeric columns are entirely composed of
+values Arrow and R are known to parse identically is converted inside
+Arrow rather than in R. It is a diagnostic switch: set it to
+\code{FALSE} to send every column down the R path and confirm that a
+surprising number came from the data rather than from the fast path. A
+column with one unconvertible value takes the R path regardless, which
+is where the value is recorded as an import error.}
+\item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+The Arrow parse is attempted only for a batch of at least this many
+rows: every Arrow call costs the same whatever the batch holds, and at
+the default 1 MiB read block a delimited batch is a few thousand rows,
+where the R parse is cheaper. Measured on a 1e6 x 20 file, the Arrow
+path was 34\\% slower at 1 MiB blocks, 18\\% faster at 8 MiB (about
+50,000 rows a batch) and 26\\% faster at 32 MiB. So it engages
+automatically once \code{DTAtools.stream_block_size} is raised to
+8 MiB or more, and not at all at the default block size.}
+\item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+whose declared \code{encoding} is not UTF-8 is converted to the UTF-8
+copy a lazy scan reads (see \code{\link{DTAFileTabular}()}), 4 MiB by
+default. It bounds the converter's buffer; the copy is identical
+whatever it is set to.}
+}
+}
+
 \examples{
 dta <- create_example_DTA()
 # Check all datasets

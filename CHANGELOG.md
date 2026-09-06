@@ -97,6 +97,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   loaded table's recorded import issues now hold the same thing as an eagerly
   loaded one's, and the two paths can be compared on it directly.
 
+- **The file editor can set the two newer reader options.** The Edit-files
+  dialog gains a file-encoding selector (`UTF-8`, `latin1`, `windows-1252`,
+  or free text) and a "quoted values may contain line breaks" checkbox,
+  shown for any parsed file type. Saving a handler now round-trips every
+  reader setting it carries -- `has_header`, `quote`, `missing_values`,
+  `newlines_in_values` and `encoding` -- including the ones the form shows
+  no control for, so editing a file name or pattern no longer resets the
+  file's other reader settings to their defaults.
+
 ### Changed
 
 - **The Edit menu's way into editing is a toggle again.** "Edit current
@@ -245,6 +254,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   error rather than being read as "no cap", which is what it silently meant
   for a table checked in memory.
 
+- **A streamed check parses declared-numeric columns in Arrow.** The reader
+  pins every column to text, and turning that text back into numbers in R
+  was the largest single cost of a scan -- 58% of a clean 1e6 x 20 file by
+  profile. Each batch is now parsed by Arrow instead, but only for the
+  columns in which every value has a form the two parsers are known to
+  agree on bit for bit: at most 15 digits with at most 3 after the point, or
+  at most 9 digits for a declared `Int`. No exponents, no 16th digit, no
+  fourth decimal: R's parser is not correctly rounded, and a one-ULP
+  difference would be enough to make a streamed uniqueness verdict disagree
+  with the in-memory one. A batch holding anything else is typed in R
+  exactly as before, so no result changes; a column found dirty is not
+  retried for a growing number of batches, so a file that is dirty
+  throughout does not keep paying for a test that cannot succeed. The step
+  only pays when a batch is large: every Arrow call costs the same whatever
+  the batch holds, and at the default 1 MiB read block a delimited batch is
+  a few thousand rows. Measured on a 1e6 x 20 file: 34% slower at 1 MiB
+  blocks, 18% faster at 8 MiB (about 50,000 rows a batch), 26% faster at
+  32 MiB; the dirty variant is unchanged throughout. It therefore engages
+  only for batches of at least `DTAtools.stream_arrow_numeric_min_rows`
+  rows (default 20,000), which means: not at all at the default block size,
+  and automatically once `DTAtools.stream_block_size` is raised to 8 MiB or
+  more. `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column
+  back down the R path; it is a diagnostic switch for comparing the two
+  parsers, not a supported way to change a result.
+
+- **A file declaring a non-UTF-8 encoding can now be validated lazily.**
+  `stream = "always"` (and `"auto"` on a large file) used to refuse such a
+  declaration, because Arrow's dataset scanner has no re-encoding step. The
+  file is now converted once, in bounded memory, to a UTF-8 copy under
+  `tempdir()` that the scan reads; the copy is cached for the session and
+  the table is still identified by the delivered file, so an unchanged
+  delivery is skipped on the next `check()` exactly as a UTF-8 one is.
+  UTF-16, UTF-32 and UCS-2/4 stay refused, since a newline byte is not a
+  character boundary in them.
+
+- Constructing a `DTADataSetTabular` from a data frame is about 30% faster
+  and holds a quarter of the transient memory it did: the frame is typed
+  and turned into an Arrow table once, and stamped with its content hash on
+  the way, instead of being converted to Arrow, back to a frame and to
+  Arrow again. `check()`, `DTADataSetTabular()` and `collect_full_errors()`
+  now say that a table built in memory for an immediate check with complete
+  error detail should be checked with `max_errors = Inf`; the counts and
+  the verdict are exact at any cap.
+
 ### Fixed
 
 - **Editing a metadata field no longer stores the whitespace around it.** A
@@ -387,6 +440,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Looking up a column's declared type while assembling an import-error frame
   is done once per column rather than once per row, which is what made a large
   frame of import errors take time out of all proportion to its size.
+
+- **A dataset, table, column or rule whose name contains a literal `{` no
+  longer crashes `print()`, `print_short_info()` or column-spec
+  construction.** Several print methods and the `DTAColumnSpec` validator
+  built their message text by splicing the name next to `{.field ...}`
+  markup (or, for `DTAColumnSpec`, by resolving the message with `glue`)
+  before handing the finished string to `cli`, which parses `{...}` in
+  whatever text it is given; a brace in the data was read back as an
+  expression to evaluate. Affected: `print(DTA)`, `print(DTADataSetTabular)`,
+  `print_short_info(DTADataSet)` and through it `DTADataSetFile`, the
+  `DTAColumnSpec` validator's messages, `print(DTARuleColUnique)` and
+  `print_short_info(DTAMetaData)`. Every value now reaches `cli` through its
+  own interpolation, which escapes braces in the substituted value.
+
+- A table loaded lazily from a file whose declared encoding is not UTF-8 is
+  scanned through a UTF-8 copy made at load time. When the delivery changed
+  afterwards, `check()` correctly saw the change but then rescanned the
+  stale copy, reporting the previous data's verdict and row count as a
+  fresh result. The copy is now re-made and re-opened before the scan.
+
+- A quoted value containing a line break reached the streaming reader one
+  character shorter than the in-memory reader, because the conversion of a
+  non-UTF-8 file normalised CRLF and a lone CR to LF. The copy is now
+  byte-faithful, so both readers see the same value in every cell, and the
+  conversion is about 15% faster than the line-based one it replaces
+  (21 MB/s on a 172 MiB Latin-1 CSV).
+
+- An encoding name `iconv()` does not know (`"latin-1"` for `"latin1"`, say)
+  surfaced as a base-R error in the system language, naming neither the file
+  nor the handler that declared it. It is now reported by this package
+  before the file is opened, naming both and pointing at `iconvlist()`.
+
+- Re-delivering a file whose declared encoding is not UTF-8 left the
+  previous session-temporary UTF-8 copy on disk. A session now holds at most
+  one copy per delivered path.
 
 ## [0.24.0] - 2026-08-31
 
