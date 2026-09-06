@@ -2774,6 +2774,12 @@ server <- function(input, output, session) {
     } else {
       pf <- isolate(rv$file_prefill) %||% list()
       g <- function(k, d = "") pf[[k]] %||% d
+      # The reader settings live in their own sub-list (dta_handler_fields()),
+      # so they need their own accessor -- `pf$reader_settings` is empty for a
+      # handler being added, and absent entirely for one whose type has none.
+      rs <- pf$reader_settings %||% list()
+      if (!is.list(rs)) rs <- list()
+      gr <- function(k, d) rs[[k]] %||% d
       is_pattern <- isTRUE(pf$pattern)
       # A file dataset parses nothing, so `any` is the only type it may
       # declare -- and it is the only dataset for which an ending restriction
@@ -2840,6 +2846,42 @@ server <- function(input, output, session) {
                 "Separate several endings with commas. Leave blank to accept",
                 "any ending. A file whose ending is not listed is refused as",
                 "it is uploaded, not at validation time."
+              )
+            )
+          ),
+          # How the file is READ. Only a parsed type has these, so the panel is
+          # the mirror of the endings panel above -- and an `any` handler's
+          # constructor would refuse either argument.
+          conditionalPanel(
+            condition = "input.file_type != 'any'",
+            layout_columns(
+              col_widths = c(6, 6),
+              selectizeInput("file_encoding", "File encoding",
+                # The handler's own value is prepended so an encoding that came
+                # from a document but is not on the shortlist still shows as the
+                # selection rather than silently falling back to UTF-8.
+                # create = TRUE for the same reason the list is a shortlist:
+                # iconv() accepts far more names than are worth listing.
+                choices = unique(c(gr("encoding", "UTF-8"), dta_handler_encodings())),
+                selected = gr("encoding", "UTF-8"), width = "100%",
+                options = list(create = TRUE)
+              ),
+              div(
+                style = "margin-top:26px;",
+                checkboxInput("file_newlines_in_values",
+                  "Quoted values may contain line breaks",
+                  value = isTRUE(gr("newlines_in_values", FALSE))
+                )
+              )
+            ),
+            div(
+              class = "msg-hint", style = "margin:-8px 0 10px;",
+              paste(
+                "UTF-8 is what a well-behaved exporter writes; pick or type",
+                "another only when the delivered file really is in it.",
+                "Line breaks inside quoted values are rare, cost parse speed",
+                "and are only needed when the file is large enough for one to",
+                "land on a read-block boundary."
               )
             )
           ),
@@ -3048,6 +3090,22 @@ server <- function(input, output, session) {
     req(ed)
     # Both text areas are one entry per line; dta_set_handler() does the split.
     pattern <- isTRUE(input$file_pattern)
+    # The form shows two reader settings; the handler may carry more. Start
+    # from what it had (empty when a handler is being added, which is what
+    # leaves a new one on the constructor defaults) so that editing a file name
+    # cannot silently drop a `has_header` or a `quote` the user never saw, then
+    # overwrite the two the form does own. dta_set_handler() drops whatever the
+    # chosen type's constructor will not take, so an `any` handler ignores both.
+    # Each of the two is overwritten only when its control actually reported a
+    # value: an input that was never rendered reads as NULL, and taking that as
+    # "unticked" / "blank" would clear a setting the form never showed.
+    reader <- isolate(rv$file_prefill)$reader_settings %||% list()
+    if (!is.list(reader)) reader <- list()
+    if (!is.null(input$file_newlines_in_values)) {
+      reader$newlines_in_values <- isTRUE(input$file_newlines_in_values)
+    }
+    encoding <- trimws(as.character(input$file_encoding %||% "")[1])
+    if (nzchar(encoding)) reader$encoding <- encoding
     # The count controls only exist while `pattern` is ticked; without it the
     # class contract fixes the count at exactly 1.
     r <- dta_set_handler(
@@ -3063,6 +3121,7 @@ server <- function(input, output, session) {
       pattern_description = input$file_pattern_description,
       info = input$file_info,
       extensions = input$file_extensions,
+      reader_settings = reader,
       # The dataset decides which types are on offer, so it has to decide which
       # ones validate too -- otherwise the form could offer `any` and the save
       # would reject it.

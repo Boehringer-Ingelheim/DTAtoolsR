@@ -139,6 +139,90 @@ dta_table_content_hash <- function(df) {
 }
 
 
+#' @title Would This Frame Come Back Unchanged From Arrow?
+#' @description
+#' `TRUE` when every column of `df` is of a type that
+#' `as.data.frame(arrow::as_arrow_table(df))` returns identically, so that a
+#' digest taken from the frame is also the digest of the Arrow table built from
+#' it.
+#'
+#' The `DTADataSetTabular()` constructor stamps a data-frame table with
+#' [dta_table_content_hash()] of the frame it coerced, rather than of the Table
+#' it then builds -- which is what lets it convert the data once instead of
+#' three times. That is only the same answer while the round trip is lossless,
+#' and for three types it is not:
+#'
+#' * a `bit64::integer64` whose values fit in 32 bits comes back as `integer`
+#'   (Arrow's `int64_downcast`);
+#' * a `difftime` comes back in seconds whatever units it went in as;
+#' * a `POSIXct` carrying `tzone = ""` -- what `as.POSIXct()` leaves when no
+#'   timezone is named -- comes back with no `tzone` at all, and after a second
+#'   round trip with the session's timezone. That one is not stable under
+#'   REPEATED round trips either, so the route this predicate sends it down
+#'   only helps while the coercion has nothing to type: when the coercion
+#'   rebuilds the table, its stamp is the digest of the first round trip and
+#'   `as.data.frame()` of the stored Table is the second. Such a table is
+#'   rescanned whenever it is rebuilt from its own contents, on either route.
+#'   It is pinned in `test-DTADataSetTabular-validation.R` rather than fixed;
+#'   the fix would be Arrow's.
+#' * a `Date` or a `POSIXct` held over INTEGER storage -- which
+#'   `structure(18262L, class = "Date")` and `.POSIXct(1L, "UTC")` are, and
+#'   which nothing in R forbids -- comes back over double storage, because Arrow
+#'   has one date32/timestamp type and R's converter builds a double from it.
+#'   The class is unchanged and the values are equal, but `identical()` is not,
+#'   and `dta_table_content_hash()` digests the storage. Hence the `is.double()`
+#'   clause: it is the STORAGE that has to survive, not the class.
+#'
+#' A frame holding any of them is typed through Arrow instead, so its stamp is
+#' taken from the same frame `dta_table_change_signal()` would hash. The cost of
+#' being wrong is not a wrong verdict -- the stamp is still a digest of real
+#' contents, so it can never claim "unchanged" for data that changed -- but a
+#' table rebuilt from its own `as.data.frame()` would hash differently from its
+#' stamp and be rescanned on every `check()`, which is the one cost the stamp
+#' exists to avoid.
+#'
+#' The list is a whitelist, not a blacklist: an R type Arrow handles in some way
+#' nobody here has checked takes the slower, always-correct route.
+#' @param df A data.frame, or any other object (which yields `FALSE`).
+#' @return `TRUE` or `FALSE`. A frame with no columns is stable.
+#' @keywords internal
+dta_frame_is_arrow_stable <- function(df) {
+  if (!is.data.frame(df)) {
+    return(FALSE)
+  }
+
+  stable_column <- function(column) {
+    cls <- class(column)
+
+    if (identical(cls, "POSIXct") || identical(cls, c("POSIXct", "POSIXt"))) {
+      tz <- attr(column, "tzone", exact = TRUE)
+      return(
+        is.double(column) &&
+          is.character(tz) && length(tz) == 1 && !is.na(tz) && nzchar(tz)
+      )
+    }
+
+    # Both time classes are checked for double STORAGE, not only for their
+    # class: Arrow returns a date32 and a timestamp as doubles whichever
+    # storage went in, so an integer-backed `Date` -- which `as.Date()` never
+    # produces but `structure(x, class = "Date")` does -- comes back a
+    # different vector carrying the same dates.
+    if (identical(cls, "Date")) {
+      return(is.double(column))
+    }
+
+    identical(cls, "character") ||
+      identical(cls, "numeric") ||
+      identical(cls, "integer") ||
+      identical(cls, "logical") ||
+      identical(cls, "factor") ||
+      identical(cls, c("ordered", "factor"))
+  }
+
+  all(vapply(df, stable_column, logical(1)))
+}
+
+
 #' @title Column Spec Structure for One Column
 #' @description
 #' Looks up the `DTAColumnSpecStructure` a collection declares for a column.
@@ -201,95 +285,6 @@ dta_spec_r_type <- function(specs, column) {
 }
 
 
-#' @title Reader Column Types Declared by the Specs
-#' @description
-#' Builds the Arrow schema handed to the CSV/TSV/delimited reader, so the
-#' declared type of a column -- not the reader's guess at it -- decides how the
-#' bytes in the file are parsed.
-#'
-#' Arrow infers a column's type from its contents, and that inference runs
-#' *before* any code in this package sees the data. Two classes of problem
-#' arise:
-#'
-#' 1. **Character corruption.** A column of quoted subject ids -- `"007"`,
-#'    `"008"` -- is inferred as `int64` and arrives in R as `7` and `8`. The
-#'    leading zeros are gone before [dta_coerce_table_to_specs()] runs, so its
-#'    "never coerce a `Char` column" guard has nothing left to protect.
-#'
-#' 2. **Hard abort on mixed numeric data.** Arrow locks in the inferred type
-#'    after scanning enough rows. If it picks `int64` for a column that mostly
-#'    looks like integers and then encounters `0.01` further down, it aborts the
-#'    entire read: `CSV conversion error to int64: invalid value '0.01'`. That
-#'    turns one reportable bad-cell into a file that will not load at all.
-#'
-#' Both problems are solved the same way: pin every declared column to `utf8`
-#' at read time and let [dta_coerce_table_to_specs()] handle the conversion.
-#' Reading as text can never fail and never loses information. An unrepresentable
-#' value (`"0.01"` in an `Int` column, `"abc"` in a `Num` column) becomes `NA`
-#' in the typed column and its source text is retained as an import error --
-#' which is exactly what the schema-validation axis expects to see.
-#' @param specs A `DTAColumnSpecCollection`, or `NULL`. `NULL` means "no
-#'   declared types are available", and yields `NULL`: the reader then infers
-#'   every column exactly as it did before.
-#' @param has_header Logical. When the file has no header, Arrow generates
-#'   positional names (`f0`, `f1`, ...) that cannot correspond to spec ids, so
-#'   no column spec is built.
-#' @return An `arrow::schema()` naming the textual columns, or `NULL` when there
-#'   is nothing to pin.
-#' @keywords internal
-dta_reader_col_types <- function(specs, has_header = TRUE) {
-  if (is.null(specs) || !isTRUE(has_header)) {
-    return(NULL)
-  }
-
-  columns <- tryCatch(specs@columns, error = function(e) NULL)
-
-  if (!is.list(columns) || length(columns) == 0) {
-    return(NULL)
-  }
-
-  ids <- vapply(
-    columns,
-    function(spec) tryCatch(as.character(spec@id)[[1]], error = function(e) NA_character_),
-    character(1),
-    USE.NAMES = FALSE
-  )
-
-  # A collection is normally named by column id, but one built by another route
-  # may not be. `dta_spec_r_type()` resolves either, so both are offered to it:
-  # the reader and the coercion choke point then agree on what a column is by
-  # construction, rather than by two lookups that could drift apart.
-  keys <- unique(c(names(columns), ids))
-  keys <- keys[!is.na(keys) & nzchar(keys)]
-
-  # Pin every column with a declared type to utf8.  Arrow's inference is applied
-  # *before* any R code runs, so two things can go wrong without this:
-  # (a) a "007" Char id is inferred as int64 and arrives as 7; and
-  # (b) a column inferred as int64 aborts the entire read when it later
-  #     encounters "0.01", turning one reportable bad cell into a load failure.
-  # Columns with no spec are left alone (NA from dta_spec_r_type) so Arrow
-  # infers them exactly as it would without specs.
-  typed_keys <- keys[vapply(
-    keys,
-    function(key) !is.na(dta_spec_r_type(specs, key)),
-    logical(1),
-    USE.NAMES = FALSE
-  )]
-
-  if (length(typed_keys) == 0) {
-    return(NULL)
-  }
-
-  # A schema entry for a column the file does not contain is ignored by Arrow,
-  # so a spec that declares more columns than the file carries is not an error
-  # here. Whether the column is missing is the column spec axis's question.
-  types <- rep(list(arrow::utf8()), length(typed_keys))
-  names(types) <- typed_keys
-
-  do.call(arrow::schema, types)
-}
-
-
 #' @title Compile Every Spec Column's Target Type Once
 #' @description
 #' A named character vector mapping every spec column key to the R type
@@ -308,8 +303,8 @@ dta_reader_col_types <- function(specs, has_header = TRUE) {
 #' and passing it in makes that cost proportional to the spec rather than to
 #' the data.
 #' @param specs A `DTAColumnSpecCollection`, or `NULL`.
-#' @return A named character vector, keyed exactly as [dta_reader_col_types()]
-#'   derives its keys (`unique(c(names(columns), ids))`, with `NA`/`""` keys
+#' @return A named character vector keyed by every name under which a column
+#'   can be looked up (`unique(c(names(columns), ids))`, with `NA`/`""` keys
 #'   dropped), with values from [dta_spec_r_type()]. `character(0)` when
 #'   `specs` is `NULL` or declares no columns.
 #' @keywords internal
@@ -333,9 +328,8 @@ dta_compile_spec_types <- function(specs) {
     USE.NAMES = FALSE
   )
 
-  # Same key derivation as dta_reader_col_types(): a collection is normally
-  # named by column id, but one built by another route may not be, so both are
-  # offered and deduplicated.
+  # A collection is normally named by column id, but one built by another route
+  # may not be, so both are offered as keys and deduplicated.
   keys <- unique(c(names(columns), ids))
   keys <- keys[!is.na(keys) & nzchar(keys)]
 
@@ -592,6 +586,275 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
     },
     issues = issues
   )
+}
+
+
+# ---- parsing declared-numeric text in Arrow ----------------------------------
+
+# The literal forms on which Arrow's string cast and R's `as.numeric()` return
+# the SAME double, bit for bit. Nothing outside them may take the Arrow route:
+# a value that differs by one ULP between the two engines is not a rounding
+# curiosity here. `dta_row_key()` renders doubles with `%.17g`, so one ULP is
+# enough to make a streamed uniqueness verdict disagree with the in-memory one
+# on the same file -- which is precisely the class of divergence
+# `test-streaming-parity.R` exists to forbid.
+#
+# What narrows these patterns so far is that R's parser is not correctly
+# rounded. `R_strtod()` accumulates the digits into an `LDOUBLE` and then
+# scales by a power of ten, so where `LDOUBLE` is x87's 80-bit type the result
+# is rounded twice -- once to 64 mantissa bits, once to 53 -- while Arrow's
+# parser rounds once. Measured on Windows/x86 while this was written: 20-digit
+# integers disagree on about 1 value in 3,500, and 7-significant-digit
+# decimals on about 1 in 3,400. Neither engine is wrong. They are different,
+# and different is the whole problem.
+#
+# Two families are immune, on either `LDOUBLE` regime:
+#
+#   double   At most 15 digits in total, at most 3 of them after the point.
+#            The digit string is then an integer p < 10^15 < 2^53, which every
+#            arithmetic involved holds exactly, and the value is p / 10^k with
+#            k <= 3. Rounding twice can only differ from rounding once when
+#            the exact value lies within half a 64-bit ULP of a 53-bit
+#            rounding boundary; for a value with denominator 10^k that
+#            distance is at least 1/(10^k * 2^(53-E)) against the 2^(E-64) it
+#            would have to be under, and the first beats the second exactly
+#            when 10^k < 2^11, i.e. when k <= 3. A value landing exactly ON a
+#            boundary is held exactly by both engines and rounds half to even
+#            in both.
+#
+#   integer  At most 9 digits, and no sign but `-`. Every such value is whole
+#            and within `.Machine$integer.max`, which is exactly when
+#            `dta_coerce_column()` narrows the column to R `integer` -- so the
+#            Arrow cast to int32 lands on the same vector
+#            `as.integer(as.numeric(text))` would have, rather than leaving a
+#            double where the R path produced an integer. Arrow's integer
+#            parser rejects a leading `+`, so the pattern rejects it too.
+#
+# Both were checked against R over 1.2 million (double) and 800,000 (integer)
+# random literals drawn from exactly these shapes, plus the boundary literals
+# `1.`, `.5`, `+4`, `-0`, `-.5`, `007`, `999999999999999` and
+# `123456789012.123`; `test-importConversion.R` re-runs that comparison.
+# Everything outside them -- an exponent, a fourth decimal, a 16th digit,
+# surrounding whitespace, `""`, `0x1F`, `Inf`, `NaN` -- is left to R, which
+# either parses it identically but unprovably, parses it differently, or
+# records it as unconvertible. Arrow's cast refuses most of them outright.
+#
+# Anchored with `^`/`$` and evaluated by RE2 inside Arrow. RE2's `$` matches at
+# end of text only where PCRE's also matches before a final newline, which
+# makes RE2 the stricter of the two: a value R would accept can only ever fall
+# OUT of the fast path, never into it.
+DTA_ARROW_DOUBLE_PATTERN <- "^[+-]?(?:[0-9]{1,15}[.]?|[0-9]{0,12}[.][0-9]{1,3})$"
+DTA_ARROW_INTEGER_PATTERN <- "^-?[0-9]{1,9}$"
+
+#' @title Parse a Batch's Declared-Numeric Text Columns in Arrow
+#' @description
+#' Typing the batch in R is the largest single cost of a streamed check:
+#' `dta_coerce_table_to_specs()` is 58% of a clean scan of the reference file
+#' by `Rprof`, nearly all of it `as.numeric()` and `is.na()` over
+#' declared-numeric columns the reader pinned to text. Arrow's own cast does
+#' the same parse about five times faster per value.
+#'
+#' It cannot simply be used instead. Arrow 25 has no cast that tolerates a bad
+#' value -- one unparseable cell fails the whole column -- and, more
+#' importantly, a successful cast is not necessarily R's answer. So the cast is
+#' used only where a second Arrow-side test has proved that it is: every
+#' non-null value of the column matches one of the patterns above, whose forms
+#' R and Arrow are known to agree on bit for bit. Every other column is handed
+#' to R exactly as before. The test is not cheap -- it costs about as much per
+#' value as the R parse it saves, so what the fast path actually buys is closer
+#' to the cast than to the whole parse.
+#'
+#' The consequence for the caller is that such a column reaches
+#' [dta_coerce_table_to_specs()] already numeric, which leaves it alone
+#' (`is.numeric()`), so no import issue can be recorded for it. That is the
+#' right answer rather than a suppressed one: every value in the column parsed.
+#'
+#' A column is left to R when it holds no non-null value at all (the R path
+#' leaves an all-missing column as text, and a column of `NA` doubles is not
+#' the same thing to the column spec axis), when it is not held as `utf8` or
+#' `large_utf8`, when any non-null value falls outside the patterns, or when
+#' Arrow refuses either operation.
+#'
+#' `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column down the
+#' R path instead. That is a diagnostic switch -- it exists so the two parsers
+#' can be compared on one input, and so a suspected disagreement can be ruled
+#' in or out without rebuilding the package -- and not a supported way to
+#' change a result: if flipping it changes one, that is a defect here.
+#'
+#' A column whose values do not all match is not retried on the very next
+#' batch. The test costs about as much as the R parse it is trying to avoid, so
+#' on a file that is dirty throughout, retrying every batch would make the scan
+#' measurably SLOWER while saving nothing; and a column with scattered bad
+#' values is overwhelmingly likely to have one in the next batch too. The wait
+#' doubles with each failure, which bounds the wasted work on a file that is
+#' dirty everywhere to a handful of batches while still recovering the fast
+#' path, after a short delay, on a file whose only bad value happened to fall
+#' in an early batch. A batch the column DOES qualify for resets the wait to
+#' one, so the schedule describes how the column is behaving now rather than
+#' the worst it has ever behaved. It is a scheduling decision and nothing else:
+#' whichever way it goes, the column is typed and its bad values reported.
+#' @param batch An Arrow `RecordBatch` (or any `ArrowTabular`). Anything else is
+#'   returned unchanged.
+#' @param state The environment [dta_arrow_numeric_state()] returned, or `NULL`
+#'   to leave the batch alone.
+#' @return The batch, with every eligible column replaced by its parsed
+#'   `float64` or `int32` form.
+#' @keywords internal
+dta_arrow_parse_numeric_batch <- function(batch, state) {
+  if (is.null(state) || !inherits(batch, "ArrowTabular")) {
+    return(batch)
+  }
+
+  n_rows <- batch$num_rows
+  if (length(n_rows) != 1 || is.na(n_rows) || n_rows == 0) {
+    return(batch)
+  }
+
+  type_map <- state$type_map
+  # Read from the batch rather than carried in the state: a reader is free to
+  # yield columns the source schema does not have in the same order, and an
+  # index taken from the wrong list would replace the wrong column.
+  column_names <- names(batch)
+
+  for (i in seq_along(column_names)) {
+    column <- column_names[[i]]
+    # The same lookup dta_coerce_table_to_specs() does, so a column this
+    # declines to touch is one that function will type in R.
+    target <- if (column %in% names(type_map)) type_map[[column]] else NA_character_
+    if (is.na(target) || !target %in% c("double", "integer")) {
+      next
+    }
+
+    wait <- state$wait[[column]]
+    if (!is.null(wait) && wait > 0) {
+      state$wait[[column]] <- wait - 1
+      next
+    }
+
+    # Read from the CURRENT batch: `SetColumn()` returns a new object rather
+    # than mutating, so earlier iterations have already replaced `batch`.
+    col <- batch$column(i - 1L)
+    # `class()` rather than `DataType$Equals()`: the comparison is made once
+    # per declared-numeric column per batch, and building the two `DataType`
+    # objects to compare against is three R6 constructions and two calls into
+    # C++ for a question the R class already answers.
+    if (!class(col$type)[[1]] %in% c("Utf8", "LargeUtf8")) {
+      next
+    }
+
+    n_null <- col$null_count
+    if (n_null >= n_rows) {
+      # No non-null value to parse. The R path leaves such a column as text and
+      # this must not differ -- and a later batch may well have values, so this
+      # is not a failure and does not count towards the backoff.
+      next
+    }
+
+    is_integer_target <- identical(target, "integer")
+    cast_type <- if (is_integer_target) state$int_type else state$double_type
+
+    # The cast is tried FIRST because it is the cheaper of the two tests --
+    # about a fifth of the regex per value -- and it fails almost immediately
+    # on a batch with a bad value near the front. On a clean batch its result
+    # is the answer; on a dirty one it is how the column is rejected without
+    # paying for the match at all.
+    cast <- tryCatch(col$cast(cast_type), error = function(e) NULL)
+
+    # The cast succeeding is NOT enough. Arrow parses `1e5`, `Inf` and a
+    # 20-digit mantissa perfectly happily, and R parses two of those to a
+    # different double. Only the pattern says the two engines agree.
+    n_matched <- if (is.null(cast)) {
+      NA_real_
+    } else {
+      tryCatch(
+        {
+          matched <- arrow::call_function(
+            "match_substring_regex", col,
+            options = list(
+              pattern = if (is_integer_target) {
+                DTA_ARROW_INTEGER_PATTERN
+              } else {
+                DTA_ARROW_DOUBLE_PATTERN
+              }
+            )
+          )
+          # Exactly one scalar ever crosses into R. `sum` skips nulls, which is
+          # what is wanted: a null is a missing value, not an unparseable one,
+          # and the cast returns it as a null.
+          as.numeric(as.vector(arrow::call_function("sum", matched)))
+        },
+        error = function(e) NA_real_
+      )
+    }
+
+    if (!isTRUE(n_matched == (n_rows - n_null))) {
+      backoff <- state$backoff[[column]]
+      if (is.null(backoff)) {
+        backoff <- 1
+      }
+      state$wait[[column]] <- backoff
+      state$backoff[[column]] <- min(backoff * 2, 1024)
+      next
+    }
+
+    # The column qualified, so its history of failing is spent. Without this the
+    # wait only ever doubles: a column with one bad value in an early batch and
+    # none thereafter kept its 2, 4, 8 ... schedule for the rest of the scan and
+    # was skipped for most of the batches it would have qualified for. The
+    # backoff exists to bound wasted work on a file that is dirty EVERYWHERE,
+    # and such a file never reaches this line.
+    state$backoff[[column]] <- 1
+
+    # The replacement field is (name, type), and both are fixed for the whole
+    # scan, so it is built once per column rather than once per column per
+    # batch -- one more Arrow R6 object that would otherwise be constructed
+    # thousands of times to say the same thing.
+    field <- state$fields[[column]]
+    if (is.null(field)) {
+      field <- arrow::field(column, cast_type)
+      state$fields[[column]] <- field
+    }
+
+    batch <- tryCatch(batch$SetColumn(i - 1L, field, cast), error = function(e) batch)
+  }
+
+  batch
+}
+
+
+#' @title Per-Scan State for the Arrow Numeric Fast Path
+#' @description
+#' Everything [dta_arrow_parse_numeric_batch()] needs that does not change from
+#' batch to batch: the compiled target types, the two Arrow `DataType` objects
+#' the cast uses, the replacement `Field` of each column once it has been seen,
+#' and the per-column backoff counters. Built once per scan because
+#' constructing an Arrow object is an R6 construction and a hop into C++, and
+#' this path runs once per declared-numeric column per batch, for every batch
+#' of a file of any size.
+#'
+#' Returns `NULL` -- which the batch function treats as "do nothing" -- when the
+#' diagnostic switch `DTAtools.stream_arrow_numeric` is off, or when the specs
+#' declare no numeric column at all, so that the whole fast path costs a single
+#' `is.null()` per batch in the cases where it can do nothing.
+#' @param type_map Named character vector from [dta_compile_spec_types()].
+#' @return An environment, or `NULL`.
+#' @keywords internal
+dta_arrow_numeric_state <- function(type_map) {
+  if (!isTRUE(getOption("DTAtools.stream_arrow_numeric", TRUE))) {
+    return(NULL)
+  }
+  if (length(type_map) == 0 || !any(type_map %in% c("double", "integer"))) {
+    return(NULL)
+  }
+
+  state <- new.env(parent = emptyenv())
+  state$type_map <- type_map
+  state$double_type <- arrow::float64()
+  state$int_type <- arrow::int32()
+  state$fields <- list()
+  state$wait <- list()
+  state$backoff <- list()
+  state
 }
 
 

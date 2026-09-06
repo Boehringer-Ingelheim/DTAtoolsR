@@ -144,11 +144,17 @@ bench_one <- function(n_rows, n_cols) {
   stages <- list()
 
   # 1. read -------------------------------------------------------------------
+  # The production eager reader, so the stage timed here is the stage
+  # load_file() actually pays. A hand-built arrow::read_csv_arrow() call with
+  # its own column types is a second reader configuration that drifts from the
+  # one under test.
   read <- timed("read", {
-    arrow::read_csv_arrow(
+    dta_read_delim_normalized(
       path,
-      col_types = dta_reader_col_types(specs, TRUE),
-      as_data_frame = FALSE
+      delim = ",",
+      quote = "\"",
+      has_header = TRUE,
+      specs = specs
     )
   })
   stages[[length(stages) + 1]] <- read

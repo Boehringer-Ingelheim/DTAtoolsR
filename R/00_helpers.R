@@ -216,6 +216,81 @@ dta_stream_block_size <- function() {
   as.integer(value)
 }
 
+# How many BYTES `dta_transcode_to_utf8()` converts per pass. The block bounds
+# memory rather than tuning speed: 4 MiB of source text, its decoded UTF-8 form
+# and the raw vector written back are all held at once, which is the same order
+# as the read block a scan already costs and small enough that the copy of a
+# 100 GB file never grows the R session.
+#
+# Bytes rather than lines because the converter cuts the stream at the last
+# newline BYTE of each block and carries the remainder forward, so that a CR --
+# whether it belongs to a CRLF pair or stands alone inside a quoted value --
+# reaches the copy exactly as it was delivered. `readLines()` folds both, which
+# made a quoted line break one character shorter when streamed than in memory.
+`__DTAtools_transcode_block_bytes_default__` <- 4194304L
+
+#' @title The Block a Non-UTF-8 File Is Transcoded In
+#' @description
+#' The number of bytes [dta_transcode_to_utf8()] reads, converts and writes at
+#' a time. Exposed as an option only so that a test can force many blocks out
+#' of a small file; there is no reason to change it in production, and raising
+#' it buys nothing but resident memory.
+#'
+#' A block is never cut in the middle of a line: the converter trims each block
+#' back to its last newline byte and carries the remainder into the next one, so
+#' this bounds the buffer rather than choosing where the text is split. A line
+#' longer than the block is therefore still converted correctly -- the buffer
+#' simply grows until a newline arrives.
+#' @return A single positive integer number of bytes, from
+#'   `getOption("DTAtools.transcode_block_bytes")`, defaulting to 4 MiB.
+#' @keywords internal
+dta_transcode_block_bytes <- function() {
+  value <- getOption(
+    "DTAtools.transcode_block_bytes",
+    `__DTAtools_transcode_block_bytes_default__`
+  )
+
+  # `largest` is a variable rather than `{.Machine$integer.max}` inline: cli
+  # >= 3.4 reads a `{}` expression starting with a dot as a style name.
+  largest <- .Machine$integer.max
+
+  if (
+    !is.numeric(value) ||
+      length(value) != 1 ||
+      is.na(value) ||
+      value < 1 ||
+      value > largest
+  ) {
+    cli_abort(c(
+      "{.code options(DTAtools.transcode_block_bytes = )} must be a single number of bytes between 1 and {largest}.",
+      "x" = "It is currently {.val {value}}."
+    ))
+  }
+
+  as.integer(value)
+}
+
+# Session cache of UTF-8 copies made by `dta_transcode_to_utf8()`, keyed by the
+# source file's identity and declared encoding.
+#
+# `parent = emptyenv()`, so a name this cache does not hold cannot be found by
+# inheriting up the environment chain and mistaken for a cached copy.
+#
+# Each entry is a list of `source` (the normalised path of the delivered file)
+# and `copy` (the path of the UTF-8 copy). The source is carried in the VALUE as
+# well as hashed into the key, because the key is a digest and cannot be read
+# backwards: without it, a re-delivery could not be recognised as superseding
+# the copy of an earlier one, and a session that re-received the same 60 GB file
+# ten times would hold ten copies of it under `tempdir()`. Writing an entry for
+# a path therefore unlinks and drops every earlier entry for that same path --
+# see `dta_transcode_cache_evict()`.
+#
+# The cache lives for the session, and so do the copies: they are written under
+# `tempdir()`, which R removes on exit. Two `load_file()` calls on the same
+# unchanged file therefore transcode once, and a session that never touches a
+# non-UTF-8 file never writes anything.
+`__DTAtools_transcode_cache__` <- new.env(parent = emptyenv())
+
 #' @title Decide Whether to Stream a File
 #' @description
 #' Turns the user-facing `stream` argument into the single yes/no the readers

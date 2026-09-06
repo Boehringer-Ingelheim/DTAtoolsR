@@ -3093,3 +3093,111 @@ test_that("the console calls an undeclared column an error, not a caveat", {
   expect_match(out, "not described by the specs", fixed = TRUE)
   expect_match(out, "Extra columns check failed", fixed = TRUE)
 })
+
+
+# ---- the Arrow-side numeric parse -------------------------------------------
+#
+# The batch loop hands declared-numeric text columns to Arrow instead of to R
+# whenever it can prove the two produce the same doubles. `stream_arrow_numeric`
+# is the diagnostic switch that turns that off, and it exists precisely so
+# these tests can run the same input down both routes and demand the same
+# answer -- not just the same verdict, the same `details` object.
+
+vs_both_routes <- function(specs, table, batch_rows = 3L, coerce = TRUE) {
+  run <- function(arrow_numeric) {
+    withr::with_options(
+      list(DTAtools.stream_arrow_numeric = arrow_numeric),
+      dta_validate_table_stream(
+        specs, vs_reader(table, batch_rows),
+        verbose = FALSE, coerce = coerce
+      )
+    )
+  }
+  list(arrow = run(TRUE), in_r = run(FALSE))
+}
+
+
+test_that("parsing a clean batch in Arrow leaves the streamed result identical", {
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+    ),
+    rules = list(
+      DTARuleColUnique(id = "id_unique", columns = "ID"),
+      DTARuleColRange(id = "val_range", columns = "VAL", range = c(0, 100))
+    )
+  )
+  table <- data.frame(
+    ID = sprintf("S%03d", 1:9),
+    # Every accepted shape, plus a null, plus a value the range rule fails on.
+    VAL = c("1.5", "007", "-0", ".5", "12.", NA, "0.001", "999.999", "1000"),
+    CNT = c("1", "-2", "003", "0", "9", NA, "7", "8", "999999999"),
+    stringsAsFactors = FALSE
+  )
+
+  both <- vs_both_routes(specs, table)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(both$arrow$n_import_errors, 0L)
+  # And the range rule really did run on numbers, so the comparison is not
+  # trivially equal because both routes did nothing.
+  expect_false(both$arrow$rules_valid)
+})
+
+
+test_that("a batch with an unconvertible value takes the R path and reports it", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE),
+    DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+  ))
+  table <- data.frame(
+    VAL = c("1.5", "abc", "3.5", "4.5"),
+    CNT = c("1", "2", "3", "4"),
+    stringsAsFactors = FALSE
+  )
+
+  # batch_rows = 4 so the bad value and the good ones share a batch: it is the
+  # column, not the file, that the fast path has to give up on.
+  both <- vs_both_routes(specs, table, batch_rows = 4L)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(as.integer(both$arrow$n_import_errors), 1L)
+  expect_equal(both$arrow$import_errors$row, 2L)
+  expect_equal(both$arrow$import_errors$column, "VAL")
+  expect_equal(both$arrow$import_errors$raw, "abc")
+  expect_equal(both$arrow$import_errors$declared_type, "SAS Num")
+})
+
+
+test_that("a value outside the accepted forms is still typed, by R, with no issue", {
+  # `1e5` and a 16-digit integer both parse; they are simply not literals the
+  # Arrow route is allowed to claim agreement on. The column has to come back
+  # typed and clean all the same -- the fast path is an optimisation, and an
+  # optimisation that declines to run must change nothing at all.
+  specs <- vc_specs(list(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)))
+  table <- data.frame(VAL = c("1e5", "1234567890123456", "2.5"), stringsAsFactors = FALSE)
+
+  both <- vs_both_routes(specs, table, batch_rows = 3L)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(both$arrow$n_import_errors, 0L)
+  expect_true(both$arrow$ok)
+})
+
+
+test_that("typing switched off leaves every column as the text the reader read", {
+  # With `coerce = FALSE` the column spec axis is meant to see text, and a
+  # declared-number column of text fails its `type` check. Casting behind its
+  # back would turn that failure into a pass, which is why the driver builds no
+  # Arrow state at all in this mode.
+  specs <- vc_specs(list(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)))
+  table <- data.frame(VAL = c("1.5", "2.5", "3.5"), stringsAsFactors = FALSE)
+
+  both <- vs_both_routes(specs, table, batch_rows = 2L, coerce = FALSE)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_false(both$arrow$columnspec_valid)
+  expect_equal(unique(both$arrow$columnspec_errors$full_error$keyword), "type")
+})

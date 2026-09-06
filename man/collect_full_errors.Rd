@@ -39,6 +39,14 @@ disk. There is nothing to reassemble in that case, so this returns the
 retained head and warns, naming how much of the detail it is: silently
 handing back 3 rows of 20 as though they were all of them is the one thing a
 function called \code{collect_full_errors()} must not do.
+
+That is why a table built in R and checked immediately -- one whose complete
+detail is wanted and whose size is already known to fit in memory -- is best
+checked with \code{check(..., max_errors = Inf)}: there is then nothing for this
+function to have to warn about. The cap exists because retention is one row
+per bad cell and an unbounded frame was a memory finding on a large dirty
+table; it is a cap on \emph{retained detail only}, never on the counts or the
+verdict, which are exact at any cap.
 }
 \examples{
 specs <- DTAtools::DTAColumnSpecCollection(

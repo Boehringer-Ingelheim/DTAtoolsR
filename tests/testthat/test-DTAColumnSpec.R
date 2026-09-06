@@ -126,6 +126,39 @@ test_that("create_example_DTAColumnSpec covers the supported indices", {
   expect_error(create_example_DTAColumnSpec(99), "Invalid index")
 })
 
+test_that("validator messages survive a column id containing braces", {
+  # The validator used to build these messages with cli_abort(glue::glue(...)):
+  # glue::glue() resolved `self@id` into the message text BEFORE cli ever saw
+  # it, so an id such as "A{B}" left a literal, un-escaped "{B}" in the string
+  # handed to cli_abort(), which then tried to evaluate it as an expression and
+  # aborted with "Could not evaluate cli `{}` expression" instead of the
+  # intended validation message.
+  err <- expect_error(
+    DTAColumnSpec(id = "A{B}", values = list("1"), pattern = "^[0-9]+$"),
+    regexp = "pattern"
+  )
+  expect_match(conditionMessage(err), "A{B}", fixed = TRUE)
+  expect_match(conditionMessage(err), "'pattern' cannot be set", fixed = TRUE)
+
+  err2 <- expect_error(
+    DTAColumnSpec(id = "A{B}", pattern = "^Z$", examples = c("nomatch")),
+    regexp = "must conform"
+  )
+  expect_match(conditionMessage(err2), "A{B}", fixed = TRUE)
+  expect_match(conditionMessage(err2), "must conform to the pattern", fixed = TRUE)
+})
+
+test_that("print() survives a column id containing braces", {
+  # The id line is already interpolated directly (`{.field {x@id}}`), so this
+  # pins the already-correct behaviour against a future regression. Note the
+  # id/label lines both render only when `label` is set (see the guard on the
+  # "id" alert in method(print, DTAColumnSpec)), so a label is provided here
+  # purely to exercise the line -- unrelated to this test's purpose.
+  spec <- DTAColumnSpec(id = "A{B}", label = "L{a}", type = "SAS Char")
+  out <- capture.output(print(spec), type = "message")
+  expect_true(any(grepl("A{B}", out, fixed = TRUE)))
+})
+
 test_that("DTAColumnSpecStructureFactory validates backend prefixes", {
   expect_error(
     DTAColumnSpecStructureFactory(type = "R Char", format = "R $10."),

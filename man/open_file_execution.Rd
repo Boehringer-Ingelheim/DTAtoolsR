@@ -70,3 +70,14 @@ has not declared how it is delimited cannot be scanned.}
 }
 }
 
+\examples{
+# The opening half of `open_file()`, called on a concrete handler. It
+# dispatches on `x` alone, so the path travels in `...` and is named.
+handler <- DTAFileCSV(filename = "clinical_data.csv")
+path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+ds <- open_file_execution(handler, file = path)
+# Nothing has been read yet; the columns come from the header alone.
+names(ds)
+
+}

@@ -522,7 +522,11 @@ test_that("a quoted line break past the first block needs the handler to declare
     as.data.frame(open_file(plain, path)),
     regexp = "CSV parse error"
   )
-  expect_identical(conditionMessage(eager_error), conditionMessage(lazy_error))
+  # The same diagnosis on both paths -- not the same bytes: Arrow's in-memory
+  # reader reports the row number only when the failing block was parsed on
+  # the thread that counts rows, which differs between platforms.
+  expect_match(conditionMessage(eager_error), "Expected 2 columns, got 1", fixed = TRUE)
+  expect_match(conditionMessage(lazy_error), "Expected 2 columns, got 1", fixed = TRUE)
 
   eager <- as.data.frame(read_file(declaring, path))
   lazy <- as.data.frame(open_file(declaring, path))
@@ -565,8 +569,12 @@ test_that("a declared quoted line break survives a check on both paths", {
 
 # ---- character encoding ------------------------------------------------------
 
-latin1_fixture <- function() {
-  path <- file.path(tempdir(), "stream_latin1.csv")
+# Each caller gets its OWN file. The transcoding cache is keyed on the source's
+# path, size and modification time, so two tests sharing one path could hand the
+# second a copy the first made -- which would make the cache tests pass for the
+# wrong reason and the "changed file" test unreproducible.
+latin1_fixture <- function(name = "stream_latin1.csv") {
+  path <- file.path(tempdir(), name)
   con <- file(path, "wb")
   on.exit(close(con), add = TRUE)
   writeBin(
@@ -581,7 +589,7 @@ latin1_fixture <- function() {
 }
 
 test_that("a declared latin1 encoding is decoded by the in-memory reader", {
-  path <- latin1_fixture()
+  path <- latin1_fixture("stream_latin1_eager.csv")
   on.exit(unlink(path), add = TRUE)
 
   declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
@@ -595,17 +603,403 @@ test_that("a declared latin1 encoding is decoded by the in-memory reader", {
   expect_false(is.character(plain$NAME))
 })
 
-test_that("a non-UTF-8 encoding is refused for lazy scanning rather than misread", {
-  path <- latin1_fixture()
+test_that("a declared latin1 encoding is scanned through a UTF-8 copy", {
+  path <- latin1_fixture("stream_latin1_lazy.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+  dataset <- open_file(declaring, path)
+
+  # Arrow's dataset scanner has no re-encoding step -- it opens its own files --
+  # so the bytes are converted first and the scan reads the conversion. This
+  # used to be a refusal, which made every non-UTF-8 delivery unstreamable.
+  expect_identical(as.data.frame(dataset)$NAME, c("Jürgen", "Ann"))
+
+  # Still a Dataset, not an `arrow_dplyr_query`: only a Dataset has `$files`,
+  # which is what the change signal fingerprints.
+  expect_true(inherits(dataset, "Dataset"))
+
+  scanned <- normalizePath(dataset$files[[1]], winslash = "/")
+  expect_false(identical(scanned, normalizePath(path, winslash = "/")))
+  # The copy is a temporary, so it dies with the session rather than settling
+  # next to the delivery.
+  expect_true(startsWith(scanned, normalizePath(tempdir(), winslash = "/")))
+})
+
+test_that("the copy's own name does not decide how it is parsed", {
+  # The copy is always written as `.csv`, whatever the delivery was called, and
+  # Arrow reads a dataset's compression from the file extension. Two things
+  # have to hold: a tab- or semicolon-separated source must still be split on
+  # its own delimiter, which travels in `parse_options` and not in the name;
+  # and a `.gz` delivery must not leave a copy Arrow then tries to decompress
+  # a second time.
+  fixture <- function(name, sep) {
+    path <- file.path(tempdir(), name)
+    con <- file(path, "wb")
+    on.exit(close(con), add = TRUE)
+    writeBin(
+      c(
+        charToRaw(paste0("NAME", sep, "V\n")),
+        as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(paste0(sep, "1\n")),
+        charToRaw(paste0("Ann", sep, "2\n"))
+      ),
+      con
+    )
+    path
+  }
+
+  tsv <- fixture("stream_latin1_tabs.tsv", "\t")
+  delim <- fixture("stream_latin1_semis.txt", ";")
+  gz <- paste0(tsv, ".gz")
+  on.exit(unlink(c(tsv, delim, gz)), add = TRUE)
+
+  bytes <- readBin(tsv, "raw", n = file.size(tsv))
+  con <- gzfile(gz, "wb")
+  writeBin(bytes, con)
+  close(con)
+
+  handlers <- list(
+    tsv = list(DTAFileTSV(filename = basename(tsv), encoding = "latin1"), tsv),
+    delim = list(
+      DTAFileDelim(filename = basename(delim), sep = ";", encoding = "latin1"),
+      delim
+    ),
+    gz = list(DTAFileTSV(filename = basename(tsv), encoding = "latin1"), gz)
+  )
+
+  for (nm in names(handlers)) {
+    handler <- handlers[[nm]][[1]]
+    file <- handlers[[nm]][[2]]
+
+    lazy <- as.data.frame(open_file(handler, file))
+    # Two columns, not one: a copy parsed as comma-separated would have made
+    # the whole line a single column named "NAME<sep>V".
+    expect_identical(names(lazy), c("NAME", "V"), info = nm)
+    expect_identical(lazy$NAME, c("Jürgen", "Ann"), info = nm)
+    expect_identical(lazy$NAME, as.data.frame(read_file(handler, file))$NAME, info = nm)
+
+    copy <- open_file(handler, file)$files[[1]]
+    expect_true(endsWith(copy, ".csv"), info = nm)
+  }
+})
+
+test_that("a latin1 file gets the same verdict streamed as in memory", {
+  path <- file.path(tempdir(), "stream_latin1_verdict.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(
+    c(
+      charToRaw("ID,NAME,SCORE\n"),
+      charToRaw("001,"), as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(",10\n"),
+      charToRaw("002,"), as.raw(c(0x4d, 0xf6, 0x6c, 0x6c, 0x65, 0x72)), charToRaw(",20\n"),
+      # An unconvertible number and a duplicated key, so this compares real
+      # error detail on all three axes rather than two clean verdicts.
+      charToRaw("003,Ann,notanumber\n"),
+      charToRaw("003,"), as.raw(c(0x47, 0x72, 0xf6, 0xdf, 0x65, 0x72, 0x65)), charToRaw(",40\n")
+    ),
+    con
+  )
+  close(con)
+
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 3, nullable = FALSE),
+      NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6, nullable = FALSE),
+      SCORE = DTAColumnSpec(id = "SCORE", type = "SAS Num", nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "id_unique", columns = "ID"))
+  )
+
+  # Sorted on every column as text: two paths may legitimately report the same
+  # errors in a different order, and an order difference is not a disagreement.
+  sorted <- function(errors) {
+    if (nrow(errors) == 0) {
+      return(errors)
+    }
+    out <- errors[do.call(order, lapply(errors, as.character)), , drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }
+
+  run <- function(stream) {
+    ds <- DTADataSetTabular(
+      name = "enc",
+      specs = specs,
+      files = list(DTAFileCSV(filename = basename(path), encoding = "latin1"))
+    )
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    checked <- check(ds, quiet = TRUE, persist = FALSE)
+
+    status <- validation_status(checked)
+    status <- status[
+      , setdiff(names(status), c("validated_at", "run_id", "validation_run")),
+      drop = FALSE
+    ]
+
+    list(
+      status = status,
+      errors = sorted(as.data.frame(validation_errors(checked, "stream_latin1_verdict"))),
+      n_import_errors = checked@validation_store[["stream_latin1_verdict"]]$n_import_errors,
+      names = names(tables(checked)[["stream_latin1_verdict"]])
+    )
+  }
+
+  eager <- run("never")
+  lazy <- run("always")
+
+  # A fixture that passed everything would prove nothing about the error paths.
+  expect_false(eager$status$ok)
+  expect_gt(nrow(eager$errors), 0)
+  expect_gt(eager$n_import_errors, 0)
+
+  expect_identical(lazy$status, eager$status)
+  expect_identical(lazy$errors, eager$errors)
+  expect_identical(lazy$n_import_errors, eager$n_import_errors)
+  expect_identical(lazy$names, eager$names)
+})
+
+test_that("a second load reuses the transcoded copy, and a changed file does not", {
+  path <- latin1_fixture("stream_latin1_cache.csv")
   on.exit(unlink(path), add = TRUE)
 
   declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
 
-  # Arrow re-encodes by wrapping the input stream, which only the in-memory
-  # reader owns; a dataset opens its own files and would read the bytes as if
-  # they were UTF-8. Saying so beats two paths disagreeing about the data.
-  expect_error(open_file(declaring, path), "cannot be validated lazily")
-  expect_error(open_file(declaring, path), "stream = \"never\"", fixed = TRUE)
+  first <- open_file(declaring, path)
+  second <- open_file(declaring, path)
+  # The conversion is linear in the file, so repeating it for every load_file()
+  # on an unchanged delivery is the whole cost of the feature paid twice.
+  expect_identical(second$files, first$files)
+
+  # The cache key carries the source's size and modification time, so editing
+  # the file must produce a new copy rather than serve the stale one.
+  con <- file(path, "ab")
+  writeBin(charToRaw("Zoe,3\n"), con)
+  close(con)
+
+  third <- open_file(declaring, path)
+  expect_false(identical(third$files, first$files))
+  expect_equal(nrow(as.data.frame(third)), 3L)
+
+  # The same thing through the entry point a user actually calls, because that
+  # is where the cost would be paid: `load_file()` opens the file afresh every
+  # time it is called, so without the cache each call would reconvert.
+  loaded <- function() {
+    ds <- DTADataSetTabular(
+      name = "cache",
+      specs = DTAColumnSpecCollection(
+        columns = list(
+          NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6),
+          V = DTAColumnSpec(id = "V", type = "SAS Num")
+        )
+      ),
+      files = list(DTAFileCSV(filename = basename(path), encoding = "latin1"))
+    )
+    tables(load_file(ds, file = path, handler_index = 1, stream = "always"))[[
+      "stream_latin1_cache"
+    ]]
+  }
+
+  expect_identical(loaded()$files, third$files)
+  expect_identical(loaded()$files, loaded()$files)
+})
+
+test_that("a wide encoding is refused rather than converted", {
+  path <- latin1_fixture("stream_wide.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  # UTF-16 puts an ordinary character's bytes either side of what the converter
+  # reads as a line break, so it cannot be transcoded a line at a time. A clear
+  # refusal beats a plausible-looking wrong answer about someone's data.
+  wide <- DTAFileCSV(filename = basename(path), encoding = "UTF-16LE")
+
+  expect_error(open_file(wide, path), "cannot be converted block by block")
+  expect_error(open_file(wide, path), "stream = \"never\"", fixed = TRUE)
+})
+
+test_that("an encoding name iconv does not know is refused by name", {
+  path <- latin1_fixture("stream_bad_encoding_name.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  # A misspelling used to reach the user as iconv()'s own error, rendered in
+  # the system language and naming neither the file nor the handler that
+  # declared it.
+  misspelled <- DTAFileCSV(filename = basename(path), encoding = "latin-1")
+
+  expect_error(open_file(misspelled, path), class = "rlang_error")
+  expect_error(open_file(misspelled, path), "latin-1", fixed = TRUE)
+  expect_error(open_file(misspelled, path), "iconvlist")
+
+  # The in-memory reader hands the name to Arrow, which has its own opinion of
+  # it; only the lazy path converts the bytes itself, so only it is this
+  # function's to answer for.
+  expect_error(read_file(misspelled, path))
+})
+
+test_that("bytes that are not the declared encoding are refused, not mangled", {
+  path <- file.path(tempdir(), "stream_bad_bytes.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(c(charToRaw("NAME,V\n"), as.raw(c(0x41, 0x81, 0xff, 0xfe)), charToRaw(",1\n")), con)
+  close(con)
+
+  # Not every platform's iconv rejects the same bytes -- Windows' is lenient
+  # about several single-byte code pages -- so the assertion runs only where
+  # the conversion really does fail.
+  probe <- iconv(rawToChar(as.raw(c(0x41, 0x81, 0xff, 0xfe))), from = "SHIFT-JIS", to = "UTF-8")
+  skip_if_not(is.na(probe), "this platform's iconv accepts the bytes this test needs rejected")
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "SHIFT-JIS")
+
+  expect_error(open_file(declaring, path), "cannot be decoded as")
+  # The place is named, because "somewhere in a 60 GB file" is not actionable.
+  # A byte offset rather than a line number: the file is cut into blocks.
+  expect_error(open_file(declaring, path), "offset 8")
+})
+
+test_that("the change signal of a transcoded dataset identifies the delivered file", {
+  path <- latin1_fixture("stream_latin1_signal.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+  dataset <- open_file(declaring, path)
+
+  # The reader's half of the contract, which holds today: the dataset carries
+  # the delivered path, not the temporary copy it is actually scanning.
+  expect_identical(
+    dta_dataset_source_files(dataset),
+    normalizePath(path, winslash = "/")
+  )
+
+  # The engine's half: `dta_table_change_signal()` reads the stamp rather than
+  # `$files`. Read from `$files` the signal describes the copy, whose
+  # modification time is merely when the conversion ran -- so the same unchanged
+  # delivery looks like a different table in every session and check()
+  # revalidates it every time.
+  info <- file.info(normalizePath(path, winslash = "/"))
+  expect_identical(
+    dta_table_change_signal(dataset),
+    dta_hash_object(list(
+      files = normalizePath(path, winslash = "/"),
+      size = info$size,
+      mtime = info$mtime,
+      columns = names(dataset$schema)
+    ))
+  )
+})
+
+test_that("a quoted line break inside a latin1 value is the same on both paths", {
+  # The transcoder is the only thing between the delivery and the lazy scan, so
+  # anything it normalises is a difference between the two readers. `readLines()`
+  # folds CRLF and a lone CR to LF, which made a quoted "a\r\nb" one character
+  # shorter streamed than in memory -- and a `length` check pass on one path and
+  # fail on the other.
+  path <- file.path(tempdir(), "stream_latin1_crlf.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(
+    c(
+      charToRaw("ID,NOTE\r\n"),
+      charToRaw("1,\"a\r\nb\"\r\n"),
+      charToRaw("2,\"c\rd\"\r\n"),
+      charToRaw("3,"), as.raw(c(0x4a, 0xfc)), charToRaw("\r\n")
+    ),
+    con
+  )
+  close(con)
+
+  handler <- DTAFileCSV(
+    filename = basename(path),
+    encoding = "latin1",
+    newlines_in_values = TRUE
+  )
+
+  eager <- as.data.frame(read_file(handler, path))
+  lazy <- as.data.frame(open_file(handler, path))
+
+  expect_identical(lazy$NOTE, eager$NOTE)
+  expect_identical(eager$NOTE, c("a\r\nb", "c\rd", "Jü"))
+  expect_identical(nchar(eager$NOTE), c(4L, 3L, 2L))
+})
+
+test_that("a lazily held latin1 table follows a delivery that changes under it", {
+  # The copy is made at load_file() time and the change signal is keyed on the
+  # DELIVERY, so an edited file opened the skip gate and the scan then reread
+  # the stale copy: a clean verdict, and the old row count, reported as fresh
+  # for data that now fails.
+  specs <- DTAColumnSpecCollection(columns = list(
+    NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6, nullable = FALSE),
+    V = DTAColumnSpec(id = "V", type = "SAS Num", nullable = FALSE)
+  ))
+
+  # One row too long for `length = 6`, so the second check has something to
+  # fail on that the first could not have seen.
+  violating <- c(
+    as.raw(c(0x53, 0x63, 0x68, 0x6d, 0xfc, 0x63, 0x6b, 0x65, 0x72)),
+    charToRaw(",3\n")
+  )
+
+  name_of <- function(path) tools::file_path_sans_ext(basename(path))
+
+  run <- function(name, encoding, first, appended) {
+    path <- file.path(tempdir(), name)
+    on.exit(unlink(path), add = TRUE)
+    con <- file(path, "wb")
+    writeBin(c(charToRaw("NAME,V\n"), first, charToRaw("Ann,2\n")), con)
+    close(con)
+
+    ds <- DTADataSetTabular(
+      name = "follow",
+      specs = specs,
+      files = list(DTAFileCSV(filename = basename(path), encoding = encoding))
+    )
+    ds <- load_file(ds, file = path, handler_index = 1, stream = "always")
+
+    before <- check(ds, quiet = TRUE, persist = FALSE)
+    rows_before <- nrow(as.data.frame(tables(before)[[name_of(path)]]))
+
+    # A different size and modification time, so the change signal differs.
+    Sys.sleep(0.01)
+    con <- file(path, "ab")
+    writeBin(appended, con)
+    close(con)
+
+    after <- check(before, quiet = TRUE, persist = FALSE)
+    rows_after <- nrow(as.data.frame(tables(after)[[name_of(path)]]))
+
+    list(
+      before = validation_status(before),
+      after = validation_status(after),
+      rows_before = rows_before,
+      rows_after = rows_after
+    )
+  }
+
+  latin1 <- run(
+    "stream_follow_latin1.csv", "latin1",
+    first = c(as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(",1\n")),
+    appended = violating
+  )
+  # The control: a UTF-8 delivery is scanned directly, has never had this
+  # defect, and is what the transcoded one must now behave like. Its bytes are
+  # ASCII, because a latin1 "ü" is not valid UTF-8 and Arrow would refuse the
+  # file rather than reach the behaviour under test.
+  utf8 <- run(
+    "stream_follow_utf8.csv", "UTF-8",
+    first = charToRaw("Jurgen,1\n"),
+    appended = charToRaw("Schmuecker,3\n")
+  )
+
+  for (label in c("latin1", "utf8")) {
+    got <- if (label == "latin1") latin1 else utf8
+
+    expect_true(got$before$ok, info = label)
+    expect_identical(got$rows_before, 2L, info = label)
+
+    expect_identical(got$after$status, "validated", info = label)
+    expect_false(got$after$ok, info = label)
+    expect_identical(got$rows_after, 3L, info = label)
+    expect_gt(got$after$n_columnspec_errors, 0)
+  }
 })
 
 test_that("a latin1 header name is decoded for the in-memory reader", {
@@ -620,4 +1014,21 @@ test_that("a latin1 header name is decoded for the in-memory reader", {
   # with the ones it decodes for itself.
   got <- read_file(DTAFileCSV(filename = basename(path), encoding = "latin1"), path)
   expect_identical(names(got), c("NAMÉ", "V"))
+})
+
+test_that("a latin1 header name is decoded exactly once on the lazy path", {
+  path <- file.path(tempdir(), "stream_latin1_header_lazy.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(c(as.raw(c(0x4e, 0x41, 0x4d, 0xc9)), charToRaw(",V\nAnn,1\n")), con)
+  close(con)
+
+  handler <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+
+  # The scan reads a copy that is ALREADY UTF-8, so the header must not be run
+  # through iconv a second time: decoding the UTF-8 bytes of "É" as latin1
+  # again would give "Ã‰", and the two paths would name the same column
+  # differently.
+  expect_identical(names(open_file(handler, path)), c("NAMÉ", "V"))
+  expect_identical(names(open_file(handler, path)), names(read_file(handler, path)))
 })

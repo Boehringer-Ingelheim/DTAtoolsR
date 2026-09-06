@@ -543,16 +543,24 @@ if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {
-  message <- "Metadata: {x@title}"
-
+  # `title` and `suffix` are INTERPOLATED as variables in the literal template
+  # handed to cli, never pasted into a string that is itself used as the
+  # template: this used to build `message` with paste0() and pass the whole,
+  # already-assembled string to cli_alert_info(), so a title or version
+  # containing a literal "{" (data appended by plain concatenation, not
+  # through cli's own interpolation) made cli try to evaluate it as an
+  # expression and abort. Braces inside a value cli itself interpolates are
+  # escaped by cli, regardless of how that value was computed.
+  title <- x@title
+  suffix <- ""
   if (!is.null(x@version)) {
-    message <- paste0(message, " ", x@version)
+    suffix <- paste0(suffix, " ", x@version)
   }
   if (!is.null(x@date)) {
-    message <- paste0(message, " ", format(x@date, "%Y-%m-%d"))
+    suffix <- paste0(suffix, " ", format(x@date, "%Y-%m-%d"))
   }
 
-  cli::cli_alert_info(message)
+  cli::cli_alert_info("Metadata: {title}{suffix}")
 
   invisible(x)
 }

@@ -704,3 +704,25 @@ test_that("check() aborts on a non-DTADataSet entry regardless of quiet", {
   expect_error(check(dta, quiet = TRUE, persist = FALSE), "is not a DTADataSet")
   expect_error(check(dta, quiet = FALSE, persist = FALSE), "is not a DTADataSet")
 })
+
+
+# ---------------------------------------------------------------------------
+# A dataset name containing braces is data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("print(DTA) survives braces in a dataset name", {
+  # print(DTA) used to paste every dataset name into `{.field ...}` markup
+  # with paste0() and hand the assembled string to cli_alert_info(), so a
+  # dataset called `a{b}` took it down with "Could not evaluate cli `{}`
+  # expression" -- the same defect already fixed for print(DTADataSetTabular).
+  ds <- DTADataSet(
+    name = "a{b}",
+    type = "file",
+    files = list(create_example_DTAFileCSV())
+  )
+  dta <- DTA(datasets = ds, metadata = create_example_DTAMetaData())
+
+  out <- dta_console(expect_invisible(print(dta)))
+
+  expect_match(out, "Datasets (1): a{b}", fixed = TRUE)
+})

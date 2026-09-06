@@ -122,3 +122,15 @@ test_that("a tabular dataset with no columns survives a full DTA YAML round trip
   expect_s3_class(ds, "DTAtools::DTADataSetTabular")
   expect_length(ds@specs@columns, 0)
 })
+
+test_that("print() survives a column id containing braces", {
+  # column_preview() joins ids with str_flatten_comma() (plain concatenation,
+  # not glue interpolation) and print() interpolates the joined result as one
+  # value (`{col_preview}`), so a brace in a column id is already safe -- this
+  # pins that against a future regression.
+  col <- DTAColumnSpec(id = "A{B}", type = "SAS Char")
+  specs <- DTAColumnSpecCollection(columns = list(col))
+
+  out <- capture.output(print(specs), type = "message")
+  expect_true(any(grepl("A{B}", out, fixed = TRUE)))
+})
