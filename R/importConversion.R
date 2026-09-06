@@ -709,6 +709,11 @@ dta_arrow_parse_numeric_batch <- function(batch, state) {
   if (length(n_rows) != 1 || is.na(n_rows) || n_rows == 0) {
     return(batch)
   }
+  # A small batch is cheaper to type in R than to hand to the engine; see
+  # dta_arrow_numeric_state() for the measurement behind the threshold.
+  if (n_rows < state$min_rows) {
+    return(batch)
+  }
 
   type_map <- state$type_map
   # Read from the batch rather than carried in the state: a reader is free to
@@ -836,6 +841,13 @@ dta_arrow_parse_numeric_batch <- function(batch, state) {
 #' diagnostic switch `DTAtools.stream_arrow_numeric` is off, or when the specs
 #' declare no numeric column at all, so that the whole fast path costs a single
 #' `is.null()` per batch in the cases where it can do nothing.
+#'
+#' The state also carries `min_rows`, from
+#' `options(DTAtools.stream_arrow_numeric_min_rows)` (20,000 by default): a
+#' batch with fewer rows is typed in R. Each Arrow step is a fixed-cost call
+#' per column per batch, so on the small batches a 1 MiB read block yields the
+#' path costs more than the parse it saves (measured 34% slower at 1 MiB
+#' blocks, 18% faster at 8 MiB, 26% faster at 32 MiB on a 1e6 x 20 file).
 #' @param type_map Named character vector from [dta_compile_spec_types()].
 #' @return An environment, or `NULL`.
 #' @keywords internal
@@ -847,8 +859,25 @@ dta_arrow_numeric_state <- function(type_map) {
     return(NULL)
   }
 
+  # Below this many rows a batch is typed in R. Each Arrow step here is a
+  # fixed-cost call into the engine per column per batch, and at the default
+  # 1 MiB read block a delimited batch is only a few thousand rows: measured
+  # on a 1e6 x 20 file, the Arrow path was 34% SLOWER at 1 MiB blocks and 18%
+  # faster at 8 MiB (about 50,000 rows per batch), 26% faster at 32 MiB. The
+  # threshold makes the step a no-op exactly where it cannot pay for itself.
+  min_rows <- getOption("DTAtools.stream_arrow_numeric_min_rows", 20000L)
+  if (
+    !is.numeric(min_rows) || length(min_rows) != 1 || is.na(min_rows) ||
+      min_rows < 0 || min_rows != trunc(min_rows)
+  ) {
+    cli::cli_abort(
+      "{.code options(DTAtools.stream_arrow_numeric_min_rows)} must be a single non-negative whole number, not {.val {min_rows}}."
+    )
+  }
+
   state <- new.env(parent = emptyenv())
   state$type_map <- type_map
+  state$min_rows <- as.numeric(min_rows)
   state$double_type <- arrow::float64()
   state$int_type <- arrow::int32()
   state$fields <- list()

@@ -266,12 +266,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   with the in-memory one. A batch holding anything else is typed in R
   exactly as before, so no result changes; a column found dirty is not
   retried for a growing number of batches, so a file that is dirty
-  throughout does not keep paying for a test that cannot succeed. Measured
-  with cores to spare: about 70,000 to 85,000 rows per second on the clean
-  file, unchanged on a variant with one unconvertible value per 1,000 rows.
-  `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column back
-  down the R path; it is a diagnostic switch for comparing the two parsers,
-  not a supported way to change a result.
+  throughout does not keep paying for a test that cannot succeed. The step
+  only pays when a batch is large: every Arrow call costs the same whatever
+  the batch holds, and at the default 1 MiB read block a delimited batch is
+  a few thousand rows. Measured on a 1e6 x 20 file: 34% slower at 1 MiB
+  blocks, 18% faster at 8 MiB (about 50,000 rows a batch), 26% faster at
+  32 MiB; the dirty variant is unchanged throughout. It therefore engages
+  only for batches of at least `DTAtools.stream_arrow_numeric_min_rows`
+  rows (default 20,000), which means: not at all at the default block size,
+  and automatically once `DTAtools.stream_block_size` is raised to 8 MiB or
+  more. `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column
+  back down the R path; it is a diagnostic switch for comparing the two
+  parsers, not a supported way to change a result.
 
 - **A file declaring a non-UTF-8 encoding can now be validated lazily.**
   `stream = "always"` (and `"auto"` on a large file) used to refuse such a

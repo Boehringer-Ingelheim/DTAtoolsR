@@ -25,5 +25,12 @@ Returns \code{NULL} -- which the batch function treats as "do nothing" -- when t
 diagnostic switch \code{DTAtools.stream_arrow_numeric} is off, or when the specs
 declare no numeric column at all, so that the whole fast path costs a single
 \code{is.null()} per batch in the cases where it can do nothing.
+
+The state also carries \code{min_rows}, from
+\code{options(DTAtools.stream_arrow_numeric_min_rows)} (20,000 by default): a
+batch with fewer rows is typed in R. Each Arrow step is a fixed-cost call
+per column per batch, so on the small batches a 1 MiB read block yields the
+path costs more than the parse it saves (measured 34\% slower at 1 MiB
+blocks, 18\% faster at 8 MiB, 26\% faster at 32 MiB on a 1e6 x 20 file).
 }
 \keyword{internal}

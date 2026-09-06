@@ -1051,6 +1051,16 @@ ic_integer_literals <- function(per = 900L) {
   )
 }
 
+# The fast path declines a batch below `DTAtools.stream_arrow_numeric_min_rows`
+# (20,000 by default, because a small batch is cheaper to type in R). The
+# batches built here are a few values long, so the threshold is lowered to 0
+# for the rest of this file to exercise the path itself; its own test below
+# pins the default.
+withr::local_options(
+  list(DTAtools.stream_arrow_numeric_min_rows = 0),
+  .local_envir = teardown_env()
+)
+
 ic_num_specs <- function(type) {
   make_specs(DTAColumnSpec(id = "VAL", type = type, nullable = TRUE))
 }
@@ -1290,4 +1300,36 @@ test_that("a specification with no numeric column builds no state at all", {
   specs <- make_specs(DTAColumnSpec(id = "TXT", type = "SAS Char", length = 4))
   expect_null(dta_arrow_numeric_state(dta_compile_spec_types(specs)))
   expect_null(dta_arrow_numeric_state(character(0)))
+})
+
+test_that("the Arrow numeric path declines a batch below the row threshold", {
+  specs <- make_specs(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE))
+  batch <- arrow::record_batch(VAL = sprintf("%.2f", seq_len(50) / 7))
+  column_type <- function(b) class(b$column(0L)$type)[[1]]
+
+  # The default threshold (20,000 rows) leaves a 50-row batch to R: every
+  # Arrow call costs the same whatever the batch holds, and at that size the
+  # R parse is the cheaper one.
+  withr::with_options(list(DTAtools.stream_arrow_numeric_min_rows = NULL), {
+    state <- dta_arrow_numeric_state(dta_compile_spec_types(specs))
+    expect_identical(state$min_rows, 20000)
+    expect_identical(column_type(dta_arrow_parse_numeric_batch(batch, state)), "Utf8")
+  })
+
+  # At or above the threshold the same batch is cast.
+  withr::with_options(list(DTAtools.stream_arrow_numeric_min_rows = 50), {
+    state <- dta_arrow_numeric_state(dta_compile_spec_types(specs))
+    expect_identical(column_type(dta_arrow_parse_numeric_batch(batch, state)), "Float64")
+  })
+
+  # A threshold that is not a single non-negative whole number is refused.
+  for (bad in list(NA, -1, 1.5, c(1, 2), "20000")) {
+    withr::with_options(list(DTAtools.stream_arrow_numeric_min_rows = bad), {
+      expect_error(
+        dta_arrow_numeric_state(dta_compile_spec_types(specs)),
+        regexp = "stream_arrow_numeric_min_rows",
+        class = "rlang_error"
+      )
+    })
+  }
 })

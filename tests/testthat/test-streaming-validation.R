@@ -3106,7 +3106,12 @@ test_that("the console calls an undeclared column an error, not a caveat", {
 vs_both_routes <- function(specs, table, batch_rows = 3L, coerce = TRUE) {
   run <- function(arrow_numeric) {
     withr::with_options(
-      list(DTAtools.stream_arrow_numeric = arrow_numeric),
+      list(
+        DTAtools.stream_arrow_numeric = arrow_numeric,
+        # Small test batches would otherwise fall below the row threshold and
+        # never reach the fast path this comparison exists to exercise.
+        DTAtools.stream_arrow_numeric_min_rows = 0
+      ),
       dta_validate_table_stream(
         specs, vs_reader(table, batch_rows),
         verbose = FALSE, coerce = coerce

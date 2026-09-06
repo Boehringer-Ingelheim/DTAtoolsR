@@ -250,6 +250,10 @@ method(`[`, DTA) <- function(x, i) {
 #'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default. A
 #'     diagnostic switch over how a streamed batch's declared-numeric columns
 #'     are parsed; see \code{\link{check}()}.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The smallest batch for which that Arrow parse is attempted; a smaller
+#'     batch is typed in R, which is cheaper at that size. See
+#'     \code{\link{check}()}.}
 #' }
 #'
 #' @param x A \code{DTA} or \code{DTADataSetTabular} object.
@@ -570,6 +574,15 @@ dta_emit_summary_message <- function(summary_message) {
 #'     surprising number came from the data rather than from the fast path. A
 #'     column with one unconvertible value takes the R path regardless, which
 #'     is where the value is recorded as an import error.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The Arrow parse is attempted only for a batch of at least this many
+#'     rows: every Arrow call costs the same whatever the batch holds, and at
+#'     the default 1 MiB read block a delimited batch is a few thousand rows,
+#'     where the R parse is cheaper. Measured on a 1e6 x 20 file, the Arrow
+#'     path was 34\% slower at 1 MiB blocks, 18\% faster at 8 MiB (about
+#'     50,000 rows a batch) and 26\% faster at 32 MiB. So it engages
+#'     automatically once \code{DTAtools.stream_block_size} is raised to
+#'     8 MiB or more, and not at all at the default block size.}
 #'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
 #'     whose declared \code{encoding} is not UTF-8 is converted to the UTF-8
 #'     copy a lazy scan reads (see \code{\link{DTAFileTabular}()}), 4 MiB by

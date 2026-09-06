@@ -121,6 +121,10 @@ converter's buffer and does not change the copy.}
 \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default. A
 diagnostic switch over how a streamed batch's declared-numeric columns
 are parsed; see \code{\link{check}()}.}
+\item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+The smallest batch for which that Arrow parse is attempted; a smaller
+batch is typed in R, which is cheaper at that size. See
+\code{\link{check}()}.}
 }
 }
 
