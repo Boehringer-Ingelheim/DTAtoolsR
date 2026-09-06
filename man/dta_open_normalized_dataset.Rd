@@ -10,50 +10,36 @@ dta_open_normalized_dataset(
   delim = ",",
   quote = "\\"",
   has_header = TRUE,
-  na = NULL
+  na = NULL,
+  handler = NULL
 )
 }
 \arguments{
 \item{path}{Character path to the delimited file.}
 
-\item{specs}{A \code{DTAColumnSpecCollection} or \code{NULL}. Only consulted for the
-first, header-only open -- the final schema pins every column to \code{utf8}
-regardless of what \code{specs} declares; see Description.}
+\item{specs}{A \code{DTAColumnSpecCollection} or \code{NULL}. When supplied, every
+column is read as text; see \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}.}
 
 \item{delim, quote, has_header}{Delimited-text parse options.}
 
 \item{na}{Character vector of strings to read as missing, or \code{NULL}
 (the default) to keep Arrow's own default (\code{c("", "NA")}) unchanged.}
+
+\item{handler}{A \code{DTAFileTabular} (or subclass) whose \code{newlines_in_values}
+and \code{encoding} apply, or \code{NULL} for the defaults.}
 }
 \value{
 An \code{arrow::Dataset}.
 }
 \description{
-The lazy counterpart of \code{dta_read_delim_normalized()}: both pin every
-column to \code{utf8} and apply the same column-name cleaning, differing only in
-when the file is read. An Arrow \code{Dataset} has no \verb{names<-} method, though,
-so here the cleaned names have to be supplied when the dataset is \emph{opened}
-rather than assigned afterwards -- which is why this cannot simply share
-the eager function's code.
+The lazy half of \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}: the plan says how the file is to
+be read, this opens it as an \code{arrow::Dataset} so nothing is read until a scan
+asks for it. Its eager twin is \code{\link[=dta_read_delim_normalized]{dta_read_delim_normalized()}}; the two are
+given the identical names, skip and column types, so a file cannot present
+itself differently depending on which one loaded it.
 
-Every column -- not only the ones a specification declares -- is pinned to
-\code{utf8}. A declared column is pinned so the specification, not Arrow's own
-inference, decides its type. An undeclared column is pinned for a different
-reason: a lazy dataset's schema is inferred from only its first block and
-then locked in for the whole scan, so a column that looks integer-only
-early on but holds \code{"0.01"} far down aborts the entire read -- \verb{CSV conversion error to int64: invalid value '0.01'} -- potentially hours into
-a multi-hundred-million-row scan. Reading as text can never fail that way.
-The per-batch coercion (\code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}}) and the rules' own
-strict numeric conversion do all the real typing in R, so nothing
-downstream changes for data that was already well-typed.
-
-The file is opened twice, unconditionally: the first open exists only to
-learn the column names from the header; the second pins every column to
-\code{utf8}, whether or not the header needed cleaning. That is cheap --
-opening a dataset reads the header, not the data -- and it buys the thing
-the alternative loses: renaming through \code{dplyr} would return an
-\code{arrow_dplyr_query}, which has no \verb{$files}, so
-\code{dta_table_change_signal()} could not fingerprint it and \code{check()} would
-revalidate the table on every run. Re-opening keeps a true \code{Dataset}.
+The scan's read block -- and with it the size of a batch, and peak memory --
+comes from \code{\link[=dta_stream_block_size]{dta_stream_block_size()}}; see there for why \code{batch_rows} cannot
+do that job on a delimited file.
 }
 \keyword{internal}

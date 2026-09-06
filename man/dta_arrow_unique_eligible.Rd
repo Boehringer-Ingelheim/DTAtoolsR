@@ -15,36 +15,46 @@ dta_arrow_unique_eligible(rule, source, specs = NULL)
 columns' declared types, as above.}
 }
 \value{
-A single, non-\code{NA} logical.
+A list with \code{ok} -- a single, non-\code{NA} logical -- and
+\code{numeric_columns}, the key columns whose spec declares a numeric type
+(\code{character(0)} for an all-text key, and always \code{character(0)} when \code{ok} is
+\code{FALSE}). A list rather than a bare logical because the caller needs both
+answers and deriving the second one twice could let them drift.
 }
 \description{
 \code{TRUE} only when every one of the following holds; any failure -- including
 an error raised while checking -- means \code{FALSE}, which routes the rule to
 the per-batch accumulator instead:
 \itemize{
-\item \code{source} is re-scannable (\code{Dataset} or \code{arrow_dplyr_query}), not a
-\code{RecordBatchReader} -- a reader is consumed by reading it, and the
-uniqueness precompute must leave it untouched for the batch loop that
-follows.
+\item \code{source} is specifically a \code{Dataset}. It must be re-scannable -- a
+\code{RecordBatchReader} is consumed by reading it, and the uniqueness
+precompute must leave the source untouched for the batch loop that follows
+-- and its schema must be readable directly as \verb{$schema}, whereas an
+\code{arrow_dplyr_query}'s schema lives inside its lazy query plan. That source
+is rare enough on this path that reconstructing it is not worth the
+complexity: it is simply never eligible, which routes it to the per-batch
+path rather than erroring.
 \item the rule names at least one key column.
-\item \code{source} is specifically a \code{Dataset}: its schema is available directly as
-\verb{$schema}, whereas an \code{arrow_dplyr_query}'s schema lives inside its lazy
-query plan. That source is rare enough on this path that reconstructing
-it is not worth the complexity -- it is simply never eligible, which
-routes it to the per-batch path rather than erroring.
-\item every key column is present in the schema and typed \code{utf8}.
-\item no key column's spec DECLARES a numeric type. The streaming open pins
-every column to \code{utf8}, so the schema type alone cannot tell a genuine
-text column from a declared-\code{Num} one that will be coerced per batch --
-and the per-batch accumulator keys a declared-numeric column on its
-coerced NUMBERS (\code{"1.50"} and \code{"1.5"} are one key), where Arrow would
-group the raw text (two keys). Declared-numeric keys therefore always
-take the per-batch path.
+\item every key column is present in the schema and typed \code{utf8}. This is about
+what the SOURCE is, not about what the specs say: the streaming open pins
+every column to \code{utf8}, so a delimited scan qualifies, while a Parquet
+dataset carrying its own numeric types does not. That exclusion is
+conservative rather than necessary -- only text-typed sources have been
+validated against the per-batch path -- and it costs nothing but speed: an
+ineligible source takes the per-batch path, which answers the rule
+correctly either way.
 }
 
-Restricted to text because R's \code{duplicated()} and Arrow's grouped
-aggregation agree byte-for-byte on strings (including \code{NA == NA}), but
-diverge on doubles -- \code{-0} vs \code{0}, \code{NaN} -- verified experimentally rather
-than assumed.
+A key column's DECLARED type decides how it is grouped, not whether it is
+eligible. The schema type alone cannot tell a genuine text column from a
+declared-\code{Num} one -- everything is \code{utf8} at scan time -- and the two are
+keyed differently: the per-batch accumulator keys a declared-numeric column
+on its coerced NUMBERS, where \code{"1.50"} and \code{"1.5"} are one key, while raw
+text grouping would see two. The numeric key columns are therefore reported
+here and normalised in \code{\link[=dta_stream_unique_precompute]{dta_stream_unique_precompute()}} before grouping, so
+that both paths key on the same values.
+
+Text is grouped as it stands because R's \code{duplicated()} and Arrow's grouped
+aggregation agree byte-for-byte on strings, including \code{NA == NA}.
 }
 \keyword{internal}

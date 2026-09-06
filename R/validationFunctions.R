@@ -85,9 +85,20 @@ validate_table <- function(specs, table, verbose = TRUE) {
 #' @param specs A [DTAColumnSpecCollection] object.
 #' @param table Data frame or Arrow Table to validate.
 #' @param verbose Logical. Whether to print progress messages. Default `TRUE`.
+#' @param max_errors Integer, or `NULL` (the default) to retain every reported
+#'   error row. Cap on the per-cell error detail held in the returned
+#'   `columnspec_errors$full_error` and `import_errors` frames. Both axes emit
+#'   one row per bad cell, so a wholly mistyped column of a large table produced
+#'   a frame as long as the table -- the streaming path has been bounded against
+#'   exactly that since it existed, and this is the same bound for a table
+#'   already in memory. Only RETENTION is capped: `n_columnspec_errors`,
+#'   `n_import_errors`, `summarised_error` and the per-check breakdown are all
+#'   computed from the complete frames, so the counts stay exact and no verdict
+#'   can be an artefact of truncation. A frame that lost rows is flagged with a
+#'   `"truncated"` attribute.
 #' @noRd
 #' @keywords internal
-validate_table_detailed <- function(specs, table, verbose = TRUE) {
+validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = NULL) {
   # Read before the table is touched: these were recorded when the table was
   # typed at import, and they ride on the table so they cannot be separated
   # from the data they describe.
@@ -253,17 +264,26 @@ validate_table_detailed <- function(specs, table, verbose = TRUE) {
     }
   }
 
+  # 0L, not 0: `nrow()` on the other branch is an integer, so a bare `0` made
+  # this field a double exactly when the count was zero and an integer
+  # otherwise. Every other count in the package is an integer, and the
+  # streaming path reports one here too, so the type must not depend on
+  # whether anything failed.
+  n_columnspec_errors <- if (is.null(full_error)) 0L else nrow(full_error)
+
+  # Retention is capped LAST, after every count, summary and per-check verdict
+  # above has been taken from the complete frames. A cap that reached those
+  # would let a memory bound decide a pass/fail verdict, which is the one thing
+  # truncation must never be able to do.
+  full_error <- dta_truncate_error_frame(full_error, max_errors)
+  import_errors <- dta_truncate_error_frame(import_errors, max_errors)
+
   details <- list(
     ok = NA,
     columnspec_valid = !has_columnspec_errors,
     rules_valid = isTRUE(rules_valid),
     import_valid = isTRUE(import_valid),
-    # 0L, not 0: `nrow()` on the other branch is an integer, so a bare `0` made
-    # this field a double exactly when the count was zero and an integer
-    # otherwise. Every other count in the package is an integer, and the
-    # streaming path reports one here too, so the type must not depend on
-    # whether anything failed.
-    n_columnspec_errors = if (is.null(full_error)) 0L else nrow(full_error),
+    n_columnspec_errors = n_columnspec_errors,
     n_rule_errors = length(rule_errors),
     n_import_errors = n_import_errors,
     columnspec_errors = list(
@@ -303,6 +323,73 @@ dta_details_ok <- function(details) {
   isTRUE(details$columnspec_valid) &&
     isTRUE(details$rules_valid) &&
     isTRUE(details$import_valid)
+}
+
+
+#' @title Cap the Rows Retained From a Per-Cell Error Frame
+#' @description
+#' Keeps at most `max_errors` rows of an error frame, flagging the result when
+#' anything was dropped. The counterpart, for a table validated in one pass, of
+#' the streaming path's error sink -- which has been bounded since it existed,
+#' because both axes emit one row per bad cell and a dirty file therefore
+#' produces a frame as long as the file.
+#'
+#' Unlike the sink, nothing spills to disk here: the whole table was in memory
+#' to begin with, so the rows this drops can be recovered simply by validating
+#' again with a larger cap.
+#'
+#' Only retention is capped. Every count and summary a caller reads is taken
+#' from the complete frame before this runs, so truncation can never turn a
+#' failing table into a passing one.
+#' A `max_errors` that is not a cap at all is an error, not a silent "keep
+#' everything". `NA`, a negative number and a vector of two were each read as
+#' "no cap" here, so a caller that computed the cap wrongly -- `NA` out of an
+#' arithmetic slip, two values out of a stray `c()` -- got the unbounded frame
+#' the argument exists to prevent, and got it without a word. Only `NULL` and
+#' `Inf` mean "no cap", and both say so deliberately.
+#' @param errors A data frame of errors, or `NULL`.
+#' @param max_errors A single non-negative number, `Inf`, or `NULL`. The last
+#'   two mean "no cap"; anything else is an error.
+#' @return The frame, truncated to `max_errors` rows and carrying
+#'   `attr(, "truncated") <- TRUE` when rows were dropped; otherwise the frame
+#'   unchanged.
+#' @keywords internal
+dta_truncate_error_frame <- function(errors, max_errors) {
+  if (is.null(max_errors)) {
+    return(errors)
+  }
+
+  # Checked before the frame is looked at, so an unusable cap is reported for
+  # every input rather than only for the ones with enough rows to reach it.
+  # Ordered so that `||` short-circuits on length before any test that would
+  # return a vector.
+  if (!is.numeric(max_errors) || length(max_errors) != 1 ||
+    is.na(max_errors) || max_errors < 0) {
+    cli::cli_abort(c(
+      "{.arg max_errors} must be a single non-negative number, {.code NULL}, or {.code Inf}.",
+      x = "Got {.obj_type_friendly {max_errors}} of length {length(max_errors)}."
+    ))
+  }
+
+  if (!is.data.frame(errors) || nrow(errors) == 0) {
+    return(errors)
+  }
+  if (!is.finite(max_errors) || nrow(errors) <= max_errors) {
+    return(errors)
+  }
+
+  keep <- errors[seq_len(as.integer(max_errors)), , drop = FALSE]
+  # `[` keeps only names/row.names/class, and the exact error count rides on the
+  # frame as an attribute of its own (see dta_import_error_count()). Dropping it
+  # here would make the truncated frame report the number of rows it kept, which
+  # is precisely the under-count the cap must not introduce.
+  carried <- setdiff(names(attributes(errors)), c("names", "row.names", "class"))
+  for (name in carried) {
+    attr(keep, name) <- attr(errors, name)
+  }
+  rownames(keep) <- NULL
+  attr(keep, "truncated") <- TRUE
+  keep
 }
 
 

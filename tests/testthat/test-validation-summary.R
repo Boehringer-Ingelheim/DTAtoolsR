@@ -70,6 +70,64 @@ test_that("the incomplete line agrees with the count that governs its noun", {
 })
 
 
+test_that("a dataset with nothing bound says so instead of reporting a clean run", {
+  # A dataset holding no target has no UNCHECKED target either: every count is
+  # zero, which is exactly what a clean run looks like. It is counted, and
+  # named, as the outstanding item itself.
+  msg <- vs_msg(
+    n_targets = 0, n_validated = 0, n_valid = 0, n_invalid = 0,
+    n_unchecked = 0, n_undelivered = 1
+  )
+
+  expect_equal(msg$severity, "warning")
+  expect_equal(msg$text, "0 tables validated: no tables loaded")
+  expect_false(grepl("all valid", msg$text, fixed = TRUE))
+})
+
+
+test_that("the undelivered branch does not displace a real failure", {
+  # Ordering matters: a failure is still the headline. The undelivered count is
+  # only reachable with zero targets, so this is a guard on the branch order
+  # rather than on a state a document can currently produce.
+  msg <- vs_msg(
+    n_targets = 1, n_validated = 1, n_valid = 0, n_invalid = 1,
+    n_unchecked = 0, n_undelivered = 1
+  )
+
+  expect_equal(msg$severity, "danger")
+  expect_match(msg$text, "1 INVALID", fixed = TRUE)
+})
+
+
+test_that("the overall line names datasets that had nothing to check", {
+  msg <- vs_all(
+    total_invalid = 0, total_import_errors = 0,
+    total_unchecked = 1, total_undelivered = 1
+  )
+
+  expect_equal(msg$severity, "warning")
+  expect_equal(
+    msg$text,
+    "Validation INCOMPLETE: 1 target was not checked (1 dataset with no tables loaded)"
+  )
+
+  # An unchecked target that is not a whole empty dataset keeps its wording.
+  expect_equal(
+    vs_all(total_invalid = 0, total_import_errors = 0, total_unchecked = 1)$text,
+    "Validation INCOMPLETE: 1 target was not checked"
+  )
+
+  # Mixed: two outstanding items, one of them an empty dataset.
+  expect_equal(
+    vs_all(
+      total_invalid = 0, total_import_errors = 0,
+      total_unchecked = 2, total_undelivered = 1
+    )$text,
+    "Validation INCOMPLETE: 2 targets were not checked (1 dataset with no tables loaded)"
+  )
+})
+
+
 test_that("the overall line names unchecked targets alongside either failure", {
   by_verdict <- vs_all(total_invalid = 1, total_import_errors = 0, total_unchecked = 2)
   expect_equal(by_verdict$severity, "danger")
@@ -210,6 +268,25 @@ test_that("a clean DTA still reports PASSED", {
   expect_match(out, "Validation PASSED", fixed = TRUE)
   expect_match(out, "all valid", fixed = TRUE)
   expect_false(grepl("not checked", out, fixed = TRUE))
+})
+
+
+test_that("check() does not certify a DTA whose data was never delivered", {
+  # The end-to-end counterpart of the builder tests above. Before the fix this
+  # combination could not even be reached: check() aborted with "No tables
+  # found in dataset." rather than reporting anything at all.
+  dta <- DTA(
+    datasets = list(undelivered = DTADataSetTabular(
+      name = "undelivered", specs = vs_specced(), tables = list()
+    )),
+    metadata = create_example_DTAMetaData()
+  )
+
+  out <- vs_console(check(dta, persist = FALSE, quiet = FALSE))
+
+  expect_match(out, "no tables loaded", fixed = TRUE)
+  expect_match(out, "Validation INCOMPLETE", fixed = TRUE)
+  expect_false(grepl("all valid", out, fixed = TRUE))
 })
 
 

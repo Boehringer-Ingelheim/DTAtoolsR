@@ -397,3 +397,297 @@ test_that("a table checked against zero column specs is 'unspecified', not a pas
   expect_equal(res$n_valid, 0)
   expect_equal(res$n_invalid, 0)
 })
+
+
+# ---------------------------------------------------------------------------
+# Replacing a bound table drops that table's verdict
+# ---------------------------------------------------------------------------
+
+# One character column of at most four characters: "A001" passes, "TOO-LONG"
+# fails, and nothing else about the file matters.
+tv_id_specs <- function() {
+  DTAColumnSpecCollection(columns = list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+}
+
+# Console output of one expression, whitespace-normalised. cli wraps to the
+# terminal width, so a message asserted on raw output can break in the middle
+# of the phrase being matched.
+tv_console <- function(expr) {
+  gsub("[[:space:]]+", " ", paste(testthat::capture_messages(expr), collapse = " "))
+}
+
+test_that("loading a different file under a bound table name drops the old verdict", {
+  # Only @tables was replaced, so the validation index, the store and every
+  # report built from them kept describing the file that had just been thrown
+  # away: validation_status() certified data it had never seen, under the name
+  # of data that was no longer there.
+  dir <- withr::local_tempdir()
+  good <- file.path(dir, "t.csv")
+  bad <- file.path(dir, "t2.csv")
+  writeLines(c("ID", "A001"), good)
+  writeLines(c("ID", "TOO-LONG"), bad)
+
+  ds <- DTADataSetTabular(
+    name = "d",
+    specs = tv_id_specs(),
+    files = list(DTAFileCSV(filename = "t.csv"), DTAFileCSV(filename = "t2.csv"))
+  )
+
+  ds <- load_file(ds, file = good, handler_index = 1, name = "t")
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_true(validation_status(ds)$ok)
+
+  ds <- load_file(ds, file = bad, handler_index = 2, name = "t")
+
+  status <- validation_status(ds)
+  expect_equal(status$status, "not_validated")
+  expect_true(is.na(status$ok))
+  expect_null(ds@validation_store[["t"]])
+  expect_equal(nrow(messages(ds, as_tibble = FALSE)), 0)
+
+  # ... and the next check() judges the file that is actually bound.
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_false(validation_status(ds)$ok)
+})
+
+test_that("re-loading the same file under a bound name also drops the old verdict", {
+  # The state is dropped on REPLACEMENT, not on a change of file: a table
+  # reloaded from the same path has not been validated in its new incarnation
+  # either, and check() re-establishes the verdict from the hash as before.
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "t.csv")
+  writeLines(c("ID", "A001"), path)
+
+  ds <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(),
+    files = list(DTAFileCSV(filename = "t.csv"))
+  )
+  ds <- check(
+    load_file(ds, file = path, handler_index = 1, name = "t"),
+    persist = FALSE, quiet = TRUE
+  )
+  expect_true(validation_status(ds)$ok)
+
+  ds <- load_file(ds, file = path, handler_index = 1, name = "t")
+  expect_equal(validation_status(ds)$status, "not_validated")
+})
+
+
+# ---------------------------------------------------------------------------
+# A tabular dataset with no tables reports, it does not abort
+# ---------------------------------------------------------------------------
+
+test_that("a tabular dataset with no tables reports rather than aborting", {
+  # A specification whose data has not been delivered yet is the ordinary
+  # state of a DTA, not an error. Every report used to abort with "No tables
+  # found in dataset." -- and at DTA level that took down check(), results()
+  # and messages() for every OTHER dataset alongside it.
+  ds <- create_example_DTADataSetTabular(1)
+  expect_length(tables(ds), 0)
+
+  status <- validation_status(ds)
+  expect_true(is.data.frame(status))
+  expect_equal(nrow(status), 0)
+  expect_true(all(
+    c("table", "target_type", "status", "ok", "n_rule_errors") %in% names(status)
+  ))
+
+  expect_equal(nrow(results(ds)), 0)
+  expect_equal(nrow(messages(ds, as_tibble = FALSE)), 0)
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_s3_class(ds, "DTAtools::DTADataSetTabular")
+  expect_equal(nrow(attr(ds, "last_validation_summary")), 0)
+})
+
+test_that("check() says out loud that a dataset had no tables to check", {
+  out <- tv_console(check(create_example_DTADataSetTabular(1), persist = FALSE))
+
+  expect_match(out, "no tables loaded", fixed = TRUE)
+  expect_false(grepl("passed validation", out, fixed = TRUE))
+})
+
+test_that("tables that carry no names are still a hard error", {
+  # "No names" and "no tables" are different situations and only the second is
+  # benign: an unnamed table cannot be addressed by any report, so answering
+  # with an empty selection would quietly leave its data out of all of them.
+  ds <- create_example_DTADataSetTabular(2)
+  names(ds@tables) <- NULL
+
+  expect_error(validation_status(ds), "have no names")
+  expect_error(check(ds, persist = FALSE, quiet = TRUE), "have no names")
+})
+
+test_that("an explicit table selection on a dataset with no tables still aborts", {
+  # The empty answer is for "check everything"; asking for a table by name or
+  # index is a mistake about the dataset, and answering it with nothing would
+  # silently drop the caller's request.
+  ds <- create_example_DTADataSetTabular(1)
+
+  expect_error(check(ds, tables = "nope", quiet = TRUE), "not found")
+  expect_error(validation_status(ds, tables = 1), "out of bounds")
+  expect_error(validation_errors(ds, table = "nope"), "not found")
+})
+
+
+# ---------------------------------------------------------------------------
+# A lazy table whose file has vanished
+# ---------------------------------------------------------------------------
+
+test_that("check() reports a lazily held table whose file has vanished", {
+  # A lazy table is a scan plan over files. Scanning one whose file was
+  # deleted raised an Arrow IOError from inside the scanner and took the whole
+  # check() down, so a single cleaned-up delivery destroyed the verdicts of
+  # every other table in the dataset.
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "vanish.csv")
+  writeLines(c("ID", "A001"), path)
+
+  ds <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(),
+    files = list(DTAFileCSV(filename = "vanish.csv"))
+  )
+  ds <- load_file(ds, file = path, handler_index = 1, stream = "always")
+  unlink(path)
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+
+  status <- validation_status(ds)
+  expect_equal(status$status, "validated")
+  expect_false(status$ok)
+  expect_equal(status$n_rule_errors, 1)
+  expect_equal(status$n_columnspec_errors, 0)
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_equal(msgs$rule_id, "file_presence")
+  expect_match(msgs$message, "not found", fixed = TRUE)
+
+  # The change signal of a Dataset whose file is gone is stable, so a repeat
+  # check() skips rather than re-reporting the same absence as a fresh finding.
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_equal(attr(ds, "last_validation_summary")$status, "skipped")
+})
+
+
+# ---------------------------------------------------------------------------
+# @import_issues records the same axis however the table was held
+# ---------------------------------------------------------------------------
+
+test_that("check() records the same import issues eager and streamed", {
+  # @import_issues is the axis a materialising load records at import: values
+  # the DECLARED TYPE could not represent. A streamed table has no such moment,
+  # so check() writes the streaming result's typing frame -- and where it took
+  # the MERGED frame instead, the same file showed one set of import issues
+  # loaded eagerly and another streamed.
+  dir <- withr::local_tempdir()
+
+  both_paths <- function(name, lines, specs) {
+    path <- file.path(dir, name)
+    writeLines(lines, path)
+    lapply(c(never = "never", always = "always"), function(stream) {
+      ds <- DTADataSetTabular(
+        name = "d", specs = specs, files = list(DTAFileCSV(filename = name))
+      )
+      ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+      ds <- check(ds, persist = FALSE, quiet = TRUE)
+      ds@import_issues[[tools::file_path_sans_ext(name)]]
+    })
+  }
+
+  # Rule-time only: a Char column a range rule compares numerically. Nothing
+  # failed to TYPE, so neither path records an import issue.
+  rule_only <- both_paths(
+    "rule_only.csv",
+    c("ID,TXT", "A001,xyz", "A002,xyz"),
+    DTAColumnSpecCollection(
+      columns = list(
+        ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+        TXT = DTAColumnSpec(id = "TXT", type = "SAS Char", length = 8, nullable = TRUE)
+      ),
+      rules = list(DTARuleColRange(id = "textrange", columns = "TXT", min = 0, max = 100))
+    )
+  )
+  expect_null(rule_only$never)
+  expect_null(rule_only$always)
+
+  # Typing only: one cell a declared Num column cannot hold. One row on both.
+  typing <- both_paths(
+    "typing_only.csv",
+    c("ID,VAL", "A001,1", "A002,zzz"),
+    DTAColumnSpecCollection(
+      columns = list(
+        ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+        VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+      )
+    )
+  )
+  expect_equal(nrow(typing$never), 1L)
+  expect_equal(nrow(typing$always), 1L)
+  for (field in c("row", "column", "raw", "declared_type", "reason")) {
+    expect_identical(typing$always[[field]], typing$never[[field]], info = field)
+  }
+})
+
+
+# ---------------------------------------------------------------------------
+# Braces in a table name are data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("a table whose name contains braces checks without aborting", {
+  # cli parses `{...}` in the string it is handed, so a table called `a{b}` --
+  # the default name for a delivered `a{b}.csv` -- aborted every non-quiet
+  # check() with "Could not evaluate cli `{}` expression".
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "a{b}.csv")
+  writeLines(c("ID", "A001"), path)
+
+  ds <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(),
+    files = list(DTAFileCSV(filename = "a{b}.csv"))
+  )
+  ds <- load_file(ds, file = path, handler_index = 1)
+  expect_named(tables(ds), "a{b}")
+
+  out <- tv_console(ds <- check(ds, persist = FALSE, quiet = FALSE))
+
+  expect_match(out, "a{b}", fixed = TRUE)
+  expect_true(validation_status(ds)$ok)
+})
+
+
+# ---------------------------------------------------------------------------
+# A vanished artifact directory does not freeze the object
+# ---------------------------------------------------------------------------
+
+test_that("a dataset whose artifact directory has vanished can still be modified", {
+  # The property remembers WHERE artifacts were written, and that directory is
+  # temporary by default. Requiring it to exist made S7's revalidation abort
+  # every later property assignment, so the object could no longer be cleared,
+  # loaded into, or even checked with persist = FALSE.
+  artifact_dir <- file.path(withr::local_tempdir(), "artifacts")
+
+  ds <- check(
+    create_example_DTADataSetTabular(2),
+    persist = TRUE, artifact_dir = artifact_dir, quiet = TRUE
+  )
+  expect_equal(ds@validation_artifact_dir, artifact_dir)
+
+  unlink(artifact_dir, recursive = TRUE)
+  expect_false(dir.exists(artifact_dir))
+
+  ds <- clear_validation(ds)
+  expect_length(ds@validation_index, 0)
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_equal(nrow(validation_status(ds)), 1)
+
+  # What the validator still rejects is a value that is not a single path.
+  expect_error(
+    {
+      ds@validation_artifact_dir <- c("a", "b")
+    },
+    "single directory path"
+  )
+})

@@ -10,7 +10,8 @@ dta_read_delim_normalized(
   quote,
   has_header,
   specs = NULL,
-  na = NULL
+  na = NULL,
+  handler = NULL
 )
 }
 \arguments{
@@ -18,28 +19,24 @@ dta_read_delim_normalized(
 
 \item{delim, quote, has_header}{Delimited-text parse options.}
 
-\item{specs}{A \code{DTAColumnSpecCollection} or \code{NULL}, used to pin declared
-column types at parse time.}
+\item{specs}{A \code{DTAColumnSpecCollection} or \code{NULL}. When supplied, every
+column is read as text; see \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}.}
 
 \item{na}{Character vector of strings to read as missing, or \code{NULL}
 (the default) to keep Arrow's own default (\code{c("", "NA")}) unchanged.}
+
+\item{handler}{A \code{DTAFileTabular} (or subclass) whose \code{newlines_in_values}
+and \code{encoding} apply, or \code{NULL} for the defaults.}
 }
 \value{
 An Arrow \code{Table}.
 }
 \description{
-The eager counterpart of \code{dta_open_normalized_dataset()}: reads the whole
-file into memory rather than opening it as a lazy \code{Dataset}, sharing the
-same declared-type pinning and column-name cleaning so the two paths type a
-column identically -- the "same column-type pinning" contract documented on
-\code{open_file()}.
+The eager half of \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}: same names, same skip, same
+column types as \code{\link[=dta_open_normalized_dataset]{dta_open_normalized_dataset()}} gives the scanner, read into
+memory as an Arrow \code{Table} instead of left on disk.
 
-Unlike the lazy opener, only the columns a specification declares are
-pinned to \code{utf8} (\code{\link[=dta_reader_col_types]{dta_reader_col_types()}}); an undeclared column is left to
-Arrow's inference, as it always was for this reader. The lazy path pins
-every column because a dataset scan can run for hours over hundreds of
-millions of rows and cannot afford Arrow locking in a wrong type partway
-through; an eager read is bounded by what fits in memory, so that risk does
-not arise here in the same way.
+Unlike the lazy opener this one CAN honour a non-UTF-8 \code{encoding}: it reads
+through an input stream, which Arrow will re-encode.
 }
 \keyword{internal}

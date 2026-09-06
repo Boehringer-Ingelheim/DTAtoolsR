@@ -553,3 +553,107 @@ test_that("handler_index aborts on NULL, NA, or a length-2 value", {
   expect_error(dta_resolve_file_handler_index(NA, handlers), class = "rlang_error")
   expect_error(dta_resolve_file_handler_index(c(1, 2), handlers), class = "rlang_error")
 })
+
+# ---------------------------------------------------------------------------
+# check() accepts the tabular scan controls and ignores them
+# ---------------------------------------------------------------------------
+
+test_that("check() on a file dataset accepts and ignores the tabular scan controls", {
+  # check() on a DTA forwards one argument list to every dataset it holds. A
+  # file dataset reads no rows, so all five are meaningless here -- but the
+  # call must not have to branch on the dataset's class, and an argument this
+  # method did not declare died on R's own "unused argument".
+  path <- withr::local_tempfile(fileext = ".txt")
+  writeLines("content", path)
+
+  ds <- check(
+    DTADataSetFile(name = "delivery", paths = path),
+    quiet = TRUE, persist = FALSE,
+    batch_rows = 10L, max_errors = 1L,
+    fail_fast = TRUE, on_missing_column = "stop", use_threads = FALSE
+  )
+
+  expect_equal(nrow(validation_status(ds)), 1)
+  expect_true(validation_status(ds)$ok)
+})
+
+# ---------------------------------------------------------------------------
+# Braces in a delivered or declared name are data, not cli syntax
+# ---------------------------------------------------------------------------
+
+# Console output of one expression, whitespace-normalised: cli wraps to the
+# terminal width, so raw output can break in the middle of a matched phrase.
+dsf_console <- function(expr) {
+  gsub("[[:space:]]+", " ", paste(testthat::capture_messages(expr), collapse = " "))
+}
+
+test_that("a file name containing braces checks without aborting", {
+  # cli parses `{...}` in the string it is handed, so a delivered `a{b}.txt`
+  # aborted every non-quiet check() with "Could not evaluate cli `{}`
+  # expression" -- on the success line, and on the failure line for a target
+  # that was declared but never arrived.
+  dir <- withr::local_tempdir()
+  delivered <- file.path(dir, "a{b}.txt")
+  writeLines("content", delivered)
+
+  ds <- DTADataSetFile(
+    name = "delivery",
+    paths = delivered,
+    files = list(DTAFileAny(filename = "a{b}.txt"), DTAFileAny(filename = "c{d}.txt"))
+  )
+
+  out <- dsf_console(ds <- check(ds, persist = FALSE, quiet = FALSE))
+
+  expect_match(out, "a{b}.txt", fixed = TRUE)
+  expect_match(out, "c{d}.txt", fixed = TRUE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$table, c("a{b}.txt", "c{d}.txt"))
+  expect_equal(sum(status$ok), 1)
+})
+
+# ---------------------------------------------------------------------------
+# A vanished artifact directory does not freeze the object
+# ---------------------------------------------------------------------------
+
+test_that("a restored dataset whose artifact directory is gone can still be used", {
+  # check(persist = TRUE) records where it wrote, and that directory is
+  # temporary by default. Requiring it to exist made S7's revalidation abort
+  # every later property assignment on a restored object: it could no longer be
+  # loaded into, cleared, or even checked with persist = FALSE -- the exact
+  # object a user saves at the end of a session and reopens the next morning.
+  dir <- withr::local_tempdir()
+  artifact_dir <- file.path(dir, "artifacts")
+  path <- file.path(dir, "delivered.txt")
+  writeLines("content", path)
+
+  ds <- check(
+    DTADataSetFile(name = "delivery", paths = path),
+    quiet = TRUE, persist = TRUE, artifact_dir = artifact_dir
+  )
+  expect_equal(ds@validation_artifact_dir, artifact_dir)
+
+  rds <- file.path(dir, "delivery.rds")
+  saveRDS(ds, rds)
+  unlink(artifact_dir, recursive = TRUE)
+  restored <- readRDS(rds)
+  expect_false(dir.exists(artifact_dir))
+
+  cleared <- clear_validation(restored)
+  expect_equal(nrow(validation_status(cleared)), 0)
+
+  rechecked <- check(restored, persist = FALSE, quiet = TRUE)
+  expect_true(validation_status(rechecked)$ok)
+
+  reloaded <- load_file(restored, file = path, handler_index = 1)
+  expect_equal(reloaded@file_paths, path)
+
+  # What the validator still rejects is a value that is not a single path.
+  expect_error(
+    {
+      restored@validation_artifact_dir <- c("a", "b")
+    },
+    "single directory path"
+  )
+})

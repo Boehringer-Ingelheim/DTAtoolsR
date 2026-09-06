@@ -215,17 +215,29 @@ dta_compression_extensions <- function() {
 }
 
 #' @title Drop a Compression Suffix From a Filename
-#' @param file_name Character. A file's basename.
-#' @return The name with a trailing compression extension removed, unchanged
-#'   when it has none.
+#' @param file_name Character. One or more file basenames.
+#' @return The names with a trailing compression extension removed, unchanged
+#'   where there is none.
+#' @details
+#' Vectorised, like the `tools::file_*` functions it is built from. It reads as
+#' a scalar helper and every caller passes one name, but an `if` on the
+#' extension turns a two-element vector into R's own "the condition has
+#' length > 1" -- raised from wherever the vector came from, which is never
+#' where the reader is looking. `ifelse()` answers per element instead.
 #' @keywords internal
 dta_strip_compression_extension <- function(file_name) {
-  ext <- tolower(tools::file_ext(file_name))
-  if (ext %in% dta_compression_extensions()) {
-    tools::file_path_sans_ext(file_name)
-  } else {
-    file_name
+  # ifelse() on an empty test returns logical(0), not character(0), and a
+  # caller comparing types would be handed the wrong one.
+  if (length(file_name) == 0) {
+    return(file_name)
   }
+
+  ext <- tolower(tools::file_ext(file_name))
+  ifelse(
+    ext %in% dta_compression_extensions(),
+    tools::file_path_sans_ext(file_name),
+    file_name
+  )
 }
 
 #' @title Matches Filename
@@ -323,13 +335,20 @@ dta_check_readable_file <- function(x, file, namecheck, .caller) {
   # vector into `if` and abort with "the condition has length > 1" instead
   # of the intended "does not match" message.
   if (namecheck && !isTRUE(any(DTAtools::matches_filename(x, basename(file))))) {
+    # Interpolated by cli itself, not pre-rendered with str_glue(): glue expands
+    # the path FIRST, and cli then reads any brace the path contains as an
+    # expression of its own -- so a perfectly ordinary `data{1}.csv` aborted
+    # with cli's "unexpected token" instead of this message, and a path
+    # containing `{.field x}` would have been rendered as markup. cli escapes
+    # braces inside an interpolated value, so `{.path {file}}` is safe for any
+    # path. The same applies to the "cannot be found" message below.
     cli::cli_abort(
-      stringr::str_glue("The provided file '{file}' does not match the filename or pattern in the DTAFile object.")
+      "The provided file {.path {file}} does not match the filename or pattern in the DTAFile object."
     )
   }
 
   if (!file.exists(file)) {
-    cli::cli_abort(stringr::str_glue("File '{file}' cannot be found."))
+    cli::cli_abort("File {.path {file}} cannot be found.")
   }
 
   # A missing file is the more fundamental problem, so this check runs after
@@ -475,6 +494,25 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'
 #' Both apply the same name checks and the same column-type pinning, so the two
 #' differ in when the data is read, not in what it is read as.
+#'
+#' @section What a batch of a delimited scan actually is:
+#' Arrow splits a delimited file into fixed-size READ BLOCKS -- one megabyte by
+#' default -- and emits one record batch per block. The \code{batch_rows}
+#' argument of \code{\link{check}()} reaches
+#' \code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
+#' batch that is already larger, so on a delimited file it is a ceiling and not
+#' a target: measured on a 4.4 MB, 46,000-row CSV, the default block gave 5
+#' batches of about 10,485 rows for \code{batch_rows} of 131,072 and of
+#' 1,000,000 alike.
+#'
+#' Peak memory during a scan is therefore governed by the block size times
+#' Arrow's read-ahead, not by \code{batch_rows}. Raise it with
+#' \code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
+#' memory to grow in proportion.
+#'
+#' A non-UTF-8 \code{encoding} declared on the handler is refused here: Arrow's
+#' dataset scanner has no re-encoding step, so such a file can only be read into
+#' memory (\code{stream = "never"}).
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.

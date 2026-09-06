@@ -28,6 +28,10 @@
 #'   (for instance \code{"."} in the SAS convention), honoured in addition to
 #'   the empty string. The default \code{""} declares nothing and keeps the
 #'   reader's own missing set.
+#' @param newlines_in_values Logical; \code{TRUE} if a quoted field may contain
+#'   a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.
+#' @param encoding Character; the file's character encoding. Default
+#'   \code{"UTF-8"}. See \code{\link{DTAFileTabular}}.
 #'
 #' @return An object of class \code{DTAFileDelim}.
 #' @name DTAFileDelim-class
@@ -48,7 +52,9 @@ DTAFileDelim <- S7::new_class(
     sep = "\t",
     has_header = TRUE,
     quote = '"',
-    missing_values = ""
+    missing_values = "",
+    newlines_in_values = FALSE,
+    encoding = "UTF-8"
   ) {
     new_object(
       DTAFileTabular(
@@ -62,7 +68,9 @@ DTAFileDelim <- S7::new_class(
         has_header = has_header,
         quote = quote,
         sep = sep,
-        missing_values = missing_values
+        missing_values = missing_values,
+        newlines_in_values = newlines_in_values,
+        encoding = encoding
       )
     )
   }
@@ -94,7 +102,8 @@ method(read_file_execution, DTAFileDelim) <- function(x, ...) {
     quote = x@quote,
     has_header = x@has_header,
     specs = args$specs,
-    na = dta_reader_na_values(x)
+    na = dta_reader_na_values(x),
+    handler = x
   )
 }
 
@@ -119,7 +128,8 @@ method(open_file_execution, DTAFileDelim) <- function(x, ...) {
     delim = x@sep,
     quote = x@quote,
     has_header = x@has_header,
-    na = dta_reader_na_values(x)
+    na = dta_reader_na_values(x),
+    handler = x
   )
 }
 

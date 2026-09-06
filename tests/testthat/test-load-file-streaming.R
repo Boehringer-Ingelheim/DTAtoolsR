@@ -415,3 +415,209 @@ test_that("a gzipped file can be opened lazily", {
   expect_true(inherits(lazy, "Dataset"))
   expect_identical(names(lazy), names(read_file(handler, file)))
 })
+
+# ---- the read block a delimited scan is batched in ---------------------------
+# `batch_rows` reaches Scanner$create(batch_size = ), which only SLICES a batch
+# that is already larger. On a delimited file the batch is one read block, so
+# `batch_rows` never enlarged anything and memory did not respond to it at all.
+# DTAtools.stream_block_size is the knob that does.
+
+# Rows per batch, at a batch_size high enough that only the block size can
+# decide. Consuming the reader is the point: a Dataset reports nothing about
+# how it will be batched until it is scanned.
+stream_batch_rows <- function(dataset, batch_size = 1e6L) {
+  reader <- arrow::Scanner$create(dataset, batch_size = batch_size)$ToRecordBatchReader()
+  rows <- integer(0)
+  repeat {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) break
+    rows <- c(rows, batch$num_rows)
+  }
+  rows
+}
+
+# ~4 MiB of text: several default blocks, one 4 MiB block.
+stream_block_fixture <- function() {
+  path <- file.path(tempdir(), "stream_block_size.csv")
+  if (!file.exists(path) || file.size(path) < 4 * 1024^2) {
+    line <- paste(rep("x", 90), collapse = "")
+    writeLines(
+      c("ID,PAD", sprintf("%07d,%s", seq_len(46000), line)),
+      path
+    )
+  }
+  path
+}
+
+test_that("the block size option decides how a delimited scan is batched", {
+  path <- stream_block_fixture()
+  on.exit(unlink(path), add = TRUE)
+  expect_gt(file.size(path), 4 * 1024^2)
+
+  handler <- DTAFileCSV(filename = basename(path))
+
+  default_rows <- stream_batch_rows(open_file(handler, path))
+  # Several batches, none of them the whole file: this is what `batch_rows`
+  # could never change.
+  expect_gt(length(default_rows), 1)
+
+  withr::local_options(DTAtools.stream_block_size = 8L * 1024L^2)
+  one_block_rows <- stream_batch_rows(open_file(handler, path))
+
+  expect_length(one_block_rows, 1)
+  expect_identical(sum(one_block_rows), sum(default_rows))
+})
+
+test_that("an unusable block size is rejected rather than silently ignored", {
+  withr::local_options(DTAtools.stream_block_size = 0)
+  expect_error(dta_stream_block_size(), "stream_block_size")
+
+  withr::local_options(DTAtools.stream_block_size = "1MB")
+  expect_error(dta_stream_block_size(), "stream_block_size")
+
+  withr::local_options(DTAtools.stream_block_size = NA)
+  expect_error(dta_stream_block_size(), "stream_block_size")
+})
+
+test_that("the default block size is arrow's own", {
+  expect_identical(dta_stream_block_size(), 1048576L)
+})
+
+# ---- quoted line breaks ------------------------------------------------------
+# A quoted newline only breaks a read when it straddles a block boundary, so a
+# small fixture proves nothing: the file below is deliberately larger than one
+# default block, with the offending value placed past it.
+
+# Every row's second field is quoted around a line break, so wherever a block
+# boundary falls it falls inside one -- placing a single such value would leave
+# the test dependent on where 1 MiB happens to land.
+newline_fixture <- function() {
+  path <- file.path(tempdir(), "stream_newlines.csv")
+  if (!file.exists(path) || file.size(path) < 1.5 * 1024^2) {
+    half <- paste(rep("a", 45), collapse = "")
+    writeLines(
+      c("ID,PAD", sprintf('%07d,"%s\n%s"', seq_len(18000), half, half)),
+      path
+    )
+  }
+  path
+}
+
+test_that("a quoted line break past the first block needs the handler to declare it", {
+  path <- newline_fixture()
+  on.exit(unlink(path), add = TRUE)
+  expect_gt(file.size(path), 1.5 * 1024^2)
+
+  plain <- DTAFileCSV(filename = basename(path))
+  declaring <- DTAFileCSV(filename = basename(path), newlines_in_values = TRUE)
+
+  # Undeclared, a quoted value crosses a block boundary and both paths refuse
+  # the file -- the same file, the same failure, which is the point. Arrow's
+  # own English, not a translated base-R message.
+  eager_error <- expect_error(
+    as.data.frame(read_file(plain, path)),
+    regexp = "CSV parse error"
+  )
+  lazy_error <- expect_error(
+    as.data.frame(open_file(plain, path)),
+    regexp = "CSV parse error"
+  )
+  expect_identical(conditionMessage(eager_error), conditionMessage(lazy_error))
+
+  eager <- as.data.frame(read_file(declaring, path))
+  lazy <- as.data.frame(open_file(declaring, path))
+
+  expect_equal(nrow(eager), 18000)
+  expect_equal(nrow(lazy), 18000)
+  # The line break is inside the value, not between rows.
+  expect_identical(as.character(eager$PAD[[15000]]), as.character(lazy$PAD[[15000]]))
+  expect_match(as.character(eager$PAD[[15000]]), "\n", fixed = TRUE)
+})
+
+test_that("a declared quoted line break survives a check on both paths", {
+  path <- newline_fixture()
+  on.exit(unlink(path), add = TRUE)
+
+  specs <- DTAColumnSpecCollection(columns = list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    PAD = DTAColumnSpec(id = "PAD", type = "SAS Char", length = 200, nullable = FALSE)
+  ))
+
+  verdict <- function(stream) {
+    ds <- DTADataSetTabular(
+      name = "nl",
+      specs = specs,
+      files = list(DTAFileCSV(filename = basename(path), newlines_in_values = TRUE))
+    )
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    checked <- check(ds, quiet = TRUE, persist = FALSE)
+    checked@validation_store[[tools::file_path_sans_ext(basename(path))]]
+  }
+
+  eager <- verdict("never")
+  lazy <- verdict("always")
+
+  for (field in c("ok", "n_columnspec_errors", "n_rule_errors", "n_import_errors")) {
+    expect_identical(lazy[[field]], eager[[field]], info = field)
+  }
+  expect_true(eager$ok)
+})
+
+# ---- character encoding ------------------------------------------------------
+
+latin1_fixture <- function() {
+  path <- file.path(tempdir(), "stream_latin1.csv")
+  con <- file(path, "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(
+    c(
+      charToRaw("NAME,V\n"),
+      as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(",1\n"),
+      charToRaw("Ann,2\n")
+    ),
+    con
+  )
+  path
+}
+
+test_that("a declared latin1 encoding is decoded by the in-memory reader", {
+  path <- latin1_fixture()
+  on.exit(unlink(path), add = TRUE)
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+  got <- as.data.frame(read_file(declaring, path))
+
+  expect_identical(got$NAME, c("Jürgen", "Ann"))
+
+  # Without the declaration arrow sees invalid UTF-8 and hands back the raw
+  # bytes as a binary column -- a file that "loads" and is unusable.
+  plain <- as.data.frame(read_file(DTAFileCSV(filename = basename(path)), path))
+  expect_false(is.character(plain$NAME))
+})
+
+test_that("a non-UTF-8 encoding is refused for lazy scanning rather than misread", {
+  path <- latin1_fixture()
+  on.exit(unlink(path), add = TRUE)
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+
+  # Arrow re-encodes by wrapping the input stream, which only the in-memory
+  # reader owns; a dataset opens its own files and would read the bytes as if
+  # they were UTF-8. Saying so beats two paths disagreeing about the data.
+  expect_error(open_file(declaring, path), "cannot be validated lazily")
+  expect_error(open_file(declaring, path), "stream = \"never\"", fixed = TRUE)
+})
+
+test_that("a latin1 header name is decoded for the in-memory reader", {
+  path <- file.path(tempdir(), "stream_latin1_header.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(c(as.raw(c(0x4e, 0x41, 0x4d, 0xc9)), charToRaw(",V\nAnn,1\n")), con)
+  close(con)
+
+  # The names come from a dataset open, which does NOT re-encode; without the
+  # explicit conversion the eager reader would be handed names that disagree
+  # with the ones it decodes for itself.
+  got <- read_file(DTAFileCSV(filename = basename(path), encoding = "latin1"), path)
+  expect_identical(names(got), c("NAMÉ", "V"))
+})

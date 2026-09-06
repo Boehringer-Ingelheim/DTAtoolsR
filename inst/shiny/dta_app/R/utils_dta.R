@@ -655,9 +655,24 @@ dta_dataset_table_names <- function(ds) {
 # validation_status(), messages(), inspect(), and dta_unload_table() all key
 # on). For tabular datasets, the key is the basename WITHOUT extension
 # (a table name). Must be vectorised over filename.
+#
+# For a tabular dataset a COMPRESSION suffix is stripped before the extension,
+# so "x.csv" and "x.csv.gz" name the same table -- the rule load_file() applies
+# in the package. Without it, re-uploading a gzipped copy of an already loaded
+# file added a second table called "x.csv" beside "x", carrying the old data
+# and the old verdict. Only gzip is listed, matching the package's
+# dta_compression_extensions(); it is restated here rather than called because
+# that helper is internal to DTAtools and this file is sourced by Shiny, not
+# by the package.
 dta_bound_item_name <- function(type, filename) {
   base <- basename(filename)
-  if (identical(type, "file")) base else tools::file_path_sans_ext(base)
+  if (identical(type, "file")) {
+    return(base)
+  }
+
+  compressed <- tolower(tools::file_ext(base)) %in% "gz"
+  base[compressed] <- tools::file_path_sans_ext(base[compressed])
+  tools::file_path_sans_ext(base)
 }
 
 # Per-table validation status: named vector

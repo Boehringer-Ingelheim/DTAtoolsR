@@ -29,6 +29,11 @@ artifacts to disk.}
 \item{artifact_dir}{Character or NULL. Optional output directory for
 persisted validation artifacts.}
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+\item{batch_rows, max_errors, fail_fast, on_missing_column, use_threads}{
+Accepted and ignored. They tune the scan of a tabular table; a file
+dataset reads no rows. They are declared so \code{check()} on a
+\code{DTA} can forward one argument list to every dataset it holds
+without branching on the dataset's class.}
 }}
 }
 \value{
@@ -40,7 +45,10 @@ validated datasets having their \code{validation_index} and
 \describe{
 \item{\code{"last_validation_summary"}}{data.frame with one row per
 dataset and columns dataset, n_targets, n_validated, n_valid,
-n_invalid, n_skipped, n_unchecked, n_import_errors.}
+n_invalid, n_skipped, n_unchecked, n_undelivered, n_import_errors.
+\code{n_undelivered} is 1 for a dataset that holds no target at all -
+it has no unchecked target to count, yet nothing about it was
+checked.}
 \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 axis, with columns scope, status, import_valid, n_import_errors, fields,
 ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -48,8 +56,9 @@ dataset, so it is reported as its own DTA-level result and never as a
 row of the per-dataset summary.}
 \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 no dataset is invalid, no table has an import error, the metadata
-imported cleanly, and no target -- e.g. a table checked against zero
-column specs -- was left unchecked.}
+imported cleanly, no target -- e.g. a table checked against zero
+column specs -- was left unchecked, and every dataset had something to
+check in the first place.}
 \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 one-row data.frame of runtime/memory metrics; see
 \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this

@@ -69,6 +69,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `label: null` used to be the same instruction; so did an absent and an
   explicitly empty vocabulary or party selection.
 
+- **A delimited handler can now describe a file whose values contain line
+  breaks, or whose bytes are not UTF-8.** `newlines_in_values` (default
+  `FALSE`) tells the reader that a quoted value may span lines, which such a
+  file needs before it can be read at all; `encoding` (default `"UTF-8"`)
+  names the file's character encoding. Both are ordinary handler fields, so
+  they can be written in the YAML beside `sep:` and `quote:` and survive a
+  round trip. `encoding` is honoured when the file is read into memory. A
+  streamed load refuses a non-UTF-8 declaration outright and says why: the
+  dataset scanner has no re-encoding step, so it would read the bytes as
+  though they were UTF-8 and report the damage as data errors.
+
+- `options(DTAtools.stream_block_size = )` sets the number of bytes Arrow
+  reads per block when it scans a delimited file, defaulting to Arrow's own
+  1 MiB. That block, not `batch_rows`, is what a batch of a delimited scan
+  actually is — `batch_rows` only caps a batch that is already larger — so
+  peak memory during a scan follows the block size times Arrow's read-ahead.
+  `load_file()` and `check()` now document that relationship instead of
+  implying `batch_rows` governs it.
+
+- The details a streamed check returns now carry `import_typing_errors`: the
+  import-typing failures on their own, beside the merged `import_errors`.
+  That is the axis a table read into memory records at load, so a lazily
+  loaded table's recorded import issues now hold the same thing as an eagerly
+  loaded one's, and the two paths can be compared on it directly.
+
 ### Changed
 
 - **The Edit menu's way into editing is a toggle again.** "Edit current
@@ -170,6 +195,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   be left armed behind a control that has been removed from the page — the
   trap that the landing-page fix below was written for.
 
+- **Given a specification, every column of a delimited file is now read as
+  text, on both paths.** The in-memory reader pinned only the declared columns
+  to text and left Arrow to infer the rest, while a streamed read left the
+  whole file as text — so a column the specification does not mention arrived
+  as a number in memory and as a string when streamed. Both readers now build
+  one plan from one reading of the header, and a specification-driven read
+  types nothing by inference. A bare `read_file()` on a handler, which has no
+  specification to go by, still infers every column as before.
+
+- A table's identity is stamped when it is imported instead of being
+  recomputed on every `check()`. The old signal wrote the whole table to a
+  gzipped temporary file and hashed that, which on a large table cost more
+  than the validation it was there to skip; the stamp now travels with the
+  table, and the fallback hashes the frame directly. What the signal means is
+  unchanged — editing a cell, or carrying different import issues, still
+  changes it — so the skip-if-unchanged gate behaves exactly as before.
+
+- `max_errors` now also bounds the detail retained for a table held in
+  memory, where it previously applied only to a streamed scan. It bounds
+  retained detail alone: the reported counts and the verdict are computed from
+  the complete frames either way, and a capped frame is marked as truncated.
+  There is no spill for an in-memory table, so re-checking with a larger cap
+  recovers the dropped rows.
+
+- A uniqueness rule keyed on a declared-numeric column can now be answered by
+  Arrow's grouped aggregation rather than row by row in R. The key is
+  normalised inside the query the same way R normalises it, so the verdict is
+  the same one; a value Arrow cannot parse makes the query fail and the scan
+  falls back to the per-batch accumulator, as it already did for anything else
+  it could not take.
+
+- A delimited file whose header repeats a column name is refused with a
+  message naming the file, on both paths. Names can collide after quotes and
+  spaces are trimmed as well as before, and the old failure surfaced from deep
+  inside Arrow with no mention of the trimming, the column, or the file.
+
+- `collect_full_errors()` warns when it cannot give back everything: a table
+  checked in memory under a `max_errors` cap keeps only the retained rows,
+  since nothing was spilled to disk, and the function now says how many of the
+  counted rows it is returning instead of handing over the head in silence. It
+  also accepts `axis = "import_typing"` for the import-typing rows of a
+  streamed scan, which are spilled and recoverable like the other two axes.
+
+- An unusable `max_errors` -- `NA`, negative, or more than one value -- is an
+  error rather than being read as "no cap", which is what it silently meant
+  for a table checked in memory.
+
 ### Fixed
 
 - **Creating a new version no longer strands the document with no way back
@@ -207,6 +279,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **The edit control no longer appears in the brandbar on the landing page.**
   There is no document there to edit, so the slot stays empty until a
   specification is loaded or created, and empties again on "Start over".
+
+- **Loading a new file over an existing table no longer leaves the old file's
+  verdict in place.** Replacing a table kept the validation result recorded
+  under that name, so `validation_status()` and `messages()` went on
+  reporting the previous delivery as though it described the new one until
+  the dataset was checked again. A replaced table now returns to
+  `not_validated`, as a replaced file target already did.
+
+- **A tabular dataset with no tables loaded is reported as incomplete instead
+  of aborting.** `check()`, `results()` and `messages()` on a DTA containing
+  such a dataset failed outright, which made an ordinary intermediate state —
+  a specification whose deliveries have not arrived yet — impossible to
+  report on at all. The dataset now yields a zero-row status, counts as
+  undelivered rather than passed in the overall summary, and the summary lines
+  say that no tables are loaded.
+
+- **A table or file name containing `{` or `}` no longer aborts the output of
+  `check()`.** Such names reached the console formatter as part of the message
+  text rather than as a value, so a brace in one was read as the start of an
+  interpolation and the run died while printing its own progress. The
+  "cannot be found" and "does not match" messages about a file path had the
+  same fault.
+
+- **A lazily loaded table whose file has since been deleted is reported as a
+  failed target instead of aborting the check.** The scan now records the
+  missing file as a rule error naming the table and the path, and the run
+  carries on to the remaining tables.
+
+- **`check()` on a DTA now forwards `fail_fast`, `on_missing_column` and
+  `use_threads` to its datasets.** They were accepted only one level down, so
+  from the DTA there was no way to ask for `on_missing_column = "stop"` — the
+  structural-only check that answers a table missing a declared column without
+  scanning the file at all.
+
+- `handler_index` on a tabular dataset accepts a character index and defaults
+  to `1`, as its documentation had always promised, and refuses an absent,
+  missing or multiple index with the same message the file-dataset method
+  gives. It previously demanded a number and had no default.
+
+- A `.gz` delivery is stored under the same table name as its uncompressed
+  twin. `sales.csv` and `sales.csv.gz` became two tables, `sales` and
+  `sales.csv`, so re-delivering a file in compressed form quietly added a
+  table instead of replacing one. The names the app binds a file to follow the
+  same rule.
+
+- An object checked with `persist = TRUE` stays usable after its artifact
+  directory disappears. The directory only has to exist while artifacts are
+  being written; requiring it of every later modification meant a cleaned-up
+  temporary directory left the object impossible to edit.
+
+- A DTA holding an entry that is not a dataset aborts `check()` whether or not
+  it is quiet. The check sat inside the branch that prints progress, so
+  `quiet = TRUE` walked straight past a malformed document rather than
+  reporting it.
+
+- **The same file now yields the same rule verdict whether it is read into
+  memory or streamed.** A column the specification does not declare was
+  inferred as a number in memory but read as text when streamed, so a rule
+  reading it — a uniqueness rule over values written `1.5`, `1.50` and `2`,
+  say — could report duplicates on one path and none on the other. Undeclared
+  columns are now read as text on both.
+
+- Looking up a column's declared type while assembling an import-error frame
+  is done once per column rather than once per row, which is what made a large
+  frame of import errors take time out of all proportion to its size.
 
 ## [0.24.0] - 2026-08-31
 
