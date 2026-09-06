@@ -437,6 +437,26 @@ server <- function(input, output, session) {
   # open.
   editing <- reactive(isTRUE(rv$editing))
 
+  # Is the landing page showing? rv$structure is NULL there, and a list once a
+  # document is open -- often an EMPTY list, for a document with no datasets,
+  # which is why this asks is.null() rather than testing the length. Getting
+  # that wrong sends an author who has just created a specification, or who
+  # has removed its last dataset, straight back to the landing page.
+  #
+  # The same question is asked in five places (output$main, output$edit_gate,
+  # output$floating_msgs, and the two create-new observers below), and was
+  # spelled out by hand at each of them; naming it once means the empty-list
+  # distinction is decided in a single spot rather than re-derived five times.
+  #
+  # Deliberately a plain function and not a reactive. The three renderUI
+  # callers must NOT take a dependency on rv$structure -- see output$main,
+  # where rebuilding the workspace DOM on every dataset add would reset the
+  # active nav tab and every file input -- so they depend on rv$doc_token and
+  # wrap this in isolate() themselves. Isolating in here instead would hide
+  # that decision from the comments that explain it, and would silently deny
+  # a future caller that genuinely wants to follow the value.
+  on_landing <- function() is.null(rv$structure)
+
   # Turning Edit mode off closes whatever editor was open and disarms it.
   #
   # The file/column/rule/dataset-metadata save handlers resolve their target
@@ -475,7 +495,7 @@ server <- function(input, output, session) {
   # load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       NULL
     } else {
       tagList(
@@ -855,13 +875,15 @@ server <- function(input, output, session) {
     # never mid-edit. `start_editing` chooses which way this is written; it
     # does not skip the write, so that guarantee holds either way.
     #
-    # Only the landing page's "Create new" passes TRUE. An empty document has
-    # no datasets AND -- because output$add_dataset_ui is gated purely on
-    # editing() -- no "+ Add dataset" control until edit mode is on, so
-    # arriving read-only would leave the user in a workspace with nothing to
-    # do and no visible way forward. Every other caller keeps the default: a
-    # document LOADED from an existing one is read-only until versioned, and a
-    # template-created one still starts read-only.
+    # The two callers that CREATE a document in this session -- "Create new"
+    # and template creation -- pass TRUE. A document the author just made
+    # should be editable right away rather than costing a trip through the
+    # Edit menu, and an empty one especially so, since output$add_dataset_ui
+    # is gated purely on editing() and offers no "+ Add dataset" control
+    # until edit mode is on. A document LOADED from an existing one keeps
+    # the default and arrives read-only; it can still be unlocked from the
+    # Edit menu without creating a version -- rv$version_locked only decides
+    # that menu's emphasis, not whether editing is possible at all.
     rv$editing <- isTRUE(start_editing)
     autosave()
   }
@@ -1316,15 +1338,27 @@ server <- function(input, output, session) {
   # carry a name.
   #
   # Both observers below refuse to run unless the app is on the landing page
-  # (rv$structure NULL). The button only EXISTS there, but its input id
-  # outlives the landing DOM, so a delayed or duplicated websocket message
+  # (on_landing(), defined above). The button only EXISTS there, but its input
+  # id outlives the landing DOM, so a delayed or duplicated websocket message
   # could otherwise silently replace a document the user has already loaded
-  # and edited. The document a user has been working on is the one thing in
-  # this app that cannot be recovered from disk, so the cheap guard is worth
-  # it even though the message is unlikely.
+  # and edited. Autosave would leave the last snapshot on disk, but everything
+  # done since it is gone, so the cheap guard is worth it even though the
+  # message is unlikely.
+  #
+  # The app's other landing-only inputs -- the YAML upload, the example
+  # loader, the two template steps, the restore button -- deliberately do NOT
+  # carry this guard, and the asymmetry is a decision rather than an
+  # oversight. None of them is reachable from the workspace either, so the
+  # guard would not fire for any of them today; and req() cancels SILENTLY, so
+  # a future route into one of them from the workspace (drag-and-drop onto an
+  # open document, an "open recent" entry) would then do nothing at all, with
+  # no error to say why. If it ever has to hold for all of them, on_landing()
+  # is the seam to widen -- and the tests that drive those inputs twice in one
+  # session would need a confirm_reset() between the two, which is the only
+  # sequence a user can actually perform.
 
   observeEvent(input$create_new, {
-    req(is.null(rv$structure))
+    req(on_landing())
     rv$create_new_msg <- NULL
     rv$create_new_token <- rv$create_new_token + 1
     showModal(modalDialog(
@@ -1345,7 +1379,13 @@ server <- function(input, output, session) {
         value = "", width = "100%",
         placeholder = "e.g. Clinical Data Transfer"
       ),
-      textInput("create_new_version", "Version", value = "1.0", width = "100%"),
+      # This field cannot be called "create_new_version": that id already
+      # belongs to the Edit menu's "Create new version" row (the
+      # observeEvent(input$create_new_version) handler above). Two controls
+      # sharing one input id means typing a version here also fires that
+      # row's version-bump observer, and Shiny logs "Duplicate input ID was
+      # found" on every use of this modal.
+      textInput("create_new_version_value", "Version", value = "1.0", width = "100%"),
       div(
         class = "msg-hint",
         HTML("The new DTA starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab.")
@@ -1363,9 +1403,9 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_confirm, {
-    req(is.null(rv$structure))
+    req(on_landing())
     title <- trimws(as.character(input$create_new_title %||% "")[1])
-    version <- trimws(as.character(input$create_new_version %||% "")[1])
+    version <- trimws(as.character(input$create_new_version_value %||% "")[1])
     # Every failure below leaves the modal open with what the user typed still
     # in it and changes nothing in rv. Deliberately NOT bumping
     # rv$create_new_token: that is create_new_body's only dependency, and
@@ -1679,21 +1719,14 @@ server <- function(input, output, session) {
     removeModal()
     # versioned deliberately left at its default (FALSE): a template-created
     # document is NEW, not loaded from an existing one, so it is not gated
-    # behind the "Create new version" flow.
+    # behind the "Create new version" flow. start_editing = TRUE is why the
+    # author lands in edit mode straight away, on the strength of the one
+    # autosave apply_loaded() already does, instead of arriving read-only and
+    # needing a second, corrective persist.
     apply_loaded(created$value, yaml_text,
-      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE
+      dataset_only = FALSE, is_example = FALSE, wrapped_dataset = FALSE,
+      start_editing = TRUE
     )
-    # apply_loaded() above always leaves rv$editing FALSE -- correct for a
-    # load, but this is not a load, it is a document just CREATED. Leaving it
-    # non-editing would strand the author in a read-only view of a document
-    # they made themselves seconds ago, one Edit-menu trip from being able to
-    # touch it.
-    rv$editing <- TRUE
-    # apply_loaded() autosaved a moment ago, while rv$editing was still FALSE,
-    # so the snapshot on disk contradicts the line above. Persist again or a
-    # reload right after creating the document restores it read-only -- the
-    # very outcome the comment above says this code exists to prevent.
-    autosave()
     showNotification(
       paste0("New DTA created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
       type = "message"
@@ -2351,6 +2384,21 @@ server <- function(input, output, session) {
     names_ds <- dta_dataset_names(rv$dta)
     targets <- if (is.null(dataset)) names_ds else intersect(dataset, names_ds)
     if (length(targets) == 0) {
+      # targets is empty two different ways, and only one of them deserves a
+      # notification. names_ds itself empty means the document has no
+      # datasets at all -- e.g. right after "Create new" -- so the sidebar's
+      # "Check all datasets" button would otherwise do and say nothing when
+      # pressed. The other way, a non-empty `dataset` that intersect() wiped
+      # out entirely, means the caller named a dataset that is no longer in
+      # the document (renamed or removed out from under it); that is a stale
+      # reference rather than a user action to react to, so it keeps today's
+      # silent return.
+      if (length(names_ds) == 0) {
+        showNotification(
+          "This specification has no datasets yet \u2014 add one with + Add dataset before validating.",
+          type = "warning", duration = 8
+        )
+      }
       return()
     }
 
@@ -4699,7 +4747,7 @@ server <- function(input, output, session) {
   # produced messages.
   output$floating_msgs <- renderUI({
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       return(NULL)
     }
     div(
@@ -6739,7 +6787,22 @@ server <- function(input, output, session) {
 
   # --- dataset detail (structure only -> stable file inputs) --------------
   output$dataset_detail <- renderUI({
-    req(rv$active, rv$structure)
+    # rv$structure is an empty list -- not NULL -- for a document with no
+    # datasets, which is exactly what keeps output$main above on the
+    # workspace rather than the landing page (on_landing() asks is.null(),
+    # deliberately, and not the length). So this is the workspace's own
+    # empty state for the no-datasets case, reached both right after
+    # "Create new" and after removing a document's last dataset; without it,
+    # req(rv$active) below fails silently and the whole Datasets tab body
+    # renders nothing.
+    req(rv$structure)
+    if (length(rv$structure) == 0) {
+      return(div(
+        class = "msg-hint",
+        "This specification has no datasets yet. Use + Add dataset in the sidebar to create the first one, and fill in the rest of the document on the Metadata tab."
+      ))
+    }
+    req(rv$active)
     s <- rv$structure[[rv$active]]
     req(!is.null(s))
     ds_idx <- s$index
@@ -6862,7 +6925,7 @@ server <- function(input, output, session) {
     # assignment that changes THAT answer also bumps rv$doc_token. Live bits
     # live in their own outputs.
     rv$doc_token
-    if (is.null(isolate(rv$structure))) {
+    if (isolate(on_landing())) {
       # Landing. Reference input$dta_client_id directly so this re-renders once
       # the browser reports its id and the restore button can appear.
       restore_available <- {
@@ -7027,11 +7090,31 @@ server <- function(input, output, session) {
         recs
       }
     })
+    restored_names <- dta_dataset_names(restored)
     rv$status <- saved$status %||% stats::setNames(
-      rep("pending", length(dta_dataset_names(restored))),
-      dta_dataset_names(restored)
+      rep("pending", length(restored_names)),
+      restored_names
     )
-    rv$active <- saved$active %||% (dta_dataset_names(restored)[1] %||% NULL)
+    # character(0)[1] is not zero-length -- it is a length-one
+    # NA_character_ -- and this app's %||% only substitutes for NULL or a
+    # genuinely zero-length value, so for a document with no datasets that
+    # NA would sail straight through instead of becoming the NULL every
+    # other rv$active assignment uses (see apply_loaded() above, which
+    # guards the same length before indexing). Left as NA, rv$active leaks
+    # into user-facing text -- the validation dock tooltip, download
+    # filenames like "NA_validation_messages" -- and the next autosave
+    # writes it back out, so once it appears it survives further reloads.
+    #
+    # `saved$active` is read through the same lens rather than trusted: a
+    # session file written before this fix can already CARRY the NA, and
+    # %||% would not substitute it there either, so a document saved by the
+    # older build would keep leaking the NA no matter how carefully the
+    # fallback below is computed. Treating a missing value as no selection
+    # is right whatever wrote the file.
+    saved_active <- saved$active
+    if (length(saved_active) == 1L && is.na(saved_active)) saved_active <- NULL
+    rv$active <- saved_active %||%
+      (if (length(restored_names) > 0) restored_names[1] else NULL)
     rv$dataset_only <- isTRUE(saved$dataset_only)
     rv$is_example <- isTRUE(saved$is_example)
     # A session file written before the versioning feature existed has none
@@ -7042,7 +7125,25 @@ server <- function(input, output, session) {
     # older session reopening editable by default would be a quiet regression
     # of that rule rather than a neutral default.
     rv$version_locked <- if (is.null(saved$version_locked)) TRUE else isTRUE(saved$version_locked)
-    rv$version_baseline_yaml <- saved$version_baseline_yaml %||% saved$yaml_text
+    # %||% cannot tell "this field is absent because the session file
+    # predates the versioning feature" from "the field is present and
+    # legitimately NULL" -- and NULL is legitimate here: apply_loaded()
+    # stores NULL for a document CREATED in this session (versioned =
+    # FALSE), and new_version_confirm() relies on that NULL to re-baseline
+    # at the moment of the first version bump. Coalescing an absent field
+    # to saved$yaml_text would fold edits made before that bump into the
+    # new version's change summary, but only when the author happened to
+    # reload in between -- so this reuses is.null(saved$version_locked),
+    # the same pre-versioning-file test the line above already makes,
+    # rather than reaching for %||%. The version_entry_index assignment
+    # just below draws the identical absent-vs-NULL line for the same
+    # reason (its comment reads "NOT %||% -- NULL is a legitimate value
+    # here").
+    rv$version_baseline_yaml <- if (is.null(saved$version_locked)) {
+      saved$yaml_text
+    } else {
+      saved$version_baseline_yaml
+    }
     # NOT %||% -- NULL is a legitimate value here (no version entry opened
     # yet this session), so coalescing it to a default would misattribute a
     # change summary to the wrong version_history entry on the next export.

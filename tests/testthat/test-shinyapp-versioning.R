@@ -563,11 +563,12 @@ test_that("a version equal to the current one is refused, leaving the document u
 })
 
 test_that("loading a second document re-arms the lock, even though the first was actively being edited", {
-  # apply_loaded() unconditionally resets rv$editing to FALSE and
-  # rv$version_locked to the freshly loaded document's own `versioned` flag
-  # (see the WHY comment on apply_loaded() in app.R) -- editing state from
-  # whatever was open before a reload (e.g. the example loader replacing the
-  # current document) must not carry forward onto what loads next.
+  # apply_loaded() unconditionally writes rv$editing to isTRUE(start_editing)
+  # -- FALSE here, since load_fixture() does not pass start_editing = TRUE --
+  # and rv$version_locked to the freshly loaded document's own `versioned`
+  # flag (see the WHY comment on apply_loaded() in app.R) -- editing state
+  # from whatever was open before a reload (e.g. the example loader replacing
+  # the current document) must not carry forward onto what loads next.
   clean_session_file()
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
