@@ -68,7 +68,16 @@ DTADataSetTabular <- S7::new_class(
     # table is typed at scan time either way.
     is_lazy <- vapply(tables, dta_table_is_lazy, logical(1))
 
-    coerced <- lapply(tables[!is_lazy], function(tbl) dta_coerce_table_to_specs(tbl, specs))
+    # The conversion to Arrow happens BEFORE the coercion, not after it, so that
+    # dta_coerce_table_to_specs() sees an Arrow Table and can stamp the returned
+    # Table with the content hash check() later reads instead of recomputing.
+    # Handing it a plain data frame produced a frame, and the stamp -- which
+    # only exists on a Table -- was never applied. The call below is kept: it is
+    # a no-op for a Table and keeps this constructor's contract explicit.
+    coerced <- lapply(
+      tables[!is_lazy],
+      function(tbl) dta_coerce_table_to_specs(arrow::as_arrow_table(tbl), specs)
+    )
 
     # Transform the materialised entries to arrow tables; lazy entries keep the
     # class they arrived with.
@@ -187,8 +196,22 @@ DTADataSetTabular <- S7::new_class(
     #  cli_abort("Properties 'validation_index' and 'validation_store' must be of the same length")
     # }
 
-    if (!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
-      cli_abort("Property 'validation_artifact_dir' must be a valid directory path or NULL")
+    # Deliberately NOT dir.exists(): the property remembers WHERE artifacts were
+    # written, and the directory it names is temporary by default. An object
+    # saved with saveRDS() and restored in a later session -- or simply after
+    # tempdir() was cleaned -- then carries a path that no longer exists, and
+    # requiring the directory here made EVERY subsequent modification of that
+    # object abort (S7 revalidates on each property assignment), so it could no
+    # longer be loaded into, cleared, or even checked with persist = FALSE.
+    # check(persist = TRUE) creates the directory itself, which is the only
+    # moment its existence actually matters.
+    if (
+      !is.null(self@validation_artifact_dir) &&
+        (!is.character(self@validation_artifact_dir) ||
+          length(self@validation_artifact_dir) != 1 ||
+          is.na(self@validation_artifact_dir))
+    ) {
+      cli_abort("Property 'validation_artifact_dir' must be a single directory path or NULL")
     }
 
     # if tables are present, check if the column names of the tables match the column names in the specs if specs are present
@@ -703,9 +726,14 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #' @param ... Additional named arguments:
 #'   \describe{
 #'     \item{file}{file to be loaded}
-#'     \item{handler_index}{of the filehandler in the files list}
-#'     \item{name}{file name, base name per default. is used to store the
-#'       table under this name}
+#'     \item{handler_index}{Single character or numeric index selecting the file
+#'       handler within the dataset. Defaults to \code{1}.}
+#'     \item{name}{Name the table is stored under. Defaults to the file's base
+#'       name with any compression suffix and then the extension removed, so
+#'       \code{x.csv} and \code{x.csv.gz} name the same table and a compressed
+#'       redelivery replaces the earlier one instead of adding a second.
+#'       Loading under a name that is already bound drops that table's
+#'       validation state, so no report shows the replaced table's verdict.}
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
 #'       memory. See \code{\link{load_file}}.}
 #'   }
@@ -733,16 +761,47 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 method(load_file, DTADataSetTabular) <- function(
   x,
   file,
-  handler_index,
-  name = tools::file_path_sans_ext(basename(file)),
+  # Defaulted to 1, as the documentation has always promised and as the file
+  # dataset's method already does. Without the default a caller who omitted it
+  # hit R's own "argument is missing" from inside the guard below.
+  handler_index = 1,
+  # The compression suffix is stripped BEFORE the extension, so `x.csv` and
+  # `x.csv.gz` name the same table. Stripping only the last extension made a
+  # gzipped redelivery land under `x.csv` -- a second table beside `x`, with the
+  # first one's data and verdict left standing next to it.
+  name = tools::file_path_sans_ext(dta_strip_compression_extension(basename(file))),
   stream = getOption("DTAtools.stream", "auto")
 ) {
-  # check if handler_index is valid and if the file exists in the files list
-  if (handler_index < 1 || handler_index > length(x@files)) {
-    cli::cli_abort("Invalid handler_index: {handler_index}. Must be between 1 and {length(x@files)}.")
-  }
+  # Shared with the file dataset's method rather than restated. The guard this
+  # replaces was `handler_index < 1 || handler_index > length(x@files)`, run on
+  # a value that could be NULL, NA, length > 1 or character -- so `"1"` reached
+  # files() as a NAME and aborted with "The following datasets not found: 1",
+  # even though a character index is documented as accepted.
+  handler_index <- dta_resolve_file_handler_index(handler_index, x@files)
 
   handler <- files(x, handler_index)
+
+  # Validated here, before `name` (whose default is derived from `file`) is
+  # first forced by the replacement guard below: a non-scalar `file` would
+  # otherwise reach that `if` as a length > 1 condition and die with R's own
+  # message instead of this package's.
+  file <- dta_assert_single_file_path(file, "load_file")
+  if (!is.character(name) || length(name) != 1 || is.na(name) || !nzchar(name)) {
+    cli::cli_abort(
+      "{.fn load_file} requires {.arg name} to be a single non-missing, non-empty string."
+    )
+  }
+
+  # Whatever is bound under this name now is about to be replaced, so any
+  # verdict recorded against it describes data that is no longer here. Left
+  # behind, validation_status() keeps reporting the replaced table's result
+  # under the new table's name until the next check() happens to run -- the file
+  # dataset's method already clears its counterpart on replacement, and this
+  # mirrors it. Import issues are re-derived below on both branches.
+  if (name %in% names(x@tables)) {
+    x@validation_index[[name]] <- NULL
+    x@validation_store[[name]] <- NULL
+  }
 
   # This is where a dataset's specs and its file handler meet, so it is the only
   # place that can tell the reader what the columns are: `read_file()` dispatches
@@ -789,6 +848,32 @@ method(load_file, DTADataSetTabular) <- function(
   }
 
   x
+}
+
+# The files a lazily held table plans to scan that are no longer there.
+#
+# Only an Arrow `Dataset` is inspected. That is what `load_file(stream =
+# "always")` produces, it is the only holding whose backing files are knowable
+# without consuming it (`$files` is read from the plan, not from disk), and it
+# is the one `dta_table_change_signal()` already fingerprints the same way. A
+# materialised Table has no files; a reader or a query is left to the scanner,
+# which is where any other failure has always surfaced.
+#
+# Returns `character(0)` -- "nothing missing, carry on" -- for every other
+# holding and whenever the file list cannot be read at all. An unfamiliar
+# holding is a reason to fall back to scanning, not a reason to fail.
+#' @keywords internal
+dta_missing_table_files <- function(table) {
+  if (!inherits(table, "Dataset")) {
+    return(character(0))
+  }
+
+  files <- tryCatch(table$files, error = function(e) character(0))
+  if (length(files) == 0) {
+    return(character(0))
+  }
+
+  files[!file.exists(files)]
 }
 
 # The status row of a table checked against zero column specs. There is nothing
@@ -887,6 +972,15 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
       index_entry = entry
     )
   })
+
+  # rbind() of an empty list is NULL, and check(DTA) calls nrow() on whatever
+  # this returns -- so a dataset with no tables bound yet has to answer with an
+  # empty FRAME carrying the real columns, not with nothing at all. The file
+  # dataset's method has always done this; the tabular one used to abort long
+  # before reaching here, taking the whole DTA's report down with it.
+  if (length(rows) == 0) {
+    return(dta_file_empty_status_row(character(0), target_type = "table"))
+  }
 
   do.call(rbind, rows)
 }
@@ -1039,8 +1133,12 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'     \item{batch_rows}{Integer. Rows per batch when scanning a table that was
 #'       loaded with \code{stream = "always"}. Ignored for a table held in
 #'       memory. Defaults to
-#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. Larger batches
-#'       are faster but hold more rows in memory at once.}
+#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. On a delimited
+#'       file a batch is one Arrow read block of about
+#'       \code{getOption("DTAtools.stream_block_size")} bytes (1 MiB by
+#'       default), and \code{batch_rows} only \emph{caps} a batch that is
+#'       already larger. Peak memory during such a scan is therefore governed by
+#'       the block size times Arrow's read-ahead, not by \code{batch_rows}.}
 #'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
 #'       the number of per-cell errors whose detail is held in RAM while
 #'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
@@ -1048,8 +1146,10 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       unbounded cap exhausts memory on a large dirty file exactly as holding
 #'       the data would. The reported \emph{counts} and the verdict are exact
 #'       either way, and rows past the cap spill to a session-temporary store
-#'       that \code{\link{collect_full_errors}()} reassembles. Ignored for a
-#'       table held in memory.}
+#'       that \code{\link{collect_full_errors}()} reassembles. It applies to a
+#'       table held in memory as well, where it bounds retained detail only --
+#'       there is no spill there, so re-checking with a larger cap recovers the
+#'       dropped rows.}
 #'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
 #'       shows any problem instead of scanning to the end. On a table large
 #'       enough to take hours, this answers \emph{is this valid?} without paying
@@ -1147,6 +1247,28 @@ S7::method(check, DTADataSetTabular) <- function(
   specs_hash <- dta_hash_object(as.list(x@specs))
   output_rows <- list()
 
+  # A dataset with no table bound is the ordinary state of a specification
+  # whose data has not been delivered yet. It has to REPORT that -- and let
+  # check(DTA) count it as work that did not happen -- rather than abort, which
+  # is what it did before: one undelivered dataset took down the check(),
+  # results() and messages() of every other dataset in the same DTA. The
+  # summary attribute is a zero-row FRAME, never NULL, so nrow()/rbind() on it
+  # keep working.
+  if (length(target_tables) == 0) {
+    if (!isTRUE(quiet)) {
+      cli::cli_alert_warning(
+        "Dataset {.field {x@name}} has no tables loaded; nothing was checked."
+      )
+    }
+
+    attr(x, "last_validation_summary") <- dta_file_empty_status_row(
+      character(0),
+      target_type = "table"
+    )
+
+    return(invisible(x))
+  }
+
   if (persist) {
     if (is.null(artifact_dir)) {
       artifact_dir <- if (!is.null(x@validation_artifact_dir)) {
@@ -1237,13 +1359,83 @@ S7::method(check, DTADataSetTabular) <- function(
       next
     }
 
+    # A lazy table is a scan plan over files, not data, and the plan holds only
+    # while those files are there. Scanning one whose file has since been
+    # deleted or moved raises an Arrow IOError from deep inside the scanner,
+    # which took the whole check() down -- so one cleaned-up delivery destroyed
+    # the verdicts of every other table in the dataset. The absence is reported
+    # as THIS table's failure instead, in the same file-presence shape a file
+    # dataset uses for an undelivered target. The skip gate above has already
+    # run, and the change signal of a Dataset whose files are gone is stable
+    # (NA size, NA mtime), so a repeated check() skips exactly as it would for
+    # an undelivered file target rather than re-reporting the same absence.
+    absent_files <- dta_missing_table_files(current_table)
+    if (length(absent_files) > 0) {
+      absence <- list(
+        ok = FALSE,
+        message = sprintf(
+          "Table '%s' cannot be read: file '%s' not found.",
+          table_name, absent_files[[1]]
+        )
+      )
+      details <- dta_file_validation_details(absence)
+
+      if (!isTRUE(quiet)) {
+        # Interpolated: both the table name and the path are arbitrary text and
+        # a `{` in either would be parsed as a cli expression.
+        absence_message <- absence$message
+        cli::cli_alert_danger("{absence_message}")
+      }
+
+      validated_at <- Sys.time()
+      index_entry <- list(
+        validated_at = validated_at,
+        ok = FALSE,
+        table_hash = table_hash,
+        specs_hash = specs_hash,
+        n_columnspec_errors = details$n_columnspec_errors,
+        n_rule_errors = details$n_rule_errors,
+        n_import_errors = details$n_import_errors,
+        run_id = format(validated_at, "%Y%m%dT%H%M%OS3"),
+        validation_run = validation_run,
+        # Nothing was read, so there is nothing to persist -- exactly as the
+        # file dataset does for a target that never arrived.
+        artifact_path = NULL,
+        partial = FALSE
+      )
+
+      x@validation_index[[table_name]] <- index_entry
+      x@validation_store[[table_name]] <- details
+      # Derived from a table that could not be read, so whatever was recorded
+      # at load time no longer describes anything.
+      x@import_issues[[table_name]] <- NULL
+
+      if (single_table_mode) {
+        attr(x, "last_validation_details") <- dta_as_validation_details(details)
+      }
+
+      output_rows[[length(output_rows) + 1]] <- dta_validation_result_to_row(
+        table_name = table_name,
+        status = "validated",
+        index_entry = index_entry,
+        target_type = "table"
+      )
+      next
+    }
+
     # Output table name/index under investigation
     if (!isTRUE(quiet)) {
       cli::cli_text()
+      # The table name is INTERPOLATED, never pasted into the format string:
+      # cli parses `{...}` in what it is handed, so a table called `a{b}` (from
+      # a delivered `a{b}.csv`) aborted the entire run with "Could not evaluate
+      # cli `{}` expression". Braces inside an interpolated value are escaped
+      # by cli itself.
       if (single_table_mode) {
-        cli::cli_rule(paste0("Validating table: ", table_name))
+        cli::cli_rule("Validating table: {table_name}")
       } else {
-        cli::cli_rule(paste0("Table ", idx, " of ", length(target_tables), ": ", table_name))
+        n_target_tables <- length(target_tables)
+        cli::cli_rule("Table {idx} of {n_target_tables}: {table_name}")
       }
     }
 
@@ -1267,11 +1459,33 @@ S7::method(check, DTADataSetTabular) <- function(
     # `details$import_errors` is in the same row/column/raw/declared_type/
     # reason shape dta_coerce_table_to_specs() produces for the eager path, so
     # it drops in as the same kind of value.
+    #
+    # `import_typing_errors` is preferred over `import_errors` where the
+    # streaming result carries it: that field is the import-TYPING axis alone,
+    # which is exactly what the eager path records at load time, whereas
+    # `import_errors` merges typing with everything else the scan folded into
+    # the import axis. Taking the merged frame put a different KIND of value in
+    # @import_issues depending on how the table happened to be held. The
+    # fallback keeps working against a result (or a restored store entry) that
+    # predates the split.
+    #
+    # The field's PRESENCE decides, not its contents. Testing the value for
+    # NULL could not tell an empty typing axis from a result written before the
+    # field existed, and fell back to the merged frame for both -- so a streamed
+    # table whose only import errors were rule-time ones recorded those rows
+    # here while the same file loaded eagerly recorded none. The streaming path
+    # now always carries the field, so its absence means exactly one thing.
     if (dta_table_is_lazy(current_table)) {
-      x@import_issues[[table_name]] <- if (
-        is.data.frame(details$import_errors) && nrow(details$import_errors) > 0
-      ) {
+      import_issues <- if ("import_typing_errors" %in% names(details)) {
+        details$import_typing_errors
+      } else {
         details$import_errors
+      }
+
+      x@import_issues[[table_name]] <- if (
+        is.data.frame(import_issues) && nrow(import_issues) > 0
+      ) {
+        import_issues
       } else {
         NULL
       }
@@ -1347,9 +1561,7 @@ S7::method(check, DTADataSetTabular) <- function(
       table_word <- if (n_total == 1) "table" else "tables"
 
       if (n_invalid > 0) {
-        cli::cli_alert_danger(
-          paste0("", n_valid, " of ", n_total, " ", table_word, " valid")
-        )
+        cli::cli_alert_danger("{n_valid} of {n_total} {table_word} valid")
       } else if (n_valid < n_total) {
         # No table failed, but not every table was actually checked either --
         # e.g. a table validated against zero column specs, status
@@ -1357,13 +1569,12 @@ S7::method(check, DTADataSetTabular) <- function(
         # clean pass; falling into the success branch here is precisely the
         # "VALIDATION PASSED certificate covering ZERO checks" this status
         # exists to prevent.
+        n_unchecked <- n_total - n_valid
         cli::cli_alert_warning(
-          paste0("", n_valid, " of ", n_total, " ", table_word, " valid; ", n_total - n_valid, " not checked")
+          "{n_valid} of {n_total} {table_word} valid; {n_unchecked} not checked"
         )
       } else {
-        cli::cli_alert_success(
-          paste0("", n_total, " ", table_word, " passed validation")
-        )
+        cli::cli_alert_success("{n_total} {table_word} passed validation")
       }
     }
   }

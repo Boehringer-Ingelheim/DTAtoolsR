@@ -7,7 +7,8 @@
 dta_overall_summary_message(
   total_invalid,
   total_import_errors,
-  total_unchecked
+  total_unchecked,
+  total_undelivered = 0
 )
 }
 \arguments{
@@ -16,7 +17,12 @@ dta_overall_summary_message(
 \item{total_import_errors}{Integer. Values that could not be represented in
 their declared type, including the metadata axis.}
 
-\item{total_unchecked}{Integer. Targets carrying no verdict either way.}
+\item{total_unchecked}{Integer. Targets carrying no verdict either way,
+datasets holding no target at all included.}
+
+\item{total_undelivered}{Integer. How many of \code{total_unchecked} are whole
+datasets with nothing bound. Named separately in the line because "1 target
+was not checked" says nothing about which target, and there is none.}
 }
 \value{
 A list of \code{severity} (\code{"danger"}, \code{"warning"} or \code{"success"}) and

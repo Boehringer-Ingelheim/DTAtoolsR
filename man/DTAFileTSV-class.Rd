@@ -15,7 +15,9 @@ DTAFileTSV(
   info = NULL,
   has_header = TRUE,
   quote = "\\"",
-  missing_values = ""
+  missing_values = "",
+  newlines_in_values = FALSE,
+  encoding = "UTF-8"
 )
 }
 \arguments{
@@ -49,6 +51,12 @@ is \code{'"'}.}
 (for instance \code{"."} in the SAS convention), honoured in addition to
 the empty string. The default \code{""} declares nothing and keeps the
 reader's own missing set.}
+
+\item{newlines_in_values}{Logical; \code{TRUE} if a quoted field may contain
+a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.}
+
+\item{encoding}{Character; the file's character encoding. Default
+\code{"UTF-8"}. See \code{\link{DTAFileTabular}}.}
 }
 \value{
 An object of class \code{DTAFileTSV}.

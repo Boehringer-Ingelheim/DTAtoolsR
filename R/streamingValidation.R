@@ -255,9 +255,9 @@ dta_rule_stream_init <- function(rule) {
     # deliberately no key budget here any more: the old
     # DTAtools.max_unique_keys abort discarded a multi-hour scan at exactly
     # the per-row-unique-ID scale streaming exists for, which is worse than
-    # the memory growth it guarded -- that growth is now the exception (non-
-    # text keys, reader sources), not the rule, and it is documented instead
-    # of enforced.
+    # the memory growth it guarded -- that growth is now the exception
+    # (consumable reader sources, and keys Acero declines to form), not the
+    # rule, and it is documented instead of enforced.
     state$seen <- fastmap::fastmap()
   }
   if (kind == "grouped") {
@@ -594,6 +594,48 @@ dta_error_sink_collect <- function(sink) {
   out
 }
 
+# A frame flagged `truncated` with nowhere to read the missing rows from.
+#
+# The streaming sink spills what it cannot hold, so its truncation is always
+# recoverable. The materialising path's `max_errors` cap is not: the whole table
+# was in memory, so the dropped rows are recovered by validating again with a
+# larger cap rather than from disk. `collect_full_errors()` therefore has
+# nothing to collect there -- and returning the head in silence is how a partial
+# frame passes for a complete one, which for a function with this name is the
+# one failure that matters. Says which fraction of the detail it is instead.
+#' @param details The validation details list the frame came from.
+#' @param frame The error frame about to be returned.
+#' @param axis The axis name, for the message and for where the total is read.
+#' @noRd
+dta_warn_uncollectable_truncation <- function(details, frame, axis) {
+  if (!isTRUE(attr(frame, "truncated", exact = TRUE))) {
+    return(invisible(FALSE))
+  }
+
+  retained <- NROW(frame)
+  # The exact totals are never capped, whichever axis is asked for: the two
+  # import frames carry theirs as an attribute, and the column spec count is a
+  # field of the result.
+  total <- switch(axis,
+    columnspec = tryCatch(details$n_columnspec_errors, error = function(e) NULL),
+    import = tryCatch(details$n_import_errors, error = function(e) NULL),
+    import_typing = dta_import_error_count(frame)
+  )
+  if (length(total) != 1 || !is.numeric(total) || is.na(total) || total < retained) {
+    total <- retained
+  }
+
+  # `{?s}` pluralises on the quantity interpolated immediately before it, so
+  # the axis name is named first: with it in between, a 20-row total read as
+  # "20 columnspec error row".
+  cli::cli_warn(c(
+    "The {axis} axis returns {retained} of {total} error row{?s}: the rest were dropped by the retained-error cap, and this result holds no spilled copy of them.",
+    i = "The reported counts are unaffected. Validate again with a larger {.arg max_errors} to retain the detail."
+  ))
+
+  invisible(TRUE)
+}
+
 #' @title Every Retained and Spilled Error Row of a Validation Result
 #' @description
 #' A streaming scan keeps at most `max_errors` per-cell error rows in memory
@@ -606,12 +648,22 @@ dta_error_sink_collect <- function(sink) {
 #' session, not beyond it. Reading a persisted `details` artifact in a later
 #' session still yields the exact counts and the retained head; if the spill
 #' directory is gone, this warns and returns the head rather than failing.
+#' A result produced on the materialising path caps retained rows without
+#' spilling them -- the whole table was in memory, so the dropped rows are
+#' recovered by validating again with a larger `max_errors` rather than from
+#' disk. There is nothing to reassemble in that case, so this returns the
+#' retained head and warns, naming how much of the detail it is: silently
+#' handing back 3 rows of 20 as though they were all of them is the one thing a
+#' function called `collect_full_errors()` must not do.
 #' @param details A validation details list, as returned by
 #'   [validate_file_stream()] or stored by `check()`.
-#' @param axis One of `"columnspec"` or `"import"`: which error frame to
-#'   reassemble.
+#' @param axis One of `"columnspec"`, `"import"` or `"import_typing"`: which
+#'   error frame to reassemble. `"import"` is the merged import axis (values the
+#'   declared type could not represent, plus values a rule read numerically and
+#'   could not); `"import_typing"` is the typing half on its own, which a
+#'   streaming result carries separately and a materialising one does not.
 #' @return A data frame with one row per error, or `NULL` when the axis has
-#'   none. For the import axis, rows flagged by more than one source are
+#'   none. For the merged import axis, rows flagged by more than one source are
 #'   deduplicated by (row, column), matching how the counts were taken.
 #' @examples
 #' specs <- DTAtools::DTAColumnSpecCollection(
@@ -635,27 +687,34 @@ dta_error_sink_collect <- function(sink) {
 #'
 #' unlink(path)
 #' @export
-collect_full_errors <- function(details, axis = c("columnspec", "import")) {
+collect_full_errors <- function(details, axis = c("columnspec", "import", "import_typing")) {
   axis <- match.arg(axis)
 
-  frame <- if (identical(axis, "columnspec")) {
-    tryCatch(details$columnspec_errors$full_error, error = function(e) NULL)
-  } else {
-    tryCatch(details$import_errors, error = function(e) NULL)
-  }
+  frame <- switch(axis,
+    columnspec = tryCatch(details$columnspec_errors$full_error, error = function(e) NULL),
+    import = tryCatch(details$import_errors, error = function(e) NULL),
+    import_typing = tryCatch(details$import_typing_errors, error = function(e) NULL)
+  )
 
   if (is.null(frame)) {
     return(NULL)
   }
 
-  dirs <- if (identical(axis, "columnspec")) {
-    attr(frame, "spill_dir", exact = TRUE)
-  } else {
+  # The merged import axis is fed by two sinks and so carries two spill
+  # pointers; every other axis has one sink and one directory.
+  dirs <- if (identical(axis, "import")) {
     attr(frame, "spill_dirs", exact = TRUE)
+  } else {
+    attr(frame, "spill_dir", exact = TRUE)
   }
   dirs <- dirs[!is.na(dirs)]
 
   if (length(dirs) == 0) {
+    # Nothing was spilled. That is either "nothing was dropped" -- the frame IS
+    # complete -- or the materialising path's in-memory cap, which drops rows
+    # without a disk copy. Only the second case is worth a word, and it is worth
+    # one: the caller asked for everything and is getting a head.
+    dta_warn_uncollectable_truncation(details, frame, axis)
     return(frame)
   }
 
@@ -743,7 +802,16 @@ collect_full_errors <- function(details, axis = c("columnspec", "import")) {
 #'   still reports "could not be evaluated" exactly as the materialising path
 #'   does -- previously a header-only file certified such rules as passed.
 #' @return A `details` list of the same shape `validate_table_detailed()`
-#'   returns.
+#'   returns, plus `import_typing_errors`: the import-typing frame on its own,
+#'   before it is merged with the rule-time import errors into `import_errors`.
+#'   That is the axis a materialising load records in a dataset's
+#'   `import_issues` property, so a caller wanting to record the same thing for
+#'   a streamed table reads this rather than the merged frame. Always present --
+#'   a zero-row frame carrying `n_import_errors = 0` when no value failed to
+#'   type -- so that a consumer can tell an empty axis from a result written
+#'   before the field existed, which is the difference between recording nothing
+#'   and falling back to the merged frame. Consumers that do not know the field
+#'   ignore it: it is an extra list element, and nothing enumerates `details`.
 #' @keywords internal
 dta_validate_table_stream <- function(specs,
                                       reader,
@@ -830,6 +898,26 @@ dta_validate_table_stream <- function(specs,
     n_batch_rows <- nrow(df)
     if (n_batch_rows == 0) {
       next
+    }
+
+    # Arrow's `null` type -- an all-empty CSV column, a Parquet or user-supplied
+    # Dataset with a genuinely null-typed column -- converts to a
+    # `vctrs_unspecified` vector, which has no `asJSON` method and no numeric
+    # conversion, so it reaches the checks untyped and aborts the scan.
+    # `validate_table_detailed()` has replaced such columns with all-NA
+    # character since before streaming existed; the same substitution here is
+    # what makes the two paths agree on a column of nothing but missing values
+    # (nullable columns pass, non-nullable ones are flagged as missing).
+    unspecified_cols <- vapply(
+      df,
+      function(col) inherits(col, "vctrs_unspecified"),
+      logical(1)
+    )
+    if (any(unspecified_cols)) {
+      df[unspecified_cols] <- lapply(
+        df[unspecified_cols],
+        function(col) rep(NA_character_, length(col))
+      )
     }
 
     # Import typing, per batch. The materialising path types the whole table
@@ -1124,6 +1212,31 @@ dta_validate_table_stream <- function(specs,
     import_errors <- NULL
   }
 
+  # The import-TYPING half on its own, ALWAYS present -- see the field comment
+  # in `details` below for why the two frames are exposed separately. Present
+  # even when nothing failed to type, because its consumer cannot tell a `NULL`
+  # field from an absent one: `check()` falls back to the MERGED frame for a
+  # result that predates this field, so a streamed table whose only import
+  # errors were rule-time ones wrote those rows into `@import_issues` while the
+  # materialising path records none for the same file. A zero-row frame says
+  # "this axis is empty" where `NULL` said nothing at all.
+  #
+  # `carried` already carries the sink's `truncated`/`spilled_rows`/`spill_dir`
+  # attributes, so a capped scan stays recoverable through
+  # `collect_full_errors(details, "import_typing")`.
+  import_typing_errors <- if (!is.null(carried)) {
+    carried
+  } else {
+    empty_typing <- dta_empty_import_errors()
+    attr(empty_typing, "n_import_errors") <- dta_narrow_count(carried_sink$total)
+    if (carried_sink$total > 0) {
+      # Errors were counted but no row survived to be collected: the count is
+      # still exact, and the frame says the detail behind it is gone.
+      attr(empty_typing, "truncated") <- TRUE
+    }
+    empty_typing
+  }
+
   # The merged frame lost the per-sink spill attributes in rbind; put the
   # pointers back so collect_full_errors() can reassemble the full detail.
   if (!is.null(import_errors) &&
@@ -1152,6 +1265,17 @@ dta_validate_table_stream <- function(specs,
     rule_results = rule_results,
     rule_errors = rule_errors,
     import_errors = import_errors,
+    # The import-TYPING half on its own, alongside the merged frame above.
+    #
+    # `import_errors` fuses two axes: values the declared type could not
+    # represent (this frame) and values a rule read numerically and could not
+    # (the rule-time frame). The materialising path records only the first in a
+    # dataset's `@import_issues`, because that is all a table typed at load time
+    # can produce. Handing `check()` the merged frame for a streamed table put a
+    # different, wider axis in the same property -- so the Shiny app showed one
+    # set of import issues for a table loaded eagerly and another for the same
+    # file streamed. Exposed separately, `check()` can record like for like.
+    import_typing_errors = import_typing_errors,
     result_version = 2L
   )
 
@@ -1205,6 +1329,15 @@ dta_validate_table_stream <- function(specs,
 #' Import errors carry the observed storage type as a placeholder; the column
 #' spec's declared type replaces it where one exists. Shared with the
 #' materialising path's collection step.
+#'
+#' The declared type is a property of the COLUMN, not of the row that failed, so
+#' it is derived once per DISTINCT column and mapped back onto the rows. Derived
+#' per row instead, a single wholly mistyped column paid the whole lookup --
+#' `dta_spec_column_structure()` walking the collection, then an S7 dispatch
+#' through `as.list()` -- once for every one of its bad cells, to obtain the same
+#' answer every time: 1.4 s on a 10,000-row frame naming one column, against
+#' 0.001 s here. The result is identical by construction; only the number of
+#' lookups changes.
 #' @param errors A data frame of import errors.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @return The data frame, with `declared_type` filled in.
@@ -1213,12 +1346,15 @@ dta_apply_spec_declared_types <- function(errors, specs = NULL) {
   if (is.null(errors) || nrow(errors) == 0) {
     return(errors)
   }
-  declared <- vapply(
-    errors$column,
+  columns <- as.character(errors$column)
+  distinct <- unique(columns)
+  declared_per_column <- vapply(
+    distinct,
     function(column) dta_spec_declared_type(specs, column),
     character(1),
     USE.NAMES = FALSE
   )
+  declared <- declared_per_column[match(columns, distinct)]
   errors$declared_type <- ifelse(is.na(declared), errors$declared_type, declared)
   errors
 }
@@ -1882,9 +2018,18 @@ dta_group_stream_finalise <- function(state, rule) {
 #' materialised table is a hash of its contents, which is exact but requires the
 #' contents -- it serialises the whole table to compute.
 #'
-#' A lazy dataset cannot afford that: hashing an 80 GB table writes 80 GB to
-#' disk before any validation happens, which defeats the purpose of not loading
-#' it. For those, identity comes from the files behind it -- their names, sizes
+#' That is why the hash is not computed here when it can be avoided. Every table
+#' this package loads passes through [dta_coerce_table_to_specs()], which
+#' materialises it in R to type it and stamps the resulting digest onto the
+#' table object on the way out (see [dta_table_hash_key]). This reads the stamp
+#' when there is one, and serialises the table only for a table that arrived by
+#' some other route -- to the same digest, [dta_table_content_hash()], so a
+#' table rebuilt from a stamped one's own contents is recognised rather than
+#' rescanned.
+#'
+#' A lazy dataset cannot afford either: hashing an 80 GB table serialises 80 GB
+#' before any validation happens, which defeats the purpose of not loading it.
+#' For those, identity comes from the files behind it -- their names, sizes
 #' and modification times -- plus the column names. That is cheap at any size.
 #'
 #' The trade is honest: file metadata can in principle miss an edit that
@@ -1897,7 +2042,22 @@ dta_group_stream_finalise <- function(state, rule) {
 #' @keywords internal
 dta_table_change_signal <- function(x) {
   if (inherits(x, "Table")) {
-    return(dta_hash_object(as.data.frame(x)))
+    # The import choke point already hashed this table, at the one moment its
+    # contents were materialised in R for reasons of their own, and left the
+    # digest on the object. Reading it back is free; deriving it here means
+    # materialising and serialising the whole table a second time.
+    stamp <- dta_table_hash_stamp(x)
+    if (!is.null(stamp)) {
+      return(stamp)
+    }
+    # A table that never passed through the choke point -- or one Arrow built
+    # anew from a stamped table, which is a different object carrying no stamp
+    # because its contents are no longer the contents that were hashed -- is
+    # hashed the honest way. Still in memory, not through a gzip-compressed
+    # temporary file, and by exactly the function the stamp itself is taken
+    # with, so an unstamped rebuild of a stamped table's own contents is
+    # recognised as unchanged rather than rescanned on every check().
+    return(dta_table_content_hash(as.data.frame(x)))
   }
 
   if (inherits(x, "Dataset")) {
@@ -1984,6 +2144,11 @@ dta_table_column_names <- function(table) {
 #'   directory and [collect_full_errors()] reassembles the complete detail;
 #'   counts and the pass/fail verdict are exact either way, and a frame whose
 #'   in-memory head is incomplete is flagged as such.
+#'
+#'   It applies to a table already in memory as well. There is no spill on that
+#'   path -- the whole table is present, so validating again with a larger cap
+#'   recovers the dropped rows -- but the counts are exact there for the same
+#'   reason they are here: only retention is capped.
 #' @param use_threads Logical. Whether Arrow's Scanner should use multiple
 #'   threads for I/O and decompression. Arrow buffers batches ahead of R in its
 #'   own C++ pool, outside the R heap, so single-threaded scanning is the lever
@@ -2053,7 +2218,15 @@ dta_validate_any_table <- function(specs,
   }
 
   if (!dta_table_is_lazy(table)) {
-    return(validate_table_detailed(specs, as.data.frame(table), verbose = verbose))
+    # `max_errors` reaches the materialising path too. It used to be a streaming
+    # concept only, so a 60-million-row table already in memory retained one
+    # error row per bad cell without limit -- a wholly mistyped column then cost
+    # a second copy of the table in error detail, on the one path with no spill
+    # to fall back on.
+    return(validate_table_detailed(
+      specs, as.data.frame(table),
+      verbose = verbose, max_errors = max_errors
+    ))
   }
 
   rules_list <- tryCatch(specs@rules, error = function(e) NULL)
@@ -2306,34 +2479,6 @@ dta_structure_errors <- function(findings) {
 }
 
 # ---- reading a file without materialising it ---------------------------------
-
-#' @title Open a Delimited File as a Lazy Dataset
-#' @description
-#' Opens a delimited file for scanning rather than reading it into memory. The
-#' parse options and the spec-driven column types are the same ones the eager
-#' reader uses, so the columns are typed identically -- the difference is only
-#' that nothing is read until a scan asks for it.
-#' @param path Character. Path to the file.
-#' @param specs A `DTAColumnSpecCollection` or `NULL`. Declared types decide how
-#'   columns are parsed; without it every column is inferred.
-#' @param delim Character. The field separator.
-#' @param quote Character. The quoting character.
-#' @param has_header Logical. Whether the first line names the columns.
-#' @return An `arrow::Dataset`.
-#' @keywords internal
-dta_open_delimited_dataset <- function(path,
-                                       specs = NULL,
-                                       delim = ",",
-                                       quote = "\"",
-                                       has_header = TRUE) {
-  arrow::open_delim_dataset(
-    path,
-    delim = delim,
-    quote = quote,
-    col_names = has_header,
-    col_types = dta_reader_col_types(specs, has_header)
-  )
-}
 
 #' @title Open a File for Validation, Whatever Its Format
 #' @description

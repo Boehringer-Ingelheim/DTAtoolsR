@@ -443,15 +443,293 @@ test_that("a declared Char id keeps its leading zeros through load_file (Delim)"
   expect_identical(out$issues, list())
 })
 
-test_that("a column absent from the specs is inferred, not dropped", {
+test_that("a column absent from the specs is read as text, not dropped", {
   out <- dta_load_id_fixture(DTAFileCSV("char_ids.csv"), "char_ids.csv", ",")
 
-  # EXTRA is in neither the schema handed to the reader nor the coercion loop,
-  # so it keeps exactly the type arrow would have given it with no specs at
-  # all -- an integer here -- and it is still present.
+  # EXTRA is described by no spec, so nothing in the coercion loop touches it
+  # and it is still present. Its TYPE is no longer arrow's guess, though: when
+  # specs are supplied every column is read as text on both the eager and the
+  # lazy reader, because an undeclared column that arrow inferred in memory and
+  # read as text when streamed made the same file reach two different rule
+  # verdicts depending on how it was loaded.
   expect_true("EXTRA" %in% names(out$table))
-  expect_true(is.numeric(out$table$EXTRA))
-  expect_equal(as.numeric(out$table$EXTRA), c(10, 20))
+  expect_type(out$table$EXTRA, "character")
+  expect_identical(out$table$EXTRA, c("10", "20"))
+})
+
+
+# ---------------------------------------------------------------------------
+# The content stamp an Arrow table carries out of the import choke point
+# ---------------------------------------------------------------------------
+
+test_that("a coerced Arrow table carries a content stamp and the caller's does not", {
+  specs <- char_num_specs()
+  original <- arrow::as_arrow_table(
+    data.frame(SUBJID = c("a", "b"), VAL = c("1", "2"), stringsAsFactors = FALSE)
+  )
+
+  stamped <- dta_coerce_table_to_specs(original, specs)$table
+
+  expect_type(dta_table_hash_stamp(stamped), "character")
+  # VAL had to be typed, so the returned table is a NEW one built from the typed
+  # frame. The caller's object is a different table holding different values, and
+  # a stamp claiming otherwise would be a lie about its contents.
+  expect_null(dta_table_hash_stamp(original))
+  # And the data itself is untouched by the stamping.
+  expect_identical(
+    as.data.frame(stamped)$SUBJID,
+    c("a", "b")
+  )
+})
+
+
+test_that("a table needing no typing at all is still stamped", {
+  # The early return hands back the ORIGINAL object rather than rebuilding it.
+  # Without a stamp on that branch, a clean table -- the common case -- would
+  # keep paying the full hash on every check().
+  specs <- make_specs(DTAColumnSpec(id = "SUBJID", type = "SAS Char", nullable = FALSE))
+  table <- arrow::as_arrow_table(
+    data.frame(SUBJID = c("x", "y"), stringsAsFactors = FALSE)
+  )
+
+  stamped <- dta_coerce_table_to_specs(table, specs)$table
+
+  expect_type(dta_table_hash_stamp(stamped), "character")
+  # Nothing was rebuilt, so the returned table IS the caller's -- an arrow table
+  # is an R6 object, i.e. an environment, and the stamp rides on the object. The
+  # caller's reference sees it, which is correct: it is the same contents.
+  expect_identical(dta_table_hash_stamp(table), dta_table_hash_stamp(stamped))
+})
+
+
+test_that("a table Arrow builds anew carries no stamp", {
+  # The stamp used to live in the table's SCHEMA METADATA, which every Arrow
+  # operation carries forward: a table concatenated with itself kept the stamp
+  # of the table it came from, so check() skipped it and reported the old
+  # verdict over data that had doubled. The stamp identifies an OBJECT's
+  # contents, so it must not survive an operation that produces different ones.
+  specs <- char_num_specs()
+  table <- dta_coerce_table_to_specs(
+    arrow::as_arrow_table(
+      data.frame(SUBJID = c("a", "b"), VAL = c("1", "2"), stringsAsFactors = FALSE)
+    ),
+    specs
+  )$table
+  expect_type(dta_table_hash_stamp(table), "character")
+
+  rebuilt <- list(
+    concatenated = arrow::concat_tables(table, table),
+    sliced = table$Slice(0, 1),
+    subset = table[, "SUBJID", drop = FALSE],
+    computed = arrow::as_arrow_table(dplyr::compute(dplyr::filter(table, VAL > 1)))
+  )
+
+  for (how in names(rebuilt)) {
+    expect_null(dta_table_hash_stamp(rebuilt[[how]]), info = how)
+    # And the change signal falls back to hashing them, so each is identified by
+    # what it actually holds rather than by what it was derived from. (Each of
+    # these four holds something different from the original; an operation that
+    # happened to reproduce the original's contents exactly -- a subset naming
+    # every column -- would rightly hash to the same value.)
+    expect_false(
+      identical(dta_table_change_signal(rebuilt[[how]]), dta_table_change_signal(table)),
+      info = how
+    )
+  }
+})
+
+
+test_that("check() rescans a table Arrow rebuilt and skips the same object", {
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+    ),
+    rules = list(DTARuleColUnique(id = "uid", columns = "ID"))
+  )
+  dir <- file.path(tempdir(), "dta-stamp-identity")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  csv <- file.path(dir, "ids.csv")
+  writeLines(c("ID,VAL", "a,1", "b,2", "c,3"), csv)
+
+  ds <- DTADataSetTabular(
+    name = "d", specs = specs, files = list(DTAFileCSV(filename = "ids.csv"))
+  )
+  ds <- load_file(ds, file = csv, handler_index = 1, stream = "never")
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  summary_of <- function(x) attr(x, "last_validation_summary")
+
+  expect_identical(summary_of(ds)$status, "validated")
+  expect_true(summary_of(ds)$ok)
+
+  # The same object handed back: nothing changed, so nothing is rescanned.
+  same <- ds
+  same@tables[[1]] <- ds@tables[[1]]
+  same <- check(same, persist = FALSE, quiet = TRUE)
+  expect_identical(summary_of(same)$status, "skipped")
+
+  # Concatenated with itself: every id is now a duplicate, and the uniqueness
+  # rule must say so. Reported "skipped"/ok while the stamp rode on the schema.
+  doubled <- ds
+  doubled@tables[[1]] <- arrow::concat_tables(ds@tables[[1]], ds@tables[[1]])
+  doubled <- check(doubled, persist = FALSE, quiet = TRUE)
+  expect_identical(summary_of(doubled)$status, "validated")
+  expect_false(summary_of(doubled)$ok)
+  expect_identical(summary_of(doubled)$n_rule_errors, 1L)
+
+  # An unstamped table of DIFFERENT contents is identified by hashing it, and
+  # that fallback is stable: revalidated once, skipped from then on.
+  plain <- ds
+  plain@tables[[1]] <- arrow::as_arrow_table(
+    data.frame(ID = c("a", "b", "c", "d"), VAL = c(1, 2, 3, 4), stringsAsFactors = FALSE)
+  )
+  expect_null(dta_table_hash_stamp(plain@tables[[1]]))
+  plain <- check(plain, persist = FALSE, quiet = TRUE)
+  expect_identical(summary_of(plain)$status, "validated")
+  plain <- check(plain, persist = FALSE, quiet = TRUE)
+  expect_identical(summary_of(plain)$status, "skipped")
+
+  # And an unstamped table rebuilt from a stamped one's OWN contents hashes to
+  # the stamp, so it is recognised rather than rescanned on every check().
+  rebuilt <- ds
+  rebuilt@tables[[1]] <- arrow::as_arrow_table(as.data.frame(ds@tables[[1]]))
+  expect_null(dta_table_hash_stamp(rebuilt@tables[[1]]))
+  rebuilt <- check(rebuilt, persist = FALSE, quiet = TRUE)
+  expect_identical(summary_of(rebuilt)$status, "skipped")
+
+  # Clearing the verdicts does not touch the data, so the stamp stays put.
+  cleared <- clear_validation(ds)
+  expect_identical(
+    dta_table_hash_stamp(cleared@tables[[1]]),
+    dta_table_hash_stamp(ds@tables[[1]])
+  )
+})
+
+
+test_that("the stamp is what dta_table_change_signal() reports, and it tracks content", {
+  specs <- char_num_specs()
+  frame <- function(vals) {
+    arrow::as_arrow_table(
+      data.frame(SUBJID = c("a", "b"), VAL = vals, stringsAsFactors = FALSE)
+    )
+  }
+
+  first <- dta_coerce_table_to_specs(frame(c("1", "2")), specs)$table
+  same <- dta_coerce_table_to_specs(frame(c("1", "2")), specs)$table
+  altered <- dta_coerce_table_to_specs(frame(c("1", "3")), specs)$table
+
+  expect_identical(dta_table_change_signal(first), dta_table_hash_stamp(first))
+  expect_identical(dta_table_change_signal(first), dta_table_change_signal(same))
+  expect_false(identical(dta_table_change_signal(first), dta_table_change_signal(altered)))
+
+  # A table that never passed the choke point has no stamp, and is identified by
+  # hashing it -- to the same value, so a lost stamp cannot fake a change.
+  unstamped <- arrow::as_arrow_table(as.data.frame(first))
+  expect_null(dta_table_hash_stamp(unstamped))
+  expect_identical(dta_table_change_signal(unstamped), dta_table_change_signal(first))
+})
+
+
+test_that("carried import issues are inside the stamp", {
+  # The reason the stamp is taken AFTER the issues are attached: check() skips
+  # revalidation on an unchanged signal, so issues outside the signal could
+  # change while a stale ok = TRUE stood.
+  specs <- char_num_specs()
+  base <- data.frame(SUBJID = c("a", "b"), VAL = c("1", "heavy"), stringsAsFactors = FALSE)
+
+  dirty <- dta_coerce_table_to_specs(arrow::as_arrow_table(base), specs)$table
+  expect_type(dta_table_hash_stamp(dirty), "character")
+
+  clean <- base
+  clean$VAL <- c("1", "2")
+  clean_table <- dta_coerce_table_to_specs(arrow::as_arrow_table(clean), specs)$table
+
+  expect_false(
+    identical(dta_table_change_signal(dirty), dta_table_change_signal(clean_table))
+  )
+
+  # Same typed values, different retained issue text: still a different signal.
+  round_tripped <- as.data.frame(dirty)
+  issues <- dta_carried_import_issues(round_tripped)
+  issues$raw <- "different"
+  attr(round_tripped, "dta_import_issues") <- issues
+  expect_false(
+    identical(
+      dta_table_change_signal(dirty),
+      dta_table_change_signal(arrow::as_arrow_table(round_tripped))
+    )
+  )
+})
+
+
+test_that("the stamp and the unstamped fallback are the same hash", {
+  # `rlang::hash()` of a data frame digests its attributes IN ORDER, and the
+  # Arrow round trip returns `dta_import_issues` and `class` in the opposite
+  # order to the frame the stamp was taken from. Every table carrying import
+  # issues therefore hashed one way at the choke point and another when read
+  # back, so a rebuilt table was rescanned on every check() -- the exact cost
+  # the stamp exists to avoid. Both sides now go through
+  # dta_table_content_hash(), which does not see attribute order at all.
+  specs <- char_num_specs()
+  dirty <- dta_coerce_table_to_specs(
+    arrow::as_arrow_table(
+      data.frame(SUBJID = c("a", "b"), VAL = c("1", "zzz"), stringsAsFactors = FALSE)
+    ),
+    specs
+  )$table
+
+  # The issues really are riding on the table; without them the two hashes agree
+  # trivially and this test proves nothing.
+  expect_equal(nrow(dta_carried_import_issues(as.data.frame(dirty))), 1L)
+
+  expect_identical(
+    dta_table_hash_stamp(dirty),
+    dta_table_content_hash(as.data.frame(dirty))
+  )
+  expect_identical(
+    dta_table_change_signal(dirty),
+    dta_table_change_signal(arrow::as_arrow_table(as.data.frame(dirty)))
+  )
+
+  # And it is still a hash OF THE CONTENTS: the same table with that one cell
+  # fixed hashes differently.
+  fixed <- dta_coerce_table_to_specs(
+    arrow::as_arrow_table(
+      data.frame(SUBJID = c("a", "b"), VAL = c("1", "2"), stringsAsFactors = FALSE)
+    ),
+    specs
+  )$table
+  expect_false(identical(dta_table_hash_stamp(dirty), dta_table_hash_stamp(fixed)))
+})
+
+
+test_that("load_file and the DTADataSetTabular constructor both stamp their tables", {
+  specs <- char_num_specs()
+
+  ds <- DTADataSetTabular(
+    name = "stamped",
+    specs = specs,
+    tables = list(
+      t = data.frame(SUBJID = c("a", "b"), VAL = c("1", "heavy"), stringsAsFactors = FALSE)
+    )
+  )
+  expect_type(dta_table_hash_stamp(ds@tables[["t"]]), "character")
+
+  dir <- file.path(tempdir(), "dta-stamped-load")
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  csv <- file.path(dir, "stamped.csv")
+  writeLines(c('"SUBJID","VAL"', '"a","1"', '"b","heavy"'), csv)
+
+  loaded <- DTADataSetTabular(
+    name = "stamped_file",
+    specs = specs,
+    files = list(DTAFileCSV(filename = "stamped.csv"))
+  )
+  loaded <- DTAtools:::load_file(loaded, file = csv, handler_index = 1, stream = "never")
+
+  expect_type(dta_table_hash_stamp(loaded@tables[["stamped"]]), "character")
 })
 
 

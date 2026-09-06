@@ -18,9 +18,18 @@ produced from, so an unchanged table is not revalidated. The signature for a
 materialised table is a hash of its contents, which is exact but requires the
 contents -- it serialises the whole table to compute.
 
-A lazy dataset cannot afford that: hashing an 80 GB table writes 80 GB to
-disk before any validation happens, which defeats the purpose of not loading
-it. For those, identity comes from the files behind it -- their names, sizes
+That is why the hash is not computed here when it can be avoided. Every table
+this package loads passes through \code{\link[=dta_coerce_table_to_specs]{dta_coerce_table_to_specs()}}, which
+materialises it in R to type it and stamps the resulting digest onto the
+table object on the way out (see \link{dta_table_hash_key}). This reads the stamp
+when there is one, and serialises the table only for a table that arrived by
+some other route -- to the same digest, \code{\link[=dta_table_content_hash]{dta_table_content_hash()}}, so a
+table rebuilt from a stamped one's own contents is recognised rather than
+rescanned.
+
+A lazy dataset cannot afford either: hashing an 80 GB table serialises 80 GB
+before any validation happens, which defeats the purpose of not loading it.
+For those, identity comes from the files behind it -- their names, sizes
 and modification times -- plus the column names. That is cheap at any size.
 
 The trade is honest: file metadata can in principle miss an edit that

@@ -167,6 +167,55 @@ dta_narrow_rows <- function(v) {
 # here.
 `__DTAtools_gz_expansion_ratio__` <- 4
 
+# Arrow's own default CSV read block, in bytes. Named here because it is the
+# unit a delimited scan is actually batched in -- see dta_stream_block_size().
+`__DTAtools_stream_block_size_default__` <- 1048576L
+
+#' @title The Read Block a Delimited Scan Is Batched In
+#' @description
+#' Arrow splits a delimited file into fixed-size READ BLOCKS and hands one
+#' record batch per block to the scanner. `batch_rows`
+#' (`Scanner$create(batch_size = )`) only ever *slices* a batch that is already
+#' larger, so on a delimited file it is a ceiling and not a target: measured on
+#' a 4.4 MB, 46,000-row CSV, the default 1 MiB block gave 5 batches of about
+#' 10,485 rows for `batch_rows` of 131,072 and of 1,000,000 alike, while
+#' `batch_rows = 10,000` did cut them down to 9. Raising the block to 8 MiB gave
+#' one batch of all 46,000 rows.
+#'
+#' Peak memory during a scan is therefore governed by this block size times
+#' Arrow's read-ahead, not by `batch_rows`. The default is Arrow's own, which is
+#' why raising it is opt-in: a larger block buys bigger batches (fewer R-level
+#' round trips per row) at a proportional cost in resident memory.
+#'
+#' @return A single positive integer number of bytes, from
+#'   `getOption("DTAtools.stream_block_size")`, defaulting to 1 MiB.
+#' @keywords internal
+dta_stream_block_size <- function() {
+  value <- getOption(
+    "DTAtools.stream_block_size",
+    `__DTAtools_stream_block_size_default__`
+  )
+
+  # `largest` is a variable rather than `{.Machine$integer.max}` inline: cli
+  # >= 3.4 reads a `{}` expression starting with a dot as a style name.
+  largest <- .Machine$integer.max
+
+  if (
+    !is.numeric(value) ||
+      length(value) != 1 ||
+      is.na(value) ||
+      value < 1 ||
+      value > largest
+  ) {
+    cli_abort(c(
+      "{.code options(DTAtools.stream_block_size = )} must be a single number of bytes between 1 and {largest}.",
+      "x" = "It is currently {.val {value}}."
+    ))
+  }
+
+  as.integer(value)
+}
+
 #' @title Decide Whether to Stream a File
 #' @description
 #' Turns the user-facing `stream` argument into the single yes/no the readers

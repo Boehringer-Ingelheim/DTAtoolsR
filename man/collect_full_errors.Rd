@@ -4,18 +4,21 @@
 \alias{collect_full_errors}
 \title{Every Retained and Spilled Error Row of a Validation Result}
 \usage{
-collect_full_errors(details, axis = c("columnspec", "import"))
+collect_full_errors(details, axis = c("columnspec", "import", "import_typing"))
 }
 \arguments{
 \item{details}{A validation details list, as returned by
 \code{\link[=validate_file_stream]{validate_file_stream()}} or stored by \code{check()}.}
 
-\item{axis}{One of \code{"columnspec"} or \code{"import"}: which error frame to
-reassemble.}
+\item{axis}{One of \code{"columnspec"}, \code{"import"} or \code{"import_typing"}: which
+error frame to reassemble. \code{"import"} is the merged import axis (values the
+declared type could not represent, plus values a rule read numerically and
+could not); \code{"import_typing"} is the typing half on its own, which a
+streaming result carries separately and a materialising one does not.}
 }
 \value{
 A data frame with one row per error, or \code{NULL} when the axis has
-none. For the import axis, rows flagged by more than one source are
+none. For the merged import axis, rows flagged by more than one source are
 deduplicated by (row, column), matching how the counts were taken.
 }
 \description{
@@ -29,6 +32,13 @@ The spill lives in the R session's temporary directory: it survives for the
 session, not beyond it. Reading a persisted \code{details} artifact in a later
 session still yields the exact counts and the retained head; if the spill
 directory is gone, this warns and returns the head rather than failing.
+A result produced on the materialising path caps retained rows without
+spilling them -- the whole table was in memory, so the dropped rows are
+recovered by validating again with a larger \code{max_errors} rather than from
+disk. There is nothing to reassemble in that case, so this returns the
+retained head and warns, naming how much of the detail it is: silently
+handing back 3 rows of 20 as though they were all of them is the one thing a
+function called \code{collect_full_errors()} must not do.
 }
 \examples{
 specs <- DTAtools::DTAColumnSpecCollection(

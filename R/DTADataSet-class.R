@@ -448,20 +448,51 @@ method(load_file, DTADataSet) <- function(
 }
 
 
+# An in-memory digest of an arbitrary R object.
+#
+# rlang::hash() serialises in memory. The implementation it replaces wrote the
+# object to a temporary .rds -- gzip-compressed, because that is saveRDS()'s
+# default -- and then md5sum()'d the file, so identifying one in-memory table
+# cost a full compression pass plus two trips through the filesystem. On a
+# large table that is more expensive than validating it, which is the opposite
+# of what a skip-if-unchanged signal is for.
+#
+# The digest is a signal, never a persisted contract: an index entry carrying a
+# hash from an older session simply fails to match and the table revalidates.
 #' @keywords internal
 dta_hash_object <- function(x) {
-  tmp <- tempfile(fileext = ".rds")
-  on.exit(unlink(tmp), add = TRUE)
-  saveRDS(x, tmp)
-  unname(as.character(tools::md5sum(tmp)))
+  rlang::hash(x)
 }
 
+# Resolves a `tables` selection against a dataset's table names.
+#
+# A dataset with no tables is not an error. It is the ordinary state of a
+# specification whose data has not been delivered yet, and reporting on it --
+# validation_status(), results(), messages(), check() -- must say "nothing
+# loaded", not abort. Aborting here made a single undelivered dataset take the
+# whole DTA's report down with it.
+#
+# An EXPLICIT selection still aborts: asking for table "x" of a dataset that
+# holds none is a mistake about the dataset, and answering it with an empty
+# selection would silently drop the caller's request.
 #' @keywords internal
 dta_table_id_to_names <- function(x, tables = NULL) {
   all_names <- names(x@tables)
 
-  if (length(all_names) == 0) {
-    cli::cli_abort("No tables found in dataset.")
+  if (is.null(all_names)) {
+    all_names <- character(0)
+  }
+
+  # "No names" and "no tables" are not the same thing, and only the second is
+  # benign. A dataset holding tables that cannot be addressed is a broken
+  # document, and answering it with an empty selection would quietly leave its
+  # data out of every report -- so this case keeps failing loudly, as the whole
+  # function used to.
+  if (length(all_names) == 0 && length(x@tables) > 0) {
+    cli::cli_abort(c(
+      "The tables of dataset {.field {x@name}} have no names.",
+      i = "Every table is addressed by name; supply a named list or use {.fn load_file}."
+    ))
   }
 
   if (is.null(tables)) {

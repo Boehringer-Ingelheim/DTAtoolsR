@@ -131,5 +131,10 @@ validation_status(check(ds, quiet = TRUE))$ok
 }
 \seealso{
 \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
-arguments tune the scan of a streamed table.
+arguments tune the scan of a streamed table. On a delimited file a batch is
+one Arrow read block of about
+\code{getOption("DTAtools.stream_block_size")} bytes (1 MiB by default);
+\code{batch_rows} only caps a batch that is already larger, so peak memory
+during a scan follows the block size times Arrow's read-ahead rather than
+\code{batch_rows}.
 }

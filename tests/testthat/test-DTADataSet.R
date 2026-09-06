@@ -333,3 +333,92 @@ test_that("DTADataSetFile may hold a DTAFileAny handler", {
   expect_s3_class(ds, "DTAtools::DTADataSetFile")
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
 })
+
+# ---------------------------------------------------------------------------
+# load_file() on a tabular dataset: handler_index and the default table name
+# ---------------------------------------------------------------------------
+
+ds_tabular_with_handler <- function(filename) {
+  DTADataSetTabular(
+    name = "d",
+    specs = create_example_DTAColumnSpecCollection(1),
+    files = list(DTAFileCSV(filename = filename))
+  )
+}
+
+test_that("load_file() accepts a character handler_index and defaults it to 1", {
+  # The guard this replaces ran `handler_index < 1 || handler_index > length()`
+  # on a value that could be NULL, NA, length > 1 or character -- so "1" was
+  # passed on to files() as a NAME and aborted with "The following datasets not
+  # found: 1", even though a character index is documented as accepted. The
+  # documented default of 1 was missing too, so omitting it hit R's own
+  # "argument is missing".
+  file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  ds <- ds_tabular_with_handler("clinical_data.csv")
+
+  expect_named(tables(load_file(ds, file = file, handler_index = "1")), "clinical_data")
+  expect_named(tables(load_file(ds, file = file, handler_index = 1)), "clinical_data")
+  expect_named(tables(load_file(ds, file = file)), "clinical_data")
+})
+
+test_that("load_file() rejects a handler_index that is not a single usable value", {
+  file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  ds <- ds_tabular_with_handler("clinical_data.csv")
+
+  expect_error(load_file(ds, file = file, handler_index = NULL), "single, non-missing")
+  expect_error(load_file(ds, file = file, handler_index = NA), "single, non-missing")
+  expect_error(load_file(ds, file = file, handler_index = c(1, 1)), "single, non-missing")
+  expect_error(load_file(ds, file = file, handler_index = 2), "Invalid handler_index")
+  expect_error(load_file(ds, file = file, handler_index = 0), "Invalid handler_index")
+})
+
+test_that("a gzipped redelivery replaces the table rather than adding a second", {
+  # The default table name stripped ONE extension, so `clinical_data2.csv.gz`
+  # became the table `clinical_data2.csv` -- a second table beside
+  # `clinical_data2`, holding the same data twice and leaving the first one's
+  # verdict standing next to it. Compression is a transport detail; it is not
+  # part of the table's identity.
+  plain <- system.file("extdata", "clinical_data2.csv", package = "DTAtools")
+  gzipped <- system.file("extdata", "clinical_data2.csv.gz", package = "DTAtools")
+  expect_true(nzchar(plain) && nzchar(gzipped))
+
+  ds <- ds_tabular_with_handler("clinical_data2.csv")
+
+  ds <- load_file(ds, file = plain, handler_index = 1)
+  expect_named(tables(ds), "clinical_data2")
+
+  ds <- load_file(ds, file = gzipped, handler_index = 1)
+  expect_named(tables(ds), "clinical_data2")
+  expect_length(tables(ds), 1)
+
+  # ... and in the other direction, too.
+  ds <- load_file(ds, file = plain, handler_index = 1)
+  expect_named(tables(ds), "clinical_data2")
+  expect_length(tables(ds), 1)
+})
+
+test_that("the app's bound-item key agrees with the table load_file() creates", {
+  # dta_bound_item_name() in inst/shiny/dta_app is what the app lists, unloads
+  # and looks up validation state by. It restates the package's naming rule, so
+  # the two have to be pinned against each other: a divergence means the UI
+  # offers a table name that no report of the loaded document knows.
+  skip_if_not_installed("shiny")
+  bound_name <- app_fn("dta_bound_item_name")
+
+  plain <- system.file("extdata", "clinical_data2.csv", package = "DTAtools")
+  gzipped <- system.file("extdata", "clinical_data2.csv.gz", package = "DTAtools")
+
+  ds <- ds_tabular_with_handler("clinical_data2.csv")
+
+  expect_equal(
+    names(tables(load_file(ds, file = plain, handler_index = 1))),
+    bound_name("tabular", plain)
+  )
+  expect_equal(
+    names(tables(load_file(ds, file = gzipped, handler_index = 1))),
+    bound_name("tabular", gzipped)
+  )
+
+  # A file dataset still keys by the delivered name, extension and all.
+  expect_equal(bound_name("file", gzipped), "clinical_data2.csv.gz")
+})

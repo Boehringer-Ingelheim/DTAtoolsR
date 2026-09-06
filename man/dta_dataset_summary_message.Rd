@@ -9,7 +9,8 @@ dta_dataset_summary_message(
   n_validated,
   n_valid,
   n_invalid,
-  n_unchecked
+  n_unchecked,
+  n_undelivered = 0
 )
 }
 \arguments{
@@ -22,6 +23,12 @@ dta_dataset_summary_message(
 \item{n_invalid}{Integer. Targets judged a failure.}
 
 \item{n_unchecked}{Integer. Targets carrying no verdict either way.}
+
+\item{n_undelivered}{Integer. 1 when the dataset holds no target at all, 0
+otherwise. A dataset with nothing bound has no target to be unchecked, so
+\code{n_unchecked} is zero for it and every branch below would read it as a
+clean run over an empty world -- the same "certificate covering zero
+checks" the unchecked tally exists to prevent, one level up.}
 }
 \value{
 A list of \code{severity} (\code{"danger"}, \code{"warning"} or \code{"success"}) and

@@ -543,3 +543,164 @@ test_that("check() reports INCOMPLETE rather than certifying unchecked targets",
   expect_equal(summary_df$n_unchecked, 1)
   expect_false(attr(dta, "last_validation_ok"))
 })
+
+
+# ---------------------------------------------------------------------------
+# A dataset with nothing bound: reported, never certified
+# ---------------------------------------------------------------------------
+
+# Console output of one expression, whitespace-normalised: cli wraps to the
+# terminal width, so raw output can break in the middle of a matched phrase.
+dta_console <- function(expr) {
+  gsub("[[:space:]]+", " ", paste(testthat::capture_messages(expr), collapse = " "))
+}
+
+test_that("a dataset with no tables makes the DTA INCOMPLETE, never PASSED", {
+  # Checking a DTA whose data has not been delivered used to abort outright
+  # ("No tables found in dataset."), taking every other dataset's verdict with
+  # it. Reporting it is only half the fix: a dataset with zero targets also has
+  # zero UNCHECKED targets, so without counting the dataset itself the run
+  # would print "Validation PASSED: All datasets are valid" over a check that
+  # read no file at all.
+  dta <- DTA(
+    datasets = list(empty = create_example_DTADataSetTabular(1)),
+    metadata = create_example_DTAMetaData()
+  )
+
+  out <- dta_console(dta <- check(dta, persist = FALSE))
+
+  expect_match(out, "Validation INCOMPLETE", fixed = TRUE)
+  expect_match(out, "no tables loaded", fixed = TRUE)
+  expect_false(grepl("Validation PASSED", out, fixed = TRUE))
+  expect_false(attr(dta, "last_validation_ok"))
+
+  summary_df <- attr(dta, "last_validation_summary")
+  expect_equal(summary_df$n_targets, 0)
+  expect_equal(summary_df$n_undelivered, 1L)
+
+  # The read-only reports answer instead of aborting, too.
+  expect_equal(nrow(results(dta)), 0)
+  expect_equal(nrow(messages(dta, as_tibble = FALSE)), 0)
+})
+
+test_that("an undelivered dataset does not hide a delivered one's result", {
+  delivered <- DTADataSetTabular(
+    name = "delivered",
+    specs = DTAColumnSpecCollection(columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+    )),
+    tables = list(tab = data.frame(ID = "A001", stringsAsFactors = FALSE))
+  )
+  dta <- DTA(
+    datasets = list(delivered = delivered, empty = create_example_DTADataSetTabular(1)),
+    metadata = create_example_DTAMetaData()
+  )
+
+  out <- dta_console(dta <- check(dta, persist = FALSE))
+
+  expect_match(out, "Validation INCOMPLETE", fixed = TRUE)
+  expect_false(attr(dta, "last_validation_ok"))
+
+  res <- results(dta)
+  expect_equal(nrow(res), 1)
+  expect_equal(res$dataset, "delivered")
+  expect_equal(res$status, "validated")
+})
+
+
+# ---------------------------------------------------------------------------
+# check(DTA) forwards the scan controls
+# ---------------------------------------------------------------------------
+
+test_that("check(DTA) forwards on_missing_column to its datasets", {
+  # `on_missing_column`, `fail_fast` and `use_threads` existed only on the
+  # dataset method, so the only way to reach them was to take a dataset out of
+  # its DTA and check it alone -- and passing one here died on R's own
+  # "unused argument" before any dataset was touched.
+  path <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c("ID", "A001"), path)
+
+  ds <- DTADataSetTabular(
+    name = "m",
+    specs = DTAColumnSpecCollection(columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      ABSENT = DTAColumnSpec(id = "ABSENT", type = "SAS Char", length = 4, nullable = FALSE)
+    )),
+    files = list(DTAFileCSV(filename = basename(path)))
+  )
+  ds <- load_file(ds, file = path, handler_index = 1)
+  dta <- DTA(datasets = list(m = ds), metadata = create_example_DTAMetaData())
+
+  table_name <- tools::file_path_sans_ext(basename(path))
+
+  stopped <- check(dta, on_missing_column = "stop", persist = FALSE, quiet = TRUE)
+  details <- validation_errors(datasets(stopped, "m"), table = table_name)
+  # The result says, in the object itself, that no row was read -- so nothing
+  # can mistake it for a verdict on the data.
+  expect_true(isTRUE(attr(details, "structural_only")))
+
+  scanned <- check(dta, persist = FALSE, quiet = TRUE)
+  scanned_details <- validation_errors(datasets(scanned, "m"), table = table_name)
+  expect_false(isTRUE(attr(scanned_details, "structural_only")))
+
+  # Both agree that the declared column is absent.
+  expect_false(validation_status(datasets(stopped, "m"))$ok)
+  expect_false(validation_status(datasets(scanned, "m"))$ok)
+})
+
+test_that("check(DTA) accepts fail_fast and use_threads for every dataset type", {
+  path <- withr::local_tempfile(fileext = ".txt")
+  writeLines("content", path)
+
+  dta <- DTA(
+    datasets = list(
+      tab = create_example_DTADataSetTabular(2),
+      files = DTADataSetFile(name = "files", paths = path)
+    ),
+    metadata = create_example_DTAMetaData()
+  )
+
+  # A file dataset reads no rows, so it accepts and ignores all three; the call
+  # must not have to branch on the dataset's class.
+  dta <- check(
+    dta,
+    fail_fast = TRUE, use_threads = FALSE, on_missing_column = "scan",
+    persist = FALSE, quiet = TRUE
+  )
+
+  expect_true(validation_status(datasets(dta, "files"))$ok)
+  expect_equal(nrow(validation_status(datasets(dta, "tab"))), 1)
+})
+
+test_that("check(DTA) rejects an unknown on_missing_column before checking anything", {
+  dta <- create_example_DTA()
+
+  # match.arg()'s message comes from base R and is rendered in the system
+  # language, so the condition class is what can be asserted about it.
+  expect_error(
+    check(dta, on_missing_column = "maybe", quiet = TRUE),
+    class = "simpleError"
+  )
+
+  # And it is rejected before the first dataset is touched: a run that had
+  # started would have printed its "Validating N Datasets" line by now.
+  expect_silent(
+    try(check(dta, on_missing_column = "maybe", quiet = FALSE), silent = TRUE)
+  )
+})
+
+
+# ---------------------------------------------------------------------------
+# A non-dataset entry is an error, quiet or not
+# ---------------------------------------------------------------------------
+
+test_that("check() aborts on a non-DTADataSet entry regardless of quiet", {
+  # `quiet` governs how much is PRINTED, never what is checked. Skipping the
+  # entry under quiet = TRUE left it out of the rollup entirely, so the run
+  # reported last_validation_ok = TRUE: a pass over an object nothing had
+  # looked at.
+  dta <- DTA(datasets = list(bogus = "x"), metadata = create_example_DTAMetaData())
+
+  expect_error(check(dta, quiet = TRUE, persist = FALSE), "is not a DTADataSet")
+  expect_error(check(dta, quiet = FALSE, persist = FALSE), "is not a DTADataSet")
+})

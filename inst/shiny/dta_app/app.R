@@ -7081,7 +7081,11 @@ server <- function(input, output, session) {
         return(list())
       }
       if (is.character(recs)) {
-        lapply(recs, function(f) list(file = f, table = tools::file_path_sans_ext(basename(f))))
+        # Legacy session files stored a bare character vector of paths. Re-derive
+        # the table name with dta_bound_item_name() rather than a bare
+        # file_path_sans_ext(): a compression suffix has to come off first, so a
+        # restored "x.csv.gz" binds to table "x" exactly as load_file() would.
+        lapply(recs, function(f) list(file = f, table = dta_bound_item_name("tabular", f)))
       } else {
         recs
       }

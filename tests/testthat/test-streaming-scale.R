@@ -58,6 +58,11 @@ test_that("the Arrow uniqueness path is actually taken for a text-keyed Dataset"
   on.exit(unlink(path), add = TRUE)
 
   dataset <- dta_open_normalized_dataset(path, specs = specs)
+  eligibility <- dta_arrow_unique_eligible(rule, dataset, specs)
+  expect_true(eligibility$ok)
+  # A text key is grouped exactly as it is read; nothing needs normalising.
+  expect_identical(eligibility$numeric_columns, character(0))
+
   pre <- dta_stream_unique_precompute(specs, dataset, specs@rules)
   expect_length(pre, 1)
   expect_false(is.null(pre[[1]]))
@@ -70,31 +75,178 @@ test_that("the Arrow uniqueness path is actually taken for a text-keyed Dataset"
   expect_true(is.null(pre_reader[[1]]))
 })
 
-test_that("a declared-numeric uniqueness key falls back and keys on coerced numbers", {
-  # Every streamed column is utf8 at scan time, so the schema type alone
-  # cannot tell a text key from a declared-Num one. The per-batch path keys a
-  # declared-Num column on its coerced NUMBERS ("1.50" and "1.5" are one
-  # key); Arrow grouping over the raw text would see two. Eligibility must
-  # therefore consult the declared type and route this rule to the fallback.
+test_that("the Arrow uniqueness path is taken for a declared-numeric key too", {
+  # Every streamed column is utf8 at scan time, so the schema type alone cannot
+  # tell a text key from a declared-Num one -- and the two are keyed
+  # differently: the per-batch path keys a declared-Num column on its coerced
+  # NUMBERS, where "1.50" and "1.5" are one key, while raw text grouping sees
+  # two. Eligibility reports which key columns are numeric so the precompute can
+  # group them on the same values.
   rule <- DTARuleColUnique(id = "n_unique", columns = "N")
   specs <- vc_specs(
-    list(DTAColumnSpec(id = "N", type = "SAS Num", nullable = TRUE)),
+    list(
+      DTAColumnSpec(id = "N", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "S", type = "SAS Char", length = 4, nullable = TRUE)
+    ),
     list(rule)
   )
-  df <- data.frame(N = c("1.50", "1.5", "2"), stringsAsFactors = FALSE)
+  df <- data.frame(N = c("1.50", "1.5", "2"), S = c("a", "b", "c"), stringsAsFactors = FALSE)
   path <- ss_write_csv(df, "ss_declared_num_key.csv")
   on.exit(unlink(path), add = TRUE)
 
   dataset <- dta_open_normalized_dataset(path, specs = specs)
-  expect_false(dta_arrow_unique_eligible(rule, dataset, specs))
+  eligibility <- dta_arrow_unique_eligible(rule, dataset, specs)
+  expect_true(eligibility$ok)
+  expect_identical(eligibility$numeric_columns, "N")
+
+  pre <- dta_stream_unique_precompute(specs, dataset, specs@rules)
+  expect_false(is.null(pre[[1]]))
 
   coerced <- dta_coerce_table_to_specs(df, specs)
   expected <- rule_check_unique(rule, as.data.frame(coerced$table))
   expect_false(expected$valid)
+  expect_identical(pre[[1]]$message, expected$message)
 
   details <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
   expect_false(details$rules_valid)
   expect_identical(details$rule_errors[[1]]$message, expected$message)
+})
+
+test_that("a declared-Int key is grouped on numbers as well", {
+  rule <- DTARuleColUnique(id = "i_unique", columns = "I")
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "I", type = "SAS Int", nullable = TRUE),
+      DTAColumnSpec(id = "S", type = "SAS Char", length = 4, nullable = TRUE)
+    ),
+    list(rule)
+  )
+  path <- ss_write_csv(
+    data.frame(I = c("07", "7", "8"), S = c("a", "b", "c"), stringsAsFactors = FALSE),
+    "ss_declared_int_key.csv"
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  dataset <- dta_open_normalized_dataset(path, specs = specs)
+  expect_identical(dta_arrow_unique_eligible(rule, dataset, specs)$numeric_columns, "I")
+
+  # "07" and "7" are one number and therefore one key; as raw text they are two.
+  pre <- dta_stream_unique_precompute(specs, dataset, specs@rules)
+  expect_false(is.null(pre[[1]]))
+  expect_match(pre[[1]]$message, "1 duplicate row")
+})
+
+test_that("a numeric key value Acero cannot parse falls back without erroring", {
+  # Acero's string-to-double cast raises rather than guessing, which is what
+  # makes the path safe: an unparseable value is not a wrong key, it is a
+  # refusal that routes the rule to the per-batch accumulator -- which reads
+  # that value as NA and reports it on the import axis instead.
+  rule <- DTARuleColUnique(id = "n_unique", columns = "N")
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "N", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "S", type = "SAS Char", length = 4, nullable = TRUE)
+    ),
+    list(rule)
+  )
+  df <- data.frame(N = c("abc", "1", "1"), S = c("a", "b", "c"), stringsAsFactors = FALSE)
+  path <- ss_write_csv(df, "ss_unparseable_num_key.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  dataset <- dta_open_normalized_dataset(path, specs = specs)
+  # Eligible -- the source and schema are right -- but the computation refuses.
+  expect_true(dta_arrow_unique_eligible(rule, dataset, specs)$ok)
+  expect_no_error(pre <- dta_stream_unique_precompute(specs, dataset, specs@rules))
+  expect_true(is.null(pre[[1]]))
+
+  coerced <- dta_coerce_table_to_specs(df, specs)
+  expected <- rule_check_unique(rule, as.data.frame(coerced$table))
+  details <- validate_file_stream(specs, path, batch_rows = 1L, verbose = FALSE)
+  expect_identical(details$rule_errors[[1]]$message, expected$message)
+})
+
+test_that("randomised numeric keys agree across the Arrow, per-batch and eager paths", {
+  # The differential test the Acero numeric key rests on. The pool is chosen so
+  # that every hazard is reachable: values that are one number and two strings
+  # ("1.5"/"1.50", "1e2"/"100"), the -0/0 fold, NaN against a missing value,
+  # and values Acero refuses to parse at all (" 3", "abc", "0x10") which must
+  # produce a fallback rather than a wrong answer.
+  # Split in two deliberately. Drawn from one pool holding the refused values,
+  # a table of any size almost always contains one, and every seed would fall
+  # back -- the loop would then never once exercise the Arrow path it exists to
+  # check. Half the seeds therefore draw only from values both engines parse.
+  parseable <- c("1.5", "1.50", "2", "2.0", "-0", "0", "NaN", "", NA, "1e2", "100")
+  refused <- c(" 3", "abc", "0x10")
+
+  arrow_answers <- 0L
+
+  for (seed in seq_len(20L)) {
+    withr::local_seed(seed)
+
+    pool <- if (seed %% 2L == 0L) parseable else c(parseable, refused)
+    n_keys <- sample(1:2, 1)
+    key_cols <- c("K1", "K2")[seq_len(n_keys)]
+    n_rows <- sample(4:30, 1)
+
+    df <- as.data.frame(
+      stats::setNames(
+        lapply(key_cols, function(nm) sample(pool, n_rows, replace = TRUE)),
+        key_cols
+      ),
+      stringsAsFactors = FALSE
+    )
+    # A filler column keeps every line populated: a row whose only values are
+    # missing serialises to a blank line, which every CSV parser skips.
+    df$S <- paste0("s", seq_len(n_rows))
+
+    specs <- vc_specs(
+      c(
+        lapply(key_cols, function(nm) DTAColumnSpec(id = nm, type = "SAS Num", nullable = TRUE)),
+        list(DTAColumnSpec(id = "S", type = "SAS Char", length = 8, nullable = FALSE))
+      ),
+      list(DTARuleColUnique(id = "k_unique", columns = key_cols))
+    )
+    rule <- specs@rules[[1]]
+
+    path <- ss_write_csv(df, "ss_numeric_key_fuzz.csv")
+    dataset <- dta_open_normalized_dataset(path, specs = specs)
+
+    # The eager oracle, read through the same dataset so the two paths cannot
+    # disagree about what the file contains before they disagree about keys.
+    materialised <- dta_coerce_table_to_specs(
+      as.data.frame(dplyr::collect(dataset)), specs
+    )$table
+    eager <- rule_check_unique(rule, as.data.frame(materialised))
+
+    per_batch <- withr::with_options(
+      list(DTAtools.stream_arrow_unique = FALSE),
+      validate_file_stream(specs, path, batch_rows = 3L, verbose = FALSE)
+    )
+    streamed <- validate_file_stream(specs, path, batch_rows = 3L, verbose = FALSE)
+    pre <- dta_stream_unique_precompute(specs, dataset, list(rule))[[1]]
+
+    unlink(path)
+
+    verdict <- function(details) {
+      if (length(details$rule_errors) == 0) NA_character_ else details$rule_errors[[1]]$message
+    }
+    eager_message <- if (isTRUE(eager$valid)) NA_character_ else eager$message
+
+    info <- paste("seed", seed)
+    expect_identical(verdict(per_batch), eager_message, info = info)
+    expect_identical(verdict(streamed), eager_message, info = info)
+
+    if (!is.null(pre)) {
+      arrow_answers <- arrow_answers + 1L
+      pre_message <- if (isTRUE(pre$valid)) NA_character_ else pre$message
+      expect_identical(pre_message, eager_message, info = info)
+    }
+  }
+
+  # Without this the whole loop could pass by never taking the Arrow path: a
+  # precompute that always returned NULL would be comparing the per-batch path
+  # against itself.
+  expect_gte(arrow_answers, 10L)
 })
 
 test_that("an empty-string key value no longer aborts the scan", {
@@ -278,6 +430,91 @@ test_that("error detail past max_errors spills and collect_full_errors() recover
   expect_identical(nrow(collected_none), nrow(reference))
   expect_identical(collected_none$message, reference$message)
 })
+
+test_that("a capped typing axis keeps its count and its spilled detail", {
+  # The typing axis is what check() records in a dataset's @import_issues, so
+  # capping it must not lose the count OR strand the rows: the frame carries the
+  # sink's spill pointer, and collect_full_errors() reads it back.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  ))
+  df <- data.frame(
+    ID = c("a", "b", "c"),
+    VAL = c("p", "q", "r"),
+    stringsAsFactors = FALSE
+  )
+  path <- ss_write_csv(df, "ss_typing_cap.csv")
+  on.exit(unlink(path), add = TRUE)
+
+  capped <- validate_file_stream(specs, path, max_errors = 1L, verbose = FALSE)
+  typing <- capped$import_typing_errors
+
+  expect_identical(nrow(typing), 1L)
+  expect_true(isTRUE(attr(typing, "truncated", exact = TRUE)))
+  # The count is the number that failed to type, not the number retained.
+  expect_equal(dta_import_error_count(typing), 3)
+
+  collected <- collect_full_errors(capped, axis = "import_typing")
+  expect_identical(nrow(collected), 3L)
+  expect_setequal(collected$raw, c("p", "q", "r"))
+  expect_true(all(collected$column == "VAL"))
+
+  # Uncapped, the axis is complete in memory and collecting it changes nothing.
+  full <- validate_file_stream(specs, path, max_errors = NULL, verbose = FALSE)
+  expect_identical(nrow(full$import_typing_errors), 3L)
+  expect_identical(nrow(collect_full_errors(full, axis = "import_typing")), 3L)
+})
+
+
+test_that("collect_full_errors() says so when it cannot collect an in-memory cap", {
+  # The streaming sink spills what it cannot hold, so its truncation is always
+  # recoverable. The materialising path's max_errors cap is not -- and returning
+  # the head in silence is how a partial frame passes for a complete one, which
+  # for a function called collect_full_errors() is the failure that matters.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
+  ))
+  table <- data.frame(ID = paste0("TOOLONG", 1:20), stringsAsFactors = FALSE)
+
+  capped <- validate_table_detailed(specs, table, verbose = FALSE, max_errors = 3L)
+  expect_identical(capped$n_columnspec_errors, 20L)
+  expect_identical(nrow(capped$columnspec_errors$full_error), 3L)
+
+  # Both counts are named, so the caller can see how much of the detail is gone.
+  expect_warning(
+    collected <- collect_full_errors(capped, axis = "columnspec"),
+    regexp = "3 of 20"
+  )
+  expect_identical(nrow(collected), 3L)
+
+  expect_warning(
+    collect_full_errors(
+      validate_table_detailed(
+        specs,
+        dta_coerce_table_to_specs(
+          data.frame(ID = rep("x", 4), VAL = rep("abc", 4), stringsAsFactors = FALSE),
+          vc_specs(list(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)))
+        )$table,
+        verbose = FALSE, max_errors = 1L
+      ),
+      axis = "import"
+    ),
+    regexp = "1 of 4"
+  )
+
+  # An uncapped result is complete, and complete results say nothing.
+  full <- validate_table_detailed(specs, table, verbose = FALSE)
+  expect_no_warning(collect_full_errors(full, axis = "columnspec"))
+
+  # Nor does a streaming result: its dropped rows are on disk and get collected.
+  path <- ss_write_csv(table, "ss_collect_warn.csv")
+  on.exit(unlink(path), add = TRUE)
+  streamed <- validate_file_stream(specs, path, max_errors = 3L, verbose = FALSE)
+  expect_no_warning(collected <- collect_full_errors(streamed, axis = "columnspec"))
+  expect_identical(nrow(collected), 20L)
+})
+
 
 test_that("import-error counts no longer inflate when several rules read one column", {
   # Two rules reading the same unconvertible column used to push two copies of

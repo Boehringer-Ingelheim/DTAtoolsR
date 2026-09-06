@@ -9,11 +9,12 @@
 #                between a batch carrying 30 columns and one carrying all 200
 #                a wide file might have.
 #
-#   precompute   For uniqueness rules over TEXT key columns specifically, the
-#                duplicate count is answered by one Arrow grouped aggregation
-#                over a Dataset, run once ahead of the batch loop, instead of
-#                by the per-batch fastmap accumulator in
-#                R/streamingValidation.R.
+#   precompute   For uniqueness rules over a Dataset, the duplicate count is
+#                answered by one Arrow grouped aggregation, run once ahead of
+#                the batch loop, instead of by the per-batch fastmap
+#                accumulator in R/streamingValidation.R. Text key columns are
+#                grouped as they stand; a key column the specs declare numeric
+#                is cast first, so that both paths key on the same values.
 #
 # Both are opportunistic: whenever either cannot be shown safe, it says so
 # (`NULL`) rather than guessing, and the existing, slower-but-always-correct
@@ -146,10 +147,14 @@ dta_scan_projection <- function(specs, rules_list, schema_names) {
 #' validation verdict for a user who never asked for it), this path is on by
 #' default.
 #'
-#' It can be, because it is restricted to `utf8` (text) key columns (see
-#' [dta_arrow_unique_eligible()]): Arrow's grouped aggregation and R's
-#' `duplicated()` agree byte-for-byte on strings, with none of the
-#' floating-point latitude that keeps the general Arrow-compute path opt-in.
+#' It can be, because the two ways a key is formed here are both cases where
+#' Arrow's grouped aggregation and R's `duplicated()` provably agree rather than
+#' merely usually agreeing (see [dta_arrow_unique_eligible()] and
+#' [dta_stream_unique_precompute()]): text keys are compared byte-for-byte by
+#' both, and a declared-numeric key is grouped on a cast that Arrow either
+#' performs exactly as R's parser does or refuses outright -- in which case the
+#' whole precompute falls back. Neither leaves the floating-point latitude that
+#' keeps the general Arrow-compute path opt-in.
 #' What tips the default the rest of the way is that the R fallback -- a
 #' `fastmap` accumulator holding one entry per distinct key -- is exactly the
 #' component that runs out of memory at the scale streaming exists for.
@@ -169,55 +174,66 @@ dta_stream_unique_arrow_enabled <- function() {
 #' an error raised while checking -- means `FALSE`, which routes the rule to
 #' the per-batch accumulator instead:
 #'
-#' * `source` is re-scannable (`Dataset` or `arrow_dplyr_query`), not a
-#'   `RecordBatchReader` -- a reader is consumed by reading it, and the
-#'   uniqueness precompute must leave it untouched for the batch loop that
-#'   follows.
+#' * `source` is specifically a `Dataset`. It must be re-scannable -- a
+#'   `RecordBatchReader` is consumed by reading it, and the uniqueness
+#'   precompute must leave the source untouched for the batch loop that follows
+#'   -- and its schema must be readable directly as `$schema`, whereas an
+#'   `arrow_dplyr_query`'s schema lives inside its lazy query plan. That source
+#'   is rare enough on this path that reconstructing it is not worth the
+#'   complexity: it is simply never eligible, which routes it to the per-batch
+#'   path rather than erroring.
 #' * the rule names at least one key column.
-#' * `source` is specifically a `Dataset`: its schema is available directly as
-#'   `$schema`, whereas an `arrow_dplyr_query`'s schema lives inside its lazy
-#'   query plan. That source is rare enough on this path that reconstructing
-#'   it is not worth the complexity -- it is simply never eligible, which
-#'   routes it to the per-batch path rather than erroring.
-#' * every key column is present in the schema and typed `utf8`.
-#' * no key column's spec DECLARES a numeric type. The streaming open pins
-#'   every column to `utf8`, so the schema type alone cannot tell a genuine
-#'   text column from a declared-`Num` one that will be coerced per batch --
-#'   and the per-batch accumulator keys a declared-numeric column on its
-#'   coerced NUMBERS (`"1.50"` and `"1.5"` are one key), where Arrow would
-#'   group the raw text (two keys). Declared-numeric keys therefore always
-#'   take the per-batch path.
+#' * every key column is present in the schema and typed `utf8`. This is about
+#'   what the SOURCE is, not about what the specs say: the streaming open pins
+#'   every column to `utf8`, so a delimited scan qualifies, while a Parquet
+#'   dataset carrying its own numeric types does not. That exclusion is
+#'   conservative rather than necessary -- only text-typed sources have been
+#'   validated against the per-batch path -- and it costs nothing but speed: an
+#'   ineligible source takes the per-batch path, which answers the rule
+#'   correctly either way.
 #'
-#' Restricted to text because R's `duplicated()` and Arrow's grouped
-#' aggregation agree byte-for-byte on strings (including `NA == NA`), but
-#' diverge on doubles -- `-0` vs `0`, `NaN` -- verified experimentally rather
-#' than assumed.
+#' A key column's DECLARED type decides how it is grouped, not whether it is
+#' eligible. The schema type alone cannot tell a genuine text column from a
+#' declared-`Num` one -- everything is `utf8` at scan time -- and the two are
+#' keyed differently: the per-batch accumulator keys a declared-numeric column
+#' on its coerced NUMBERS, where `"1.50"` and `"1.5"` are one key, while raw
+#' text grouping would see two. The numeric key columns are therefore reported
+#' here and normalised in [dta_stream_unique_precompute()] before grouping, so
+#' that both paths key on the same values.
+#'
+#' Text is grouped as it stands because R's `duplicated()` and Arrow's grouped
+#' aggregation agree byte-for-byte on strings, including `NA == NA`.
 #' @param rule A uniqueness rule.
 #' @param source A table representation to be scanned.
 #' @param specs A `DTAColumnSpecCollection`, or `NULL`: consulted for the key
 #'   columns' declared types, as above.
-#' @return A single, non-`NA` logical.
+#' @return A list with `ok` -- a single, non-`NA` logical -- and
+#'   `numeric_columns`, the key columns whose spec declares a numeric type
+#'   (`character(0)` for an all-text key, and always `character(0)` when `ok` is
+#'   `FALSE`). A list rather than a bare logical because the caller needs both
+#'   answers and deriving the second one twice could let them drift.
 #' @keywords internal
 dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
+  ineligible <- list(ok = FALSE, numeric_columns = character(0))
+
   tryCatch(
     {
-      consumable <- inherits(source, "Dataset") || inherits(source, "arrow_dplyr_query")
-      if (!consumable) {
-        return(FALSE)
+      # A `Dataset` and nothing else: re-scannable, and its schema is readable
+      # without reconstructing a lazy query plan. See the eligibility bullets
+      # above for why an `arrow_dplyr_query` is not admitted here.
+      if (!inherits(source, "Dataset")) {
+        return(ineligible)
       }
 
       cols <- dta_unique_columns(rule)
       if (!is.character(cols) || length(cols) == 0) {
-        return(FALSE)
+        return(ineligible)
       }
 
-      if (!inherits(source, "Dataset")) {
-        return(FALSE)
-      }
       schema <- source$schema
 
       if (!all(cols %in% names(schema))) {
-        return(FALSE)
+        return(ineligible)
       }
 
       types_ok <- all(vapply(
@@ -226,20 +242,22 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
         logical(1)
       ))
       if (!types_ok) {
-        return(FALSE)
+        return(ineligible)
       }
 
-      declared_text <- all(vapply(
+      numeric_columns <- cols[vapply(
         cols,
         function(col) {
           target <- dta_spec_r_type(specs, col)
-          is.na(target) || identical(target, "character")
+          !is.na(target) && target %in% c("double", "integer")
         },
-        logical(1)
-      ))
-      declared_text
+        logical(1),
+        USE.NAMES = FALSE
+      )]
+
+      list(ok = TRUE, numeric_columns = as.character(numeric_columns))
     },
-    error = function(e) FALSE
+    error = function(e) ineligible
   )
 }
 
@@ -256,10 +274,35 @@ dta_arrow_unique_eligible <- function(rule, source, specs = NULL) {
 #' The whole computation is one extra streaming pass over just the key
 #' columns, run once before the main batch loop rather than accumulated
 #' alongside it.
+#' @section Declared-numeric key columns:
+#' A key column the specs declare `Num` or `Int` is grouped on
+#' `as.numeric(col)`, so that Arrow keys it on the same values the per-batch
+#' accumulator keys its coerced column on -- `"1.50"` and `"1.5"` are one key on
+#' both. Two properties of that cast are what make it safe, both measured on
+#' arrow 25.0.1 rather than assumed:
+#'
+#' * it is exact where it succeeds. Every string both engines accept parses to
+#'   the identical double, `"1e2"`, `"007"`, `".5"`, `"Inf"` and
+#'   `"18446744073709551616"` included.
+#' * it ERRORS where it would have to guess. `"abc"`, `"0x10"` and `" 3"` --
+#'   all of which R's parser accepts or turns into `NA` -- make Acero raise,
+#'   which the `tryCatch` below turns into the per-batch fallback. Divergence
+#'   is therefore not a wrong answer but a slower correct one.
+#'
+#' One normalisation is still required on top: `-0` and `0` are one value to
+#' `duplicated()` (the key encoding adds `+ 0` for exactly this) and two groups
+#' to Acero, so the cast is followed by `if_else(k == 0, 0, k)`. Measured on the
+#' eight values `NaN, NaN, <missing>, <missing>, -0, 0, 1.5, 1.50`, which
+#' `duplicated()` calls 4 duplicates: without the fold Acero reported 3.
+#'
+#' No `NaN` normalisation is applied, deliberately. Acero already groups `NaN`
+#' with itself and apart from null, which is exactly what the R key does --
+#' `dta_row_key()` masks only `is.na(x) & !is.nan(x)`, leaving `NaN` its own
+#' rendering. Folding `NaN` into null as well took those same eight values to 5
+#' duplicates, one more than the table contains.
 #' @param specs A `DTAColumnSpecCollection`. Consulted by
-#'   [dta_arrow_unique_eligible()] for the key columns' declared types: a
-#'   declared-numeric key is keyed on its coerced numbers by the per-batch
-#'   path, which Arrow's raw-text grouping would not reproduce.
+#'   [dta_arrow_unique_eligible()] for the key columns' declared types, which
+#'   decide which key columns are normalised as numbers before grouping.
 #' @param source A table representation to be scanned (typically the
 #'   `Dataset` the streaming driver was opened from).
 #' @param rules_list A list of `DTARule` objects, or `NULL`.
@@ -278,34 +321,54 @@ dta_stream_unique_precompute <- function(specs, source, rules_list) {
   arrow_enabled <- dta_stream_unique_arrow_enabled()
 
   lapply(rules_list, function(rule) {
-    if (!isTRUE(arrow_enabled) ||
-      !identical(dta_rule_stream_kind(rule), "keyed") ||
-      !isTRUE(dta_arrow_unique_eligible(rule, source, specs))) {
+    if (!isTRUE(arrow_enabled) || !identical(dta_rule_stream_kind(rule), "keyed")) {
+      return(NULL)
+    }
+
+    eligibility <- dta_arrow_unique_eligible(rule, source, specs)
+    if (!isTRUE(eligibility$ok)) {
       return(NULL)
     }
 
     # Any arrow failure here falls back silently to the per-batch accumulator
     # in R/streamingValidation.R -- a resource or engine problem on this
     # opportunistic path is not a reason to fail validation that the slower
-    # path would still complete correctly.
+    # path would still complete correctly. An unparseable value in a
+    # declared-numeric key column arrives as exactly such a failure: the cast
+    # below raises rather than inventing a key, and the per-batch path -- which
+    # reads that value as NA and reports it on the import axis -- answers the
+    # rule instead.
     tryCatch(
       {
         cols <- dta_unique_columns(rule)
+        numeric_cols <- eligibility$numeric_columns
+
+        query <- dplyr::select(source, dplyr::all_of(cols))
+        if (length(numeric_cols) > 0) {
+          # See the "Declared-numeric key columns" section above for why the
+          # cast is safe and why the zero fold is needed but a NaN fold is not.
+          query <- dplyr::mutate(
+            query,
+            dplyr::across(dplyr::all_of(numeric_cols), ~ as.numeric(.x))
+          )
+          query <- dplyr::mutate(
+            query,
+            dplyr::across(dplyr::all_of(numeric_cols), ~ dplyr::if_else(.x == 0, 0, .x))
+          )
+        }
+
         # This nested aggregation runs entirely inside Acero (verified on
         # arrow 25.0.1): the distinct keys live in the C++ engine, and only
         # the one-row reduction below -- duplicate count and total -- ever
         # reaches R.
         agg <- dplyr::summarise(
-          dplyr::group_by(
-            dplyr::select(source, dplyr::all_of(cols)),
-            dplyr::across(dplyr::all_of(cols))
-          ),
+          dplyr::group_by(query, dplyr::across(dplyr::all_of(cols))),
           .n = dplyr::n(), .groups = "drop"
         )
         counts <- dplyr::collect(
           dplyr::summarise(agg, dups = sum(.n) - dplyr::n(), total = sum(.n))
         )
-        # dups equals sum(duplicated(df[cols])) exactly for text keys.
+        # dups equals sum(duplicated(df[cols])) exactly for these keys.
         n <- as.double(counts$dups[[1]])
 
         if (n > 0) {

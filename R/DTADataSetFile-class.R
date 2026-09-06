@@ -96,8 +96,22 @@ DTADataSetFile <- S7::new_class(
       cli_abort("'file_paths' must be a character vector or NULL.")
     }
 
-    if (!is.null(self@validation_artifact_dir) && !dir.exists(self@validation_artifact_dir)) {
-      cli_abort("Property 'validation_artifact_dir' must be a valid directory path or NULL.")
+    # Deliberately NOT dir.exists(): the property remembers WHERE artifacts were
+    # written, and the directory it names is temporary by default. An object
+    # saved with saveRDS() and restored in a later session -- or simply after
+    # tempdir() was cleaned -- then carries a path that no longer exists, and
+    # requiring the directory here made EVERY subsequent modification of that
+    # object abort (S7 revalidates on each property assignment), so it could no
+    # longer be loaded into, cleared, or even checked with persist = FALSE.
+    # check(persist = TRUE) creates the directory itself, which is the only
+    # moment its existence actually matters.
+    if (
+      !is.null(self@validation_artifact_dir) &&
+        (!is.character(self@validation_artifact_dir) ||
+          length(self@validation_artifact_dir) != 1 ||
+          is.na(self@validation_artifact_dir))
+    ) {
+      cli_abort("Property 'validation_artifact_dir' must be a single directory path or NULL.")
     }
   }
 )
@@ -295,11 +309,16 @@ dta_file_validation_details <- function(validation_result) {
 # character(0), the empty frame validation_status() must return when there is
 # nothing to report -- one definition, so the "no entry" and "no entries at all"
 # shapes cannot drift apart.
+#
+# `target_type` is a parameter rather than the constant "file" because a TABULAR
+# dataset holding no tables needs exactly this frame too, only saying "table".
+# Two copies of a ten-column schema is how an eleventh column ends up in one of
+# them and makes rbind() abort the first time a report mixes the two.
 #' @keywords internal
-dta_file_empty_status_row <- function(table_name) {
+dta_file_empty_status_row <- function(table_name, target_type = "file") {
   data.frame(
     table = table_name,
-    target_type = rep("file", length(table_name)),
+    target_type = rep(target_type, length(table_name)),
     status = rep("not_validated", length(table_name)),
     ok = rep(NA, length(table_name)),
     validated_at = rep(NA_character_, length(table_name)),
@@ -544,6 +563,11 @@ S7::method(clear_validation, DTADataSetFile) <- function(
 #'     \item{artifact_dir}{Character or NULL. Optional output directory for
 #'       persisted validation artifacts.}
 #'     \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+#'     \item{batch_rows, max_errors, fail_fast, on_missing_column, use_threads}{
+#'       Accepted and ignored. They tune the scan of a tabular table; a file
+#'       dataset reads no rows. They are declared so \code{check()} on a
+#'       \code{DTA} can forward one argument list to every dataset it holds
+#'       without branching on the dataset's class.}
 #'   }
 #' @return Invisibly returns the updated \code{DTADataSetFile} object \code{x}.
 #' @usage check(x, ...)
@@ -561,7 +585,10 @@ S7::method(check, DTADataSetFile) <- function(
   # nothing to scan in batches -- but `check()` on a DTA calls every dataset the
   # same way, and it should not have to branch on the dataset's class to do it.
   batch_rows = NULL,
-  max_errors = NULL
+  max_errors = NULL,
+  fail_fast = FALSE,
+  on_missing_column = c("scan", "stop"),
+  use_threads = TRUE
 ) {
   if (is.null(validation_run)) {
     validation_run <- dta_new_validation_run_id()
@@ -625,7 +652,12 @@ S7::method(check, DTADataSetFile) <- function(
 
     if (!isTRUE(quiet)) {
       cli::cli_text()
-      cli::cli_rule(paste0("File ", idx, " of ", length(selected_keys), ": ", table_name))
+      # The target name is INTERPOLATED, never pasted in: cli parses `{...}` in
+      # the string it is handed, so a delivered file called `a{b}.csv` aborted
+      # the whole check with "Could not evaluate cli `{}` expression". Braces
+      # inside an interpolated value are escaped by cli itself.
+      n_selected <- length(selected_keys)
+      cli::cli_rule("File {idx} of {n_selected}: {table_name}")
     }
 
     if (missing) {
@@ -642,7 +674,11 @@ S7::method(check, DTADataSetFile) <- function(
       run_id <- format(validated_at, "%Y%m%dT%H%M%OS3")
 
       if (!isTRUE(quiet)) {
-        cli::cli_alert_danger(validation_result$message)
+        # Interpolated, not handed to cli as a literal format string: the
+        # message embeds the target's name, and a `{` in that name would be
+        # parsed as a cli expression and abort the run.
+        failure_message <- validation_result$message
+        cli::cli_alert_danger("{failure_message}")
       }
 
       entry <- list(
@@ -687,9 +723,10 @@ S7::method(check, DTADataSetFile) <- function(
 
     if (!isTRUE(quiet)) {
       if (isTRUE(details$ok)) {
-        cli::cli_alert_success(paste0("File '", path, "' is readable and not empty."))
+        cli::cli_alert_success("File {.path {path}} is readable and not empty.")
       } else {
-        cli::cli_alert_danger(validation_result$message)
+        failure_message <- validation_result$message
+        cli::cli_alert_danger("{failure_message}")
       }
     }
 
@@ -731,9 +768,9 @@ S7::method(check, DTADataSetFile) <- function(
 
     cli::cli_text()
     if (n_valid < n_total) {
-      cli::cli_alert_danger(paste0(n_valid, " of ", n_total, " ", file_word, " valid"))
+      cli::cli_alert_danger("{n_valid} of {n_total} {file_word} valid")
     } else {
-      cli::cli_alert_success(paste0(n_total, " ", file_word, " passed validation"))
+      cli::cli_alert_success("{n_total} {file_word} passed validation")
     }
   }
 

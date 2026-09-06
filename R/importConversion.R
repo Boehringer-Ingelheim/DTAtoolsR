@@ -18,6 +18,126 @@ dta_import_raw_max_chars <- 200L
 #' @keywords internal
 dta_import_max_rows_per_column <- 10000L
 
+#' @title Attribute Name Carrying a Table's Content Stamp
+#' @description
+#' The R attribute under which [dta_coerce_table_to_specs()] records a digest of
+#' the table it produced, so that `dta_table_change_signal()` can identify that
+#' table without hashing it a second time.
+#'
+#' The typed table is already fully materialised in R at the moment the import
+#' choke point runs, so the digest is taken there for the price of one in-memory
+#' serialisation of a frame that was going to be built anyway. Read back off the
+#' table, the same answer then costs nothing at all -- where deriving it later
+#' means materialising and serialising the whole table again, which on a large
+#' table is more expensive than validating it.
+#'
+#' An R attribute on the arrow object, and deliberately NOT the table's schema
+#' metadata. Schema metadata is *carried forward* by every Arrow operation --
+#' `arrow::concat_tables()`, `Table$Slice()`, `[`, `dplyr::filter() |>
+#' compute()` -- so a table changed by any of them kept the stamp of the table
+#' it was derived from, and `check()` skipped it with the stale verdict. (A
+#' three-row table concatenated with itself, every id now duplicated, reported
+#' status `skipped` and `ok = TRUE`.) The stamp must identify THIS object's
+#' contents, so it rides on the object: an arrow table is an R6 object, i.e. an
+#' environment, so the attribute is shared by every reference to it and absent
+#' from anything Arrow builds anew.
+#' @keywords internal
+dta_table_hash_key <- "dta_table_hash"
+
+#' @title Stamp an Arrow Table With a Digest of Its Contents
+#' @description
+#' Records `hash` on the table under [dta_table_hash_key] and returns it.
+#'
+#' An arrow table is an R6 object -- an environment -- so this attaches the
+#' stamp to the object itself rather than copying it: every reference to that
+#' table sees the stamp, and only that table carries it. A table Arrow builds
+#' anew from it (`concat_tables()`, `Slice()`, `[`, a computed `dplyr` query)
+#' is a different object and carries no stamp, which is exactly the required
+#' behaviour -- its contents are not the contents that were hashed.
+#' @param table An Arrow table, or any other object (returned unchanged).
+#' @param hash A length-1 character digest.
+#' @return The stamped table, or `table` unchanged when it is not an Arrow table
+#'   or the stamp could not be applied.
+#' @keywords internal
+dta_stamp_table_hash <- function(table, hash) {
+  if (!inherits(table, "ArrowTabular")) {
+    return(table)
+  }
+  if (!is.character(hash) || length(hash) != 1 || is.na(hash) || !nzchar(hash)) {
+    return(table)
+  }
+
+  # A stamp is an optimisation, never a requirement: an arrow build that refuses
+  # the attribute yields an unstamped table, which `dta_table_change_signal()`
+  # identifies by hashing it, exactly as before this existed.
+  tryCatch(
+    {
+      attr(table, dta_table_hash_key) <- hash
+      table
+    },
+    error = function(e) table
+  )
+}
+
+#' @title The Content Stamp an Arrow Table Carries
+#' @param table An Arrow table, or any other object.
+#' @return The stamp recorded by [dta_stamp_table_hash()], or `NULL` when the
+#'   table carries none.
+#' @keywords internal
+dta_table_hash_stamp <- function(table) {
+  stamp <- attr(table, dta_table_hash_key, exact = TRUE)
+
+  if (!is.character(stamp) || length(stamp) != 1 || is.na(stamp) || !nzchar(stamp)) {
+    return(NULL)
+  }
+
+  stamp
+}
+
+#' @title Digest of a Table's Contents and Carried Import Issues
+#' @description
+#' The one content hash both the stamp [dta_stamp_table_hash()] records and the
+#' fallback in `dta_table_change_signal()` derive, so that a stamped table and
+#' the same table rebuilt from its own `as.data.frame()` hash identically.
+#'
+#' `rlang::hash()` of a data frame alone cannot do that: it digests the object
+#' including its attributes IN ORDER, and the Arrow round trip returns
+#' `dta_import_issues` and `class` in the opposite order to the frame the stamp
+#' was taken from. Every table carrying import issues therefore hashed one way
+#' at the choke point and another when read back, so a rebuilt table was
+#' rescanned by `check()` on every run -- the exact cost the stamp exists to
+#' avoid.
+#'
+#' Hashing a canonical list instead removes attribute order from the answer
+#' entirely: the column names, the column vectors stripped of their names, and
+#' the issues frame reduced the same way plus the exact error count it carries
+#' (which is not `nrow()` when the per-column cap truncated it, and must change
+#' the signal when it changes).
+#' @param df A data.frame, typically carrying a `"dta_import_issues"` attribute.
+#' @return A length-1 character digest.
+#' @keywords internal
+dta_table_content_hash <- function(df) {
+  issues <- attr(df, "dta_import_issues", exact = TRUE)
+
+  # `lapply()`, not `as.list()`: `as.list()` on a data.frame keeps the frame's
+  # own attributes on the list it returns -- including `dta_import_issues`,
+  # which is exactly the attribute whose position moves across the Arrow round
+  # trip. `lapply()` builds a fresh list carrying nothing but the columns.
+  rlang::hash(list(
+    columns = names(df),
+    values = unname(lapply(df, identity)),
+    issues = if (is.data.frame(issues)) {
+      list(
+        columns = names(issues),
+        values = unname(lapply(issues, identity)),
+        n = attr(issues, "n_import_errors", exact = TRUE)
+      )
+    } else {
+      NULL
+    }
+  ))
+}
+
 
 #' @title Column Spec Structure for One Column
 #' @description
@@ -336,6 +456,16 @@ dta_coerce_column <- function(values, target) {
 #' whose import issues had changed could be skipped while still reporting a
 #' stale `ok = TRUE`. Riding on the table, they cannot be separated from the
 #' data they describe.
+#'
+#' An Arrow table additionally comes back stamped with a digest of the typed
+#' frame -- issues attribute included -- under [dta_table_hash_key], because
+#' this is the one moment at which the whole table is materialised in R anyway.
+#' `dta_table_change_signal()` reads that stamp instead of re-deriving it, which
+#' is what stops identifying a table from costing more than validating it. Both
+#' returns carry it: the rebuilt table and the original handed back when nothing
+#' needed typing. The digest is [dta_table_content_hash()], which is also what
+#' the change signal falls back to for an unstamped table, so the two agree on
+#' the same contents.
 #' @param table An Arrow Table or a data.frame.
 #' @param specs A `DTAColumnSpecCollection`, or `NULL`.
 #' @param type_map Named character vector from [dta_compile_spec_types()], or
@@ -349,9 +479,9 @@ dta_coerce_column <- function(values, target) {
 #'   unaffected. A caller that spills retained detail to disk instead of
 #'   holding it in memory passes `Inf`.
 #' @return A list with `table` (the typed table, same class as the input, with
-#'   the issues attached) and `issues` (a data.frame in the shape of
-#'   [dta_empty_import_errors()], carrying the exact error count in its
-#'   `"n_import_errors"` attribute).
+#'   the issues attached and -- for an Arrow table -- the content stamp) and
+#'   `issues` (a data.frame in the shape of [dta_empty_import_errors()],
+#'   carrying the exact error count in its `"n_import_errors"` attribute).
 #' @keywords internal
 dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_per_column = dta_import_max_rows_per_column) {
   was_arrow <- inherits(table, "Table") || inherits(table, "ArrowTabular")
@@ -441,15 +571,25 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
   # Nothing was typed and nothing failed: hand back the original object rather
   # than paying for a round trip that cannot have changed anything.
   if (!changed && nrow(issues) == 0) {
-    return(list(table = table, issues = issues))
+    return(list(
+      table = if (was_arrow) dta_stamp_table_hash(table, dta_table_content_hash(df)) else table,
+      issues = issues
+    ))
   }
 
   if (nrow(issues) > 0) {
     attr(df, "dta_import_issues") <- issues
   }
 
+  # Stamped AFTER the issues are attached, so the digest covers them. `check()`
+  # skips revalidation when the table's signal is unchanged, and issues that did
+  # not contribute to the signal could change while a stale `ok = TRUE` stood.
   list(
-    table = if (was_arrow) arrow::as_arrow_table(df) else df,
+    table = if (was_arrow) {
+      dta_stamp_table_hash(arrow::as_arrow_table(df), dta_table_content_hash(df))
+    } else {
+      df
+    },
     issues = issues
   )
 }

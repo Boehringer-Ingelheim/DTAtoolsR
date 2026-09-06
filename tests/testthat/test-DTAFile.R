@@ -396,17 +396,39 @@ test_that("read_file keeps a declared Char column as text for Delim", {
   expect_equal(df$SUBJID, c("007", "008"))
 })
 
-test_that("read_file leaves a column the specs do not mention to inference", {
+test_that("read_file reads a column the specs do not mention as text", {
   path <- dta_write_id_fixture("dta_ids_extra.csv", ",")
   on.exit(unlink(path), add = TRUE)
 
   x <- read_file(DTAFileCSV(basename(path)), path, specs = dta_id_specs())
   df <- as.data.frame(x)
 
-  # EXTRA has no spec, so it is neither pinned nor dropped: arrow types it
-  # exactly as it does without any specs at all.
+  # EXTRA has no spec, and is still not dropped -- but once ANY specs are
+  # supplied it is read as text rather than inferred. The lazy path has always
+  # had to pin every column (a dataset locks in a type from its first block),
+  # so leaving this one to inference here made the SAME file present EXTRA as a
+  # double in memory and as a string when streamed; a uniqueness rule over it
+  # then counted "1.5" and "1.50" as one key on one path and two on the other.
   expect_true("EXTRA" %in% names(df))
-  expect_equal(as.numeric(df$EXTRA), c(10, 20))
+  expect_type(df$EXTRA, "character")
+  expect_equal(df$EXTRA, c("10", "20"))
+})
+
+test_that("both readers type an undeclared column identically", {
+  # The generalisation of the case above: whatever the reader decides, it has
+  # to decide it once. Compared as data rather than as a class, because
+  # as.data.frame() on a Dataset returns a tibble and on a Table a data.frame.
+  path <- dta_write_id_fixture("dta_ids_bothpaths.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  handler <- DTAFileCSV(basename(path))
+  eager <- as.data.frame(read_file(handler, path, specs = dta_id_specs()))
+  lazy <- as.data.frame(open_file(handler, path, specs = dta_id_specs()))
+
+  expect_identical(names(eager), names(lazy))
+  for (column in names(eager)) {
+    expect_identical(eager[[column]], lazy[[column]], info = column)
+  }
 })
 
 test_that("read_file without specs still infers every column as before", {
@@ -447,12 +469,13 @@ test_that("dta_reader_args rejects a call with no file", {
   expect_error(dta_reader_args(specs = dta_id_specs()), "file")
 })
 
-test_that("specs are ignored when the file has no header", {
+test_that("specs cannot name a column when the file has no header", {
   path <- dta_write_id_fixture("dta_ids_noheader.csv", ",")
   on.exit(unlink(path), add = TRUE)
 
   # Arrow generates positional names (f0, f1, ...) that cannot correspond to
-  # spec ids, so no column spec is built and the header line becomes data.
+  # spec ids, so nothing the specs declare can be matched -- and the first line
+  # is data, not a header, so all three lines are rows.
   x <- read_file(
     DTAFileCSV(basename(path), has_header = FALSE),
     path,
@@ -462,6 +485,195 @@ test_that("specs are ignored when the file has no header", {
   expect_equal(nrow(x), 3)
   expect_equal(ncol(x), 3)
   expect_false("SUBJID" %in% names(x))
+})
+
+
+# ---------------------------------------------------------------------------
+# One reader plan for both paths
+# ---------------------------------------------------------------------------
+# The eager and the lazy reader are two calls into arrow with the same
+# configuration, derived once by dta_delim_reader_plan(). What follows pins
+# that configuration itself, because the failures it prevents (a header parsed
+# as a data row, a first data row silently dropped) are invisible in a verdict
+# and only show up as an off-by-one row count.
+
+# A header that needs cleaning and one that does not, with the SAME two data
+# rows, so the row count answers one question only: was the right line skipped?
+dta_write_header_fixture <- function(name, header) {
+  path <- file.path(tempdir(), name)
+  writeLines(c(header, "42,M", "51,F"), path)
+  path
+}
+
+test_that("the header line is skipped and no data row is lost, on both readers", {
+  cases <- list(
+    clean = "AGE,GENDER",
+    padded = '" AGE ","GENDER "'
+  )
+
+  for (label in names(cases)) {
+    path <- dta_write_header_fixture(paste0("dta_hdr_", label, ".csv"), cases[[label]])
+    on.exit(unlink(path), add = TRUE)
+
+    handler <- DTAFileCSV(basename(path))
+    eager <- as.data.frame(read_file(handler, path))
+    lazy <- as.data.frame(open_file(handler, path))
+
+    for (got in list(eager = eager, lazy = lazy)) {
+      expect_identical(names(got), c("AGE", "GENDER"), info = label)
+      expect_equal(nrow(got), 2, info = label)
+      # The first data row is the one a wrong `skip` eats; the header is what a
+      # missing `skip` adds back as a row of the literal words.
+      expect_identical(as.character(got$AGE), c("42", "51"), info = label)
+      expect_identical(as.character(got$GENDER), c("M", "F"), info = label)
+    }
+  }
+})
+
+test_that("with no header every line is data, on both readers", {
+  path <- dta_write_header_fixture("dta_hdr_none.csv", "AGE,GENDER")
+  on.exit(unlink(path), add = TRUE)
+
+  handler <- DTAFileCSV(basename(path), has_header = FALSE)
+  eager <- as.data.frame(read_file(handler, path))
+  lazy <- as.data.frame(open_file(handler, path))
+
+  for (got in list(eager = eager, lazy = lazy)) {
+    expect_equal(nrow(got), 3)
+    expect_identical(names(got), c("f0", "f1"))
+    expect_identical(as.character(got$f0), c("AGE", "42", "51"))
+  }
+})
+
+test_that("the reader plan derives one configuration for both paths", {
+  path <- dta_write_header_fixture("dta_plan_padded.csv", '" AGE ","GENDER "')
+  on.exit(unlink(path), add = TRUE)
+
+  plan <- dta_delim_reader_plan(path, delim = ",", quote = '"', has_header = TRUE)
+
+  expect_identical(plan$column_names, c("AGE", "GENDER"))
+  expect_identical(plan$skip, 1L)
+  # No specs: inference is left alone, exactly as a bare read_file() has always
+  # behaved.
+  expect_null(plan$col_types)
+
+  with_specs <- dta_delim_reader_plan(
+    path,
+    specs = dta_id_specs(), delim = ",", quote = '"', has_header = TRUE
+  )
+  # EVERY column, not only the declared ones -- neither AGE nor GENDER is in
+  # dta_id_specs()'s SUBJID/AGE pair by name and type both, but both are pinned.
+  expect_identical(names(with_specs$col_types), c("AGE", "GENDER"))
+  expect_true(all(vapply(
+    with_specs$col_types$fields,
+    function(f) f$type$Equals(arrow::utf8()),
+    logical(1)
+  )))
+
+  no_header <- dta_delim_reader_plan(path, delim = ",", quote = '"', has_header = FALSE)
+  expect_identical(no_header$skip, 0L)
+  expect_identical(no_header$column_names, c("f0", "f1"))
+})
+
+test_that("a header arrow cannot use is refused naming the file", {
+  path <- file.path(tempdir(), "dta_dup_header.csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("A,A,B", "1,2,3"), path)
+
+  # Arrow reports this as "Could not read schema ... Is this a 'csv' file?",
+  # which sends the reader looking at the file format rather than at its first
+  # line. Both paths now say what is actually wrong, and say it identically.
+  expect_error(read_file(DTAFileCSV(basename(path)), path), "column names")
+  expect_error(open_file(DTAFileCSV(basename(path)), path), "column names")
+})
+
+test_that("names that collide only after cleaning are refused", {
+  path <- file.path(tempdir(), "dta_collide_header.csv")
+  on.exit(unlink(path), add = TRUE)
+  # Two distinct names to arrow, one name after the quotes and spaces go.
+  writeLines(c('"A"," A ",B', "1,2,3"), path)
+
+  expect_error(read_file(DTAFileCSV(basename(path)), path), "repeated column names")
+  expect_error(open_file(DTAFileCSV(basename(path)), path), "repeated column names")
+})
+
+
+# ---------------------------------------------------------------------------
+# Real-world parse settings on the handler
+# ---------------------------------------------------------------------------
+
+test_that("a tabular handler carries the two parse settings with harmless defaults", {
+  for (ctor in list(DTAFileCSV, DTAFileTSV, DTAFileDelim, DTAFileTabular)) {
+    h <- ctor(filename = "a.csv")
+    expect_false(h@newlines_in_values)
+    expect_equal(h@encoding, "UTF-8")
+  }
+
+  declared <- DTAFileCSV(
+    filename = "a.csv",
+    newlines_in_values = TRUE,
+    encoding = "latin1"
+  )
+  expect_true(declared@newlines_in_values)
+  expect_equal(declared@encoding, "latin1")
+})
+
+test_that("the two parse settings are validated", {
+  expect_error(
+    DTAFileCSV(filename = "a.csv", newlines_in_values = NA),
+    "newlines_in_values"
+  )
+  expect_error(
+    DTAFileCSV(filename = "a.csv", newlines_in_values = c(TRUE, TRUE)),
+    "newlines_in_values"
+  )
+  expect_error(DTAFileCSV(filename = "a.csv", encoding = ""), "encoding")
+  expect_error(DTAFileCSV(filename = "a.csv", encoding = NA_character_), "encoding")
+  expect_error(
+    DTAFileCSV(filename = "a.csv", encoding = c("UTF-8", "latin1")),
+    "encoding"
+  )
+})
+
+test_that("the two parse settings survive the factory and a YAML round trip", {
+  from_factory <- DTAFileFactory(
+    type = "csv", filename = "a.csv",
+    newlines_in_values = TRUE, encoding = "latin1"
+  )
+  expect_true(from_factory@newlines_in_values)
+  expect_equal(from_factory@encoding, "latin1")
+
+  # The route a specification document actually takes: YAML text -> list ->
+  # DTAFileFactory. A key that never reaches the constructor is a key a user
+  # can write and never see honoured.
+  parsed <- yaml::yaml.load(paste(
+    "name: encoded",
+    "type: tabular",
+    "files:",
+    "  type: tsv",
+    "  filename: a.tsv",
+    "  newlines_in_values: true",
+    "  encoding: latin1",
+    "columns:",
+    "  - id: STUDYID",
+    "    type: SAS Char",
+    sep = "\n"
+  ))
+  ds <- dta_dataset_from_list(parsed)
+
+  expect_true(ds@files[[1]]@newlines_in_values)
+  expect_equal(ds@files[[1]]@encoding, "latin1")
+})
+
+test_that("print_info reports the two parse settings", {
+  out <- paste(
+    capture_messages(print_info(DTAFileCSV("a.csv", encoding = "latin1"))),
+    collapse = ""
+  )
+
+  expect_match(out, "Newlines in values")
+  expect_match(out, "Encoding")
+  expect_match(out, "latin1")
 })
 
 
@@ -788,4 +1000,58 @@ test_that("read_file() still aborts with 'does not match' when neither pattern m
   )
 
   expect_error(read_file(file_info, path), "does not match")
+})
+
+
+# ---------------------------------------------------------------------------
+# A brace in a file name must not be read as cli markup
+# ---------------------------------------------------------------------------
+# Both guards used to render the path with str_glue() and hand the RESULT to
+# cli, which then read any brace the path contained as an expression of its
+# own. `data{1}.csv` -- an ordinary name -- aborted with cli's own parse error
+# instead of the intended message, so the user was told nothing about their
+# file. Interpolating the variable lets cli escape the braces itself.
+
+test_that("a file name containing braces still reports the real problem", {
+  braced <- file.path(tempdir(), "dta_brace{1}.csv")
+  on.exit(unlink(braced), add = TRUE)
+  writeLines(c("A", "1"), braced)
+
+  expect_error(
+    read_file(DTAFileCSV("something_else.csv"), braced),
+    regexp = "does not match"
+  )
+  expect_error(
+    open_file(DTAFileCSV("something_else.csv"), braced),
+    regexp = "does not match"
+  )
+
+  absent <- file.path(tempdir(), "dta_absent{2}.csv")
+  expect_false(file.exists(absent))
+  expect_error(
+    read_file(DTAFileCSV("dta_absent{2}.csv"), absent),
+    regexp = "cannot be found"
+  )
+  expect_error(
+    open_file(DTAFileCSV("dta_absent{2}.csv"), absent),
+    regexp = "cannot be found"
+  )
+})
+
+test_that("a file name containing cli markup is not rendered as markup", {
+  # `{.field x}` is a style, not a variable, so it would not have aborted --
+  # it would have printed the name in colour with the markup silently removed,
+  # naming a file the user does not have. cli wraps at the console width, so
+  # widen it: a line break landing inside the name would fail this for the
+  # wrong reason.
+  withr::local_options(cli.width = 1000)
+
+  styled <- file.path(tempdir(), "dta_{.field x}.csv")
+  expect_false(file.exists(styled))
+
+  expect_error(
+    read_file(DTAFileCSV("dta_{.field x}.csv"), styled),
+    regexp = "{.field x}",
+    fixed = TRUE
+  )
 })

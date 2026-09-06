@@ -16,7 +16,9 @@ DTAFileTabular(
   missing_values = "",
   sep = "\\t",
   has_header = TRUE,
-  quote = "\\""
+  quote = "\\"",
+  newlines_in_values = FALSE,
+  encoding = "UTF-8"
 )
 }
 \arguments{
@@ -51,6 +53,26 @@ is \code{TRUE}.}
 
 \item{quote}{Character or \code{NULL}; quoting character for fields. Default
 is \code{'"'}.}
+
+\item{newlines_in_values}{Logical; \code{TRUE} if a quoted field may contain
+a line break. Default is \code{FALSE}, which is Arrow's own default and
+what every file written by a well-behaved exporter satisfies.
+
+The setting exists because a quoted line break is only a problem when it
+straddles one of the fixed-size blocks the file is read in (see
+\code{DTAtools.stream_block_size}): a small file with quoted newlines reads
+correctly either way, and the same data past the first block fails with
+"CSV parse error: straddling object straddles two block boundaries". Turning
+this on makes the reader hold a block open until the quoted value ends, at
+some cost in parse speed -- which is why it is not the default.}
+
+\item{encoding}{Character; the character encoding of the file, as accepted by
+\code{\link[base]{iconv}}. Default is \code{"UTF-8"}.
+
+Anything other than UTF-8 is honoured on the in-memory reader only. Arrow's
+dataset scanner has no re-encoding step, so a non-UTF-8 file cannot be
+validated lazily and \code{\link{open_file}()} says so rather than reading
+the bytes as if they were UTF-8 and disagreeing with the in-memory path.}
 }
 \value{
 An object of class \code{DTAFileTabular}.

@@ -29,6 +29,27 @@ which is what lets a file larger than memory be validated at all.
 Both apply the same name checks and the same column-type pinning, so the two
 differ in when the data is read, not in what it is read as.
 }
+\section{What a batch of a delimited scan actually is}{
+
+Arrow splits a delimited file into fixed-size READ BLOCKS -- one megabyte by
+default -- and emits one record batch per block. The \code{batch_rows}
+argument of \code{\link{check}()} reaches
+\code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
+batch that is already larger, so on a delimited file it is a ceiling and not
+a target: measured on a 4.4 MB, 46,000-row CSV, the default block gave 5
+batches of about 10,485 rows for \code{batch_rows} of 131,072 and of
+1,000,000 alike.
+
+Peak memory during a scan is therefore governed by the block size times
+Arrow's read-ahead, not by \code{batch_rows}. Raise it with
+\code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
+memory to grow in proportion.
+
+A non-UTF-8 \code{encoding} declared on the handler is refused here: Arrow's
+dataset scanner has no re-encoding step, so such a file can only be read into
+memory (\code{stream = "never"}).
+}
+
 \examples{
 handler <- DTAFileCSV(filename = "clinical_data.csv")
 file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")

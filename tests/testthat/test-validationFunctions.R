@@ -161,6 +161,172 @@ test_that("validate_table does not abort when a rule names an absent column", {
   expect_match(conditionMessage(err), "AGE")
 })
 
+test_that("declared types are stamped per distinct column, not per error row", {
+  # The lookup walks the collection and dispatches through S7, and it was run
+  # once per ERROR. A wholly mistyped column of 10,000 rows therefore paid it
+  # 10,000 times for one answer. Deriving it per distinct column is the same
+  # function of the same inputs, so the frames must be identical -- asserted
+  # here against the per-row form the fix replaced, over a frame mixing three
+  # columns of which only two are declared.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    )
+  )
+
+  errors <- data.frame(
+    row = 1:6,
+    column = c("AGE", "UNDECLARED", "ID", "AGE", "UNDECLARED", "ID"),
+    raw = c("a", "b", "c", "d", "e", "f"),
+    declared_type = c("character", "character", "double", "character", "integer", "double"),
+    reason = "not_convertible",
+    stringsAsFactors = FALSE
+  )
+
+  per_row <- errors
+  declared <- vapply(
+    per_row$column,
+    function(column) dta_spec_declared_type(specs, column),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  per_row$declared_type <- ifelse(is.na(declared), per_row$declared_type, declared)
+
+  expect_identical(dta_apply_spec_declared_types(errors, specs), per_row)
+
+  # And the answers themselves: the declared type where there is one, the
+  # observed storage type where there is not.
+  stamped <- dta_apply_spec_declared_types(errors, specs)
+  expect_identical(stamped$declared_type[stamped$column == "AGE"], c("SAS Num", "SAS Num"))
+  expect_identical(stamped$declared_type[stamped$column == "ID"], c("SAS Char", "SAS Char"))
+  expect_identical(
+    stamped$declared_type[stamped$column == "UNDECLARED"],
+    c("character", "integer")
+  )
+})
+
+
+test_that("dta_apply_spec_declared_types leaves an empty or absent frame alone", {
+  expect_null(dta_apply_spec_declared_types(NULL, NULL))
+  empty <- dta_empty_import_errors()
+  expect_identical(dta_apply_spec_declared_types(empty, NULL), empty)
+})
+
+
+test_that("max_errors caps the retained detail without moving any count", {
+  # The streaming path has bounded its error frames since it existed; a table
+  # already in memory retained one row per bad cell without limit, so a wholly
+  # mistyped column cost a second copy of the table in error detail.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE),
+      AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
+    )
+  )
+  # Typed at the import choke point first, so the table carries import issues as
+  # a loaded one would: both per-cell axes then have more rows than the cap.
+  table <- dta_coerce_table_to_specs(
+    data.frame(
+      ID = paste0("TOOLONG", 1:5),
+      AGE = rep("abc", 5),
+      stringsAsFactors = FALSE
+    ),
+    specs
+  )$table
+
+  full <- validate_table_detailed(specs, table, verbose = FALSE)
+  capped <- validate_table_detailed(specs, table, verbose = FALSE, max_errors = 2L)
+
+  # Counts, verdict and the per-check breakdown come from the complete frames.
+  expect_identical(capped$ok, full$ok)
+  expect_identical(capped$n_columnspec_errors, full$n_columnspec_errors)
+  expect_identical(capped$n_import_errors, full$n_import_errors)
+  expect_identical(capped$columnspec_checks, full$columnspec_checks)
+  expect_identical(
+    capped$columnspec_errors$summarised_error,
+    full$columnspec_errors$summarised_error
+  )
+
+  # Only retention shrank, and the frame says so.
+  expect_identical(nrow(capped$columnspec_errors$full_error), 2L)
+  expect_true(isTRUE(attr(capped$columnspec_errors$full_error, "truncated")))
+  expect_identical(nrow(capped$import_errors), 2L)
+  expect_true(isTRUE(attr(capped$import_errors, "truncated")))
+  # The retained rows are the head of the complete frame, not a resample.
+  expect_identical(
+    capped$columnspec_errors$full_error$row,
+    utils::head(full$columnspec_errors$full_error$row, 2L)
+  )
+
+  # A cap of zero still reports the same counts; it just keeps nothing.
+  none <- validate_table_detailed(specs, table, verbose = FALSE, max_errors = 0L)
+  expect_identical(none$n_columnspec_errors, full$n_columnspec_errors)
+  expect_identical(nrow(none$columnspec_errors$full_error), 0L)
+
+  # The default retains everything, exactly as before the parameter existed.
+  expect_identical(
+    validate_table_detailed(specs, table, verbose = FALSE),
+    full
+  )
+  expect_null(attr(full$columnspec_errors$full_error, "truncated"))
+})
+
+
+test_that("an unusable max_errors is refused rather than read as no cap", {
+  # `NA`, a negative number, a length-2 vector and a string were all read as
+  # "keep everything": a caller who computed the cap wrongly got the unbounded
+  # frame the argument exists to prevent, and got it without a word.
+  errors <- data.frame(
+    row = 1:5,
+    column = "ID",
+    stringsAsFactors = FALSE
+  )
+
+  for (bad in list(NA, NA_integer_, c(1, 2), -1, "3")) {
+    expect_error(
+      dta_truncate_error_frame(errors, bad),
+      class = "rlang_error",
+      regexp = "single non-negative number"
+    )
+  }
+
+  # An unusable cap is refused whatever the frame is, so the report does not
+  # depend on the input happening to have enough rows to reach the cap.
+  expect_error(
+    dta_truncate_error_frame(NULL, NA),
+    class = "rlang_error",
+    regexp = "single non-negative number"
+  )
+
+  # The two deliberate ways to say "no cap" still say it.
+  expect_identical(dta_truncate_error_frame(errors, NULL), errors)
+  expect_identical(dta_truncate_error_frame(errors, Inf), errors)
+  # And a real cap still caps, including the boundary value zero.
+  expect_identical(nrow(dta_truncate_error_frame(errors, 0)), 0L)
+  expect_identical(nrow(dta_truncate_error_frame(errors, 2L)), 2L)
+})
+
+
+test_that("a capped import frame still reports the exact error count", {
+  # dta_import_error_count() reads a frame-level attribute, and `[` drops it.
+  # A truncated frame that lost it would report the rows it kept.
+  specs <- DTAColumnSpecCollection(
+    columns = list(VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE))
+  )
+  table <- dta_coerce_table_to_specs(
+    data.frame(VAL = rep("nope", 6), stringsAsFactors = FALSE),
+    specs
+  )$table
+
+  capped <- validate_table_detailed(specs, table, verbose = FALSE, max_errors = 2L)
+
+  expect_identical(nrow(capped$import_errors), 2L)
+  expect_equal(dta_import_error_count(capped$import_errors), 6)
+  expect_equal(capped$n_import_errors, 6L)
+})
+
+
 test_that("Row numbers stay correct for errors past the first 5000-row chunk", {
   # validate_table_detailed() validates in chunks of 5000 rows and offsets the
   # reported row by chunk_size * (chunk_index - 1). Only a violation in a later

@@ -59,7 +59,16 @@ does -- previously a header-only file certified such rules as passed.}
 }
 \value{
 A \code{details} list of the same shape \code{validate_table_detailed()}
-returns.
+returns, plus \code{import_typing_errors}: the import-typing frame on its own,
+before it is merged with the rule-time import errors into \code{import_errors}.
+That is the axis a materialising load records in a dataset's
+\code{import_issues} property, so a caller wanting to record the same thing for
+a streamed table reads this rather than the merged frame. Always present --
+a zero-row frame carrying \code{n_import_errors = 0} when no value failed to
+type -- so that a consumer can tell an empty axis from a result written
+before the field existed, which is the difference between recording nothing
+and falling back to the merged frame. Consumers that do not know the field
+ignore it: it is an extra list element, and nothing enumerates \code{details}.
 }
 \description{
 The streaming counterpart of \code{validate_table_detailed()}. Evaluates all three
