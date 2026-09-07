@@ -847,7 +847,10 @@ dta_arrow_parse_numeric_batch <- function(batch, state) {
 #' batch with fewer rows is typed in R. Each Arrow step is a fixed-cost call
 #' per column per batch, so on the small batches a 1 MiB read block yields the
 #' path costs more than the parse it saves (measured 34% slower at 1 MiB
-#' blocks, 18% faster at 8 MiB, 26% faster at 32 MiB on a 1e6 x 20 file).
+#' blocks, 18% faster at 8 MiB, 26% faster at 32 MiB on a 1e6 x 20 file). The
+#' 8 MiB default block clears the threshold on a file of ordinary width, so the
+#' guard is what stands the step down on the batches that stay small -- a
+#' lowered block, or rows wide enough that 8 MiB holds fewer than 20,000.
 #' @param type_map Named character vector from [dta_compile_spec_types()].
 #' @return An environment, or `NULL`.
 #' @keywords internal
@@ -860,11 +863,12 @@ dta_arrow_numeric_state <- function(type_map) {
   }
 
   # Below this many rows a batch is typed in R. Each Arrow step here is a
-  # fixed-cost call into the engine per column per batch, and at the default
-  # 1 MiB read block a delimited batch is only a few thousand rows: measured
-  # on a 1e6 x 20 file, the Arrow path was 34% SLOWER at 1 MiB blocks and 18%
-  # faster at 8 MiB (about 50,000 rows per batch), 26% faster at 32 MiB. The
-  # threshold makes the step a no-op exactly where it cannot pay for itself.
+  # fixed-cost call into the engine per column per batch, so a batch of a few
+  # thousand rows cannot repay it: measured on a 1e6 x 20 file, the Arrow path
+  # was 34% SLOWER at 1 MiB blocks and 18% faster at 8 MiB (about 50,000 rows
+  # per batch), 26% faster at 32 MiB. The 8 MiB default block puts an ordinary
+  # file the right side of this; the threshold makes the step a no-op where a
+  # smaller block, or a very wide row, keeps the batch below it.
   min_rows <- getOption("DTAtools.stream_arrow_numeric_min_rows", 20000L)
   if (
     !is.numeric(min_rows) || length(min_rows) != 1 || is.na(min_rows) ||

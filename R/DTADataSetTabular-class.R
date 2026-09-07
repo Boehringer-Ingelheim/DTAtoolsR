@@ -1173,7 +1173,7 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. On a delimited
 #'       file a batch is one Arrow read block of about
-#'       \code{getOption("DTAtools.stream_block_size")} bytes (1 MiB by
+#'       \code{getOption("DTAtools.stream_block_size")} bytes (8 MiB by
 #'       default), and \code{batch_rows} only \emph{caps} a batch that is
 #'       already larger. Peak memory during such a scan is therefore governed by
 #'       the block size times Arrow's read-ahead, not by \code{batch_rows}.}

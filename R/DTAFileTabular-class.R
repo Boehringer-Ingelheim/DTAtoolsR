@@ -1403,7 +1403,13 @@ dta_read_delim_normalized <- function(
     read_options = arrow::csv_read_options(
       column_names = plan$column_names,
       skip_rows = plan$skip,
-      encoding = plan$encoding
+      encoding = plan$encoding,
+      # The same block the lazy path reads in. It buys this reader nothing --
+      # it holds the whole table either way -- but a quoted line break is
+      # refused exactly when it straddles a block boundary, so a reader on a
+      # different block accepts files the other refuses. That is the one
+      # outcome these two are written to prevent.
+      block_size = dta_stream_block_size()
     ),
     col_types = plan$col_types,
     as_data_frame = FALSE

@@ -243,7 +243,7 @@ method(`[`, DTA) <- function(x, i) {
 #'   \item{\code{DTAtools.stream_threshold}}{The size, in bytes, above which
 #'     \code{stream = "auto"} keeps a file lazy. 512 MB by default.}
 #'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
-#'     delimited file, 1 MiB by default. Read during \code{\link{check}()}
+#'     delimited file, 8 MiB by default. Read during \code{\link{check}()}
 #'     rather than here, and what governs a scan's peak memory.}
 #'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
 #'     whose declared \code{encoding} is not UTF-8 is converted, at load time,
@@ -265,7 +265,7 @@ method(`[`, DTA) <- function(x, i) {
 #' @seealso \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
 #'   arguments tune the scan of a streamed table. On a delimited file a batch is
 #'   one Arrow read block of about
-#'   \code{getOption("DTAtools.stream_block_size")} bytes (1 MiB by default);
+#'   \code{getOption("DTAtools.stream_block_size")} bytes (8 MiB by default);
 #'   \code{batch_rows} only caps a batch that is already larger, so peak memory
 #'   during a scan follows the block size times Arrow's read-ahead rather than
 #'   \code{batch_rows}.
@@ -566,9 +566,13 @@ dta_emit_summary_message <- function(summary_message) {
 #'
 #' \describe{
 #'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
-#'     delimited file, 1 MiB by default. This -- times Arrow's read-ahead --
+#'     delimited file, 8 MiB by default. This -- times Arrow's read-ahead --
 #'     is what governs peak memory during a scan; \code{batch_rows} only
-#'     \emph{caps} a batch that is already larger.}
+#'     \emph{caps} a batch that is already larger. The default is eight
+#'     times Arrow's own 1 MiB, which on eight threads cost 48 MB of measured
+#'     read-ahead and bought batches large enough for the Arrow numeric parse
+#'     below to engage. Rows per batch is about the block divided by the width
+#'     of a row, so a file much wider than 420 bytes a row wants more.}
 #'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default.
 #'     Whether a batch whose declared-numeric columns are entirely composed of
 #'     values Arrow and R are known to parse identically is converted inside
@@ -579,13 +583,14 @@ dta_emit_summary_message <- function(summary_message) {
 #'     is where the value is recorded as an import error.}
 #'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
 #'     The Arrow parse is attempted only for a batch of at least this many
-#'     rows: every Arrow call costs the same whatever the batch holds, and at
-#'     the default 1 MiB read block a delimited batch is a few thousand rows,
-#'     where the R parse is cheaper. Measured on a 1e6 x 20 file, the Arrow
-#'     path was 34\% slower at 1 MiB blocks, 18\% faster at 8 MiB (about
-#'     50,000 rows a batch) and 26\% faster at 32 MiB. So it engages
-#'     automatically once \code{DTAtools.stream_block_size} is raised to
-#'     8 MiB or more, and not at all at the default block size.}
+#'     rows: every Arrow call costs the same whatever the batch holds, so on a
+#'     batch of a few thousand rows the R parse is cheaper. Measured on a
+#'     1e6 x 20 file, the Arrow path was 34\% slower at 1 MiB blocks, 18\%
+#'     faster at 8 MiB (about 50,000 rows a batch) and 26\% faster at 32 MiB.
+#'     The 8 MiB default block clears the threshold on a file of ordinary
+#'     width, so the parse engages; it stands down on a narrow batch, which is
+#'     what a lowered \code{DTAtools.stream_block_size} or a very wide row
+#'     produces.}
 #'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
 #'     whose declared \code{encoding} is not UTF-8 is converted to the UTF-8
 #'     copy a lazy scan reads (see \code{\link{DTAFileTabular}()}), 4 MiB by
@@ -610,10 +615,12 @@ dta_emit_summary_message <- function(summary_message) {
 #'       Ignored for tables held in memory. Defaults to
 #'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. On a delimited
 #'       file a batch is one Arrow read block of about
-#'       \code{getOption("DTAtools.stream_block_size")} bytes (1 MiB by
+#'       \code{getOption("DTAtools.stream_block_size")} bytes (8 MiB by
 #'       default), and \code{batch_rows} only caps a batch that is already
 #'       larger, so peak memory follows the block size times Arrow's read-ahead
-#'       rather than \code{batch_rows}.}
+#'       rather than \code{batch_rows}. It does bind at the top end: past about
+#'       16 MiB of block on a file of ordinary width, the row cap rather than
+#'       the block decides how large a batch gets.}
 #'     \item{max_errors}{Integer, \code{Inf}, or NULL to hold everything in
 #'       memory. Cap on the number of per-cell errors whose detail is held in
 #'       RAM while scanning. Defaults to
