@@ -28,7 +28,6 @@ backends and that they match. If both are provided and do not match, an error is
 The backend is determined by the prefix of \code{type} or \code{format}.
 }
 \examples{
-library(DTAtools)
 DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 
 }

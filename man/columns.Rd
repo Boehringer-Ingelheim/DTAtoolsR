@@ -12,13 +12,13 @@ columns(x, ...)
 \item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-A list with metadata information
+A named list of \code{\link{DTAColumnSpec}} objects, one per
+declared column, named by column id.
 }
 \description{
 Method to get columns specifications from DTADataSetTabular
 }
 \examples{
-library(DTAtools)
 ds <- create_example_DTADataSetTabular()
 columns(ds)
 }

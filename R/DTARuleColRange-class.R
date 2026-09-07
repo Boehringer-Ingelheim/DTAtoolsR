@@ -8,7 +8,10 @@
 #' @export
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param columns Character vector. Column name(s) checked by the range rule.
+#' @param columns Character. The single column the range applies to. The
+#'   property is a character vector for consistency with the other rule
+#'   classes, but a range rule must name exactly one column; more than one is
+#'   an error when the rule is evaluated.
 #' @param range Numeric vector or list. Legacy argument for range checks.
 #' @param description Character or NULL. Free-text description of the rule.
 #' @param min Numeric or NULL. Lower bound of the allowed range.
@@ -97,14 +100,7 @@ DTARuleColRange <- S7::new_class(
 )
 
 
-#' @title print
-#' @description
-#' Print overview for DTARuleColRange
-#' @param x An object of class DTARuleColRange
 #' @importFrom cli cli_alert_info cli_alert
-#' @examples
-#' rule <- create_example_DTARuleColRange()
-#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColRange) <- function(x, ...) {
@@ -117,15 +113,15 @@ method(print, DTARuleColRange) <- function(x, ...) {
 }
 
 
-#' @title create_example_DTARuleColRange
+#' @title Create an Example Column-Range Rule
 #' @description
 #' create example for DTARuleColRange
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#' library(DTAtools)
 #' create_example_DTARuleColRange()
 #' @name create_example_DTARuleColRange
+#' @return An example \code{DTARuleColRange} object.
 #' @export
 create_example_DTARuleColRange <- function(index = 1) {
   # nolint
@@ -152,12 +148,6 @@ method(check, DTARuleColRange) <- function(x, tab) {
   # TODO from here
 }
 
-#' @title as.list for DTARuleColRange
-#' @description
-#' Convert a DTARuleColRange object to a list.
-#' @param x An object of class DTARuleColRange
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColRange object.
 #' @export
 #' @name as.list
 method(as.list, DTARuleColRange) <- function(x, ...) {

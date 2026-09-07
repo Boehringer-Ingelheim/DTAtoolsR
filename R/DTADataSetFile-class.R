@@ -14,6 +14,14 @@
 #' @param template_version Character or NA. Version of the template used.
 #' @param template_date Character or NA. Date of the template used.
 #' @return An object of class DTADataSetFile.
+#' @examples
+#' path <- tempfile(fileext = ".pdf")
+#' writeLines("a delivered report", path)
+#'
+#' ds <- DTADataSetFile(name = "delivery", paths = path)
+#' validation_status(check(ds, quiet = TRUE))
+#'
+#' unlink(path)
 #' @export
 DTADataSetFile <- S7::new_class(
   "DTADataSetFile",

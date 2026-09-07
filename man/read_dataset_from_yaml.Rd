@@ -16,7 +16,6 @@ An object of class DTADataSet
 Constructs a DTADataSet object from a YAML file specification.
 }
 \examples{
-require(DTAtools)
 file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 dta <- read_dataset_from_yaml(file)
 }

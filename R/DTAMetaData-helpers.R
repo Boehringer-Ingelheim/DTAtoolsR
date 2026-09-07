@@ -17,39 +17,13 @@
 }
 
 
-#' @title Convert DTAMetaData to List
-#' @description Convert a DTAMetaData object to a nested list structure suitable for YAML export
-#' or programmatic access.
-#'
-#' @details
-#' Every \code{Date} in the result - the top-level \code{date}, each
-#' \code{version_history[[i]]$date}, and the transmission transfer dates - is
-#' rendered as an ISO \code{"YYYY-MM-DD"} string so that a YAML dump can be read
-#' straight back through \code{DTAMetaData()}.
-#'
-#' \code{@import_issues} is deliberately not exported: it is a runtime record of
-#' what was lost while coercing the input, not part of the specification.
-#' \code{@template} IS exported (when non-empty): it is a provenance record that
-#' must survive a save/reload cycle so the rebase feature can trust it later.
-#'
-#' This method is hand-written field by field rather than iterating S7
-#' properties, so it does NOT pick up a new \code{DTAMetaData} property
-#' automatically. Adding a property to the class without adding it here means
-#' it is silently dropped on the next save -- if you add a property, add it
-#' to this function too.
-#'
-#' @param x An object of class DTAMetaData
-#' @param ... Additional arguments (not used)
-#'
-#' @return A list with all metadata fields
-#'
-#' @examples
-#' library(DTAtools)
-#' md <- create_example_DTAMetaData(2)
-#' md_list <- as.list(md)
-#'
 #' @name as.list
 #' @export
+# MAINTENANCE: this method is hand-written field by field rather than iterating
+# S7 properties, so it does NOT pick up a new DTAMetaData property
+# automatically. Adding a property to the class without adding it here means it
+# is silently dropped on the next save -- if you add a property, add it here
+# too.
 method(as.list, DTAMetaData) <- function(x, ...) {
   result <- list(
     title = x@title,
@@ -120,7 +94,6 @@ method(as.list, DTAMetaData) <- function(x, ...) {
 #' @return A character vector of names or list of contacts authorized for corrections
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_authorized_for_corrections(md)
 #'
@@ -144,7 +117,6 @@ get_authorized_for_corrections <- function(x) {
 #' @return A character vector of reviewer names or list of reviewer contact objects
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_receiver_reviewers(md)
 #'
@@ -184,7 +156,6 @@ get_receiver_reviewers <- function(x, name_only = TRUE) {
 #' @return A list with elements first_transfer and last_transfer
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_transmission_dates(md)
 #'
@@ -223,7 +194,6 @@ get_transmission_dates <- function(x) {
 #' call.
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_version_history_df(md)
 #'
@@ -283,7 +253,6 @@ get_version_history_df <- function(x) {
 #' @return A list with elements is_valid (logical) and messages (character vector)
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' validate_transmission_dates(md)
 #'
@@ -348,7 +317,6 @@ validate_transmission_dates <- function(x) {
 #'   metadata imported cleanly.
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- DTAMetaData(
 #'   title = "Qualified Date",
 #'   transmission = list(date_last_transfer = "2026-12-31 at the earliest")

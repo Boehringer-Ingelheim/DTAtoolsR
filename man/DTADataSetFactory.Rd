@@ -30,7 +30,6 @@ Constructs a DTADataSetFactory object for a specified backend (e.g., SAS or R),
 based on the provided type.
 }
 \examples{
-library(DTAtools)
 DTADataSetFactory(
   type = "file",
   name = "mydataset",

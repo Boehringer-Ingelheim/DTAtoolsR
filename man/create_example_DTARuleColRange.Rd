@@ -2,17 +2,19 @@
 % Please edit documentation in R/DTARuleColRange-class.R
 \name{create_example_DTARuleColRange}
 \alias{create_example_DTARuleColRange}
-\title{create_example_DTARuleColRange}
+\title{Create an Example Column-Range Rule}
 \usage{
 create_example_DTARuleColRange(index = 1)
 }
 \arguments{
 \item{index}{rule selector}
 }
+\value{
+An example \code{DTARuleColRange} object.
+}
 \description{
 create example for DTARuleColRange
 }
 \examples{
-library(DTAtools)
 create_example_DTARuleColRange()
 }

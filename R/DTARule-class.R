@@ -55,15 +55,8 @@ DTARule <- S7::new_class(
 )
 
 
-#' @title print
-#' @description
-#' Print overview for DTARule
-#' @param x An object of class DTARule
 #' @importFrom stringr str_glue
 #' @importFrom cli cli_alert cli_text cli_div
-#' @examples
-#' rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
-#' print(rule)
 #' @name print
 #' @export
 method(print, DTARule) <- function(x, ...) {
@@ -73,14 +66,9 @@ method(print, DTARule) <- function(x, ...) {
 }
 
 
-#' @title check
-#' @description
-#' check rule against data
-#' @importFrom cli cli_abort
-#' @examples
-#' # do not manually create DTARule objects, use derived classes instead
-#' @name check
-#' @export
+# The `check` generic is declared and documented in 00_helpers.R; this file
+# only guards against it being missing, and registers the base method below.
+#
 # `inherits = FALSE` for the same reason as the guard in 00_helpers.R, which
 # see: unscoped, an attached devtools makes this find devtools::check and skip
 # creating the generic. 00_helpers.R is collated first and always defines it,
@@ -163,12 +151,6 @@ DTARuleFactory <- function(id, type, ...) {
 }
 
 
-#' @title as.list for DTARule
-#' @description
-#' Convert a DTARule object to a list.
-#' @param x An object of class DTARule.
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARule object.
 #' @export
 #' @name as.list
 method(as.list, DTARule) <- function(x, ...) {

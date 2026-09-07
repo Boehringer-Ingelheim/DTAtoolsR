@@ -4,6 +4,11 @@
 \name{names}
 \alias{names}
 \title{Get Names Method}
+\usage{
+names(x, ...)
+
+names(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTAColumnSpecCollection.}
 
@@ -14,8 +19,6 @@ A character vector of column names.
 }
 \description{
 Method to get the names of columns in the collection.
-
-returns list of names of the column specs
 }
 \examples{
 collection <- create_example_DTAColumnSpecCollection()

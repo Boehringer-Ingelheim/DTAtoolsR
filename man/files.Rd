@@ -24,7 +24,6 @@ or index is provided.
 Method to get files from DTADataSet object.
 }
 \examples{
-library(DTAtools)
 ds <- create_example_DTADataSetTabular()
 files(ds)
 }

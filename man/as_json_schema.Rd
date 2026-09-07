@@ -3,22 +3,52 @@
 %   R/DTAColumnSpecCollection-class.R, R/DTAColumnSpecStructure-class.R
 \name{as_json_schema}
 \alias{as_json_schema}
-\title{as_json_schema}
+\title{JSON Schema for a Column Specification}
+\usage{
+as_json_schema(x, ...)
+
+as_json_schema(x, ...)
+
+as_json_schema(x, ...)
+}
 \arguments{
-\item{x}{A \code{DTAColumnSpecStructure} object.}
+\item{x}{A \code{\link{DTAColumnSpec}},
+\code{\link{DTAColumnSpecCollection}} or
+\code{\link{DTAColumnSpecStructure}} object.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-A list representing the JSON Schema.
+For a \code{\link{DTAColumnSpec}} or
+\code{\link{DTAColumnSpecStructure}}, a list holding that column's JSON
+Schema fragment. For a \code{\link{DTAColumnSpecCollection}}, the finished
+schema already serialised: a length-1 character vector of class
+\code{"json"}, describing an array whose \code{items} carry one property
+per column.
 }
 \description{
-Converts a DTAColumnSpecStructure to a JSON Schema.
+Renders a column specification as JSON Schema: the type, and the length,
+pattern and permitted-value constraints the specification declares. The
+single-column methods return the schema fragment as a list; the
+\code{\link{DTAColumnSpecCollection}} method assembles those fragments into
+a whole schema and serialises it.
 
-Converts a DTAColumnSpec s into a JSON Schema.
-
-Converts a DTAColumnSpecStructure to a JSON Schema.
+The schema describes the contract for other tools to consume; it is not what
+this package validates against. \code{\link{check}()} and
+\code{\link{validate_table}()} evaluate each column's values directly rather
+than serialising the table and running a JSON Schema engine over it. Nor is
+it what \code{\link{write_columns_to_json}()} writes -- that serialises
+\code{\link{as.list}()}, the specification itself, rather than a schema.
 }
 \examples{
-library(DTAtools)
-specs <- create_example_DTAColumnSpecCollection()
-as_json_schema(specs)
+as_json_schema(DTAColumnSpec(id = "AGE", type = "SAS Num"))
+
+# A whole collection serialises to a finished JSON Schema document.
+schema <- as_json_schema(create_example_DTAColumnSpecCollection())
+class(schema)
+substr(schema, 1, 60)
+}
+\seealso{
+\code{\link{as_json_schema_type}()},
+\code{\link{write_columns_to_json}()}
 }

@@ -285,8 +285,14 @@ dta_equality_bound <- function(x, value) {
 #' @param rule A DTARule object of type `"check_range"`. Expected slots:
 #'   - `@id` character
 #'   - `@type` = "check_range"
-#'   - `@column` character: name of the column to check
-#'   - `@range` numeric(2): inclusive lower/upper bounds, e.g. c(0, 1)
+#'   - the target column, spelled either `@columns` (what [DTARuleColRange()]
+#'     stores) or `@column`. Exactly one column is required.
+#'   - the bounds, spelled either `@min` and `@max` (what [DTARuleColRange()]
+#'     stores, including when it was constructed from `range =`) or a
+#'     `@range` numeric(2) giving inclusive lower and upper bounds.
+#'
+#'   Both spellings resolve through `dta_range_target()`, so a rule read from
+#'   YAML and one built in R behave identically.
 #' @param df A data.frame to validate.
 #' @param numeric_cache A named list from [dta_build_numeric_cache()] mapping
 #'   column name to its cached numeric conversion, or `NULL` to convert on
@@ -295,8 +301,11 @@ dta_equality_bound <- function(x, value) {
 #' an **inclusive** numeric range `[lower, upper]`. Missing values are ignored.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
-#' # Suppose `rule` is a DTARule with column="age", range=c(18, 65)
-#' # rule_check_range(rule, df)
+#' df <- data.frame(AGE = c(34, 71, 12))
+#' rule <- DTARuleFactory("adult_age", "col_range", columns = "AGE", min = 18, max = 65)
+#'
+#' # Two rows fall outside the inclusive band, so the rule fails.
+#' rule_check_range(rule, df)
 #' @export
 rule_check_range <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
@@ -420,7 +429,9 @@ dta_range_violation_message <- function(id, n, col, range) {
 #' @param rule A DTARule object of type `"check_unique"`. Expected slots:
 #'   - `@id` character
 #'   - `@type` = "check_unique"
-#'   - `@column` character: name of the column to check
+#'   - the target columns, spelled either `@columns` (what
+#'     [DTARuleColUnique()] stores) or `@column`. Several columns are checked
+#'     as a combination: it is the tuple that must be unique.
 #' @param df A data.frame to validate.
 #' @param numeric_cache A named list from [dta_build_numeric_cache()], or
 #'   `NULL`. Ignored: uniqueness never compares columns numerically, but the
@@ -430,7 +441,11 @@ dta_range_violation_message <- function(id, n, col, range) {
 #' Repeated `NA` values are considered duplicates by base R `duplicated()`.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
-#' # rule_check_unique(rule, df)
+#' df <- data.frame(SUBJID = c("S1", "S2", "S2"), stringsAsFactors = FALSE)
+#' rule <- DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID")
+#'
+#' # "S2" appears twice.
+#' rule_check_unique(rule, df)
 #' @export
 rule_check_unique <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
@@ -992,8 +1007,20 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #'   `NULL` to convert each column on demand.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
-#' # Example: If species == "setosa", then petal_length in [1.0, 1.9]
-#' # rule_check_col_condition(rule, iris)
+#' df <- data.frame(
+#'   STATUS = c("DONE", "DONE", "NOT DONE"),
+#'   RESULT = c(4.2, NA, NA),
+#'   stringsAsFactors = FALSE
+#' )
+#' rule <- DTARuleFactory(
+#'   "result_required_when_done",
+#'   "col_condition",
+#'   condition = list(STATUS = list(equals = "DONE")),
+#'   then = list(RESULT = list(empty = FALSE))
+#' )
+#'
+#' # Row 2 satisfies the IF but not the THEN.
+#' rule_check_col_condition(rule, df)
 #' @export
 rule_check_col_condition <- function(rule, df, numeric_cache = NULL) {
   check_rule_class(rule)
@@ -1427,6 +1454,19 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
 #' @param verbose Logical. If TRUE (default), prints progress messages.
 #' @return (Invisibly) a list of rule validation results, each as a list with
 #'   elements `id`, `valid`, and `message`.
+#' @examples
+#' df <- data.frame(
+#'   SUBJID = c("S1", "S2", "S2"),
+#'   AGE = c(34, 71, 12),
+#'   stringsAsFactors = FALSE
+#' )
+#' rules <- list(
+#'   DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID"),
+#'   DTARuleFactory("adult_age", "col_range", columns = "AGE", min = 18, max = 65)
+#' )
+#'
+#' results <- apply_rules(rules, df, verbose = FALSE)
+#' vapply(results, function(r) r$valid, logical(1))
 #' @export
 apply_rules <- function(rules, df, verbose = TRUE) {
   if (is.null(rules)) {
@@ -1519,7 +1559,17 @@ apply_rules <- function(rules, df, verbose = TRUE) {
 #' @param DTAColumnSpecCollection A `DTAColumnSpecCollection` with rules defined.
 #' @param table A data.frame to validate.
 #' @importFrom stats setNames
-#' @return (Invisibly) the list of rule results from `applySchemaRules()`.
+#' @return (Invisibly) the list of rule results from [apply_rules()], each a
+#'   list with elements `id`, `valid` and `message`.
+#' @examples
+#' specs <- DTAColumnSpecCollection(
+#'   columns = list(SUBJID = DTAColumnSpec(id = "SUBJID", type = "SAS Char")),
+#'   rules = list(DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID"))
+#' )
+#' df <- data.frame(SUBJID = c("S1", "S2", "S3"), stringsAsFactors = FALSE)
+#'
+#' # Every rule passes, so the call returns quietly.
+#' validate_rules(specs, df)
 #' @export
 validate_rules <- function(DTAColumnSpecCollection, table) {
   rules <- rules(DTAColumnSpecCollection)

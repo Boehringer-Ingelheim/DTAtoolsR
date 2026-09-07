@@ -18,7 +18,6 @@ This function creates example \code{DTAMetaData}
 objects with various levels of completeness and structure.
 }
 \examples{
-library(DTAtools)
 example_metadata <- create_example_DTAMetaData()
 print(example_metadata)
 }

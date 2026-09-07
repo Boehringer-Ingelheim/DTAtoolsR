@@ -70,7 +70,6 @@ DTA <- S7::new_class(
 #' @param ... Not used by current methods; reserved for future extensions.
 #' @return A list with metadata information
 #' @examples
-#' library(DTAtools)
 #' dta_obj <- create_example_DTA()
 #' metadata(dta_obj)
 #' @name metadata
@@ -87,17 +86,21 @@ method(metadata, DTA) <- function(x) {
 #' Method to get one or more datasets from a DTA object.
 #' @importFrom cli cli_alert_info cli_abort
 #' @param x An object of class DTA.
-#' @param name Optional single character or single integer. if NULL, returns a
-#' list of all datasets. If character, returns the datasets with the specified name.
-#' If integer, returns the datasets at the specified index.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{name}{Optional single character or single integer. If NULL
+#'       (the default), returns a list of all datasets. If character, returns
+#'       the dataset with that name. If integer, returns the dataset at that
+#'       index.}
+#'   }
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
-#' library(DTAtools)
 #' x <- create_example_DTA()
 #' datasets(x)
 #' datasets(x, "vitals")
 #' datasets(x, 1)
 #' @name datasets
+#' @usage datasets(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain `datasets` function would make
@@ -949,16 +952,49 @@ method(check, DTA) <- function(
 }
 
 
-#' @title Print DTA Object
+#' @title Print a DTAtools Object
 #' @description
-#' Print method for DTA objects.
-#' @param x An object of class DTA
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
+#' Prints a readable summary of any DTAtools object. A method is defined for
+#' every class the package exports, so \code{print()} works on a whole
+#' agreement, on a dataset, on a file handler, on a column specification and on
+#' a rule.
+#'
+#' What is shown depends on the class. A \code{\link{DTA}} prints its metadata
+#' heading and one line per dataset; a \code{\link{DTADataSetTabular}} prints
+#' its name, file handlers and tables; a \code{\link{DTAFile}} handler prints
+#' the filename or pattern and how many files it expects; a
+#' \code{\link{DTAColumnSpec}} prints its declared type, format and permitted
+#' values; a \code{\link{DTARule}} prints its type and the columns it
+#' constrains.
+#'
+#' \code{\link{print_info}()} gives a fuller, multi-line form of the same
+#' object and \code{\link{print_short_info}()} a one-line form.
+#' @param x A DTAtools object.
+#' @param ... Additional arguments (not used).
+#' @return Invisibly, \code{x}.
 #' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text cli_div
 #' @examples
-#' dta_obj <- create_example_DTA()
-#' print(dta_obj)
+#' # A whole agreement, and a dataset inside it.
+#' print(create_example_DTA())
+#' print(create_example_DTADataSetTabular())
+#'
+#' # Column specifications, singly and as a collection.
+#' print(create_example_DTAColumnSpec())
+#' print(create_example_DTAColumnSpecCollection())
+#' print(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+#'
+#' # File handlers, including one for a deliverable that is never parsed.
+#' print(create_example_DTAFileCSV())
+#' print(create_example_DTAFileTSV())
+#' print(DTAFileDelim("readings.psv", sep = "|"))
+#' print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
+#'
+#' # Metadata, and one rule of each kind.
+#' print(create_example_DTAMetaData())
+#' print(create_example_DTARuleColCondition())
+#' print(create_example_DTARuleColRange())
+#' print(create_example_DTARuleColUnique())
+#' @seealso \code{\link{print_info}()}, \code{\link{print_short_info}()}
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
@@ -1030,7 +1066,6 @@ create_example_DTA <- function(index = 1) {
 #' @importFrom cli cli_abort cli_alert_warning
 #' @return An object of class DTA
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' dta <- read_dta_from_yaml(file)
 #' @export
@@ -1054,7 +1089,6 @@ read_dta_from_yaml <- function(file) {
 #' @importFrom cli cli_abort cli_alert_warning
 #' @return An object of class DTA
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' yaml_data <- yaml::read_yaml(file)
 #' dta <- dta_from_list(yaml_data)

@@ -3,12 +3,19 @@
 \name{datasets}
 \alias{datasets}
 \title{Get datasets}
+\usage{
+datasets(x, ...)
+}
 \arguments{
 \item{x}{An object of class DTA.}
 
-\item{name}{Optional single character or single integer. if NULL, returns a
-list of all datasets. If character, returns the datasets with the specified name.
-If integer, returns the datasets at the specified index.}
+\item{...}{Additional named arguments:
+\describe{
+\item{name}{Optional single character or single integer. If NULL
+(the default), returns a list of all datasets. If character, returns
+the dataset with that name. If integer, returns the dataset at that
+index.}
+}}
 }
 \value{
 Either a list of DTADataSet objects or a single DTADataSet.
@@ -17,7 +24,6 @@ Either a list of DTADataSet objects or a single DTADataSet.
 Method to get one or more datasets from a DTA object.
 }
 \examples{
-library(DTAtools)
 x <- create_example_DTA()
 datasets(x)
 datasets(x, "vitals")

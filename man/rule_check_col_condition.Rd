@@ -66,6 +66,18 @@ single-column mappings; they are normalised to the named form.
 If \verb{@condition} is empty, the \verb{@then} part applies to \strong{all rows}.
 }
 \examples{
-# Example: If species == "setosa", then petal_length in [1.0, 1.9]
-# rule_check_col_condition(rule, iris)
+df <- data.frame(
+  STATUS = c("DONE", "DONE", "NOT DONE"),
+  RESULT = c(4.2, NA, NA),
+  stringsAsFactors = FALSE
+)
+rule <- DTARuleFactory(
+  "result_required_when_done",
+  "col_condition",
+  condition = list(STATUS = list(equals = "DONE")),
+  then = list(RESULT = list(empty = FALSE))
+)
+
+# Row 2 satisfies the IF but not the THEN.
+rule_check_col_condition(rule, df)
 }

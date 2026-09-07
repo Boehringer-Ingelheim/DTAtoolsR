@@ -3,8 +3,17 @@
 \name{as_json_schema_length}
 \alias{as_json_schema_length}
 \title{as_json_schema_length}
+\usage{
+as_json_schema_length(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAColumnSpec} object.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
+}
+\value{
+The column's declared maximum length, as a number, or \code{NA}
+when the specification declares none.
 }
 \description{
 Converts a DTAColumnSpec to a JSON Schema length.

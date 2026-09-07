@@ -1,7 +1,8 @@
 #' @title DTARuleColUnique Class
 #' @description
-#' Represents a single rule for validating data tables. The rule can be of various types,
-#' such as `check_range`, `check_unique`, or `check_col_condition`
+#' A rule requiring that the named columns hold no duplicate value across the
+#' table. Given several columns it is the combination that must be unique, not
+#' each column on its own.
 #'
 #' @import S7
 #' @importFrom cli cli_abort
@@ -79,14 +80,7 @@ DTARuleColUnique <- S7::new_class(
 )
 
 
-#' @title print
-#' @description
-#' Print overview for DTARuleColUnique
-#' @param x An object of class DTARuleColUnique
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
-#' @examples
-#' rule <- create_example_DTARuleColUnique()
-#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColUnique) <- function(x, ...) {
@@ -104,15 +98,15 @@ method(print, DTARuleColUnique) <- function(x, ...) {
   cli_text("column(s): {.field {cols}}")
 }
 
-#' @title create_example_DTARuleColUnique
+#' @title Create an Example Column-Uniqueness Rule
 #' @description
 #' create example for DTARuleColUnique
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#' library(DTAtools)
 #' create_example_DTARuleColUnique()
 #' @name create_example_DTARuleColUnique
+#' @return An example \code{DTARuleColUnique} object.
 #' @export
 create_example_DTARuleColUnique <- function(index = 1) {
   # nolint
@@ -143,12 +137,6 @@ method(check, DTARuleColUnique) <- function(x, tab) {
   # TODO from here
 }
 
-#' @title as.list for DTARuleColUnique
-#' @description
-#' Convert a DTARuleColUnique object to a list.
-#' @param x An object of class DTARuleColUnique
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColUnique object.
 #' @export
 #' @name as.list
 method(as.list, DTARuleColUnique) <- function(x, ...) {

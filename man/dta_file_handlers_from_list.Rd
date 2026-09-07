@@ -26,7 +26,6 @@ and leaves those of a sequence unnamed -- so a handler whose own value is a
 sequence (\code{info:}) is still read as the single mapping it is.
 }
 \examples{
-library(DTAtools)
 dta_file_handlers_from_list(list(type = "csv", filename = "clinical_data.csv"))
 dta_file_handlers_from_list(list(
   list(type = "csv", filename = "a.csv"),

@@ -25,9 +25,11 @@ pattern. Default is \code{FALSE}.}
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}
 
-\item{number_of_files}{Numeric or \code{NULL}; number of files
-expected. Default is \code{1}. If two numbers are provided,
-they represent min and maximum of files expected.}
+\item{number_of_files}{Numeric or \code{NULL}; the exact number of files
+expected. Must be a single value -- a length-2 vector is an error, not a
+range. Default is \code{1}. To express a range, set
+\code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+\code{number_of_files} alongside either of them is an error.}
 
 \item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
 expected.}
@@ -48,11 +50,15 @@ number of files, and how to read them, including separator, header presence,
 quoting, and column types.
 }
 \details{
-This class is used internally by the DTAtoolsR package to
-manage metadata and properties of DTA files.
+This class is the base of the file-handler hierarchy and carries
+the metadata and parsing properties every handler shares. It is rarely
+constructed directly: prefer a concrete subclass --
+\code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
+\code{\link{DTAFileDelim}} for a file that is read, or
+\code{\link{DTAFileAny}} for a deliverable that is only checked for
+arrival.
 }
 \examples{
 file_info <- DTAFile("file.txt")
 file_info_pattern <- DTAFile("file\\\\d+\\\\.txt", pattern = TRUE)
 }
-\keyword{internal}

@@ -300,6 +300,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The reference documentation says what the functions actually do.** A review
+  of every exported roxygen block found nineteen help pages stating something
+  untrue, and they are corrected. `?DTAFileTabular` described a class called
+  `C`; `?DTAFileCSV` called CSV "Tab-Separated Values"; `DTAFileCSV`,
+  `DTAFileTSV` and `DTAFileDelim` each named `DTAFile` as their parent when all
+  three descend from `DTAFileTabular`; `?DTADataSet` printed the internal object
+  name `__DTAtools_supported_dataset_types__` where it should have listed
+  `"tabular"` and `"file"`; `columns()` claimed to return metadata;
+  `validate_rules()` pointed at an `applySchemaRules()` that does not exist;
+  `write_table_to_file()` documented `@return NULL` although it returns the
+  table, its name and its checksum; and `rule_check_range()` and
+  `rule_check_unique()` named slots (`@column`, `@range`) that no object in the
+  package carries. The rule pages now describe both spellings their resolver
+  accepts.
+- **Help pages shared by many classes are readable again.** Eighteen `print()`
+  methods, ten `as.list()` methods and the `print_info()`, `print_short_info()`,
+  `names()`, `as_json_schema()` and `as_json_schema_type()` families each merged
+  onto a single page, stacking one title, description and return value per
+  method. `?print` opened as "Print DTA Object", described its argument as a
+  `DTARuleGroupCondition`, and repeated "Invisibly returns the input object"
+  seven times. Each of these pages now carries one authored description covering
+  every class it documents, and the individual methods contribute their call
+  signature only.
+- **`?check` describes validation rather than the package's file layout.** Its
+  first paragraph explained why the generic is defined in `00_helpers.R` given
+  R's alphabetical collation -- a note for maintainers, which now lives beside
+  the code it explains. The page says what `check()` does, which classes have
+  methods, and where to read the verdict afterwards.
+- **Examples run.** Six exported functions shipped an `@examples` section
+  containing only comments, so they had no worked example and no smoke coverage:
+  `rule_check_range()`, `rule_check_unique()`, `rule_check_col_condition()`,
+  `export_specs_table()`, `export_column_value_table()` and
+  `columns_specs_from_word()`. Thirteen further pages had no examples at all,
+  among them the whole result-reading API -- `validation_status()`,
+  `validation_errors()`, `inspect()` and `apply_rules()`. Both gaps are filled.
+  `write_dta()` and `write_dataset_metadata()` were wrapped in `\dontrun{}` only
+  because they wrote into the working directory; they now write to `tempfile()`
+  and are executed like any other example. The 47 redundant `library(DTAtools)`
+  lines that opened examples have been removed.
+- **There is a front door.** `?DTAtools` previously did not exist. The package
+  now has a help page introducing the read-load-check-report workflow, the class
+  hierarchy, document export, the template system, and the options that govern
+  streaming, error retention and Arrow compute.
+- **Ten help pages show their call signature.** `datasets()`, `labels()`,
+  `matches_filename()`, `names()`, `open_file()`, `read_file()`, `as_r_type()`,
+  `as_json_schema()`, `as_json_schema_length()` and `as_json_schema_type()`
+  rendered with no `\usage` section at all, because their generic is declared
+  behind a guard roxygen cannot derive a signature from. Seven pages that
+  documented no return value now do, and titles that merely repeated the
+  function name have been replaced.
+
 - **Editing a metadata field no longer stores the whitespace around it.** A
   title or version typed with a leading or trailing space was saved exactly as
   typed, even though the same code already counts a field of nothing but

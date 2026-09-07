@@ -16,6 +16,5 @@ An example \code{DTAFileTSV} object.
 Creates an example \code{DTAFileTSV} object using example files.
 }
 \examples{
-library(DTAtools)
 create_example_DTAFileTSV()
 }

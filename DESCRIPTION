@@ -88,6 +88,7 @@ Collate:
     'DTARuleColRange-class.R'
     'DTARuleColUnique-class.R'
     'DTARuleGroupCondition-class.R'
+    'DTAtools-package.R'
     'arrowCompute.R'
     'benchmarking.R'
     'columnSpecChecks.R'

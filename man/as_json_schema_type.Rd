@@ -3,14 +3,44 @@
 %   R/DTAColumnSpecStructure-class.R, R/DTAColumnSpecStructureSAS-class.R
 \name{as_json_schema_type}
 \alias{as_json_schema_type}
-\title{as_json_schema_type}
+\title{JSON Schema Type of a Column Specification}
+\usage{
+as_json_schema_type(x, ...)
+
+as_json_schema_type(x, ...)
+
+as_json_schema_type(x, ...)
+}
 \arguments{
-\item{x}{An object of class DTAColumnSpecStructure.}
+\item{x}{A \code{\link{DTAColumnSpec}} or
+\code{\link{DTAColumnSpecStructure}} object.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
+}
+\value{
+A character vector naming the JSON Schema type of the column, with
+\code{"null"} appended when the column is nullable.
 }
 \description{
-Converts a DTAColumnSpec to a JSON Schema type.
+The JSON Schema type a declared column type maps to -- the form the column
+is \emph{validated} against. \code{\link{as_r_type}()} is its import-time
+sibling, giving the R type the column is \emph{stored} as; the two are kept
+consistent, so every declared type whose JSON Schema type is
+\code{"string"} is stored as \code{"character"}.
 
-Converts a DTAColumnSpecStructure to a JSON Schema type.
+Called on a \code{\link{DTAColumnSpec}} it also accounts for nullability;
+called on the underlying structure it reports the type alone. The base
+\code{\link{DTAColumnSpecStructure}} method aborts, because a structure that
+names no backend cannot say how it should be validated.
+}
+\examples{
+as_json_schema_type(DTAColumnSpec(id = "AGE", type = "SAS Num"))
 
-Converts a DTAColumnSpecStructure to a JSON Schema type.
+# A nullable column admits the null type as well.
+as_json_schema_type(
+  DTAColumnSpec(id = "SITEID", type = "SAS Char", nullable = TRUE)
+)
+}
+\seealso{
+\code{\link{as_r_type}()}, \code{\link{as_json_schema}()}
 }

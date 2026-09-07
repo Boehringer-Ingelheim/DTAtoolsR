@@ -2,17 +2,19 @@
 % Please edit documentation in R/DTARuleColUnique-class.R
 \name{create_example_DTARuleColUnique}
 \alias{create_example_DTARuleColUnique}
-\title{create_example_DTARuleColUnique}
+\title{Create an Example Column-Uniqueness Rule}
 \usage{
 create_example_DTARuleColUnique(index = 1)
 }
 \arguments{
 \item{index}{rule selector}
 }
+\value{
+An example \code{DTARuleColUnique} object.
+}
 \description{
 create example for DTARuleColUnique
 }
 \examples{
-library(DTAtools)
 create_example_DTARuleColUnique()
 }

@@ -4,6 +4,7 @@
 #'
 #' This class defines the structure of a column in a DTA dataset.
 #' @import S7
+#' @return An object of class \code{DTAColumnSpecStructure}.
 #' @export
 #'
 #' @param type Character or NA. The type of the column.
@@ -69,14 +70,6 @@ DTAColumnSpecStructure <- S7::new_class(
   paste(backend, paste(as.character(value), collapse = " "))
 }
 
-#' @title as.list method for as.list.DTAColumnSpecStructure
-#' @description
-#' Converts a DTAColumnSpecStructure object to a list. Properties that are not
-#' set are omitted entirely rather than serialized as a backend prefix followed
-#' by nothing (`"SAS "`), which would not survive a YAML round trip.
-#' @param x A DTAColumnSpecStructure object.
-#' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpecStructure properties that are set.
 #' @export
 #' @name as.list
 method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
@@ -93,11 +86,8 @@ method(as.list, DTAColumnSpecStructure) <- function(x, ...) {
   out
 }
 
-#' @title as_json_schema_type
-#' @description
-#' Converts a DTAColumnSpecStructure to a JSON Schema type.
 #' @name as_json_schema_type
-#' @param x An object of class DTAColumnSpecStructure.
+#' @usage as_json_schema_type(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -110,11 +100,8 @@ method(as_json_schema_type, DTAColumnSpecStructure) <- function(x) {
   cli_abort("as_json_schema_type is not implemented at this level.")
 }
 
-#' @description
-#' Converts a DTAColumnSpecStructure to a JSON Schema.
-#' @param x A `DTAColumnSpecStructure` object.
 #' @name as_json_schema
-#' @title as_json_schema
+#' @usage as_json_schema(x, ...)
 #' @export
 if (!exists("as_json_schema", mode = "function", inherits = FALSE)) {
   as_json_schema <- new_generic("as_json_schema", "x")
@@ -137,10 +124,8 @@ method(as_json_schema, DTAColumnSpecStructure) <- function(x) {
 }
 
 
-#' @title names
-#' @description
-#' returns list of names of the column specs
 #' @name names
+#' @usage names(x, ...)
 #' @export
 if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
@@ -151,10 +136,8 @@ method(names, DTAColumnSpecStructure) <- function(x) {
 }
 
 
-#' @title print info
-#' @description
-#' prints info of the column spec structure
 #' @name print_info
+#' @usage print_info(x, ...)
 #' @export
 if (!exists("print_info", mode = "function", inherits = FALSE)) {
   print_info <- new_generic("print_info", "x")
@@ -177,9 +160,6 @@ method(print_info, DTAColumnSpecStructure) <- function(x) {
 }
 
 
-#' @title print
-#' @description
-#' prints info of the column spec structure
 #' @name print
 #' @export
 if (!exists("print", mode = "function")) {

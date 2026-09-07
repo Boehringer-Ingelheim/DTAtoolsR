@@ -268,10 +268,6 @@ dta_normalize_group_constraints <- function(constraints, condition_names) {
   out
 }
 
-#' @title print
-#' @description
-#' Print overview for DTARuleGroupCondition.
-#' @param x An object of class DTARuleGroupCondition
 #' @name print
 #' @export
 method(print, DTARuleGroupCondition) <- function(x, ...) {
@@ -290,12 +286,6 @@ method(check, DTARuleGroupCondition) <- function(x, tab) {
   }
 }
 
-#' @title as.list for DTARuleGroupCondition
-#' @description
-#' Convert a DTARuleGroupCondition object to a list.
-#' @param x An object of class DTARuleGroupCondition
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the rule.
 #' @export
 #' @name as.list
 method(as.list, DTARuleGroupCondition) <- function(x, ...) {

@@ -7,7 +7,7 @@
 .format_document_date(x)
 }
 \arguments{
-\item{x}{A \code{Date}, \code{POSIXt}, or any value convertible with \code{\link[=as.character]{as.character()}}.}
+\item{x}{A \code{Date}, \code{POSIXt}, or any value convertible with \code{\link[base:as.character]{base::as.character()}}.}
 }
 \value{
 A character scalar; \code{""} for \code{NULL}/zero-length/\code{NA} input.

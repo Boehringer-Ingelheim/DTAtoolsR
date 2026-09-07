@@ -30,8 +30,11 @@ pattern. Default is \code{FALSE}.}
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}
 
-\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
-expected. Default is \code{1}.}
+\item{number_of_files}{Numeric or \code{NULL}; the exact number of files
+expected. Must be a single value -- a length-2 vector is an error, not a
+range. Default is \code{1}. To express a range, set
+\code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+\code{number_of_files} alongside either of them is an error.}
 
 \item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
 expected.}
@@ -62,9 +65,13 @@ a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.}
 An object of class \code{DTAFileTSV}.
 }
 \description{
-Defines the S7 class \code{DTAFileTSV}, which extends \code{DTAFile}
-to represent metadata and configuration for TSV (Tab-Separated Values)
-data files.
+Defines the S7 class \code{DTAFileTSV}, which extends
+\code{\link{DTAFileTabular}} to represent metadata and configuration for
+TSV (tab-separated values) data files.
+}
+\examples{
+handler <- DTAFileTSV(filename = "gf_data_small_smirna.tsv")
+matches_filename(handler, "gf_data_small_smirna.tsv")
 }
 \seealso{
 \code{\link{DTAFile}}
