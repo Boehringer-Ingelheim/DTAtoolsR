@@ -1,9 +1,11 @@
 #' @title DTAFileTabular Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{C}, which extends \code{DTAFile}
-#' to represent metadata and configuration for Delim (Tab-Separated Values)
-#'  data files.
+#' Defines the S7 class \code{DTAFileTabular}, which extends \code{DTAFile}
+#' with the parse options every delimited reader needs: separator, header,
+#' quoting, missing-value tokens, embedded newlines and character encoding.
+#' It is the common parent of \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}}
+#' and \code{\link{DTAFileDelim}}, and is not normally constructed directly.
 #'
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
@@ -11,8 +13,11 @@
 #'   pattern. Default is \code{FALSE}.
 #' @param pattern_description Character or \code{NULL}; human-readable
 #'   description of the \code{filename} pattern.
-#' @param number_of_files Numeric or \code{NULL}; maximum number of files
-#'   expected. Default is \code{1}.
+#' @param number_of_files Numeric or \code{NULL}; the exact number of files
+#'   expected. Must be a single value -- a length-2 vector is an error, not a
+#'   range. Default is \code{1}. To express a range, set
+#'   \code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+#'   \code{number_of_files} alongside either of them is an error.
 #' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
@@ -75,6 +80,10 @@
 #'
 #' @seealso \code{\link{DTAFile}}
 #'
+#' @examples
+#' # The shared base: normally you construct one of its subclasses instead.
+#' handler <- DTAFileTabular(filename = "data.txt", sep = ",")
+#' max_number_of_files(handler)
 #' @export
 DTAFileTabular <- S7::new_class(
   "DTAFileTabular",
@@ -1394,7 +1403,13 @@ dta_read_delim_normalized <- function(
     read_options = arrow::csv_read_options(
       column_names = plan$column_names,
       skip_rows = plan$skip,
-      encoding = plan$encoding
+      encoding = plan$encoding,
+      # The same block the lazy path reads in. It buys this reader nothing --
+      # it holds the whole table either way -- but a quoted line break is
+      # refused exactly when it straddles a block boundary, so a reader on a
+      # different block accepts files the other refuses. That is the one
+      # outcome these two are written to prevent.
+      block_size = dta_stream_block_size()
     ),
     col_types = plan$col_types,
     as_data_frame = FALSE
@@ -1436,25 +1451,9 @@ dta_reader_na_values <- function(x) {
 }
 
 
-#' Print Information About a DTAFile Object
-#'
-#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-#'
 #' @importFrom cli cli_alert_info cli_alert
-#'
-#' @param x A \code{DTAFile} object whose information is to be printed.
-#'
-#' @return The input object \code{x}, returned invisibly.
-#'
-#' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
-#'
-#' @examples
-#' dta_file <- DTAFileCSV(filename = "data.csv")
-#' print_info(dta_file)
-#'
 #' @name print_info
-#' @seealso \code{\link{DTAFile}}
+#' @usage print_info(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would

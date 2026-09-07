@@ -23,7 +23,6 @@ unparseable date becomes \code{NA} on that row instead of aborting the whole
 call.
 }
 \examples{
-library(DTAtools)
 md <- create_example_DTAMetaData(2)
 get_version_history_df(md)
 

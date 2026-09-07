@@ -20,7 +20,6 @@ If the collection contains more than 5 rules, it returns the IDs of the first fo
 an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
 }
 \examples{
-library(DTAtools)
 x <- create_example_DTAColumnSpecCollection()
 rule_preview(x)
 }

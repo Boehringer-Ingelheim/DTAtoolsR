@@ -3,19 +3,24 @@
 \name{open_file}
 \alias{open_file}
 \title{Open a file lazily based on DTAFile}
+\usage{
+open_file(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAFile} object (or subclass) containing file reading
 parameters.}
 
-\item{file}{A character string specifying the path to the file to be opened.}
-
-\item{namecheck}{Logical; when \code{TRUE} (the default) the file name must
-match the object's filename or pattern.}
-
+\item{...}{Additional named arguments:
+\describe{
+\item{file}{A character string giving the path to the file to be
+opened.}
+\item{namecheck}{Logical; when \code{TRUE} (the default) the file name
+must match the object's filename or pattern.}
 \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
 \code{NULL} (the default). Passed to the reader so that a column the
-specification declares as text is parsed as text rather than inferred --
-see \code{\link{read_file}()} for why that matters.}
+specification declares as text is parsed as text rather than inferred
+-- see \code{\link{read_file}()} for why that matters.}
+}}
 }
 \value{
 An \code{arrow::Dataset}.
@@ -31,8 +36,8 @@ differ in when the data is read, not in what it is read as.
 }
 \section{What a batch of a delimited scan actually is}{
 
-Arrow splits a delimited file into fixed-size READ BLOCKS -- one megabyte by
-default -- and emits one record batch per block. The \code{batch_rows}
+Arrow splits a delimited file into fixed-size READ BLOCKS -- eight megabytes
+by default -- and emits one record batch per block. The \code{batch_rows}
 argument of \code{\link{check}()} reaches
 \code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
 batch that is already larger, so on a delimited file it is a ceiling and not
@@ -41,9 +46,13 @@ batches of about 10,485 rows for \code{batch_rows} of 131,072 and of
 1,000,000 alike.
 
 Peak memory during a scan is therefore governed by the block size times
-Arrow's read-ahead, not by \code{batch_rows}. Raise it with
-\code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
-memory to grow in proportion.
+Arrow's read-ahead, not by \code{batch_rows}. Change it with
+\code{options(DTAtools.stream_block_size = )}, in bytes. Read-ahead is about
+one block in flight per CPU thread, so the cost of moving it is roughly the
+difference times the core count -- 48 MB, measured, between a 1 MiB block and
+the 8 MiB default on eight threads. Lower it on a memory-starved machine;
+raise it for a file whose rows are much wider than about 420 bytes, where
+8 MiB no longer yields a batch large enough for the Arrow numeric parse.
 
 A non-UTF-8 \code{encoding} declared on the handler is honoured here too,
 although Arrow's dataset scanner has no re-encoding step of its own: the

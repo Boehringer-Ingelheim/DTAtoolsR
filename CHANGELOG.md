@@ -84,12 +84,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   though they were UTF-8 and report the damage as data errors.
 
 - `options(DTAtools.stream_block_size = )` sets the number of bytes Arrow
-  reads per block when it scans a delimited file, defaulting to Arrow's own
-  1 MiB. That block, not `batch_rows`, is what a batch of a delimited scan
-  actually is — `batch_rows` only caps a batch that is already larger — so
-  peak memory during a scan follows the block size times Arrow's read-ahead.
-  `load_file()` and `check()` now document that relationship instead of
-  implying `batch_rows` governs it.
+  reads per block when it scans a delimited file, **defaulting to 8 MiB**.
+  That block, not `batch_rows`, is what a batch of a delimited scan actually
+  is — `batch_rows` only caps a batch that is already larger — so peak memory
+  during a scan follows the block size times Arrow's read-ahead. `load_file()`
+  and `check()` now document that relationship instead of implying
+  `batch_rows` governs it.
+
+  The default is eight times Arrow's own 1 MiB because the cost of the
+  difference was measured rather than assumed, by `benchmarks/bench_block_size.R`
+  (new), which runs each block size in a fresh process — Arrow's memory pool
+  has no reset, so its `max_memory` is a per-process high-water mark and a
+  second block size measured in the same process would inherit the first's
+  peak. Every replicate is committed in `benchmarks/block_size.csv`, so the
+  figures quoted here can be checked against the rows rather than taken on
+  trust.
+
+  On a 204 MB, 1e6 × 20 CSV across eight CPU threads, the pool peaked at
+  230 MB with a 1 MiB block and 277 MB with an 8 MiB one — a difference of
+  48 MB, against a floor of 230 MB that is the error and grouping accumulators
+  rather than read-ahead. Memory is the reproducible half of the measurement:
+  across three replicates the pool peak varied by at most 4.4 MB, and at five
+  of the seven block sizes not at all. Its marginal cost is flat only where
+  read-ahead dominates — 2.9–5.0 MB per MiB from 1 to 4 MiB, then 8.6–9.2 MB
+  per MiB from 4 MiB up, about one block in flight per CPU thread.
+
+  What the 48 MB buys is batches roughly eight times larger (4,897 rows at
+  1 MiB, 39,185 at 8 MiB) and, because a batch now exceeds
+  `DTAtools.stream_arrow_numeric_min_rows`, the Arrow numeric parse where it
+  previously could not engage at all. The second is why the default is 8 and
+  not 4 MiB: at 4 MiB the *largest* full batch held 19,594 rows, under the
+  20,000-row gate, so the parse fires nowhere in the scan.
+
+  Wall time improves too, but it is the noisy half and is not quoted as a
+  single figure: medians over three replicates were 19.5 s at 1 MiB, 14.7 s at
+  8 MiB and 12.9 s at 16 MiB, the last two with overlapping ranges of
+  12.7–15.6 s and 10.7–13.2 s. 16 MiB is the faster setting and a fair
+  override where there is memory to spare — it is not the default because its
+  extra 69 MB of read-ahead scales with core count, costing several times as
+  much on a large host as on the small one a default has to be safe on. Past
+  16 MiB there is nothing left to buy: 32 MiB yields the same thirteen batches
+  as 16 MiB, the `batch_rows` cap of 131,072 having begun to bind, and 64 MiB
+  costs 487 MB more than 8 MiB without beating 16 MiB on time.
+
+  Two things to know before overriding it. Rows per batch is about the block
+  divided by the width of a row, so 8 MiB clears the 20,000-row numeric gate
+  only up to roughly 420 bytes a row; a much wider delivery wants a larger
+  block for the same benefit, at the same cost. And a memory-starved machine
+  can still have the old behaviour with
+  `options(DTAtools.stream_block_size = 1024^2)` — no result changes either
+  way.
+
+- **Both delimited readers now read on the same block.** The block size
+  reached only the lazy path; a table read into memory always used Arrow's own
+  1 MiB whatever the option said. Because a quoted line break is refused
+  exactly when it straddles a block boundary, the two paths could disagree
+  about whether a file was readable at all — a file between the two block
+  sizes was refused when read eagerly and accepted when streamed, which is the
+  one outcome the shared reader plan exists to prevent. Raising the default
+  would have made that divergence the normal case rather than an opt-in one.
 
 - The details a streamed check returns now carry `import_typing_errors`: the
   import-typing failures on their own, beside the merged `import_errors`.
@@ -268,14 +321,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   retried for a growing number of batches, so a file that is dirty
   throughout does not keep paying for a test that cannot succeed. The step
   only pays when a batch is large: every Arrow call costs the same whatever
-  the batch holds, and at the default 1 MiB read block a delimited batch is
-  a few thousand rows. Measured on a 1e6 x 20 file: 34% slower at 1 MiB
-  blocks, 18% faster at 8 MiB (about 50,000 rows a batch), 26% faster at
-  32 MiB; the dirty variant is unchanged throughout. It therefore engages
-  only for batches of at least `DTAtools.stream_arrow_numeric_min_rows`
-  rows (default 20,000), which means: not at all at the default block size,
-  and automatically once `DTAtools.stream_block_size` is raised to 8 MiB or
-  more. `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column
+  the batch holds, so a batch of a few thousand rows cannot repay it.
+  Measured on a 1e6 x 20 file: 34% slower at 1 MiB blocks, 18% faster at
+  8 MiB (about 50,000 rows a batch), 26% faster at 32 MiB; the dirty variant
+  is unchanged throughout. It therefore engages only for batches of at least
+  `DTAtools.stream_arrow_numeric_min_rows` rows (default 20,000). The 8 MiB
+  default block clears that on a file of ordinary width, so the parse
+  engages; the threshold is what stands it down where a lowered
+  `DTAtools.stream_block_size`, or a row wide enough that 8 MiB holds fewer
+  than 20,000 of them, keeps a batch small.
+  `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column
   back down the R path; it is a diagnostic switch for comparing the two
   parsers, not a supported way to change a result.
 
@@ -299,6 +354,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the verdict are exact at any cap.
 
 ### Fixed
+
+- **The reference documentation says what the functions actually do.** A review
+  of every exported roxygen block found nineteen help pages stating something
+  untrue, and they are corrected. `?DTAFileTabular` described a class called
+  `C`; `?DTAFileCSV` called CSV "Tab-Separated Values"; `DTAFileCSV`,
+  `DTAFileTSV` and `DTAFileDelim` each named `DTAFile` as their parent when all
+  three descend from `DTAFileTabular`; `?DTADataSet` printed the internal object
+  name `__DTAtools_supported_dataset_types__` where it should have listed
+  `"tabular"` and `"file"`; `columns()` claimed to return metadata;
+  `validate_rules()` pointed at an `applySchemaRules()` that does not exist;
+  `write_table_to_file()` documented `@return NULL` although it returns the
+  table, its name and its checksum; and `rule_check_range()` and
+  `rule_check_unique()` named slots (`@column`, `@range`) that no object in the
+  package carries. The rule pages now describe both spellings their resolver
+  accepts.
+- **Help pages shared by many classes are readable again.** Eighteen `print()`
+  methods, ten `as.list()` methods and the `print_info()`, `print_short_info()`,
+  `names()`, `as_json_schema()` and `as_json_schema_type()` families each merged
+  onto a single page, stacking one title, description and return value per
+  method. `?print` opened as "Print DTA Object", described its argument as a
+  `DTARuleGroupCondition`, and repeated "Invisibly returns the input object"
+  seven times. Each of these pages now carries one authored description covering
+  every class it documents, and the individual methods contribute their call
+  signature only.
+- **`?check` describes validation rather than the package's file layout.** Its
+  first paragraph explained why the generic is defined in `00_helpers.R` given
+  R's alphabetical collation -- a note for maintainers, which now lives beside
+  the code it explains. The page says what `check()` does, which classes have
+  methods, and where to read the verdict afterwards.
+- **Examples run.** Six exported functions shipped an `@examples` section
+  containing only comments, so they had no worked example and no smoke coverage:
+  `rule_check_range()`, `rule_check_unique()`, `rule_check_col_condition()`,
+  `export_specs_table()`, `export_column_value_table()` and
+  `columns_specs_from_word()`. Thirteen further pages had no examples at all,
+  among them the whole result-reading API -- `validation_status()`,
+  `validation_errors()`, `inspect()` and `apply_rules()`. Both gaps are filled.
+  `write_dta()` and `write_dataset_metadata()` were wrapped in `\dontrun{}` only
+  because they wrote into the working directory; they now write to `tempfile()`
+  and are executed like any other example. The 47 redundant `library(DTAtools)`
+  lines that opened examples have been removed.
+- **There is a front door.** `?DTAtools` previously did not exist. The package
+  now has a help page introducing the read-load-check-report workflow, the class
+  hierarchy, document export, the template system, and the options that govern
+  streaming, error retention and Arrow compute.
+- **Ten help pages show their call signature.** `datasets()`, `labels()`,
+  `matches_filename()`, `names()`, `open_file()`, `read_file()`, `as_r_type()`,
+  `as_json_schema()`, `as_json_schema_length()` and `as_json_schema_type()`
+  rendered with no `\usage` section at all, because their generic is declared
+  behind a guard roxygen cannot derive a signature from. Seven pages that
+  documented no return value now do, and titles that merely repeated the
+  function name have been replaced.
 
 - **Editing a metadata field no longer stores the whitespace around it.** A
   title or version typed with a leading or trailing space was saved exactly as

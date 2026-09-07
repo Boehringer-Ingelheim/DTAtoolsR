@@ -5,7 +5,9 @@
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom stringr str_flatten_comma
 #' @param name Character. Name of the container.
-#' @param type Character. Dataset type, must be one of `__DTAtools_supported_dataset_types__`.
+#' @param type Character. Dataset type: either \code{"tabular"}, whose files
+#'   are read and validated against column specifications, or \code{"file"},
+#'   whose files are only checked for presence, readability and non-emptiness.
 #' @param files a list of DTAFile objects specifying input file information.
 #' @param description Character or NA. Free-text description of the dataset.
 #' @param template_source Character or NA. Source of the template used to
@@ -135,14 +137,8 @@ method(min_number_of_files, DTADataSet) <- function(x, ...) {
   sum(unlist(sapply(x@files, min_number_of_files)))
 }
 
-#' @title Print Method for DTADataSet
-#' @description Print a summary of a DTADataSet object.
-#' @param x A DTADataSet object.
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @importFrom stringr str_c str_glue
-#' @examples
-#' library(DTAtools)
-#' print(create_example_DTADataSetTabular())
 #' @name print
 #' @export
 method(print, DTADataSet) <- function(x, ...) {
@@ -153,25 +149,8 @@ method(print, DTADataSet) <- function(x, ...) {
   invisible(x)
 }
 
-#' @title Print Dataset Information
-#' @description
-#' Prints information about a \code{DTADataSet} object, including template source, version, date, and file information.
-#'
-#' @param x A \code{DTADataSet} object whose information is to be printed.
-#'
-#' @details
-#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
-#'
-#' @return No return value. This function is called for its side effects
-#'   (printing to the console).
-#'
-#' @seealso
-#' \code{\link{DTADataSet}}
-#'
-#' @examples
-#' ds <- create_example_DTADataSetTabular(2)
-#' print_info(ds)
 #' @name print_info
+#' @usage print_info(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -219,27 +198,8 @@ method(print_info, DTADataSet) <- function(x) {
 }
 
 
-#' @title Print Short Information for DTADataset
-#' @description
-#' Prints short information about a \code{DTADataSet} object.
-#'
-#' @param x A \code{DTADataSet} object whose information is to be printed.
-#'
-#' @details
-#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
-#'
 #' @importFrom cli cli_alert_info cli_alert
 #' @importFrom stringr str_c str_glue
-#' @return No return value. This function is called for its side effects
-#'   (printing to the console).
-#'
-#' @seealso
-#' \code{\link{DTADataSet}}
-#'
-#' @examples
-#' library(DTAtools)
-#' ds <- create_example_DTADataSetTabular()
-#' print_short_info(ds)
 #' @name print_short_info
 #' @export
 if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
@@ -288,7 +248,6 @@ method(print_short_info, DTADataSet) <- function(x, ...) {
 #' @importFrom cli cli_abort
 #' @return An object of class DTADataSet
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' dta <- read_dataset_from_yaml(file)
 #' @export
@@ -311,7 +270,6 @@ read_dataset_from_yaml <- function(file) {
 #' @importFrom cli cli_abort
 #' @return An object of class DTADataSet
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' yaml_dataset <- yaml::read_yaml(file)
 #' dataset <- dta_dataset_from_list(yaml_dataset)
@@ -347,7 +305,6 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 #' @return A list of DTAFile objects, or a single DTAFile object when a name
 #'   or index is provided.
 #' @examples
-#' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' files(ds)
 #' @name files
@@ -399,7 +356,6 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 #'   }
 #' @return A list of tables, or a single table when one index/name is provided.
 #' @examples
-#' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' tables(ds)
 #' @name tables

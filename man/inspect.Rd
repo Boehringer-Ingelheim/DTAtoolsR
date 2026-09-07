@@ -32,3 +32,10 @@ messages identified by numeric \code{id} values from \code{messages()}.
 Methods are available for \code{DTA}, \code{DTADataSet},
 \code{DTADataSetTabular}, and \code{DTADataSetFile}.
 }
+\examples{
+ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
+
+# Every message, numbered, then one of them in full.
+messages(ds)
+inspect(ds, id = 1)
+}

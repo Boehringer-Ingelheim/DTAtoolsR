@@ -53,3 +53,15 @@ dta-templates/
 # failure on all five platforms and nothing before it.
 !inst/extdata/templates/*.dta-party.yaml
 !inst/extdata/template-repo-skeleton/*.dta-party.yaml
+
+# `R CMD check` writes <pkg>.Rcheck/ beside the package and `R CMD build`
+# leaves a <pkg>_<version>.tar.gz. Both are regenerated on demand and must
+# never be committed. The older `..Rcheck/00check.log` line above matches
+# neither, because the directory is named after the package.
+*.Rcheck/
+*.tar.gz
+
+# Root-level scratch scripts left behind by local verification runs.
+/step3_examples.R
+/step4_usage_and_aliases.R
+/check_output.txt

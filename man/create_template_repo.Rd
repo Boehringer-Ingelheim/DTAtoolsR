@@ -55,7 +55,6 @@ fill in from nothing. See \code{vignette("private-templates", package = "DTAtool
 creates.
 }
 \examples{
-library(DTAtools)
 dir <- file.path(tempdir(), "my-templates")
 create_template_repo(dir)
 list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE)

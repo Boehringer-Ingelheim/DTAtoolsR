@@ -2,17 +2,19 @@
 % Please edit documentation in R/DTARuleColCondition-class.R
 \name{create_example_DTARuleColCondition}
 \alias{create_example_DTARuleColCondition}
-\title{create_example_DTARuleColCondition}
+\title{Create an Example Column-Condition Rule}
 \usage{
 create_example_DTARuleColCondition(index = 1)
 }
 \arguments{
 \item{index}{rule selector}
 }
+\value{
+An example \code{DTARuleColCondition} object.
+}
 \description{
 create example for DTARule
 }
 \examples{
-library(DTAtools)
 create_example_DTARuleColCondition()
 }

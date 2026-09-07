@@ -40,17 +40,23 @@
 #'
 #' @export
 #' @examples
-#' \dontrun{
-#' dta <- DTA(
-#'   title = "Clinical Data Transfer",
-#'   version = "1.0",
-#'   date = Sys.Date()
-#' )
-#' write_dta(dta, file = "dta_metadata.docx")
+#' dta <- create_example_DTA()
+#' out <- tempfile(fileext = ".docx")
+#' write_dta(dta, file = out, quiet = TRUE)
+#' file.exists(out)
+#' unlink(out)
 #'
 #' # Fill a user-authored Word template instead of the built-in layout
-#' write_dta(dta, file = "dta_from_template.docx", template = "my_template.docx")
-#' }
+#' template <- tempfile(fileext = ".docx")
+#' doc <- officer::read_docx()
+#' doc <- officer::body_add_par(doc, "Title: {DTA_TITLE}")
+#' doc <- officer::body_add_par(doc, "Version: {DTA_VERSION}")
+#' print(doc, target = template)
+#'
+#' out_from_template <- tempfile(fileext = ".docx")
+#' write_dta(dta, file = out_from_template, template = template, quiet = TRUE)
+#' file.exists(out_from_template)
+#' unlink(c(template, out_from_template))
 write_dta <- function(
   x,
   file,
@@ -853,13 +859,11 @@ dta_pdf_backend <- function() {
 #'
 #' @export
 #' @examples
-#' \dontrun{
-#' ds <- DTADataSetTabular(
-#'   name = "example_dataset",
-#'   specs = create_example_DTAColumnSpecCollection(1)
-#' )
-#' write_dataset_metadata(ds, file = "dataset_spec.docx")
-#' }
+#' ds <- create_example_DTADataSetTabular()
+#' out <- tempfile(fileext = ".docx")
+#' write_dataset_metadata(ds, file = out, quiet = TRUE)
+#' file.exists(out)
+#' unlink(out)
 write_dataset_metadata <- function(
   x,
   file,
@@ -1010,6 +1014,12 @@ write_dataset_metadata <- function(
 #'   \code{include_file_specs}, \code{include_rules}, \code{signature_list}).
 #' @return Invisibly returns the document object
 #' @export
+#' @examples
+#' ds <- create_example_DTADataSetTabular()
+#' out <- tempfile(fileext = ".docx")
+#' write_file_specification(ds, file = out, quiet = TRUE)
+#' file.exists(out)
+#' unlink(out)
 write_file_specification <- function(x, file, ...) {
   write_dataset_metadata(x, file, ...)
 }

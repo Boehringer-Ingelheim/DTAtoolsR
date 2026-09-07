@@ -20,3 +20,17 @@ elements \code{id}, \code{valid}, and \code{message}.
 \description{
 Applies all rules to a data frame with CLI feedback.
 }
+\examples{
+df <- data.frame(
+  SUBJID = c("S1", "S2", "S2"),
+  AGE = c(34, 71, 12),
+  stringsAsFactors = FALSE
+)
+rules <- list(
+  DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID"),
+  DTARuleFactory("adult_age", "col_range", columns = "AGE", min = 18, max = 65)
+)
+
+results <- apply_rules(rules, df, verbose = FALSE)
+vapply(results, function(r) r$valid, logical(1))
+}

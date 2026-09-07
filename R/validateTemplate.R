@@ -1250,7 +1250,6 @@
 #'   checked file passed every check.
 #' @export
 #' @examples
-#' library(DTAtools)
 #' issues <- validate_template(system.file("extdata", "templates", package = "DTAtools"))
 #' issues
 validate_template <- function(path, strict = FALSE, kinds = NULL) {

@@ -221,7 +221,6 @@ get_arrow_type <- function(x) {
 #' @importFrom cli cli_abort
 #' @return An example DTAColumnSpec object based on the provided index.
 #' @examples
-#' library(DTAtools)
 #' create_example_DTAColumnSpec()
 #' @export
 create_example_DTAColumnSpec <- function(index = 1) {
@@ -283,11 +282,6 @@ create_example_DTAColumnSpec <- function(index = 1) {
 }
 
 
-#' @title Print Method for DTAColumnSpec
-#' @description
-#' S7 print method for DTAColumnSpec objects.
-#' @param x A DTAColumnSpec object.
-#' @param ... Additional arguments (ignored).
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @name print
 #' @export
@@ -327,13 +321,56 @@ method(print, DTAColumnSpec) <- function(x, ...) {
   invisible(x)
 }
 
-#' @title as.list method for DTAColumnSpec
+#' @title Convert a DTAtools Object to a List
 #' @name as.list
 #' @description
-#' Converts a DTAColumnSpec object to a named list.
-#' @param x A DTAColumnSpec object.
+#' Converts a DTAtools object to a plain named list, which is the form a
+#' specification is written out in: \code{\link{write_columns_to_yaml}()} and
+#' \code{\link{write_columns_to_json}()} both serialise the result of this
+#' method, and \code{\link{specs_from_list}()} reads it back.
+#'
+#' A method is defined for every class that appears in a saved specification.
+#' Each returns that object's own properties; nested objects are converted
+#' recursively, so \code{as.list()} on a
+#' \code{\link{DTAColumnSpecCollection}} yields a list of column lists rather
+#' than a list of S7 objects.
+#'
+#' Unset properties are omitted rather than written as an empty value. On a
+#' \code{\link{DTAColumnSpecStructure}} that matters for round-tripping: a
+#' bare backend prefix (\code{"SAS "}) would re-parse to an empty type and
+#' fail the SAS validator on the next read.
+#' @param x A DTAtools object: a \code{\link{DTAColumnSpec}},
+#'   \code{\link{DTAColumnSpecCollection}},
+#'   \code{\link{DTAColumnSpecStructure}} (or its SAS subclass),
+#'   \code{\link{DTAMetaData}}, or any \code{\link{DTARule}} subclass.
 #' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpec properties.
+#' @return A named list of the object's properties, with unset properties
+#'   omitted. For a \code{\link{DTAColumnSpecCollection}} the list holds one
+#'   entry per column; for a \code{\link{DTAMetaData}} it holds every metadata
+#'   field.
+#' @section Dates in a DTAMetaData list:
+#' Every \code{Date} in the result -- the top-level \code{date}, each
+#' \code{version_history[[i]]$date}, and the transmission transfer dates -- is
+#' rendered as an ISO \code{"YYYY-MM-DD"} string, so that a YAML dump can be
+#' read straight back through \code{\link{DTAMetaData}()}.
+#'
+#' \code{@import_issues} is deliberately not exported: it records what was lost
+#' while coercing the input, which is a property of one read rather than part
+#' of the specification. \code{@template} is exported when non-empty, because
+#' it is provenance that must survive a save and reload.
+#' @examples
+#' # A single column specification, and a whole collection.
+#' as.list(create_example_DTAColumnSpec())
+#' str(as.list(create_example_DTAColumnSpecCollection()), max.level = 2)
+#'
+#' # Metadata, including the ISO date rendering described above.
+#' md <- as.list(create_example_DTAMetaData(2))
+#' md$date
+#'
+#' # A rule.
+#' as.list(create_example_DTARuleColUnique())
+#' @seealso \code{\link{write_columns_to_yaml}()},
+#'   \code{\link{write_columns_to_json}()}, \code{\link{specs_from_list}()}
 #' @export
 method(as.list, DTAColumnSpec) <- function(x, ...) {
   x1 <- list(
@@ -352,11 +389,33 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
   c(x1, x2)
 }
 
-#' @param x A `DTAColumnSpec` object.
+#' @param x A \code{\link{DTAColumnSpec}} or
+#'   \code{\link{DTAColumnSpecStructure}} object.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @name as_json_schema_type
-#' @title as_json_schema_type
+#' @title JSON Schema Type of a Column Specification
 #' @description
-#' Converts a DTAColumnSpec to a JSON Schema type.
+#' The JSON Schema type a declared column type maps to -- the form the column
+#' is \emph{validated} against. \code{\link{as_r_type}()} is its import-time
+#' sibling, giving the R type the column is \emph{stored} as; the two are kept
+#' consistent, so every declared type whose JSON Schema type is
+#' \code{"string"} is stored as \code{"character"}.
+#'
+#' Called on a \code{\link{DTAColumnSpec}} it also accounts for nullability;
+#' called on the underlying structure it reports the type alone. The base
+#' \code{\link{DTAColumnSpecStructure}} method aborts, because a structure that
+#' names no backend cannot say how it should be validated.
+#' @return A character vector naming the JSON Schema type of the column, with
+#'   \code{"null"} appended when the column is nullable.
+#' @examples
+#' as_json_schema_type(DTAColumnSpec(id = "AGE", type = "SAS Num"))
+#'
+#' # A nullable column admits the null type as well.
+#' as_json_schema_type(
+#'   DTAColumnSpec(id = "SITEID", type = "SAS Char", nullable = TRUE)
+#' )
+#' @seealso \code{\link{as_r_type}()}, \code{\link{as_json_schema}()}
+#' @usage as_json_schema_type(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -377,11 +436,15 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
 }
 
 #' @param x A `DTAColumnSpec` object.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @name as_json_schema_length
 #' @rdname as_json_schema_length-DTAColumnSpec
 #' @title as_json_schema_length
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema length.
+#' @return The column's declared maximum length, as a number, or \code{NA}
+#'   when the specification declares none.
+#' @usage as_json_schema_length(x, ...)
 #' @export
 if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {
   as_json_schema_length <- new_generic("as_json_schema_length", "x")
@@ -392,11 +455,41 @@ method(as_json_schema_length, DTAColumnSpec) <- function(x) {
 }
 
 
-#' @param x A `DTAColumnSpec` object.
+#' @param x A \code{\link{DTAColumnSpec}},
+#'   \code{\link{DTAColumnSpecCollection}} or
+#'   \code{\link{DTAColumnSpecStructure}} object.
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @name as_json_schema
-#' @title as_json_schema
+#' @title JSON Schema for a Column Specification
 #' @description
-#' Converts a DTAColumnSpecStructure to a JSON Schema.
+#' Renders a column specification as JSON Schema: the type, and the length,
+#' pattern and permitted-value constraints the specification declares. The
+#' single-column methods return the schema fragment as a list; the
+#' \code{\link{DTAColumnSpecCollection}} method assembles those fragments into
+#' a whole schema and serialises it.
+#'
+#' The schema describes the contract for other tools to consume; it is not what
+#' this package validates against. \code{\link{check}()} and
+#' \code{\link{validate_table}()} evaluate each column's values directly rather
+#' than serialising the table and running a JSON Schema engine over it. Nor is
+#' it what \code{\link{write_columns_to_json}()} writes -- that serialises
+#' \code{\link{as.list}()}, the specification itself, rather than a schema.
+#' @return For a \code{\link{DTAColumnSpec}} or
+#'   \code{\link{DTAColumnSpecStructure}}, a list holding that column's JSON
+#'   Schema fragment. For a \code{\link{DTAColumnSpecCollection}}, the finished
+#'   schema already serialised: a length-1 character vector of class
+#'   \code{"json"}, describing an array whose \code{items} carry one property
+#'   per column.
+#' @examples
+#' as_json_schema(DTAColumnSpec(id = "AGE", type = "SAS Num"))
+#'
+#' # A whole collection serialises to a finished JSON Schema document.
+#' schema <- as_json_schema(create_example_DTAColumnSpecCollection())
+#' class(schema)
+#' substr(schema, 1, 60)
+#' @seealso \code{\link{as_json_schema_type}()},
+#'   \code{\link{write_columns_to_json}()}
+#' @usage as_json_schema(x, ...)
 #' @export
 if (!exists("as_json_schema", mode = "function", inherits = FALSE)) {
   as_json_schema <- new_generic("as_json_schema", "x")

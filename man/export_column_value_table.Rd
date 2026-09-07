@@ -28,6 +28,9 @@ None. The function creates a Word document.
 This function takes all values defined in a column and prints a word table containing those values. Can be copied into the DTA
 }
 \examples{
-# No runnable example yet.
-# Word export examples are intentionally skipped until the API is reworked.
+specs <- create_example_DTAColumnSpecCollection()
+out <- tempfile(fileext = ".docx")
+export_column_value_table(specs, file = out, id = "STUDYID", quiet = TRUE)
+file.exists(out)
+unlink(out)
 }

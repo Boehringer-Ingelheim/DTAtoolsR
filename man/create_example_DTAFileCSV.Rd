@@ -16,6 +16,5 @@ An example \code{DTAFileCSV} object.
 Creates an example \code{DTAFileCSV} object using example files.
 }
 \examples{
-library(DTAtools)
 create_example_DTAFileCSV()
 }

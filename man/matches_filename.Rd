@@ -3,11 +3,17 @@
 \name{matches_filename}
 \alias{matches_filename}
 \title{Matches Filename}
+\usage{
+matches_filename(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAFile} object.}
 
-\item{file}{A character string representing the name of the file to check against
-the stored filename or pattern}
+\item{...}{Additional named arguments:
+\describe{
+\item{file}{A character string naming the file to check against the
+handler's stored filename or pattern.}
+}}
 }
 \value{
 A logical value indicating whether the filename matches.

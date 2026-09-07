@@ -1,9 +1,9 @@
 #' @title DTAFileCSV Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileCSV}, which extends \code{DTAFile}
-#' to represent metadata and configuration for CSV (Tab-Separated Values)
-#'  data files.
+#' Defines the S7 class \code{DTAFileCSV}, which extends
+#' \code{\link{DTAFileTabular}} to represent metadata and configuration for
+#' CSV (comma-separated values) data files.
 #'
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
@@ -11,8 +11,11 @@
 #'   pattern. Default is \code{FALSE}.
 #' @param pattern_description Character or \code{NULL}; human-readable
 #'   description of the \code{filename} pattern.
-#' @param number_of_files Numeric or \code{NULL}; maximum number of files
-#'   expected. Default is \code{1}.
+#' @param number_of_files Numeric or \code{NULL}; the exact number of files
+#'   expected. Must be a single value -- a length-2 vector is an error, not a
+#'   range. Default is \code{1}. To express a range, set
+#'   \code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+#'   \code{number_of_files} alongside either of them is an error.
 #' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
@@ -35,6 +38,10 @@
 #' @return An object of class \code{DTAFileCSV}.
 #' @seealso \code{\link{DTAFile}}
 #' @include DTAFileTabular-class.R
+#' @examples
+#' handler <- DTAFileCSV(filename = "clinical_data.csv")
+#' matches_filename(handler, "clinical_data.csv")
+#' matches_filename(handler, "clinical_data.tsv")
 #' @export
 DTAFileCSV <- S7::new_class(
   # nolint
@@ -137,7 +144,6 @@ method(open_file_execution, DTAFileCSV) <- function(x, ...) {
 #' @param index example selector.
 #' @return An example \code{DTAFileCSV} object.
 #' @examples
-#' library(DTAtools)
 #' create_example_DTAFileCSV()
 #' @export
 create_example_DTAFileCSV <- function(index = 1) {
@@ -158,17 +164,7 @@ create_example_DTAFileCSV <- function(index = 1) {
 }
 
 
-#' @title Print DTAFileCSV Object
-#' @description
-#' Print method for DTAFileCSV objects.
-#' @param x An object of class DTAFileCSV
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
 #' @importFrom cli cli_div cli_text
-#' @examples
-#' library(DTAtools)
-#' print(create_example_DTAFileCSV())
-#'
 #' @name print
 #' @export
 method(print, DTAFileCSV) <- function(x, ...) {

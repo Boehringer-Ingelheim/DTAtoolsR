@@ -20,7 +20,6 @@ If the collection contains more than 5 columns, it returns the IDs of the first 
 an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
 }
 \examples{
-library(DTAtools)
 x <- create_example_DTAColumnSpecCollection()
 column_preview(x)
 }

@@ -20,6 +20,9 @@ DTAColumnSpecStructure(
 
 \item{backend}{Character. The backend system defining the type/format (e.g. \code{"SAS"}).}
 }
+\value{
+An object of class \code{DTAColumnSpecStructure}.
+}
 \description{
 Class for column types.
 

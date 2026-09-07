@@ -24,7 +24,6 @@ Constructs a DTAColumnSpecCollection object from separate components: columns an
 Supports both named and unnamed lists of column specifications.
 }
 \examples{
-library(DTAtools)
 # Load example YAML file from package extdata
 yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 input_list <- yaml::read_yaml(yaml_file)

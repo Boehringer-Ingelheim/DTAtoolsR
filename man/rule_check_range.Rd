@@ -11,9 +11,15 @@ rule_check_range(rule, df, numeric_cache = NULL)
 \itemize{
 \item \verb{@id} character
 \item \verb{@type} = "check_range"
-\item \verb{@column} character: name of the column to check
-\item \verb{@range} numeric(2): inclusive lower/upper bounds, e.g. c(0, 1)
-}}
+\item the target column, spelled either \verb{@columns} (what \code{\link[=DTARuleColRange]{DTARuleColRange()}}
+stores) or \verb{@column}. Exactly one column is required.
+\item the bounds, spelled either \verb{@min} and \verb{@max} (what \code{\link[=DTARuleColRange]{DTARuleColRange()}}
+stores, including when it was constructed from \verb{range =}) or a
+\verb{@range} numeric(2) giving inclusive lower and upper bounds.
+}
+
+Both spellings resolve through \code{dta_range_target()}, so a rule read from
+YAML and one built in R behave identically.}
 
 \item{df}{A data.frame to validate.}
 
@@ -29,6 +35,9 @@ Ensures all non-missing values in \code{rule@column} fall within
 an \strong{inclusive} numeric range \verb{[lower, upper]}. Missing values are ignored.
 }
 \examples{
-# Suppose `rule` is a DTARule with column="age", range=c(18, 65)
-# rule_check_range(rule, df)
+df <- data.frame(AGE = c(34, 71, 12))
+rule <- DTARuleFactory("adult_age", "col_range", columns = "AGE", min = 18, max = 65)
+
+# Two rows fall outside the inclusive band, so the rule fails.
+rule_check_range(rule, df)
 }

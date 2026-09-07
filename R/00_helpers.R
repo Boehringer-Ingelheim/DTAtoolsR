@@ -167,9 +167,12 @@ dta_narrow_rows <- function(v) {
 # here.
 `__DTAtools_gz_expansion_ratio__` <- 4
 
-# Arrow's own default CSV read block, in bytes. Named here because it is the
-# unit a delimited scan is actually batched in -- see dta_stream_block_size().
-`__DTAtools_stream_block_size_default__` <- 1048576L
+# The CSV read block, in bytes. This is the unit a delimited scan is actually
+# batched in -- see dta_stream_block_size(). Eight times Arrow's own 1 MiB
+# default, because measurement put the cost of the difference at about 50 MB
+# and the benefit at rather more than that; the reasoning is in
+# benchmarks/bench_block_size.R and summarised below.
+`__DTAtools_stream_block_size_default__` <- 8388608L
 
 #' @title The Read Block a Delimited Scan Is Batched In
 #' @description
@@ -177,18 +180,62 @@ dta_narrow_rows <- function(v) {
 #' record batch per block to the scanner. `batch_rows`
 #' (`Scanner$create(batch_size = )`) only ever *slices* a batch that is already
 #' larger, so on a delimited file it is a ceiling and not a target: measured on
-#' a 4.4 MB, 46,000-row CSV, the default 1 MiB block gave 5 batches of about
-#' 10,485 rows for `batch_rows` of 131,072 and of 1,000,000 alike, while
-#' `batch_rows = 10,000` did cut them down to 9. Raising the block to 8 MiB gave
-#' one batch of all 46,000 rows.
+#' a 4.4 MB, 46,000-row CSV, a 1 MiB block gave 5 batches of about 10,485 rows
+#' for `batch_rows` of 131,072 and of 1,000,000 alike, while
+#' `batch_rows = 10,000` did cut them down to 9. An 8 MiB block gave one batch
+#' of all 46,000 rows.
 #'
 #' Peak memory during a scan is therefore governed by this block size times
-#' Arrow's read-ahead, not by `batch_rows`. The default is Arrow's own, which is
-#' why raising it is opt-in: a larger block buys bigger batches (fewer R-level
-#' round trips per row) at a proportional cost in resident memory.
+#' Arrow's read-ahead, not by `batch_rows`.
+#'
+#' @section Why 8 MiB rather than Arrow's 1 MiB:
+#' Read-ahead is what a larger block costs, and it is much smaller than the
+#' phrase "proportional cost in resident memory" suggests. Measured by
+#' `benchmarks/bench_block_size.R`, whose every replicate is kept in
+#' `benchmarks/block_size.csv` so that the figures below can be checked: on a
+#' 204 MB, 1e6 x 20 CSV (214 bytes a row) across eight CPU threads, Arrow's
+#' pool peaked at 230 MB with a 1 MiB block and 277 MB with an 8 MiB one -- 48
+#' MB, against a floor of 230 MB that is the error and grouping accumulators
+#' rather than read-ahead.
+#'
+#' That figure is reproducible in a way the timings are not: across three
+#' replicates the pool peak varied by at most 4.4 MB, and at five of the seven
+#' block sizes not at all. The marginal cost is flat only where read-ahead
+#' actually dominates -- 2.9 to 5.0 MB per MiB between 1 and 4 MiB, where the
+#' accumulator floor still swamps it, then 9.2, 8.6, 8.9 and 8.6 MB per MiB
+#' over the steps from 4 to 64 MiB. That upper figure is close enough to one
+#' block in flight per CPU thread to be worth assuming on a machine with more
+#' of them.
+#'
+#' What the 48 MB buys is two things. Batches grow, 4,897 rows at 1 MiB against
+#' 39,185 at 8 MiB, so there are far fewer R-level round trips per row; and
+#' because a batch now exceeds `DTAtools.stream_arrow_numeric_min_rows`
+#' (20,000), the Arrow numeric parse engages where it previously could not.
+#' The second is the reason the default is 8 and not 4 MiB: at 4 MiB the
+#' largest full batch on that file held 19,594 rows -- not the smallest, the
+#' largest -- so no batch clears the gate and the parse never fires anywhere in
+#' the scan. That threshold is a step rather than a slope, and 8 MiB is the
+#' first block over it.
+#'
+#' Time is the weaker half of the case and is reported as such. Median over
+#' three replicates: 19.5 s at 1 MiB, 14.7 s at 8 MiB, 12.9 s at 16 MiB, with
+#' ranges (12.7-15.6 s and 10.7-13.2 s for the latter two) that overlap. 16 MiB
+#' is the faster setting and a fair override where there is memory to spare; it
+#' is not the default because its extra 69 MB of read-ahead scales with core
+#' count, so the same setting costs several times as much on a large host as on
+#' the small one a default has to be safe on. Past 16 MiB there is nothing left
+#' to buy: 32 MiB yields the same thirteen batches as 16 MiB, the `batch_rows`
+#' cap of 131,072 having begun to bind, and 64 MiB costs 487 MB more than 8 MiB
+#' without beating 16 MiB on time.
+#'
+#' One caveat, since the block is in bytes and the numeric gate is in rows:
+#' rows per batch is about the block size divided by the width of a row, so
+#' 8 MiB clears 20,000 rows only for files up to roughly 420 bytes a row. A
+#' much wider file gets smaller batches and less of the benefit, at the same
+#' cost. Raise the option for those.
 #'
 #' @return A single positive integer number of bytes, from
-#'   `getOption("DTAtools.stream_block_size")`, defaulting to 1 MiB.
+#'   `getOption("DTAtools.stream_block_size")`, defaulting to 8 MiB.
 #' @keywords internal
 dta_stream_block_size <- function() {
   value <- getOption(
@@ -382,18 +429,43 @@ dta_resolve_stream_mode <- function(
 # string here.
 `__DTAtools_supported_file_types__` <- c("any", "csv", "tsv") # TODO: "sas7bdat", ..
 
-#' @title Check Generic
+#' @title Validate an Object Against Its Specification
 #' @description
-#' Generic function for validating DTA-related objects (e.g. \code{DTA},
-#' \code{DTADataSet}, \code{DTADataSetTabular}). Defined here (rather than in
-#' individual class files) because R files are loaded alphabetically and
-#' several class files need this generic to already exist when they register
-#' their methods.
-#' @param x An object to check.
-#' @param ... Additional arguments passed to methods.
-#' @return Depends on the method implementation.
+#' Validates a DTA object and records the verdict on it. This is the package's
+#' central verb: it reads each target, evaluates every column specification and
+#' every rule the specification declares, and returns the object with its
+#' validation state filled in.
+#'
+#' Methods exist for \code{\link{DTA}} (validates every dataset it holds, and
+#' the agreement's own metadata), \code{\link{DTADataSetTabular}} (validates
+#' the tables against their column specs and rules),
+#' \code{\link{DTADataSetFile}} (checks that the delivered files exist, are
+#' readable and are not empty) and \code{\link{DTADataSet}} (the base method,
+#' which checks structure only). Each method accepts its own set of named
+#' arguments through \code{...}; they are documented per method below.
+#'
+#' The verdict is not the return value. Read it with
+#' \code{\link{validation_status}()}, \code{\link{results}()},
+#' \code{\link{messages}()} or \code{\link{inspect}()}, or write it out with
+#' \code{\link{write_validation_report}()}.
+#' @param x An object to check: a \code{\link{DTA}}, or any
+#'   \code{\link{DTADataSet}} subclass.
+#' @param ... Named arguments for the individual methods; see the per-method
+#'   descriptions below.
+#' @return The validated object, invisibly, with its validation state updated
+#'   and a \code{"last_validation_summary"} attribute attached. The exact shape
+#'   is documented per method below.
+#' @seealso \code{\link{validation_status}()}, \code{\link{results}()},
+#'   \code{\link{messages}()}, \code{\link{inspect}()},
+#'   \code{\link{validation_errors}()} and
+#'   \code{\link{write_validation_report}()} for reading a result;
+#'   \code{\link{clear_validation}()} for discarding one.
 #' @name check
 #' @export
+# The generic is defined in this file, rather than in an individual class file,
+# because R files are collated alphabetically and several class files need it
+# to exist already when they register their methods.
+#
 # `inherits = FALSE` is load-bearing, not tidiness.
 #
 # Without it, exists() searches the whole SEARCH PATH, not just this package.
@@ -435,7 +507,6 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 #' The backend is determined by the prefix of \code{type} or \code{format}.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
 #' @seealso \code{\link{DTAColumnSpecStructureSAS}}
@@ -514,7 +585,6 @@ DTAColumnSpecStructureFactory <- function(
 #' depending on the backend specified.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTADataSetFactory(
 #'   type = "file",
 #'   name = "mydataset",
@@ -586,7 +656,6 @@ DTADataSetFactory <- function(
 #' @return A list of \code{DTAFile} objects, empty when \code{files} is
 #'   \code{NULL} or empty.
 #' @examples
-#' library(DTAtools)
 #' dta_file_handlers_from_list(list(type = "csv", filename = "clinical_data.csv"))
 #' dta_file_handlers_from_list(list(
 #'   list(type = "csv", filename = "a.csv"),
@@ -657,7 +726,6 @@ dta_file_handlers_from_list <- function(files) {
 #' @return An object derived from class \code{DTAFile}, depending on the backend specified.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
 #' # A deliverable that is never parsed, restricted to two endings.

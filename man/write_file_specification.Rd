@@ -21,3 +21,10 @@ Invisibly returns the document object
 \description{
 Convenience alias for write_dataset_metadata()
 }
+\examples{
+ds <- create_example_DTADataSetTabular()
+out <- tempfile(fileext = ".docx")
+write_file_specification(ds, file = out, quiet = TRUE)
+file.exists(out)
+unlink(out)
+}

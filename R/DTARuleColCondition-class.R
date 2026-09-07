@@ -107,14 +107,7 @@ DTARuleColCondition <- S7::new_class(
 )
 
 
-#' @title print
-#' @description
-#' Print overview for DTADTARuleColConditionRule
-#' @param x An object of class DTARuleColCondition
 #' @importFrom cli cli_alert_info cli_alert cli_text
-#' @examples
-#' rule <- create_example_DTARuleColCondition()
-#' print(rule)
 #' @name print
 #' @export
 method(print, DTARuleColCondition) <- function(x, ...) {
@@ -146,15 +139,15 @@ method(print, DTARuleColCondition) <- function(x, ...) {
 }
 
 
-#' @title create_example_DTARuleColCondition
+#' @title Create an Example Column-Condition Rule
 #' @description
 #' create example for DTARule
 #' @param index rule selector
 #' @importFrom cli cli_abort
 #' @examples
-#' library(DTAtools)
 #' create_example_DTARuleColCondition()
 #' @name create_example_DTARuleColCondition
+#' @return An example \code{DTARuleColCondition} object.
 #' @export
 create_example_DTARuleColCondition <- function(index = 1) {
   # nolint
@@ -182,12 +175,6 @@ method(check, DTARuleColCondition) <- function(x, tab) {
 }
 
 
-#' @title as.list for DTARuleColCondition
-#' @description
-#' Convert a DTARuleColCondition object to a list.
-#' @param x An object of class DTARuleColCondition
-#' @param ... Additional arguments (not used).
-#' @return A named list containing the properties of the DTARuleColCondition object.
 #' @export
 #' @name as.list
 method(as.list, DTARuleColCondition) <- function(x, ...) {

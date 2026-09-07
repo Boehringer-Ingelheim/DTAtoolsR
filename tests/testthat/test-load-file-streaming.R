@@ -456,16 +456,22 @@ test_that("the block size option decides how a delimited scan is batched", {
 
   handler <- DTAFileCSV(filename = basename(path))
 
-  default_rows <- stream_batch_rows(open_file(handler, path))
+  # Both blocks are pinned, neither is the default: the assertion is that the
+  # option decides the batching, which is a claim about the option and not
+  # about whatever the default happens to be this release.
+  small_rows <- withr::with_options(
+    list(DTAtools.stream_block_size = 1024L^2),
+    stream_batch_rows(open_file(handler, path))
+  )
   # Several batches, none of them the whole file: this is what `batch_rows`
   # could never change.
-  expect_gt(length(default_rows), 1)
+  expect_gt(length(small_rows), 1)
 
   withr::local_options(DTAtools.stream_block_size = 8L * 1024L^2)
   one_block_rows <- stream_batch_rows(open_file(handler, path))
 
   expect_length(one_block_rows, 1)
-  expect_identical(sum(one_block_rows), sum(default_rows))
+  expect_identical(sum(one_block_rows), sum(small_rows))
 })
 
 test_that("an unusable block size is rejected rather than silently ignored", {
@@ -479,14 +485,17 @@ test_that("an unusable block size is rejected rather than silently ignored", {
   expect_error(dta_stream_block_size(), "stream_block_size")
 })
 
-test_that("the default block size is arrow's own", {
-  expect_identical(dta_stream_block_size(), 1048576L)
+test_that("the default block size is eight times arrow's own", {
+  expect_identical(dta_stream_block_size(), 8388608L)
 })
 
 # ---- quoted line breaks ------------------------------------------------------
 # A quoted newline only breaks a read when it straddles a block boundary, so a
-# small fixture proves nothing: the file below is deliberately larger than one
-# default block, with the offending value placed past it.
+# small fixture proves nothing: the file below is deliberately larger than the
+# 1 MiB block the tests below pin, with the offending value placed past it.
+# The block is pinned rather than defaulted so that raising
+# DTAtools.stream_block_size does not quietly stop the file from straddling
+# anything -- which would leave these tests passing while testing nothing.
 
 # Every row's second field is quoted around a line break, so wherever a block
 # boundary falls it falls inside one -- placing a single such value would leave
@@ -507,6 +516,7 @@ test_that("a quoted line break past the first block needs the handler to declare
   path <- newline_fixture()
   on.exit(unlink(path), add = TRUE)
   expect_gt(file.size(path), 1.5 * 1024^2)
+  withr::local_options(DTAtools.stream_block_size = 1024L^2)
 
   plain <- DTAFileCSV(filename = basename(path))
   declaring <- DTAFileCSV(filename = basename(path), newlines_in_values = TRUE)
@@ -538,9 +548,40 @@ test_that("a quoted line break past the first block needs the handler to declare
   expect_match(as.character(eager$PAD[[15000]]), "\n", fixed = TRUE)
 })
 
+test_that("both readers straddle on the same block, so neither accepts what the other refuses", {
+  # The block size used to reach only the lazy reader; the eager one always
+  # read on arrow's own 1 MiB. Since a quoted line break is refused exactly
+  # when it crosses a block boundary, that made the two disagree about whether
+  # a file was readable at all -- for this fixture, at any block large enough
+  # to cover it.
+  path <- newline_fixture()
+  on.exit(unlink(path), add = TRUE)
+  plain <- DTAFileCSV(filename = basename(path))
+
+  withr::with_options(list(DTAtools.stream_block_size = 1024L^2), {
+    expect_error(as.data.frame(read_file(plain, path)), regexp = "CSV parse error")
+    expect_error(as.data.frame(open_file(plain, path)), regexp = "CSV parse error")
+  })
+
+  # One block covers the whole file, so no value straddles anything and the
+  # undeclared line breaks read cleanly. On both paths, or the verdict on a
+  # file would depend on which reader happened to see it.
+  withr::with_options(list(DTAtools.stream_block_size = 32L * 1024L^2), {
+    eager <- as.data.frame(read_file(plain, path))
+    lazy <- as.data.frame(open_file(plain, path))
+    expect_equal(nrow(eager), 18000)
+    expect_equal(nrow(lazy), 18000)
+    expect_identical(
+      as.character(eager$PAD[[15000]]),
+      as.character(lazy$PAD[[15000]])
+    )
+  })
+})
+
 test_that("a declared quoted line break survives a check on both paths", {
   path <- newline_fixture()
   on.exit(unlink(path), add = TRUE)
+  withr::local_options(DTAtools.stream_block_size = 1024L^2)
 
   specs <- DTAColumnSpecCollection(columns = list(
     ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
@@ -601,6 +642,54 @@ test_that("a declared latin1 encoding is decoded by the in-memory reader", {
   # bytes as a binary column -- a file that "loads" and is unusable.
   plain <- as.data.frame(read_file(DTAFileCSV(filename = basename(path)), path))
   expect_false(is.character(plain$NAME))
+})
+
+test_that("a declared encoding survives a block small enough to split the file", {
+  # `encoding` and `block_size` now travel in the same csv_read_options() call
+  # on the eager path, which they never did before: that reader used arrow's
+  # own 1 MiB block whatever the option said, so this combination was
+  # unreachable and is therefore untested. Arrow re-encodes by wrapping the
+  # input stream it owns, BEFORE the stream is split into blocks, so the two
+  # settings should not interact at all -- which is a claim worth pinning,
+  # because if it were wrong the symptom would be mojibake rather than an
+  # error, and a silently wrong decode is what the encoding work exists to
+  # prevent.
+  #
+  # The file has to be big enough for the small blocks below to genuinely fall
+  # inside it; the two-row fixture used elsewhere fits in one block whatever is
+  # asked for, and would pass this test without exercising anything.
+  path <- file.path(tempdir(), "stream_latin1_blocks.csv")
+  on.exit(unlink(path), add = TRUE)
+  con <- file(path, "wb")
+  writeBin(
+    c(
+      charToRaw("NAME,V\n"),
+      unlist(lapply(seq_len(400), function(i) {
+        c(
+          as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)),
+          charToRaw(sprintf(",%d\n", i))
+        )
+      }))
+    ),
+    con
+  )
+  close(con)
+  expect_gt(file.size(path), 4096)
+
+  declaring <- DTAFileCSV(filename = basename(path), encoding = "latin1")
+
+  for (block in c(256L, 1024L, 65536L, 8388608L)) {
+    withr::local_options(DTAtools.stream_block_size = block)
+    got <- as.data.frame(read_file(declaring, path))
+    expect_identical(nrow(got), 400L, info = sprintf("block_size = %d", block))
+    # Every row decoded, not just the ones in the first block: a boundary
+    # falling mid-row is the thing a small block actually produces here, since
+    # latin1 has no multi-byte character for one to cut in half.
+    expect_true(
+      all(got$NAME == "Jürgen"),
+      info = sprintf("block_size = %d", block)
+    )
+  }
 })
 
 test_that("a declared latin1 encoding is scanned through a UTF-8 copy", {

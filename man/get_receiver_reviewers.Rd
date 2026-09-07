@@ -18,7 +18,6 @@ A character vector of reviewer names or list of reviewer contact objects
 Retrieve receiver contacts who have the reviewer role (authorized to request corrections)
 }
 \examples{
-library(DTAtools)
 md <- create_example_DTAMetaData(2)
 get_receiver_reviewers(md)
 

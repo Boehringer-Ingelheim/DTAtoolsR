@@ -470,7 +470,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 #' produced them, so dates are never formatted with `%B`/`%b` (both are taken
 #' from `LC_TIME`). Non-date values are passed through unchanged.
 #'
-#' @param x A `Date`, `POSIXt`, or any value convertible with [as.character()].
+#' @param x A `Date`, `POSIXt`, or any value convertible with [base::as.character()].
 #' @return A character scalar; `""` for `NULL`/zero-length/`NA` input.
 #' @keywords internal
 .format_document_date <- function(x) {

@@ -11,9 +11,11 @@
 #'   to match files.
 #' @param pattern Logical; if \code{TRUE}, \code{filename} is treated as a regex
 #'   pattern. Default is \code{FALSE}.
-#' @param number_of_files Numeric or \code{NULL}; number of files
-#'   expected. Default is \code{1}. If two numbers are provided,
-#'   they represent min and maximum of files expected.
+#' @param number_of_files Numeric or \code{NULL}; the exact number of files
+#'   expected. Must be a single value -- a length-2 vector is an error, not a
+#'   range. Default is \code{1}. To express a range, set
+#'   \code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+#'   \code{number_of_files} alongside either of them is an error.
 #' @param pattern_description Character or \code{NULL}; human-readable
 #'   description of the \code{filename} pattern.
 #' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
@@ -25,9 +27,13 @@
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
 #' @name DTAFile-class
-#' @details This class is used internally by the DTAtoolsR package to
-#' manage metadata and properties of DTA files.
-#' @keywords internal
+#' @details This class is the base of the file-handler hierarchy and carries
+#'   the metadata and parsing properties every handler shares. It is rarely
+#'   constructed directly: prefer a concrete subclass --
+#'   \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}},
+#'   \code{\link{DTAFileDelim}} for a file that is read, or
+#'   \code{\link{DTAFileAny}} for a deliverable that is only checked for
+#'   arrival.
 #' @examples
 #' file_info <- DTAFile("file.txt")
 #' file_info_pattern <- DTAFile("file\\d+\\.txt", pattern = TRUE)
@@ -249,8 +255,11 @@ dta_strip_compression_extension <- function(file_name) {
 #' appended to the declaration, so existing anchored patterns keep working.
 #'
 #' @param x A `DTAFile` object.
-#' @param file A character string representing the name of the file to check against
-#'   the stored filename or pattern
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{file}{A character string naming the file to check against the
+#'       handler's stored filename or pattern.}
+#'   }
 #' @return A logical value indicating whether the filename matches.
 #' @importFrom stringr str_detect
 #' @examples
@@ -266,6 +275,7 @@ dta_strip_compression_extension <- function(file_name) {
 #' }
 #' @name matches_filename
 #' @rdname matches_filename
+#' @usage matches_filename(x, ...)
 #' @export
 if (!exists("matches_filename", mode = "function", inherits = FALSE)) {
   matches_filename <- new_generic("matches_filename", "x")
@@ -414,12 +424,15 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
-#' @param file A character string specifying the path to the file to be read.
-#' @param namecheck Logical; when \code{TRUE} (the default) the file name must
-#'   match the object's filename or pattern.
-#' @param specs A \code{DTAColumnSpecCollection} declaring the columns, or
-#'   \code{NULL} (the default).
-#'
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{file}{A character string giving the path to the file to be read.}
+#'     \item{namecheck}{Logical; when \code{TRUE} (the default) the file name
+#'       must match the object's filename or pattern.}
+#'     \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
+#'       \code{NULL} (the default). See the section below for why it matters.}
+#'   }
+#' @section Why the specs are handed to the reader:
 #'   A reader that knows nothing about the specification has to guess a type per
 #'   column, and it guesses before any code in this package sees the data: a
 #'   column of quoted subject ids -- \code{"007"}, \code{"008"} -- is inferred as
@@ -454,6 +467,7 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #' @importFrom cli cli_abort
 #' @name read_file
 #' @rdname read_file
+#' @usage read_file(x, ...)
 #' @export
 if (!exists("read_file", mode = "function", inherits = FALSE)) {
   read_file <- new_generic("read_file", "x")
@@ -526,8 +540,8 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' differ in when the data is read, not in what it is read as.
 #'
 #' @section What a batch of a delimited scan actually is:
-#' Arrow splits a delimited file into fixed-size READ BLOCKS -- one megabyte by
-#' default -- and emits one record batch per block. The \code{batch_rows}
+#' Arrow splits a delimited file into fixed-size READ BLOCKS -- eight megabytes
+#' by default -- and emits one record batch per block. The \code{batch_rows}
 #' argument of \code{\link{check}()} reaches
 #' \code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
 #' batch that is already larger, so on a delimited file it is a ceiling and not
@@ -536,9 +550,13 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' 1,000,000 alike.
 #'
 #' Peak memory during a scan is therefore governed by the block size times
-#' Arrow's read-ahead, not by \code{batch_rows}. Raise it with
-#' \code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
-#' memory to grow in proportion.
+#' Arrow's read-ahead, not by \code{batch_rows}. Change it with
+#' \code{options(DTAtools.stream_block_size = )}, in bytes. Read-ahead is about
+#' one block in flight per CPU thread, so the cost of moving it is roughly the
+#' difference times the core count -- 48 MB, measured, between a 1 MiB block and
+#' the 8 MiB default on eight threads. Lower it on a memory-starved machine;
+#' raise it for a file whose rows are much wider than about 420 bytes, where
+#' 8 MiB no longer yields a batch large enough for the Arrow numeric parse.
 #'
 #' A non-UTF-8 \code{encoding} declared on the handler is honoured here too,
 #' although Arrow's dataset scanner has no re-encoding step of its own: the
@@ -552,13 +570,17 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #'
 #' @param x A \code{DTAFile} object (or subclass) containing file reading
 #'   parameters.
-#' @param file A character string specifying the path to the file to be opened.
-#' @param namecheck Logical; when \code{TRUE} (the default) the file name must
-#'   match the object's filename or pattern.
-#' @param specs A \code{DTAColumnSpecCollection} declaring the columns, or
-#'   \code{NULL} (the default). Passed to the reader so that a column the
-#'   specification declares as text is parsed as text rather than inferred --
-#'   see \code{\link{read_file}()} for why that matters.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{file}{A character string giving the path to the file to be
+#'       opened.}
+#'     \item{namecheck}{Logical; when \code{TRUE} (the default) the file name
+#'       must match the object's filename or pattern.}
+#'     \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
+#'       \code{NULL} (the default). Passed to the reader so that a column the
+#'       specification declares as text is parsed as text rather than inferred
+#'       -- see \code{\link{read_file}()} for why that matters.}
+#'   }
 #' @return An \code{arrow::Dataset}.
 #' @seealso \code{\link{read_file}()} for the materialising counterpart, and
 #'   \code{\link{load_file}()}, whose \code{stream} argument chooses between
@@ -573,6 +595,7 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' @importFrom cli cli_abort
 #' @name open_file
 #' @rdname open_file
+#' @usage open_file(x, ...)
 #' @export
 if (!exists("open_file", mode = "function", inherits = FALSE)) {
   open_file <- new_generic("open_file", "x")
@@ -585,17 +608,7 @@ method(open_file, DTAFile) <- function(x, file, namecheck = TRUE, specs = NULL) 
 }
 
 
-#' @title Print DTAFile Object
-#' @description
-#' Print method for DTAFile objects.
-#' @param x An object of class DTAFile
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
 #' @importFrom cli cli_text cli_div
-#' @examples
-#' # do not use this, use derived classes instead, e.g.
-#' # DTAFileCSV or DTAFileTSV
-#' print(DTAFileCSV("example.csv"))
 #' @name print
 #' @export
 method(print, DTAFile) <- function(x, ...) {
@@ -644,23 +657,34 @@ dta_print_file_count <- function(x) {
 }
 
 
-#' Print Information About a DTAFile Object
+#' @title Print Detailed Information About a DTAtools Object
+#' @description
+#' Prints the fuller, multi-line form of an object, where
+#' \code{\link{print}()} gives the summary and
+#' \code{\link{print_short_info}()} a single line. Methods exist for
+#' \code{\link{DTAFile}} and its subclasses, \code{\link{DTADataSet}},
+#' \code{\link{DTAMetaData}} and \code{\link{DTAColumnSpecStructure}}.
 #'
-#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-#'
+#' For a file handler it shows the filename or pattern, then the minimum and
+#' maximum number of files expected -- as a single value when both bounds are
+#' equal and set, and as "unbounded" for a bound that is unset. A
+#' \code{\link{DTAFileAny}} additionally lists the file endings it accepts. For
+#' a dataset it shows the template provenance and a summary of the file
+#' handlers, and for metadata the agreement's title, version and parties.
 #' @importFrom cli cli_alert_info cli_alert
-#' @param x A \code{DTAFile} object whose information is to be printed.
-#'
-#' @return The input object \code{x}, returned invisibly.
-#'
-#' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
-#'
+#' @param x A DTAtools object.
+#' @param ... Additional arguments (not used).
+#' @return Invisibly, \code{x}.
 #' @examples
-#' dta_file <- DTAFileCSV(filename = "data.csv")
-#' print_info(dta_file)
+#' # A file handler, and one restricted to particular endings.
+#' print_info(DTAFileCSV(filename = "data.csv"))
+#' print_info(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
 #'
-#' @seealso \code{\link{DTAFile}}
+#' # A dataset and the agreement metadata.
+#' print_info(create_example_DTADataSetTabular(2))
+#' print_info(create_example_DTAMetaData())
+#' @seealso \code{\link{print}()}, \code{\link{print_short_info}()}
+#' @usage print_info(x, ...)
 #' @name print_info
 #' @export
 if (!exists("print_info", mode = "function", inherits = FALSE)) {
@@ -679,24 +703,36 @@ method(print_info, DTAFile) <- function(x) {
 }
 
 
-#' Print Information About a DTAFile Object
+#' @title Print a Short Summary of a DTAtools Object
+#' @description
+#' The compact form, used when listing many objects at once, where
+#' \code{\link{print}()} gives a summary and \code{\link{print_info}()} the
+#' full detail. Methods exist for \code{\link{DTAFile}} and its subclasses,
+#' \code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}} and
+#' \code{\link{DTAMetaData}}.
 #'
-#' This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-#'
+#' A file handler prints on one line: the filename or pattern, then the
+#' expected file count in parentheses -- a single value when both bounds are
+#' equal and set, and an open range such as \code{"(2-)"} when one bound is
+#' unset. A \code{\link{DTADataSetTabular}} adds two further lines to the
+#' dataset's own, counting its column specs and rules and then its tables.
 #' @importFrom cli cli_alert
-#'
-#' @param x A \code{DTAFile} object whose information is to be printed.
-#'
-#' @return The input object \code{x}, returned invisibly.
-#'
-#' @details
-#' The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound leaves that side blank, e.g. "(2-)".
-#'
+#' @param x A DTAtools object.
+#' @param ... Additional arguments (not used).
+#' @return Invisibly, \code{x}.
 #' @examples
-#' dta_file <- DTAFileCSV(filename = "data.csv")
-#' print_short_info(dta_file)
+#' print_short_info(DTAFileCSV(filename = "data.csv"))
 #'
-#' @seealso \code{\link{DTAFile}}
+#' # An open-ended file count.
+#' print_short_info(DTAFileCSV(
+#'   filename = "part.*", pattern = TRUE,
+#'   min_number_of_files = 2
+#' ))
+#'
+#' print_short_info(create_example_DTADataSetTabular())
+#' print_short_info(create_example_DTAMetaData())
+#' @seealso \code{\link{print}()}, \code{\link{print_info}()}
+#' @usage print_short_info(x, ...)
 #' @name print_short_info
 #' @export
 if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
