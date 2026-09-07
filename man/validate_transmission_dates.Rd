@@ -16,7 +16,6 @@ A list with elements is_valid (logical) and messages (character vector)
 Check that transmission dates are valid (either Date objects or non-empty character phrases)
 }
 \examples{
-library(DTAtools)
 md <- create_example_DTAMetaData(2)
 validate_transmission_dates(md)
 

@@ -95,6 +95,7 @@
 #' This class defines the structure of a column in a DTA dataset.
 #' @import S7
 #' @importFrom stringr str_glue
+#' @return An object of class \code{DTAColumnSpecStructureSAS}.
 #' @export
 #'
 #' @param type Character or NA. The type of the column.
@@ -157,15 +158,6 @@ DTAColumnSpecStructureSAS <- S7::new_class(
 )
 
 
-#' @title as.list method for as.list.DTAColumnSpecStructureSAS
-#' @description
-#' Converts a DTAColumnSpecStructureSAS object to a named list. An unset `type`
-#' or `format` is omitted from the list instead of being written as the bare
-#' backend prefix (`"SAS "`), which would re-parse to an empty value and fail
-#' the SAS validator on the next read.
-#' @param x A DTAColumnSpecStructureSAS object.
-#' @param ... Additional arguments (ignored).
-#' @return A named list with the DTAColumnSpecStructureSAS properties that are set.
 #' @export
 #' @name as.list
 method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
@@ -182,10 +174,8 @@ method(as.list, DTAColumnSpecStructureSAS) <- function(x, ...) {
   out
 }
 
-#' @title as_json_schema_type
-#' @description
-#' Converts a DTAColumnSpecStructure to a JSON Schema type.
 #' @name as_json_schema_type
+#' @usage as_json_schema_type(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -208,7 +198,7 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 }
 
 
-#' @title as_r_type
+#' @title R Storage Type of a Declared Column Type
 #' @description
 #' The R storage type a declared column type maps to. This is the import-time
 #' sibling of [as_json_schema_type()]: that generic says how a column is
@@ -231,7 +221,9 @@ method(as_json_schema_type, DTAColumnSpecStructureSAS) <- function(x) {
 #' @examples
 #' as_r_type(DTAColumnSpecStructureSAS(type = "Num"))
 #' as_r_type(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+#' @param ... Not used by current methods; reserved for future extensions.
 #' @name as_r_type
+#' @usage as_r_type(x, ...)
 #' @export
 if (!exists("as_r_type", mode = "function", inherits = FALSE)) {
   as_r_type <- new_generic("as_r_type", "x")
@@ -258,9 +250,6 @@ method(as_r_type, DTAColumnSpecStructureSAS) <- function(x) {
 }
 
 
-#' @title print
-#' @description
-#' prints info of the column spec structure
 #' @name print
 #' @export
 if (!exists("print", mode = "function")) {

@@ -39,5 +39,6 @@ yaml_file <- tempfile(fileext = ".yaml")
 writeLines(yaml_content, yaml_file)
 
 # Create the DTAColumnSpecCollection object
-DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
+specs <- import_specs_from_yaml(yaml_file)
+specs
 }

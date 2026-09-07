@@ -9,7 +9,7 @@
 %   R/DTARuleGroupCondition-class.R
 \name{print}
 \alias{print}
-\title{Print DTA Object}
+\title{Print a DTAtools Object}
 \usage{
 ## S7 method for class <DTAtools::DTA>
 print(x, ...)
@@ -60,95 +60,52 @@ print(x, ...)
 print(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTARuleGroupCondition}
+\item{x}{A DTAtools object.}
 
-\item{...}{Additional arguments (not used)}
+\item{...}{Additional arguments (not used).}
 }
 \value{
-Invisibly returns the input object
-
-Invisibly returns the input object
-
-Invisibly returns the input object
-
-Invisibly returns the input object
-
-Invisibly returns the input object
-
-Invisibly returns the input object
-
-Invisibly returns the input object
+Invisibly, \code{x}.
 }
 \description{
-Print method for DTA objects.
+Prints a readable summary of any DTAtools object. A method is defined for
+every class the package exports, so \code{print()} works on a whole
+agreement, on a dataset, on a file handler, on a column specification and on
+a rule.
 
-S7 print method for DTAColumnSpec objects.
+What is shown depends on the class. A \code{\link{DTA}} prints its metadata
+heading and one line per dataset; a \code{\link{DTADataSetTabular}} prints
+its name, file handlers and tables; a \code{\link{DTAFile}} handler prints
+the filename or pattern and how many files it expects; a
+\code{\link{DTAColumnSpec}} prints its declared type, format and permitted
+values; a \code{\link{DTARule}} prints its type and the columns it
+constrains.
 
-Print overview for DTAColumnSpecCollection
-
-prints info of the column spec structure
-
-prints info of the column spec structure
-
-Print a summary of a DTADataSet object.
-
-Print method for DTAFile objects.
-
-Print method for DTAFileAny objects.
-
-Print a summary of a DTADataSetTabular object.
-
-Print method for DTAFileCSV objects.
-
-Print method for DTAFileDelim objects.
-
-Print method for DTAFileTSV objects.
-
-Print method for DTAMetadata objects.
-
-Print overview for DTARule
-
-Print overview for DTADTARuleColConditionRule
-
-Print overview for DTARuleColRange
-
-Print overview for DTARuleColUnique
-
-Print overview for DTARuleGroupCondition.
+\code{\link{print_info}()} gives a fuller, multi-line form of the same
+object and \code{\link{print_short_info}()} a one-line form.
 }
 \examples{
-dta_obj <- create_example_DTA()
-print(dta_obj)
-x <- create_example_DTAColumnSpecCollection()
-print(x)
-library(DTAtools)
+# A whole agreement, and a dataset inside it.
+print(create_example_DTA())
 print(create_example_DTADataSetTabular())
-# do not use this, use derived classes instead, e.g.
-# DTAFileCSV or DTAFileTSV
-print(DTAFileCSV("example.csv"))
-library(DTAtools)
+
+# Column specifications, singly and as a collection.
+print(create_example_DTAColumnSpec())
+print(create_example_DTAColumnSpecCollection())
+print(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+
+# File handlers, including one for a deliverable that is never parsed.
+print(create_example_DTAFileCSV())
+print(create_example_DTAFileTSV())
+print(DTAFileDelim("readings.psv", sep = "|"))
 print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
 
-library(DTAtools)
-print(create_example_DTADataSetTabular())
-library(DTAtools)
-print(create_example_DTAFileCSV())
-
-library(DTAtools)
-print(DTAFileDelim("example.tsv"))
-
-library(DTAtools)
-print(create_example_DTAFileTSV())
-
-library(DTAtools)
+# Metadata, and one rule of each kind.
 print(create_example_DTAMetaData())
-
-rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")
-print(rule)
-rule <- create_example_DTARuleColCondition()
-print(rule)
-rule <- create_example_DTARuleColRange()
-print(rule)
-rule <- create_example_DTARuleColUnique()
-print(rule)
+print(create_example_DTARuleColCondition())
+print(create_example_DTARuleColRange())
+print(create_example_DTARuleColUnique())
+}
+\seealso{
+\code{\link{print_info}()}, \code{\link{print_short_info}()}
 }

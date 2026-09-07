@@ -16,7 +16,6 @@ A list with elements first_transfer and last_transfer
 Extract transmission transfer dates, whether they are Date objects or character phrases
 }
 \examples{
-library(DTAtools)
 md <- create_example_DTAMetaData(2)
 get_transmission_dates(md)
 

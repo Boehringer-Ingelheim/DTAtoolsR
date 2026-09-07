@@ -18,7 +18,6 @@ A list with metadata information
 Method to get Metadata from a DTA object.
 }
 \examples{
-library(DTAtools)
 dta_obj <- create_example_DTA()
 metadata(dta_obj)
 }

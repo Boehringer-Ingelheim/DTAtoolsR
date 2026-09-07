@@ -3,19 +3,24 @@
 \name{open_file}
 \alias{open_file}
 \title{Open a file lazily based on DTAFile}
+\usage{
+open_file(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAFile} object (or subclass) containing file reading
 parameters.}
 
-\item{file}{A character string specifying the path to the file to be opened.}
-
-\item{namecheck}{Logical; when \code{TRUE} (the default) the file name must
-match the object's filename or pattern.}
-
+\item{...}{Additional named arguments:
+\describe{
+\item{file}{A character string giving the path to the file to be
+opened.}
+\item{namecheck}{Logical; when \code{TRUE} (the default) the file name
+must match the object's filename or pattern.}
 \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
 \code{NULL} (the default). Passed to the reader so that a column the
-specification declares as text is parsed as text rather than inferred --
-see \code{\link{read_file}()} for why that matters.}
+specification declares as text is parsed as text rather than inferred
+-- see \code{\link{read_file}()} for why that matters.}
+}}
 }
 \value{
 An \code{arrow::Dataset}.

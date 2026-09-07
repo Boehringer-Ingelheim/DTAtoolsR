@@ -13,6 +13,9 @@ DTAColumnSpecStructureSAS(type = NULL, format = NULL, length = NULL)
 
 \item{length}{Numeric or NA. The max character length.}
 }
+\value{
+An object of class \code{DTAColumnSpecStructureSAS}.
+}
 \description{
 Class for column types for SAS structures.
 

@@ -382,18 +382,43 @@ dta_resolve_stream_mode <- function(
 # string here.
 `__DTAtools_supported_file_types__` <- c("any", "csv", "tsv") # TODO: "sas7bdat", ..
 
-#' @title Check Generic
+#' @title Validate an Object Against Its Specification
 #' @description
-#' Generic function for validating DTA-related objects (e.g. \code{DTA},
-#' \code{DTADataSet}, \code{DTADataSetTabular}). Defined here (rather than in
-#' individual class files) because R files are loaded alphabetically and
-#' several class files need this generic to already exist when they register
-#' their methods.
-#' @param x An object to check.
-#' @param ... Additional arguments passed to methods.
-#' @return Depends on the method implementation.
+#' Validates a DTA object and records the verdict on it. This is the package's
+#' central verb: it reads each target, evaluates every column specification and
+#' every rule the specification declares, and returns the object with its
+#' validation state filled in.
+#'
+#' Methods exist for \code{\link{DTA}} (validates every dataset it holds, and
+#' the agreement's own metadata), \code{\link{DTADataSetTabular}} (validates
+#' the tables against their column specs and rules),
+#' \code{\link{DTADataSetFile}} (checks that the delivered files exist, are
+#' readable and are not empty) and \code{\link{DTADataSet}} (the base method,
+#' which checks structure only). Each method accepts its own set of named
+#' arguments through \code{...}; they are documented per method below.
+#'
+#' The verdict is not the return value. Read it with
+#' \code{\link{validation_status}()}, \code{\link{results}()},
+#' \code{\link{messages}()} or \code{\link{inspect}()}, or write it out with
+#' \code{\link{write_validation_report}()}.
+#' @param x An object to check: a \code{\link{DTA}}, or any
+#'   \code{\link{DTADataSet}} subclass.
+#' @param ... Named arguments for the individual methods; see the per-method
+#'   descriptions below.
+#' @return The validated object, invisibly, with its validation state updated
+#'   and a \code{"last_validation_summary"} attribute attached. The exact shape
+#'   is documented per method below.
+#' @seealso \code{\link{validation_status}()}, \code{\link{results}()},
+#'   \code{\link{messages}()}, \code{\link{inspect}()},
+#'   \code{\link{validation_errors}()} and
+#'   \code{\link{write_validation_report}()} for reading a result;
+#'   \code{\link{clear_validation}()} for discarding one.
 #' @name check
 #' @export
+# The generic is defined in this file, rather than in an individual class file,
+# because R files are collated alphabetically and several class files need it
+# to exist already when they register their methods.
+#
 # `inherits = FALSE` is load-bearing, not tidiness.
 #
 # Without it, exists() searches the whole SEARCH PATH, not just this package.
@@ -435,7 +460,6 @@ if (!exists("check", mode = "function", inherits = FALSE)) {
 #' The backend is determined by the prefix of \code{type} or \code{format}.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTAColumnSpecStructureFactory(type = "SAS Char", format = "SAS $10.", length = 10)
 #'
 #' @seealso \code{\link{DTAColumnSpecStructureSAS}}
@@ -514,7 +538,6 @@ DTAColumnSpecStructureFactory <- function(
 #' depending on the backend specified.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTADataSetFactory(
 #'   type = "file",
 #'   name = "mydataset",
@@ -586,7 +609,6 @@ DTADataSetFactory <- function(
 #' @return A list of \code{DTAFile} objects, empty when \code{files} is
 #'   \code{NULL} or empty.
 #' @examples
-#' library(DTAtools)
 #' dta_file_handlers_from_list(list(type = "csv", filename = "clinical_data.csv"))
 #' dta_file_handlers_from_list(list(
 #'   list(type = "csv", filename = "a.csv"),
@@ -657,7 +679,6 @@ dta_file_handlers_from_list <- function(files) {
 #' @return An object derived from class \code{DTAFile}, depending on the backend specified.
 #'
 #' @examples
-#' library(DTAtools)
 #' DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 #'
 #' # A deliverable that is never parsed, restricted to two endings.

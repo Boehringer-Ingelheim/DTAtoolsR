@@ -16,7 +16,6 @@ A character vector of names or list of contacts authorized for corrections
 Retrieve list of contacts authorized to request corrections from receiver
 }
 \examples{
-library(DTAtools)
 md <- create_example_DTAMetaData(2)
 get_authorized_for_corrections(md)
 

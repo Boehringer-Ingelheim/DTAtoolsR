@@ -3,61 +3,44 @@
 %   R/DTADataSetTabular-class.R, R/DTAMetaData-class.R
 \name{print_short_info}
 \alias{print_short_info}
-\title{Print Short Information for DTADataset}
+\title{Print a Short Summary of a DTAtools Object}
 \usage{
+print_short_info(x, ...)
+
 ## S7 method for class <DTAtools::DTADataSetTabular>
 print_short_info(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTAMetadata}
+\item{x}{A DTAtools object.}
 
-\item{...}{Additional arguments (not used)}
+\item{...}{Additional arguments (not used).}
 }
 \value{
-No return value. This function is called for its side effects
-(printing to the console).
-
-The input object \code{x}, returned invisibly.
-
-No return value. This function is called for its side effects
-(printing to the console).
-
-Invisibly returns the input object
+Invisibly, \code{x}.
 }
 \description{
-Prints short information about a \code{DTADataSet} object.
+The compact form, used when listing many objects at once, where
+\code{\link{print}()} gives a summary and \code{\link{print_info}()} the
+full detail. Methods exist for \code{\link{DTAFile}} and its subclasses,
+\code{\link{DTADataSet}}, \code{\link{DTADataSetTabular}} and
+\code{\link{DTAMetaData}}.
 
-This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-
-Prints short information about a \code{DTADataSetTabular} object.
-
-Print short info method for DTAMetadata objects.
-}
-\details{
-This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
-
-The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound leaves that side blank, e.g. "(2-)".
-
-This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
+A file handler prints on one line: the filename or pattern, then the
+expected file count in parentheses -- a single value when both bounds are
+equal and set, and an open range such as \code{"(2-)"} when one bound is
+unset. A \code{\link{DTADataSetTabular}} adds two further lines to the
+dataset's own, counting its column specs and rules and then its tables.
 }
 \examples{
-library(DTAtools)
-ds <- create_example_DTADataSetTabular()
-print_short_info(ds)
-dta_file <- DTAFileCSV(filename = "data.csv")
-print_short_info(dta_file)
+print_short_info(DTAFileCSV(filename = "data.csv"))
 
-library(DTAtools)
-ds <- create_example_DTADataSetTabular()
-print_short_info(ds)
-library(DTAtools)
+# An open-ended file count.
+print_short_info(DTAFileCSV(filename = "part.*", pattern = TRUE,
+                            min_number_of_files = 2))
+
+print_short_info(create_example_DTADataSetTabular())
 print_short_info(create_example_DTAMetaData())
-
 }
 \seealso{
-\code{\link{DTADataSet}}
-
-\code{\link{DTAFile}}
-
-\code{\link{DTADataSetTabular}}
+\code{\link{print}()}, \code{\link{print_info}()}
 }

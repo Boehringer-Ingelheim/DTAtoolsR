@@ -379,6 +379,7 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
 #' ds <- create_example_DTADataSetTabular(2)
 #' labels(ds)
 #' @name labels
+#' @usage labels(object, ...)
 #' @export
 # `labels` already exists as a base R (S3) generic, so this extends it rather
 # than replacing it -- exactly the pattern already used for `names`/`print`
@@ -429,11 +430,19 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #'   is FALSE, so a call against an existing path aborts unless `overwrite =
 #'   TRUE` is passed explicitly.
 #' @param compression Character. Compression method, either "none" or "gzip". Default is "none".
-#' @param get_md5sum Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
-#' @param write_md5sum_to_file Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.
+#' @param get_md5sum Logical. Whether to compute the MD5 checksum of the file
+#'   just written. When FALSE, no checksum is computed, the returned
+#'   \code{md5sum} element is \code{NA}, and no sidecar file is written
+#'   whatever \code{write_md5sum_to_file} says. Default is TRUE.
+#' @param write_md5sum_to_file Logical. Whether the checksum and the file's
+#'   row and column counts are also written to a sidecar metadata file beside
+#'   the output. Only consulted when \code{get_md5sum = TRUE}. Default is TRUE.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param ... Additional arguments passed to write.table.
-#' @return NULL. The function writes the table to a file.
+#' @return Invisibly, a list with \code{tables} (the data as written),
+#'   \code{table} (the table's name) and \code{md5sum} (the checksum, or
+#'   \code{NA} when \code{get_md5sum = FALSE}). Called mainly for the side
+#'   effect of writing the file.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' out_file <- tempfile(fileext = ".tsv")
@@ -584,9 +593,9 @@ write_table_to_file <- function(
 #' Method to get columns specifications from DTADataSetTabular
 #' @param x An object of class DTADataSetTabular
 #' @param ... Not used by current methods; reserved for future extensions.
-#' @return A list with metadata information
+#' @return A named list of \code{\link{DTAColumnSpec}} objects, one per
+#'   declared column, named by column id.
 #' @examples
-#' library(DTAtools)
 #' ds <- create_example_DTADataSetTabular()
 #' columns(ds)
 #' @name columns
@@ -620,7 +629,6 @@ method(rules, DTADataSetTabular) <- function(x, ...) {
 #'
 #' @return An example DTADataSetTabular object.
 #' @examples
-#' library(DTAtools)
 #' create_example_DTADataSetTabular()
 #' @export
 create_example_DTADataSetTabular <- function(index = 1) {
@@ -664,14 +672,8 @@ create_example_DTADataSetTabular <- function(index = 1) {
   )
 }
 
-#' @title Print Method for DTADataSetTabular
-#' @description Print a summary of a DTADataSetTabular object.
-#' @param x A DTADataSetTabular object.
 #' @importFrom cli cli_alert_info cli_alert cli_text
 #' @importFrom stringr str_c str_glue
-#' @examples
-#' library(DTAtools)
-#' print(create_example_DTADataSetTabular())
 #' @name print
 #' @export
 method(print, DTADataSetTabular) <- function(x, ...) {
@@ -719,27 +721,8 @@ method(print, DTADataSetTabular) <- function(x, ...) {
 }
 
 
-#' @title Print Short Information for DTADataSetTabular
-#' @description
-#' Prints short information about a \code{DTADataSetTabular} object.
-#'
-#' @param x A \code{DTADataSetTabular} object whose information is to be printed.
-#'
-#' @details
-#' This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
-#'
 #' @importFrom cli cli_alert_info cli_alert
 #' @importFrom stringr str_c str_glue
-#' @return No return value. This function is called for its side effects
-#'   (printing to the console).
-#'
-#' @seealso
-#' \code{\link{DTADataSetTabular}}
-#'
-#' @examples
-#' library(DTAtools)
-#' ds <- create_example_DTADataSetTabular()
-#' print_short_info(ds)
 #' @name print_short_info
 #' @export
 method(print_short_info, DTADataSetTabular) <- function(x, ...) {

@@ -7,7 +7,7 @@
 %   R/DTARuleGroupCondition-class.R
 \name{as.list}
 \alias{as.list}
-\title{as.list method for DTAColumnSpec}
+\title{Convert a DTAtools Object to a List}
 \usage{
 ## S7 method for class <DTAtools::DTAColumnSpec>
 as.list(x, ...)
@@ -40,80 +40,62 @@ as.list(x, ...)
 as.list(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTARuleGroupCondition}
+\item{x}{A DTAtools object: a \code{\link{DTAColumnSpec}},
+\code{\link{DTAColumnSpecCollection}},
+\code{\link{DTAColumnSpecStructure}} (or its SAS subclass),
+\code{\link{DTAMetaData}}, or any \code{\link{DTARule}} subclass.}
 
-\item{...}{Additional arguments (not used).}
+\item{...}{Additional arguments (ignored).}
 }
 \value{
-A named list with the DTAColumnSpec properties.
-
-A list representation of the DTAColumnSpecCollection object.
-
-A named list with the DTAColumnSpecStructure properties that are set.
-
-A named list with the DTAColumnSpecStructureSAS properties that are set.
-
-A list with all metadata fields
-
-A named list containing the properties of the DTARule object.
-
-A named list containing the properties of the DTARuleColCondition object.
-
-A named list containing the properties of the DTARuleColRange object.
-
-A named list containing the properties of the DTARuleColUnique object.
-
-A named list containing the properties of the rule.
+A named list of the object's properties, with unset properties
+omitted. For a \code{\link{DTAColumnSpecCollection}} the list holds one
+entry per column; for a \code{\link{DTAMetaData}} it holds every metadata
+field.
 }
 \description{
-Converts a DTAColumnSpec object to a named list.
+Converts a DTAtools object to a plain named list, which is the form a
+specification is written out in: \code{\link{write_columns_to_yaml}()} and
+\code{\link{write_columns_to_json}()} both serialise the result of this
+method, and \code{\link{specs_from_list}()} reads it back.
 
-This function transforms a DTAColumnSpecCollection object to a list.
+A method is defined for every class that appears in a saved specification.
+Each returns that object's own properties; nested objects are converted
+recursively, so \code{as.list()} on a
+\code{\link{DTAColumnSpecCollection}} yields a list of column lists rather
+than a list of S7 objects.
 
-Converts a DTAColumnSpecStructure object to a list. Properties that are not
-set are omitted entirely rather than serialized as a backend prefix followed
-by nothing (\code{"SAS "}), which would not survive a YAML round trip.
-
-Converts a DTAColumnSpecStructureSAS object to a named list. An unset \code{type}
-or \code{format} is omitted from the list instead of being written as the bare
-backend prefix (\code{"SAS "}), which would re-parse to an empty value and fail
-the SAS validator on the next read.
-
-Convert a DTAMetaData object to a nested list structure suitable for YAML export
-or programmatic access.
-
-Convert a DTARule object to a list.
-
-Convert a DTARuleColCondition object to a list.
-
-Convert a DTARuleColRange object to a list.
-
-Convert a DTARuleColUnique object to a list.
-
-Convert a DTARuleGroupCondition object to a list.
+Unset properties are omitted rather than written as an empty value. On a
+\code{\link{DTAColumnSpecStructure}} that matters for round-tripping: a
+bare backend prefix (\code{"SAS "}) would re-parse to an empty type and
+fail the SAS validator on the next read.
 }
-\details{
-Every \code{Date} in the result - the top-level \code{date}, each
-\code{version_history[[i]]$date}, and the transmission transfer dates - is
-rendered as an ISO \code{"YYYY-MM-DD"} string so that a YAML dump can be read
-straight back through \code{DTAMetaData()}.
+\section{Dates in a DTAMetaData list}{
 
-\code{@import_issues} is deliberately not exported: it is a runtime record of
-what was lost while coercing the input, not part of the specification.
-\code{@template} IS exported (when non-empty): it is a provenance record that
-must survive a save/reload cycle so the rebase feature can trust it later.
+Every \code{Date} in the result -- the top-level \code{date}, each
+\code{version_history[[i]]$date}, and the transmission transfer dates -- is
+rendered as an ISO \code{"YYYY-MM-DD"} string, so that a YAML dump can be
+read straight back through \code{\link{DTAMetaData}()}.
 
-This method is hand-written field by field rather than iterating S7
-properties, so it does NOT pick up a new \code{DTAMetaData} property
-automatically. Adding a property to the class without adding it here means
-it is silently dropped on the next save -- if you add a property, add it
-to this function too.
+\code{@import_issues} is deliberately not exported: it records what was lost
+while coercing the input, which is a property of one read rather than part
+of the specification. \code{@template} is exported when non-empty, because
+it is provenance that must survive a save and reload.
 }
+
 \examples{
-x <- create_example_DTAColumnSpecCollection()
-as.list(x)
-library(DTAtools)
-md <- create_example_DTAMetaData(2)
-md_list <- as.list(md)
+# A single column specification, and a whole collection.
+as.list(create_example_DTAColumnSpec())
+str(as.list(create_example_DTAColumnSpecCollection()), max.level = 2)
 
+# Metadata, including the ISO date rendering described above.
+md <- as.list(create_example_DTAMetaData(2))
+md$date
+
+# A rule.
+as.list(create_example_DTARuleColUnique())
+}
+\seealso{
+\code{\link{write_columns_to_yaml}()},
+\code{\link{write_columns_to_json}()}, \code{\link{specs_from_list}()}
 }

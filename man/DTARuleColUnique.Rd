@@ -21,8 +21,9 @@ for uniqueness throughout the table.}
 An object of class \code{DTARuleColUnique}.
 }
 \description{
-Represents a single rule for validating data tables. The rule can be of various types,
-such as \code{check_range}, \code{check_unique}, or \code{check_col_condition}
+A rule requiring that the named columns hold no duplicate value across the
+table. Given several columns it is the combination that must be unique, not
+each column on its own.
 }
 \examples{
 # Create a check_unique rule

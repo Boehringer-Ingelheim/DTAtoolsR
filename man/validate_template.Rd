@@ -65,7 +65,6 @@ this check, the job goes green having validated nothing: exactly the
 failure a repository linter exists to catch.
 }
 \examples{
-library(DTAtools)
 issues <- validate_template(system.file("extdata", "templates", package = "DTAtools"))
 issues
 }

@@ -16,6 +16,5 @@ An example DTADataSetTabular object.
 S7 method to create and return an example DTADataSetTabular object.
 }
 \examples{
-library(DTAtools)
 create_example_DTADataSetTabular()
 }

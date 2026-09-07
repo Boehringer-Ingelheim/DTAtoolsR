@@ -2,9 +2,14 @@
 % Please edit documentation in R/DTAColumnSpecStructureSAS-class.R
 \name{as_r_type}
 \alias{as_r_type}
-\title{as_r_type}
+\title{R Storage Type of a Declared Column Type}
+\usage{
+as_r_type(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAColumnSpecStructure} object.}
+
+\item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
 A length-1 character naming an R type: one of \code{"character"},

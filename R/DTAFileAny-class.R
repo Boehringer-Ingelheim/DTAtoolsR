@@ -254,17 +254,7 @@ dta_file_extension_allowed <- function(file, extensions) {
   ))
 }
 
-#' @title Print DTAFileAny Object
-#' @description
-#' Print method for DTAFileAny objects.
-#' @param x An object of class DTAFileAny
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
 #' @importFrom cli cli_div cli_text
-#' @examples
-#' library(DTAtools)
-#' print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
-#'
 #' @name print
 #' @export
 method(print, DTAFileAny) <- function(x, ...) {
@@ -276,20 +266,9 @@ method(print, DTAFileAny) <- function(x, ...) {
   invisible(x)
 }
 
-#' @title Print Information About a DTAFileAny Object
-#' @description
-#' Print method for detailed information about a \code{DTAFileAny} object,
-#' including its filename, pattern, number of files, and the endings it
-#' accepts.
-#' @param x A \code{DTAFileAny} object whose information is to be printed.
-#' @return The input object \code{x}, returned invisibly.
 #' @importFrom cli cli_alert_info cli_alert
-#' @examples
-#' library(DTAtools)
-#' print_info(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
-#'
-#' @usage print_info(x, ...)
 #' @name print_info
+#' @usage print_info(x, ...)
 #' @export
 method(print_info, DTAFileAny) <- function(x) {
   # Duplicated from method(print_info, DTAFile) rather than calling super():

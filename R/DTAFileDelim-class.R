@@ -1,9 +1,11 @@
 #' @title DTAFileDelim Class Constructor
 #'
 #' @description
-#' Defines the S7 class \code{DTAFileDelim}, which extends \code{DTAFile}
-#' to represent metadata and configuration for TSV (Tab-Separated Values)
-#'  data files.
+#' Defines the S7 class \code{DTAFileDelim}, which extends
+#' \code{\link{DTAFileTabular}} to represent metadata and configuration for
+#' delimited data files with a caller-supplied separator. Unlike
+#' \code{\link{DTAFileCSV}} and \code{\link{DTAFileTSV}}, which fix the
+#' separator, this class takes it as the \code{sep} argument (tab by default).
 #'
 #' @param filename Character vector of file names or regular expression patterns
 #'   to match files.
@@ -11,8 +13,11 @@
 #'   pattern. Default is \code{FALSE}.
 #' @param pattern_description Character or \code{NULL}; human-readable
 #'   description of the \code{filename} pattern.
-#' @param number_of_files Numeric or \code{NULL}; maximum number of files
-#'   expected. Default is \code{1}.
+#' @param number_of_files Numeric or \code{NULL}; the exact number of files
+#'   expected. Must be a single value -- a length-2 vector is an error, not a
+#'   range. Default is \code{1}. To express a range, set
+#'   \code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+#'   \code{number_of_files} alongside either of them is an error.
 #' @param min_number_of_files Numeric or \code{NULL}; minimum number of files
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
@@ -37,6 +42,10 @@
 #' @name DTAFileDelim-class
 #' @seealso \code{\link{DTAFile}}
 #'
+#' @examples
+#' # A pipe-delimited file.
+#' handler <- DTAFileDelim(filename = "readings.psv", sep = "|")
+#' matches_filename(handler, "readings.psv")
 #' @export
 DTAFileDelim <- S7::new_class(
   "DTAFileDelim",
@@ -133,17 +142,7 @@ method(open_file_execution, DTAFileDelim) <- function(x, ...) {
   )
 }
 
-#' @title Print DTAFileDelim Object
-#' @description
-#' Print method for DTAFileDelim objects.
-#' @param x An object of class DTAFileDelim
-#' @param ... Additional arguments (not used)
 #' @importFrom cli cli_text cli_div
-#' @return Invisibly returns the input object
-#' @examples
-#' library(DTAtools)
-#' print(DTAFileDelim("example.tsv"))
-#'
 #' @name print
 #' @export
 method(print, DTAFileDelim) <- function(x, ...) {

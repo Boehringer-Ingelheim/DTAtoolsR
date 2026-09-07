@@ -31,8 +31,11 @@ pattern. Default is \code{FALSE}.}
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}
 
-\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
-expected. Default is \code{1}.}
+\item{number_of_files}{Numeric or \code{NULL}; the exact number of files
+expected. Must be a single value -- a length-2 vector is an error, not a
+range. Default is \code{1}. To express a range, set
+\code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+\code{number_of_files} alongside either of them is an error.}
 
 \item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
 expected.}
@@ -103,9 +106,16 @@ blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
 An object of class \code{DTAFileTabular}.
 }
 \description{
-Defines the S7 class \code{C}, which extends \code{DTAFile}
-to represent metadata and configuration for Delim (Tab-Separated Values)
-data files.
+Defines the S7 class \code{DTAFileTabular}, which extends \code{DTAFile}
+with the parse options every delimited reader needs: separator, header,
+quoting, missing-value tokens, embedded newlines and character encoding.
+It is the common parent of \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}}
+and \code{\link{DTAFileDelim}}, and is not normally constructed directly.
+}
+\examples{
+# The shared base: normally you construct one of its subclasses instead.
+handler <- DTAFileTabular(filename = "data.txt", sep = ",")
+max_number_of_files(handler)
 }
 \seealso{
 \code{\link{DTAFile}}

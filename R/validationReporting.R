@@ -518,6 +518,12 @@ S7::method(messages, DTA) <- function(
 #'   Detail fields are appended as flat columns prefixed with
 #'   \code{schema_}, \code{context_}, and \code{failing_}.
 #' @usage inspect(x, ...)
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
+#'
+#' # Every message, numbered, then one of them in full.
+#' messages(ds)
+#' inspect(ds, id = 1)
 #' @name inspect
 #' @export
 inspect <- S7::new_generic("inspect", "x")

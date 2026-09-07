@@ -62,17 +62,23 @@ Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA ob
 including metadata, version history, transmission details, and approval signatures.
 }
 \examples{
-\dontrun{
-dta <- DTA(
-  title = "Clinical Data Transfer",
-  version = "1.0",
-  date = Sys.Date()
-)
-write_dta(dta, file = "dta_metadata.docx")
+dta <- create_example_DTA()
+out <- tempfile(fileext = ".docx")
+write_dta(dta, file = out, quiet = TRUE)
+file.exists(out)
+unlink(out)
 
 # Fill a user-authored Word template instead of the built-in layout
-write_dta(dta, file = "dta_from_template.docx", template = "my_template.docx")
-}
+template <- tempfile(fileext = ".docx")
+doc <- officer::read_docx()
+doc <- officer::body_add_par(doc, "Title: {DTA_TITLE}")
+doc <- officer::body_add_par(doc, "Version: {DTA_VERSION}")
+print(doc, target = template)
+
+out_from_template <- tempfile(fileext = ".docx")
+write_dta(dta, file = out_from_template, template = template, quiet = TRUE)
+file.exists(out_from_template)
+unlink(c(template, out_from_template))
 }
 \seealso{
 \code{\link[=export_with_template]{export_with_template()}} for the full list of supported placeholders.
