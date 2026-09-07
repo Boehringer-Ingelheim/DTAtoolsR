@@ -124,30 +124,36 @@ DTAColumnSpec <- S7::new_class(
       cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
+    # `self@id` (and, below, `ex`/`self@pattern`) are INTERPOLATED as
+    # variables, never pre-resolved with glue::glue() and handed to cli_abort()
+    # as a finished string: cli parses `{...}` in the literal message it is
+    # given, so a column id such as "A{B}" made glue::glue() splice the raw
+    # text "A{B}" into the message BEFORE cli ever saw it, and cli then tried
+    # to evaluate the stray `{B}` as an expression, aborting with "Could not
+    # evaluate cli `{}` expression" instead of the intended validation
+    # message. Braces inside a value cli itself interpolates are escaped by
+    # cli, so the fix is to let cli do the interpolation.
+
     # if values are provided, there cannot be a pattern or examples
     if (!is.null(self@values)) {
       if (!is.null(self@pattern)) {
-        cli_abort(glue::glue("{self@id}: 'pattern' cannot be set if 'values' are provided."))
+        cli_abort("{self@id}: 'pattern' cannot be set if 'values' are provided.")
       }
       if (!is.null(self@examples)) {
-        cli_abort(
-          glue::glue("{self@id}: 'examples' cannot be set if 'values' are provided.")
-        )
+        cli_abort("{self@id}: 'examples' cannot be set if 'values' are provided.")
       }
     }
 
     # if a pattern is provided, there cannot be values and examples must conform with pattern provided
     if (!is.null(self@pattern)) {
       if (!is.null(self@values)) {
-        cli_abort(glue::glue("{self@id}: 'values' cannot be set if pattern is provided."))
+        cli_abort("{self@id}: 'values' cannot be set if pattern is provided.")
       }
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
           if (!grepl(ex, pattern = self@pattern)) {
             cli_abort(
-              glue::glue(
-                "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
-              )
+              "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
             )
           }
         }
@@ -168,7 +174,7 @@ DTAColumnSpec <- S7::new_class(
       )
       if (!(self@colclass %in% valid_colclasses)) {
         cli_abort(
-          glue::glue("'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}")
+          "'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}"
         )
       }
     }

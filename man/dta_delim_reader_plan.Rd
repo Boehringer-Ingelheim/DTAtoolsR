@@ -11,7 +11,8 @@ dta_delim_reader_plan(
   quote = "\\"",
   has_header = TRUE,
   na = NULL,
-  handler = NULL
+  handler = NULL,
+  encoding = NULL
 )
 }
 \arguments{
@@ -26,6 +27,13 @@ dta_delim_reader_plan(
 
 \item{handler}{A \code{DTAFileTabular} (or subclass) whose \code{newlines_in_values}
 and \code{encoding} apply, or \code{NULL} for the defaults.}
+
+\item{encoding}{Character or \code{NULL} (the default). Overrides the encoding
+the handler declares. The one caller that supplies it is
+\code{\link[=dta_open_normalized_dataset]{dta_open_normalized_dataset()}}, which has already converted the file to a
+UTF-8 copy and is planning a read of \emph{that}: the handler still says
+\code{latin1}, and honouring it here would decode the copy's header a second
+time. \code{NULL} leaves the handler in charge, which is every other route.}
 }
 \value{
 A list with \code{path}, \code{column_names}, \code{skip}, \code{col_types},

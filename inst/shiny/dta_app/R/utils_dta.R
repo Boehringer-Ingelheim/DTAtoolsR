@@ -1894,6 +1894,83 @@ dta_handler_type <- function(h) {
   "csv"
 }
 
+# ---- Reader settings of a tabular handler ---------------------------------
+# A DTAFileTabular carries the settings that decide HOW its file is parsed --
+# `has_header`, `quote`, `missing_values`, and the newer `newlines_in_values`
+# and `encoding`. None of them used to be serialised, so a handler read from a
+# YAML that set one came back from the app with the constructor default and the
+# file was silently read a different way.
+#
+# The set is DERIVED rather than listed here, so a reader option added to
+# DTAFileTabular is carried by the next document the app saves without another
+# edit to this file. Two filters make that safe.
+#
+#   * The DTAFile base properties are emitted by dta_handler_to_list() in their
+#     own shapes (`number_of_files` collapses a min/max pair; `info` keeps the
+#     keys of its entries), so they are excluded here rather than written twice
+#     -- a document carrying both `number_of_files` and a min/max pair is one
+#     DTAFile's own constructor refuses.
+#   * A property the CONSTRUCTOR does not take cannot be read back.
+#     DTAFileCSV()/DTAFileTSV() fix `sep` themselves, and
+#     DTAFileFactory(type = "csv", sep = ",") aborts with "unused argument", so
+#     emitting `sep` would turn a document containing one into a document the
+#     app rejects -- the same trap dta_handler_type() describes above for a
+#     DTAFileDelim.
+#
+# `any` is deliberately outside all of this: its one extra property,
+# `extensions`, is already emitted by name, and a DTAFileAny parses nothing.
+
+# A throwaway handler of `type`, carrying nothing but its constructor's own
+# defaults. It answers both questions the filters ask -- which arguments that
+# constructor accepts, and what it puts in each property when the document says
+# nothing -- from DTAFileFactory() itself, so a type the factory learns to build
+# needs no change here.
+.dta_handler_probe <- function(type) {
+  tryCatch(
+    DTAtools::DTAFileFactory(type = as.character(type %||% "")[1], filename = "probe"),
+    error = function(e) NULL
+  )
+}
+
+# The reader-setting property names of `h`, in property order. Empty for a
+# handler that is not tabular, or a type nothing can rebuild.
+.dta_reader_setting_names <- function(h, probe) {
+  if (is.null(probe) || !inherits(h, "DTAtools::DTAFileTabular")) {
+    return(character(0))
+  }
+  props <- tryCatch(S7::prop_names(h), error = function(e) character(0))
+  base <- tryCatch(
+    names(DTAtools::DTAFile@properties),
+    error = function(e) character(0)
+  )
+  accepted <- tryCatch(
+    names(formals(S7::S7_class(probe))),
+    error = function(e) character(0)
+  )
+  intersect(setdiff(props, base), accepted)
+}
+
+# Every reader setting `h` carries, as a named list (the editor prefills from
+# this, and hands back whatever it did not show a control for).
+.dta_handler_reader_settings <- function(h, type = dta_handler_type(h)) {
+  probe <- .dta_handler_probe(type)
+  nms <- .dta_reader_setting_names(h, probe)
+  stats::setNames(
+    lapply(nms, function(p) tryCatch(S7::prop(h, p), error = function(e) NULL)),
+    nms
+  )
+}
+
+# The same settings for a DEFAULT handler of that type: what the constructor
+# restores for every key the document leaves out.
+.dta_handler_reader_defaults <- function(type) {
+  probe <- .dta_handler_probe(type)
+  if (is.null(probe)) {
+    return(list())
+  }
+  .dta_handler_reader_settings(probe, type)
+}
+
 # One file handler -> plain list (mirrors the `files:` block of the examples).
 dta_handler_to_list <- function(h) {
   out <- list()
@@ -1918,6 +1995,14 @@ dta_handler_to_list <- function(h) {
   ext <- tryCatch(h@extensions, error = function(e) NULL)
   if (!is.null(ext) && length(ext) > 0) {
     out$extensions <- if (length(ext) == 1) ext else as.list(ext)
+  }
+  # A setting left at its default is omitted, not written out: the constructor
+  # restores it exactly, and spelling all five onto every handler would rewrite
+  # every bundled specification to say what it already said.
+  settings <- .dta_handler_reader_settings(h, out$type)
+  defaults <- .dta_handler_reader_defaults(out$type)
+  for (nm in names(settings)) {
+    if (!identical(settings[[nm]], defaults[[nm]])) out[[nm]] <- settings[[nm]]
   }
   out
 }
@@ -2624,6 +2709,16 @@ dta_handler_types <- function(dataset_type = "tabular") {
   }
 }
 
+# Encodings the file editor offers by NAME. Unlike dta_handler_types() this is
+# not a closed set and the control that shows it accepts free text: `encoding`
+# ends up in iconv(), whose list of accepted names is platform-specific, so a
+# fixed list here could only ever be a shortlist. These three are what a
+# delivered extract is actually written in -- UTF-8, and the two single-byte
+# encodings a Windows-authored CSV comes in.
+dta_handler_encodings <- function() {
+  c("UTF-8", "latin1", "windows-1252")
+}
+
 # A compact data.frame overview of a dataset's file handlers (editor table).
 dta_handlers_overview <- function(dta, dataset) {
   hs <- dta_handlers(dta_get_dataset(dta, dataset))
@@ -2717,7 +2812,14 @@ dta_handler_fields <- function(dta, dataset, index) {
     max_number_of_files = if (is.na(mx)) 1L else as.integer(mx),
     pattern_description = tryCatch(h@pattern_description, error = function(e) NULL) %||% "",
     info = paste(.dta_info_to_lines(info), collapse = "\n"),
-    extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", ")
+    extensions = paste(tryCatch(h@extensions, error = function(e) NULL) %||% character(0), collapse = ", "),
+    # Every reader setting the handler carries, in one nested list rather than
+    # one field each. The form has controls for two of them; the rest are
+    # invisible in the editor and are handed straight back to dta_set_handler()
+    # on save, so editing a file name cannot silently re-read the file a
+    # different way. A handler being ADDED has no prefill, which is what leaves
+    # a new one on the constructor defaults.
+    reader_settings = .dta_handler_reader_settings(h)
   )
 }
 
@@ -2732,7 +2834,8 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
                             pattern = FALSE, count_mode = "exact",
                             number_of_files = 1, min_number_of_files = 1,
                             max_number_of_files = 1, pattern_description = NULL,
-                            info = NULL, extensions = NULL, dataset_type = "tabular") {
+                            info = NULL, extensions = NULL, dataset_type = "tabular",
+                            reader_settings = list()) {
   dta_try({
     # One name or pattern per line, so a multi-name handler survives the
     # fields -> form -> set round trip as several names rather than one.
@@ -2808,6 +2911,31 @@ dta_set_handler <- function(dta, dataset, index = NULL, filename, type = "csv",
     if (identical(type, "any") && !is.null(ext)) {
       factory_args$extensions <- ext
     }
+
+    # Reader settings arrive as one named list rather than as an argument each,
+    # because the form shows controls for only two of them (see
+    # dta_handler_fields()). Anything the target constructor does not accept is
+    # DROPPED rather than forwarded: do.call() would abort with "unused
+    # argument", and the editor would report a message about an argument the
+    # user was never shown -- the same reason `extensions` is gated above.
+    settings <- if (is.list(reader_settings)) reader_settings else list()
+    snames <- names(settings) %||% character(0)
+    settings <- settings[nzchar(snames)]
+    probe <- .dta_handler_probe(type)
+    accepted <- if (is.null(probe)) {
+      character(0)
+    } else {
+      tryCatch(names(formals(S7::S7_class(probe))), error = function(e) character(0))
+    }
+    settings <- settings[names(settings) %in% setdiff(accepted, names(factory_args))]
+    # An empty string means "say nothing about it", not "set it to nothing":
+    # the free-text encoding control comes back blank when it is cleared, and
+    # `encoding = ""` fails the class validator with a message about a property
+    # the form calls something else. Leaving the key out restores the default.
+    settings <- settings[!vapply(settings, function(v) {
+      is.null(v) || length(v) == 0 || (is.character(v) && !nzchar(v[1]))
+    }, logical(1))]
+    factory_args <- c(factory_args, settings)
 
     handler <- do.call(DTAtools::DTAFileFactory, factory_args)
 

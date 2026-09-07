@@ -99,6 +99,129 @@ test_that("a gzipped file is still read in batches, with file row numbers", {
   )
 })
 
+test_that("a gzipped latin1 file streams, and agrees with every other route", {
+  # Two transport details at once: the bytes are compressed AND they are not
+  # UTF-8. The lazy reader has to decompress through gzfile() to convert, then
+  # hand the scanner plain UTF-8 text -- so this is the case where a converter
+  # that expanded the archive to disk first, or that read the compressed bytes
+  # as if they were text, would show up.
+  plain <- file.path(tempdir(), "gz_latin1.csv")
+  gz <- paste0(plain, ".gz")
+  on.exit(unlink(c(plain, gz)), add = TRUE)
+
+  bytes <- c(
+    charToRaw("NAME,V\n"),
+    as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(",1\n"),
+    as.raw(c(0x4d, 0xf6, 0x6c, 0x6c, 0x65, 0x72)), charToRaw(",2\n")
+  )
+  con <- file(plain, "wb")
+  writeBin(bytes, con)
+  close(con)
+  gz_compress(plain, gz)
+
+  handler <- DTAFileCSV(filename = "gz_latin1.csv", encoding = "latin1")
+  expected <- c("Jürgen", "Möller")
+
+  expect_identical(as.data.frame(read_file(handler, plain))$NAME, expected)
+  expect_identical(as.data.frame(read_file(handler, gz))$NAME, expected)
+  expect_identical(as.data.frame(open_file(handler, plain))$NAME, expected)
+  expect_identical(as.data.frame(open_file(handler, gz))$NAME, expected)
+
+  # The scan reads a converted copy, and the copy is plain text under
+  # tempdir() -- not a second archive left next to the delivery.
+  scanned <- normalizePath(open_file(handler, gz)$files[[1]], winslash = "/")
+  expect_true(startsWith(scanned, normalizePath(tempdir(), winslash = "/")))
+  expect_false(identical(scanned, normalizePath(gz, winslash = "/")))
+  expect_identical(readBin(scanned, "raw", n = 2L), as.raw(c(0x4e, 0x41)))
+})
+
+test_that("a gzipped latin1 file gets the same verdict on all four routes", {
+  # Reading the same values is necessary but not sufficient: what a user acts
+  # on is the verdict. Compression and encoding are both transport details, so
+  # all four combinations of {plain, gzipped} x {read into memory, streamed}
+  # must produce one answer -- counts, statuses and error detail alike.
+  plain <- file.path(tempdir(), "gz_latin1_verdict.csv")
+  gz <- paste0(plain, ".gz")
+  on.exit(unlink(c(plain, gz)), add = TRUE)
+
+  con <- file(plain, "wb")
+  writeBin(
+    c(
+      charToRaw("NAME,V\n"),
+      as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(",1\n"),
+      as.raw(c(0x4d, 0xf6, 0x6c, 0x6c, 0x65, 0x72)), charToRaw(",2\n"),
+      # An unconvertible number and a duplicated key, so this compares real
+      # error detail on all three axes rather than four clean verdicts.
+      charToRaw("Ann,notanumber\n"),
+      charToRaw("Ann,4\n")
+    ),
+    con
+  )
+  close(con)
+  gz_compress(plain, gz)
+
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6, nullable = FALSE),
+      V = DTAColumnSpec(id = "V", type = "SAS Num", nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "name_unique", columns = "NAME"))
+  )
+
+  # Two routes may legitimately report the same errors in a different order,
+  # and an order difference is not a disagreement.
+  sorted <- function(errors) {
+    if (nrow(errors) == 0) {
+      return(errors)
+    }
+    out <- errors[do.call(order, lapply(errors, as.character)), , drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }
+
+  route <- function(path, stream) {
+    ds <- DTADataSetTabular(
+      name = "enc",
+      specs = specs,
+      files = list(DTAFileCSV(filename = "gz_latin1_verdict.csv", encoding = "latin1"))
+    )
+    checked <- check(
+      load_file(ds, file = path, handler_index = 1, stream = stream),
+      quiet = TRUE, persist = FALSE
+    )
+    status <- validation_status(checked)
+    list(
+      status = status[
+        , setdiff(names(status), c("validated_at", "run_id", "validation_run")),
+        drop = FALSE
+      ],
+      errors = sorted(as.data.frame(validation_errors(checked, "gz_latin1_verdict"))),
+      n_import_errors = checked@validation_store[["gz_latin1_verdict"]]$n_import_errors,
+      values = as.data.frame(tables(checked)[["gz_latin1_verdict"]])$NAME
+    )
+  }
+
+  reference <- route(plain, "never")
+
+  # A fixture that passed everything would prove nothing about the error paths.
+  expect_false(reference$status$ok)
+  expect_gt(nrow(reference$errors), 0)
+  expect_gt(reference$n_import_errors, 0)
+  expect_identical(reference$values, c("Jürgen", "Möller", "Ann", "Ann"))
+
+  for (route_name in c("plain streamed", "gz in memory", "gz streamed")) {
+    got <- switch(route_name,
+      "plain streamed" = route(plain, "always"),
+      "gz in memory" = route(gz, "never"),
+      "gz streamed" = route(gz, "always")
+    )
+    expect_identical(got$status, reference$status, info = route_name)
+    expect_identical(got$errors, reference$errors, info = route_name)
+    expect_identical(got$n_import_errors, reference$n_import_errors, info = route_name)
+    expect_identical(got$values, reference$values, info = route_name)
+  }
+})
+
 test_that("a gzipped file can be loaded and checked through the DTA entry points", {
   plain_path <- gz_extdata("clinical_data.csv")
   gz <- file.path(tempdir(), "clinical_data.csv.gz")

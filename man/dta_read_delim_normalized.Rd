@@ -36,7 +36,12 @@ The eager half of \code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}:
 column types as \code{\link[=dta_open_normalized_dataset]{dta_open_normalized_dataset()}} gives the scanner, read into
 memory as an Arrow \code{Table} instead of left on disk.
 
-Unlike the lazy opener this one CAN honour a non-UTF-8 \code{encoding}: it reads
-through an input stream, which Arrow will re-encode.
+A non-UTF-8 \code{encoding} is honoured here by Arrow itself: this reader owns
+the input stream it reads through, and \code{csv_read_options(encoding = )}
+re-encodes that stream. That is the one thing the lazy opener cannot do --
+a dataset opens its own files -- which is why it converts the file to a
+UTF-8 copy first (see \code{\link[=dta_transcode_to_utf8]{dta_transcode_to_utf8()}}) and reads that instead. Two
+mechanisms, one result: the same bytes decode the same way whichever reader
+loaded them.
 }
 \keyword{internal}

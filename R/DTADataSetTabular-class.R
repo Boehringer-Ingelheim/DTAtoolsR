@@ -17,6 +17,17 @@
 #'   generate the dataset specification.
 #' @param template_version Character or NA. Version of the template used.
 #' @param template_date Character or NA. Date of the template used.
+#' @details
+#' A table handed to this constructor is a table already in memory, which is
+#' the case [check()]'s retained-error cap is least suited to. `max_errors`
+#' (default `getOption("DTAtools.max_errors", 10000L)`) exists because on a
+#' large dirty file retention is one row per bad cell and an unbounded error
+#' frame exhausts memory; a table small enough to have been built in R has
+#' nothing to protect. Check such a table with `check(..., max_errors = Inf)`
+#' when the complete per-cell detail is wanted -- there is no spill on the
+#' materialising path, so detail dropped by the cap is recovered only by
+#' checking again. The cap never affects the answer: the reported counts and
+#' the verdict on every axis are exact at any cap, including the default.
 #' @return An object of class DTADataSetTabular
 #' @examples
 #' # Create sample tables
@@ -68,20 +79,52 @@ DTADataSetTabular <- S7::new_class(
     # table is typed at scan time either way.
     is_lazy <- vapply(tables, dta_table_is_lazy, logical(1))
 
-    # The conversion to Arrow happens BEFORE the coercion, not after it, so that
-    # dta_coerce_table_to_specs() sees an Arrow Table and can stamp the returned
-    # Table with the content hash check() later reads instead of recomputing.
-    # Handing it a plain data frame produced a frame, and the stamp -- which
-    # only exists on a Table -- was never applied. The call below is kept: it is
-    # a no-op for a Table and keeps this constructor's contract explicit.
-    coerced <- lapply(
-      tables[!is_lazy],
-      function(tbl) dta_coerce_table_to_specs(arrow::as_arrow_table(tbl), specs)
-    )
+    # A data frame is coerced AS a data frame and converted to Arrow exactly
+    # once, at the end. Converting it up front instead made
+    # dta_coerce_table_to_specs() see an Arrow Table, which it immediately
+    # turned back into a data frame with as.data.frame() and then rebuilt as a
+    # Table -- three conversions of the whole table where one is needed, and on
+    # a 1e6 x 20 frame that detour was half the construction cost and a copy of
+    # the data in peak heap. The only thing it bought was the content stamp,
+    # which the coercion applies only to an Arrow input; it is applied here
+    # instead, from the same dta_table_content_hash() of the same coerced frame
+    # (issues attribute included), so a frame-built table and an Arrow-built one
+    # carrying the same data are stamped identically and check() skips both.
+    #
+    # That identity holds only while the frame survives the Arrow round trip
+    # unchanged, because dta_table_change_signal() falls back to hashing
+    # as.data.frame() of the stored Table. dta_frame_is_arrow_stable() names the
+    # types for which it does not (integer64, difftime, a POSIXct with no named
+    # timezone); such a frame takes the original route, where the stamp is again
+    # taken from the round-tripped frame.
+    #
+    # Anything else materialised -- an Arrow Table, a RecordBatch -- keeps the
+    # original route too: the coercion stamps the Table it returns, and
+    # as_arrow_table() below both normalises a RecordBatch to a Table (the class
+    # validator admits only Tables) and is a no-op for a Table.
+    #
+    # A lazy holding (Dataset / arrow_dplyr_query / RecordBatchReader) is not in
+    # `tables[!is_lazy]` at all and is passed through untouched, for the reason
+    # given above.
+    coerced <- lapply(tables[!is_lazy], function(tbl) {
+      if (dta_frame_is_arrow_stable(tbl)) {
+        result <- dta_coerce_table_to_specs(tbl, specs)
+        return(list(
+          table = dta_stamp_table_hash(
+            arrow::as_arrow_table(result$table),
+            dta_table_content_hash(result$table)
+          ),
+          issues = result$issues
+        ))
+      }
+
+      result <- dta_coerce_table_to_specs(arrow::as_arrow_table(tbl), specs)
+      list(table = arrow::as_arrow_table(result$table), issues = result$issues)
+    })
 
     # Transform the materialised entries to arrow tables; lazy entries keep the
     # class they arrived with.
-    tables[!is_lazy] <- lapply(coerced, function(result) arrow::as_arrow_table(result$table))
+    tables[!is_lazy] <- lapply(coerced, function(result) result$table)
 
     import_issues <- lapply(coerced, function(result) result$issues)
     import_issues <- import_issues[
@@ -656,15 +699,18 @@ method(print, DTADataSetTabular) <- function(x, ...) {
       shown_names <- table_names
     }
 
-    # Build the message with proper cli markup, need paste and paste0
-    # instead of stringr functions to work with cli
-    alert_message <- paste0(
-      "Tables (",
-      n_targets,
-      "): ",
-      paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
+    # The names are INTERPOLATED, never pasted into the markup: cli parses
+    # `{...}` in the string it is handed, so a table called `a{b}` (from a
+    # delivered `a{b}.csv`) took print() down with "Could not evaluate cli `{}`
+    # expression". Braces inside an interpolated value are escaped by cli
+    # itself. cli_vec() only restores the separators the paste produced -- cli
+    # would otherwise write "a, b and c" where this has always written
+    # "a, b, c".
+    shown <- cli::cli_vec(
+      shown_names,
+      list("vec-sep" = ", ", "vec-last" = ", ")
     )
-    cli_alert_info(alert_message)
+    cli_alert_info("Tables ({n_targets}): {.field {shown}}")
   } else {
     cli_alert_info("Tables: {.emph none}")
   }
@@ -854,10 +900,19 @@ method(load_file, DTADataSetTabular) <- function(
 #
 # Only an Arrow `Dataset` is inspected. That is what `load_file(stream =
 # "always")` produces, it is the only holding whose backing files are knowable
-# without consuming it (`$files` is read from the plan, not from disk), and it
-# is the one `dta_table_change_signal()` already fingerprints the same way. A
+# without consuming it (the file list is read from the plan, not from disk), and
+# it is the one `dta_table_change_signal()` already fingerprints the same way. A
 # materialised Table has no files; a reader or a query is left to the scanner,
 # which is where any other failure has always surfaced.
+#
+# `dta_dataset_source_files()`, not `$files`, for the same reason the change
+# signal uses it: a dataset over a non-UTF-8 delivery scans a transcoded COPY,
+# and the copy is neither what the user delivered nor what they can act on. Read
+# from `$files` this reported an absent delivery by a `tempdir()` path the user
+# never chose, and reported an absent COPY -- which is the session's own
+# housekeeping, not a delivery failure -- as though the data had gone. A missing
+# copy is instead re-made by `dta_refresh_transcoded_dataset()`, which runs
+# immediately before this in `check()`.
 #
 # Returns `character(0)` -- "nothing missing, carry on" -- for every other
 # holding and whenever the file list cannot be read at all. An unfamiliar
@@ -868,7 +923,7 @@ dta_missing_table_files <- function(table) {
     return(character(0))
   }
 
-  files <- tryCatch(table$files, error = function(e) character(0))
+  files <- dta_dataset_source_files(table)
   if (length(files) == 0) {
     return(character(0))
   }
@@ -1139,17 +1194,22 @@ invalidate_by_spec_change <- function(x, tables = NULL) {
 #'       default), and \code{batch_rows} only \emph{caps} a batch that is
 #'       already larger. Peak memory during such a scan is therefore governed by
 #'       the block size times Arrow's read-ahead, not by \code{batch_rows}.}
-#'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
-#'       the number of per-cell errors whose detail is held in RAM while
-#'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
-#'       the default is finite because retention is one row per bad cell, so an
-#'       unbounded cap exhausts memory on a large dirty file exactly as holding
-#'       the data would. The reported \emph{counts} and the verdict are exact
-#'       either way, and rows past the cap spill to a session-temporary store
-#'       that \code{\link{collect_full_errors}()} reassembles. It applies to a
-#'       table held in memory as well, where it bounds retained detail only --
-#'       there is no spill there, so re-checking with a larger cap recovers the
-#'       dropped rows.}
+#'     \item{max_errors}{Integer, \code{Inf}, or NULL to hold everything in
+#'       memory. Cap on the number of per-cell errors whose detail is held in
+#'       RAM while scanning. Defaults to
+#'       \code{getOption("DTAtools.max_errors", 10000L)}; the default is finite
+#'       because retention is one row per bad cell, so an unbounded cap
+#'       exhausts memory on a large dirty file exactly as holding the data
+#'       would. The reported \emph{counts} and the verdict are exact either
+#'       way -- the cap decides how much detail is kept, never what the answer
+#'       is -- and rows past the cap spill to a session-temporary store that
+#'       \code{\link{collect_full_errors}()} reassembles. It applies to a table
+#'       held in memory as well, where it bounds retained detail only: there is
+#'       no spill there, so the dropped rows are recovered only by checking
+#'       again with a larger cap. A table constructed in R and checked straight
+#'       away, whose complete detail is wanted, should therefore pass
+#'       \code{max_errors = Inf} -- it is already in memory, so the cap buys
+#'       nothing and costs the detail.}
 #'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
 #'       shows any problem instead of scanning to the end. On a table large
 #'       enough to take hours, this answers \emph{is this valid?} without paying
@@ -1357,6 +1417,30 @@ S7::method(check, DTADataSetTabular) <- function(
         target_type = "table"
       )
       next
+    }
+
+    # A lazy table over a non-UTF-8 delivery is a scan plan over a UTF-8 COPY
+    # of it, and a copy does not follow what it was copied from. The change
+    # signal above is keyed on the delivery (see `dta_dataset_source_files()`),
+    # so an edited file opens the skip gate exactly as it should -- and then the
+    # scan below read the STALE copy and reported the old data's verdict as a
+    # fresh one, clean row count and all. Re-opening here makes the plan follow
+    # the delivery again.
+    #
+    # After the skip gate rather than before it, so that an unchanged table --
+    # the common case, and the one the gate exists for -- never pays even the
+    # fingerprint check. An unchanged delivery that does reach this returns the
+    # same object, so the cost on the rescan path is two `file.info()` fields.
+    #
+    # The signal is taken again only when the object really was replaced: it
+    # carries the schema, and a re-delivery is free to have a different one.
+    # Recording the stale schema's signal would leave a hash that never recurs,
+    # and the table would be rescanned on every check() thereafter.
+    refreshed <- dta_refresh_transcoded_dataset(current_table)
+    if (!identical(refreshed, current_table)) {
+      current_table <- refreshed
+      x@tables[[table_name]] <- refreshed
+      table_hash <- dta_table_change_signal(current_table)
     }
 
     # A lazy table is a scan plan over files, not data, and the plan holds only

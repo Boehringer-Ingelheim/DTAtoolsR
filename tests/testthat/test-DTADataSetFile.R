@@ -613,6 +613,24 @@ test_that("a file name containing braces checks without aborting", {
   expect_equal(sum(status$ok), 1)
 })
 
+test_that("print() and print_short_info() survive braces in the dataset's own name", {
+  # DTADataSetFile has no print()/print_short_info() of its own -- both are
+  # inherited from DTADataSet -- so the fix to that parent method (a name
+  # spliced into `{.field ...}` markup with paste0()/str_c() before reaching
+  # cli) must also hold for this subclass.
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "delivered.txt")
+  writeLines("content", path)
+
+  ds <- DTADataSetFile(name = "d{x}", paths = path)
+
+  out <- dsf_console(expect_invisible(print(ds)))
+  expect_match(out, "d{x}", fixed = TRUE)
+
+  short <- dsf_console(expect_invisible(print_short_info(ds)))
+  expect_match(short, "d{x}", fixed = TRUE)
+})
+
 # ---------------------------------------------------------------------------
 # A vanished artifact directory does not freeze the object
 # ---------------------------------------------------------------------------

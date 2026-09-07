@@ -95,12 +95,12 @@ dta_rule_all_columns <- function(rule) {
 #'   turn out to be empty or already everything.
 #' @keywords internal
 dta_scan_projection <- function(specs, rules_list, schema_names) {
-  # The spec-declared column keys, exactly as dta_reader_col_types()
-  # (R/importConversion.R) derives them for the same collection. That
-  # function's job is to build an arrow::schema() for the reader -- pinned to
-  # utf8 and ordered by the schema -- so it is not called here; this needs
-  # plain names, unordered, to compare against schema_names below, and the
-  # short derivation is repeated rather than shared for that reason.
+  # The spec-declared column keys, exactly as dta_compile_spec_types()
+  # (R/importConversion.R) derives them for the same collection: a collection
+  # is normally named by column id, but one built by another route may not be,
+  # so both are offered and deduplicated. That function is not called here
+  # because it also resolves each key's target R type, which this does not
+  # need -- only plain names, to compare against schema_names below.
   spec_columns <- tryCatch(specs@columns, error = function(e) NULL)
   declared <- character(0)
   if (is.list(spec_columns) && length(spec_columns) > 0) {

@@ -45,9 +45,15 @@ Arrow's read-ahead, not by \code{batch_rows}. Raise it with
 \code{options(DTAtools.stream_block_size = )}, in bytes, and expect resident
 memory to grow in proportion.
 
-A non-UTF-8 \code{encoding} declared on the handler is refused here: Arrow's
-dataset scanner has no re-encoding step, so such a file can only be read into
-memory (\code{stream = "never"}).
+A non-UTF-8 \code{encoding} declared on the handler is honoured here too,
+although Arrow's dataset scanner has no re-encoding step of its own: the
+file is converted once, streaming and in bounded memory, to a UTF-8 copy
+under \code{\link[base]{tempdir}()} which the scan then reads. The copy is
+cached for the session and costs disk rather than memory; see
+\code{\link{DTAFileTabular}}. The wide encodings (UTF-16, UTF-32, UCS-2,
+UCS-4) are the exception -- a newline byte is not a character boundary
+there, so such a file is refused and must be read with
+\code{stream = "never"}.
 }
 
 \examples{

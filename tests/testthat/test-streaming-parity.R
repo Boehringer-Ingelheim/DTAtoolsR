@@ -328,6 +328,271 @@ test_that("the two paths agree on a file with no rows and on one with a single r
   }
 })
 
+# ---- the R-typed generator --------------------------------------------------
+#
+# Everything above starts from a FILE, so every column reaches both engines as
+# text and the reader decides what it becomes. A table built in R never passes
+# a reader at all: its columns arrive already typed, and the two engines see
+# that typing at different moments -- the whole-column engine gets the table
+# the constructor coerced once, the streaming engine coerces each batch as it
+# arrives. Both must still reach the same verdict.
+#
+# The pinned Int-narrowing defect is the one place they cannot: `SAS Int`
+# narrows to R `integer` only when every value in hand is whole and inside the
+# integer range, and "in hand" is the whole column on one path and one batch on
+# the other, so a column that is fractional or out of range only in SOME batches
+# is typed differently by the two. That is a real defect, pinned elsewhere; it is
+# kept out of this generator by giving every `SAS Int` column whole values well
+# inside the integer range, so the two agree by construction rather than by luck.
+
+parity_memory_pool <- function() {
+  list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    SITE = DTAColumnSpec(id = "SITE", type = "SAS Char", length = 4, nullable = TRUE),
+    SEX = DTAColumnSpec(
+      id = "SEX", type = "SAS Char", length = 1,
+      nullable = FALSE, values = c("M", "F")
+    ),
+    AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE),
+    CNT = DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+  )
+}
+
+# The declared columns, each in the R type a caller would naturally build it in
+# rather than as text. Defects sit at fixed positions, for the reason the file
+# generator gives: one that appears only for some seeds is one this file does
+# not really test.
+parity_memory_values <- function(name, n) {
+  switch(name,
+    ID = {
+      v <- sprintf("S%04d", seq_len(n))
+      if (n >= 4) v[[4]] <- v[[3]] # duplicate key
+      if (n >= 5) v[[5]] <- "THIS-ID-IS-FAR-TOO-LONG" # over the declared length
+      if (n >= 6) v[[6]] <- NA_character_ # missing in a non-nullable column
+      v
+    },
+    SITE = rep(c("S01", "S02", NA_character_), length.out = n),
+    # A factor, not a character vector: a declared `Char` column is never
+    # coerced, so whatever R type it arrived in is what both engines validate.
+    SEX = {
+      v <- rep(c("M", "F"), length.out = n)
+      if (n >= 3) v[[3]] <- "X" # outside the permitted set
+      factor(v, levels = c("M", "F", "X"))
+    },
+    AGE = {
+      v <- rep(c(17, 18, 45, 70, 71), length.out = n)
+      if (n >= 8) v[[8]] <- NA_real_ # missing in a nullable column
+      v
+    },
+    # Whole and far inside the integer range in EVERY batch -- see the note on
+    # the pinned Int-narrowing defect above.
+    CNT = as.integer(rep(0:5, length.out = n)),
+    cli::cli_abort("No generator for column {name}.")
+  )
+}
+
+# Columns no specification mentions, in the R types a constructed table carries.
+# XKEY is numeric and read by a uniqueness rule; the rest are read by nothing,
+# and are here because a column a rule never touches must not change a verdict
+# either -- including the types that only exist in R (`Date`, `POSIXct`,
+# `factor`, `logical`, and `integer64` where bit64 is installed).
+parity_memory_extras <- function(n) {
+  extras <- list(
+    XKEY = rep(c(1.5, 1.5, 2, 2, 0, -0.5, NA_real_, 3), length.out = n),
+    FLAG = rep(c(TRUE, FALSE, NA), length.out = n),
+    DAY = as.Date("2026-01-01") + rep(0:6, length.out = n),
+    WHEN = as.POSIXct("2026-01-01 00:00:00", tz = "UTC") +
+      rep(c(0, 3600, 86400), length.out = n),
+    XPAD = if (n == 0) character(0) else sprintf("p%03d", seq_len(n))
+  )
+
+  if (requireNamespace("bit64", quietly = TRUE)) {
+    extras$BIG <- bit64::as.integer64(rep(c(1, 2, 3), length.out = n))
+  }
+
+  extras
+}
+
+parity_case_memory <- function(seed) {
+  # Offset from the file generator's seeds so the two draw different shapes
+  # rather than the same one twice.
+  set.seed(1000L + seed)
+
+  pool <- parity_memory_pool()
+  optional <- setdiff(names(pool), c("ID", "AGE"))
+  chosen <- c("ID", "AGE", sample(optional, sample(seq_len(3), 1)))
+  chosen <- names(pool)[names(pool) %in% chosen]
+
+  n <- sample(0:400, 1)
+
+  columns <- lapply(chosen, function(name) parity_memory_values(name, n))
+  names(columns) <- chosen
+  columns <- c(columns, parity_memory_extras(n))
+
+  frame <- as.data.frame(columns, stringsAsFactors = FALSE)
+
+  list(
+    frame = frame,
+    specs = DTAColumnSpecCollection(
+      columns = pool[chosen],
+      rules = parity_rules(chosen)
+    ),
+    rows = n,
+    # Small, so a 400-row case is scanned in many batches and every
+    # batch-boundary decision is actually taken more than once.
+    batch_rows = sample(c(3L, 7L, 64L), 1),
+    seed = seed
+  )
+}
+
+# Both engines reached through `check()`, so the two results are the same shape
+# and are assembled by the same code. Holding the frame directly puts it on the
+# whole-column engine; holding a `RecordBatchReader` over it puts it on the
+# streaming one -- `dta_validate_any_table()` then calls
+# `dta_validate_table_stream()` with `coerce = TRUE` and the reader's own column
+# names, which is the call this comparison is about.
+#
+# `max_errors = Inf` on both sides: the default cap retains a bounded prefix,
+# and two paths that report errors in a different order would then retain
+# different rows and disagree about retention rather than about the data.
+parity_run_memory <- function(case, engine) {
+  holding <- if (identical(engine, "stream")) {
+    dta_as_batch_reader(case$frame, batch_rows = case$batch_rows)
+  } else {
+    case$frame
+  }
+
+  ds <- DTADataSetTabular(
+    name = "parity_memory",
+    specs = case$specs,
+    tables = list(t = holding)
+  )
+  checked <- check(ds, persist = FALSE, quiet = TRUE, max_errors = Inf)
+
+  status <- validation_status(checked)
+  status <- status[
+    , setdiff(names(status), c("validated_at", "run_id", "validation_run")),
+    drop = FALSE
+  ]
+
+  list(
+    status = status,
+    errors = parity_sort(as.data.frame(validation_errors(checked, "t"))),
+    n_import_errors = checked@validation_store[["t"]]$n_import_errors
+  )
+}
+
+parity_memory_results <- local({
+  cache <- NULL
+
+  function() {
+    if (!is.null(cache)) {
+      return(cache)
+    }
+
+    cache <<- lapply(seq_len(25), function(seed) {
+      case <- parity_case_memory(seed)
+      list(
+        case = case,
+        memory = parity_run_memory(case, "memory"),
+        stream = parity_run_memory(case, "stream")
+      )
+    })
+
+    cache
+  }
+})
+
+test_that("the two engines agree on every generated R-typed table", {
+  for (entry in parity_memory_results()) {
+    case <- entry$case
+    label <- sprintf(
+      "memory seed %d (%d rows, batch_rows %d)",
+      case$seed, case$rows, case$batch_rows
+    )
+
+    expect_identical(entry$stream$status, entry$memory$status, info = label)
+    expect_identical(entry$stream$errors, entry$memory$errors, info = label)
+    expect_identical(
+      entry$stream$n_import_errors, entry$memory$n_import_errors,
+      info = label
+    )
+  }
+})
+
+test_that("the generated R-typed tables carry the R types they claim to", {
+  # Without this the test above would compare two engines over a table of
+  # character columns and prove nothing about R typing.
+  seen <- c(
+    "double", "integer", "character", "factor", "logical", "Date", "POSIXct"
+  )
+  found <- stats::setNames(rep(FALSE, length(seen)), seen)
+  axes <- list(columnspec = FALSE, rule = FALSE)
+
+  for (entry in parity_memory_results()) {
+    frame <- entry$case$frame
+    for (column in frame) {
+      cls <- class(column)[[1]]
+      if (identical(cls, "numeric")) cls <- "double"
+      if (cls %in% names(found)) found[[cls]] <- TRUE
+    }
+
+    errors <- entry$memory$errors
+    if (nrow(errors) > 0) {
+      sources <- as.character(errors$source)
+      axes$columnspec <- axes$columnspec || any(sources == "columnspec")
+      axes$rule <- axes$rule || any(sources == "rule")
+    }
+  }
+
+  expect_true(all(found), info = paste(names(found)[!found], collapse = ", "))
+  expect_true(axes$columnspec)
+  expect_true(axes$rule)
+
+  if (requireNamespace("bit64", quietly = TRUE)) {
+    has_big <- vapply(
+      parity_memory_results(),
+      function(entry) "BIG" %in% names(entry$case$frame),
+      logical(1)
+    )
+    expect_true(all(has_big))
+  }
+})
+
+test_that("the two engines agree on an R-typed table with no rows and with one row", {
+  # The generator draws a row count and may never draw the boundaries, which is
+  # where the two engines are most likely to differ: a zero-row table yields no
+  # batch at all, so every rule is settled from `known_columns` alone.
+  for (n in c(0, 1)) {
+    columns <- list(
+      ID = parity_memory_values("ID", n),
+      AGE = parity_memory_values("AGE", n)
+    )
+    columns <- c(columns, parity_memory_extras(n))
+
+    case <- list(
+      frame = as.data.frame(columns, stringsAsFactors = FALSE),
+      specs = DTAColumnSpecCollection(
+        columns = parity_memory_pool()[c("ID", "AGE")],
+        rules = parity_rules(c("ID", "AGE"))
+      ),
+      rows = n,
+      batch_rows = 3L,
+      seed = 900L + n
+    )
+
+    memory <- parity_run_memory(case, "memory")
+    stream <- parity_run_memory(case, "stream")
+
+    expect_identical(stream$status, memory$status, info = paste(n, "rows"))
+    expect_identical(stream$errors, memory$errors, info = paste(n, "rows"))
+    expect_identical(
+      stream$n_import_errors, memory$n_import_errors,
+      info = paste(n, "rows")
+    )
+  }
+})
+
 test_that("an undeclared column read by a rule is keyed identically on both paths", {
   # The reduced form of the generator's core case, kept separately so that a
   # failure names the mechanism rather than a seed. "1.5" and "1.50" are one

@@ -235,6 +235,27 @@ method(`[`, DTA) <- function(x, i) {
 #' table large enough to matter streams by default. Either explicit
 #' \code{stream} value still overrides the guess.
 #'
+#' @section Options a streamed load is subject to:
+#' \describe{
+#'   \item{\code{DTAtools.stream_threshold}}{The size, in bytes, above which
+#'     \code{stream = "auto"} keeps a file lazy. 512 MB by default.}
+#'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+#'     delimited file, 1 MiB by default. Read during \code{\link{check}()}
+#'     rather than here, and what governs a scan's peak memory.}
+#'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+#'     whose declared \code{encoding} is not UTF-8 is converted, at load time,
+#'     to the UTF-8 copy the scan will read (see
+#'     \code{\link{DTAFileTabular}()}). 4 MiB by default; it bounds the
+#'     converter's buffer and does not change the copy.}
+#'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default. A
+#'     diagnostic switch over how a streamed batch's declared-numeric columns
+#'     are parsed; see \code{\link{check}()}.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The smallest batch for which that Arrow parse is attempted; a smaller
+#'     batch is typed in R, which is cheaper at that size. See
+#'     \code{\link{check}()}.}
+#' }
+#'
 #' @param x A \code{DTA} or \code{DTADataSetTabular} object.
 #' @param ... Additional arguments passed to the method.
 #' @return The updated object.
@@ -534,6 +555,41 @@ dta_emit_summary_message <- function(summary_message) {
 #' @description
 #' Validates all datasets within a \code{DTA} object, or a specific dataset.
 #' Provides comprehensive validation summary across all datasets.
+#'
+#' @section Options that tune a scan:
+#' Three options change how a streamed table is read. None of them changes
+#' what is reported: a table gets the same verdict, the same counts and the
+#' same error detail whatever they are set to.
+#'
+#' \describe{
+#'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+#'     delimited file, 1 MiB by default. This -- times Arrow's read-ahead --
+#'     is what governs peak memory during a scan; \code{batch_rows} only
+#'     \emph{caps} a batch that is already larger.}
+#'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default.
+#'     Whether a batch whose declared-numeric columns are entirely composed of
+#'     values Arrow and R are known to parse identically is converted inside
+#'     Arrow rather than in R. It is a diagnostic switch: set it to
+#'     \code{FALSE} to send every column down the R path and confirm that a
+#'     surprising number came from the data rather than from the fast path. A
+#'     column with one unconvertible value takes the R path regardless, which
+#'     is where the value is recorded as an import error.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The Arrow parse is attempted only for a batch of at least this many
+#'     rows: every Arrow call costs the same whatever the batch holds, and at
+#'     the default 1 MiB read block a delimited batch is a few thousand rows,
+#'     where the R parse is cheaper. Measured on a 1e6 x 20 file, the Arrow
+#'     path was 34\% slower at 1 MiB blocks, 18\% faster at 8 MiB (about
+#'     50,000 rows a batch) and 26\% faster at 32 MiB. So it engages
+#'     automatically once \code{DTAtools.stream_block_size} is raised to
+#'     8 MiB or more, and not at all at the default block size.}
+#'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+#'     whose declared \code{encoding} is not UTF-8 is converted to the UTF-8
+#'     copy a lazy scan reads (see \code{\link{DTAFileTabular}()}), 4 MiB by
+#'     default. It bounds the converter's buffer; the copy is identical
+#'     whatever it is set to.}
+#' }
+#'
 #' @param x An object of class \code{DTA}.
 #' @param ... Additional named arguments:
 #'   \describe{
@@ -555,17 +611,22 @@ dta_emit_summary_message <- function(summary_message) {
 #'       default), and \code{batch_rows} only caps a batch that is already
 #'       larger, so peak memory follows the block size times Arrow's read-ahead
 #'       rather than \code{batch_rows}.}
-#'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
-#'       the number of per-cell errors whose detail is held in RAM while
-#'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
-#'       the default is finite because retention is one row per bad cell, so an
-#'       unbounded cap exhausts memory on a large dirty file exactly as holding
-#'       the data would. Rows past the cap spill to a session-temporary store
-#'       and \code{\link{collect_full_errors}()} reassembles the complete
-#'       detail; counts and the verdict are exact either way. It applies to a
-#'       table held in memory as well, where it bounds retained detail only --
-#'       there is no spill there, so re-checking with a larger cap recovers the
-#'       dropped rows.}
+#'     \item{max_errors}{Integer, \code{Inf}, or NULL to hold everything in
+#'       memory. Cap on the number of per-cell errors whose detail is held in
+#'       RAM while scanning. Defaults to
+#'       \code{getOption("DTAtools.max_errors", 10000L)}; the default is finite
+#'       because retention is one row per bad cell, so an unbounded cap
+#'       exhausts memory on a large dirty file exactly as holding the data
+#'       would. Rows past the cap spill to a session-temporary store and
+#'       \code{\link{collect_full_errors}()} reassembles the complete detail;
+#'       counts and the verdict are exact either way -- the cap decides how
+#'       much detail is kept, never what the answer is. It applies to a table
+#'       held in memory as well, where it bounds retained detail only: there is
+#'       no spill there, so the dropped rows are recovered only by checking
+#'       again with a larger cap. A table constructed in R and checked straight
+#'       away, whose complete detail is wanted, should therefore pass
+#'       \code{max_errors = Inf} -- it is already in memory, so the cap buys
+#'       nothing and costs the detail.}
 #'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
 #'       shows any problem instead of scanning to the end. Forwarded to every
 #'       dataset; see \code{\link{check}()} on a \code{DTADataSetTabular} for
@@ -916,13 +977,17 @@ method(print, DTA) <- function(x, ...) {
       shown_names <- ds_names
     }
 
-    alert_message <- paste0(
-      "Datasets (",
-      n_ds,
-      "): ",
-      paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
+    # The names are INTERPOLATED, never pasted into the markup: cli parses
+    # `{...}` in the string it is handed, so a dataset called `a{b}` took
+    # print() down with "Could not evaluate cli `{}` expression". Braces
+    # inside an interpolated value are escaped by cli itself. cli_vec() only
+    # restores the separators the paste produced -- see print(DTADataSetTabular)
+    # for the same pattern.
+    shown <- cli::cli_vec(
+      shown_names,
+      list("vec-sep" = ", ", "vec-last" = ", ")
     )
-    cli_alert_info(alert_message)
+    cli_alert_info("Datasets ({n_ds}): {.field {shown}}")
   } else {
     cli_alert_info("Datasets: {.emph none}")
   }

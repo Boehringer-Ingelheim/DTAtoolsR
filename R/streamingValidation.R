@@ -655,6 +655,14 @@ dta_warn_uncollectable_truncation <- function(details, frame, axis) {
 #' retained head and warns, naming how much of the detail it is: silently
 #' handing back 3 rows of 20 as though they were all of them is the one thing a
 #' function called `collect_full_errors()` must not do.
+#'
+#' That is why a table built in R and checked immediately -- one whose complete
+#' detail is wanted and whose size is already known to fit in memory -- is best
+#' checked with `check(..., max_errors = Inf)`: there is then nothing for this
+#' function to have to warn about. The cap exists because retention is one row
+#' per bad cell and an unbounded frame was a memory finding on a large dirty
+#' table; it is a cap on *retained detail only*, never on the counts or the
+#' verdict, which are exact at any cap.
 #' @param details A validation details list, as returned by
 #'   [validate_file_stream()] or stored by `check()`.
 #' @param axis One of `"columnspec"`, `"import"` or `"import_typing"`: which
@@ -850,6 +858,14 @@ dta_validate_table_stream <- function(specs,
   columnspec_schemas <- dta_compile_columnspec_schemas(specs)
   # Likewise each column's target R type for the coercion axis.
   spec_type_map <- dta_compile_spec_types(specs)
+  # And likewise everything the Arrow-side numeric parse needs that is the same
+  # for every batch. `NULL` when it can do nothing -- the switch is off, or no
+  # column is declared numeric -- so that the batch loop pays one `is.null()`.
+  #
+  # Only when the batch is being typed at all: with `coerce = FALSE` the column
+  # spec axis is meant to see the text the reader produced, and handing it
+  # numbers instead would change its verdict rather than merely its speed.
+  arrow_numeric <- if (isTRUE(coerce)) dta_arrow_numeric_state(spec_type_map) else NULL
 
   columnspec_sink <- dta_error_sink(max_errors)
   carried_sink <- dta_error_sink(max_errors)
@@ -888,6 +904,17 @@ dta_validate_table_stream <- function(specs,
     batch <- reader$read_next_batch()
     if (is.null(batch)) {
       break
+    }
+
+    # Declared-numeric columns the reader pinned to text are parsed here, in
+    # Arrow, for every batch in which each of their values is known to parse to
+    # the same double R would produce -- which is most batches of a clean file,
+    # and the larger half of what checking one costs. A batch holding one value
+    # outside that guarantee keeps the column as text and is typed in R exactly
+    # as before; see `dta_arrow_parse_numeric_batch()` for what "known" means
+    # and why it is so much narrower than "looks numeric".
+    if (!is.null(arrow_numeric)) {
+      batch <- dta_arrow_parse_numeric_batch(batch, arrow_numeric)
     }
 
     df <- as.data.frame(batch)
@@ -2061,7 +2088,10 @@ dta_table_change_signal <- function(x) {
   }
 
   if (inherits(x, "Dataset")) {
-    files <- tryCatch(x$files, error = function(e) character(0))
+    # The delivered file's own identity, even when the scan reads a transcoded
+    # UTF-8 copy of it: the copy's mtime is when the conversion ran, which
+    # would otherwise make every session revalidate an unchanged delivery.
+    files <- dta_dataset_source_files(x)
     if (length(files) == 0) {
       return(NULL)
     }

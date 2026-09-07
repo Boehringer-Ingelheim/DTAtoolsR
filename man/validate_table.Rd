@@ -40,3 +40,13 @@ specs do not describe fails the axis just as an absent declared column does. A c
 column declares reports as \code{not_applicable}; one the run could not settle
 reports as \code{not_checked}. Neither is a pass.
 }
+\examples{
+specs <- DTAColumnSpecCollection(
+  columns = list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    AGE = DTAColumnSpec(id = "AGE", type = "SAS Int", nullable = TRUE)
+  )
+)
+df <- data.frame(ID = c("A001", "A002"), AGE = c(30L, 45L), stringsAsFactors = FALSE)
+validate_table(specs, df, verbose = FALSE)
+}

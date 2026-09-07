@@ -422,3 +422,34 @@ test_that("the app's bound-item key agrees with the table load_file() creates", 
   # A file dataset still keys by the delivered name, extension and all.
   expect_equal(bound_name("file", gzipped), "clinical_data2.csv.gz")
 })
+
+
+# ---------------------------------------------------------------------------
+# A dataset name containing braces is data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("print_short_info() survives braces in the dataset name", {
+  # print_short_info(DTADataSet) built its message with str_c()/paste0(),
+  # splicing x@name's raw text next to literal "{.field " / "}" markup before
+  # handing the whole assembled string to cli_alert(). A name such as "d{x}"
+  # made cli try to evaluate the stray `{x}` as the function argument `x`
+  # itself, aborting with "cannot coerce type 'object' to vector of type
+  # 'character'" instead of printing.
+  ds <- DTADataSet(
+    name = "d{x}",
+    type = "file",
+    files = list(create_example_DTAFileCSV())
+  )
+
+  short <- capture.output(print_short_info(ds), type = "message")
+  expect_true(any(grepl("d{x}", short, fixed = TRUE)))
+
+  # The zero-files branch never mentions the name, but must still not abort.
+  ds_empty <- DTADataSet(name = "e{y}", type = "file", files = list())
+  expect_no_error(capture.output(print_short_info(ds_empty), type = "message"))
+
+  # print()/print_info() route the name through direct interpolation already
+  # and must keep doing so.
+  full <- capture.output(print(ds), type = "message")
+  expect_true(any(grepl("d{x}", full, fixed = TRUE)))
+})

@@ -94,11 +94,14 @@ method(print, DTARuleColUnique) <- function(x, ...) {
   cli_text("<{.emph DTARuleColUnique}> : {.field {x@id}}")
   if (!is.null(x@description)) cli_text("{x@description}")
 
-  message <- paste0(
-    "column(s): ",
-    paste(paste0("{.field ", x@columns, "}"), collapse = ", ")
-  )
-  cli_text(message)
+  # The column names are INTERPOLATED, never pasted into the markup: cli
+  # parses `{...}` in the string it is handed, so a column called `a{b}` took
+  # this down with "Could not evaluate cli `{}` expression". Braces inside an
+  # interpolated value are escaped by cli itself. cli_vec() only restores the
+  # separators the paste produced -- see print(DTADataSetTabular) for the same
+  # pattern.
+  cols <- cli::cli_vec(x@columns, list("vec-sep" = ", ", "vec-last" = ", "))
+  cli_text("column(s): {.field {cols}}")
 }
 
 #' @title create_example_DTARuleColUnique

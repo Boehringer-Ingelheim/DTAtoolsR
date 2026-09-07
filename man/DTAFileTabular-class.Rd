@@ -69,10 +69,35 @@ some cost in parse speed -- which is why it is not the default.}
 \item{encoding}{Character; the character encoding of the file, as accepted by
 \code{\link[base]{iconv}}. Default is \code{"UTF-8"}.
 
-Anything other than UTF-8 is honoured on the in-memory reader only. Arrow's
-dataset scanner has no re-encoding step, so a non-UTF-8 file cannot be
-validated lazily and \code{\link{open_file}()} says so rather than reading
-the bytes as if they were UTF-8 and disagreeing with the in-memory path.}
+Both readers honour it, by different means. The in-memory reader passes it
+to Arrow, which re-encodes by wrapping the input stream it owns. The
+dataset scanner has no such step -- it opens its own files -- so a
+non-UTF-8 file is instead converted once, streaming and in bounded memory,
+to a UTF-8 copy under \code{\link[base]{tempdir}()} that the scan reads;
+the copy is cached for the session, so repeated loads of an unchanged file
+convert once, and a re-delivery replaces it rather than adding to it. Both
+paths therefore produce the same verdict for the same file, which is the
+point -- including for a quoted value containing a line break, which is
+copied byte for byte rather than normalised.
+
+The cost is disk and one pass, not memory. Conversion runs at an order of
+20 MB/s -- 21 MB/s measured here on a 172 MiB, 1,000,000 x 20 latin1 CSV,
+and 19 MB/s of decoded output when the source is gzip-compressed -- and the
+copy is the size of the decoded text: roughly the size of the source for latin1
+that is mostly ASCII, up to twice it for text that is wholly accented, and
+the full decoded size for a \code{.gz} source. A very large non-UTF-8
+delivery needs that much free space under \code{tempdir()}; declaring
+\code{"UTF-8"} for a file that really is UTF-8 costs nothing at all. The
+block the conversion works in is
+\code{options(DTAtools.transcode_block_bytes = )}, 4 MiB by default; it
+bounds the buffer and has no effect on the copy.
+
+The wide encodings (UTF-16, UTF-32, UCS-2, UCS-4) are the exception: their
+characters can contain a newline byte, so the file cannot be converted in
+blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
+\code{stream = "never"} as the way to read it. A name this platform's
+\code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
+\code{"latin1"}, say) is refused too, before the file is opened.}
 }
 \value{
 An object of class \code{DTAFileTabular}.

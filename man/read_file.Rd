@@ -42,3 +42,15 @@ as it must be implemented by a subclass.}
 }
 }
 
+\examples{
+handler <- DTAFileCSV(filename = "clinical_data.csv")
+path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+table <- read_file(handler, path)
+dim(table)
+names(table)[1:3]
+
+# The whole file is in memory now. `open_file()` is the counterpart that
+# leaves it on disk to be scanned in batches.
+
+}

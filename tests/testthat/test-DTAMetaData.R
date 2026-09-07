@@ -566,6 +566,37 @@ test_that("print methods render the metadata they are given", {
   expect_lt(length(short), length(info))
 })
 
+
+# ---------------------------------------------------------------------------
+# A title or version containing braces is data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("print_short_info() survives braces in the title, version or date", {
+  # print_short_info(DTAMetaData) started from the literal template
+  # "Metadata: {x@title}" and then APPENDED x@version and the formatted date
+  # with paste0() -- plain text, not routed through cli's own interpolation --
+  # before handing the whole assembled string to cli_alert_info(). A title or
+  # version containing a literal "{" therefore reached cli unescaped and made
+  # it try to evaluate the stray expression, aborting instead of printing.
+  md <- DTAMetaData(title = "T{1}", version = "v{2}", date = as.Date("2026-01-01"))
+
+  short <- capture.output(print_short_info(md), type = "message")
+  expect_length(short, 1)
+  expect_match(short, "T{1}", fixed = TRUE)
+  expect_match(short, "v{2}", fixed = TRUE)
+  expect_match(short, "2026-01-01", fixed = TRUE)
+
+  # Title-only (no version, no date) is a different branch of the same fix.
+  md_title_only <- DTAMetaData(title = "OnlyTitle{z}")
+  short2 <- capture.output(print_short_info(md_title_only), type = "message")
+  expect_match(short2, "OnlyTitle{z}", fixed = TRUE)
+
+  # print()/print_info() already interpolate title/version directly and must
+  # keep doing so.
+  full <- capture.output(print(md), type = "message")
+  expect_true(any(grepl("T{1}", full, fixed = TRUE)))
+})
+
 test_that("as.list(DTAMetaData) omits an absent field but keeps a blank one", {
   # One omission rule for every field. It used to be three -- four fields
   # written unconditionally, some gated on length() > 0, the rest on

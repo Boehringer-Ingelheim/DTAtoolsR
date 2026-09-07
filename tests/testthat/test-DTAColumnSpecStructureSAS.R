@@ -262,3 +262,25 @@ test_that("validate_table chunked path preserves values without mutation", {
 
   expect_identical(validated, original)
 })
+
+test_that("print() renders without error (braces are not reachable on this class)", {
+  # Unlike the base DTAColumnSpecStructure, every free-text property here is
+  # constrained by this class's own validator: `type` must be one of the
+  # fixed SAS type aliases and `format` must match one of a handful of strict
+  # per-type regexes (see `__dta_sas_format_is_valid_for_type__`), so neither
+  # can ever hold a "{" -- confirmed by both attempts below being rejected
+  # before construction completes. A brace-content regression test like the
+  # base class's therefore does not apply; this is a plain smoke test instead.
+  expect_error(
+    DTAColumnSpecStructureSAS(type = "Char{X}", format = "$12.", length = 12),
+    regexp = "'type' must be one of"
+  )
+  expect_error(
+    DTAColumnSpecStructureSAS(type = "Char", format = "${1}0.", length = 12),
+    regexp = "Unsupported SAS format"
+  )
+
+  x <- DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)
+  out <- capture.output(print(x), type = "message")
+  expect_true(any(grepl("DTAColumnSpecStructureSAS", out, fixed = TRUE)))
+})

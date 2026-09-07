@@ -42,4 +42,29 @@ The scan's read block -- and with it the size of a batch, and peak memory --
 comes from \code{\link[=dta_stream_block_size]{dta_stream_block_size()}}; see there for why \code{batch_rows} cannot
 do that job on a delimited file.
 }
+\section{A file that is not UTF-8}{
+
+Arrow re-encodes by wrapping the INPUT STREAM, which only the in-memory
+reader owns: a dataset opens its own files, so \code{csv_read_options(encoding =)}
+is accepted here and then silently ignored -- the bytes come back either as
+\code{binary} or, with UTF-8 checking off, as a string of undecoded bytes. Either
+way the same file would validate differently depending on how it was loaded,
+which is the one outcome this reader exists to prevent.
+
+This used to be answered by refusing, which made every non-UTF-8 delivery
+unstreamable however large it was. It is now answered by
+\code{\link[=dta_transcode_to_utf8]{dta_transcode_to_utf8()}}: the file is converted once, in bounded memory, to
+a UTF-8 copy under \code{tempdir()}, and the scan reads that. The copy is cached
+per session, so a second \code{load_file()} on an unchanged file reuses it.
+
+The returned dataset is stamped twice. With the ORIGINAL path (see
+\link{dta_dataset_source_key}), so that \code{dta_table_change_signal()} identifies the
+delivered file rather than the temporary copy, whose modification time is
+merely when the conversion happened to run; and with everything needed to
+open it again (see \link{dta_dataset_transcode_key}), so that
+\code{\link[=dta_refresh_transcoded_dataset]{dta_refresh_transcoded_dataset()}} can make the scan follow a delivery that
+changes after it was loaded rather than rescanning a copy of what it used to
+hold.
+}
+
 \keyword{internal}

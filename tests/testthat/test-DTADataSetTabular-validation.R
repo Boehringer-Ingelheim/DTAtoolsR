@@ -571,6 +571,47 @@ test_that("check() reports a lazily held table whose file has vanished", {
   expect_equal(attr(ds, "last_validation_summary")$status, "skipped")
 })
 
+test_that("a vanished delivery is reported by its own path, not by its copy", {
+  # A non-UTF-8 delivery is scanned through a UTF-8 copy under tempdir(). Read
+  # from `$files`, the absence was reported by a path the user never chose and
+  # cannot act on.
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "vanish_latin1.csv")
+  con <- file(path, "wb")
+  writeBin(c(charToRaw("ID\n"), as.raw(c(0x41, 0xfc, 0x31)), charToRaw("\n")), con)
+  close(con)
+
+  ds <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(),
+    files = list(DTAFileCSV(filename = "vanish_latin1.csv", encoding = "latin1"))
+  )
+  ds <- load_file(ds, file = path, handler_index = 1, stream = "always")
+
+  table <- tables(ds)[["vanish_latin1"]]
+  copy <- normalizePath(table$files[[1]], winslash = "/")
+  delivery <- dta_dataset_source_files(table)
+
+  # The premise: the scan really is reading something else, and the dataset is
+  # identified by the delivery all the same.
+  expect_false(identical(copy, delivery))
+  expect_identical(basename(delivery), "vanish_latin1.csv")
+
+  # A copy that has gone is the session's own housekeeping, not a delivery
+  # failure: the delivery is still there and is simply converted again.
+  unlink(copy)
+  expect_identical(dta_missing_table_files(table), character(0))
+
+  unlink(path)
+  expect_identical(dta_missing_table_files(table), delivery)
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  msgs <- messages(ds, as_tibble = FALSE)
+  expect_equal(msgs$rule_id, "file_presence")
+  expect_match(msgs$message, basename(path), fixed = TRUE)
+  # Named by the delivery, and never by the temporary it was copied into.
+  expect_false(grepl(basename(copy), msgs$message, fixed = TRUE))
+})
+
 
 # ---------------------------------------------------------------------------
 # @import_issues records the same axis however the table was held
@@ -658,6 +699,55 @@ test_that("a table whose name contains braces checks without aborting", {
 })
 
 
+test_that("print() survives braces in the dataset name and in a table name", {
+  # print() pasted every table name into `{.field <name>}` markup and handed
+  # the result to cli, which then tried to evaluate `b` as an R expression:
+  # printing an object built from a delivered `a{b}.csv` aborted. The dataset
+  # name goes through the same path and is asserted alongside it.
+  ds <- DTADataSetTabular(
+    name = "d{x}",
+    specs = tv_id_specs(),
+    tables = list(`a{b}` = data.frame(ID = "A001", stringsAsFactors = FALSE))
+  )
+
+  out <- tv_console(expect_invisible(print(ds)))
+
+  expect_match(out, "d{x}", fixed = TRUE)
+  expect_match(out, "Tables (1): a{b}", fixed = TRUE)
+
+  # The count-only method in this file must survive it too.
+  short <- tv_console(expect_invisible(print_short_info(ds)))
+  expect_match(short, "Tables: (1)", fixed = TRUE)
+})
+
+
+test_that("print() lists several table names comma-separated and truncates past five", {
+  # The interpolation had to be given cli_vec() separators to keep printing
+  # "a, b, c"; cli's own default would have written "a, b and c", and the
+  # elision marker of the >5 case would have been collapsed with "and" too.
+  frame <- function() data.frame(ID = "A001", stringsAsFactors = FALSE)
+  named <- function(names) {
+    stats::setNames(lapply(names, function(ignored) frame()), names)
+  }
+
+  three <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(), tables = named(c("t1", "t2", "t3"))
+  )
+  expect_match(
+    tv_console(print(three)), "Tables (3): t1, t2, t3",
+    fixed = TRUE
+  )
+
+  many <- DTADataSetTabular(
+    name = "d", specs = tv_id_specs(), tables = named(sprintf("t%d", 1:7))
+  )
+  expect_match(
+    tv_console(print(many)), "Tables (7): t1, t2, t3, t4, ..., t7",
+    fixed = TRUE
+  )
+})
+
+
 # ---------------------------------------------------------------------------
 # A vanished artifact directory does not freeze the object
 # ---------------------------------------------------------------------------
@@ -690,4 +780,260 @@ test_that("a dataset whose artifact directory has vanished can still be modified
     },
     "single directory path"
   )
+})
+
+
+# ---------------------------------------------------------------------------
+# A table constructed from a data frame is stamped, not re-hashed
+# ---------------------------------------------------------------------------
+
+# The constructor used to convert a data frame to Arrow, hand THAT to the
+# coercion (which turned it straight back into a data frame), and rebuild a
+# Table from the result: three conversions of the whole table, where the only
+# thing the detour bought was the content stamp the coercion applies to an
+# Arrow input. The frame is now coerced as a frame and converted once, and the
+# stamp is applied in the constructor from the same digest. These tests pin
+# what that stamp has to be worth for the change to be an improvement rather
+# than a shortcut.
+
+tv_stamp_specs <- function() {
+  DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+    ),
+    rules = list(DTARuleColUnique(id = "uid", columns = "ID"))
+  )
+}
+
+tv_summary <- function(x) attr(x, "last_validation_summary")
+
+test_that("a table built from a data frame carries the digest check() would derive", {
+  ds <- DTADataSetTabular(
+    name = "d",
+    specs = tv_stamp_specs(),
+    tables = list(t = data.frame(
+      ID = c("a", "b", "c"), VAL = c(1, 2, 3), stringsAsFactors = FALSE
+    ))
+  )
+
+  stored <- ds@tables[["t"]]
+  expect_s3_class(stored, "Table")
+  expect_false(is.null(dta_table_hash_stamp(stored)))
+
+  # The stamp is worse than no stamp unless it is the SAME digest the change
+  # signal falls back to for an unstamped table: a rebuild of this table's own
+  # contents would otherwise hash differently and be rescanned forever.
+  expect_identical(
+    dta_table_change_signal(stored),
+    dta_table_content_hash(as.data.frame(stored))
+  )
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_identical(tv_summary(ds)$status, "validated")
+  expect_true(tv_summary(ds)$ok)
+
+  # Nothing changed, so nothing is rescanned.
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_identical(tv_summary(ds)$status, "skipped")
+
+  # And an unstamped rebuild from the stored table's own contents is
+  # recognised rather than rescanned -- which is exactly what the digest
+  # having to be the same one buys.
+  rebuilt <- ds
+  rebuilt@tables[["t"]] <- arrow::as_arrow_table(as.data.frame(ds@tables[["t"]]))
+  expect_null(dta_table_hash_stamp(rebuilt@tables[["t"]]))
+  rebuilt <- check(rebuilt, persist = FALSE, quiet = TRUE)
+  expect_identical(tv_summary(rebuilt)$status, "skipped")
+})
+
+test_that("an import issue raised at construction is inside the stamp", {
+  # The digest covers the issues attribute, so a table whose import issues
+  # changed can never be skipped with a stale verdict.
+  build <- function(vals) {
+    DTADataSetTabular(
+      name = "d",
+      specs = tv_stamp_specs(),
+      tables = list(t = data.frame(
+        ID = c("a", "b"), VAL = vals, stringsAsFactors = FALSE
+      ))
+    )
+  }
+
+  clean <- build(c("1", "2"))
+  dirty <- build(c("1", "nope"))
+
+  expect_length(clean@import_issues, 0)
+  expect_equal(nrow(dirty@import_issues[["t"]]), 1)
+  expect_false(identical(
+    dta_table_change_signal(clean@tables[["t"]]),
+    dta_table_change_signal(dirty@tables[["t"]])
+  ))
+
+  # Same data, same issues, built twice: one digest, so a rebuilt object is
+  # not rescanned merely for having been rebuilt.
+  expect_identical(
+    dta_table_change_signal(dirty@tables[["t"]]),
+    dta_table_change_signal(build(c("1", "nope"))@tables[["t"]])
+  )
+})
+
+# The two frames below carry a column of a type the predicate rejects
+# alongside the declared ones. VAL decides which branch of the coercion runs:
+# given as text it has to be typed, so the coercion rebuilds the table and the
+# stamp is taken from the round-tripped frame; given as numbers nothing needs
+# typing, the coercion hands back the Table it was given, and the stamp is the
+# digest of that Table's own as.data.frame(). Both branches have to agree with
+# dta_table_change_signal(), so both are exercised.
+tv_unstable_frames <- function(val) {
+  frames <- list(
+    difftime = data.frame(
+      ID = c("a", "b"), VAL = val,
+      D = as.difftime(c(1, 2), units = "hours"),
+      stringsAsFactors = FALSE
+    )
+  )
+  if (requireNamespace("bit64", quietly = TRUE)) {
+    frames$integer64 <- data.frame(
+      ID = c("a", "b"), VAL = val,
+      B = bit64::as.integer64(c(1, 2)),
+      stringsAsFactors = FALSE
+    )
+  }
+  frames
+}
+
+test_that("a frame Arrow does not return unchanged is stamped from the round trip", {
+  # A `difftime` comes back from Arrow in seconds whatever units it went in
+  # as, and a small `integer64` comes back as `integer`. A stamp taken from
+  # the frame as written would then not be the digest of the Table that was
+  # stored, so such a frame takes the original route and is stamped from the
+  # round-tripped copy instead. The stamp still has to equal what the change
+  # signal derives, which is what this asserts.
+  for (val in list(c("1", "2"), c(1, 2))) {
+    frames <- tv_unstable_frames(val)
+    typed <- if (is.character(val)) "text VAL" else "numeric VAL"
+
+    for (label in names(frames)) {
+      info <- paste(label, typed)
+      expect_false(dta_frame_is_arrow_stable(frames[[label]]), info = info)
+
+      ds <- DTADataSetTabular(
+        name = "d", specs = tv_stamp_specs(), tables = list(t = frames[[label]])
+      )
+      stored <- ds@tables[["t"]]
+
+      expect_false(is.null(dta_table_hash_stamp(stored)), info = info)
+      expect_identical(
+        dta_table_change_signal(stored),
+        dta_table_content_hash(as.data.frame(stored)),
+        info = info
+      )
+
+      ds <- check(ds, persist = FALSE, quiet = TRUE)
+      expect_identical(tv_summary(ds)$status, "validated", info = info)
+      ds <- check(ds, persist = FALSE, quiet = TRUE)
+      expect_identical(tv_summary(ds)$status, "skipped", info = info)
+    }
+  }
+})
+
+test_that("a POSIXct with no named timezone still checks, and still skips a re-check", {
+  # KNOWN DEFECT, pinned rather than endorsed: `tzone = ""` -- what
+  # as.POSIXct() leaves when no timezone is named -- is the one type that is
+  # not stable under REPEATED Arrow round trips. It comes back from the first
+  # with no tzone and from the second with the session's timezone, so when the
+  # coercion rebuilds the table (which it does only when some column needs
+  # typing) the stamp is the digest of the first round trip while a rebuild of
+  # the stored table hashes the second. Such a table is rescanned every time it
+  # is rebuilt from its own contents. It is only ever a cost, never a wrong
+  # answer: the digest is still of real contents, so it can never claim
+  # "unchanged" for data that changed, and the object's own stamp is stable, so
+  # a re-check of the same object is still skipped. If Arrow ever round-trips
+  # `tzone = ""` faithfully, the expect_false() below becomes an
+  # expect_identical() of the two digests.
+  frame <- function(val) {
+    data.frame(
+      ID = c("a", "b"), VAL = val,
+      W = as.POSIXct(c("2026-01-01 10:00:00", "2026-01-02 11:00:00")),
+      stringsAsFactors = FALSE
+    )
+  }
+  expect_false(dta_frame_is_arrow_stable(frame(c(1, 2))))
+
+  # Nothing to type: the coercion hands back the Table it was given, whose own
+  # as.data.frame() IS what was hashed, so the digests agree after all.
+  untyped <- DTADataSetTabular(
+    name = "d", specs = tv_stamp_specs(), tables = list(t = frame(c(1, 2)))
+  )@tables[["t"]]
+  expect_identical(
+    dta_table_change_signal(untyped),
+    dta_table_content_hash(as.data.frame(untyped))
+  )
+
+  # VAL arrives as text and has to be typed, so the coercion rebuilds -- and
+  # this is where the second round trip bites.
+  ds <- DTADataSetTabular(
+    name = "d", specs = tv_stamp_specs(), tables = list(t = frame(c("1", "2")))
+  )
+  stored <- ds@tables[["t"]]
+  expect_false(identical(
+    dta_table_change_signal(stored),
+    dta_table_content_hash(as.data.frame(stored))
+  ))
+
+  # The verdict is unaffected, and the same object is still skipped.
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_identical(tv_summary(ds)$status, "validated")
+  expect_identical(tv_summary(ds)$n_import_errors, 0L)
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  expect_identical(tv_summary(ds)$status, "skipped")
+})
+
+
+# ---------------------------------------------------------------------------
+# The retained-error cap on a table held in memory
+# ---------------------------------------------------------------------------
+
+test_that("max_errors bounds retained detail on an in-memory table, never the counts", {
+  # The cap exists because retention is one row per bad cell, so an unbounded
+  # error frame is a memory finding on a large dirty input. A table built in R
+  # and checked straight away is the case it is least suited to -- it is
+  # already in memory -- which is why check(), DTADataSetTabular() and
+  # collect_full_errors() all say to pass `max_errors = Inf` there. This pins
+  # both halves of that advice: the cap really does drop detail, and it really
+  # does not touch the answer.
+  ds <- DTADataSetTabular(
+    name = "d",
+    specs = tv_id_specs(),
+    tables = list(t = data.frame(
+      ID = rep("TOO-LONG", 25), stringsAsFactors = FALSE
+    ))
+  )
+
+  outcome <- function(cap) {
+    checked <- suppressWarnings(
+      check(ds, persist = FALSE, quiet = TRUE, force = TRUE, max_errors = cap)
+    )
+    status <- validation_status(checked)
+    details <- validation_errors(checked, table = "t", source = "memory")
+    list(
+      ok = status$ok,
+      counted = status$n_columnspec_errors,
+      rows = nrow(as.data.frame(details))
+    )
+  }
+
+  capped <- outcome(3)
+  uncapped <- outcome(Inf)
+
+  # The verdict and the count are the same at either cap.
+  expect_false(capped$ok)
+  expect_false(uncapped$ok)
+  expect_equal(capped$counted, 25)
+  expect_equal(uncapped$counted, 25)
+
+  # The retained detail is not.
+  expect_equal(capped$rows, 3)
+  expect_equal(uncapped$rows, 25)
 })
