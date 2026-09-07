@@ -6,7 +6,7 @@ Specifications written in YAML. Domain overview: `README.md`. Feature walkthroug
 
 ## Commands
 
-Run everything from the repo root; `renv` activates via `.Rprofile`.
+Run everything from the repo root.
 
 | Task | Command |
 | --- | --- |
@@ -20,6 +20,17 @@ Run everything from the repo root; `renv` activates via `.Rprofile`.
 In PowerShell, `R` is an alias for `Invoke-History` — always use `Rscript`, and
 quote `-e` with double quotes so the argument survives. If `Rscript` is not on
 `PATH`, `CLAUDE.local.md` holds the absolute path for this machine.
+
+`.Rprofile` sources `renv/activate.R`, which repoints `.libPaths()` at a project
+library keyed by the project *directory name*. The main checkout's is populated;
+a **git worktree gets its own, empty one**, so `styler`, `roxygen2`, `devtools`
+and `rcmdcheck` all report as not installed there, though they are sitting in
+the user library the whole time. Do not `renv::restore()` into a worktree — that
+installs the ~105 packages in `renv.lock` into a library that dies with it. Either put a `.Renviron` (untracked,
+already gitignored) holding `RENV_CONFIG_AUTOLOADER_ENABLED=FALSE` in the
+worktree root, which fixes every invocation including the table above, or pass
+`--no-init-file` per call. `.Rprofile` holds nothing but the autoloader, so
+skipping it costs nothing.
 
 `pre-commit` only runs the fast, language-agnostic hooks (whitespace, merge
 conflicts, private keys, the forbidden-artifact check) — it does **not** style
@@ -127,8 +138,8 @@ contract.
   condition classes (`subscriptOutOfBoundsError`), package-authored `cli`
   strings, or force `LC_TIME = "C"`.
 - tidyverse style, checked by `styler` in the `r-style` CI workflow — run
-  `Rscript -e "styler::style_pkg()"` yourself before committing; do not
-  hand-format.
+  `Rscript .github/scripts/style.R` yourself before committing, never
+  `styler::style_pkg()` (see Commands above for why); do not hand-format.
 
 ## Guardrails
 

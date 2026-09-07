@@ -6,7 +6,7 @@
 
 **Key domain:** Pharma/clinical data compliance — ensuring data conforms to transmission agreements before exchange between parties.
 
-**Run everything from the repo root** via `Rscript`. The `.Rprofile` activates `renv` automatically.
+**Run everything from the repo root** via `Rscript`. The `.Rprofile` activates `renv` automatically — which in a **git worktree** repoints `.libPaths()` at an empty per-worktree library, so `styler`, `roxygen2`, `devtools` and `rcmdcheck` all report as not installed even though they are present in the user library. Fix that with a `.Renviron` in the worktree root holding `RENV_CONFIG_AUTOLOADER_ENABLED=FALSE`, or per call with `Rscript --no-init-file`. Never `renv::restore()` into a worktree — it installs the ~105 packages in `renv.lock` into a library that dies with the worktree.
 
 ## Commands
 
@@ -15,7 +15,7 @@
 | Load package | `Rscript -e "pkgload::load_all()"` |
 | Run all tests | `Rscript -e "devtools::test()"` |
 | Run single test file | `Rscript -e "devtools::test(filter='TestFileName')"` (e.g., `'DTAFile'`) |
-| Style R code | `Rscript -e "styler::style_pkg()"` |
+| Style R code | `Rscript .github/scripts/style.R` (check only: `--check`) |
 | Regenerate docs + NAMESPACE | `Rscript -e "roxygen2::roxygenise()"` |
 | Full package check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
 | Fast pre-commit hooks | `pre-commit run --all-files` |
@@ -110,7 +110,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 ### Code Style
 
-- **tidyverse style**, enforced by `styler::style_pkg()` (run before every commit; CI will fail on diffs).
+- **tidyverse style**, applied by `.github/scripts/style.R` (run before every commit; CI will fail on diffs). Never call `styler::style_pkg()` directly: the script is the same file the `r-style` workflow runs, and unlike the bare call it also covers `inst/` and repairs line endings.
 - **Comments only when clarifying:** Avoid over-commenting obvious code.
 
 ### Guardrails
@@ -169,7 +169,7 @@ Located in `.github/workflows/`:
 - **`pre-commit.yml`** — Fast language-agnostic checks (whitespace, merge conflicts, private keys).
 - **`release.yml`** — Release workflow (release branch only).
 
-**Before pushing:** Always run `styler::style_pkg()` and `roxygen2::roxygenise()` yourself. CI is strict.
+**Before pushing:** Always run `Rscript .github/scripts/style.R` and `Rscript -e "roxygen2::roxygenise()"` yourself. CI is strict.
 
 ## Key Files
 

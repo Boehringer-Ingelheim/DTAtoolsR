@@ -8,8 +8,8 @@ Use the `r-verify` subagent to verify the current working tree. Scope: $ARGUMENT
 Interpret the scope as follows — if it is empty, run the full test suite.
 
 - a bare word (e.g. `DTAFile`) → `devtools::test(filter='<word>')`
-- `style` → `styler::style_pkg(dry = "fail")` — checks without writing, and
-  errors if any file is not already styled
+- `style` → `Rscript .github/scripts/style.R --check` — checks without
+  writing, names every unstyled file, and covers `inst/` as well as `R/`
 - `docs` → `roxygen2::roxygenise()`, then report whether `man/` or `NAMESPACE`
   came out dirty (`git status --porcelain man NAMESPACE`)
 - `check` → `rcmdcheck::rcmdcheck(args='--no-manual')`
@@ -21,13 +21,20 @@ Do not run `Rscript` from the main thread; the point of this command is to keep
 the transcript out of the main context. Wait for the subagent's report, then
 tell me only what failed and what you intend to do about it.
 
-**Applying style fixes is a main-thread job.** `r-verify` only ever checks with
-`dry = "fail"`. If it reports unstyled files, run
-`Rscript -e "styler::style_pkg()"` yourself and show me the resulting diff —
-never ask the subagent to rewrite R sources.
+**Applying style fixes is a main-thread job.** `r-verify` only ever runs
+`style.R --check`. If it reports unstyled files, run
+`Rscript .github/scripts/style.R` yourself and show me the resulting diff —
+never ask the subagent to rewrite R sources, and never reach for
+`styler::style_pkg()` (see CLAUDE.md for why the script exists).
 
 Remember the local environment: `Rscript` is not on `PATH` in a shell started
 before 2026-08-13, so prefer the absolute path from `CLAUDE.local.md`.
+
+In a git worktree `renv` points `.libPaths()` at an empty per-worktree library
+and every dev package looks uninstalled — `--no-init-file`, or a `.Renviron` in
+the worktree root holding `RENV_CONFIG_AUTOLOADER_ENABLED=FALSE`, restores the
+user library; `renv::restore()` never.
+
 `pre-commit` **is** installed locally and its git hook runs on every commit, but
 it runs only the fast language-agnostic hooks — it does not style or roxygenise,
 so those stages are not covered by running the hooks. Use `style` and `docs`
