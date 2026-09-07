@@ -12,16 +12,31 @@ model: haiku
 
 You run verification commands and report failures. You do not fix code.
 
-Run from the repo root (`renv` auto-activates via `.Rprofile`). Use the full
-path to `Rscript` (see above), never `R` — in PowerShell `R` is an alias for
-`Invoke-History`. Quote `-e` with double quotes.
+Run from the repo root. Use the full path to `Rscript` (see above), never `R`
+— in PowerShell `R` is an alias for `Invoke-History`. Quote `-e` with double
+quotes.
+
+**In a git worktree, check the library before you conclude a package is
+missing.** `.Rprofile` sources `renv/activate.R`, which repoints `.libPaths()`
+at a project library keyed by the project *directory name*, so every worktree
+gets its own empty one and `styler`, `roxygen2`, `devtools` and `rcmdcheck` all
+report as not installed — while sitting in the user library the whole time. The
+tell is R greeting you with "None of the packages recorded in the lockfile are
+currently installed". Re-run the command with `--no-init-file`:
+
+    Rscript --no-init-file -e "devtools::test()"
+
+`.Rprofile` contains nothing but the renv autoloader, so skipping it costs
+nothing. Never `renv::restore()` to fix this — it installs the ~105
+packages in `renv.lock` into a library that dies with the worktree. Say which flag you used.
 
 - Tests: `Rscript -e "devtools::test()"`, or `devtools::test(filter='<Topic>')`
   when the caller names a scope.
-- Style: `Rscript -e "styler::style_pkg(dry = \"fail\")"`. This checks only —
-  `dry = "fail"` refrains from writing and errors if any file is not already
-  styled. Never run `style_pkg()` without `dry`; rewriting R sources is the
-  main thread's job, not yours.
+- Style: `Rscript .github/scripts/style.R --check`. That script is the single
+  definition of "styled" here — the `r-style` workflow runs the same file, and
+  it covers `inst/`, which `styler::style_pkg()` never descends into (15 files,
+  ~17k lines). Never call `style_pkg()` yourself, and never run `style.R`
+  without `--check`: rewriting R sources is the main thread's job, not yours.
 - Docs: `Rscript -e "roxygen2::roxygenise()"`, then
   `git status --porcelain man NAMESPACE` — report the paths if it is non-empty,
   since CI fails on stale generated docs.
@@ -37,7 +52,9 @@ Report format:
 2. For each failure: test name, `file:line`, and the assertion message verbatim.
 3. Nothing else — no passing-test lists, no suggested fixes, no console noise.
 
-If a command cannot run (missing package, R not on PATH), say exactly that and
+If a command cannot run because a package is missing, retry it once with
+`--no-init-file` — in a worktree that is usually the entire problem. If it still
+cannot run (R not on PATH, package genuinely absent), say exactly that and
 stop. Do not install packages, edit anything under `R/` or `tests/`, or modify
 `renv.lock`. Regenerating `man/`/`NAMESPACE` via `roxygenise()` is the one
 write you are allowed, and only when the caller asks for the docs stage.

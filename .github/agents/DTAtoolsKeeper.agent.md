@@ -102,11 +102,16 @@ checks, docs) says it's done.
 
 ## Style, linting & pre-commit
 
-- Code style is enforced by `.pre-commit-config.yaml` via
-  `lorenzwalthert/precommit`: `styler` with `style_pkg = tidyverse_style`,
-  `scope = tokens`; `roxygenize`; `deps-in-desc`; `use-tidy-description`;
-  `parsable-R`; no `browser()`/`debug()` statements. Match this style
-  proactively rather than waiting for a hook to flag it.
+- Code style is tidyverse style at `scope = tokens`, applied by
+  `.github/scripts/style.R` — a wrapper around `styler` that also covers
+  `inst/`, which `styler::style_pkg()` never descends into. Call the script,
+  not `style_pkg()`.
+- `.pre-commit-config.yaml` does **not** enforce any of this. The
+  `lorenzwalthert/precommit` hooks (`styler`, `roxygenize`, `deps-in-desc`,
+  `use-tidy-description`, `parsable-R`, no `browser()`/`debug()`) were removed
+  from it and now run as plain R scripts in `.github/workflows/r-style.yaml`.
+  Nothing local will reformat your work for you, so match the style
+  proactively and run the script yourself before you commit.
 - Never commit `.Rhistory`, `.RData`, `.Rds`/`.rds` files (there's a
   `forbid-to-commit` local hook for this) — check `git status` before
   committing and keep stray scratch files (like loose `.docx`/`.md` test
@@ -179,15 +184,22 @@ Prefer running these via `Rscript -e "..."` (or an R console) with generous
 timeouts — package checks are slow by nature, not a sign something is stuck:
 
 - Regenerate docs: `Rscript -e "roxygen2::roxygenize()"`
-- Style changed files: `Rscript -e "styler::style_pkg(style = styler::tidyverse_style)"`
+- Style changed files: `Rscript .github/scripts/style.R` (check without
+  writing: `Rscript .github/scripts/style.R --check`)
 - Run tests: `Rscript -e "devtools::test()"` (or `testthat::test_dir('tests/testthat')`)
 - Full check: `Rscript -e "devtools::check()"` or `Rscript -e "rcmdcheck::rcmdcheck(args = c('--no-manual'))"`
 - Load for interactive verification: `Rscript -e "devtools::load_all(); <your smoke test code>"`
 - Pre-commit locally (if `pre-commit` is installed): `pre-commit run --all-files`
 
-If a required package (e.g. `devtools`, `styler`, `roxygen2`, `rcmdcheck`) is
-missing from the environment, install it rather than skipping the step, and
-say so.
+If a required package (e.g. `devtools`, `styler`, `roxygen2`, `rcmdcheck`)
+reports as missing, do **not** install it yet. In a git worktree that is almost
+always `renv` pointing `.libPaths()` at an empty per-worktree library while the
+package sits untouched in the user library. Retry the command with
+`Rscript --no-init-file`, or put `RENV_CONFIG_AUTOLOADER_ENABLED=FALSE` in a
+`.Renviron` at the worktree root. Never `renv::restore()` into a worktree — it
+installs the ~105 packages in `renv.lock` into a library that dies with the
+worktree. Only if the package really is absent from the user library should you
+install it, and then say so.
 
 # Operating principles
 

@@ -10,8 +10,11 @@
 # in .github/workflows/r-style.yaml, against the project's own installed
 # library: see that file, .github/scripts/check_r_sanity.R and
 # .github/scripts/check_deps_in_desc.R. Locally, run
-# `Rscript -e "styler::style_pkg()"` and `Rscript -e "roxygen2::roxygenise()"`
-# before committing (see CLAUDE.md).
+# `Rscript .github/scripts/style.R` and `Rscript -e "roxygen2::roxygenise()"`
+# before committing (see CLAUDE.md). style.R, not a bare
+# `styler::style_pkg()`, is the single definition of "styled" here: it is the
+# same file the r-style workflow runs, and it also covers inst/, which
+# style_pkg() never descends into.
 #
 # renv/staging_excluded/ is a vendored renv package-library snapshot that ended
 # up tracked in git (renv/.gitignore only lists `staging/`, not the distinct
