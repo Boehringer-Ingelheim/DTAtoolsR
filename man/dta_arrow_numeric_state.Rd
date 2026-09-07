@@ -31,6 +31,9 @@ The state also carries \code{min_rows}, from
 batch with fewer rows is typed in R. Each Arrow step is a fixed-cost call
 per column per batch, so on the small batches a 1 MiB read block yields the
 path costs more than the parse it saves (measured 34\% slower at 1 MiB
-blocks, 18\% faster at 8 MiB, 26\% faster at 32 MiB on a 1e6 x 20 file).
+blocks, 18\% faster at 8 MiB, 26\% faster at 32 MiB on a 1e6 x 20 file). The
+8 MiB default block clears the threshold on a file of ordinary width, so the
+guard is what stands the step down on the batches that stay small -- a
+lowered block, or rows wide enough that 8 MiB holds fewer than 20,000.
 }
 \keyword{internal}
