@@ -35,8 +35,10 @@ dataset's own, counting its column specs and rules and then its tables.
 print_short_info(DTAFileCSV(filename = "data.csv"))
 
 # An open-ended file count.
-print_short_info(DTAFileCSV(filename = "part.*", pattern = TRUE,
-                            min_number_of_files = 2))
+print_short_info(DTAFileCSV(
+  filename = "part.*", pattern = TRUE,
+  min_number_of_files = 2
+))
 
 print_short_info(create_example_DTADataSetTabular())
 print_short_info(create_example_DTAMetaData())
