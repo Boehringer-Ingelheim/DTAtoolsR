@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Every modal whose body is built on the server now actually shows it.**
+  Shiny decides whether to render an output from a visibility snapshot taken
+  when the browser binds it, and re-checks that only for the containers it
+  knows about -- a tab, an accordion. Nothing re-checks a modal, and Bootstrap
+  5 shows one behind its backdrop's fade, so the dialog was still invisible at
+  the moment everything inside it was bound: the renders were suspended and
+  their HTML never sent. **Create new from template** was the visible
+  casualty -- the picker opened with an empty body, and *Next* then reported
+  that no template had been selected -- but *Create new*, *Add dataset*, the
+  column/rule/file/details editors and the inline messages that report a
+  rejected value were all blank the same way. The app now re-asserts the
+  visibility of everything inside a dialog once it is really on screen.
+
 ## [0.25.0] - 2026-09-07
 
 ### Added

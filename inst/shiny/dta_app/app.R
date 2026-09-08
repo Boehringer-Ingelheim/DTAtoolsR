@@ -183,6 +183,62 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 });
 "
 
+# Un-suspend the outputs inside a modal once the modal is really on screen.
+#
+# Shiny suspends an output whose element looked hidden when the client bound
+# it, and re-checks that only when something fires an event it listens for --
+# shown.bs.tab for a nav_panel(), shown.bs.collapse for an accordion. There is
+# no such re-check for a modal. Bootstrap 5 then guarantees the bad snapshot:
+# Modal.show() hands _showElement() to the backdrop as a completion callback,
+# so .modal() returns with the dialog still display:none, and Shiny binds the
+# whole dialog -- body and everything the body's own render inserts -- inside
+# that gap. Every output in it is recorded as hidden and suspended forever.
+#
+# Seen in the wild as "creating templates does not work": the picker modal
+# opened with an empty body, because output$template_picker_ui -- the uiOutput
+# holding the Template and Version dropdowns -- was suspended and its HTML
+# never sent. "Next" then found no selection and said so. Every other modal
+# whose body is a uiOutput() (Create new, Add dataset, the file/column/rule/
+# details editors) was dead the same way, as were the inline *_msg outputs
+# that report a rejected value.
+#
+# shown.bs.modal fires after the dialog is on screen, which is after the body
+# and its nested outputs have bound, so ONE sweep covers them all; anything
+# inserted later binds against a visible modal and needs no help. The listener
+# is delegated from `document` (the event bubbles) so it also covers a modal
+# that does not exist yet, and vanilla rather than jQuery so it does not
+# depend on Bootstrap's jQuery bridge still being present.
+#
+# It RE-TAKES the snapshot rather than asserting "visible": an output the modal
+# itself hides -- a conditionalPanel, a second step of a two-step body -- is
+# meant to stay suspended, and forcing it visible would start rendering it. No
+# modal here has one today, which is exactly why a sweep that hard-coded
+# `false` would have looked correct until someone added one.
+#
+# Not outputOptions(suspendWhenHidden = FALSE), which is how the sidebar
+# outputs below solve their own version of this: that takes a list of ids, and
+# the ids at risk here are not enumerable -- a modal body's own render inserts
+# outputs (col_tbl, col_vocab_terms, ...) that bind after the body arrives and
+# race the same fade. Naming only the bodies would leave those broken, and
+# naming everything would keep the editors' tables re-rendering on every data
+# change with no modal open at all.
+modal_unsuspend_js <- "
+document.addEventListener('shown.bs.modal', function (ev) {
+  if (typeof Shiny === 'undefined' || !ev.target.querySelectorAll) return;
+  function hidden(el) {
+    for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
+      if (window.getComputedStyle(n).display === 'none') return true;
+    }
+    return false;
+  }
+  ev.target.querySelectorAll('.shiny-bound-output').forEach(function (el) {
+    if (el.id) {
+      Shiny.setInputValue('.clientdata_output_' + el.id + '_hidden', hidden(el));
+    }
+  });
+});
+"
+
 # Per-browser secret backing 'Restore previous session'. The autosaved session
 # must outlive the Shiny session (the whole point is recovering after a reload
 # or a crash), so it cannot be keyed to session$token, which is regenerated on
@@ -308,7 +364,8 @@ ui <- bslib::page_fluid(
     tags$script(shiny::HTML(download_trigger_js)),
     tags$script(shiny::HTML(client_id_js)),
     tags$script(shiny::HTML(yaml_ace_resize_js)),
-    # Unlike the five above, this one is a function in R/ui_components.R
+    tags$script(shiny::HTML(modal_unsuspend_js)),
+    # Unlike the six above, this one is a function in R/ui_components.R
     # rather than a string here, because its behaviour is worth testing
     # separately -- see click_guard_script() there, and the test file, for why
     # double-click protection cannot live on the server at all. Its position
