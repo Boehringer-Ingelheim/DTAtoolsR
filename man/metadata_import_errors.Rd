@@ -24,7 +24,6 @@ Metadata has no rows or columns, so \code{row} is always \code{NA} and
 \code{"transmission$date_last_transfer"}.
 }
 \examples{
-library(DTAtools)
 md <- DTAMetaData(
   title = "Qualified Date",
   transmission = list(date_last_transfer = "2026-12-31 at the earliest")

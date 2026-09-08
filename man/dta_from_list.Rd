@@ -16,7 +16,6 @@ An object of class DTA
 Constructs a DTA object from a list.
 }
 \examples{
-require(DTAtools)
 file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 yaml_data <- yaml::read_yaml(file)
 dta <- dta_from_list(yaml_data)

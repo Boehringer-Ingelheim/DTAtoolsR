@@ -247,8 +247,15 @@ test_that("a missing column costs one column spec error per row, not one per tab
 # which exercises the validation engine but bypasses the reader and the import
 # typing entirely. Those two stages are precisely what P3 replaces, so they
 # need their own oracle: the same cases routed through
-# read_csv_arrow -> dta_coerce_table_to_specs -> as.data.frame, which is the
-# sequence DTADataSetTabular-class.R:937 actually performs.
+# read -> dta_coerce_table_to_specs -> as.data.frame, which is the sequence
+# an eager load_file() actually performs.
+#
+# The read goes through dta_read_delim_normalized(), the production eager
+# reader, rather than a hand-built arrow::read_csv_arrow() call. The hand-built
+# call took its schema from dta_reader_col_types(), which no production path had
+# used since the reader plan replaced it and which is now gone; keeping a
+# second, test-only reader configuration is how the two paths drifted apart in
+# the first place.
 vc_roundtrip <- function(case) {
   path <- tempfile(fileext = ".csv")
   on.exit(unlink(path), add = TRUE)
@@ -256,10 +263,12 @@ vc_roundtrip <- function(case) {
 
   tryCatch(
     {
-      tbl <- arrow::read_csv_arrow(
+      tbl <- dta_read_delim_normalized(
         path,
-        col_types = dta_reader_col_types(case$specs, TRUE),
-        as_data_frame = FALSE
+        delim = ",",
+        quote = "\"",
+        has_header = TRUE,
+        specs = case$specs
       )
       coerced <- dta_coerce_table_to_specs(tbl, case$specs)
       details <- validate_table_detailed(
@@ -337,4 +346,127 @@ test_that("dta_as_numeric_strict never flags typed columns as unconvertible", {
     dta_as_numeric_strict(factor(c("10", "20")))$values,
     c(10, 20)
   )
+})
+
+
+# ---- the same data, typed in R rather than read from a file -----------------
+
+# Every case in `vc_corpus()` is a frame of text and numbers, and every
+# consumer of that corpus -- here, `test-columnspec-checks.R` and
+# `test-streaming-validation.R` -- writes it to a CSV before checking it. So
+# the corpus cannot say anything about a table that never passes a reader:
+# by the time any of its consumers sees a case, `factor`, `Date`, `POSIXct`
+# and `logical` have all become text. That is why the R-typed cases live here
+# rather than in the shared helper, where adding them would only have churned
+# three other files' expectations without testing the typing.
+#
+# The claim under test is the one the package makes about constructed tables:
+# a table built in R and a file carrying the same values reach the SAME
+# verdict. Both sides are reduced to axis facts -- validity flags and error
+# counts -- because the message text on the two paths legitimately names
+# different things (an R factor level and the string a reader produced from
+# it) while the verdict must not differ.
+
+vc_typed_cases <- function() {
+  ids <- c("A001", "A002", "TOO-LONG")
+
+  list(
+    # A declared Char column held as a factor. The declared type is never
+    # coerced, so the engine sees factor levels where the file path sees
+    # strings, and the length and codelist checks have to agree anyway.
+    factor_char = vc_case(
+      "declared Char column held as a factor",
+      "columnspec",
+      vc_specs(list(
+        DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+        DTAColumnSpec(
+          id = "SEX", type = "SAS Char", length = 1,
+          nullable = FALSE, values = c("M", "F")
+        )
+      )),
+      data.frame(
+        ID = ids,
+        SEX = factor(c("M", "X", "F"), levels = c("M", "F", "X")),
+        stringsAsFactors = FALSE
+      )
+    ),
+
+    # Declared numerics that arrive as R numbers rather than as text: nothing
+    # to parse, so the import axis must stay silent while the range rule still
+    # fires.
+    numeric_typed = vc_case(
+      "declared Num and Int columns already typed in R",
+      "rule",
+      vc_specs(
+        list(
+          DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+          DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE),
+          # Whole and far inside the integer range, so the pinned Int
+          # narrowing defect cannot be what this case measures.
+          DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+        ),
+        list(DTARuleColRange(id = "age_range", columns = "AGE", range = c(18, 70)))
+      ),
+      data.frame(
+        ID = c("A001", "A002", "A003"),
+        AGE = c(30, 17, 71),
+        CNT = c(1L, 2L, 3L),
+        stringsAsFactors = FALSE
+      )
+    ),
+
+    # Columns only R can hold, none of them declared. They are read by nothing,
+    # and must still cost exactly what an undeclared text column costs.
+    r_only_types = vc_case(
+      "undeclared Date, POSIXct and logical columns",
+      "columnspec",
+      vc_specs(list(
+        DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+      )),
+      data.frame(
+        ID = c("A001", "A002"),
+        DAY = as.Date(c("2026-01-01", "2026-01-02")),
+        WHEN = as.POSIXct(
+          c("2026-01-01 10:00:00", "2026-01-02 11:00:00"),
+          tz = "UTC"
+        ),
+        FLAG = c(TRUE, FALSE),
+        stringsAsFactors = FALSE
+      )
+    )
+  )
+}
+
+test_that("an R-typed table and the same values in a file reach the same verdict", {
+  for (name in names(vc_typed_cases())) {
+    case <- vc_typed_cases()[[name]]
+    from_r <- vc_axis_facts(vc_details(case))
+    from_file <- vc_roundtrip(case)
+
+    expect_true(from_file$read_ok, info = name)
+    expect_equal(
+      from_r,
+      from_file[, names(from_r), drop = FALSE],
+      ignore_attr = TRUE,
+      info = name
+    )
+  }
+})
+
+test_that("the R-typed cases really are typed, and really do exercise every axis", {
+  # Without this the test above would compare two frames of text and prove
+  # nothing about R typing.
+  classes <- unlist(lapply(vc_typed_cases(), function(case) {
+    vapply(case$table, function(column) class(column)[[1]], character(1))
+  }), use.names = FALSE)
+  expect_true(all(
+    c("factor", "numeric", "integer", "Date", "POSIXct", "logical") %in% classes
+  ))
+
+  facts <- do.call(rbind, lapply(vc_typed_cases(), function(case) {
+    vc_axis_facts(vc_details(case))
+  }))
+  expect_false(all(facts$columnspec_valid))
+  expect_false(all(facts$rules_valid))
+  expect_true(all(facts$import_valid))
 })

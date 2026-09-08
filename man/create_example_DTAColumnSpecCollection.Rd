@@ -16,6 +16,5 @@ An example DTAColumnSpecCollection object.
 S7 method to create and return an example DTAColumnSpecCollection object.
 }
 \examples{
-library(DTAtools)
 create_example_DTAColumnSpecCollection()
 }

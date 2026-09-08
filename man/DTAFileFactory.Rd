@@ -29,7 +29,6 @@ so this factory builds what it is asked for and the dataset has the final
 say.
 }
 \examples{
-library(DTAtools)
 DTAFileFactory(type = "csv", filename = "clinical_data.csv")
 
 # A deliverable that is never parsed, restricted to two endings.

@@ -565,3 +565,79 @@ test_that("print methods render the metadata they are given", {
   # print_short_info() stays short: it must not spill the full print_info body.
   expect_lt(length(short), length(info))
 })
+
+
+# ---------------------------------------------------------------------------
+# A title or version containing braces is data, not cli syntax
+# ---------------------------------------------------------------------------
+
+test_that("print_short_info() survives braces in the title, version or date", {
+  # print_short_info(DTAMetaData) started from the literal template
+  # "Metadata: {x@title}" and then APPENDED x@version and the formatted date
+  # with paste0() -- plain text, not routed through cli's own interpolation --
+  # before handing the whole assembled string to cli_alert_info(). A title or
+  # version containing a literal "{" therefore reached cli unescaped and made
+  # it try to evaluate the stray expression, aborting instead of printing.
+  md <- DTAMetaData(title = "T{1}", version = "v{2}", date = as.Date("2026-01-01"))
+
+  short <- capture.output(print_short_info(md), type = "message")
+  expect_length(short, 1)
+  expect_match(short, "T{1}", fixed = TRUE)
+  expect_match(short, "v{2}", fixed = TRUE)
+  expect_match(short, "2026-01-01", fixed = TRUE)
+
+  # Title-only (no version, no date) is a different branch of the same fix.
+  md_title_only <- DTAMetaData(title = "OnlyTitle{z}")
+  short2 <- capture.output(print_short_info(md_title_only), type = "message")
+  expect_match(short2, "OnlyTitle{z}", fixed = TRUE)
+
+  # print()/print_info() already interpolate title/version directly and must
+  # keep doing so.
+  full <- capture.output(print(md), type = "message")
+  expect_true(any(grepl("T{1}", full, fixed = TRUE)))
+})
+
+test_that("as.list(DTAMetaData) omits an absent field but keeps a blank one", {
+  # One omission rule for every field. It used to be three -- four fields
+  # written unconditionally, some gated on length() > 0, the rest on
+  # !is.null() -- so a field nothing had set still reached the file as
+  # `header: ~`. ABSENT is not written; present-but-blank is written, blank.
+  # Keeping those apart is what lets a template say `key: null` (drop, not
+  # shown) and `key: ""` (empty, shown blank) and have both survive to the file.
+  absent <- DTAMetaData(title = "T", version = "1")
+  blank <- DTAMetaData(title = "T", version = "1", header = "")
+
+  expect_false("header" %in% names(as.list(absent)))
+  expect_true("header" %in% names(as.list(blank)))
+  expect_identical(as.list(blank)$header, "")
+})
+
+test_that("a field absent from as.list() is absent from the written YAML too", {
+  # Asserting on the written file rather than on the list is the point: the
+  # rule only matters if it survives yaml::write_yaml, which renders a NULL
+  # element as `~` rather than dropping it.
+  md <- DTAMetaData(title = "T", version = "1")
+  path <- withr::local_tempfile(fileext = ".yaml")
+
+  yaml::write_yaml(as.list(md), path)
+  written <- yaml::read_yaml(path)
+
+  expect_false("header" %in% names(written))
+  expect_false("error_handling" %in% names(written))
+  expect_equal(written$title, "T")
+})
+
+test_that("as.list(DTAMetaData) keeps a deliberately blank authorized_for_corrections", {
+  # `authorized_for_corrections` defaults to NULL, so an empty list is an
+  # author's explicit "no one, and I am saying so" -- the present-but-blank
+  # state, not absence. The collection-valued properties below default to an
+  # empty list, where the same shape means nothing was ever set; a single
+  # omission rule over both would have to get one of them wrong.
+  blank <- DTAMetaData(title = "T", version = "1", authorized_for_corrections = list())
+  unset <- DTAMetaData(title = "T", version = "1")
+
+  expect_true("authorized_for_corrections" %in% names(as.list(blank)))
+  expect_false("authorized_for_corrections" %in% names(as.list(unset)))
+  # An empty receiver IS the unset state for that property, so it stays out.
+  expect_false("receiver" %in% names(as.list(blank)))
+})

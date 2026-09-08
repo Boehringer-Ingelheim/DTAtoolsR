@@ -43,6 +43,18 @@ An object of class DTADataSetTabular
 \description{
 Handles tabular data with column specifications and rules.
 }
+\details{
+A table handed to this constructor is a table already in memory, which is
+the case \code{\link[=check]{check()}}'s retained-error cap is least suited to. \code{max_errors}
+(default \code{getOption("DTAtools.max_errors", 10000L)}) exists because on a
+large dirty file retention is one row per bad cell and an unbounded error
+frame exhausts memory; a table small enough to have been built in R has
+nothing to protect. Check such a table with \code{check(..., max_errors = Inf)}
+when the complete per-cell detail is wanted -- there is no spill on the
+materialising path, so detail dropped by the cap is recovered only by
+checking again. The cap never affects the answer: the reported counts and
+the verdict on every axis are exact at any cap, including the default.
+}
 \examples{
 # Create sample tables
 table1 <- data.frame(STUDYID = c("1234", "1234", "1234"), VISIT = c("V03", "V03", "EOT"))

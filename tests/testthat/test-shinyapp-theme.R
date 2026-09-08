@@ -145,3 +145,34 @@ test_that("bi_css returns html-classed CSS defining the custom properties the ma
   expect_match(txt, "--bi-fail:", fixed = TRUE)
   expect_match(txt, "--bi-green-dark:", fixed = TRUE)
 })
+
+test_that("bi_css hides an empty edit_gate slot, after the rule that would otherwise lay it out", {
+  skip_if_not_installed("bslib")
+  txt <- as.character(app_fn("bi_css")())
+
+  base_rule <- ".app-actions > .shiny-html-output { display: flex;"
+  empty_rule <- ".app-actions > .shiny-html-output:empty { display: none; }"
+  expect_match(txt, base_rule, fixed = TRUE)
+  expect_match(txt, empty_rule, fixed = TRUE)
+
+  # Order, not just presence. On the landing page edit_gate renders NULL and
+  # Shiny empties the span without removing it, so the base rule above would
+  # leave a generated zero-width flex item still taking a share of
+  # .app-actions' gap: 8px. :empty outranks it on specificity, but the
+  # override is only safe to rely on while it stays later in the sheet.
+  expect_lt(
+    regexpr(base_rule, txt, fixed = TRUE)[[1]],
+    regexpr(empty_rule, txt, fixed = TRUE)[[1]]
+  )
+})
+
+test_that("the status pill has a fill rule but no hover rule -- it is a label, not a control", {
+  # .app-actions .brand-status is the status pill edit_status_tag() renders
+  # next to edit_menu() (ui_components.R). It must never gain a :hover rule:
+  # anything hoverable next to the interactive .brand-link/.brand-action
+  # pills either side of it would read as clickable when nothing reaches it.
+  txt <- as.character(app_fn("bi_css")())
+
+  expect_match(txt, ".app-actions .brand-status", fixed = TRUE)
+  expect_no_match(txt, ".app-actions .brand-status:hover", fixed = TRUE)
+})

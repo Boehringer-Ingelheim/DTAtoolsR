@@ -696,3 +696,255 @@ test_that("dta_handler_fields() returns extensions as a comma-separated string",
   expect_match(fields$extensions, "pdf")
   expect_match(fields$extensions, "zip")
 })
+
+
+# ---------------------------------------------------------------------------
+# Reader settings: HOW the file is parsed
+# ---------------------------------------------------------------------------
+# A tabular handler carries `has_header`, `quote`, `missing_values` and, since
+# the streaming work, `newlines_in_values` and `encoding`. None of them used to
+# be serialised, so a handler read from a YAML that set one came back from the
+# app on the constructor default -- the document still declared the file, but
+# no longer declared how to read it.
+
+test_that("dta_handler_to_list carries every non-default reader setting", {
+  fn <- app_fn("dta_handler_to_list")
+
+  l <- fn(DTAtools::DTAFileCSV(
+    filename = "a.csv",
+    has_header = FALSE, quote = "'", missing_values = "NULL",
+    newlines_in_values = TRUE, encoding = "latin1"
+  ))
+
+  expect_false(l$has_header)
+  expect_equal(l$quote, "'")
+  expect_equal(l$missing_values, "NULL")
+  expect_true(l$newlines_in_values)
+  expect_equal(l$encoding, "latin1")
+})
+
+test_that("a reader setting left at its default is not written out", {
+  # The constructor restores it exactly, so writing all five onto every handler
+  # would rewrite every bundled specification to say what it already said.
+  fn <- app_fn("dta_handler_to_list")
+
+  l <- fn(DTAtools::DTAFileCSV(filename = "a.csv", number_of_files = 1))
+
+  expect_equal(l$filename, "a.csv")
+  expect_false(any(
+    c("has_header", "quote", "missing_values", "newlines_in_values", "encoding") %in%
+      names(l)
+  ))
+})
+
+test_that("every key a handler is serialised with can be read back", {
+  # The rule that keeps `sep` out: DTAFileCSV()/DTAFileTSV() fix the separator
+  # themselves and do not accept one, so a document carrying `sep` would abort
+  # DTAFileFactory() instead of merely being wrong. The do.call() below is the
+  # assertion -- it fails on any key the constructor will not take.
+  fn <- app_fn("dta_handler_to_list")
+
+  for (type in c("csv", "tsv")) {
+    h <- DTAtools::DTAFileFactory(
+      type = type, filename = "a.dat", number_of_files = 1,
+      has_header = FALSE, quote = "'", missing_values = ".",
+      newlines_in_values = TRUE, encoding = "windows-1252"
+    )
+    l <- fn(h)
+
+    expect_false("sep" %in% names(l))
+    back <- do.call(DTAtools::DTAFileFactory, l)
+    expect_equal(back@sep, h@sep)
+    expect_equal(back@encoding, "windows-1252")
+    expect_true(back@newlines_in_values)
+    expect_false(back@has_header)
+  }
+})
+
+test_that("a type='any' handler is serialised exactly as before", {
+  # DTAFileAny parses nothing and its constructor takes neither setting, so the
+  # generic block must not reach it -- and `extensions`, its one extra
+  # property, keeps being emitted by name rather than a second time.
+  fn <- app_fn("dta_handler_to_list")
+
+  l <- fn(DTAtools::DTAFileAny(
+    filename = ".*", pattern = TRUE, extensions = c("pdf", "zip")
+  ))
+
+  expect_equal(l$type, "any")
+  expect_equal(l$extensions, list("pdf", "zip"))
+  expect_false(any(
+    c("newlines_in_values", "encoding", "has_header") %in% names(l)
+  ))
+})
+
+test_that("a handler with every field set survives YAML -> app -> YAML", {
+  from_yaml <- app_fn("dta_read_yaml_text")
+  to_yaml <- app_fn("dta_to_yaml_text")
+  handlers_fn <- app_fn("dta_handlers")
+
+  # Every key the `files:` block can express, on one handler.
+  yaml_in <- paste(
+    "metadata:",
+    "  title: Reader settings",
+    "  version: \"0.1\"",
+    "datasets:",
+    "  - name: raw",
+    "    type: tabular",
+    "    files:",
+    "      filename: site_.*[.]tsv$",
+    "      type: tsv",
+    "      pattern: yes",
+    "      min_number_of_files: 1",
+    "      max_number_of_files: 3",
+    "      pattern_description: one file per site",
+    "      info:",
+    "        - data: smrnaseq",
+    "      has_header: no",
+    "      quote: \"'\"",
+    "      missing_values: '.'",
+    "      newlines_in_values: yes",
+    "      encoding: latin1",
+    sep = "\n"
+  )
+
+  first <- from_yaml(yaml_in)
+  expect_true(first$ok)
+
+  out <- to_yaml(first$value)
+  expect_true(out$ok)
+
+  again <- from_yaml(out$value)
+  expect_true(again$ok)
+
+  h <- handlers_fn(datasets(again$value, "raw"))[[1]]
+  expect_s3_class(h, "DTAtools::DTAFileTSV")
+  expect_equal(h@filename, "site_.*[.]tsv$")
+  expect_true(h@pattern)
+  expect_equal(min_number_of_files(h), 1)
+  expect_equal(max_number_of_files(h), 3)
+  expect_equal(h@pattern_description, "one file per site")
+  expect_equal(h@info, list(list(data = "smrnaseq")))
+  expect_false(h@has_header)
+  expect_equal(h@quote, "'")
+  expect_equal(h@missing_values, ".")
+  expect_true(h@newlines_in_values)
+  expect_equal(h@encoding, "latin1")
+  # The separator is the subclass's own and must not appear in the document.
+  expect_equal(h@sep, "\t")
+  expect_false(grepl("sep:", out$value, fixed = TRUE))
+})
+
+# ---- Reaching them from the editor ------------------------------------------
+
+test_that("the editor offers a shortlist of encodings, not a closed set", {
+  # `encoding` reaches iconv(), whose accepted names are platform-specific, so
+  # the control that shows this list also accepts free text.
+  fn <- app_fn("dta_handler_encodings")
+
+  expect_equal(fn(), c("UTF-8", "latin1", "windows-1252"))
+})
+
+test_that("dta_handler_fields reports the handler's reader settings", {
+  fields_fn <- app_fn("dta_handler_fields")
+  set_fn <- app_fn("dta_set_handler")
+
+  seeded <- set_fn(app_fixture_dta(), "clinical_data",
+    index = 1, filename = "clinical_data.csv", type = "csv",
+    reader_settings = list(encoding = "latin1", newlines_in_values = TRUE)
+  )
+  expect_true(seeded$ok)
+
+  f <- fields_fn(seeded$value, "clinical_data", 1)
+
+  expect_equal(f$reader_settings$encoding, "latin1")
+  expect_true(f$reader_settings$newlines_in_values)
+  # The settings the form shows no control for are reported too -- that is what
+  # lets a save hand them back untouched.
+  expect_true(f$reader_settings$has_header)
+  expect_equal(f$reader_settings$quote, "\"")
+  # ...and `sep`, which no constructor takes back, is not among them.
+  expect_false("sep" %in% names(f$reader_settings))
+})
+
+test_that("a DTAFileAny reports no reader settings at all", {
+  fields_fn <- app_fn("dta_handler_fields")
+
+  h <- DTAtools::DTAFileAny(filename = "report.pdf")
+  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
+
+  expect_length(fields_fn(dta_obj, "rpts", 1)$reader_settings, 0)
+})
+
+test_that("editing a handler keeps the reader settings the form never shows", {
+  # The regression this prevents: the form has controls for two of the five, so
+  # a save that only renamed the file would otherwise rebuild the handler on the
+  # constructor defaults and silently read it a different way.
+  fields_fn <- app_fn("dta_handler_fields")
+  set_fn <- app_fn("dta_set_handler")
+  handlers_fn <- app_fn("dta_handlers")
+
+  seeded <- set_fn(app_fixture_dta(), "clinical_data",
+    index = 1, filename = "clinical_data.csv", type = "csv",
+    reader_settings = list(
+      has_header = FALSE, quote = "'", missing_values = ".",
+      newlines_in_values = TRUE, encoding = "latin1"
+    )
+  )
+  expect_true(seeded$ok)
+
+  before <- fields_fn(seeded$value, "clinical_data", 1)
+  renamed <- set_fn(seeded$value, "clinical_data",
+    index = 1, filename = "renamed.csv", type = "csv",
+    reader_settings = before$reader_settings
+  )
+
+  expect_true(renamed$ok)
+  h <- handlers_fn(datasets(renamed$value, "clinical_data"))[[1]]
+  expect_equal(h@filename, "renamed.csv")
+  expect_false(h@has_header)
+  expect_equal(h@quote, "'")
+  expect_equal(h@missing_values, ".")
+  expect_true(h@newlines_in_values)
+  expect_equal(h@encoding, "latin1")
+})
+
+test_that("a blank encoding leaves the handler on UTF-8 rather than aborting", {
+  # The free-text control comes back empty when it is cleared. `encoding = ""`
+  # fails the class validator, so an empty value means "say nothing about it".
+  set_fn <- app_fn("dta_set_handler")
+  handlers_fn <- app_fn("dta_handlers")
+
+  res <- set_fn(app_fixture_dta(), "clinical_data",
+    index = 1, filename = "a.csv", type = "csv",
+    reader_settings = list(encoding = "")
+  )
+
+  expect_true(res$ok)
+  expect_equal(
+    handlers_fn(datasets(res$value, "clinical_data"))[[1]]@encoding,
+    "UTF-8"
+  )
+})
+
+test_that("reader settings a type cannot take are dropped, not forwarded", {
+  # DTAFileAny() accepts neither, and do.call()ing them into it would abort with
+  # a message about an argument the user was never shown.
+  set_fn <- app_fn("dta_set_handler")
+  handlers_fn <- app_fn("dta_handlers")
+
+  ds <- DTAtools::DTADataSetFile(name = "reports")
+  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
+
+  res <- set_fn(dta_obj, "reports",
+    filename = "report.pdf", type = "any", dataset_type = "file",
+    reader_settings = list(encoding = "latin1", newlines_in_values = TRUE)
+  )
+
+  expect_true(res$ok)
+  expect_s3_class(
+    handlers_fn(datasets(res$value, "reports"))[[1]],
+    "DTAtools::DTAFileAny"
+  )
+})

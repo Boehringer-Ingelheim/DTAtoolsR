@@ -1124,3 +1124,39 @@ test_that("build_template_index() picks up a vocabulary file", {
   expect_identical(rows$id, "visit")
   expect_identical(rows$version, "1.0")
 })
+
+test_that("an explicitly empty selection means none, and does not fall back to the default", {
+  # NULL and character(0) are not the same answer. Every empty selection used
+  # to fall back to `default:`, which made a slot WITH a default impossible to
+  # empty on purpose -- the author's "none" was silently overruled by the
+  # template's suggestion.
+  normalise <- app_fn("normalise_vocabulary_slots")
+  slot_values <- app_fn("vocabulary_slot_values")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  resolver <- vocab_resolver_for(dir)
+
+  slot <- normalise(list(vocab_slot_def(default = c("SCR", "C1D1"))))[[1]]
+
+  # Silence: the key was never supplied, so the default stands.
+  expect_identical(slot_values(slot, NULL, resolver), c("SCR", "C1D1"))
+  # Engagement: an explicitly empty selection means no terms at all.
+  expect_null(slot_values(slot, character(0), resolver))
+  # A blank string is the same engagement, spelled the way a UI submits it.
+  expect_null(slot_values(slot, "", resolver))
+})
+
+test_that("an explicitly empty selection still has to satisfy min", {
+  # Emptying on purpose is a selection like any other, so a slot that requires
+  # a term must reject it -- rather than the min check being skipped because
+  # the value happens to be empty.
+  normalise <- app_fn("normalise_vocabulary_slots")
+  slot_values <- app_fn("vocabulary_slot_values")
+  dir <- withr::local_tempdir()
+  write_vocabulary_fixture(dir)
+  resolver <- vocab_resolver_for(dir)
+
+  needs_one <- normalise(list(vocab_slot_def(min = 1, default = "SCR")))[[1]]
+
+  expect_vocab_error_contains(slot_values(needs_one, character(0), resolver), "at least 1")
+})

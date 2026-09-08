@@ -32,6 +32,9 @@ Flextable object that is saved.
 This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.
 }
 \examples{
-# No runnable example yet.
-# Word export examples are intentionally skipped until the API is reworked.
+specs <- create_example_DTAColumnSpecCollection()
+out <- tempfile(fileext = ".docx")
+export_specs_table(specs, file = out, quiet = TRUE)
+file.exists(out)
+unlink(out)
 }

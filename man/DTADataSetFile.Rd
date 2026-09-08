@@ -37,3 +37,12 @@ An object of class DTADataSetFile.
 Handles file-backed datasets that only need to verify that one
 or more referenced files exist, are readable, and are not empty.
 }
+\examples{
+path <- tempfile(fileext = ".pdf")
+writeLines("a delivered report", path)
+
+ds <- DTADataSetFile(name = "delivery", paths = path)
+validation_status(check(ds, quiet = TRUE))
+
+unlink(path)
+}

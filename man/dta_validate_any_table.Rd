@@ -32,7 +32,12 @@ unbounded retention exhausts memory exactly as holding the data would.
 Nothing is lost, though: rows past the cap spill to a session-temporary
 directory and \code{\link[=collect_full_errors]{collect_full_errors()}} reassembles the complete detail;
 counts and the pass/fail verdict are exact either way, and a frame whose
-in-memory head is incomplete is flagged as such.}
+in-memory head is incomplete is flagged as such.
+
+It applies to a table already in memory as well. There is no spill on that
+path -- the whole table is present, so validating again with a larger cap
+recovers the dropped rows -- but the counts are exact there for the same
+reason they are here: only retention is capped.}
 
 \item{use_threads}{Logical. Whether Arrow's Scanner should use multiple
 threads for I/O and decompression. Arrow buffers batches ahead of R in its

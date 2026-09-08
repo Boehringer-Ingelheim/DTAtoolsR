@@ -3,17 +3,30 @@
 \name{read_file}
 \alias{read_file}
 \title{Read a file based on DTAFile}
+\usage{
+read_file(x, ...)
+}
 \arguments{
 \item{x}{A \code{DTAFile} object (or subclass) containing file reading
 parameters.}
 
-\item{file}{A character string specifying the path to the file to be read.}
-
-\item{namecheck}{Logical; when \code{TRUE} (the default) the file name must
-match the object's filename or pattern.}
-
+\item{...}{Additional named arguments:
+\describe{
+\item{file}{A character string giving the path to the file to be read.}
+\item{namecheck}{Logical; when \code{TRUE} (the default) the file name
+must match the object's filename or pattern.}
 \item{specs}{A \code{DTAColumnSpecCollection} declaring the columns, or
-\code{NULL} (the default).
+\code{NULL} (the default). See the section below for why it matters.}
+}}
+}
+\value{
+An Arrow Table containing the file's contents.
+}
+\description{
+Reads a data file using the parameters specified in a
+\code{DTAFile} object or one of its subclasses.
+}
+\section{Why the specs are handed to the reader}{
 
 A reader that knows nothing about the specification has to guess a type per
 column, and it guesses before any code in this package sees the data: a
@@ -25,15 +38,9 @@ the reader lets a column the specification declares as text be read as text.
 inferred. This is the behaviour of a standalone \code{read_file()} call on a
 bare \code{DTAFile}, which has no specification to consult;
 \code{\link{load_file}()} is where a dataset's specs and its file handler
-meet, and it is the caller that supplies them.}
+meet, and it is the caller that supplies them.
 }
-\value{
-An Arrow Table containing the file's contents.
-}
-\description{
-Reads a data file using the parameters specified in a
-\code{DTAFile} object or one of its subclasses.
-}
+
 \section{Methods}{
 
 \describe{
@@ -42,3 +49,15 @@ as it must be implemented by a subclass.}
 }
 }
 
+\examples{
+handler <- DTAFileCSV(filename = "clinical_data.csv")
+path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+table <- read_file(handler, path)
+dim(table)
+names(table)[1:3]
+
+# The whole file is in memory now. `open_file()` is the counterpart that
+# leaves it on disk to be scanned in batches.
+
+}

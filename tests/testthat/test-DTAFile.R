@@ -396,17 +396,39 @@ test_that("read_file keeps a declared Char column as text for Delim", {
   expect_equal(df$SUBJID, c("007", "008"))
 })
 
-test_that("read_file leaves a column the specs do not mention to inference", {
+test_that("read_file reads a column the specs do not mention as text", {
   path <- dta_write_id_fixture("dta_ids_extra.csv", ",")
   on.exit(unlink(path), add = TRUE)
 
   x <- read_file(DTAFileCSV(basename(path)), path, specs = dta_id_specs())
   df <- as.data.frame(x)
 
-  # EXTRA has no spec, so it is neither pinned nor dropped: arrow types it
-  # exactly as it does without any specs at all.
+  # EXTRA has no spec, and is still not dropped -- but once ANY specs are
+  # supplied it is read as text rather than inferred. The lazy path has always
+  # had to pin every column (a dataset locks in a type from its first block),
+  # so leaving this one to inference here made the SAME file present EXTRA as a
+  # double in memory and as a string when streamed; a uniqueness rule over it
+  # then counted "1.5" and "1.50" as one key on one path and two on the other.
   expect_true("EXTRA" %in% names(df))
-  expect_equal(as.numeric(df$EXTRA), c(10, 20))
+  expect_type(df$EXTRA, "character")
+  expect_equal(df$EXTRA, c("10", "20"))
+})
+
+test_that("both readers type an undeclared column identically", {
+  # The generalisation of the case above: whatever the reader decides, it has
+  # to decide it once. Compared as data rather than as a class, because
+  # as.data.frame() on a Dataset returns a tibble and on a Table a data.frame.
+  path <- dta_write_id_fixture("dta_ids_bothpaths.csv", ",")
+  on.exit(unlink(path), add = TRUE)
+
+  handler <- DTAFileCSV(basename(path))
+  eager <- as.data.frame(read_file(handler, path, specs = dta_id_specs()))
+  lazy <- as.data.frame(open_file(handler, path, specs = dta_id_specs()))
+
+  expect_identical(names(eager), names(lazy))
+  for (column in names(eager)) {
+    expect_identical(eager[[column]], lazy[[column]], info = column)
+  }
 })
 
 test_that("read_file without specs still infers every column as before", {
@@ -447,12 +469,13 @@ test_that("dta_reader_args rejects a call with no file", {
   expect_error(dta_reader_args(specs = dta_id_specs()), "file")
 })
 
-test_that("specs are ignored when the file has no header", {
+test_that("specs cannot name a column when the file has no header", {
   path <- dta_write_id_fixture("dta_ids_noheader.csv", ",")
   on.exit(unlink(path), add = TRUE)
 
   # Arrow generates positional names (f0, f1, ...) that cannot correspond to
-  # spec ids, so no column spec is built and the header line becomes data.
+  # spec ids, so nothing the specs declare can be matched -- and the first line
+  # is data, not a header, so all three lines are rows.
   x <- read_file(
     DTAFileCSV(basename(path), has_header = FALSE),
     path,
@@ -462,6 +485,593 @@ test_that("specs are ignored when the file has no header", {
   expect_equal(nrow(x), 3)
   expect_equal(ncol(x), 3)
   expect_false("SUBJID" %in% names(x))
+})
+
+
+# ---------------------------------------------------------------------------
+# One reader plan for both paths
+# ---------------------------------------------------------------------------
+# The eager and the lazy reader are two calls into arrow with the same
+# configuration, derived once by dta_delim_reader_plan(). What follows pins
+# that configuration itself, because the failures it prevents (a header parsed
+# as a data row, a first data row silently dropped) are invisible in a verdict
+# and only show up as an off-by-one row count.
+
+# A header that needs cleaning and one that does not, with the SAME two data
+# rows, so the row count answers one question only: was the right line skipped?
+dta_write_header_fixture <- function(name, header) {
+  path <- file.path(tempdir(), name)
+  writeLines(c(header, "42,M", "51,F"), path)
+  path
+}
+
+test_that("the header line is skipped and no data row is lost, on both readers", {
+  cases <- list(
+    clean = "AGE,GENDER",
+    padded = '" AGE ","GENDER "'
+  )
+
+  for (label in names(cases)) {
+    path <- dta_write_header_fixture(paste0("dta_hdr_", label, ".csv"), cases[[label]])
+    on.exit(unlink(path), add = TRUE)
+
+    handler <- DTAFileCSV(basename(path))
+    eager <- as.data.frame(read_file(handler, path))
+    lazy <- as.data.frame(open_file(handler, path))
+
+    for (got in list(eager = eager, lazy = lazy)) {
+      expect_identical(names(got), c("AGE", "GENDER"), info = label)
+      expect_equal(nrow(got), 2, info = label)
+      # The first data row is the one a wrong `skip` eats; the header is what a
+      # missing `skip` adds back as a row of the literal words.
+      expect_identical(as.character(got$AGE), c("42", "51"), info = label)
+      expect_identical(as.character(got$GENDER), c("M", "F"), info = label)
+    }
+  }
+})
+
+test_that("with no header every line is data, on both readers", {
+  path <- dta_write_header_fixture("dta_hdr_none.csv", "AGE,GENDER")
+  on.exit(unlink(path), add = TRUE)
+
+  handler <- DTAFileCSV(basename(path), has_header = FALSE)
+  eager <- as.data.frame(read_file(handler, path))
+  lazy <- as.data.frame(open_file(handler, path))
+
+  for (got in list(eager = eager, lazy = lazy)) {
+    expect_equal(nrow(got), 3)
+    expect_identical(names(got), c("f0", "f1"))
+    expect_identical(as.character(got$f0), c("AGE", "42", "51"))
+  }
+})
+
+test_that("the reader plan derives one configuration for both paths", {
+  path <- dta_write_header_fixture("dta_plan_padded.csv", '" AGE ","GENDER "')
+  on.exit(unlink(path), add = TRUE)
+
+  plan <- dta_delim_reader_plan(path, delim = ",", quote = '"', has_header = TRUE)
+
+  expect_identical(plan$column_names, c("AGE", "GENDER"))
+  expect_identical(plan$skip, 1L)
+  # No specs: inference is left alone, exactly as a bare read_file() has always
+  # behaved.
+  expect_null(plan$col_types)
+
+  with_specs <- dta_delim_reader_plan(
+    path,
+    specs = dta_id_specs(), delim = ",", quote = '"', has_header = TRUE
+  )
+  # EVERY column, not only the declared ones -- neither AGE nor GENDER is in
+  # dta_id_specs()'s SUBJID/AGE pair by name and type both, but both are pinned.
+  expect_identical(names(with_specs$col_types), c("AGE", "GENDER"))
+  expect_true(all(vapply(
+    with_specs$col_types$fields,
+    function(f) f$type$Equals(arrow::utf8()),
+    logical(1)
+  )))
+
+  no_header <- dta_delim_reader_plan(path, delim = ",", quote = '"', has_header = FALSE)
+  expect_identical(no_header$skip, 0L)
+  expect_identical(no_header$column_names, c("f0", "f1"))
+})
+
+test_that("a header arrow cannot use is refused naming the file", {
+  path <- file.path(tempdir(), "dta_dup_header.csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("A,A,B", "1,2,3"), path)
+
+  # Arrow reports this as "Could not read schema ... Is this a 'csv' file?",
+  # which sends the reader looking at the file format rather than at its first
+  # line. Both paths now say what is actually wrong, and say it identically.
+  expect_error(read_file(DTAFileCSV(basename(path)), path), "column names")
+  expect_error(open_file(DTAFileCSV(basename(path)), path), "column names")
+})
+
+test_that("names that collide only after cleaning are refused", {
+  path <- file.path(tempdir(), "dta_collide_header.csv")
+  on.exit(unlink(path), add = TRUE)
+  # Two distinct names to arrow, one name after the quotes and spaces go.
+  writeLines(c('"A"," A ",B', "1,2,3"), path)
+
+  expect_error(read_file(DTAFileCSV(basename(path)), path), "repeated column names")
+  expect_error(open_file(DTAFileCSV(basename(path)), path), "repeated column names")
+})
+
+
+# ---------------------------------------------------------------------------
+# Real-world parse settings on the handler
+# ---------------------------------------------------------------------------
+
+test_that("a tabular handler carries the two parse settings with harmless defaults", {
+  for (ctor in list(DTAFileCSV, DTAFileTSV, DTAFileDelim, DTAFileTabular)) {
+    h <- ctor(filename = "a.csv")
+    expect_false(h@newlines_in_values)
+    expect_equal(h@encoding, "UTF-8")
+  }
+
+  declared <- DTAFileCSV(
+    filename = "a.csv",
+    newlines_in_values = TRUE,
+    encoding = "latin1"
+  )
+  expect_true(declared@newlines_in_values)
+  expect_equal(declared@encoding, "latin1")
+})
+
+test_that("the two parse settings are validated", {
+  expect_error(
+    DTAFileCSV(filename = "a.csv", newlines_in_values = NA),
+    "newlines_in_values"
+  )
+  expect_error(
+    DTAFileCSV(filename = "a.csv", newlines_in_values = c(TRUE, TRUE)),
+    "newlines_in_values"
+  )
+  expect_error(DTAFileCSV(filename = "a.csv", encoding = ""), "encoding")
+  expect_error(DTAFileCSV(filename = "a.csv", encoding = NA_character_), "encoding")
+  expect_error(
+    DTAFileCSV(filename = "a.csv", encoding = c("UTF-8", "latin1")),
+    "encoding"
+  )
+})
+
+test_that("the two parse settings survive the factory and a YAML round trip", {
+  from_factory <- DTAFileFactory(
+    type = "csv", filename = "a.csv",
+    newlines_in_values = TRUE, encoding = "latin1"
+  )
+  expect_true(from_factory@newlines_in_values)
+  expect_equal(from_factory@encoding, "latin1")
+
+  # The route a specification document actually takes: YAML text -> list ->
+  # DTAFileFactory. A key that never reaches the constructor is a key a user
+  # can write and never see honoured.
+  parsed <- yaml::yaml.load(paste(
+    "name: encoded",
+    "type: tabular",
+    "files:",
+    "  type: tsv",
+    "  filename: a.tsv",
+    "  newlines_in_values: true",
+    "  encoding: latin1",
+    "columns:",
+    "  - id: STUDYID",
+    "    type: SAS Char",
+    sep = "\n"
+  ))
+  ds <- dta_dataset_from_list(parsed)
+
+  expect_true(ds@files[[1]]@newlines_in_values)
+  expect_equal(ds@files[[1]]@encoding, "latin1")
+})
+
+test_that("print_info reports the two parse settings", {
+  out <- paste(
+    capture_messages(print_info(DTAFileCSV("a.csv", encoding = "latin1"))),
+    collapse = ""
+  )
+
+  expect_match(out, "Newlines in values")
+  expect_match(out, "Encoding")
+  expect_match(out, "latin1")
+})
+
+
+# ---------------------------------------------------------------------------
+# Converting a file that is not UTF-8
+# ---------------------------------------------------------------------------
+# Arrow's dataset scanner has no re-encoding step, so the lazy reader converts
+# the file once into a UTF-8 copy and scans that. These pin the converter
+# itself; test-load-file-streaming.R pins what the two readers then agree on.
+
+# `bytes` is written verbatim, so a fixture can declare exactly which encoding
+# it is in rather than depending on the session's.
+transcode_fixture <- function(name, bytes, gz = FALSE) {
+  path <- file.path(tempdir(), name)
+  con <- if (gz) gzfile(path, "wb") else file(path, "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(bytes, con)
+  path
+}
+
+# "Jürgen,1" and "Möller,2" under a two-column header, in latin1.
+latin1_body <- function(terminator = "\n") {
+  c(
+    charToRaw(paste0("NAME,V", terminator)),
+    as.raw(c(0x4a, 0xfc, 0x72, 0x67, 0x65, 0x6e)), charToRaw(paste0(",1", terminator)),
+    as.raw(c(0x4d, 0xf6, 0x6c, 0x6c, 0x65, 0x72)), charToRaw(paste0(",2", terminator))
+  )
+}
+
+test_that("only UTF-8 counts as UTF-8, and only the wide encodings are wide", {
+  expect_true(dta_encoding_is_utf8("UTF-8"))
+  expect_true(dta_encoding_is_utf8("utf-8"))
+  expect_false(dta_encoding_is_utf8("UTF8"))
+  expect_false(dta_encoding_is_utf8("latin1"))
+
+  # A newline byte is part of an ordinary character in these, so the line-based
+  # converter cannot be used on them.
+  for (wide in c("UTF-16", "utf16le", "UTF-16BE", "UTF-32", "UCS-2", "ucs-4")) {
+    expect_true(dta_encoding_is_wide(wide), info = wide)
+  }
+  for (narrow in c("UTF-8", "latin1", "ISO-8859-15", "windows-1252", "SHIFT-JIS", "CP1251")) {
+    expect_false(dta_encoding_is_wide(narrow), info = narrow)
+  }
+})
+
+test_that("the transcoding block is an option, validated like the read block", {
+  expect_equal(dta_transcode_block_bytes(), 4194304L)
+
+  withr::local_options(DTAtools.transcode_block_bytes = 128)
+  expect_identical(dta_transcode_block_bytes(), 128L)
+
+  withr::local_options(DTAtools.transcode_block_bytes = 0)
+  expect_error(dta_transcode_block_bytes(), "between 1 and")
+  withr::local_options(DTAtools.transcode_block_bytes = c(1, 2))
+  expect_error(dta_transcode_block_bytes(), "between 1 and")
+})
+
+test_that("the copy is the delivered bytes re-encoded and nothing else", {
+  # CRLF input, so the claim being made is the one that matters: the copy is
+  # what `iconv()` of the whole file would produce, line endings included. A
+  # line-based converter folded CRLF to LF here, which is invisible in an
+  # unquoted field and one character short inside a quoted one.
+  path <- transcode_fixture("dta_transcode_crlf.csv", latin1_body("\r\n"))
+  on.exit(unlink(path), add = TRUE)
+
+  copy <- dta_transcode_to_utf8(path, "latin1")
+  bytes <- readBin(copy, "raw", n = file.size(copy))
+
+  expect_identical(
+    bytes,
+    charToRaw(iconv(
+      rawToChar(readBin(path, "raw", n = file.size(path))),
+      from = "latin1", to = "UTF-8"
+    ))
+  )
+
+  # "Jürgen" is 0x4a 0xfc ... in latin1 and 0x4a 0xc3 0xbc ... in UTF-8.
+  expect_true(grepl("\xc3\xbc", rawToChar(bytes), fixed = TRUE, useBytes = TRUE))
+  # Every CR the delivery carried is still there, and the file still ends the
+  # way it was delivered.
+  expect_identical(sum(bytes == as.raw(0x0d)), 3L)
+  expect_identical(bytes[(length(bytes) - 1L):length(bytes)], as.raw(c(0x0d, 0x0a)))
+
+  lines <- readLines(copy, encoding = "UTF-8")
+  expect_identical(lines[[1]], "NAME,V")
+  expect_length(lines, 3L)
+})
+
+test_that("a CR that is not a line ending survives the conversion", {
+  # A lone CR inside a quoted value, and a CRLF inside another. Neither is a
+  # line break -- they are data -- and `readLines()` turns both into LF, which
+  # made the streamed value one character shorter than the in-memory one.
+  body <- c(
+    charToRaw("NAME,V\n"),
+    charToRaw("\"a\rb\","), as.raw(0xfc), charToRaw("\n"),
+    charToRaw("\"c\r\nd\",x\n")
+  )
+  path <- transcode_fixture("dta_transcode_cr.csv", body)
+  on.exit(unlink(path), add = TRUE)
+
+  copy <- dta_transcode_to_utf8(path, "latin1")
+  bytes <- readBin(copy, "raw", n = file.size(copy))
+
+  # The only byte that changed is the latin1 "ü", which became two UTF-8 bytes.
+  expect_identical(
+    bytes,
+    c(
+      charToRaw("NAME,V\n"),
+      charToRaw("\"a\rb\","), as.raw(c(0xc3, 0xbc)), charToRaw("\n"),
+      charToRaw("\"c\r\nd\",x\n")
+    )
+  )
+})
+
+test_that("the copy does not depend on how many bytes a block holds", {
+  # A body long enough that a 16-byte block cuts it in many places, with a
+  # multi-byte character straddling several of them and one line longer than
+  # the block itself.
+  body <- c(
+    charToRaw("NAME,V\n"),
+    unlist(lapply(1:20, function(i) {
+      c(as.raw(c(0x4a, 0xfc, 0x72)), charToRaw(paste0(i, ",", i, "\n")))
+    })),
+    charToRaw(paste0(strrep("x", 100), ",1\n"))
+  )
+
+  path <- transcode_fixture("dta_transcode_blocks.csv", body)
+  on.exit(unlink(path), add = TRUE)
+
+  # A block far smaller than one line against the whole file at once: the block
+  # bounds memory, it must not touch the answer. A block that ends mid-line, or
+  # mid-character, is exactly what the carry exists for.
+  withr::local_options(DTAtools.transcode_block_bytes = 16)
+  by_block <- readBin(
+    copy_one <- dta_transcode_to_utf8(path, "latin1"),
+    "raw",
+    n = file.size(copy_one)
+  )
+
+  # A fresh source, because the first copy is now cached against this one.
+  other <- transcode_fixture("dta_transcode_blocks2.csv", body)
+  on.exit(unlink(other), add = TRUE)
+  withr::local_options(DTAtools.transcode_block_bytes = 4194304L)
+  at_once <- readBin(
+    copy_all <- dta_transcode_to_utf8(other, "latin1"),
+    "raw",
+    n = file.size(copy_all)
+  )
+
+  expect_identical(by_block, at_once)
+  expect_identical(
+    by_block,
+    charToRaw(iconv(rawToChar(body), from = "latin1", to = "UTF-8"))
+  )
+})
+
+test_that("the pieces a block is converted in cover it exactly, cut on newlines", {
+  # The pieces exist so that iconv() is handed short strings, which it converts
+  # about three times faster than one long one. They must therefore be a fact
+  # about speed alone: they cover the block once, in order, and every cut but
+  # the last falls on a newline byte -- which no ASCII-compatible encoding puts
+  # inside a character, so the conversions rejoin to the conversion of the whole.
+  block <- charToRaw(paste0(
+    paste(vapply(1:5000, function(i) paste0("row", i, ",value"), character(1)),
+      collapse = "\n"
+    ),
+    "\n"
+  ))
+
+  spans <- dta_transcode_spans(block)
+
+  expect_gt(length(spans$starts), 1L)
+  expect_length(spans$ends, length(spans$starts))
+  expect_identical(spans$starts[[1]], 1L)
+  expect_identical(spans$ends[[length(spans$ends)]], length(block))
+  # Contiguous and non-overlapping.
+  expect_identical(
+    spans$starts[-1],
+    spans$ends[-length(spans$ends)] + 1L
+  )
+  # Every cut but the last is a newline.
+  expect_true(all(block[head(spans$ends, -1L)] == as.raw(0x0a)))
+
+  # A block with no newline at all is one span rather than a cut line.
+  one_line <- charToRaw(strrep("x", 200000))
+  expect_identical(dta_transcode_spans(one_line), list(starts = 1L, ends = 200000L))
+})
+
+test_that("a last line with no terminator gets none added", {
+  path <- transcode_fixture(
+    "dta_transcode_unterminated.csv",
+    c(charToRaw("NAME,V\n"), as.raw(c(0x4a, 0xfc)), charToRaw(",1"))
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  copy <- dta_transcode_to_utf8(path, "latin1")
+  bytes <- readBin(copy, "raw", n = file.size(copy))
+
+  expect_identical(bytes[[length(bytes)]], charToRaw("1"))
+  expect_identical(
+    bytes,
+    c(charToRaw("NAME,V\n"), as.raw(c(0x4a, 0xc3, 0xbc)), charToRaw(",1"))
+  )
+})
+
+test_that("a gzip-compressed source is converted without being expanded first", {
+  path <- transcode_fixture("dta_transcode_gz.csv.gz", latin1_body(), gz = TRUE)
+  on.exit(unlink(path), add = TRUE)
+
+  copy <- dta_transcode_to_utf8(path, "latin1")
+
+  expect_identical(readLines(copy, encoding = "UTF-8"), c("NAME,V", "Jürgen,1", "Möller,2"))
+  # The copy is plain text: it is what a scanner reads, not a second archive.
+  expect_gt(file.size(copy), 0)
+  expect_identical(readBin(copy, "raw", n = 2L), as.raw(c(0x4e, 0x41)))
+})
+
+test_that("the copy is cached on the source's identity and its encoding", {
+  path <- transcode_fixture("dta_transcode_cache.csv", latin1_body())
+  on.exit(unlink(path), add = TRUE)
+
+  first <- dta_transcode_to_utf8(path, "latin1")
+  expect_identical(dta_transcode_to_utf8(path, "latin1"), first)
+
+  # A different declared encoding is a different conversion of the same bytes.
+  # It is also a re-conversion of the same delivery, so it supersedes the copy
+  # above rather than joining it -- see the eviction test below.
+  expect_false(identical(dta_transcode_to_utf8(path, "CP1251"), first))
+
+  # tempdir() is the session's, but nothing stops something else clearing it:
+  # a cache entry whose copy is gone must reconvert, not hand back a path that
+  # is not there. A fresh source, so that what is being tested is the vanished
+  # copy and not the eviction the line above performed.
+  cleared <- transcode_fixture("dta_transcode_cache_cleared.csv", latin1_body())
+  on.exit(unlink(cleared), add = TRUE)
+
+  before <- dta_transcode_to_utf8(cleared, "latin1")
+  unlink(before)
+  again <- dta_transcode_to_utf8(cleared, "latin1")
+  expect_false(identical(again, before))
+  expect_true(file.exists(again))
+})
+
+test_that("a wide encoding is refused before anything is read", {
+  path <- transcode_fixture("dta_transcode_wide.csv", latin1_body())
+  on.exit(unlink(path), add = TRUE)
+
+  expect_error(
+    dta_transcode_to_utf8(path, "UTF-16LE"),
+    "cannot be converted block by block"
+  )
+  expect_error(dta_transcode_to_utf8(path, "UTF-16LE"), "stream = \"never\"", fixed = TRUE)
+})
+
+test_that("an encoding name this platform cannot use is refused by name", {
+  path <- transcode_fixture("dta_transcode_badname.csv", latin1_body())
+  on.exit(unlink(path), add = TRUE)
+
+  # `latin1` and `cp1252` are real names; the hyphenated spellings are not, and
+  # used to surface as iconv()'s own error -- in the system language, naming
+  # neither the file nor the encoding that was declared for it. Matched on the
+  # condition class rather than on a base-R message for the same reason.
+  for (name in c("latin-1", "cp-1252", "not an encoding")) {
+    expect_error(
+      dta_transcode_to_utf8(path, name),
+      class = "rlang_error",
+      info = name
+    )
+    expect_error(dta_transcode_to_utf8(path, name), name, fixed = TRUE, info = name)
+    expect_error(dta_transcode_to_utf8(path, name), "iconvlist", info = name)
+  }
+
+  # The refusal happens before the file is opened, so it does not depend on the
+  # delivery being there -- and it costs no I/O to establish.
+  expect_error(
+    dta_check_encoding_supported("latin-1", "C:/nowhere/absent.csv"),
+    "not an encoding this platform can convert from"
+  )
+  expect_true(dta_check_encoding_supported("latin1", path))
+  expect_true(dta_check_encoding_supported("UTF-8", path))
+})
+
+test_that("a half-written copy does not survive the failure that produced it", {
+  path <- transcode_fixture(
+    "dta_transcode_bad.csv",
+    c(charToRaw("NAME,V\n"), as.raw(c(0x41, 0x81, 0xff, 0xfe)), charToRaw(",1\n"))
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  # Windows' iconv is lenient about several single-byte code pages, so the
+  # assertion runs only where the conversion really does fail.
+  probe <- iconv(rawToChar(as.raw(c(0x41, 0x81, 0xff, 0xfe))), from = "SHIFT-JIS", to = "UTF-8")
+  skip_if_not(is.na(probe), "this platform's iconv accepts the bytes this test needs rejected")
+
+  before <- list.files(tempdir(), pattern = "^file.*\\.csv$")
+  expect_error(dta_transcode_to_utf8(path, "SHIFT-JIS"), "cannot be decoded as")
+  # The offset is named, because "somewhere in a 60 GB file" is not actionable.
+  # A byte offset rather than a line number: the file is cut into blocks, not
+  # lines, and the second line of this fixture starts at byte 8.
+  expect_error(dta_transcode_to_utf8(path, "SHIFT-JIS"), "offset 8")
+
+  # No copy left behind, and nothing cached that a later call could return.
+  expect_identical(list.files(tempdir(), pattern = "^file.*\\.csv$"), before)
+})
+
+test_that("a NUL byte is named rather than left to rawToChar()", {
+  # rawToChar() cannot hold a NUL, and its own error is a base-R message about
+  # a "raw vector" in the system language -- which says nothing about the
+  # delivery. A NUL is also what a UTF-16 file declared as latin1 looks like.
+  path <- transcode_fixture(
+    "dta_transcode_nul.csv",
+    c(charToRaw("NAME,V\n"), charToRaw("A"), as.raw(0x00), charToRaw(",1\n"))
+  )
+  on.exit(unlink(path), add = TRUE)
+
+  expect_error(dta_transcode_to_utf8(path, "latin1"), class = "rlang_error")
+  expect_error(dta_transcode_to_utf8(path, "latin1"), "0x00")
+  expect_error(dta_transcode_to_utf8(path, "latin1"), "byte 9")
+})
+
+test_that("a re-delivery replaces its copy instead of adding to it", {
+  path <- transcode_fixture("dta_transcode_evict.csv", latin1_body())
+  on.exit(unlink(path), add = TRUE)
+
+  first <- dta_transcode_to_utf8(path, "latin1")
+  expect_true(file.exists(first))
+
+  # A new size and modification time is a new cache key, so the entry for the
+  # old one is unreachable -- and, until it was evicted, still a full-size copy
+  # of the file under tempdir() for the rest of the session. A 60 GB delivery
+  # received ten times left ten of them.
+  Sys.sleep(0.01)
+  con <- file(path, "ab")
+  writeBin(charToRaw("Zoe,3\n"), con)
+  close(con)
+
+  second <- dta_transcode_to_utf8(path, "latin1")
+
+  expect_false(identical(second, first))
+  expect_false(file.exists(first))
+  expect_true(file.exists(second))
+
+  # And the entry went with the file: nothing in the cache still points at it.
+  entries <- mget(
+    ls(envir = `__DTAtools_transcode_cache__`, all.names = TRUE),
+    envir = `__DTAtools_transcode_cache__`
+  )
+  copies <- vapply(entries, function(e) e$copy, character(1))
+  expect_false(first %in% copies)
+  expect_true(second %in% copies)
+
+  # A copy of a DIFFERENT delivery is not touched by any of this.
+  other <- transcode_fixture("dta_transcode_evict_other.csv", latin1_body())
+  on.exit(unlink(other), add = TRUE)
+  kept <- dta_transcode_to_utf8(other, "latin1")
+  dta_transcode_to_utf8(path, "CP1251")
+  expect_true(file.exists(kept))
+})
+
+test_that("a dataset can be told which file it should be identified by", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  dataset <- open_file(DTAFileCSV("clinical_data.csv"), path)
+
+  # Unstamped, a dataset answers with the files Arrow opened.
+  expect_identical(dta_dataset_source_files(dataset), dataset$files)
+
+  stamped <- dta_stamp_dataset_source(dataset, "C:/deliveries/original.csv")
+  expect_identical(dta_dataset_source_files(stamped), "C:/deliveries/original.csv")
+  # An arrow object is an environment, so the stamp is shared by every
+  # reference to it rather than copied onto one of them.
+  expect_identical(dta_dataset_source_files(dataset), "C:/deliveries/original.csv")
+
+  # Nothing that is not a dataset, and no empty stamp, is accepted.
+  expect_identical(dta_stamp_dataset_source("not a dataset", "x"), "not a dataset")
+  fresh <- open_file(DTAFileCSV("clinical_data.csv"), path)
+  expect_identical(dta_dataset_source_files(dta_stamp_dataset_source(fresh, "")), fresh$files)
+})
+
+test_that("the reader plan's encoding argument overrides the handler's", {
+  path <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+  handler <- DTAFileCSV("clinical_data.csv", encoding = "latin1")
+
+  expect_identical(dta_delim_reader_plan(path, handler = handler)$encoding, "latin1")
+  # What the lazy opener passes once it has converted the file: the handler
+  # still declares latin1, and honouring that would decode the copy twice.
+  expect_identical(
+    dta_delim_reader_plan(path, handler = handler, encoding = "UTF-8")$encoding,
+    "UTF-8"
+  )
+  # The override touches only the encoding: everything else the plan decides is
+  # still the handler's. `parse_options` is excluded because it is a fresh
+  # arrow object on every call and so is never `identical()` to another one --
+  # what it was built from is covered by the settings tests above.
+  comparable <- function(plan) plan[setdiff(names(plan), c("parse_options", "encoding"))]
+  expect_identical(
+    comparable(dta_delim_reader_plan(path, handler = handler, encoding = "UTF-8")),
+    comparable(dta_delim_reader_plan(path, handler = handler))
+  )
 })
 
 
@@ -788,4 +1398,58 @@ test_that("read_file() still aborts with 'does not match' when neither pattern m
   )
 
   expect_error(read_file(file_info, path), "does not match")
+})
+
+
+# ---------------------------------------------------------------------------
+# A brace in a file name must not be read as cli markup
+# ---------------------------------------------------------------------------
+# Both guards used to render the path with str_glue() and hand the RESULT to
+# cli, which then read any brace the path contained as an expression of its
+# own. `data{1}.csv` -- an ordinary name -- aborted with cli's own parse error
+# instead of the intended message, so the user was told nothing about their
+# file. Interpolating the variable lets cli escape the braces itself.
+
+test_that("a file name containing braces still reports the real problem", {
+  braced <- file.path(tempdir(), "dta_brace{1}.csv")
+  on.exit(unlink(braced), add = TRUE)
+  writeLines(c("A", "1"), braced)
+
+  expect_error(
+    read_file(DTAFileCSV("something_else.csv"), braced),
+    regexp = "does not match"
+  )
+  expect_error(
+    open_file(DTAFileCSV("something_else.csv"), braced),
+    regexp = "does not match"
+  )
+
+  absent <- file.path(tempdir(), "dta_absent{2}.csv")
+  expect_false(file.exists(absent))
+  expect_error(
+    read_file(DTAFileCSV("dta_absent{2}.csv"), absent),
+    regexp = "cannot be found"
+  )
+  expect_error(
+    open_file(DTAFileCSV("dta_absent{2}.csv"), absent),
+    regexp = "cannot be found"
+  )
+})
+
+test_that("a file name containing cli markup is not rendered as markup", {
+  # `{.field x}` is a style, not a variable, so it would not have aborted --
+  # it would have printed the name in colour with the markup silently removed,
+  # naming a file the user does not have. cli wraps at the console width, so
+  # widen it: a line break landing inside the name would fail this for the
+  # wrong reason.
+  withr::local_options(cli.width = 1000)
+
+  styled <- file.path(tempdir(), "dta_{.field x}.csv")
+  expect_false(file.exists(styled))
+
+  expect_error(
+    read_file(DTAFileCSV("dta_{.field x}.csv"), styled),
+    regexp = "{.field x}",
+    fixed = TRUE
+  )
 })

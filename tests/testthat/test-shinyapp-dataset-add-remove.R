@@ -252,7 +252,6 @@ test_that("removing one of two datasets keeps the sidebar rendered", {
   skip_if_not_installed("shinyjs")
 
   shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
@@ -288,7 +287,6 @@ test_that("removing the first dataset keeps the sidebar pointing at the second",
   skip_if_not_installed("shinyjs")
 
   shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
@@ -334,7 +332,6 @@ test_that("doc_token moves only on load, restore and reset -- not on mutations",
   skip_if_not_installed("shinyjs")
 
   shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     # A client id first, so every autosave lands in a restorable session file.
     session$setInputs(dta_client_id = strrep("e", 32))
 
@@ -378,7 +375,6 @@ test_that("the main layout follows doc_token: workspace on load, landing on rese
   skip_if_not_installed("shinyjs")
 
   shiny::testServer(.shiny_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = sidebar_upload(app_fixture_path("clinical_dta.yaml")))
 
     main <- paste(as.character(output$main$html), collapse = "")

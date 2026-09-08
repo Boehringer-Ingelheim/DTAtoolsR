@@ -347,17 +347,7 @@ DTAMetaData <- S7::new_class(
 }
 
 
-#' @title Print DTAMetaData Object
-#' @description
-#' Print method for DTAMetadata objects.
-#' @param x An object of class DTAMetadata
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
 #' @importFrom cli cli_div cli_text
-#' @examples
-#' library(DTAtools)
-#' print(create_example_DTAMetaData())
-#'
 #' @name print
 #' @export
 method(print, DTAMetaData) <- function(x, ...) {
@@ -369,19 +359,9 @@ method(print, DTAMetaData) <- function(x, ...) {
   invisible(x)
 }
 
-#' @title Print Info DTAMetaData Object
-#' @description
-#' Print method for DTAMetadata objects.
 #' @importFrom cli cli_alert_info cli_alert cli_text
-#'
-#' @param x An object of class DTAMetadata
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
-#' @examples
-#' library(DTAtools)
-#' print(create_example_DTAMetaData())
-#'
 #' @name print_info
+#' @usage print_info(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -526,33 +506,31 @@ method(print_info, DTAMetaData) <- function(x, ...) {
 }
 
 
-#' @title Print short info from DTAMetaData Object
-#' @description
-#' Print short info method for DTAMetadata objects.
-#' @param x An object of class DTAMetadata
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
 #' @importFrom cli cli_alert_info
-#' @examples
-#' library(DTAtools)
-#' print_short_info(create_example_DTAMetaData())
-#'
 #' @name print_short_info
 #' @export
 if (!exists("print_short_info", mode = "function", inherits = FALSE)) {
   print_short_info <- new_generic("print_short_info", "x")
 }
 method(print_short_info, DTAMetaData) <- function(x, ...) {
-  message <- "Metadata: {x@title}"
-
+  # `title` and `suffix` are INTERPOLATED as variables in the literal template
+  # handed to cli, never pasted into a string that is itself used as the
+  # template: this used to build `message` with paste0() and pass the whole,
+  # already-assembled string to cli_alert_info(), so a title or version
+  # containing a literal "{" (data appended by plain concatenation, not
+  # through cli's own interpolation) made cli try to evaluate it as an
+  # expression and abort. Braces inside a value cli itself interpolates are
+  # escaped by cli, regardless of how that value was computed.
+  title <- x@title
+  suffix <- ""
   if (!is.null(x@version)) {
-    message <- paste0(message, " ", x@version)
+    suffix <- paste0(suffix, " ", x@version)
   }
   if (!is.null(x@date)) {
-    message <- paste0(message, " ", format(x@date, "%Y-%m-%d"))
+    suffix <- paste0(suffix, " ", format(x@date, "%Y-%m-%d"))
   }
 
-  cli::cli_alert_info(message)
+  cli::cli_alert_info("Metadata: {title}{suffix}")
 
   invisible(x)
 }
@@ -569,7 +547,6 @@ method(print_short_info, DTAMetaData) <- function(x, ...) {
 #'
 #' @return An object of class \code{DTAMetaData} with example metadata.
 #' @examples
-#' library(DTAtools)
 #' example_metadata <- create_example_DTAMetaData()
 #' print(example_metadata)
 #' @export

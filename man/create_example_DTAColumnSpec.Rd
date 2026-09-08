@@ -16,6 +16,5 @@ An example DTAColumnSpec object based on the provided index.
 S7 method to create and return an example DTAColumnSpec object.
 }
 \examples{
-library(DTAtools)
 create_example_DTAColumnSpec()
 }

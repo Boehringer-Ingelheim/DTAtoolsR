@@ -16,10 +16,14 @@ kernel semantics -- rounding, NaN handling -- and silently change a
 validation verdict for a user who never asked for it), this path is on by
 default.
 
-It can be, because it is restricted to \code{utf8} (text) key columns (see
-\code{\link[=dta_arrow_unique_eligible]{dta_arrow_unique_eligible()}}): Arrow's grouped aggregation and R's
-\code{duplicated()} agree byte-for-byte on strings, with none of the
-floating-point latitude that keeps the general Arrow-compute path opt-in.
+It can be, because the two ways a key is formed here are both cases where
+Arrow's grouped aggregation and R's \code{duplicated()} provably agree rather than
+merely usually agreeing (see \code{\link[=dta_arrow_unique_eligible]{dta_arrow_unique_eligible()}} and
+\code{\link[=dta_stream_unique_precompute]{dta_stream_unique_precompute()}}): text keys are compared byte-for-byte by
+both, and a declared-numeric key is grouped on a cast that Arrow either
+performs exactly as R's parser does or refuses outright -- in which case the
+whole precompute falls back. Neither leaves the floating-point latitude that
+keeps the general Arrow-compute path opt-in.
 What tips the default the rest of the way is that the R fallback -- a
 \code{fastmap} accumulator holding one entry per distinct key -- is exactly the
 component that runs out of memory at the scale streaming exists for.

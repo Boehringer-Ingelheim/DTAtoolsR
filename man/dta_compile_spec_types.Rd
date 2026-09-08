@@ -10,8 +10,8 @@ dta_compile_spec_types(specs)
 \item{specs}{A \code{DTAColumnSpecCollection}, or \code{NULL}.}
 }
 \value{
-A named character vector, keyed exactly as \code{\link[=dta_reader_col_types]{dta_reader_col_types()}}
-derives its keys (\code{unique(c(names(columns), ids))}, with \code{NA}/\code{""} keys
+A named character vector keyed by every name under which a column
+can be looked up (\code{unique(c(names(columns), ids))}, with \code{NA}/\code{""} keys
 dropped), with values from \code{\link[=dta_spec_r_type]{dta_spec_r_type()}}. \code{character(0)} when
 \code{specs} is \code{NULL} or declares no columns.
 }

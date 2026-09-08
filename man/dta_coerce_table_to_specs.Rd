@@ -30,9 +30,9 @@ holding it in memory passes \code{Inf}.}
 }
 \value{
 A list with \code{table} (the typed table, same class as the input, with
-the issues attached) and \code{issues} (a data.frame in the shape of
-\code{\link[=dta_empty_import_errors]{dta_empty_import_errors()}}, carrying the exact error count in its
-\code{"n_import_errors"} attribute).
+the issues attached and -- for an Arrow table -- the content stamp) and
+\code{issues} (a data.frame in the shape of \code{\link[=dta_empty_import_errors]{dta_empty_import_errors()}},
+carrying the exact error count in its \code{"n_import_errors"} attribute).
 }
 \description{
 The typed import choke point. The declared type of every column is applied to
@@ -67,5 +67,15 @@ in the dataset's \code{import_issues} property would not be hashed, so a table
 whose import issues had changed could be skipped while still reporting a
 stale \code{ok = TRUE}. Riding on the table, they cannot be separated from the
 data they describe.
+
+An Arrow table additionally comes back stamped with a digest of the typed
+frame -- issues attribute included -- under \link{dta_table_hash_key}, because
+this is the one moment at which the whole table is materialised in R anyway.
+\code{dta_table_change_signal()} reads that stamp instead of re-deriving it, which
+is what stops identifying a table from costing more than validating it. Both
+returns carry it: the rebuilt table and the original handed back when nothing
+needed typing. The digest is \code{\link[=dta_table_content_hash]{dta_table_content_hash()}}, which is also what
+the change signal falls back to for an unstamped table, so the two agree on
+the same contents.
 }
 \keyword{internal}

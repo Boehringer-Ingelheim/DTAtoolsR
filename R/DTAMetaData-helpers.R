@@ -17,89 +17,72 @@
 }
 
 
-#' @title Convert DTAMetaData to List
-#' @description Convert a DTAMetaData object to a nested list structure suitable for YAML export
-#' or programmatic access.
-#'
-#' @details
-#' Every \code{Date} in the result - the top-level \code{date}, each
-#' \code{version_history[[i]]$date}, and the transmission transfer dates - is
-#' rendered as an ISO \code{"YYYY-MM-DD"} string so that a YAML dump can be read
-#' straight back through \code{DTAMetaData()}.
-#'
-#' \code{@import_issues} is deliberately not exported: it is a runtime record of
-#' what was lost while coercing the input, not part of the specification.
-#' \code{@template} IS exported (when non-empty): it is a provenance record that
-#' must survive a save/reload cycle so the rebase feature can trust it later.
-#'
-#' This method is hand-written field by field rather than iterating S7
-#' properties, so it does NOT pick up a new \code{DTAMetaData} property
-#' automatically. Adding a property to the class without adding it here means
-#' it is silently dropped on the next save -- if you add a property, add it
-#' to this function too.
-#'
-#' @param x An object of class DTAMetaData
-#' @param ... Additional arguments (not used)
-#'
-#' @return A list with all metadata fields
-#'
-#' @examples
-#' library(DTAtools)
-#' md <- create_example_DTAMetaData(2)
-#' md_list <- as.list(md)
-#'
 #' @name as.list
 #' @export
+# MAINTENANCE: this method is hand-written field by field rather than iterating
+# S7 properties, so it does NOT pick up a new DTAMetaData property
+# automatically. Adding a property to the class without adding it here means it
+# is silently dropped on the next save -- if you add a property, add it here
+# too.
 method(as.list, DTAMetaData) <- function(x, ...) {
   result <- list(
     title = x@title,
     version = x@version,
     date = .date_to_iso(x@date),
-    header = x@header
-  )
-
-  # Add version_history if present
-  if (length(x@version_history) > 0) {
-    result$version_history <- lapply(x@version_history, function(record) {
+    header = x@header,
+    version_history = lapply(x@version_history, function(record) {
       if (is.list(record) && !is.null(record$date)) {
         record$date <- .date_to_iso(record$date)
       }
       record
-    })
-  }
+    }),
+    receiver = x@receiver,
+    supplier = x@supplier,
+    transmission = lapply(x@transmission, .date_to_iso),
+    error_handling = x@error_handling,
+    authorized_for_corrections = x@authorized_for_corrections,
+    # Machine-owned provenance. Unlike import_issues this MUST round-trip: it
+    # is what the rebase feature will trust.
+    template = x@template
+  )
 
-  # Add receiver if present
-  if (length(x@receiver) > 0) {
-    result$receiver <- x@receiver
-  }
+  keep <- vapply(
+    names(result),
+    function(name) !.dta_metadata_field_is_absent(result[[name]], name),
+    logical(1)
+  )
+  result[keep]
+}
 
-  # Add supplier if present
-  if (length(x@supplier) > 0) {
-    result$supplier <- x@supplier
-  }
+# Properties whose UNSET representation is an empty list rather than NULL, so
+# an empty one carries no information and is not written.
+#
+# `authorized_for_corrections` is deliberately NOT here: it defaults to NULL,
+# which makes `list()` an explicit choice by the author ("no one, and I am
+# saying so") rather than the absence of one -- the same present-but-blank
+# state `""` expresses for a scalar. Dropping it would erase a distinction the
+# class can actually represent.
+.dta_metadata_empty_list_is_absent <- c(
+  "version_history", "receiver", "supplier", "transmission", "template"
+)
 
-  # Add transmission if present
-  if (length(x@transmission) > 0) {
-    result$transmission <- lapply(x@transmission, .date_to_iso)
+# Whether one metadata field is absent, and so not written at all.
+#
+# This replaces four fields (title, version, date, header) that used to be
+# emitted unconditionally -- which is how a field nothing had ever set still
+# reached the file as `header: ~`. NULL is absent for every property.
+#
+# The empty-list case has to stay per-property, because the class represents
+# "unset" differently depending on the property: an empty list IS the unset
+# state for the collection-valued ones above, and a deliberate blank for the
+# ones that default to NULL. One predicate over both would either start
+# writing `receiver: []` into every document that has no receiver, or silently
+# discard an author's explicit blank.
+.dta_metadata_field_is_absent <- function(value, name) {
+  if (is.null(value)) {
+    return(TRUE)
   }
-
-  # Add error_handling if present
-  if (!is.null(x@error_handling)) {
-    result$error_handling <- x@error_handling
-  }
-
-  # Add authorized_for_corrections if present
-  if (!is.null(x@authorized_for_corrections)) {
-    result$authorized_for_corrections <- x@authorized_for_corrections
-  }
-
-  # Add template (machine-owned provenance) if present. Unlike import_issues,
-  # this MUST round-trip: it is what the rebase feature will trust.
-  if (length(x@template) > 0) {
-    result$template <- x@template
-  }
-
-  result
+  name %in% .dta_metadata_empty_list_is_absent && length(value) == 0
 }
 
 
@@ -111,7 +94,6 @@ method(as.list, DTAMetaData) <- function(x, ...) {
 #' @return A character vector of names or list of contacts authorized for corrections
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_authorized_for_corrections(md)
 #'
@@ -135,7 +117,6 @@ get_authorized_for_corrections <- function(x) {
 #' @return A character vector of reviewer names or list of reviewer contact objects
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_receiver_reviewers(md)
 #'
@@ -175,7 +156,6 @@ get_receiver_reviewers <- function(x, name_only = TRUE) {
 #' @return A list with elements first_transfer and last_transfer
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_transmission_dates(md)
 #'
@@ -214,7 +194,6 @@ get_transmission_dates <- function(x) {
 #' call.
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' get_version_history_df(md)
 #'
@@ -274,7 +253,6 @@ get_version_history_df <- function(x) {
 #' @return A list with elements is_valid (logical) and messages (character vector)
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- create_example_DTAMetaData(2)
 #' validate_transmission_dates(md)
 #'
@@ -339,7 +317,6 @@ validate_transmission_dates <- function(x) {
 #'   metadata imported cleanly.
 #'
 #' @examples
-#' library(DTAtools)
 #' md <- DTAMetaData(
 #'   title = "Qualified Date",
 #'   transmission = list(date_last_transfer = "2026-12-31 at the earliest")

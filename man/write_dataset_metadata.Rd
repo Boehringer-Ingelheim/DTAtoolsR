@@ -44,11 +44,9 @@ including metadata, file specifications, column specifications with allowed valu
 and validation rules in human-readable format.
 }
 \examples{
-\dontrun{
-ds <- DTADataSetTabular(
-  name = "example_dataset",
-  specs = create_example_DTAColumnSpecCollection(1)
-)
-write_dataset_metadata(ds, file = "dataset_spec.docx")
-}
+ds <- create_example_DTADataSetTabular()
+out <- tempfile(fileext = ".docx")
+write_dataset_metadata(ds, file = out, quiet = TRUE)
+file.exists(out)
+unlink(out)
 }

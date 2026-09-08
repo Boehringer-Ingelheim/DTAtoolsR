@@ -4,6 +4,584 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] - 2026-09-07
+
+### Added
+
+- **A specification can now be started from nothing.** The app's landing page
+  gains a **Create new** button alongside *Create new from template* and *Load
+  example*. It asks only for a title and a version, then opens the workspace on
+  an empty DTA — metadata only, no datasets — ready to build up by hand with
+  **+ Add dataset** and the Metadata tab. Its version history opens with a
+  single entry for the version just chosen, so an exported specification
+  records the version it started at rather than first appearing in the history
+  at whatever it is next bumped to. Until now every way into the app read an
+  existing document: a YAML file, the bundled example, or a template
+  expansion. A newly created document arrives in edit mode, because an empty
+  specification is only worth creating if you can immediately start filling
+  it in.
+
+- **An ancestor template can now constrain its descendants.** `sealed:` names
+  paths a descendant may not change, and `required:` names paths that must hold
+  a value before a document can be built; both take the same dotted paths the
+  merge itself uses, so `options.header.default` addresses exactly what
+  `modify:` would. Both accumulate down the chain and are never subtractive — a
+  child cannot unseal what an ancestor sealed, nor drop an inherited
+  requirement — and a template's own `sealed:` binds its descendants rather than
+  itself, since a seal that bound its declarer would forbid it from writing the
+  field it seals.
+
+  The two are checked at different moments, and deliberately so. A seal is
+  checked when the chain resolves, by comparing the value at each sealed path
+  before and after the merge: one check covers every route a child could take —
+  a `base:` override, a `modify:`, a `remove:`, an explicit `null`, a whole
+  section replaced. A requirement is checked when a document is created, because
+  an abstract parent is *supposed* to be allowed to leave it unset. A `base.`
+  path is satisfied either by a descendant template setting it or by the person
+  creating the document choosing it; a blank does not satisfy it.
+
+  `validate_template()` reports `sealed_violation`, and warns
+  `sealed_path_unknown` for a seal that matches nothing and so protects nothing.
+  Note that rebasing a document does not consult `sealed:` — a seal constrains
+  template authors, not every document.
+
+- Party slots take `required: true`, the counterpart of a vocabulary slot's
+  `min:`. A required slot refuses an absent selection and an explicitly empty
+  one alike — the latter matters, because an empty selection means "deliberately
+  none", which is the answer a required slot exists to reject.
+
+- **Template collections take verbs, so a deviation can say what it means.**
+  `options:`, `datasets:`, `party_slots:`, `vocabulary_slots:` and a dataset
+  patch's `columns:` now accept an explicit mapping of `inherit:` / `remove:` /
+  `add:` / `modify:` / `order:` alongside the existing bare list of entries,
+  which is unchanged and still supported. Three operations that had no spelling
+  before are now expressible: `inherit: [ids]` keeps only a named subset (a
+  child wanting two of twenty inherited entries no longer writes eighteen
+  removals), `inherit: none` replaces the parent's set wholesale, and `order:`
+  applies to every collection rather than only `options:`. `add:` additionally
+  requires its key to be new and `modify:` requires its key to be inherited, so
+  a mistyped id is an error naming the mistake — in the bare form the same typo
+  silently becomes an extra entry instead of the modification that was meant.
+  `remove_columns:`/`add_columns:`/`modify_columns:` remain the original names
+  for three of these verbs and keep working.
+
+- Template values now have four states rather than two, uniformly in every
+  section and at every depth: an omitted key inherits, a written key overrides,
+  an explicitly empty one (`""`, `{}`, `[]`) is present but blank, and `null`
+  drops the key from the template and from the written DTA. `label: ""` and
+  `label: null` used to be the same instruction; so did an absent and an
+  explicitly empty vocabulary or party selection.
+
+- **A delimited handler can now describe a file whose values contain line
+  breaks, or whose bytes are not UTF-8.** `newlines_in_values` (default
+  `FALSE`) tells the reader that a quoted value may span lines, which such a
+  file needs before it can be read at all; `encoding` (default `"UTF-8"`)
+  names the file's character encoding. Both are ordinary handler fields, so
+  they can be written in the YAML beside `sep:` and `quote:` and survive a
+  round trip. `encoding` is honoured when the file is read into memory. A
+  streamed load refuses a non-UTF-8 declaration outright and says why: the
+  dataset scanner has no re-encoding step, so it would read the bytes as
+  though they were UTF-8 and report the damage as data errors.
+
+- `options(DTAtools.stream_block_size = )` sets the number of bytes Arrow
+  reads per block when it scans a delimited file, **defaulting to 8 MiB**.
+  That block, not `batch_rows`, is what a batch of a delimited scan actually
+  is — `batch_rows` only caps a batch that is already larger — so peak memory
+  during a scan follows the block size times Arrow's read-ahead. `load_file()`
+  and `check()` now document that relationship instead of implying
+  `batch_rows` governs it.
+
+  The default is eight times Arrow's own 1 MiB because the cost of the
+  difference was measured rather than assumed, by `benchmarks/bench_block_size.R`
+  (new), which runs each block size in a fresh process — Arrow's memory pool
+  has no reset, so its `max_memory` is a per-process high-water mark and a
+  second block size measured in the same process would inherit the first's
+  peak. Every replicate is committed in `benchmarks/block_size.csv`, so the
+  figures quoted here can be checked against the rows rather than taken on
+  trust.
+
+  On a 204 MB, 1e6 × 20 CSV across eight CPU threads, the pool peaked at
+  230 MB with a 1 MiB block and 277 MB with an 8 MiB one — a difference of
+  48 MB, against a floor of 230 MB that is the error and grouping accumulators
+  rather than read-ahead. Memory is the reproducible half of the measurement:
+  across three replicates the pool peak varied by at most 4.4 MB, and at five
+  of the seven block sizes not at all. Its marginal cost is flat only where
+  read-ahead dominates — 2.9–5.0 MB per MiB from 1 to 4 MiB, then 8.6–9.2 MB
+  per MiB from 4 MiB up, about one block in flight per CPU thread.
+
+  What the 48 MB buys is batches roughly eight times larger (4,897 rows at
+  1 MiB, 39,185 at 8 MiB) and, because a batch now exceeds
+  `DTAtools.stream_arrow_numeric_min_rows`, the Arrow numeric parse where it
+  previously could not engage at all. The second is why the default is 8 and
+  not 4 MiB: at 4 MiB the *largest* full batch held 19,594 rows, under the
+  20,000-row gate, so the parse fires nowhere in the scan.
+
+  Wall time improves too, but it is the noisy half and is not quoted as a
+  single figure: medians over three replicates were 19.5 s at 1 MiB, 14.7 s at
+  8 MiB and 12.9 s at 16 MiB, the last two with overlapping ranges of
+  12.7–15.6 s and 10.7–13.2 s. 16 MiB is the faster setting and a fair
+  override where there is memory to spare — it is not the default because its
+  extra 69 MB of read-ahead scales with core count, costing several times as
+  much on a large host as on the small one a default has to be safe on. Past
+  16 MiB there is nothing left to buy: 32 MiB yields the same thirteen batches
+  as 16 MiB, the `batch_rows` cap of 131,072 having begun to bind, and 64 MiB
+  costs 487 MB more than 8 MiB without beating 16 MiB on time.
+
+  Two things to know before overriding it. Rows per batch is about the block
+  divided by the width of a row, so 8 MiB clears the 20,000-row numeric gate
+  only up to roughly 420 bytes a row; a much wider delivery wants a larger
+  block for the same benefit, at the same cost. And a memory-starved machine
+  can still have the old behaviour with
+  `options(DTAtools.stream_block_size = 1024^2)` — no result changes either
+  way.
+
+- **Both delimited readers now read on the same block.** The block size
+  reached only the lazy path; a table read into memory always used Arrow's own
+  1 MiB whatever the option said. Because a quoted line break is refused
+  exactly when it straddles a block boundary, the two paths could disagree
+  about whether a file was readable at all — a file between the two block
+  sizes was refused when read eagerly and accepted when streamed, which is the
+  one outcome the shared reader plan exists to prevent. Raising the default
+  would have made that divergence the normal case rather than an opt-in one.
+
+- The details a streamed check returns now carry `import_typing_errors`: the
+  import-typing failures on their own, beside the merged `import_errors`.
+  That is the axis a table read into memory records at load, so a lazily
+  loaded table's recorded import issues now hold the same thing as an eagerly
+  loaded one's, and the two paths can be compared on it directly.
+
+- **The file editor can set the two newer reader options.** The Edit-files
+  dialog gains a file-encoding selector (`UTF-8`, `latin1`, `windows-1252`,
+  or free text) and a "quoted values may contain line breaks" checkbox,
+  shown for any parsed file type. Saving a handler now round-trips every
+  reader setting it carries -- `has_header`, `quote`, `missing_values`,
+  `newlines_in_values` and `encoding` -- including the ones the form shows
+  no control for, so editing a file name or pattern no longer resets the
+  file's other reader settings to their defaults.
+
+### Changed
+
+- **The Edit menu's way into editing is a toggle again.** "Edit current
+  version" is now **Enable edit mode**, and it and **Stop editing** are one row
+  that flips: exactly one of them is on offer at any moment, decided only by
+  whether editing is currently on. Previously both could be listed at once
+  while editing in place, and the enable row was withheld whenever a version
+  entry was open — see the fix below for what that cost.
+
+- **The edit-mode status pill says "Edit mode" in every state.** It used to
+  name the route taken in — "Editing new version", "Editing new document",
+  "Edit mode" — three labels for one fact, whether editing is allowed. Every
+  editing surface is gated on a single flag, so the pill now names that flag
+  and nothing else; which version the document is on, and what it has been
+  through, is on the Metadata tab where it can be read in full.
+
+- An explicitly empty collection (`options: []`, `datasets: []`) now means
+  *none*, the same way `base: {}` already replaced the parent's section rather
+  than inheriting it. It previously inherited the parent's entries, which was
+  the last place the sections disagreed. Omit the key to inherit; write
+  `inherit: [ids]` to take a subset.
+
+- **`base:` and the other sections now follow the same rules.** The template
+  reader used to fill in `options:`/`datasets:` with an empty list before
+  inheritance ran, which destroyed the difference between "the child wrote
+  nothing" and "the child wrote nothing *deliberately*" — so an empty
+  `options:` inherited the parent's while an empty `base:` replaced it, the
+  same YAML gesture meaning opposite things in different sections. Shape
+  defaults now apply after the merge instead of before it.
+
+- A metadata field that is absent is no longer written to the DTA at all.
+  `as.list()` on `DTAMetaData` wrote four fields unconditionally, so a field
+  nothing had ever set could still reach the file as `header: ~`. NULL is now
+  absent for every property, and an empty list is absent only for the
+  properties whose unset state *is* an empty list (`receiver`, `supplier`,
+  `transmission`, `version_history`, `template`). A field that is present but
+  blank — `""`, or an explicitly empty `authorized_for_corrections`, which
+  defaults to NULL and so can tell the two apart — is still written, blank.
+
+- An explicitly empty vocabulary selection now means *no terms* instead of
+  falling back to the slot's `default:`, and an explicitly empty party-slot
+  selection empties that slot instead of being ignored. A selection that is
+  simply absent still takes the default, as before.
+
+- Dataset patches merge with the same function as the rest of the engine
+  rather than `utils::modifyList()`. The two agreed on every shape a column
+  holds today, but on a sequence of mappings `modifyList()` returned the
+  parent untouched and discarded the child's value in silence.
+
+
+- **Styling the package no longer breaks the next commit on Windows.** styler
+  writes files through a text-mode connection, so on Windows every file it
+  restyled came back with CRLF line endings; the `mixed-line-ending`
+  pre-commit hook then reverted them and rejected the commit, which had to be
+  staged and run a second time — after every single styling run. The styler
+  calls now live in `.github/scripts/style.R`, which returns the files it
+  touched to LF before the commit ever sees them. A new `.gitattributes`
+  (`* text=auto eol=lf`) makes line endings a property of the repository
+  instead of each contributor's `core.autocrlf` — whose Git-for-Windows
+  installer default, `true`, would otherwise reproduce the same fight on every
+  checkout. It renormalises nothing: no tracked file held a CR byte.
+
+- `.github/scripts/style.R` is also what the `r-style` workflow runs, as
+  `Rscript .github/scripts/style.R --check`, rather than the workflow inlining
+  its own copy of the styler calls. There is now one definition of "styled"
+  shared by the check and the fix, so the two cannot drift apart, and the
+  documented local command covers `inst/` — 15 files and more R code than `R/`
+  itself — which a bare `styler::style_pkg()` never descends into. The check
+  now also names every unstyled file rather than aborting on the first.
+
+- **One "Edit" menu in the app replaces the "Create new version" button and
+  the "Edit mode" switch.** Editing a specification used to have exactly one
+  door: a loaded document was read-only until you created a new version, and
+  only then did a toggle appear. That forced a version bump on anyone who
+  wanted to correct a typo, and it offered no way to start a fresh
+  specification from an existing one. The brandbar now carries a single Edit
+  menu with three routes — **Create new version** (the same dialogue as
+  before), **Edit current version**, and **Create new from current** — plus
+  **Stop editing** to return to the read-only view. While editing, a tag
+  beside the menu names which of them you are in.
+
+  **A loaded document can now be edited without creating a version.** That is
+  the point of "Edit current version", and it is a deliberate relaxation of
+  the rule introduced one release ago: nothing is written to the version
+  history on that route, so an export records no change summary for it. The
+  menu row says so where you choose it. Take "Create new version" instead
+  whenever the change is one the recipient of the specification should be able
+  to see in its history.
+
+  **"Create new from current" keeps the specification and discards its past.**
+  Every dataset, column and rule is carried over; the version becomes 0.1 and
+  the version history is replaced by a single entry recording which document
+  and version it was derived from. The title and date are left alone for you
+  to change. It asks for confirmation first, because the old history cannot be
+  recovered afterwards.
+
+  The switch is gone rather than hidden, and with it the four places the app
+  had to reset it by hand: edit mode is now server-owned state, so it cannot
+  be left armed behind a control that has been removed from the page — the
+  trap that the landing-page fix below was written for.
+
+- **Given a specification, every column of a delimited file is now read as
+  text, on both paths.** The in-memory reader pinned only the declared columns
+  to text and left Arrow to infer the rest, while a streamed read left the
+  whole file as text — so a column the specification does not mention arrived
+  as a number in memory and as a string when streamed. Both readers now build
+  one plan from one reading of the header, and a specification-driven read
+  types nothing by inference. A bare `read_file()` on a handler, which has no
+  specification to go by, still infers every column as before.
+
+- A table's identity is stamped when it is imported instead of being
+  recomputed on every `check()`. The old signal wrote the whole table to a
+  gzipped temporary file and hashed that, which on a large table cost more
+  than the validation it was there to skip; the stamp now travels with the
+  table, and the fallback hashes the frame directly. What the signal means is
+  unchanged — editing a cell, or carrying different import issues, still
+  changes it — so the skip-if-unchanged gate behaves exactly as before.
+
+- `max_errors` now also bounds the detail retained for a table held in
+  memory, where it previously applied only to a streamed scan. It bounds
+  retained detail alone: the reported counts and the verdict are computed from
+  the complete frames either way, and a capped frame is marked as truncated.
+  There is no spill for an in-memory table, so re-checking with a larger cap
+  recovers the dropped rows.
+
+- A uniqueness rule keyed on a declared-numeric column can now be answered by
+  Arrow's grouped aggregation rather than row by row in R. The key is
+  normalised inside the query the same way R normalises it, so the verdict is
+  the same one; a value Arrow cannot parse makes the query fail and the scan
+  falls back to the per-batch accumulator, as it already did for anything else
+  it could not take.
+
+- A delimited file whose header repeats a column name is refused with a
+  message naming the file, on both paths. Names can collide after quotes and
+  spaces are trimmed as well as before, and the old failure surfaced from deep
+  inside Arrow with no mention of the trimming, the column, or the file.
+
+- `collect_full_errors()` warns when it cannot give back everything: a table
+  checked in memory under a `max_errors` cap keeps only the retained rows,
+  since nothing was spilled to disk, and the function now says how many of the
+  counted rows it is returning instead of handing over the head in silence. It
+  also accepts `axis = "import_typing"` for the import-typing rows of a
+  streamed scan, which are spilled and recoverable like the other two axes.
+
+- An unusable `max_errors` -- `NA`, negative, or more than one value -- is an
+  error rather than being read as "no cap", which is what it silently meant
+  for a table checked in memory.
+
+- **A streamed check parses declared-numeric columns in Arrow.** The reader
+  pins every column to text, and turning that text back into numbers in R
+  was the largest single cost of a scan -- 58% of a clean 1e6 x 20 file by
+  profile. Each batch is now parsed by Arrow instead, but only for the
+  columns in which every value has a form the two parsers are known to
+  agree on bit for bit: at most 15 digits with at most 3 after the point, or
+  at most 9 digits for a declared `Int`. No exponents, no 16th digit, no
+  fourth decimal: R's parser is not correctly rounded, and a one-ULP
+  difference would be enough to make a streamed uniqueness verdict disagree
+  with the in-memory one. A batch holding anything else is typed in R
+  exactly as before, so no result changes; a column found dirty is not
+  retried for a growing number of batches, so a file that is dirty
+  throughout does not keep paying for a test that cannot succeed. The step
+  only pays when a batch is large: every Arrow call costs the same whatever
+  the batch holds, so a batch of a few thousand rows cannot repay it.
+  Measured on a 1e6 x 20 file: 34% slower at 1 MiB blocks, 18% faster at
+  8 MiB (about 50,000 rows a batch), 26% faster at 32 MiB; the dirty variant
+  is unchanged throughout. It therefore engages only for batches of at least
+  `DTAtools.stream_arrow_numeric_min_rows` rows (default 20,000). The 8 MiB
+  default block clears that on a file of ordinary width, so the parse
+  engages; the threshold is what stands it down where a lowered
+  `DTAtools.stream_block_size`, or a row wide enough that 8 MiB holds fewer
+  than 20,000 of them, keeps a batch small.
+  `options(DTAtools.stream_arrow_numeric = FALSE)` sends every column
+  back down the R path; it is a diagnostic switch for comparing the two
+  parsers, not a supported way to change a result.
+
+- **A file declaring a non-UTF-8 encoding can now be validated lazily.**
+  `stream = "always"` (and `"auto"` on a large file) used to refuse such a
+  declaration, because Arrow's dataset scanner has no re-encoding step. The
+  file is now converted once, in bounded memory, to a UTF-8 copy under
+  `tempdir()` that the scan reads; the copy is cached for the session and
+  the table is still identified by the delivered file, so an unchanged
+  delivery is skipped on the next `check()` exactly as a UTF-8 one is.
+  UTF-16, UTF-32 and UCS-2/4 stay refused, since a newline byte is not a
+  character boundary in them.
+
+- Constructing a `DTADataSetTabular` from a data frame is about 30% faster
+  and holds a quarter of the transient memory it did: the frame is typed
+  and turned into an Arrow table once, and stamped with its content hash on
+  the way, instead of being converted to Arrow, back to a frame and to
+  Arrow again. `check()`, `DTADataSetTabular()` and `collect_full_errors()`
+  now say that a table built in memory for an immediate check with complete
+  error detail should be checked with `max_errors = Inf`; the counts and
+  the verdict are exact at any cap.
+
+### Fixed
+
+- **The reference documentation says what the functions actually do.** A review
+  of every exported roxygen block found nineteen help pages stating something
+  untrue, and they are corrected. `?DTAFileTabular` described a class called
+  `C`; `?DTAFileCSV` called CSV "Tab-Separated Values"; `DTAFileCSV`,
+  `DTAFileTSV` and `DTAFileDelim` each named `DTAFile` as their parent when all
+  three descend from `DTAFileTabular`; `?DTADataSet` printed the internal object
+  name `__DTAtools_supported_dataset_types__` where it should have listed
+  `"tabular"` and `"file"`; `columns()` claimed to return metadata;
+  `validate_rules()` pointed at an `applySchemaRules()` that does not exist;
+  `write_table_to_file()` documented `@return NULL` although it returns the
+  table, its name and its checksum; and `rule_check_range()` and
+  `rule_check_unique()` named slots (`@column`, `@range`) that no object in the
+  package carries. The rule pages now describe both spellings their resolver
+  accepts.
+- **Help pages shared by many classes are readable again.** Eighteen `print()`
+  methods, ten `as.list()` methods and the `print_info()`, `print_short_info()`,
+  `names()`, `as_json_schema()` and `as_json_schema_type()` families each merged
+  onto a single page, stacking one title, description and return value per
+  method. `?print` opened as "Print DTA Object", described its argument as a
+  `DTARuleGroupCondition`, and repeated "Invisibly returns the input object"
+  seven times. Each of these pages now carries one authored description covering
+  every class it documents, and the individual methods contribute their call
+  signature only.
+- **`?check` describes validation rather than the package's file layout.** Its
+  first paragraph explained why the generic is defined in `00_helpers.R` given
+  R's alphabetical collation -- a note for maintainers, which now lives beside
+  the code it explains. The page says what `check()` does, which classes have
+  methods, and where to read the verdict afterwards.
+- **Examples run.** Six exported functions shipped an `@examples` section
+  containing only comments, so they had no worked example and no smoke coverage:
+  `rule_check_range()`, `rule_check_unique()`, `rule_check_col_condition()`,
+  `export_specs_table()`, `export_column_value_table()` and
+  `columns_specs_from_word()`. Thirteen further pages had no examples at all,
+  among them the whole result-reading API -- `validation_status()`,
+  `validation_errors()`, `inspect()` and `apply_rules()`. Both gaps are filled.
+  `write_dta()` and `write_dataset_metadata()` were wrapped in `\dontrun{}` only
+  because they wrote into the working directory; they now write to `tempfile()`
+  and are executed like any other example. The 47 redundant `library(DTAtools)`
+  lines that opened examples have been removed.
+- **There is a front door.** `?DTAtools` previously did not exist. The package
+  now has a help page introducing the read-load-check-report workflow, the class
+  hierarchy, document export, the template system, and the options that govern
+  streaming, error retention and Arrow compute.
+- **Ten help pages show their call signature.** `datasets()`, `labels()`,
+  `matches_filename()`, `names()`, `open_file()`, `read_file()`, `as_r_type()`,
+  `as_json_schema()`, `as_json_schema_length()` and `as_json_schema_type()`
+  rendered with no `\usage` section at all, because their generic is declared
+  behind a guard roxygen cannot derive a signature from. Seven pages that
+  documented no return value now do, and titles that merely repeated the
+  function name have been replaced.
+
+- **Editing a metadata field no longer stores the whitespace around it.** A
+  title or version typed with a leading or trailing space was saved exactly as
+  typed, even though the same code already counts a field of nothing but
+  spaces as empty. Those two fields identify the document — they reach the
+  exported Word file, the download filename and the version history — so a
+  stray space registered as a change to a version that renders identically to
+  the one before it. Every metadata field the Metadata tab writes is now
+  stored trimmed. A document already holding a padded value keeps it until
+  that field is next edited, rather than being rewritten on load.
+
+- **Restoring a previous session no longer invents a change baseline.** A
+  document created in this session (from a template, or from nothing)
+  deliberately has no "as loaded" baseline: the first "Create new version"
+  establishes one at the moment of the bump. The restore path could not tell
+  that legitimate NULL from a session file written before the versioning
+  feature existed, and substituted the document as of the last autosave for
+  both. The effect was that the first version's change summary depended on
+  whether the author happened to reload the page before bumping: reload in
+  between, and edits made before the bump were folded into that version's
+  summary; don't, and they were not. Restore now tells the two cases apart
+  the same way it already does when deciding whether the restored document
+  opens read-only.
+
+- **Restoring a specification with no datasets no longer leaves "NA" in the
+  interface.** The restore path took the first dataset name of a document
+  that has none, which in R yields a missing value rather than an empty one,
+  so it reached user-visible text: the validation dock offered to "Run a
+  check on NA", and downloaded files were named "NA_validation_messages". It
+  now leaves no dataset selected, exactly as every other route through the
+  app already does.
+
+- **A specification with no datasets no longer looks broken.** Its workspace
+  opened on an empty panel with nothing to read, and the sidebar's "Check all
+  datasets" button did nothing at all when pressed. The workspace now
+  explains that the specification has no datasets yet and points at "+ Add
+  dataset", and the button, pressed with nothing to check, says so rather
+  than sitting silent. This state was always reachable by removing a
+  specification's last dataset; starting one from nothing makes it the first
+  thing an author sees.
+
+- **Creating a new version no longer strands the document with no way back
+  into edit mode.** The Edit menu withheld its enable-editing row whenever a
+  version entry was open, and the observer behind it refused to fire for the
+  same reason. But an entry stays open for the rest of the session once a
+  version is created, whereas editing stops the moment the author asks it to —
+  so "Create new version", then "Stop editing", left the only remaining route
+  into editing being to create *another* version. The row now follows edit
+  mode itself, and choosing it resumes the open entry rather than starting
+  anything: the entry, its note, and the baseline its change summary diffs
+  against all survive the round trip.
+
+- **A collection can no longer hold two entries under the same identity.**
+  `datasets:` matched each child entry to at most one parent entry and appended
+  the rest unconditionally, so a child could write the same key twice; every
+  rule here addresses an entry by key and takes the first match, which made the
+  second entry unreachable — and made it a way past a seal, since the sealed
+  path compared equal on the untouched first entry while the second carried the
+  value the author actually wanted. `options:` collapsed the same mistake the
+  other way, shadowing the earlier entry and losing it silently. Both are now
+  rejected, naming the repeated key.
+
+- A `required:` path pointing at a list field is no longer satisfied by a list
+  that is structurally non-empty but blank throughout — `supplier: {affiliation:
+  ""}` counted as filled, which is precisely the compound-field case the feature
+  is documented with.
+
+- **The "Edit mode" switch no longer appears in the brandbar on the landing
+  page.** There is no document there to edit, so the slot now stays empty
+  until a specification is loaded or created, and empties again on "Start
+  over". Nothing changes once a document is open: a loaded document still
+  offers "Create new version" until it is versioned, and the switch after
+  that.
+- **The edit control no longer appears in the brandbar on the landing page.**
+  There is no document there to edit, so the slot stays empty until a
+  specification is loaded or created, and empties again on "Start over".
+
+- **Loading a new file over an existing table no longer leaves the old file's
+  verdict in place.** Replacing a table kept the validation result recorded
+  under that name, so `validation_status()` and `messages()` went on
+  reporting the previous delivery as though it described the new one until
+  the dataset was checked again. A replaced table now returns to
+  `not_validated`, as a replaced file target already did.
+
+- **A tabular dataset with no tables loaded is reported as incomplete instead
+  of aborting.** `check()`, `results()` and `messages()` on a DTA containing
+  such a dataset failed outright, which made an ordinary intermediate state —
+  a specification whose deliveries have not arrived yet — impossible to
+  report on at all. The dataset now yields a zero-row status, counts as
+  undelivered rather than passed in the overall summary, and the summary lines
+  say that no tables are loaded.
+
+- **A table or file name containing `{` or `}` no longer aborts the output of
+  `check()`.** Such names reached the console formatter as part of the message
+  text rather than as a value, so a brace in one was read as the start of an
+  interpolation and the run died while printing its own progress. The
+  "cannot be found" and "does not match" messages about a file path had the
+  same fault.
+
+- **A lazily loaded table whose file has since been deleted is reported as a
+  failed target instead of aborting the check.** The scan now records the
+  missing file as a rule error naming the table and the path, and the run
+  carries on to the remaining tables.
+
+- **`check()` on a DTA now forwards `fail_fast`, `on_missing_column` and
+  `use_threads` to its datasets.** They were accepted only one level down, so
+  from the DTA there was no way to ask for `on_missing_column = "stop"` — the
+  structural-only check that answers a table missing a declared column without
+  scanning the file at all.
+
+- `handler_index` on a tabular dataset accepts a character index and defaults
+  to `1`, as its documentation had always promised, and refuses an absent,
+  missing or multiple index with the same message the file-dataset method
+  gives. It previously demanded a number and had no default.
+
+- A `.gz` delivery is stored under the same table name as its uncompressed
+  twin. `sales.csv` and `sales.csv.gz` became two tables, `sales` and
+  `sales.csv`, so re-delivering a file in compressed form quietly added a
+  table instead of replacing one. The names the app binds a file to follow the
+  same rule.
+
+- An object checked with `persist = TRUE` stays usable after its artifact
+  directory disappears. The directory only has to exist while artifacts are
+  being written; requiring it of every later modification meant a cleaned-up
+  temporary directory left the object impossible to edit.
+
+- A DTA holding an entry that is not a dataset aborts `check()` whether or not
+  it is quiet. The check sat inside the branch that prints progress, so
+  `quiet = TRUE` walked straight past a malformed document rather than
+  reporting it.
+
+- **The same file now yields the same rule verdict whether it is read into
+  memory or streamed.** A column the specification does not declare was
+  inferred as a number in memory but read as text when streamed, so a rule
+  reading it — a uniqueness rule over values written `1.5`, `1.50` and `2`,
+  say — could report duplicates on one path and none on the other. Undeclared
+  columns are now read as text on both.
+
+- Looking up a column's declared type while assembling an import-error frame
+  is done once per column rather than once per row, which is what made a large
+  frame of import errors take time out of all proportion to its size.
+
+- **A dataset, table, column or rule whose name contains a literal `{` no
+  longer crashes `print()`, `print_short_info()` or column-spec
+  construction.** Several print methods and the `DTAColumnSpec` validator
+  built their message text by splicing the name next to `{.field ...}`
+  markup (or, for `DTAColumnSpec`, by resolving the message with `glue`)
+  before handing the finished string to `cli`, which parses `{...}` in
+  whatever text it is given; a brace in the data was read back as an
+  expression to evaluate. Affected: `print(DTA)`, `print(DTADataSetTabular)`,
+  `print_short_info(DTADataSet)` and through it `DTADataSetFile`, the
+  `DTAColumnSpec` validator's messages, `print(DTARuleColUnique)` and
+  `print_short_info(DTAMetaData)`. Every value now reaches `cli` through its
+  own interpolation, which escapes braces in the substituted value.
+
+- A table loaded lazily from a file whose declared encoding is not UTF-8 is
+  scanned through a UTF-8 copy made at load time. When the delivery changed
+  afterwards, `check()` correctly saw the change but then rescanned the
+  stale copy, reporting the previous data's verdict and row count as a
+  fresh result. The copy is now re-made and re-opened before the scan.
+
+- A quoted value containing a line break reached the streaming reader one
+  character shorter than the in-memory reader, because the conversion of a
+  non-UTF-8 file normalised CRLF and a lone CR to LF. The copy is now
+  byte-faithful, so both readers see the same value in every cell, and the
+  conversion is about 15% faster than the line-based one it replaces
+  (21 MB/s on a 172 MiB Latin-1 CSV).
+
+- An encoding name `iconv()` does not know (`"latin-1"` for `"latin1"`, say)
+  surfaced as a base-R error in the system language, naming neither the file
+  nor the handler that declared it. It is now reported by this package
+  before the file is opened, naming both and pointing at `iconvlist()`.
+
+- Re-delivering a file whose declared encoding is not UTF-8 left the
+  previous session-temporary UTF-8 copy on disk. A session now holds at most
+  one copy per delivered path.
+
 ## [0.24.0] - 2026-08-31
 
 ### Added
@@ -2821,7 +3399,8 @@ All of the following belong to the manifest verification work above.
 
 - Initial internal release
 
-[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.20.1...v0.23.0
 [0.20.1]: https://github.com/Boehringer-Ingelheim/DTAtoolsR/compare/v0.18.1...v0.20.1

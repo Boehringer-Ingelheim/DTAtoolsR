@@ -16,7 +16,9 @@ DTAFileDelim(
   sep = "\\t",
   has_header = TRUE,
   quote = "\\"",
-  missing_values = ""
+  missing_values = "",
+  newlines_in_values = FALSE,
+  encoding = "UTF-8"
 )
 }
 \arguments{
@@ -29,8 +31,11 @@ pattern. Default is \code{FALSE}.}
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}
 
-\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
-expected. Default is \code{1}.}
+\item{number_of_files}{Numeric or \code{NULL}; the exact number of files
+expected. Must be a single value -- a length-2 vector is an error, not a
+range. Default is \code{1}. To express a range, set
+\code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+\code{number_of_files} alongside either of them is an error.}
 
 \item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
 expected.}
@@ -53,14 +58,27 @@ is \code{'"'}.}
 (for instance \code{"."} in the SAS convention), honoured in addition to
 the empty string. The default \code{""} declares nothing and keeps the
 reader's own missing set.}
+
+\item{newlines_in_values}{Logical; \code{TRUE} if a quoted field may contain
+a line break. Default \code{FALSE}. See \code{\link{DTAFileTabular}}.}
+
+\item{encoding}{Character; the file's character encoding. Default
+\code{"UTF-8"}. See \code{\link{DTAFileTabular}}.}
 }
 \value{
 An object of class \code{DTAFileDelim}.
 }
 \description{
-Defines the S7 class \code{DTAFileDelim}, which extends \code{DTAFile}
-to represent metadata and configuration for TSV (Tab-Separated Values)
-data files.
+Defines the S7 class \code{DTAFileDelim}, which extends
+\code{\link{DTAFileTabular}} to represent metadata and configuration for
+delimited data files with a caller-supplied separator. Unlike
+\code{\link{DTAFileCSV}} and \code{\link{DTAFileTSV}}, which fix the
+separator, this class takes it as the \code{sep} argument (tab by default).
+}
+\examples{
+# A pipe-delimited file.
+handler <- DTAFileDelim(filename = "readings.psv", sep = "|")
+matches_filename(handler, "readings.psv")
 }
 \seealso{
 \code{\link{DTAFile}}

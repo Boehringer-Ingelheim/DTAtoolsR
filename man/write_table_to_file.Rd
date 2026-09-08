@@ -46,16 +46,24 @@ is FALSE, so a call against an existing path aborts unless \code{overwrite = TRU
 
 \item{compression}{Character. Compression method, either "none" or "gzip". Default is "none".}
 
-\item{get_md5sum}{Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.}
+\item{get_md5sum}{Logical. Whether to compute the MD5 checksum of the file
+just written. When FALSE, no checksum is computed, the returned
+\code{md5sum} element is \code{NA}, and no sidecar file is written
+whatever \code{write_md5sum_to_file} says. Default is TRUE.}
 
-\item{write_md5sum_to_file}{Logical. Whether to calculate and print the MD5 checksum of the file. MD5SUM and number of rows and columns of file will be also saved in an additional file. Default is TRUE.}
+\item{write_md5sum_to_file}{Logical. Whether the checksum and the file's
+row and column counts are also written to a sidecar metadata file beside
+the output. Only consulted when \code{get_md5sum = TRUE}. Default is TRUE.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
 \item{...}{Additional arguments passed to write.table.}
 }
 \value{
-NULL. The function writes the table to a file.
+Invisibly, a list with \code{tables} (the data as written),
+\code{table} (the table's name) and \code{md5sum} (the checksum, or
+\code{NA} when \code{get_md5sum = FALSE}). Called mainly for the side
+effect of writing the file.
 }
 \description{
 Write a named DTA table saved in a DTADataSetTabular object to a file.

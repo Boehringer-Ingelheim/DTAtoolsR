@@ -14,7 +14,7 @@ img
 .pre-commit-config.yaml
 ^\.github$
 CHANGELOG.md
-.lock
+.lock$
 ^\.Rprofile$
 ^DTATOOLSR_METADATA_IMPLEMENTATION\.md$
 ^bla\.md$
@@ -56,6 +56,7 @@ CHANGELOG.md
 ^\.claude$
 ^\.claude/
 ^\.graphifyignore$
+^\.gitattributes$
 
 # Planning directory — never part of the shipped package
 ^thoughts$

@@ -8,9 +8,8 @@ dta_stream_unique_precompute(specs, source, rules_list)
 }
 \arguments{
 \item{specs}{A \code{DTAColumnSpecCollection}. Consulted by
-\code{\link[=dta_arrow_unique_eligible]{dta_arrow_unique_eligible()}} for the key columns' declared types: a
-declared-numeric key is keyed on its coerced numbers by the per-batch
-path, which Arrow's raw-text grouping would not reproduce.}
+\code{\link[=dta_arrow_unique_eligible]{dta_arrow_unique_eligible()}} for the key columns' declared types, which
+decide which key columns are normalised as numbers before grouping.}
 
 \item{source}{A table representation to be scanned (typically the
 \code{Dataset} the streaming driver was opened from).}
@@ -38,4 +37,34 @@ The whole computation is one extra streaming pass over just the key
 columns, run once before the main batch loop rather than accumulated
 alongside it.
 }
+\section{Declared-numeric key columns}{
+
+A key column the specs declare \code{Num} or \code{Int} is grouped on
+\code{as.numeric(col)}, so that Arrow keys it on the same values the per-batch
+accumulator keys its coerced column on -- \code{"1.50"} and \code{"1.5"} are one key on
+both. Two properties of that cast are what make it safe, both measured on
+arrow 25.0.1 rather than assumed:
+\itemize{
+\item it is exact where it succeeds. Every string both engines accept parses to
+the identical double, \code{"1e2"}, \code{"007"}, \code{".5"}, \code{"Inf"} and
+\code{"18446744073709551616"} included.
+\item it ERRORS where it would have to guess. \code{"abc"}, \code{"0x10"} and \code{" 3"} --
+all of which R's parser accepts or turns into \code{NA} -- make Acero raise,
+which the \code{tryCatch} below turns into the per-batch fallback. Divergence
+is therefore not a wrong answer but a slower correct one.
+}
+
+One normalisation is still required on top: \code{-0} and \code{0} are one value to
+\code{duplicated()} (the key encoding adds \code{+ 0} for exactly this) and two groups
+to Acero, so the cast is followed by \code{if_else(k == 0, 0, k)}. Measured on the
+eight values \verb{NaN, NaN, <missing>, <missing>, -0, 0, 1.5, 1.50}, which
+\code{duplicated()} calls 4 duplicates: without the fold Acero reported 3.
+
+No \code{NaN} normalisation is applied, deliberately. Acero already groups \code{NaN}
+with itself and apart from null, which is exactly what the R key does --
+\code{dta_row_key()} masks only \code{is.na(x) & !is.nan(x)}, leaving \code{NaN} its own
+rendering. Folding \code{NaN} into null as well took those same eight values to 5
+duplicates, one more than the table contains.
+}
+
 \keyword{internal}

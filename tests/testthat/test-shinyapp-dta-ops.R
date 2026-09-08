@@ -639,6 +639,35 @@ test_that("dta_set_metadata_field unsets an optional nullable field on blank inp
   expect_null(metadata(res$value)@date)
 })
 
+test_that("dta_set_metadata_field stores a scalar field trimmed", {
+  # The function's own blank test treats surrounding whitespace as absence of
+  # content, so storing it would contradict a rule it has already applied. It
+  # matters most for the two fields that identify the document: an untrimmed
+  # title reaches the exported document and the version-history diff, where it
+  # reads as a change to a version that renders identically to the last one.
+  fn <- app_fn("dta_set_metadata_field")
+
+  res <- fn(app_fixture_dta(), "title", "  Padded Title  ")
+  expect_true(res$ok)
+  expect_equal(metadata(res$value)@title, "Padded Title")
+
+  res_v <- fn(app_fixture_dta(), "version", "\t2.0\n")
+  expect_true(res_v$ok)
+  expect_equal(metadata(res_v$value)@version, "2.0")
+})
+
+test_that("dta_set_metadata_field leaves a non-character field alone when trimming", {
+  # authorized_for_corrections is character OR list; trimws() on a list would
+  # corrupt it, which is why the trim is guarded on is.character(). A list
+  # value has to survive the round trip untouched.
+  fn <- app_fn("dta_set_metadata_field")
+
+  res <- fn(app_fixture_dta(), "authorized_for_corrections", list("  Alice  ", "Bob"))
+
+  expect_true(res$ok)
+  expect_equal(metadata(res$value)@authorized_for_corrections, list("  Alice  ", "Bob"))
+})
+
 test_that("dta_set_metadata_field returns ok=FALSE without throwing for an unknown field", {
   fn <- app_fn("dta_set_metadata_field")
 

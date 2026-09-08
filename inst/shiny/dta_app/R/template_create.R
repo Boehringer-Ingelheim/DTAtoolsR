@@ -94,7 +94,7 @@ load_template_definition <- function(ref, index = NULL, kind = "dta_creation_tem
     }
 
     resolved <- resolve_template_inheritance(read$value, template_index_resolver(index))
-    def <- resolved$def
+    def <- dta_template_finalize_def(resolved$def)
 
     # Abstract exists ONLY to be extended: a family's shared base/options/
     # datasets live there so every concrete descendant states just its own

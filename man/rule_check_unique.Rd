@@ -11,7 +11,9 @@ rule_check_unique(rule, df, numeric_cache = NULL)
 \itemize{
 \item \verb{@id} character
 \item \verb{@type} = "check_unique"
-\item \verb{@column} character: name of the column to check
+\item the target columns, spelled either \verb{@columns} (what
+\code{\link[=DTARuleColUnique]{DTARuleColUnique()}} stores) or \verb{@column}. Several columns are checked
+as a combination: it is the tuple that must be unique.
 }}
 
 \item{df}{A data.frame to validate.}
@@ -29,5 +31,9 @@ Ensures that all values in the specified column are unique.
 Repeated \code{NA} values are considered duplicates by base R \code{duplicated()}.
 }
 \examples{
-# rule_check_unique(rule, df)
+df <- data.frame(SUBJID = c("S1", "S2", "S2"), stringsAsFactors = FALSE)
+rule <- DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID")
+
+# "S2" appears twice.
+rule_check_unique(rule, df)
 }

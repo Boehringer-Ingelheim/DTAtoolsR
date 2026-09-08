@@ -7,13 +7,20 @@
 dta_strip_compression_extension(file_name)
 }
 \arguments{
-\item{file_name}{Character. A file's basename.}
+\item{file_name}{Character. One or more file basenames.}
 }
 \value{
-The name with a trailing compression extension removed, unchanged
-when it has none.
+The names with a trailing compression extension removed, unchanged
+where there is none.
 }
 \description{
 Drop a Compression Suffix From a Filename
+}
+\details{
+Vectorised, like the \verb{tools::file_*} functions it is built from. It reads as
+a scalar helper and every caller passes one name, but an \code{if} on the
+extension turns a two-element vector into R's own "the condition has
+length > 1" -- raised from wherever the vector came from, which is never
+where the reader is looking. \code{ifelse()} answers per element instead.
 }
 \keyword{internal}

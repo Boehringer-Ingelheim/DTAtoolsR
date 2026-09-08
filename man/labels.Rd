@@ -3,6 +3,9 @@
 \name{labels}
 \alias{labels}
 \title{List of tables labels within DTADataSetTabular Object}
+\usage{
+labels(object, ...)
+}
 \arguments{
 \item{object}{An object of class DTADataSetTabular}
 

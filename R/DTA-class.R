@@ -70,7 +70,6 @@ DTA <- S7::new_class(
 #' @param ... Not used by current methods; reserved for future extensions.
 #' @return A list with metadata information
 #' @examples
-#' library(DTAtools)
 #' dta_obj <- create_example_DTA()
 #' metadata(dta_obj)
 #' @name metadata
@@ -87,17 +86,21 @@ method(metadata, DTA) <- function(x) {
 #' Method to get one or more datasets from a DTA object.
 #' @importFrom cli cli_alert_info cli_abort
 #' @param x An object of class DTA.
-#' @param name Optional single character or single integer. if NULL, returns a
-#' list of all datasets. If character, returns the datasets with the specified name.
-#' If integer, returns the datasets at the specified index.
+#' @param ... Additional named arguments:
+#'   \describe{
+#'     \item{name}{Optional single character or single integer. If NULL
+#'       (the default), returns a list of all datasets. If character, returns
+#'       the dataset with that name. If integer, returns the dataset at that
+#'       index.}
+#'   }
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
-#' library(DTAtools)
 #' x <- create_example_DTA()
 #' datasets(x)
 #' datasets(x, "vitals")
 #' datasets(x, 1)
 #' @name datasets
+#' @usage datasets(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain `datasets` function would make
@@ -235,11 +238,37 @@ method(`[`, DTA) <- function(x, i) {
 #' table large enough to matter streams by default. Either explicit
 #' \code{stream} value still overrides the guess.
 #'
+#' @section Options a streamed load is subject to:
+#' \describe{
+#'   \item{\code{DTAtools.stream_threshold}}{The size, in bytes, above which
+#'     \code{stream = "auto"} keeps a file lazy. 512 MB by default.}
+#'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+#'     delimited file, 8 MiB by default. Read during \code{\link{check}()}
+#'     rather than here, and what governs a scan's peak memory.}
+#'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+#'     whose declared \code{encoding} is not UTF-8 is converted, at load time,
+#'     to the UTF-8 copy the scan will read (see
+#'     \code{\link{DTAFileTabular}()}). 4 MiB by default; it bounds the
+#'     converter's buffer and does not change the copy.}
+#'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default. A
+#'     diagnostic switch over how a streamed batch's declared-numeric columns
+#'     are parsed; see \code{\link{check}()}.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The smallest batch for which that Arrow parse is attempted; a smaller
+#'     batch is typed in R, which is cheaper at that size. See
+#'     \code{\link{check}()}.}
+#' }
+#'
 #' @param x A \code{DTA} or \code{DTADataSetTabular} object.
 #' @param ... Additional arguments passed to the method.
 #' @return The updated object.
 #' @seealso \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
-#'   arguments tune the scan of a streamed table.
+#'   arguments tune the scan of a streamed table. On a delimited file a batch is
+#'   one Arrow read block of about
+#'   \code{getOption("DTAtools.stream_block_size")} bytes (8 MiB by default);
+#'   \code{batch_rows} only caps a batch that is already larger, so peak memory
+#'   during a scan follows the block size times Arrow's read-ahead rather than
+#'   \code{batch_rows}.
 #' @name load_file
 #' @export
 load_file <- new_generic("load_file", "x")
@@ -258,8 +287,10 @@ load_file <- new_generic("load_file", "x")
 #'       handler within the dataset. Defaults to \code{1}.}
 #'     \item{name}{Optional name under which the loaded item is stored. When
 #'       omitted, each dataset type applies its own default: a tabular dataset
-#'       names the table after the file with its extension stripped, a file
-#'       dataset keeps the full file name, which is the key it reports under.}
+#'       names the table after the file with any compression suffix and then
+#'       its extension stripped (so \code{x.csv} and \code{x.csv.gz} name the
+#'       same table), a file dataset keeps the full file name, which is the key
+#'       it reports under.}
 #'     \item{stream}{One of \code{"auto"} (the default), \code{"always"} or
 #'       \code{"never"}, or a single logical. Decides whether the table is read
 #'       into memory or kept lazy and scanned in batches -- see the generic's
@@ -357,6 +388,11 @@ dta_count_noun <- function(n, singular, plural) {
 #' @param n_valid Integer. Targets judged a pass.
 #' @param n_invalid Integer. Targets judged a failure.
 #' @param n_unchecked Integer. Targets carrying no verdict either way.
+#' @param n_undelivered Integer. 1 when the dataset holds no target at all, 0
+#'   otherwise. A dataset with nothing bound has no target to be unchecked, so
+#'   `n_unchecked` is zero for it and every branch below would read it as a
+#'   clean run over an empty world -- the same "certificate covering zero
+#'   checks" the unchecked tally exists to prevent, one level up.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
@@ -364,7 +400,8 @@ dta_dataset_summary_message <- function(n_targets,
                                         n_validated,
                                         n_valid,
                                         n_invalid,
-                                        n_unchecked) {
+                                        n_unchecked,
+                                        n_undelivered = 0) {
   unchecked_tail <- if (n_unchecked > 0) {
     paste0("; ", dta_count_noun(n_unchecked, "target", "targets"), " not checked")
   } else {
@@ -378,6 +415,15 @@ dta_dataset_summary_message <- function(n_targets,
         dta_count_noun(n_validated, "table", "tables"), " validated: ",
         n_valid, " valid, ", n_invalid, " INVALID", unchecked_tail
       )
+    ))
+  }
+
+  # Said in its own words rather than as "0 of 0 tables valid", which reads
+  # like a verdict on data that exists.
+  if (n_undelivered > 0) {
+    return(list(
+      severity = "warning",
+      text = "0 tables validated: no tables loaded"
     ))
   }
 
@@ -414,13 +460,18 @@ dta_dataset_summary_message <- function(n_targets,
 #' @param total_invalid Integer. Targets judged a failure, across all datasets.
 #' @param total_import_errors Integer. Values that could not be represented in
 #'   their declared type, including the metadata axis.
-#' @param total_unchecked Integer. Targets carrying no verdict either way.
+#' @param total_unchecked Integer. Targets carrying no verdict either way,
+#'   datasets holding no target at all included.
+#' @param total_undelivered Integer. How many of `total_unchecked` are whole
+#'   datasets with nothing bound. Named separately in the line because "1 target
+#'   was not checked" says nothing about which target, and there is none.
 #' @return A list of `severity` (`"danger"`, `"warning"` or `"success"`) and
 #'   `text`.
 #' @keywords internal
 dta_overall_summary_message <- function(total_invalid,
                                         total_import_errors,
-                                        total_unchecked) {
+                                        total_unchecked,
+                                        total_undelivered = 0) {
   unchecked_tail <- if (total_unchecked > 0) {
     paste0("; ", dta_count_noun(total_unchecked, "target", "targets"), " not checked")
   } else {
@@ -450,12 +501,22 @@ dta_overall_summary_message <- function(total_invalid,
   }
 
   if (total_unchecked > 0) {
+    undelivered_tail <- if (total_undelivered > 0) {
+      paste0(
+        " (", dta_count_noun(total_undelivered, "dataset", "datasets"),
+        " with no tables loaded)"
+      )
+    } else {
+      ""
+    }
+
     return(list(
       severity = "warning",
       text = paste0(
         "Validation INCOMPLETE: ",
         dta_count_noun(total_unchecked, "target", "targets"), " ",
-        if (total_unchecked == 1) "was" else "were", " not checked"
+        if (total_unchecked == 1) "was" else "were", " not checked",
+        undelivered_tail
       )
     ))
   }
@@ -497,6 +558,46 @@ dta_emit_summary_message <- function(summary_message) {
 #' @description
 #' Validates all datasets within a \code{DTA} object, or a specific dataset.
 #' Provides comprehensive validation summary across all datasets.
+#'
+#' @section Options that tune a scan:
+#' Three options change how a streamed table is read. None of them changes
+#' what is reported: a table gets the same verdict, the same counts and the
+#' same error detail whatever they are set to.
+#'
+#' \describe{
+#'   \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
+#'     delimited file, 8 MiB by default. This -- times Arrow's read-ahead --
+#'     is what governs peak memory during a scan; \code{batch_rows} only
+#'     \emph{caps} a batch that is already larger. The default is eight
+#'     times Arrow's own 1 MiB, which on eight threads cost 48 MB of measured
+#'     read-ahead and bought batches large enough for the Arrow numeric parse
+#'     below to engage. Rows per batch is about the block divided by the width
+#'     of a row, so a file much wider than 420 bytes a row wants more.}
+#'   \item{\code{DTAtools.stream_arrow_numeric}}{\code{TRUE} by default.
+#'     Whether a batch whose declared-numeric columns are entirely composed of
+#'     values Arrow and R are known to parse identically is converted inside
+#'     Arrow rather than in R. It is a diagnostic switch: set it to
+#'     \code{FALSE} to send every column down the R path and confirm that a
+#'     surprising number came from the data rather than from the fast path. A
+#'     column with one unconvertible value takes the R path regardless, which
+#'     is where the value is recorded as an import error.}
+#'   \item{\code{DTAtools.stream_arrow_numeric_min_rows}}{20,000 by default.
+#'     The Arrow parse is attempted only for a batch of at least this many
+#'     rows: every Arrow call costs the same whatever the batch holds, so on a
+#'     batch of a few thousand rows the R parse is cheaper. Measured on a
+#'     1e6 x 20 file, the Arrow path was 34\% slower at 1 MiB blocks, 18\%
+#'     faster at 8 MiB (about 50,000 rows a batch) and 26\% faster at 32 MiB.
+#'     The 8 MiB default block clears the threshold on a file of ordinary
+#'     width, so the parse engages; it stands down on a narrow batch, which is
+#'     what a lowered \code{DTAtools.stream_block_size} or a very wide row
+#'     produces.}
+#'   \item{\code{DTAtools.transcode_block_bytes}}{Bytes per pass when a file
+#'     whose declared \code{encoding} is not UTF-8 is converted to the UTF-8
+#'     copy a lazy scan reads (see \code{\link{DTAFileTabular}()}), 4 MiB by
+#'     default. It bounds the converter's buffer; the copy is identical
+#'     whatever it is set to.}
+#' }
+#'
 #' @param x An object of class \code{DTA}.
 #' @param ... Additional named arguments:
 #'   \describe{
@@ -512,16 +613,43 @@ dta_emit_summary_message <- function(summary_message) {
 #'     \item{batch_rows}{Integer. Rows per batch when scanning a table that was
 #'       loaded with \code{stream = "always"} (see \code{\link{load_file}}).
 #'       Ignored for tables held in memory. Defaults to
-#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}.}
-#'     \item{max_errors}{Integer, or NULL to hold everything in memory. Cap on
-#'       the number of per-cell errors whose detail is held in RAM while
-#'       scanning. Defaults to \code{getOption("DTAtools.max_errors", 10000L)};
-#'       the default is finite because retention is one row per bad cell, so an
-#'       unbounded cap exhausts memory on a large dirty file exactly as holding
-#'       the data would. Rows past the cap spill to a session-temporary store
-#'       and \code{\link{collect_full_errors}()} reassembles the complete
-#'       detail; counts and the verdict are exact either way. Ignored for
-#'       tables held in memory.}
+#'       \code{getOption("DTAtools.stream_batch_rows", 131072L)}. On a delimited
+#'       file a batch is one Arrow read block of about
+#'       \code{getOption("DTAtools.stream_block_size")} bytes (8 MiB by
+#'       default), and \code{batch_rows} only caps a batch that is already
+#'       larger, so peak memory follows the block size times Arrow's read-ahead
+#'       rather than \code{batch_rows}. It does bind at the top end: past about
+#'       16 MiB of block on a file of ordinary width, the row cap rather than
+#'       the block decides how large a batch gets.}
+#'     \item{max_errors}{Integer, \code{Inf}, or NULL to hold everything in
+#'       memory. Cap on the number of per-cell errors whose detail is held in
+#'       RAM while scanning. Defaults to
+#'       \code{getOption("DTAtools.max_errors", 10000L)}; the default is finite
+#'       because retention is one row per bad cell, so an unbounded cap
+#'       exhausts memory on a large dirty file exactly as holding the data
+#'       would. Rows past the cap spill to a session-temporary store and
+#'       \code{\link{collect_full_errors}()} reassembles the complete detail;
+#'       counts and the verdict are exact either way -- the cap decides how
+#'       much detail is kept, never what the answer is. It applies to a table
+#'       held in memory as well, where it bounds retained detail only: there is
+#'       no spill there, so the dropped rows are recovered only by checking
+#'       again with a larger cap. A table constructed in R and checked straight
+#'       away, whose complete detail is wanted, should therefore pass
+#'       \code{max_errors = Inf} -- it is already in memory, so the cap buys
+#'       nothing and costs the detail.}
+#'     \item{fail_fast}{Logical, default FALSE. Stop at the first batch that
+#'       shows any problem instead of scanning to the end. Forwarded to every
+#'       dataset; see \code{\link{check}()} on a \code{DTADataSetTabular} for
+#'       what a partial report does and does not say. Ignored for tables held
+#'       in memory.}
+#'     \item{on_missing_column}{One of \code{"scan"} (default) or
+#'       \code{"stop"}. Whether a column the specs require but the table lacks
+#'       is reported once per row (by reading the whole table) or structurally,
+#'       reading nothing. Forwarded to every dataset, and unlike the two
+#'       arguments around it, it applies to tables held in memory as well.}
+#'     \item{use_threads}{Logical, default TRUE. Whether Arrow's Scanner uses
+#'       multiple threads while scanning. FALSE is the lever for resident
+#'       memory rather than speed. Ignored for tables held in memory.}
 #'     \item{benchmark}{Logical. If TRUE, measures runtime and memory for this
 #'       call and attaches the result as the \code{"benchmark"} attribute.
 #'       Defaults to \code{getOption("DTAtools.benchmark", FALSE)}. Opt-in
@@ -535,7 +663,10 @@ dta_emit_summary_message <- function(summary_message) {
 #'   \describe{
 #'     \item{\code{"last_validation_summary"}}{data.frame with one row per
 #'       dataset and columns dataset, n_targets, n_validated, n_valid,
-#'       n_invalid, n_skipped, n_unchecked, n_import_errors.}
+#'       n_invalid, n_skipped, n_unchecked, n_undelivered, n_import_errors.
+#'       \code{n_undelivered} is 1 for a dataset that holds no target at all -
+#'       it has no unchecked target to count, yet nothing about it was
+#'       checked.}
 #'     \item{\code{"last_metadata_summary"}}{one-row data.frame for the metadata
 #'       axis, with columns scope, status, import_valid, n_import_errors, fields,
 #'       ok. Metadata belongs to the \code{DTA} itself rather than to any
@@ -543,8 +674,9 @@ dta_emit_summary_message <- function(summary_message) {
 #'       row of the per-dataset summary.}
 #'     \item{\code{"last_validation_ok"}}{single logical, \code{TRUE} only when
 #'       no dataset is invalid, no table has an import error, the metadata
-#'       imported cleanly, and no target -- e.g. a table checked against zero
-#'       column specs -- was left unchecked.}
+#'       imported cleanly, no target -- e.g. a table checked against zero
+#'       column specs -- was left unchecked, and every dataset had something to
+#'       check in the first place.}
 #'     \item{\code{"benchmark"}}{Present only when \code{benchmark = TRUE}. A
 #'       one-row data.frame of runtime/memory metrics; see
 #'       \code{\link{validation_benchmark}}. \code{rows} is \code{NA} at this
@@ -586,8 +718,19 @@ method(check, DTA) <- function(
   validation_run = NULL,
   batch_rows = getOption("DTAtools.stream_batch_rows", 131072L),
   max_errors = getOption("DTAtools.max_errors", 10000L),
+  # Forwarded to every dataset, exactly like batch_rows/max_errors. They were
+  # missing here, so the only way to reach the scan controls -- including
+  # on_missing_column = "stop", the one that turns a 60 GB read into a header
+  # comparison -- was to take each dataset out of the DTA and check it alone.
+  fail_fast = FALSE,
+  on_missing_column = c("scan", "stop"),
+  use_threads = TRUE,
   benchmark = getOption("DTAtools.benchmark", FALSE)
 ) {
+  # Matched once, here, so a typo is reported before any dataset is touched
+  # rather than after the first one has been scanned.
+  on_missing_column <- match.arg(on_missing_column, c("scan", "stop"))
+
   if (is.null(x@datasets) || length(x@datasets) == 0) {
     cli_abort("DTA object has no datasets to check.")
   }
@@ -627,7 +770,7 @@ method(check, DTA) <- function(
   n_datasets <- length(target_datasets)
   dataset_word <- if (n_datasets == 1) "Dataset" else "Datasets"
   if (!isTRUE(quiet)) {
-    cli::cli_alert_info(paste0("Validating ", n_datasets, " ", dataset_word))
+    cli::cli_alert_info("Validating {n_datasets} {dataset_word}")
   }
 
   if (is.null(validation_run)) {
@@ -639,15 +782,21 @@ method(check, DTA) <- function(
   for (ds_name in target_datasets) {
     ds <- x@datasets[[ds_name]]
 
+    # Aborts whether or not the run is quiet. `quiet` governs how much is
+    # PRINTED, never what is checked: skipping the entry under quiet = TRUE
+    # left it out of the rollup entirely, so a DTA holding a non-dataset
+    # (anything a hand-edited document or a bad deserialisation can produce)
+    # reported last_validation_ok = TRUE -- a pass over an object nothing had
+    # looked at.
+    #
+    # The name is interpolated rather than pasted in: it is arbitrary text, and
+    # a `{` in it would be parsed as a cli expression.
     if (!inherits(ds, "DTAtools::DTADataSet")) {
-      if (!isTRUE(quiet)) {
-        cli_abort(paste0("Dataset '", ds_name, "' is not a DTADataSet object."))
-      }
-      next
+      cli::cli_abort("Dataset {.field {ds_name}} is not a DTADataSet object.")
     }
 
     if (!isTRUE(quiet)) {
-      cli::cli_h1(paste0("Dataset: ", ds_name))
+      cli::cli_h1("Dataset: {ds_name}")
     }
 
     # Check the dataset. `check()` returns a (possibly new) validated copy of
@@ -666,7 +815,10 @@ method(check, DTA) <- function(
       # Only meaningful for a table that was loaded lazily; both dataset
       # methods accept them so this call does not have to know which it has.
       batch_rows = batch_rows,
-      max_errors = max_errors
+      max_errors = max_errors,
+      fail_fast = fail_fast,
+      on_missing_column = on_missing_column,
+      use_threads = use_threads
     )
     x@datasets[[ds_name]] <- ds
 
@@ -688,6 +840,12 @@ method(check, DTA) <- function(
     # (see dta_validation_result_to_row()), so they already sit inside
     # n_valid/n_invalid.
     n_unchecked <- n_targets - n_valid - n_invalid
+    # A dataset holding NOTHING has no target to be unchecked: every count
+    # above is zero, and zero unchecked targets is exactly what a clean run
+    # looks like. So the dataset itself is counted as the outstanding item --
+    # otherwise a DTA whose data has not been delivered at all printed
+    # "Validation PASSED: All datasets are valid" over a run that read no file.
+    n_undelivered <- as.integer(n_targets == 0)
 
     summary_rows[[length(summary_rows) + 1]] <- data.frame(
       dataset = ds_name,
@@ -697,6 +855,7 @@ method(check, DTA) <- function(
       n_invalid = n_invalid,
       n_skipped = n_skipped,
       n_unchecked = n_unchecked,
+      n_undelivered = n_undelivered,
       n_import_errors = n_import_errors,
       stringsAsFactors = FALSE
     )
@@ -708,7 +867,8 @@ method(check, DTA) <- function(
         n_validated = n_validated,
         n_valid = n_valid,
         n_invalid = n_invalid,
-        n_unchecked = n_unchecked
+        n_unchecked = n_unchecked,
+        n_undelivered = n_undelivered
       ))
     }
   }
@@ -765,7 +925,12 @@ method(check, DTA) <- function(
   # `n_unchecked` above. Left out of `overall_ok`, a DTA whose datasets declare
   # zero-column specs would satisfy `total_invalid == 0 && total_import_errors
   # == 0` and print "Validation PASSED" over a run that checked nothing.
-  total_unchecked <- sum(summary_df$n_unchecked, na.rm = TRUE)
+  # A dataset with nothing bound is folded in here rather than tallied on an
+  # axis of its own: from the DTA's point of view it is the same kind of
+  # outstanding work as a target that carried no verdict, and it has to keep
+  # `overall_ok` FALSE for the same reason.
+  total_undelivered <- sum(summary_df$n_undelivered, na.rm = TRUE)
+  total_unchecked <- sum(summary_df$n_unchecked, na.rm = TRUE) + total_undelivered
   overall_ok <- total_invalid == 0 && total_import_errors == 0 && total_unchecked == 0
 
   if (!isTRUE(quiet)) {
@@ -773,7 +938,8 @@ method(check, DTA) <- function(
     dta_emit_summary_message(dta_overall_summary_message(
       total_invalid = total_invalid,
       total_import_errors = total_import_errors,
-      total_unchecked = total_unchecked
+      total_unchecked = total_unchecked,
+      total_undelivered = total_undelivered
     ))
   }
 
@@ -793,16 +959,49 @@ method(check, DTA) <- function(
 }
 
 
-#' @title Print DTA Object
+#' @title Print a DTAtools Object
 #' @description
-#' Print method for DTA objects.
-#' @param x An object of class DTA
-#' @param ... Additional arguments (not used)
-#' @return Invisibly returns the input object
+#' Prints a readable summary of any DTAtools object. A method is defined for
+#' every class the package exports, so \code{print()} works on a whole
+#' agreement, on a dataset, on a file handler, on a column specification and on
+#' a rule.
+#'
+#' What is shown depends on the class. A \code{\link{DTA}} prints its metadata
+#' heading and one line per dataset; a \code{\link{DTADataSetTabular}} prints
+#' its name, file handlers and tables; a \code{\link{DTAFile}} handler prints
+#' the filename or pattern and how many files it expects; a
+#' \code{\link{DTAColumnSpec}} prints its declared type, format and permitted
+#' values; a \code{\link{DTARule}} prints its type and the columns it
+#' constrains.
+#'
+#' \code{\link{print_info}()} gives a fuller, multi-line form of the same
+#' object and \code{\link{print_short_info}()} a one-line form.
+#' @param x A DTAtools object.
+#' @param ... Additional arguments (not used).
+#' @return Invisibly, \code{x}.
 #' @importFrom cli cli_alert_info cli_h1 cli_alert cli_text cli_div
 #' @examples
-#' dta_obj <- create_example_DTA()
-#' print(dta_obj)
+#' # A whole agreement, and a dataset inside it.
+#' print(create_example_DTA())
+#' print(create_example_DTADataSetTabular())
+#'
+#' # Column specifications, singly and as a collection.
+#' print(create_example_DTAColumnSpec())
+#' print(create_example_DTAColumnSpecCollection())
+#' print(DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12))
+#'
+#' # File handlers, including one for a deliverable that is never parsed.
+#' print(create_example_DTAFileCSV())
+#' print(create_example_DTAFileTSV())
+#' print(DTAFileDelim("readings.psv", sep = "|"))
+#' print(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
+#'
+#' # Metadata, and one rule of each kind.
+#' print(create_example_DTAMetaData())
+#' print(create_example_DTARuleColCondition())
+#' print(create_example_DTARuleColRange())
+#' print(create_example_DTARuleColUnique())
+#' @seealso \code{\link{print_info}()}, \code{\link{print_short_info}()}
 #' @name print
 #' @export
 method(print, DTA) <- function(x, ...) {
@@ -821,13 +1020,17 @@ method(print, DTA) <- function(x, ...) {
       shown_names <- ds_names
     }
 
-    alert_message <- paste0(
-      "Datasets (",
-      n_ds,
-      "): ",
-      paste(paste0("{.field ", shown_names, "}"), collapse = ", ")
+    # The names are INTERPOLATED, never pasted into the markup: cli parses
+    # `{...}` in the string it is handed, so a dataset called `a{b}` took
+    # print() down with "Could not evaluate cli `{}` expression". Braces
+    # inside an interpolated value are escaped by cli itself. cli_vec() only
+    # restores the separators the paste produced -- see print(DTADataSetTabular)
+    # for the same pattern.
+    shown <- cli::cli_vec(
+      shown_names,
+      list("vec-sep" = ", ", "vec-last" = ", ")
     )
-    cli_alert_info(alert_message)
+    cli_alert_info("Datasets ({n_ds}): {.field {shown}}")
   } else {
     cli_alert_info("Datasets: {.emph none}")
   }
@@ -870,7 +1073,6 @@ create_example_DTA <- function(index = 1) {
 #' @importFrom cli cli_abort cli_alert_warning
 #' @return An object of class DTA
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' dta <- read_dta_from_yaml(file)
 #' @export
@@ -894,7 +1096,6 @@ read_dta_from_yaml <- function(file) {
 #' @importFrom cli cli_abort cli_alert_warning
 #' @return An object of class DTA
 #' @examples
-#' require(DTAtools)
 #' file <- system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 #' yaml_data <- yaml::read_yaml(file)
 #' dta <- dta_from_list(yaml_data)

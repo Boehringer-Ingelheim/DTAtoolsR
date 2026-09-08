@@ -747,3 +747,110 @@ test_that("build_dataset_from_template() with an empty patch leaves the dataset 
   expect_null(res$value$dataset$description)
   expect_equal(res$value$dataset$type, "tabular")
 })
+
+# ---- columns: the shared collection vocabulary ------------------------------
+
+# `remove_columns:`/`add_columns:`/`modify_columns:` are three of the same five
+# verbs `options:` and `datasets:` use. `columns:` spells them the shared way
+# and adds the two the named ops cannot express -- keep only a subset, and
+# replace the column list wholesale.
+
+test_that("apply_dataset_patch() columns: remove drops an inherited column", {
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+  before <- length(ds$columns)
+
+  res <- fn(ds, list(columns = list(remove = "GFNAM")))
+
+  ids <- vapply(res$dataset$columns, function(c) c$id, character(1))
+  expect_length(res$dataset$columns, before - 1L)
+  expect_false("GFNAM" %in% ids)
+  # The verbs report in the `*_columns` vocabulary the UI already reads: they
+  # are a second spelling of these ops, not a second set of them.
+  ops <- vapply(res$deviations, function(d) paste(d$op, d$target), character(1))
+  expect_true("remove_columns GFNAM" %in% ops)
+})
+
+test_that("apply_dataset_patch() columns: inherit none replaces the column list wholesale", {
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+
+  res <- fn(ds, list(columns = list(
+    inherit = "none",
+    add = list(list(id = "ONLY", label = "Only column", type = "SAS Char"))
+  )))
+
+  expect_equal(vapply(res$dataset$columns, function(c) c$id, character(1)), "ONLY")
+})
+
+test_that("apply_dataset_patch() columns: inherit [ids] keeps only the named subset", {
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+  kept <- ds$columns[[1]]$id
+
+  res <- fn(ds, list(columns = list(inherit = kept)))
+
+  expect_equal(vapply(res$dataset$columns, function(c) c$id, character(1)), kept)
+})
+
+test_that("apply_dataset_patch() columns: modify merges and add refuses a duplicate id", {
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+
+  res <- fn(ds, list(columns = list(
+    modify = list(list(id = "GFNAM", label = "Renamed"))
+  )))
+  gfnam <- Filter(function(c) identical(c$id, "GFNAM"), res$dataset$columns)[[1]]
+  expect_equal(gfnam$label, "Renamed")
+  expect_equal(gfnam$type, "SAS Char") # untouched
+
+  expect_error(
+    fn(ds, list(columns = list(add = list(list(id = "GFNAM"))))),
+    regexp = "already inherited"
+  )
+})
+
+test_that("apply_dataset_patch() columns: rejects a bare list, naming the named ops", {
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+
+  expect_error(
+    fn(ds, list(columns = list(list(id = "GFNAM", label = "x")))),
+    regexp = "must be a mapping"
+  )
+})
+
+test_that("apply_dataset_patch() modify_columns replaces a sequence of mappings instead of discarding it", {
+  # KNOWN DEFECT FIXED. modify_columns merged with utils::modifyList(), which
+  # recurses whenever both sides are lists -- and an unnamed list has no names
+  # to walk, so it returned the PARENT untouched and the child's value vanished
+  # in silence. dta_template_merge_value() replaces a sequence wholesale, which
+  # is what every other section of the engine already did.
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+  ds$columns[[2]]$rules <- list(list(kind = "parent_rule"))
+
+  res <- fn(ds, list(modify_columns = list(
+    list(id = "GFNAM", rules = list(list(kind = "child_rule")))
+  )))
+
+  gfnam <- res$dataset$columns[[2]]
+  expect_length(gfnam$rules, 1)
+  expect_equal(gfnam$rules[[1]]$kind, "child_rule")
+})
+
+test_that("apply_dataset_patch() modify_columns still deletes a property set to null", {
+  # The other half of the merge-engine swap: modifyList() deleted on NULL, and
+  # dta_template_merge_value() has to keep doing so or `field: ~` in a patch
+  # would start writing a null instead of removing the field.
+  fn <- app_fn("apply_dataset_patch")
+  ds <- minimal_dataset_spec()
+
+  res <- fn(ds, list(modify_columns = list(
+    list(id = "GFNAM", type = NULL)
+  )))
+
+  gfnam <- res$dataset$columns[[2]]
+  expect_false("type" %in% names(gfnam))
+  expect_equal(gfnam$id, "GFNAM")
+})

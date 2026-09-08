@@ -112,7 +112,6 @@ DTAColumnSpecCollection <- S7::new_class(
 #'
 #' @seealso \code{\link{DTAColumnSpecCollection}}
 #' @examples
-#' library(DTAtools)
 #' x <- create_example_DTAColumnSpecCollection()
 #' column_preview(x)
 #' @export
@@ -152,7 +151,6 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #'
 #' @seealso \code{\link{DTAColumnSpecCollection}}
 #' @examples
-#' library(DTAtools)
 #' x <- create_example_DTAColumnSpecCollection()
 #' rule_preview(x)
 #' @export
@@ -180,15 +178,8 @@ method(rule_preview, DTAColumnSpecCollection) <- function(x) {
   rule_preview
 }
 
-#' @title print
-#' @description
-#' Print overview for DTAColumnSpecCollection
-#' @param x An object of class DTAColumnSpecCollection.
 #' @importFrom cli cli_alert_info cli_alert cli_text cli_div
 #' @importFrom purrr map
-#' @examples
-#' x <- create_example_DTAColumnSpecCollection()
-#' print(x)
 #' @name print
 #' @export
 method(print, DTAColumnSpecCollection) <- function(x, ...) {
@@ -218,6 +209,7 @@ method(print, DTAColumnSpecCollection) <- function(x, ...) {
 #' collection <- create_example_DTAColumnSpecCollection()
 #' names(collection)
 #' @name names
+#' @usage names(x, ...)
 #' @export
 if (!exists("names", mode = "function")) {
   names <- new_generic("names", "x")
@@ -302,7 +294,8 @@ method(rules, DTAColumnSpecCollection) <- function(x, ...) {
 #' writeLines(yaml_content, yaml_file)
 #'
 #' # Create the DTAColumnSpecCollection object
-#' DTAColumnSpecCollection <- import_specs_from_yaml(yaml_file)
+#' specs <- import_specs_from_yaml(yaml_file)
+#' specs
 import_specs_from_yaml <- function(file) {
   yaml <- yaml::read_yaml(file)
 
@@ -341,8 +334,6 @@ import_specs_from_yaml <- function(file) {
 #' @return An object of class DTAColumnSpecCollection.
 #' @export
 #'
-#' @examples
-#' library(DTAtools)
 #' @examples
 #' # Load example YAML file from package extdata
 #' yaml_file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
@@ -585,16 +576,9 @@ columns_specs_from_word <- function(
 }
 
 
-#' @title Convert DTAColumnSpec s to JSON Schema
-#' @description Converts a DTAColumnSpec s into a JSON Schema.
-#' @param x A `DTAColumnSpecCollection` object.
 #' @name as_json_schema
-#' @return A list representing the JSON Schema.
 #' @importFrom jsonlite toJSON
-#' @examples
-#' library(DTAtools)
-#' specs <- create_example_DTAColumnSpecCollection()
-#' as_json_schema(specs)
+#' @usage as_json_schema(x, ...)
 #' @export
 # `inherits = FALSE` scopes this lookup to this package's namespace; without
 # it, an attached package exporting a plain function of the same name would
@@ -634,17 +618,7 @@ method(as_json_schema, DTAColumnSpecCollection) <- function(x) {
   return(json_schema)
 }
 
-#' @title as.list for DTAColumnSpecCollection
-#' @description
-#' This function transforms a DTAColumnSpecCollection object to a list.
 #' @export
-#'
-#' @param x An object of class DTAColumnSpecCollection.
-#' @param ... Additional arguments (not used)
-#' @return A list representation of the DTAColumnSpecCollection object.
-#' @examples
-#' x <- create_example_DTAColumnSpecCollection()
-#' as.list(x)
 #' @name as.list
 method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
   columns <- lapply(x@columns, function(column) {
@@ -667,7 +641,6 @@ method(as.list, DTAColumnSpecCollection) <- function(x, ...) {
 #'
 #' @return An example DTAColumnSpecCollection object.
 #' @examples
-#' library(DTAtools)
 #' create_example_DTAColumnSpecCollection()
 #' @export
 create_example_DTAColumnSpecCollection <- function(index = 1) {

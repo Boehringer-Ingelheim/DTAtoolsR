@@ -12,9 +12,20 @@ validate_rules(DTAColumnSpecCollection, table)
 \item{table}{A data.frame to validate.}
 }
 \value{
-(Invisibly) the list of rule results from \code{applySchemaRules()}.
+(Invisibly) the list of rule results from \code{\link[=apply_rules]{apply_rules()}}, each a
+list with elements \code{id}, \code{valid} and \code{message}.
 }
 \description{
 Validates a table using rules defined in a \code{DTAColumnSpecCollection}.
 Aborts with a CLI error if any rule fails.
+}
+\examples{
+specs <- DTAColumnSpecCollection(
+  columns = list(SUBJID = DTAColumnSpec(id = "SUBJID", type = "SAS Char")),
+  rules = list(DTARuleFactory("unique_subject", "col_unique", columns = "SUBJID"))
+)
+df <- data.frame(SUBJID = c("S1", "S2", "S3"), stringsAsFactors = FALSE)
+
+# Every rule passes, so the call returns quietly.
+validate_rules(specs, df)
 }

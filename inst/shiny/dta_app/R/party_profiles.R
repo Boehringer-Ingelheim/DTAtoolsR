@@ -203,7 +203,13 @@ normalise_party_slots <- function(slots) {
       # No allow-list means "any profile whose role matches" -- an empty
       # character(0) rather than NULL so party_profiles_for_slot() can test
       # length() without a %||% at every call site.
-      profiles = as.character(slot$profiles %||% character(0))
+      profiles = as.character(slot$profiles %||% character(0)),
+      # The party analogue of a vocabulary slot's `min:`: this slot must be
+      # filled before a document can be built. Without it "required-to-fill"
+      # has a hole exactly where a human does the filling -- a template can
+      # oblige a descendant to set a metadata field, but nothing could oblige
+      # the person creating the document to choose a supplier.
+      required = isTRUE(slot$required)
     )
   }
 
@@ -282,9 +288,11 @@ apply_party_profile <- function(dta, target, profile) {
 
 # Apply a user's slot -> profile-id selections to a DTA.
 #
-# An absent or empty selection for a slot is not an error: it means the
-# template's own default for that field (whatever `base.metadata` already put
-# there) stands untouched. An unknown profile id, in contrast, names the slot
+# An ABSENT selection for a slot is not an error: it means the template's own
+# default for that field (whatever `base.metadata` already put there) stands
+# untouched. An EXPLICITLY EMPTY one is not the same answer -- it says the slot
+# is deliberately unfilled, and empties the target instead of leaving the
+# template's value showing. An unknown profile id, in contrast, names the slot
 # and the id in the abort -- a stale selection (the profile was renamed or
 # removed from the picker's allow-list between page load and submit) must be
 # caught here, not silently ignored, because silently ignoring it would leave
@@ -294,8 +302,30 @@ apply_party_selections <- function(dta, slots, selections, profiles) {
   profile_ids <- vapply(profiles, function(p) as.character(p$id %||% ""), character(1))
 
   for (slot in slots) {
+    # Absent and explicitly-empty are DIFFERENT instructions, and collapsing
+    # them is what made "deliberately no party here" impossible to say. A slot
+    # missing from `selections` is silence -- the author never engaged with it,
+    # so whatever base.metadata put in the target stands. A slot present but
+    # empty is an engagement that means none, and empties the target instead.
+    engaged <- slot$id %in% names(selections)
     sel <- as.character(selections[[slot$id]] %||% "")
-    if (length(sel) == 0 || !nzchar(sel[[1]])) {
+    sel <- sel[!is.na(sel) & nzchar(sel)]
+    if (length(sel) == 0) {
+      # A required slot refuses BOTH silences. An explicitly empty selection is
+      # a deliberate "none", which is precisely the answer a required slot
+      # exists to reject -- so it aborts here rather than clearing the target,
+      # and an absent one aborts rather than leaving the template's value to
+      # stand in for a choice nobody made.
+      if (isTRUE(slot$required)) {
+        cli::cli_abort(c(
+          "Party slot {.val {slot$id}} is required, and no profile was selected for it.",
+          i = "Choose a profile for {.field {slot$label %||% slot$id}} before creating the document."
+        ))
+      }
+      if (!engaged) {
+        next
+      }
+      dta <- apply_template_metadata_path(dta, slot$target, list())
       next
     }
     sel <- sel[[1]]

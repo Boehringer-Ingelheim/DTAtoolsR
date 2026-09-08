@@ -6,13 +6,13 @@ Specifications written in YAML. Domain overview: `README.md`. Feature walkthroug
 
 ## Commands
 
-Run everything from the repo root; `renv` activates via `.Rprofile`.
+Run everything from the repo root.
 
 | Task | Command |
 | --- | --- |
 | Load package | `Rscript -e "pkgload::load_all()"` |
 | Tests | `Rscript -e "devtools::test()"` (one file: `devtools::test(filter='DTAFile')`) |
-| Style R code | `Rscript -e "styler::style_pkg()"` |
+| Style R code | `Rscript .github/scripts/style.R` |
 | Regenerate docs | `Rscript -e "roxygen2::roxygenise()"` |
 | Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
 | Fast hooks | `pre-commit run --all-files` (also runs in CI) |
@@ -21,12 +21,34 @@ In PowerShell, `R` is an alias for `Invoke-History` — always use `Rscript`, an
 quote `-e` with double quotes so the argument survives. If `Rscript` is not on
 `PATH`, `CLAUDE.local.md` holds the absolute path for this machine.
 
+`.Rprofile` sources `renv/activate.R`, which repoints `.libPaths()` at a project
+library keyed by the project *directory name*. The main checkout's is populated;
+a **git worktree gets its own, empty one**, so `styler`, `roxygen2`, `devtools`
+and `rcmdcheck` all report as not installed there, though they are sitting in
+the user library the whole time. Do not `renv::restore()` into a worktree — that
+installs the ~105 packages in `renv.lock` into a library that dies with it. Either put a `.Renviron` (untracked,
+already gitignored) holding `RENV_CONFIG_AUTOLOADER_ENABLED=FALSE` in the
+worktree root, which fixes every invocation including the table above, or pass
+`--no-init-file` per call. `.Rprofile` holds nothing but the autoloader, so
+skipping it costs nothing.
+
 `pre-commit` only runs the fast, language-agnostic hooks (whitespace, merge
 conflicts, private keys, the forbidden-artifact check) — it does **not** style
 or roxygenise R code. Run the "Style R code" and "Regenerate docs" commands
 above yourself before committing; both need `Rscript` on `PATH`. CI enforces
 both in the `r-style` workflow and fails (does not auto-fix) on any diff, so a
 PR with unstyled code or stale `man/`/`NAMESPACE` will not go green.
+
+Do not call `styler::style_pkg()` directly. `.github/scripts/style.R` is what
+the `r-style` workflow runs (as `… style.R --check`), so it is the only way to
+find out locally what CI will say, and it does two things the bare call does
+not: it also styles `inst/`, which `style_pkg()` never descends into and which
+holds more R code than `R/` does, and it repairs line endings afterwards.
+styler writes through a text-mode connection, so on Windows every file it
+restyles comes back CRLF — which the `mixed-line-ending` hook then reverts,
+rejecting the commit and making you stage and commit a second time. The script
+returns those files to LF before you ever see them, and `.gitattributes` keeps
+line endings a property of the repository rather than of your `core.autocrlf`.
 
 ## Workflow
 
@@ -116,8 +138,8 @@ contract.
   condition classes (`subscriptOutOfBoundsError`), package-authored `cli`
   strings, or force `LC_TIME = "C"`.
 - tidyverse style, checked by `styler` in the `r-style` CI workflow — run
-  `Rscript -e "styler::style_pkg()"` yourself before committing; do not
-  hand-format.
+  `Rscript .github/scripts/style.R` yourself before committing, never
+  `styler::style_pkg()` (see Commands above for why); do not hand-format.
 
 ## Guardrails
 

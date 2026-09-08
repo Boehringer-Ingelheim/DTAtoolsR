@@ -525,3 +525,89 @@ test_that("apply_party_selections() still accepts an 'any' role in either slot",
   expect_equal(md@supplier$affiliation$name, "Shared Bureau")
   expect_equal(md@receiver$affiliation$name, "Shared Bureau")
 })
+
+test_that("apply_party_selections() empties a slot that was explicitly selected as none", {
+  # Absent and explicitly-empty are different instructions. A slot missing from
+  # `selections` is silence and leaves the template's own value standing (the
+  # test above). A slot PRESENT but empty is an engagement meaning "no party
+  # here", and must clear the target rather than being treated as silence --
+  # otherwise "deliberately unfilled" is inexpressible.
+  dta <- app_fixture_dta()
+  fn <- app_fn("apply_party_selections")
+
+  dta2 <- fn(
+    dta, full_party_slots(),
+    list(supplier_choice = "supplier_acme", receiver_choice = ""),
+    full_party_profiles()
+  )
+
+  expect_equal(DTAtools::metadata(dta2)@supplier$affiliation$name, "ACME Labs")
+  expect_length(DTAtools::metadata(dta2)@receiver, 0)
+})
+
+test_that("apply_party_selections() treats an absent slot and an empty one differently", {
+  dta <- app_fixture_dta()
+  before <- DTAtools::metadata(dta)@receiver
+  fn <- app_fn("apply_party_selections")
+
+  absent <- fn(dta, full_party_slots(), list(), full_party_profiles())
+  emptied <- fn(dta, full_party_slots(), list(receiver_choice = ""), full_party_profiles())
+
+  expect_equal(DTAtools::metadata(absent)@receiver, before)
+  expect_length(DTAtools::metadata(emptied)@receiver, 0)
+})
+
+test_that("normalise_party_slots() carries a required flag, defaulting to FALSE", {
+  fn <- app_fn("normalise_party_slots")
+
+  slots <- fn(list(
+    list(id = "a", target = "metadata.supplier"),
+    list(id = "b", target = "metadata.receiver", required = TRUE)
+  ))
+
+  expect_false(slots[[1]]$required)
+  expect_true(slots[[2]]$required)
+})
+
+test_that("apply_party_selections() aborts when a required slot has no selection", {
+  # The party analogue of a vocabulary slot's `min:`. Without it,
+  # "required-to-fill" has a hole exactly where a human does the filling.
+  dta <- app_fixture_dta()
+  fn <- app_fn("apply_party_selections")
+  slots <- app_fn("normalise_party_slots")(list(
+    list(id = "supplier_choice", target = "metadata.supplier", required = TRUE)
+  ))
+
+  expect_error(
+    fn(dta, slots, list(), full_party_profiles()),
+    regexp = "is required"
+  )
+})
+
+test_that("apply_party_selections() aborts on an explicitly empty required slot", {
+  # This is the case that matters: an explicitly empty selection now means
+  # "deliberately none", which is precisely the answer a required slot exists
+  # to refuse. Treating it like an absent one would let it through.
+  dta <- app_fixture_dta()
+  fn <- app_fn("apply_party_selections")
+  slots <- app_fn("normalise_party_slots")(list(
+    list(id = "supplier_choice", target = "metadata.supplier", required = TRUE)
+  ))
+
+  expect_error(
+    fn(dta, slots, list(supplier_choice = ""), full_party_profiles()),
+    regexp = "is required"
+  )
+})
+
+test_that("a required slot with a selection applies normally", {
+  dta <- app_fixture_dta()
+  fn <- app_fn("apply_party_selections")
+  slots <- app_fn("normalise_party_slots")(list(
+    list(id = "supplier_choice", target = "metadata.supplier", required = TRUE)
+  ))
+
+  dta2 <- fn(dta, slots, list(supplier_choice = "supplier_acme"), full_party_profiles())
+
+  expect_equal(DTAtools::metadata(dta2)@supplier$affiliation$name, "ACME Labs")
+})

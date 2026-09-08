@@ -4,67 +4,51 @@
 %   R/DTAFileTabular-class.R, R/DTAMetaData-class.R
 \name{print_info}
 \alias{print_info}
-\title{print info}
+\title{Print Detailed Information About a DTAtools Object}
 \usage{
+print_info(x, ...)
+
+print_info(x, ...)
+
+print_info(x, ...)
+
+print_info(x, ...)
+
+print_info(x, ...)
+
 print_info(x, ...)
 }
 \arguments{
-\item{x}{An object of class DTAMetadata}
+\item{x}{A DTAtools object.}
 
-\item{...}{Additional arguments (not used)}
+\item{...}{Additional arguments (not used).}
 }
 \value{
-No return value. This function is called for its side effects
-(printing to the console).
-
-The input object \code{x}, returned invisibly.
-
-The input object \code{x}, returned invisibly.
-
-The input object \code{x}, returned invisibly.
-
-Invisibly returns the input object
+Invisibly, \code{x}.
 }
 \description{
-prints info of the column spec structure
+Prints the fuller, multi-line form of an object, where
+\code{\link{print}()} gives the summary and
+\code{\link{print_short_info}()} a single line. Methods exist for
+\code{\link{DTAFile}} and its subclasses, \code{\link{DTADataSet}},
+\code{\link{DTAMetaData}} and \code{\link{DTAColumnSpecStructure}}.
 
-Prints information about a \code{DTADataSet} object, including template source, version, date, and file information.
-
-This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-
-Print method for detailed information about a \code{DTAFileAny} object,
-including its filename, pattern, number of files, and the endings it
-accepts.
-
-This method prints detailed information about a \code{DTAFile} object, including its filename, pattern, and the number of files associated with it. The information is displayed using the \code{cli} package for formatted output.
-
-Print method for DTAMetadata objects.
-}
-\details{
-This method displays the template source, version, and date if available. It also summarizes the file information entries, indicating if none are present.
-
-The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
-
-The function displays the filename and pattern of the \code{DTAFile} object. It also prints the minimum and maximum number of files, or a single value if both are equal and set; an unset bound prints as "unbounded".
+For a file handler it shows the filename or pattern, then the minimum and
+maximum number of files expected -- as a single value when both bounds are
+equal and set, and as "unbounded" for a bound that is unset. A
+\code{\link{DTAFileAny}} additionally lists the file endings it accepts. For
+a dataset it shows the template provenance and a summary of the file
+handlers, and for metadata the agreement's title, version and parties.
 }
 \examples{
-ds <- create_example_DTADataSetTabular(2)
-print_info(ds)
-dta_file <- DTAFileCSV(filename = "data.csv")
-print_info(dta_file)
-
-library(DTAtools)
+# A file handler, and one restricted to particular endings.
+print_info(DTAFileCSV(filename = "data.csv"))
 print_info(DTAFileAny(filename = "study_report.pdf", extensions = "pdf"))
 
-dta_file <- DTAFileCSV(filename = "data.csv")
-print_info(dta_file)
-
-library(DTAtools)
-print(create_example_DTAMetaData())
-
+# A dataset and the agreement metadata.
+print_info(create_example_DTADataSetTabular(2))
+print_info(create_example_DTAMetaData())
 }
 \seealso{
-\code{\link{DTADataSet}}
-
-\code{\link{DTAFile}}
+\code{\link{print}()}, \code{\link{print_short_info}()}
 }

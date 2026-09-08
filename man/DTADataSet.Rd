@@ -17,7 +17,9 @@ DTADataSet(
 \arguments{
 \item{name}{Character. Name of the container.}
 
-\item{type}{Character. Dataset type, must be one of \verb{__DTAtools_supported_dataset_types__}.}
+\item{type}{Character. Dataset type: either \code{"tabular"}, whose files
+are read and validated against column specifications, or \code{"file"},
+whose files are only checked for presence, readability and non-emptiness.}
 
 \item{files}{a list of DTAFile objects specifying input file information.}
 

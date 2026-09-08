@@ -22,7 +22,6 @@ A list of tables, or a single table when one index/name is provided.
 Method to get tables from DTADataSet object.
 }
 \examples{
-library(DTAtools)
 ds <- create_example_DTADataSetTabular()
 tables(ds)
 }

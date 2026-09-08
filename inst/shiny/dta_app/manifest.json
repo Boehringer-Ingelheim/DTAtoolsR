@@ -43,7 +43,7 @@
       "description": {
         "Package": "DTAtools",
         "Title": "Validation and Authoring Tools for Data Transfer Agreements (DTAs) and Data Transmission Specifications (DTS)",
-        "Version": "0.24.0",
+        "Version": "0.25.0",
         "Authors@R": "c(\nperson(\"Thomas\", \"Schwarzl\", email = \"thomas.schwarzl@boehringer-ingelheim.com\",\nrole = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0001-7697-7000\")),\nperson(\"Daniel\", \"Schreyer\",\nemail = \"daniel.schreyer.ext@boehringer-ingelheim.com\", role = c(\"aut\", \"ctb\")))",
         "Maintainer": "Thomas Schwarzl <thomas.schwarzl@boehringer-ingelheim.com>",
         "Description": "Tools for defining, validating, and processing data transfer\nagreements (DTAs) and data transfer specifications (DTS). The package supports\nimporting, checking, transforming, and exporting structured data while\nensuring compliance with predefined contract and specification rules. It is\ndesigned for reproducible data workflows and integrates with common R-based\nanalysis pipelines for metadata handling, data validation, and reporting.",
@@ -63,12 +63,12 @@
         "RemoteHost": "api.github.com",
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
-        "RemoteRef": "master",
-        "RemoteSha": "d583895e0922cdbc3543f9cbe3135a828a66e98d",
+        "RemoteRef": "dev",
+        "RemoteSha": "a6413cf375581142379265ba94b228923f1ed163",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
-        "GithubRef": "master",
-        "GithubSHA1": "d583895e0922cdbc3543f9cbe3135a828a66e98d",
+        "GithubRef": "dev",
+        "GithubSHA1": "a6413cf375581142379265ba94b228923f1ed163",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3112,16 +3112,16 @@
   },
   "files": {
     "R/dataset_template.R": {
-      "checksum": "1f7a1ff69678151f15fb64e2efc0e4e1"
+      "checksum": "a3416a9585ea3d04de7d59d0a01ce802"
     },
     "R/party_profiles.R": {
-      "checksum": "12fc95df496c0fb9f56f98f76cc1c730"
+      "checksum": "55eaad81a9ac5be1ad97c852e44eba16"
     },
     "R/template_core.R": {
-      "checksum": "4e2e41d27b2e298eac22b1e176d40394"
+      "checksum": "08aa8e7616fce1dec77489bba522f12b"
     },
     "R/template_create.R": {
-      "checksum": "9ba84319b860fedc77d67274c1c46aa5"
+      "checksum": "777b0f929e4134c85de3a37fd7f6edff"
     },
     "R/template_diff.R": {
       "checksum": "2be3277be3b9ca763a18937c3a29c533"
@@ -3130,34 +3130,34 @@
       "checksum": "adec5cff8fccbc212b221e2bc45d6eaf"
     },
     "R/template_inherit.R": {
-      "checksum": "efaaa3db4a088e677caa200647400764"
+      "checksum": "47555d6668745816cd2a325fdda76dde"
     },
     "R/template_sources.R": {
       "checksum": "264c117393a5c0f08b4d1c5c73d7cff6"
     },
     "R/theme.R": {
-      "checksum": "d9b3704aec6246c95fdd55089162b70c"
+      "checksum": "5b70f79197f44154f86f86561eef485f"
     },
     "R/ui_components.R": {
-      "checksum": "64d332d974bc4b6405ce63405d97ebf7"
+      "checksum": "4249209fb20871c74c4cd1ecb14ef3fd"
     },
     "R/utils_dta.R": {
-      "checksum": "5c0902676a66f30d76ba0f532254a25d"
+      "checksum": "0b138ddc0177c621b8a0924872e32ad7"
     },
     "R/utils_export.R": {
       "checksum": "6c7cb1149bdcf892905f7f2f0a31e96f"
     },
     "R/versioning.R": {
-      "checksum": "113140917979da950121c19dfd1a625f"
+      "checksum": "14395df11bfe7b9c920e1d89d18ac7e3"
     },
     "R/vocabulary.R": {
-      "checksum": "3b9e1e0117c176a37928557a51f80674"
+      "checksum": "bc7120fb72d6e9be2720991f8bd3010b"
     },
     "VERSION": {
-      "checksum": "a69680a2ca0f3a0f5ec5b3a4fea80da1"
+      "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "0718fb7e9a57269da61fc10208a20e38"
+      "checksum": "05f42caa14d970261925769e835be2bc"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

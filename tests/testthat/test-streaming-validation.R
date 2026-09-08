@@ -392,9 +392,15 @@ test_that("the streamed details object satisfies the published contract", {
       "ok", "columnspec_valid", "rules_valid", "import_valid",
       "n_columnspec_errors", "n_rule_errors", "n_import_errors",
       "columnspec_errors", "columnspec_checks", "rule_results", "rule_errors",
-      "import_errors", "result_version"
+      # The import-typing axis on its own, which only a streamed result can
+      # report: a materialising load records it at import time instead. It is an
+      # ADDITION to the shape, not a replacement for anything -- every field the
+      # materialising path produces is still here, in the same order.
+      "import_errors", "import_typing_errors", "result_version"
     )
   )
+  eager <- validate_table_detailed(case$specs, case$table, verbose = FALSE)
+  expect_true(all(names(eager) %in% names(streamed)))
   expect_named(streamed$columnspec_errors, c("summarised_error", "full_error"))
   expect_type(streamed$n_import_errors, "integer")
 
@@ -751,6 +757,32 @@ test_that("an in-memory table is identified by its contents", {
 
   expect_equal(dta_table_change_signal(a), dta_table_change_signal(b))
   expect_false(identical(dta_table_change_signal(a), dta_table_change_signal(c)))
+})
+
+test_that("a stamped table is identified by its stamp rather than re-hashed", {
+  # Identifying a table used to cost more than validating it, because the
+  # signal serialised the whole table -- through a gzip-compressed temporary
+  # file -- every time it was asked for. The import choke point already has the
+  # table materialised, so it hashes it there and leaves the digest on the
+  # table; this reads it.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
+  ))
+  table <- dta_coerce_table_to_specs(
+    arrow::as_arrow_table(data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)),
+    specs
+  )$table
+
+  expect_identical(dta_table_change_signal(table), dta_table_hash_stamp(table))
+
+  # The stamp is authoritative: a table wearing a different one reports it,
+  # which is what proves the contents are not being re-hashed here. It rides on
+  # the arrow object -- an R6 object, i.e. an environment -- so restamping is
+  # visible through every reference to that table, and the returned object is
+  # the one that was handed in.
+  restamped <- dta_stamp_table_hash(table, "not-a-real-digest")
+  expect_identical(dta_table_change_signal(restamped), "not-a-real-digest")
+  expect_identical(dta_table_change_signal(table), "not-a-real-digest")
 })
 
 test_that("a dataset is identified without reading its rows", {
@@ -1174,6 +1206,29 @@ test_that("max_errors bounds retained detail while keeping the count exact", {
   expect_equal(nrow(streamed$full_error), 3)
   expect_equal(streamed$n_errors, 10L)
   expect_true(isTRUE(attr(streamed$full_error, "truncated")))
+})
+
+test_that("max_errors reaches a table that is already in memory", {
+  # It used to be a streaming concept only: dta_validate_any_table() accepted it
+  # and then dropped it on the materialising branch, so the one path with no
+  # spill to fall back on was also the one with no bound.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 2, nullable = FALSE)
+  ))
+  frame <- arrow::as_arrow_table(
+    data.frame(ID = rep("TOOLONG", 10), stringsAsFactors = FALSE)
+  )
+
+  capped <- dta_validate_any_table(specs, frame, verbose = FALSE, max_errors = 3L)
+  uncapped <- dta_validate_any_table(specs, frame, verbose = FALSE, max_errors = NULL)
+
+  expect_false(dta_table_is_lazy(frame))
+  expect_equal(nrow(capped$columnspec_errors$full_error), 3)
+  expect_equal(nrow(uncapped$columnspec_errors$full_error), 10)
+  # The count and the verdict are the file's, not the cap's.
+  expect_equal(capped$n_columnspec_errors, uncapped$n_columnspec_errors)
+  expect_identical(capped$ok, uncapped$ok)
+  expect_true(isTRUE(attr(capped$columnspec_errors$full_error, "truncated")))
 })
 
 # ---- streaming the rules axis ------------------------------------------------
@@ -1846,6 +1901,151 @@ test_that("import errors from both axes are counted once each, cap or no cap", {
   capped <- validate_file_stream(specs, path, max_errors = 5L, verbose = FALSE)
   expect_equal(as.integer(capped$n_import_errors), 2L * n)
   expect_lt(nrow(capped$import_errors), 2L * n)
+})
+
+test_that("the import-typing axis is reported on its own alongside the merged frame", {
+  # A dataset's @import_issues records ONE axis -- values the declared type
+  # could not represent -- because that is all a table typed at load time can
+  # produce. A streamed table has no such moment, so check() took the merged
+  # frame instead and put a wider axis in the same property: the same file
+  # showed one set of import issues loaded eagerly and another streamed.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
+    ),
+    rules = list(
+      DTARuleColRange(id = "textrange", columns = "TEXTCOL", min = 0, max = 100)
+    )
+  )
+  path <- vs_write_csv(data.frame(
+    NUMCOL = c("1", "abc"),
+    TEXTCOL = c("xyz", "xyz"),
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  details <- validate_file_stream(specs, path, verbose = FALSE)
+
+  # Merged: the unconvertible NUMCOL cell plus both TEXTCOL cells the range
+  # rule read as numbers.
+  expect_setequal(unique(details$import_errors$column), c("NUMCOL", "TEXTCOL"))
+  expect_equal(nrow(details$import_errors), 3L)
+
+  # Typing only: the one cell whose declared type could not hold it.
+  expect_equal(nrow(details$import_typing_errors), 1L)
+  expect_identical(details$import_typing_errors$column, "NUMCOL")
+  expect_identical(details$import_typing_errors$raw, "abc")
+  expect_identical(details$import_typing_errors$row, 2L)
+  expect_equal(dta_import_error_count(details$import_typing_errors), 1)
+
+  # The extra field is inert for every consumer that does not know it.
+  expect_no_error(flat <- as.data.frame(details))
+  expect_equal(nrow(flat), length(details$rule_errors) + 3L +
+    NROW(details$columnspec_errors$full_error))
+})
+
+test_that("a file with no typing failures reports an EMPTY typing frame, not none", {
+  # The field is always present, and that is the whole point of it: its consumer
+  # (check(), writing @import_issues for a lazy table) cannot tell a NULL field
+  # from a result written before the field existed, and its fallback for the
+  # latter is the MERGED frame. With NULL for "nothing failed to type", a
+  # streamed table whose only import errors were rule-time ones recorded those
+  # rows as import issues while the same file loaded eagerly recorded none.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  path <- vs_write_csv(data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE))
+  on.exit(unlink(path), add = TRUE)
+
+  details <- validate_file_stream(specs, path, verbose = FALSE)
+
+  expect_true(details$ok)
+  expect_true("import_typing_errors" %in% names(details))
+  expect_true(is.data.frame(details$import_typing_errors))
+  expect_identical(nrow(details$import_typing_errors), 0L)
+  expect_identical(names(details$import_typing_errors), names(dta_empty_import_errors()))
+  expect_equal(dta_import_error_count(details$import_typing_errors), 0)
+})
+
+
+test_that("rule-time import errors alone leave the typing axis empty", {
+  # The axis a materialising load records at import time is the TYPING axis, and
+  # a Char column a rule happens to compare numerically produces none of it.
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+      DTAColumnSpec(id = "TXT", type = "SAS Char", length = 8, nullable = TRUE)
+    ),
+    rules = list(DTARuleColRange(id = "textrange", columns = "TXT", min = 0, max = 100))
+  )
+  path <- vs_write_csv(data.frame(
+    ID = c("A001", "A002"),
+    TXT = c("xyz", "xyz"),
+    stringsAsFactors = FALSE
+  ))
+  on.exit(unlink(path), add = TRUE)
+
+  details <- validate_file_stream(specs, path, verbose = FALSE)
+
+  # The merged axis has the two cells the range rule read as numbers ...
+  expect_equal(nrow(details$import_errors), 2L)
+  # ... and the typing axis has none of them.
+  expect_identical(nrow(details$import_typing_errors), 0L)
+  expect_equal(dta_import_error_count(details$import_typing_errors), 0)
+})
+
+test_that("a null-typed column reaching the batch loop is read as missing text", {
+  # Arrow's `null` type converts to a `vctrs_unspecified` vector, which has no
+  # asJSON method and no numeric conversion, so it reached the checks untyped
+  # and aborted the scan. validate_table_detailed() has substituted all-NA
+  # character for such a column since before streaming existed; without the same
+  # substitution here the two paths disagreed about a column of nothing but
+  # missing values.
+  table <- arrow::arrow_table(
+    ID = c("A001", "A002"),
+    EMPTY = arrow::Array$create(c(NA, NA), type = arrow::null())
+  )
+  expect_true(table$schema[["EMPTY"]]$type$Equals(arrow::null()))
+
+  nullable <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "EMPTY", type = "SAS Char", length = 8, nullable = TRUE)
+  ))
+  expected <- validate_table_detailed(nullable, as.data.frame(table), verbose = FALSE)
+  streamed <- expect_no_error(
+    dta_validate_table_stream(
+      nullable, dta_as_batch_reader(table, batch_rows = 1L),
+      verbose = FALSE
+    )
+  )
+  expect_true(streamed$ok)
+  expect_identical(streamed$ok, expected$ok)
+  expect_identical(streamed$n_columnspec_errors, expected$n_columnspec_errors)
+
+  # And a non-nullable column of nothing but missing values fails on both paths,
+  # once per row, with the same verdict.
+  required <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "EMPTY", type = "SAS Char", length = 8, nullable = FALSE)
+  ))
+  expected_required <- validate_table_detailed(
+    required, as.data.frame(table),
+    verbose = FALSE
+  )
+  streamed_required <- dta_validate_table_stream(
+    required, dta_as_batch_reader(table, batch_rows = 1L),
+    verbose = FALSE
+  )
+  expect_false(streamed_required$ok)
+  expect_identical(
+    streamed_required$n_columnspec_errors,
+    expected_required$n_columnspec_errors
+  )
+  expect_identical(
+    streamed_required$columnspec_errors$full_error$keyword,
+    expected_required$columnspec_errors$full_error$keyword
+  )
 })
 
 # ---- cross-batch determinism and resource budgets ---------------------------
@@ -2892,4 +3092,117 @@ test_that("the console calls an undeclared column an error, not a caveat", {
 
   expect_match(out, "not described by the specs", fixed = TRUE)
   expect_match(out, "Extra columns check failed", fixed = TRUE)
+})
+
+
+# ---- the Arrow-side numeric parse -------------------------------------------
+#
+# The batch loop hands declared-numeric text columns to Arrow instead of to R
+# whenever it can prove the two produce the same doubles. `stream_arrow_numeric`
+# is the diagnostic switch that turns that off, and it exists precisely so
+# these tests can run the same input down both routes and demand the same
+# answer -- not just the same verdict, the same `details` object.
+
+vs_both_routes <- function(specs, table, batch_rows = 3L, coerce = TRUE) {
+  run <- function(arrow_numeric) {
+    withr::with_options(
+      list(
+        DTAtools.stream_arrow_numeric = arrow_numeric,
+        # Small test batches would otherwise fall below the row threshold and
+        # never reach the fast path this comparison exists to exercise.
+        DTAtools.stream_arrow_numeric_min_rows = 0
+      ),
+      dta_validate_table_stream(
+        specs, vs_reader(table, batch_rows),
+        verbose = FALSE, coerce = coerce
+      )
+    )
+  }
+  list(arrow = run(TRUE), in_r = run(FALSE))
+}
+
+
+test_that("parsing a clean batch in Arrow leaves the streamed result identical", {
+  specs <- vc_specs(
+    list(
+      DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE),
+      DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+    ),
+    rules = list(
+      DTARuleColUnique(id = "id_unique", columns = "ID"),
+      DTARuleColRange(id = "val_range", columns = "VAL", range = c(0, 100))
+    )
+  )
+  table <- data.frame(
+    ID = sprintf("S%03d", 1:9),
+    # Every accepted shape, plus a null, plus a value the range rule fails on.
+    VAL = c("1.5", "007", "-0", ".5", "12.", NA, "0.001", "999.999", "1000"),
+    CNT = c("1", "-2", "003", "0", "9", NA, "7", "8", "999999999"),
+    stringsAsFactors = FALSE
+  )
+
+  both <- vs_both_routes(specs, table)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(both$arrow$n_import_errors, 0L)
+  # And the range rule really did run on numbers, so the comparison is not
+  # trivially equal because both routes did nothing.
+  expect_false(both$arrow$rules_valid)
+})
+
+
+test_that("a batch with an unconvertible value takes the R path and reports it", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE),
+    DTAColumnSpec(id = "CNT", type = "SAS Int", nullable = TRUE)
+  ))
+  table <- data.frame(
+    VAL = c("1.5", "abc", "3.5", "4.5"),
+    CNT = c("1", "2", "3", "4"),
+    stringsAsFactors = FALSE
+  )
+
+  # batch_rows = 4 so the bad value and the good ones share a batch: it is the
+  # column, not the file, that the fast path has to give up on.
+  both <- vs_both_routes(specs, table, batch_rows = 4L)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(as.integer(both$arrow$n_import_errors), 1L)
+  expect_equal(both$arrow$import_errors$row, 2L)
+  expect_equal(both$arrow$import_errors$column, "VAL")
+  expect_equal(both$arrow$import_errors$raw, "abc")
+  expect_equal(both$arrow$import_errors$declared_type, "SAS Num")
+})
+
+
+test_that("a value outside the accepted forms is still typed, by R, with no issue", {
+  # `1e5` and a 16-digit integer both parse; they are simply not literals the
+  # Arrow route is allowed to claim agreement on. The column has to come back
+  # typed and clean all the same -- the fast path is an optimisation, and an
+  # optimisation that declines to run must change nothing at all.
+  specs <- vc_specs(list(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)))
+  table <- data.frame(VAL = c("1e5", "1234567890123456", "2.5"), stringsAsFactors = FALSE)
+
+  both <- vs_both_routes(specs, table, batch_rows = 3L)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_equal(both$arrow$n_import_errors, 0L)
+  expect_true(both$arrow$ok)
+})
+
+
+test_that("typing switched off leaves every column as the text the reader read", {
+  # With `coerce = FALSE` the column spec axis is meant to see text, and a
+  # declared-number column of text fails its `type` check. Casting behind its
+  # back would turn that failure into a pass, which is why the driver builds no
+  # Arrow state at all in this mode.
+  specs <- vc_specs(list(DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)))
+  table <- data.frame(VAL = c("1.5", "2.5", "3.5"), stringsAsFactors = FALSE)
+
+  both <- vs_both_routes(specs, table, batch_rows = 2L, coerce = FALSE)
+
+  expect_identical(both$arrow, both$in_r)
+  expect_false(both$arrow$columnspec_valid)
+  expect_equal(unique(both$arrow$columnspec_errors$full_error$keyword), "type")
 })

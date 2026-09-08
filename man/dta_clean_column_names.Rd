@@ -13,10 +13,9 @@ dta_clean_column_names(x)
 The cleaned character vector.
 }
 \description{
-Strips surrounding quotes and whitespace from header names. Factored out of
-\code{dta_normalize_column_names()} so the eager and lazy readers apply the \emph{same}
-rule -- they cannot apply it the same way, but they must reach the same
-answer, or the identical file would present different column names depending
-on how it happened to be loaded and would match the specs on only one path.
+Strips surrounding quotes and whitespace from header names. Applied once, by
+\code{\link[=dta_delim_reader_plan]{dta_delim_reader_plan()}}, to the names both readers are then given -- so the
+identical file cannot present different column names depending on how it
+happened to be loaded, and cannot match the specs on only one path.
 }
 \keyword{internal}

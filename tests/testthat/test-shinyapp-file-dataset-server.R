@@ -63,7 +63,6 @@ file_ds_clean_session <- function() {
 # quoted expression rather than a function because testServer() evaluates its
 # body in a session-scoped environment that a called function cannot reach.
 file_ds_setup <- quote({
-  session$setInputs(edit_mode = TRUE)
   session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
   unlock_editing(session)
   session$setInputs(add_ds_name = "reports", add_ds_type = "file")
@@ -215,7 +214,6 @@ test_that("a Files dataset with nothing bound reports no data rather than passin
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "empty_reports", add_ds_type = "file")
@@ -243,7 +241,6 @@ test_that("the handler form for a Files dataset offers no type to choose", {
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
@@ -272,7 +269,6 @@ test_that("the handler form for a tabular dataset still offers csv and tsv", {
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     file_ds_select(session, rv, "clinical_data")
@@ -295,7 +291,6 @@ test_that("saving the form's own default builds an unparsed handler", {
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
@@ -386,7 +381,6 @@ test_that("edit_cols and edit_rules refuse to open on a file dataset", {
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
@@ -416,7 +410,6 @@ test_that("col_save and rule_save refuse a stashed editor_dataset that is a file
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")
@@ -444,7 +437,6 @@ test_that("edit_cols and edit_rules still open on a tabular dataset (positive co
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     # "clinical_data" is tabular and already active on load -- no selection needed.
@@ -469,7 +461,6 @@ test_that("the file editor shows the zero-handlers banner for a freshly added Fi
   file_ds_clean_session()
 
   shiny::testServer(file_ds_app_dir(), {
-    session$setInputs(edit_mode = TRUE)
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
     session$setInputs(add_ds_name = "reports", add_ds_type = "file")

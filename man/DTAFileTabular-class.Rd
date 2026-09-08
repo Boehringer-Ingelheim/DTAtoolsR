@@ -16,7 +16,9 @@ DTAFileTabular(
   missing_values = "",
   sep = "\\t",
   has_header = TRUE,
-  quote = "\\""
+  quote = "\\"",
+  newlines_in_values = FALSE,
+  encoding = "UTF-8"
 )
 }
 \arguments{
@@ -29,8 +31,11 @@ pattern. Default is \code{FALSE}.}
 \item{pattern_description}{Character or \code{NULL}; human-readable
 description of the \code{filename} pattern.}
 
-\item{number_of_files}{Numeric or \code{NULL}; maximum number of files
-expected. Default is \code{1}.}
+\item{number_of_files}{Numeric or \code{NULL}; the exact number of files
+expected. Must be a single value -- a length-2 vector is an error, not a
+range. Default is \code{1}. To express a range, set
+\code{min_number_of_files}/\code{max_number_of_files} instead; supplying
+\code{number_of_files} alongside either of them is an error.}
 
 \item{min_number_of_files}{Numeric or \code{NULL}; minimum number of files
 expected.}
@@ -51,14 +56,66 @@ is \code{TRUE}.}
 
 \item{quote}{Character or \code{NULL}; quoting character for fields. Default
 is \code{'"'}.}
+
+\item{newlines_in_values}{Logical; \code{TRUE} if a quoted field may contain
+a line break. Default is \code{FALSE}, which is Arrow's own default and
+what every file written by a well-behaved exporter satisfies.
+
+The setting exists because a quoted line break is only a problem when it
+straddles one of the fixed-size blocks the file is read in (see
+\code{DTAtools.stream_block_size}): a small file with quoted newlines reads
+correctly either way, and the same data past the first block fails with
+"CSV parse error: straddling object straddles two block boundaries". Turning
+this on makes the reader hold a block open until the quoted value ends, at
+some cost in parse speed -- which is why it is not the default.}
+
+\item{encoding}{Character; the character encoding of the file, as accepted by
+\code{\link[base]{iconv}}. Default is \code{"UTF-8"}.
+
+Both readers honour it, by different means. The in-memory reader passes it
+to Arrow, which re-encodes by wrapping the input stream it owns. The
+dataset scanner has no such step -- it opens its own files -- so a
+non-UTF-8 file is instead converted once, streaming and in bounded memory,
+to a UTF-8 copy under \code{\link[base]{tempdir}()} that the scan reads;
+the copy is cached for the session, so repeated loads of an unchanged file
+convert once, and a re-delivery replaces it rather than adding to it. Both
+paths therefore produce the same verdict for the same file, which is the
+point -- including for a quoted value containing a line break, which is
+copied byte for byte rather than normalised.
+
+The cost is disk and one pass, not memory. Conversion runs at an order of
+20 MB/s -- 21 MB/s measured here on a 172 MiB, 1,000,000 x 20 latin1 CSV,
+and 19 MB/s of decoded output when the source is gzip-compressed -- and the
+copy is the size of the decoded text: roughly the size of the source for latin1
+that is mostly ASCII, up to twice it for text that is wholly accented, and
+the full decoded size for a \code{.gz} source. A very large non-UTF-8
+delivery needs that much free space under \code{tempdir()}; declaring
+\code{"UTF-8"} for a file that really is UTF-8 costs nothing at all. The
+block the conversion works in is
+\code{options(DTAtools.transcode_block_bytes = )}, 4 MiB by default; it
+bounds the buffer and has no effect on the copy.
+
+The wide encodings (UTF-16, UTF-32, UCS-2, UCS-4) are the exception: their
+characters can contain a newline byte, so the file cannot be converted in
+blocks cut at newlines and \code{\link{open_file}()} refuses it, naming
+\code{stream = "never"} as the way to read it. A name this platform's
+\code{\link[base]{iconv}()} does not know (\code{"latin-1"} for
+\code{"latin1"}, say) is refused too, before the file is opened.}
 }
 \value{
 An object of class \code{DTAFileTabular}.
 }
 \description{
-Defines the S7 class \code{C}, which extends \code{DTAFile}
-to represent metadata and configuration for Delim (Tab-Separated Values)
-data files.
+Defines the S7 class \code{DTAFileTabular}, which extends \code{DTAFile}
+with the parse options every delimited reader needs: separator, header,
+quoting, missing-value tokens, embedded newlines and character encoding.
+It is the common parent of \code{\link{DTAFileCSV}}, \code{\link{DTAFileTSV}}
+and \code{\link{DTAFileDelim}}, and is not normally constructed directly.
+}
+\examples{
+# The shared base: normally you construct one of its subclasses instead.
+handler <- DTAFileTabular(filename = "data.txt", sep = ",")
+max_number_of_files(handler)
 }
 \seealso{
 \code{\link{DTAFile}}

@@ -163,14 +163,29 @@ app_fixture_char_num_specs <- function() {
 # Drive the app's "Create new version" flow, which is what unlocks editing for
 # a document LOADED from an existing one (an upload, a bundled example, or a
 # restored session). Such a document arrives read-only by design -- see the
-# WHY comment on editing() in app.R -- so setting edit_mode = TRUE is no
-# longer sufficient on its own, and every test that loads a fixture and then
+# WHY comment on editing() in app.R -- and this confirm handler is one of the
+# paths that flips rv$editing on, so every test that loads a fixture and then
 # edits it needs this in between.
 unlock_editing <- function(session, version = "9.9") {
   session$setInputs(create_new_version = 1)
   session$setInputs(new_version_value = version)
   session$setInputs(new_version_confirm = 1)
 }
+
+# Enter editing via the app's "Enable edit mode" control, without creating a
+# new version. Works whether or not a version entry is already open -- it
+# resumes an open one rather than starting anything.
+#
+# Wrapping the input id rather than inlining setInputs() at every call site
+# means the id belongs to the app, not to the test: if the app ever renames
+# enable_edit_mode, only this line changes.
+enter_edit_mode <- function(session) session$setInputs(enable_edit_mode = 1)
+
+# Leave editing via the app's "Stop editing" control.
+#
+# Same reasoning as enter_edit_mode() above -- one seam for the input id
+# rather than setInputs(stop_editing = ...) scattered across every test.
+leave_edit_mode <- function(session) session$setInputs(stop_editing = 1)
 
 # ---- Static-source assertions for app-wiring tests --------------------------
 

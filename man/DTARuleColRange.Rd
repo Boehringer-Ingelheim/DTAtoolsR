@@ -16,7 +16,10 @@ DTARuleColRange(
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{columns}{Character vector. Column name(s) checked by the range rule.}
+\item{columns}{Character. The single column the range applies to. The
+property is a character vector for consistency with the other rule
+classes, but a range rule must name exactly one column; more than one is
+an error when the rule is evaluated.}
 
 \item{range}{Numeric vector or list. Legacy argument for range checks.}
 

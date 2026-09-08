@@ -15,8 +15,11 @@
 #' @return Flextable object that is saved.
 #' @export
 #' @examples
-#' # No runnable example yet.
-#' # Word export examples are intentionally skipped until the API is reworked.
+#' specs <- create_example_DTAColumnSpecCollection()
+#' out <- tempfile(fileext = ".docx")
+#' export_specs_table(specs, file = out, quiet = TRUE)
+#' file.exists(out)
+#' unlink(out)
 export_specs_table <- function(
   DTAColumnSpecCollection,
   file = "dta_spec_table.docx",
@@ -218,8 +221,11 @@ export_specs_table <- function(
 #' @return None. The function creates a Word document.
 #' @export
 #' @examples
-#' # No runnable example yet.
-#' # Word export examples are intentionally skipped until the API is reworked.
+#' specs <- create_example_DTAColumnSpecCollection()
+#' out <- tempfile(fileext = ".docx")
+#' export_column_value_table(specs, file = out, id = "STUDYID", quiet = TRUE)
+#' file.exists(out)
+#' unlink(out)
 export_column_value_table <- function(
   DTAColumnSpecCollection,
   file = "column_value_table.docx",
