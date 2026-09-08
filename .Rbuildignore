@@ -3,6 +3,7 @@
 ^renv/library$
 ^renv/staging$
 ^renv/settings\.json$
+^\.renvignore$
 ^DTAtoolsR\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
