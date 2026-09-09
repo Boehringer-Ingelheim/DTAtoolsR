@@ -59,16 +59,18 @@ These are the only `metadata.transmission.*` keys the app editor renders.
 | transmission_type | text combo | metadata.transmission.type |
 | transmission_frequency | text combo | metadata.transmission.frequency |
 | transmission_notification | text combo | metadata.transmission.notification |
-| test_upload | boolean (Yes/No) | metadata.transmission.test_upload |
-| blinded_transfer | boolean (Yes/No) | metadata.transmission.blinded_transfer |
+| test_upload | checkbox | metadata.transmission.test_upload |
+| blinded_transfer | checkbox | metadata.transmission.blinded_transfer |
 | date_first_transfer | text combo | metadata.transmission.date_first_transfer |
 | date_last_transfer | text combo | metadata.transmission.date_last_transfer |
 | error_handling | text combo | metadata.error_handling |
 | authorized_for_corrections | text combo | metadata.authorized_for_corrections |
 
-"text combo" options show suggested values in a dropdown that also includes a
-"(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals a
-text field next to the dropdown for a free-typed value.
+"text combo" options show the suggested values in a searchable dropdown: pick
+one, choose "(leave blank)", or type your own value (this template's text
+options all allow it). The ACME deviation's `header` default appears
+pre-selected in that dropdown even though it is not one of the suggestions
+listed above.
 
 ## Appendix — GF concepts not modeled in `DTAMetaData`
 These appeared in the source `.docx` but have no first-class `DTAMetaData`
