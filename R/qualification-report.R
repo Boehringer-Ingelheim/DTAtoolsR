@@ -356,6 +356,7 @@ qual_report_dev_table <- function(x) {
     Title = qual_truncate(x$deviations$title, 70),
     Severity = x$deviations$severity,
     State = x$deviations$status,
+    Closed = x$deviations$closed,
     `This run` = status,
     Affects = x$deviations$affects,
     check.names = FALSE, stringsAsFactors = FALSE

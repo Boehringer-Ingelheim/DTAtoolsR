@@ -181,7 +181,7 @@ deviations:
 
   - id: DEV-008
     title: validate_table() reports a clean pass when its specification is not one
-    status: open
+    status: closed
     severity: major
     affects: [REQ-ROBUST-001, REQ-VAL-027]
     observed: >
@@ -203,7 +203,7 @@ deviations:
       or route through check() on a dataset, which validates its argument.
     reference: inst/qualification/tests/test-OQ-ROBUST-inputs.R
     opened: 2026-09-09
-    closed: null
+    closed: 2026-09-10
 
   - id: DEV-009
     title: A transfer date given as free text is discarded without a record

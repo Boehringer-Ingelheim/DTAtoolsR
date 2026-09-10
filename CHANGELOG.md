@@ -98,6 +98,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **`validate_table()` no longer reports a clean pass when its specification is
+  not a specification.** This function signals "nothing wrong with this
+  delivery" by returning the table unchanged. A `specs` argument that was not a
+  `DTAColumnSpecCollection` -- a path where an object was meant, a `NULL`
+  coerced along the way, a list still being assembled -- produced no schema, no
+  rules and therefore no errors, and the table came back unchanged. The caller
+  was told the data was clean by a run that had never looked at it, and nothing
+  in the answer distinguished it from a real one. The specification is now
+  checked before anything else, at the point both the in-memory and the
+  streaming paths pass through, and a specification that is not one raises.
+
 - **A deviation of an abstract template no longer inherits `abstract: true`.**
   `extends:` merged the flag like any other scalar, so every concrete child of
   an abstract base was refused by *Create new from template* ("is abstract

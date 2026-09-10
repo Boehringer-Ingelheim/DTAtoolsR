@@ -576,6 +576,10 @@ qual_deviations_df <- function(root) {
       workaround = d$workaround %||% NA_character_,
       reference = d$reference %||% NA_character_,
       opened = as.character(d$opened %||% NA_character_),
+      # A register entry that says "closed" without saying when is an
+      # incomplete record: the date is what ties the closure to the release
+      # that made it true.
+      closed = as.character(d$closed %||% NA_character_),
       stringsAsFactors = FALSE
     )
   })
