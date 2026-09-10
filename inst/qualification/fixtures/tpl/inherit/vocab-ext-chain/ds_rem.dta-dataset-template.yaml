@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: vec_ds_removed
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from:
+        vocabulary: vec_child@1.0
+        include: [C]

@@ -1,0 +1,5 @@
+kind: dta_vocabulary
+id: kds_voc
+version: "1.0"
+terms:
+  - code: A

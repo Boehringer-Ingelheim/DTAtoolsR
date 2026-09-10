@@ -1,0 +1,7 @@
+kind: dta_creation_template
+id: dtu1
+version: "1.0"
+abstract: true
+datasets:
+  - template: nonexistent_dataset@1.0
+    as: whatever

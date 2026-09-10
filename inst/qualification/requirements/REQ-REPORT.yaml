@@ -1,0 +1,193 @@
+area: REPORT
+title: The standalone HTML validation report
+
+# write_validation_report() is meant to be read on a validated system with no
+# internet access, by someone who was not in the room when the transfer was
+# checked. Two things follow from that: the file has to be everything it
+# claims to be with nothing fetched at render time, and it has to say what
+# check() actually found -- a report that quietly drops a finding is worse
+# than no report, because it reads as a clean bill of health.
+
+requirements:
+  # ---- standalone -------------------------------------------------------------
+
+  - id: REQ-REPORT-001
+    text: >
+      write_validation_report() shall produce a document that references
+      nothing over the network: no <script src>, <link href> or <img src>
+      pointing at a URL. CSS and JavaScript shall be embedded inline.
+    risk: high
+    category: integrity
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+    notes: >
+      Load-bearing for a validated-system reader: a report that reaches for
+      the network renders differently, or not at all, depending on what the
+      opening machine can reach, which defeats the point of a standalone
+      artifact.
+
+  # ---- the overview -------------------------------------------------------------
+
+  - id: REQ-REPORT-002
+    text: >
+      The overview's pass/fail/pending counts shall agree with results(): a
+      target counts as passed when its status is "validated", failed when its
+      status is "failed", and pending for every other status (skipped,
+      not_validated, unspecified).
+    risk: high
+    category: functional
+    covers: [write_validation_report, results]
+    source: R/reportRendering.R .report_summary_html(), .report_status_label()
+
+  - id: REQ-REPORT-003
+    text: >
+      The overview's per-target table and its pass/fail/pending counts shall
+      be built only from results(), which carries one row per dataset target
+      and none for metadata.
+    risk: high
+    category: functional
+    covers: [write_validation_report, results]
+    source: R/exportValidationReport.R, R/validationReporting.R
+    notes: >
+      Pinned, not endorsed. results(DTA) iterates x@datasets and never adds a
+      row for the metadata axis (check(DTA) computes a metadata verdict, but
+      keeps it in attr(x, "last_metadata_summary"), never in the data.frame
+      results() returns). write_validation_report()'s overview section is
+      built from results(x) alone, so a transfer that is invalid ONLY because
+      of a metadata import error (e.g. a qualified transmission date) shows
+      every target passed, zero failed, in the overview -- the failure is
+      visible solely as a message row further down the same document, never
+      in the summary a reader sees first. Verified directly: a DTA with one
+      clean dataset and a metadata date carrying trailing text reports
+      n_pass = 1, n_fail = 0 in the rendered overview.
+
+  # ---- messages and inspect panels ---------------------------------------------
+
+  - id: REQ-REPORT-004
+    text: >
+      The document shall carry exactly one message-table row per row of
+      messages(x), including rows hidden by the max_repeats cap (they are
+      hidden with a "show more" toggle, not omitted from the document).
+    risk: high
+    category: functional
+    covers: [write_validation_report, messages]
+    source: R/reportRendering.R .report_messages_table_html()
+
+  - id: REQ-REPORT-005
+    text: >
+      The document shall carry exactly one inspect detail panel per row of
+      messages(x), identified by that message's own id.
+    risk: medium
+    category: functional
+    covers: [write_validation_report, messages]
+    source: R/reportRendering.R .report_inspect_panel_html()
+
+  - id: REQ-REPORT-006
+    text: >
+      A metadata import error present anywhere in the transfer shall not
+      degrade the inspect detail available for any other message in the
+      document.
+    risk: high
+    category: functional
+    covers: [write_validation_report, inspect]
+    source: R/exportValidationReport.R, R/validationReporting.R
+    notes: >
+      Pinned, not endorsed; currently violated. write_validation_report()
+      fetches inspect() detail for every message with ONE batched call,
+      inspect(x, id = messages(x)$id), wrapped in tryCatch(..., error =
+      function(e) NULL). A metadata message's row carries dataset = NA, and
+      inspect(DTA)'s method looks up x@datasets[[NA_character_]] for it --
+      which is NULL, not an error by itself, but the method then aborts with
+      "Dataset 'NA' not found in DTA object." because the lookup came back
+      NULL. That single error discards the WHOLE batched result, so every
+      message's panel -- not only the metadata one -- falls back to the
+      generic "unknown"-badged panel ("(see technical detail below)"
+      instead of the plain-language should-be/actual comparison the same
+      message would get if no metadata issue existed anywhere in the
+      transfer). Verified directly: an otherwise identical transfer produces
+      an inspect-badge-columnspec panel with real comparison text when its
+      metadata is clean, and an inspect-badge-unknown fallback panel for the
+      very same message once one metadata import issue is added anywhere in
+      the same DTA.
+
+  - id: REQ-REPORT-007
+    text: >
+      max_repeats shall cap identical repeated messages (same
+      dataset/target/source/rule/column/keyword/message, differing only by
+      row) at that many visible rows, hiding the rest behind a "show more"
+      toggle; NULL or Inf shall disable capping; a value that is not a
+      positive whole number shall be rejected.
+    risk: medium
+    category: functional
+    covers: [write_validation_report]
+    source: R/reportRendering.R .report_messages_table_html()
+
+  # ---- multiple datasets, unchecked datasets, clean transfers -------------------
+
+  - id: REQ-REPORT-008
+    text: >
+      A transfer of several datasets shall contribute one overview row per
+      dataset target, and the messages table shall carry every dataset's
+      messages together.
+    risk: medium
+    category: functional
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+
+  - id: REQ-REPORT-009
+    text: >
+      A dataset that was never checked shall appear in the overview as
+      pending, not be silently omitted from the document.
+    risk: high
+    category: functional
+    covers: [write_validation_report, results]
+    source: R/reportRendering.R .report_status_label()
+
+  - id: REQ-REPORT-010
+    text: >
+      A transfer with no validation failures shall show zero failed in the
+      overview and zero message-table rows.
+    risk: medium
+    category: functional
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+
+  # ---- file handling and its arguments -------------------------------------------
+
+  - id: REQ-REPORT-011
+    text: >
+      write_validation_report() shall not replace an existing file unless
+      overwrite = TRUE, and quiet = TRUE shall suppress only its success
+      message, never the file being written.
+    risk: medium
+    category: functional
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+
+  - id: REQ-REPORT-012
+    text: >
+      The report's title shall be the explicit title argument when supplied;
+      otherwise the DTA's metadata title when one is set; otherwise
+      "Validation Report". A title of NA is treated as not supplied.
+    risk: low
+    category: functional
+    covers: [write_validation_report, metadata]
+    source: R/exportValidationReport.R
+
+  - id: REQ-REPORT-013
+    text: >
+      The document header shall show the generation timestamp.
+    risk: low
+    category: functional
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+
+  - id: REQ-REPORT-014
+    text: >
+      write_validation_report() shall reject an x that is not a DTA object,
+      and a title that is not NULL and not a single character string, each
+      with a condition naming the offending argument.
+    risk: medium
+    category: interface
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R

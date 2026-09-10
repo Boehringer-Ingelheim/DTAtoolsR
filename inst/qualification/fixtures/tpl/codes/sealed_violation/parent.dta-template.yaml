@@ -1,0 +1,14 @@
+kind: dta_creation_template
+id: seal_p
+version: "1.0"
+abstract: true
+sealed: ["label"]
+label: Parent label
+base:
+  metadata:
+    title: Parent
+datasets:
+  - name: x
+    type: tabular
+    columns:
+      - id: A

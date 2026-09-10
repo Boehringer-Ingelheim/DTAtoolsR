@@ -1,0 +1,473 @@
+# Known deviations and documented limitations.
+#
+# A deviation is a defect: the software does something other than what its
+# requirement says. A limitation is behaviour that is correct as designed but
+# surprising enough that a user could be caught out by it.
+#
+# Both are declared here BEFORE a qualification run, never discovered by one.
+# That distinction is the point of the register: a failure the run finds and
+# the register does not contain is a new finding and fails the run, while one
+# it does contain is a known, assessed, accepted defect. Every open deviation
+# must be bound by exactly one `qa_known_deviation()` call in the suite, and
+# the run fails if a registered defect stops reproducing -- at that point the
+# register has stopped describing the software, and a register that misstates
+# the software is worse than none.
+#
+# `status` has three values. `open` means the defect is live AND a test in this
+# suite binds it, which every open entry must have. `pending` means it is
+# registered but the area work package that binds it has not landed yet; the
+# meta checks skip it, and promoting it to `open` is part of adding that test.
+# `closed` means it was fixed, and the entry stays for history.
+
+deviations:
+  - id: DEV-001
+    title: The SAS format BEST12. is inferred as an integer type
+    status: open
+    severity: minor
+    affects: [REQ-CORE-006, REQ-TYPE-001]
+    observed: >
+      DTAColumnSpecStructureSAS(format = "BEST12.") infers type "Int".
+    expected: >
+      BESTw. is SAS's general numeric default output format and may use
+      scientific notation, so it should infer "Num".
+    impact: >
+      as_json_schema_type() emits "integer" for such a column, so a legitimate
+      decimal value such as 1.25 is rejected by the generated schema.
+    workaround: Declare the column type explicitly instead of relying on format inference.
+    reference: tests/testthat/test-DTAColumnSpecStructureSAS.R:24
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-002
+    title: A POSIXct column with no named timezone is rescanned on every rebuild
+    status: pending
+    severity: minor
+    affects: [REQ-VAL-001]
+    observed: >
+      A tzone = "" timestamp column is not stable under repeated Arrow round
+      trips: the first returns no tzone and the second the session timezone, so
+      a table rebuilt from its own contents hashes differently than the stamp
+      recorded for it.
+    expected: >
+      A table whose contents have not changed should hash identically, so an
+      unchanged table is revalidated at most once.
+    impact: >
+      Cost only, never a wrong answer. The digest is still taken of real
+      contents, so it cannot report "unchanged" for data that changed, and a
+      re-check of the same object is still skipped.
+    workaround: Name the timezone when constructing POSIXct columns.
+    reference: tests/testthat/test-DTADataSetTabular-validation.R:942
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-003
+    title: export_column_value_table() leaks an internal error for a bad first argument
+    status: open
+    severity: minor
+    affects: [REQ-EXPORT-001]
+    observed: >
+      Passing a plain list raises an untranslated base R error rather than a
+      cli condition, because the function has no input validation.
+    expected: >
+      It should abort with a cli condition naming the expected class, as
+      export_specs_table() does.
+    impact: >
+      The caller sees an internal message that is localised and cannot be
+      matched programmatically, so a wrapper cannot distinguish a bad argument
+      from an unrelated failure.
+    workaround: Validate the argument before the call.
+    reference: tests/testthat/test-exportFunctions.R:127
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-004
+    title: A declared Int column can be typed differently by the two engines
+    status: open
+    severity: major
+    affects: [REQ-TYPE-002]
+    observed: >
+      SAS Int narrows to R integer only when every value in hand is whole and
+      inside the integer range. "In hand" is the whole column for the
+      whole-column engine and one batch for the streaming engine, so a column
+      that is fractional or out of range in only some batches is typed
+      differently by the two.
+    expected: >
+      The declared type should determine the storage type identically on both
+      paths, independent of how the data is batched.
+    impact: >
+      The two paths can disagree about the import axis for the same file. The
+      randomised parity generator avoids the case by construction, so it is not
+      otherwise visible.
+    workaround: >
+      Declare such a column as SAS Num when values may be fractional or outside
+      the integer range.
+    reference: tests/testthat/test-streaming-parity.R:340
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-005
+    title: messages() aborts on a dataset whose specification declares no columns
+    status: open
+    severity: major
+    affects: [REQ-VAL-020, REQ-VAL-023]
+    observed: >
+      A dataset whose specification has no columns is checked and recorded with
+      the status "unspecified" and an ok of NA, which is right. Calling
+      messages() on it then aborts with "No validation artifact available ...
+      Run check() first with persist = TRUE", even though check() has been run
+      and persist = FALSE succeeded for every other dataset.
+    expected: >
+      messages() should return zero rows for a table that was checked but had
+      nothing to check, as results() already does for the same dataset.
+    impact: >
+      Any caller that collects messages across a set of datasets fails outright
+      when one of them has an empty specification, rather than reporting that
+      the dataset was not checked. The error text also misdirects, naming a
+      persistence argument that is not the cause.
+    workaround: >
+      Filter datasets by validation_status(...)$status before calling
+      messages(), or give every dataset at least one column specification.
+    reference: inst/qualification/tests/test-OQ-VAL-check.R
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-006
+    title: A declared integer column silently accepts values outside the integer range
+    status: open
+    severity: major
+    affects: [REQ-TYPE-009]
+    observed: >
+      A column declared SAS Int holding 5000000000 validates as completely
+      clean: ok is TRUE and all three axis counts are zero. The column is
+      stored as a double because narrowing declines to convert it, and the
+      column-specification type check tests only that the value is whole, never
+      that it fits an int32.
+    expected: >
+      A value that cannot be represented in the declared type should be
+      reported, on the import axis, exactly as an unparseable value is.
+    impact: >
+      A delivery carrying identifiers or counts beyond the integer range passes
+      a specification that declares them as integers. The receiving system may
+      then narrow them itself and corrupt them, with nothing in the transfer
+      record to say the values were ever out of range.
+    workaround: Declare such a column as SAS Num, which imposes no integer bound.
+    reference: inst/qualification/tests/test-OQ-TYPE-declared.R
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-007
+    title: write_table_to_file() returns a list where it documents a checksum
+    status: open
+    severity: minor
+    affects: [REQ-FILE-027]
+    observed: >
+      The roxygen for write_table_to_file() documents the md5sum element of its
+      return as the checksum, or NA when get_md5sum is FALSE. When get_md5sum is
+      TRUE the slot instead holds the whole three-element list that
+      write_metadata() returns: the checksum, the row count and the column
+      count.
+    expected: >
+      Either the documented bare checksum, or documentation describing the list
+      that is actually returned.
+    impact: >
+      A caller following the documented contract literally, such as
+      if (!is.na(result$md5sum)), gets base R's "the condition has length > 1"
+      instead of the intended branch. The integrity check a caller wrote to
+      confirm a transfer arrived intact is the thing that breaks.
+    workaround: Read the checksum as result$md5sum[[1]].
+    reference: R/DTADataSetTabular-class.R:573 with R/exportFunctions.R:283
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-008
+    title: validate_table() reports a clean pass when its specification is not one
+    status: open
+    severity: major
+    affects: [REQ-ROBUST-001, REQ-VAL-027]
+    observed: >
+      validate_table(specs = "not a collection", table = <a data frame>)
+      returns the table unchanged, which is this function's signal that the
+      table satisfies its specification. No condition is raised and nothing in
+      the return says a specification was never applied.
+    expected: >
+      A specs argument that is not a DTAColumnSpecCollection should raise a
+      condition, as check() does for a dataset argument of the wrong type.
+    impact: >
+      The most dangerous shape a failure in this package can take. A caller
+      that builds a specification dynamically and gets an empty string, a NULL
+      coerced to text, or a path where an object was meant, is told the
+      delivery is clean. Nothing downstream can tell that answer apart from a
+      real one, because it is the same answer.
+    workaround: >
+      Check inherits(specs, "DTAtools::DTAColumnSpecCollection") before calling,
+      or route through check() on a dataset, which validates its argument.
+    reference: inst/qualification/tests/test-OQ-ROBUST-inputs.R
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-009
+    title: A transfer date given as free text is discarded without a record
+    status: open
+    severity: major
+    affects: [REQ-META-009]
+    observed: >
+      The top-level date property accepts a phrase such as "after approval" and
+      stores NA, recording no import issue. A transmission date given the same
+      phrase keeps it verbatim and records the residue.
+    expected: >
+      Either the phrase is kept, as it is for a transmission date, or an import
+      issue records what was supplied and why it was not usable.
+    impact: >
+      The date a transfer was agreed disappears from the record with nothing to
+      say it was ever supplied. A reader of the metadata cannot tell an absent
+      date from one that was written in a form the parser could not use.
+    workaround: Supply the top-level date as an ISO date, and put any qualifying text elsewhere.
+    reference: R/DTAMetaData-class.R:67 with :258
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-010
+    title: A metadata import issue is lost after one write and read
+    status: open
+    severity: major
+    affects: [REQ-META-018]
+    observed: >
+      A metadata field that produced a trailing_residue import issue serialises
+      through as.list() as the resolved Date alone. The original raw string,
+      held only in import_issues, is never written, so reading the file back
+      yields a clean object with no issue recorded.
+    expected: >
+      An import issue should survive a round trip, or the raw value should be
+      written so that reading it back reproduces the issue.
+    impact: >
+      The record of a questionable value silently becomes a record of a clean
+      one, after a single save and reload. A reviewer reading the reloaded
+      transfer has no way to know a value was ever qualified.
+    workaround: Correct the value at source rather than relying on the recorded issue.
+    reference: R/DTAMetaData-helpers.R:41
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-011
+    title: The report overview shows all targets passed when only metadata failed
+    status: open
+    severity: major
+    affects: [REQ-REPORT-003]
+    observed: >
+      The summary cards of the standalone HTML report are built from results(),
+      which iterates the datasets and never contributes a row for metadata. A
+      transfer whose only fault is a metadata import error therefore shows one
+      target passed and none failed, with the fault visible solely as a single
+      message row further down the page.
+    expected: >
+      The overview should reflect every axis of the verdict the report presents,
+      or should state that metadata is reported separately.
+    impact: >
+      The overview is what a reviewer reads first, and for many it is all they
+      read. A report whose headline says everything passed, while a message
+      below says otherwise, invites exactly the wrong conclusion from the
+      document a quality unit signs.
+    workaround: Read the message table as well as the overview.
+    reference: R/validationReporting.R:115 with R/exportValidationReport.R
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-012
+    title: One metadata import error removes the inspect detail from every message
+    status: open
+    severity: major
+    affects: [REQ-REPORT-006]
+    observed: >
+      write_validation_report() fetches all inspect detail in one batched call
+      wrapped in tryCatch. inspect() on a DTA looks the metadata message's
+      dataset up as NA, finds nothing and aborts, so the whole batch is
+      discarded and every message in the report falls back to a generic panel.
+    expected: >
+      A message whose detail cannot be produced should lose its own detail
+      only.
+    impact: >
+      The click-to-inspect detail that makes the report useful disappears for
+      the entire transfer because of one unrelated metadata issue, and nothing
+      in the document says the detail is missing rather than absent.
+    workaround: Correct metadata import issues before generating the report.
+    reference: R/exportValidationReport.R:88 with R/validationReporting.R:1072
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-013
+    title: An uncompressed export can leave a header-only file at the destination
+    status: open
+    severity: major
+    affects: [REQ-EXPORT-025, REQ-ROBUST-005]
+    observed: >
+      write_table_to_file(compression = "none") writes straight to the
+      destination. Base R truncates that file and writes the header before it
+      converts the columns, so a conversion that fails afterwards leaves a
+      header-only file where the previous export was. The gzip branch writes to
+      a temporary file first and leaves the destination untouched on failure.
+    expected: >
+      An export that cannot complete should leave the destination as it was, on
+      both branches.
+    impact: >
+      A failed re-export silently replaces a good delivery with an empty one
+      that still looks like a file. A downstream system reading it sees a table
+      with no rows, which validates clean.
+    workaround: Export with compression = "gzip", which writes atomically.
+    reference: R/DTADataSetTabular-class.R:555
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-014
+    title: The Word specification round trip cannot read its own output
+    status: open
+    severity: minor
+    affects: [REQ-EXPORT-019]
+    observed: >
+      export_specs_table() writes a column's format without its backend prefix,
+      and columns_specs_from_word() requires that prefix. For a column with no
+      format at all, which is the common case, the reader aborts outright.
+    expected: >
+      A specification exported to Word should be readable back by the package
+      that wrote it.
+    impact: >
+      The documented workflow of exchanging a specification as a Word document
+      and importing the reviewed version back does not complete.
+    workaround: Exchange specifications as YAML, which round-trips.
+    reference: R/exportFunctions.R:58 with R/DTAColumnSpecCollection-class.R:491
+    opened: 2026-09-09
+    closed: null
+
+  - id: DEV-015
+    title: A specification written to JSON cannot be read back
+    status: open
+    severity: minor
+    affects: [REQ-EXPORT-029, REQ-SPEC-015]
+    observed: >
+      A column always serialises every optional property, and an unset one
+      becomes an empty JSON object. Read back, that empty object is a list,
+      which the class rejects. Because the mutually exclusive properties mean at
+      least two are always unset, no column survives. The package ships no JSON
+      reader in any case: the import function is commented out and marked as
+      still to do.
+    expected: >
+      Either a JSON export that can be read back, or documentation saying the
+      format is write-only.
+    impact: >
+      A caller who exports a specification as JSON has a file nothing in the
+      package can consume, and no indication that this was expected.
+    workaround: Use write_columns_to_yaml(), whose round trip is verified.
+    reference: R/DTAColumnSpec-class.R:375
+    opened: 2026-09-09
+    closed: null
+
+limitations:
+  - id: LIM-001
+    title: A row whose every field is empty is dropped by the CSV reader
+    affects: [REQ-FILE-001]
+    reference: tests/testthat/test-validation-oracle.R:296
+    consequence: >
+      A line with no content at all is treated as a record separator and
+      skipped, which is what essentially every CSV parser does. A file
+      containing all-empty rows therefore validates fewer rows than it
+      contains, with no warning. A partially empty row survives intact, so this
+      costs a row only when every column of that row is absent.
+
+  - id: LIM-007
+    title: An explicit null and an empty collection are indistinguishable in a template
+    affects: [REQ-TMPL-022]
+    reference: inst/shiny/dta_app/R/template_inherit.R
+    consequence: >
+      A template section may be absent, explicitly null, an empty collection or
+      a value, and the inheritance layer reads all four states distinctly. Every
+      downstream consumer then reads the merged result through a null-coalescing
+      default, which collapses null and empty before anything inspects them. A
+      template author who writes an explicit null to clear an inherited section
+      gets the same result as writing an empty collection, and neither is
+      reported.
+
+  - id: LIM-008
+    title: The template environment variables do not reach the validator
+    affects: [REQ-TMPL-011]
+    reference: R/validateTemplate.R:311
+    consequence: >
+      The seven DTATOOLS_TEMPLATE_ variables govern the application's own
+      multi-root template discovery. validate_template() and
+      create_template_repo() bypass that discovery entirely, so their results
+      are identical whether the variables are set or not. Configuring a private
+      template source therefore changes what the application offers and not what
+      the validator checks.
+
+  - id: LIM-006
+    title: A ragged data row is reported as if the header were unreadable
+    affects: [REQ-FILE-017]
+    reference: R/DTAFileTabular-class.R:1038
+    consequence: >
+      Every failure of the underlying reader is wrapped as "Cannot read the
+      column names of ... Is this a 'csv' file?", including a row with too few
+      or too many fields far below a perfectly well-formed header. The real
+      cause appears only in the nested error text. A supplier reading the first
+      line of the message looks at the header, which is not what is wrong.
+      open_file(), documented as reading only the schema, raises the same abort
+      rather than deferring it to the first scan.
+
+  - id: LIM-005
+    title: A logical column built in R cannot satisfy any declarable column type
+    affects: [REQ-TYPE-011]
+    reference: inst/qualification/tests/test-OQ-TYPE-declared.R
+    consequence: >
+      A logical value's JSON type is reported as "boolean", and no declarable
+      column type maps to it: the SAS backend rejects a Bool type at
+      construction. A table built in R with a logical flag column therefore
+      fails the type check on every row, while the same values read from a file
+      as the text TRUE and FALSE validate cleanly against a Char column. A
+      caller constructing tables in R must convert logical columns to text
+      first.
+
+  - id: LIM-004
+    title: Benchmark metrics are unavailable when a dataset is checked directly
+    affects: [REQ-PERF-011]
+    reference: inst/qualification/tests/test-PQ-PERF-scale.R
+    consequence: >
+      check() on a DTADataSetTabular has no benchmark argument and does not
+      honour options(DTAtools.benchmark = TRUE), so validation_benchmark()
+      returns nothing for it. Metrics are available only from
+      validate_file_stream(benchmark = TRUE) or from check() on a whole DTA,
+      which takes the argument. A caller measuring one dataset at a time
+      therefore has to route through one of those two instead.
+
+  - id: LIM-003
+    title: The scan-record attributes are set only on the streaming path
+    affects: [REQ-VAL-026]
+    reference: inst/qualification/tests/test-OQ-VAL-accessors.R
+    consequence: >
+      validation_errors() carries n_rows_scanned only when the table was
+      validated by the streaming engine; the whole-column engine sets no such
+      attribute. partial_scan and structural_only are likewise absent on a
+      normal complete run rather than present and FALSE. A caller reading them
+      must treat absent as "not partial" and must not rely on n_rows_scanned
+      being available, which means there is no portable way to ask how many
+      rows a verdict was based on.
+
+  - id: LIM-002
+    title: '"NaN" in a text column is classified as unconvertible, not missing'
+    affects: [REQ-TYPE-003]
+    reference: tests/testthat/helper-validation-corpus.R:338
+    consequence: >
+      The string "NaN" parses to NaN, and is.na(NaN) is TRUE, so the strict
+      numeric conversion classifies it as unconvertible rather than missing. It
+      is therefore reported on the import axis. Arguable, but it is the
+      behaviour on record and is pinned so that it cannot change silently.
+
+  - id: LIM-009
+    title: A transfer-level check reports no row count, and therefore no throughput
+    affects: [REQ-PERF-011]
+    reference: R/DTA-class.R:952
+    consequence: >
+      check() on a transfer object passes a missing row count to its own
+      benchmark, by a documented choice: there is no cheap, trustworthy total
+      across every dataset at that level and a guess would be worse than
+      reporting nothing. Both rows and rows_per_sec are therefore empty in the
+      metrics of every measurement this suite takes, however long the run took.
+      validate_file_stream() does supply the count for a single delivery. The
+      qualification records throughput from the row count its own generator
+      wrote, and the throughput_source column of performance.csv says so.

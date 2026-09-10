@@ -1,0 +1,172 @@
+area: ROBUST
+title: Error handling, integrity and isolation
+
+# What the package does when it is given something it did not expect. The
+# concern is not that bad input is rejected -- it is that bad input is never
+# accepted quietly. A validation tool that fails silently reports a clean
+# delivery, which is the one outcome worse than reporting nothing at all.
+
+requirements:
+  # ---- refusing what cannot be used --------------------------------------------
+
+  - id: REQ-ROBUST-001
+    text: >
+      An exported function given an argument of the wrong type shall raise a
+      condition rather than proceed, and shall not write anything to disk
+      before doing so.
+    risk: high
+    category: functional
+    covers: [check, validate_table, write_table_to_file, write_validation_report]
+    source: >
+      The package's own error convention: user-facing failures are raised with
+      cli::cli_abort(), never base stop(). R/DTADataSetTabular-class.R and
+      R/exportDocuments.R are the reference implementations.
+
+  - id: REQ-ROBUST-002
+    text: >
+      A path that does not exist, or that cannot be read, shall raise a
+      condition naming the path.
+    risk: high
+    category: functional
+    covers: [read_dta_from_yaml, load_file, validate_file_stream]
+    source: R/streamingValidation.R
+
+  - id: REQ-ROBUST-003
+    text: >
+      A delivery that is not readable as the declared format shall raise a
+      condition rather than validate as an empty or partial table.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: R/DTAFileTabular-class.R
+    notes: >
+      An unreadable delivery reported as zero rows would validate clean: no
+      value breaks a constraint if there are no values.
+
+  # ---- integrity of what is written ---------------------------------------------
+
+  - id: REQ-ROBUST-004
+    text: >
+      Writing to a path that already exists shall require the caller to say so,
+      and a refused write shall leave the existing file byte-for-byte unchanged.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file, write_validation_report, write_dta]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-ROBUST-005
+    text: >
+      A write that cannot complete shall not leave a file that looks complete.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-ROBUST-006
+    text: >
+      The recorded checksum of an exported delivery shall equal the checksum of
+      the bytes on disk, and shall change when those bytes change.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file]
+    source: README section "Write validated data to file"
+
+  # ---- isolation ------------------------------------------------------------------
+
+  - id: REQ-ROBUST-007
+    text: >
+      Validating a delivery shall not change the session's options, locale,
+      environment variables or working directory.
+    risk: high
+    category: integrity
+    covers: [check, validate_file_stream]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      A function that changes global state damages work that has nothing to do
+      with it, and the damage surfaces somewhere else entirely.
+
+  - id: REQ-ROBUST-008
+    text: >
+      Validating a delivery shall write only inside the temporary directory and
+      any output directory the caller named.
+    risk: high
+    category: security
+    covers: [check, write_table_to_file]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-ROBUST-009
+    text: >
+      Validating a delivery shall not consume the session's random number
+      stream in a way that changes a later result.
+    risk: medium
+    category: integrity
+    covers: [check]
+    source: inst/qualification/docs/validation-plan.md
+
+  # ---- inputs at the edges ---------------------------------------------------------
+
+  - id: REQ-ROBUST-010
+    text: >
+      A delivery with no rows, and one with no columns the specification
+      declares, shall each reach a definite verdict rather than an error.
+    risk: high
+    category: functional
+    covers: [check, validation_status]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-ROBUST-011
+    text: >
+      A delivery containing a very large single value, or very many columns,
+      shall be validated rather than refused for its shape alone.
+    risk: medium
+    category: functional
+    covers: [check]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-ROBUST-012
+    text: >
+      A delivery whose bytes are not valid in the declared encoding shall be
+      reported rather than silently reinterpreted.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-ROBUST-013
+    text: >
+      A truncated compressed delivery shall raise a condition rather than
+      validate the part that could be read.
+    risk: high
+    category: integrity
+    covers: [load_file]
+    source: R/streamingScale.R
+    notes: >
+      Validating the readable prefix of a corrupted file is the worst available
+      outcome: it reports a verdict on data the sender never sent.
+
+  # ---- determinism ------------------------------------------------------------------
+
+  - id: REQ-ROBUST-014
+    text: >
+      Two validations of one unchanged delivery shall produce identical
+      messages, and two exports of one unchanged table shall produce identical
+      files apart from any recorded timestamp.
+    risk: high
+    category: integrity
+    covers: [check, messages, write_table_to_file]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-ROBUST-015
+    text: >
+      An error raised for a user shall be a package condition that a caller can
+      match on, not an untranslated internal one.
+    risk: medium
+    category: interface
+    covers: [check, load_file, read_dta_from_yaml]
+    source: >
+      The package's own error convention: cli::cli_abort() and cli::cli_warn()
+      throughout R/, which give every user-facing condition a matchable class.
+    notes: >
+      A base R error message is rendered in the system language, so a caller
+      cannot match it portably. Matching on a condition class is the only way a
+      wrapper can tell one failure from another.

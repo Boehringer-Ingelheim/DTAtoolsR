@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **A qualification suite that produces audit-grade evidence for an installed
+  copy of the package.** `run_qualification()` runs an installation,
+  operational and performance qualification against the *installed* namespace
+  and writes an evidence bundle: a Validation Summary Report, a requirements
+  traceability matrix, per-step expected-versus-observed records anchored to
+  the file and line that produced them, a record of the environment, a
+  contemporaneous run log, and a hash manifest covering all of it. The suite
+  ships in `inst/qualification/`, so it is available wherever the package is
+  installed, and needs nothing beyond R, the package and `testthat`; reports in
+  HTML, Word and PDF are produced when the tooling for them exists and are
+  recorded as unavailable when it does not.
+
+  It answers a question the developer test suite cannot. Those tests are not
+  installed with the package, are not traced to requirements, and record only
+  whether something held rather than what was expected. This suite states its
+  expected values before it runs, never takes one from a stored snapshot of the
+  software's own output, and keeps a register of known defects that fails the
+  run if a registered defect stops reproducing.
+
+  The suite covers every exported function across fifteen functional areas,
+  from reading a specification to the behaviour of the streaming engine at ten
+  million rows, and its performance stage checks that the same delivery yields
+  the same verdict whatever the scale tier, thread count, batch size or locale.
+  Expected results are computed from how the test data was built rather than
+  recorded from a run, which is what lets a correctness claim survive a change
+  of scale.
+
+  Writing it surfaced a number of defects and documented limitations in the
+  package itself. They are listed in `inst/qualification/deviations.yaml`, each
+  open entry bound to a test that asserts it still occurs, and each reported at
+  every run; a registered defect that stops reproducing fails the run rather
+  than passing quietly. Nothing here changes validation behaviour -- the
+  findings are recorded so that they can be assessed and fixed deliberately.
+
+  Before release, five defects were introduced into the package one at a time
+  to confirm the suite is capable of failing, and each was caught by the test
+  cases whose subject was the behaviour broken. The results, including one
+  control that did not fire and why, are recorded in section 4a of
+  `inst/qualification/docs/validation-plan.md`.
+
+  The developer test suite is executed too, when the package was installed
+  with its tests, and reported as supplementary evidence. It runs in a separate
+  process under a time bound, so it cannot influence the qualification and a
+  developer test that blocks cannot stop the run.
+
+  `qualification_requirements()` returns the requirements being verified.
+  See `inst/qualification/README.md` for how to run, review and sign a
+  qualification, and how to verify a bundle has not been altered.
+
 ### Fixed
 
 - **Every modal whose body is built on the server now actually shows it.**

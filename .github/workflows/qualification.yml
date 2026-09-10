@@ -1,0 +1,107 @@
+# Runs the qualification suite against an installed package.
+#
+# A real qualification run happens by hand on the target system: that is the
+# whole point of it, and its evidence bundle is the deliverable. What runs here
+# is the quick tier, on a schedule, so that the suite cannot rot unnoticed
+# between deployments -- and so that it is exercised against an *installed*
+# package on three operating systems rather than only against a source tree on
+# one developer's machine.
+#
+# Pull requests are gated by tests/testthat/test-qualification.R instead, which
+# is fast and needs no installation.
+
+name: qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: Scale tier
+        required: false
+        default: quick
+        type: choice
+        options: [quick, standard, full]
+  schedule:
+    # Weekly, on Monday, after the R-CMD-check run.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-latest }
+          - { os: windows-latest }
+          - { os: macos-latest }
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+        with:
+          pandoc-version: "3.10.1"
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rcmdcheck
+            any::testthat
+            any::R6
+          needs: check
+
+      # --install-tests so the run can report the developer suite as
+      # supplementary evidence, and --build so the installation writes a
+      # checksum manifest into the library for the installation stage to
+      # verify the installed files against. Neither is required and neither
+      # changes the verdict; both make the run cover more.
+      - name: Install the package
+        run: R CMD INSTALL --install-tests --build .
+        shell: bash
+
+      - name: Run the qualification
+        run: |
+          Rscript -e 'DTAtools::run_qualification(
+            "qualification-output",
+            scale = "${{ inputs.scale || 'quick' }}",
+            tester = "GitHub Actions ${{ matrix.config.os }}"
+          )'
+        shell: bash
+
+      # Uploaded before the verdict is enforced, so a failing run still leaves
+      # the evidence that explains why it failed.
+      - name: Upload the evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ matrix.config.os }}
+          path: qualification-output
+          retention-days: 30
+
+      - name: Fail on a FAIL verdict
+        if: always()
+        run: |
+          Rscript -e '
+            summaries <- list.files("qualification-output", pattern = "^SUMMARY[.]txt$",
+                                    recursive = TRUE, full.names = TRUE)
+            if (length(summaries) == 0) stop("No qualification summary was produced.")
+            text <- readLines(summaries[[1]])
+            verdict <- sub("^Verdict\\s*:\\s*", "", grep("^Verdict", text, value = TRUE)[[1]])
+            cat("Verdict:", verdict, "\n")
+            if (startsWith(verdict, "FAIL")) stop("The qualification run failed.")
+          '
+        shell: bash

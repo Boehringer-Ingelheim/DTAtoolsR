@@ -1,0 +1,8 @@
+kind: dta_vocabulary
+id: vec_child
+version: "1.0"
+extends: vec_parent@1.0
+remove_terms: [C]
+add_terms:
+  - code: D
+    label: Term D

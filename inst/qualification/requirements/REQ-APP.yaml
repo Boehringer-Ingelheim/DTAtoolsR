@@ -1,0 +1,262 @@
+area: APP
+title: The interactive application
+
+# The app is the one place in the package where a user never sees check()'s
+# return value directly -- they see a coloured status and a notification, and
+# act on that. Everything in this area exists because a mismatch between what
+# the validation engine found and what the screen shows is invisible to
+# anyone reading only the app: the reactive state IS the interface, so a bug
+# in how it is built or updated is a bug the user cannot see around.
+#
+# Reached almost entirely through shiny::testServer() against the bundled app
+# directory, the same technique the package's own development suite
+# (tests/testthat/test-shinyapp-*.R) uses. A handful of behaviours have no
+# server-side component at all -- see REQ-APP-013's notes -- and are pinned
+# structurally instead, exactly as the development suite already does for the
+# same reason.
+
+requirements:
+  # ---- launching the application --------------------------------------------
+
+  - id: REQ-APP-001
+    text: >
+      run_dta_app() shall accept launch.browser (default TRUE), an optional
+      port, and further arguments passed through to shiny::runApp(), and
+      shall require the shiny, bslib and DT packages.
+    risk: low
+    category: interface
+    covers: [run_dta_app]
+    source: R/run_dta_app.R
+
+  - id: REQ-APP-002
+    text: >
+      run_dta_app() shall resolve the application directory bundled with the
+      installed package and pass it, together with launch.browser and any
+      supplied port, to shiny::runApp().
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: R/run_dta_app.R
+
+  - id: REQ-APP-003
+    text: >
+      When a required package is not installed, run_dta_app() shall raise one
+      condition naming every missing package and shall never call
+      shiny::runApp().
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: R/run_dta_app.R
+
+  # ---- the reactive workspace and loading a specification --------------------
+
+  - id: REQ-APP-004
+    text: >
+      The application's reactive workspace shall hold no document, no active
+      dataset and no upload until a specification is loaded.
+    risk: low
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R
+
+  - id: REQ-APP-005
+    text: >
+      Loading a DTA YAML specification shall populate the reactive document,
+      select its first dataset as active, and report every declared dataset's
+      status as "pending".
+    risk: high
+    category: functional
+    covers: [run_dta_app, read_dta_from_yaml]
+    source: inst/shiny/dta_app/R/utils_dta.R apply_loaded()
+
+  - id: REQ-APP-006
+    text: >
+      Loading a specification shall replace the reactive workspace entirely:
+      the uploads, the per-dataset status map and the active dataset from a
+      previously loaded document shall carry none of their prior values
+      forward.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R apply_loaded()
+    notes: >
+      A validation tool that quietly carried an upload or a status forward
+      from a document the user has since replaced would let a stale verdict
+      be read against the wrong specification.
+
+  # ---- datasets: add, remove, bind --------------------------------------------
+
+  - id: REQ-APP-007
+    text: >
+      Adding a dataset shall be refused unless the document is in edit mode,
+      and while in edit mode shall extend both the document and the
+      per-dataset status map, the new entry reported "nodata".
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R
+
+  - id: REQ-APP-008
+    text: >
+      Removing a dataset, once confirmed, shall drop it from both the
+      document and the per-dataset status map.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R
+
+  - id: REQ-APP-009
+    text: >
+      Binding a data file to a dataset's file handler shall register the
+      upload keyed by dataset name and handler index and shall leave the
+      dataset's status at "pending" rather than validating it; binding a file
+      that would replace an already-bound table shall require the caller to
+      confirm the overwrite before it takes effect.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R handle_upload()
+    notes: >
+      The overwrite confirmation is the app's own version of REQ-ROBUST-004:
+      a dropped file that silently replaced bound data would validate the
+      wrong delivery without saying so.
+
+  # ---- validation: check and status -------------------------------------------
+
+  - id: REQ-APP-010
+    text: >
+      Running a check shall map each targeted dataset's outcome onto exactly
+      one of the app's four status values -- pass, fail, pending, nodata --
+      and a dataset with no data bound shall always be reported "nodata",
+      never "pass", regardless of what the underlying validation result would
+      say on its own.
+    risk: high
+    category: functional
+    covers: [run_dta_app, check]
+    source: inst/shiny/dta_app/R/utils_dta.R dta_status_map()
+    notes: >
+      "pass"/"fail"/"pending"/"nodata" is the real, exact vocabulary read from
+      rv$status's own definition in app.R -- not "valid"/"invalid" or
+      check()'s own status strings, which the app deliberately does not
+      expose as-is.
+
+  - id: REQ-APP-011
+    text: >
+      A value the reader cannot parse as its declared type shall be reported
+      through the import axis, and a dataset with only an import-axis
+      violation shall be reported "fail" the same way a column-specification
+      or rule violation would be.
+    risk: high
+    category: functional
+    covers: [run_dta_app, check, messages]
+    source: inst/shiny/dta_app/app.R
+    notes: >
+      This is REQ-VAL-002's independent-axes contract observed from the
+      app's own reactive state rather than from check()'s return value
+      directly -- the concern this area exists for.
+
+  # ---- edit mode ---------------------------------------------------------------
+
+  - id: REQ-APP-012
+    text: >
+      "Enable edit mode" shall unlock every specification-editing surface
+      without appending a version-history entry, and "Stop editing" shall
+      lock them again so that a specification change attempted afterward does
+      not reach the document.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R
+    notes: >
+      Read-only-by-default is deliberately scoped to the SPECIFICATION only:
+      loading a document, uploading files and running checks are never gated
+      on edit mode, or the app's default mode would be useless for the one
+      thing most users open it to do.
+
+  # ---- the double-click guard --------------------------------------------------
+
+  - id: REQ-APP-013
+    text: >
+      The script the application emits to guard its action buttons against a
+      double click shall be a syntactically self-contained inline <script>
+      (no unescaped "</script" in its body) registered on the click event's
+      CAPTURE phase, so a click swallowed by an element's own handler still
+      reaches the guard.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/ui_components.R click_guard_script()
+    notes: >
+      PINNED AS STRUCTURAL, NOT REACTIVE: the guard is pure client-side
+      JavaScript with no server-side observer at all (app.R's own comment
+      at the point it is inserted says so directly), and no JavaScript
+      engine is anywhere in the package's dependency set. This is exactly
+      why the package's own development suite
+      (test-shinyapp-click-guard.R) tests it the same way -- by asserting
+      the safety properties the guard's correctness rests on through the
+      app's helper environment, not by driving it through
+      shiny::testServer(). Recorded here rather than left uncovered because
+      the app ships no OTHER protection against a duplicated click.
+
+  # ---- exporting a report -------------------------------------------------------
+
+  - id: REQ-APP-014
+    text: >
+      Exporting the HTML validation report shall be refused until at least
+      one loaded dataset has been checked, and once produced shall be a
+      well-formed HTML file naming the checked dataset.
+    risk: medium
+    category: functional
+    covers: [run_dta_app, write_validation_report]
+    source: inst/shiny/dta_app/app.R output$dl_msgs_html
+
+  # ---- templates: creation, inheritance, party profiles -----------------------
+
+  - id: REQ-APP-015
+    text: >
+      Creating a document from a bundled creation template shall apply the
+      template's base metadata, and a party profile chosen for one of the
+      template's party slots shall overwrite that slot's affiliation and
+      contacts in the new document's metadata.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/template_core.R create_dta_from_template()
+
+  - id: REQ-APP-016
+    text: >
+      Creating a document from a template that extends another shall carry
+      the parent's base metadata and options forward unchanged wherever the
+      child does not override them, and shall apply the child's own dataset
+      patch on top of the imported dataset template.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/template_inherit.R
+
+  # ---- the controlled vocabulary picker -----------------------------------------
+
+  - id: REQ-APP-017
+    text: >
+      Choosing permitted values from a controlled vocabulary for a column
+      being edited shall replace that column's pending allowed values with
+      the selected terms and clear any pending pattern constraint, without
+      changing the saved specification until the column is saved; a
+      vocabulary reference that cannot be resolved shall report a message
+      rather than raise an error.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R col_vocab_apply / output$col_vocab_terms
+
+  # ---- versioning ---------------------------------------------------------------
+
+  - id: REQ-APP-018
+    text: >
+      Creating a new version shall append exactly one version-history entry
+      and update the document's recorded version; a blank version shall be
+      refused, leaving the document and its edit lock unchanged.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R

@@ -1,0 +1,7 @@
+kind: dta_dataset_template
+id: vfi1
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from: {}
