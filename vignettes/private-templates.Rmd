@@ -332,6 +332,39 @@ field — `base.metadata`'s own keys are validated the same way, so a typo'd
 field name aborts template creation immediately rather than silently being
 dropped.
 
+### How options are asked for
+
+Every entry in `options:` becomes one control in the "Create new from
+template" dialog, chosen from its `type:` and whether it lists `choices:`. An
+option with `choices:` is a combobox: pick one of the suggestions or type a
+value of your own. Whether typing is allowed follows `allow_custom:` — for
+`type: text` it is allowed unless the template sets `allow_custom: false`;
+for `type: select` it is forbidden unless the template sets
+`allow_custom: true`. "(leave blank)" is always offered alongside the
+suggestions and writes an empty value.
+
+```yaml
+- id: header
+  label: Header / organization
+  type: text
+  target: metadata.header
+  help: Organization shown in the document header.
+  choices:
+    - Test Company 1
+    - Example Pharma Inc.
+```
+
+A `default:` that is not itself one of the `choices` is added to the list and
+pre-selected rather than silently dropped. That is how the ACME deviation
+later in this vignette pre-fills `header:` with "ACME Labs" — a value the
+option above never suggests.
+
+`type: boolean` renders as a checkbox, never a Yes/No dropdown; `textarea`
+and `number` are a multi-line box and a numeric input, as their names
+suggest; and any `help:` text an option carries shows under its control. All
+of it sits in a two-column grid, so a template with a dozen options still
+reads as a short form.
+
 ## Reusable dataset templates
 
 A creation template does not have to inline its dataset structure. The
@@ -447,6 +480,35 @@ datasets:
           nullable: Yes
           description: ACME's internal sample identifier, for query resolution.
 ```
+
+### How a family looks in the app
+
+The "Create new from template" picker groups templates into families derived
+from `extends:` alone — no separate configuration. A deviation such as
+`biomarker_gf_acme` sits indented under its base, with an "extends Biomarker
+GF DTS" line under its title, and a chain deeper than one level (a
+vendor-specific deviation of a vendor deviation) nests one step further for
+each generation. Until a member of a family is selected, the family is
+collapsed to its top row with an "n variants" badge; selecting a row expands
+its family in place. An `abstract:` base is never offered as a template of
+its own, but it still names and anchors the family its descendants are shown
+under; those descendants are concrete unless they write `abstract: true`
+themselves, because the flag describes the file that carries it and is not
+inherited.
+
+Typing in the search box matches the start of any word in the label, id,
+description, and every ancestor's label and id — so "biomarker" finds every
+variant in the family, "acme" finds only the vendor ones, and "one" does not
+drag in every "stand-alone" — with the matched text highlighted and results
+shown as a flat list rather than a tree. The source is not searched; it has
+its own filter. A "Source"
+filter appears next to the search box only when more than one template source
+is configured. Pressing Enter in the search box continues with the selected
+template — the first match, unless you picked another. The panel below the list always describes
+the selection: every version of the selected template, the exact resolved
+chain ("based on …"), and a short summary of what it will ask for — or, for a
+template that fails to load, its error, so a broken file is caught before you
+commit to it rather than after.
 
 The merge asks two questions, and they have the same answers everywhere.
 
@@ -841,8 +903,15 @@ vocabulary_slots:
     min: 1
 ```
 
-The "Create new from template" modal renders this as a multi-select of the
-vocabulary's terms. `target:` is always
+The "Create new from template" modal renders this as a searchable
+multi-select: each term is listed as "CODE — Label" with its description
+underneath, and searching a word from the description finds the term too.
+Chosen terms are shown as removable chips inside the box. "All",
+"None" and "Default" links fill or clear the selection in one click, next to
+a live "n of m selected" count. `min:` is shown as "Choose at least n." and
+is enforced when the document is created. An emptied slot means no terms,
+not "back to the default": the control opens holding the default, and
+whatever it holds when the document is created is what is applied. `target:` is always
 `datasets.<dataset>.columns.<column>.values`; a slot whose target names a
 dataset or column the template does not build fails loudly rather than
 silently doing nothing.
@@ -850,7 +919,8 @@ silently doing nothing.
 **`mode:` is about authoring freedom, not looser validation.** `closed` offers
 exactly the vocabulary's terms and rejects anything else. `open` additionally
 lets the author type a value the vocabulary does not have — "pick from the
-vocabulary, or use your own" — and the terms they end up with are *still* a
+vocabulary, or use your own", typing the term into the search box and
+pressing Enter to add it — and the terms they end up with are *still* a
 closed `enum` in the produced document. There is deliberately no "advisory"
 mode that would let non-conforming data through: the only way to express that
 today is to emit no `values:` at all, which turns the check for that column

@@ -6,7 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Choosing a template is now a search, not a dropdown.** "Create new from
+  template" used to list every template in one flat dropdown, grouped only by
+  source. The picker now groups templates into families derived from
+  `extends:` and shows them as a collapsible tree: a deviation sits indented
+  under its base with an "extends …" line, and a family collapses to its top
+  row with an "n variants" badge until one of its members is selected.
+  Searching matches the start of any word in the label, id, description and
+  every ancestor's label and id, so "biomarker" finds a whole family, "acme"
+  finds only the vendor deviations, and "one" does not drag in every
+  "stand-alone"; matches are highlighted and shown as a flat list rather
+  than a tree. A "Source" filter appears once more than one template library
+  is configured, and pressing Enter in the search box continues with the
+  selected template — the first match, unless another one was picked. A
+  panel below the list always describes the selection: its versions, the
+  exact resolved lineage ("based on …"), and a summary of what it will ask
+  for — or, for a template that fails to load, its error, shown before *Use
+  this template* can be pressed rather than after. The list itself no longer
+  re-renders on every click, only when the search or the source filter
+  changes, and going back to it keeps the search text and selection intact.
+
+- **Filling in a template got shorter and clearer.** Every option with
+  `choices:` is now one combobox instead of a dropdown padded with
+  "(leave blank)" and "Custom..." rows plus a companion text field: pick a
+  suggestion, choose "(leave blank)", or type a value directly. Typing is
+  allowed only when the template allows it — `allow_custom:` still governs
+  this, and `type: select` is strict by default unless the template opts in
+  with `allow_custom: true` (no bundled template uses `type: select`, so
+  nothing changes for any template shipped today). Boolean options are
+  checkboxes rather than Yes/No dropdowns, and options now lay out in a
+  two-column grid so long forms read shorter. Party slots name the template's
+  own default affiliation instead of an opaque "(use template default)".
+  Vocabulary pickers show each term's description, chosen terms as removable
+  chips, "All", "None" and "Default" links with a live "n of m selected"
+  count, and a "Choose at least n." hint for `min:`; an open-mode slot still
+  lets you type a term and press Enter to add it. The dialog's back button
+  now reads "Back to templates".
+
 ### Fixed
+
+- **A deviation of an abstract template no longer inherits `abstract: true`.**
+  `extends:` merged the flag like any other scalar, so every concrete child of
+  an abstract base was refused by *Create new from template* ("is abstract
+  and exists to be extended") unless it wrote `abstract: false` itself, which
+  nothing documented. `abstract:` now describes only the file that carries
+  it, like `id:` and `version:` do.
 
 - **Every modal whose body is built on the server now actually shows it.**
   Shiny decides whether to render an output from a visibility snapshot taken
