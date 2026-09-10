@@ -164,7 +164,12 @@ test_that("the generated fixture's expected result is arithmetic, not a recordin
   # size so that a pull request notices a drift in the validation engine's
   # counting the same day it lands.
   suite <- file.path(qual_root(), "tests")
-  env <- new.env(parent = globalenv())
+  # Parented on the namespace, not on the global environment. The helpers call
+  # the package's own constructors unqualified, which resolve through
+  # globalenv() only while the package happens to be attached -- true under
+  # devtools::test(), false when this suite is run from an installed library,
+  # where the failure is a bare "could not find function".
+  env <- new.env(parent = asNamespace("DTAtools"))
   sys.source(file.path(suite, "helper-00-qa.R"), envir = env)
   sys.source(file.path(suite, "helper-generators.R"), envir = env)
 
