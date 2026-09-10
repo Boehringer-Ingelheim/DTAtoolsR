@@ -1043,6 +1043,86 @@ bi_css <- function() {
     @media (prefers-reduced-motion: reduce) {
       .dta-busy-shown::after { animation: none; opacity: .55; }
     }
+
+    /* Create-from-template picker and options dialog (template_ui.R).
+
+       The one bold move here is the family tree: a child row hangs from a thin
+       green guide line, and the selected row carries a solid green bar. Every
+       other line is quiet grey on white -- with a few hundred templates the
+       list has to read as a list, not as a wall of cards.
+
+       Collapsing is pure CSS driven by one class the client toggles: a row
+       that is not a family head and whose family is not open is simply not
+       displayed. Search results set .flat on the list, which shows every row
+       and drops the indentation, because a filtered tree is not a tree. */
+    .tmpl-picker-list {
+      border: 1px solid var(--bi-pending-border); border-radius: 8px;
+      max-height: 45vh; overflow-y: auto; padding: 0; background: #fff;
+    }
+    .tmpl-row { border-top: 1px solid var(--bi-pending-border); }
+    .tmpl-row:first-child { border-top: none; }
+    .tmpl-row > label {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 8px 12px; margin: 0; cursor: pointer; width: 100%;
+    }
+    .tmpl-row input[type=radio] { margin-top: 4px; }
+    .tmpl-row:not([data-top]):not(.open) { display: none; }
+    .tmpl-picker-list.flat .tmpl-row { display: block; }
+    .tmpl-row.selected {
+      box-shadow: inset 3px 0 0 var(--bi-green); background: rgba(0,98,91,.04);
+    }
+    /* The whole row takes focus, not just the 13px radio dot. */
+    .tmpl-row:focus-within { outline: 2px solid var(--bi-green); outline-offset: -2px; }
+    .tmpl-entry { flex: 1; min-width: 0; }
+    .tmpl-picker-list:not(.flat) .tmpl-row:not([data-top]) .tmpl-entry {
+      border-left: 2px solid rgba(0,98,91,.35); padding-left: 10px;
+    }
+    .tmpl-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+    /* Muted, but in the normal face: a monospace id reads as machine output
+       and pulls more weight than the template's own name. */
+    .tmpl-id { color: var(--bi-grey); font-size: .82rem; }
+    .tmpl-version { color: var(--bi-grey); font-size: .82rem; }
+    .tmpl-variants { margin-left: auto; font-size: .82rem; color: var(--bi-green); }
+    /* A CSS hex escape swallows one following space, so the gap after the
+       caret has to be a non-breaking space of its own. */
+    .tmpl-variants::before { content: '\\25B8\\00a0'; }
+    .tmpl-row.open .tmpl-variants::before { content: '\\25BE\\00a0'; }
+    /* A match is a quiet green wash, not the browser's marker yellow. */
+    .tmpl-picker-list mark { background: rgba(0,98,91,.14); color: inherit; padding: 0; }
+    /* Two lines in the list; the detail panel below shows the full text. */
+    .tmpl-desc {
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .tmpl-count { margin: 6px 0; }
+    /* Search box and source filter share one line where the width allows;
+       the box takes whatever the filter leaves. */
+    .tmpl-search-row { display: flex; flex-wrap: wrap; gap: 0 18px; align-items: flex-end; }
+    .tmpl-search-row > .tmpl-search { flex: 1 1 280px; }
+    .tmpl-search-row > .shiny-input-container:not(.tmpl-search) { flex: 0 0 auto; }
+    /* The carry-over section's own summary line is its heading. */
+    .tmpl-options-body details { margin-top: 18px; }
+    .tmpl-options-body details > summary { font-weight: 600; cursor: pointer; }
+    .tmpl-detail { margin-top: 12px; }
+    .tmpl-detail-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+    /* Two columns where the width allows, one where it does not; a textarea
+       option spans the whole width whatever the count. */
+    .tmpl-opts-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 0 20px;
+    }
+    .tmpl-opt-wide { grid-column: 1 / -1; }
+    .tmpl-vocab-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+    .tmpl-vocab-actions a { font-size: .82rem; margin-right: 8px; }
+    .tmpl-vocab-count { font-size: .82rem; color: var(--bi-grey); }
+    /* Term descriptions inside the selectize dropdown rows. */
+    .vocab-opt-desc { font-size: .8rem; color: var(--bi-grey); white-space: normal; }
+    .tmpl-head {
+      display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline;
+      margin-bottom: 4px;
+    }
+    /* Sections are separated by space rather than rules. */
+    .tmpl-options-body h6 { margin-top: 18px; }
     "))
 }
 

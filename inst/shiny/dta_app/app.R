@@ -183,6 +183,35 @@ Shiny.addCustomMessageHandler('dta_msgs_dock', function(action){
 });
 "
 
+# Quick actions ("All", "None", "Default") for a vocabulary multi-select in the
+# template options modal: set the selectize control's value from a link's
+# onclick, returning false so the href="#" never navigates.
+#
+# Client-side rather than one observer per slot, because those slots come and
+# go with every modal open: server observers created there would accumulate
+# for the life of the session, one set per open, with nothing to destroy them.
+# Selectize writes the new value back through Shiny's own binding, so the
+# server still sees an ordinary input update -- which is what re-renders the
+# "n of m selected" count next to the links.
+#
+# The link passes ITSELF, not the control's id: the id is built from a slot id
+# a template author chose, and splicing that into a JS string literal would
+# let a private template run script in the app with one well-placed quote.
+# The control is found from the link instead, and the default values ride in
+# a data attribute, which htmltools escapes.
+vocab_set_js <- "
+function DTA_vocabSet(link, what){
+  var box = link && link.closest ? link.closest('.tmpl-vocab') : null;
+  var el = box ? box.querySelector('select') : null;
+  if (!el || !el.selectize) return false;
+  var s = el.selectize;
+  if (what === 'all') s.setValue(Object.keys(s.options));
+  else if (what === 'none') s.clear();
+  else s.setValue((link.dataset.vals || '').split('\\u001f').filter(Boolean));
+  return false;
+}
+"
+
 # Programmatic trigger for the hidden export download button. shinyjs::click()
 # dispatches a jQuery-style event that does NOT invoke an anchor's native
 # download navigation, so a Shiny downloadButton never actually downloads from
@@ -236,6 +265,14 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 # race the same fade. Naming only the bodies would leave those broken, and
 # naming everything would keep the editors' tables re-rendering on every data
 # change with no modal open at all.
+#
+# The same listener also honours an `autofocus` attribute inside the dialog,
+# for the same reason it exists at all: Bootstrap 5 moves focus to the dialog
+# element itself as part of showing it, discarding whatever the browser's own
+# autofocus handling had done, so the attribute only takes effect if something
+# re-applies it AFTER the show completes -- and this is already the one thing
+# that runs at exactly that moment. It is what puts the caret in the template
+# picker's search box when the modal opens with its body already rendered.
 modal_unsuspend_js <- "
 document.addEventListener('shown.bs.modal', function (ev) {
   if (typeof Shiny === 'undefined' || !ev.target.querySelectorAll) return;
@@ -250,6 +287,8 @@ document.addEventListener('shown.bs.modal', function (ev) {
       Shiny.setInputValue('.clientdata_output_' + el.id + '_hidden', hidden(el));
     }
   });
+  var f = ev.target.querySelector('[autofocus]');
+  if (f) f.focus();
 });
 "
 
@@ -395,12 +434,13 @@ ui <- bslib::page_fluid(
     tags$style(bi_css()),
     tags$script(shiny::HTML(reset_fileinput_js)),
     tags$script(shiny::HTML(msgs_dock_js)),
+    tags$script(shiny::HTML(vocab_set_js)),
     tags$script(shiny::HTML(download_trigger_js)),
     tags$script(shiny::HTML(client_id_js)),
     tags$script(shiny::HTML(yaml_ace_resize_js)),
     tags$script(shiny::HTML(modal_unsuspend_js)),
     tags$script(shiny::HTML(modal_state_js)),
-    # Unlike the seven above, this one is a function in R/ui_components.R
+    # Unlike the eight above, this one is a function in R/ui_components.R
     # rather than a string here, because its behaviour is worth testing
     # separately -- see click_guard_script() there, and the test file, for why
     # double-click protection cannot live on the server at all. Its position
@@ -473,7 +513,8 @@ server <- function(input, output, session) {
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
     template_ref = NULL, # "id@version" of the creation template chosen in the picker
-    template_index = NULL, # template index snapshot frozen when "Next" was clicked
+    template_index = NULL, # index snapshot frozen at "Use this template"
+    template_vocab_specs = NULL, # vocabulary slots resolved when the options modal opened
     add_ds_msg = NULL, # inline add-dataset result: NULL | list(ok, error)
     add_ds_token = 0, # bump to re-render the add-dataset modal body
     create_new_msg = NULL, # inline create-new-DTA result: NULL | list(ok, error)
@@ -980,101 +1021,20 @@ server <- function(input, output, session) {
     autosave()
   }
 
-  # Build one input control for a creation-template option.
-  #
-  # Every non-boolean dropdown offers its suggested `choices` plus a
-  # "(leave blank)" entry and a "Custom..." entry. Choosing "Custom..." reveals
-  # a companion text field next to the dropdown for a free-typed value, so any
-  # option can be a suggestion, blank, or custom text.
-  render_template_option_input <- function(opt, base_metadata = list()) {
-    oid <- as.character(opt$id %||% "")
-    if (!nzchar(oid)) {
-      return(NULL)
-    }
-    iid <- paste0("tmpl_opt_", oid)
-    label <- as.character(opt$label %||% oid)
-    typ <- tolower(as.character(opt$type %||% "text"))
-    def <- dta_template_default(opt, base_metadata)
-    help <- as.character(opt$help %||% "")
-
-    # Sentinel values for the extra dropdown entries.
-    blank_val <- "__blank__"
-    custom_val <- "__custom__"
-
-    # Dropdown with suggestions + "(leave blank)" + "Custom..." and a companion
-    # text field revealed only when "Custom..." is selected.
-    dropdown_with_custom <- function(ch) {
-      def_chr <- if (is.null(def)) "" else as.character(def)[[1]]
-      choices <- c(
-        ch,
-        stats::setNames(blank_val, "(leave blank)"),
-        stats::setNames(custom_val, "Custom...")
-      )
-      in_choices <- nzchar(def_chr) && def_chr %in% unname(ch)
-      selected <- if (in_choices) {
-        def_chr
-      } else if (nzchar(def_chr)) {
-        custom_val
-      } else {
-        blank_val
-      }
-      prefill <- if (!in_choices && nzchar(def_chr)) def_chr else ""
-      cid <- paste0(iid, "_custom")
-      div(
-        class = "tmpl-opt-row",
-        style = "display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;",
-        div(
-          style = "flex:1 1 240px; min-width:200px;",
-          selectInput(iid, label, choices = choices, selected = selected)
-        ),
-        conditionalPanel(
-          condition = sprintf("input['%s'] == '%s'", iid, custom_val),
-          style = "flex:1 1 240px; min-width:200px;",
-          textInput(cid, "Custom value",
-            value = prefill, placeholder = "Type a custom value"
-          )
-        )
-      )
-    }
-
-    ctl <- switch(typ,
-      select = dropdown_with_custom(dta_template_choices(opt)),
-      boolean = {
-        ch <- c("Yes" = "yes", "No" = "no")
-        selectInput(iid, label,
-          choices = ch,
-          selected = if (identical(def, TRUE) || identical(def, "yes")) "yes" else "no"
-        )
-      },
-      textarea = {
-        textAreaInput(iid, label, value = as.character(def %||% ""), rows = 3)
-      },
-      number = {
-        numericInput(iid, label, value = suppressWarnings(as.numeric(def %||% 0)))
-      },
-      # Default: free text. With suggested `choices` it becomes a dropdown with
-      # blank + Custom...; otherwise a plain (already fully custom) text field.
-      {
-        ch <- dta_template_choices(opt)
-        if (length(ch) > 0) {
-          dropdown_with_custom(ch)
-        } else {
-          textInput(iid, label,
-            value = as.character(def %||% ""),
-            placeholder = "Type a value"
-          )
-        }
-      }
-    )
-
-    if (nzchar(help)) {
-      tagList(ctl, div(class = "msg-hint", style = "margin:-8px 0 8px;", help))
-    } else {
-      ctl
-    }
-  }
-
   # Collect option values from the currently-open template modal.
+  #
+  # A boolean option is a checkboxInput, so its value arrives as TRUE/FALSE.
+  # The old Yes/No dropdown's "yes" is still accepted: it costs one comparison
+  # and covers a restored autosave, or any caller still setting the input by
+  # its former string value.
+  #
+  # Everything else arrives as the literal string the option's combobox holds
+  # -- picked from the suggestions or typed in place, indistinguishable by
+  # design, which is why there is no longer a "__custom__" sentinel or a
+  # companion text field to read it from. Only "(leave blank)" still needs
+  # translating: it is a real, selectable row precisely so that "no value" is
+  # a deliberate choice rather than an empty box the author may just not have
+  # reached yet.
   collect_template_selections <- function(def) {
     out <- list()
     opts <- def$options %||% list()
@@ -1085,15 +1045,9 @@ server <- function(input, output, session) {
       val <- input[[iid]]
       typ <- tolower(as.character(opt$type %||% "text"))
       if (identical(typ, "boolean")) {
-        val <- identical(as.character(val %||% ""), "yes")
-      } else {
-        vchr <- as.character(val %||% "")
-        if (identical(vchr, "__custom__")) {
-          # Read the free-typed value from the companion field next to the dropdown.
-          val <- as.character(input[[paste0(iid, "_custom")]] %||% "")
-        } else if (identical(vchr, "__blank__")) {
-          val <- ""
-        }
+        val <- isTRUE(val) || identical(as.character(val %||% ""), "yes")
+      } else if (identical(as.character(val %||% ""), "__blank__")) {
+        val <- ""
       }
       out[[oid]] <- val
     }
@@ -1118,20 +1072,25 @@ server <- function(input, output, session) {
     out
   }
 
-  # The vocabulary-slot counterpart of collect_party_selections(). A slot the
-  # author left empty is OMITTED rather than recorded as character(0), so
-  # vocabulary_slot_values() takes its "fall back to the slot's default"
-  # branch -- the same distinction party slots draw between "no choice made"
-  # and "an explicit choice".
-  collect_vocab_selections <- function(def) {
-    slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) list())
+  # The vocabulary-slot counterpart of collect_party_selections(), with one
+  # deliberate difference: an EMPTIED control is recorded as character(0), not
+  # omitted. The control opens holding the slot's `default:`, so whatever it
+  # holds at "Create DTA" is the author's answer -- and the "None" link above
+  # it would be a lie if clearing the chips silently put the default back.
+  # vocabulary_slot_values() reads character(0) as "no terms", and refuses it
+  # when `min:` says so, which is exactly what the emptied control shows.
+  #
+  # Only slots that actually rendered a control are read: the records
+  # show_template_options_modal() resolved when the dialog opened. A slot whose
+  # vocabulary could not be resolved has no control and is left out, so
+  # creation still falls back to its default and fails naming the vocabulary,
+  # rather than reporting "0 selected" against a `min:`.
+  collect_vocab_selections <- function() {
     out <- list()
-    for (slot in slots) {
-      val <- as.character(input[[paste0("tmpl_vocab_", slot$id)]] %||% character(0))
-      val <- val[!is.na(val) & nzchar(val)]
-      if (length(val) > 0) {
-        out[[slot$id]] <- val
-      }
+    for (rec in rv$template_vocab_specs$slots %||% list()) {
+      if (!is.null(rec$error)) next
+      val <- as.character(input[[paste0("tmpl_vocab_", rec$slot$id)]] %||% character(0))
+      out[[rec$slot$id]] <- val[!is.na(val) & nzchar(val)]
     }
     out
   }
@@ -1188,152 +1147,75 @@ server <- function(input, output, session) {
   }
 
   # `index` resolves the template's party profiles (template_party_profiles(),
-  # template_create.R) -- NULL only for a caller that never went through the
-  # index at all, which no longer happens from this modal, but is kept
-  # optional so the function degrades to "no party slots offered" rather than
-  # erroring if it ever is.
-  show_template_options_modal <- function(def, index) {
-    opts <- def$options %||% list()
-    slots <- normalise_party_slots(def$party_slots)
-    profiles <- if (!is.null(index)) template_party_profiles(index) else list()
+  # template_create.R) and its vocabularies (vocabulary_resolver(),
+  # vocabulary.R) -- NULL only for a caller that never went through the index
+  # at all, which no longer happens from this modal, but is kept optional so
+  # the function degrades to "no party slots offered" rather than erroring if
+  # it ever is.
+  #
+  # `loaded` is the WHOLE load_template_definition() result rather than just
+  # its `def`: the modal's header names the exact id@version, the source it
+  # came from and the resolved `extends` chain the author is about to
+  # instantiate, and none of those survive into the merged definition.
+  #
+  # The body itself is template_options_modal_body() (R/template_ui.R), which
+  # is a pure function of its arguments and tested as one. What has to stay
+  # here is the part that needs the server: one renderText per vocabulary
+  # slot, so the "n of m selected" count follows the control as the author
+  # edits it -- the quick-action links (DTA_vocabSet, head script above) set
+  # the selectize value client-side, Shiny reports the new input, and the
+  # count re-renders from it.
+  #
+  # Re-registering those outputs on every open is deliberate, not a leak:
+  # assigning to output[[id]] REPLACES the previous render rather than adding
+  # a second one, so the set never grows, and a slot belonging to a template
+  # the author has since backed out of simply stops being rendered.
+  show_template_options_modal <- function(loaded, index) {
+    def <- loaded$value$def
+    vocab_specs <- template_vocab_slot_specs(def, index)
+    # Kept for collect_vocab_selections(): which slots have a control to read.
+    rv$template_vocab_specs <- vocab_specs
 
-    # One selectInput per party slot: the template's own default (an empty
-    # selection, which apply_party_selections() leaves untouched) plus every
-    # profile eligible for that slot's role/allow-list
-    # (party_profiles_for_slot(), party_profiles.R).
-    party_ui <- if (length(slots) > 0) {
-      tagList(
-        tags$hr(),
-        tags$h6("Parties"),
-        lapply(slots, function(slot) {
-          eligible <- party_profiles_for_slot(profiles, slot)
-          ch <- stats::setNames("", "(use template default)")
-          if (length(eligible) > 0) {
-            ch <- c(ch, stats::setNames(
-              vapply(eligible, function(p) as.character(p$id), character(1)),
-              vapply(eligible, function(p) as.character(p$label %||% p$id), character(1))
-            ))
-          }
-          selectInput(paste0("tmpl_party_", slot$id), slot$label, choices = ch, selected = "")
+    for (record in vocab_specs$slots %||% list()) {
+      # A slot whose vocabulary could not be resolved renders its error
+      # instead of a control, so there is no input to count and no output id
+      # for the body to have placed.
+      if (!is.null(record$error)) next
+      # local() so each renderText closes over ITS OWN slot: without it every
+      # one of them would read the loop variable's final value.
+      local({
+        rec <- record
+        iid <- paste0("tmpl_vocab_", rec$slot$id)
+        codes <- vapply(rec$items, function(it) as.character(it$value), character(1))
+        output[[paste0(iid, "_count")]] <- renderText({
+          # What the control holds is what will be applied (see
+          # collect_vocab_selections()), so that is what the count describes.
+          # An emptied multi-select reaches the server as NULL, the same as
+          # one not yet bound: both are "0 of n" -- and the control opens
+          # holding the default, so the count never says 0 while chips show.
+          sel <- as.character(input[[iid]] %||% character(0))
+          sel <- sel[!is.na(sel) & nzchar(sel)]
+          # Terms typed by the author in an `open` slot are counted
+          # separately: "2 of 5" alone would silently under-report a
+          # selection that is in fact larger than the vocabulary offers.
+          n_known <- sum(sel %in% codes)
+          n_custom <- length(sel) - n_known
+          txt <- sprintf("%d of %d selected", n_known, length(codes))
+          if (n_custom > 0) paste0(txt, sprintf(", %d custom", n_custom)) else txt
         })
-      )
+      })
     }
-
-    # One multi-select per vocabulary slot, seeded with the terms that slot
-    # offers. `create = TRUE` in "open" mode is what makes ONE control serve
-    # both modes: selectize lets the author type a term the vocabulary does
-    # not have, which is exactly "pick from the vocabulary, or use your own",
-    # without a second free-text box to reconcile.
-    #
-    # An unresolvable vocabulary is reported INLINE and leaves the slot out,
-    # rather than aborting the modal: the rest of the template is still
-    # perfectly usable, and a private source that is temporarily unreachable
-    # must not make document creation impossible.
-    vocab_slots <- tryCatch(normalise_vocabulary_slots(def$vocabulary_slots), error = function(e) e)
-    vocab_ui <- if (inherits(vocab_slots, "condition")) {
-      tagList(
-        tags$hr(),
-        tags$h6("Controlled vocabularies"),
-        p(paste("This template's vocabulary slots could not be read:", conditionMessage(vocab_slots)),
-          class = "msg-hint"
-        )
-      )
-    } else if (length(vocab_slots) > 0) {
-      resolve_vocab <- vocabulary_resolver(index)
-      tagList(
-        tags$hr(),
-        tags$h6("Controlled vocabularies"),
-        lapply(vocab_slots, function(slot) {
-          choices <- tryCatch(vocabulary_slot_choices(slot, resolve_vocab), error = function(e) e)
-          if (inherits(choices, "condition")) {
-            return(p(paste0(slot$label, ": ", conditionMessage(choices)), class = "msg-hint"))
-          }
-          codes <- vapply(choices$terms, function(t) t$code, character(1))
-          # "CODE — Label" so the picker is readable, while the VALUE stays the
-          # bare code: the label is authoring metadata and must never leak into
-          # a column's permitted values.
-          labels <- vapply(choices$terms, function(t) {
-            lb <- as.character(t$label %||% "")
-            if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
-          }, character(1))
-
-          tagList(
-            selectizeInput(
-              paste0("tmpl_vocab_", slot$id), slot$label,
-              choices = stats::setNames(codes, labels),
-              selected = slot$default,
-              multiple = TRUE, width = "100%",
-              options = list(create = identical(slot$mode, "open"))
-            ),
-            if (nzchar(slot$description)) p(slot$description, class = "msg-hint"),
-            if (identical(slot$mode, "open")) {
-              p("You may also type a value that is not in this vocabulary.", class = "msg-hint")
-            }
-          )
-        })
-      )
-    }
-
-    # "From the open document" is offered ONLY when a document is actually
-    # open -- there is nothing to carry over from otherwise -- and is the
-    # default in that case, since a user who already has a document open and
-    # is creating a related one most often wants its relationship metadata to
-    # follow. With no document open, "Don't carry anything over" is both the
-    # only sensible default and the only option besides a file upload.
-    carry_choices <- stats::setNames("none", "Don't carry anything over")
-    if (!is.null(rv$dta)) {
-      carry_choices <- c(carry_choices, stats::setNames("open", "From the open document"))
-    }
-    carry_choices <- c(carry_choices, stats::setNames("file", "From a file"))
-    carry_default <- if (!is.null(rv$dta)) "open" else "none"
-
-    carry_ui <- tagList(
-      tags$hr(),
-      tags$details(
-        tags$summary("Carry over metadata from an existing document"),
-        div(
-          style = "padding:8px 0 0;",
-          radioButtons("tmpl_carry_source", NULL, choices = carry_choices, selected = carry_default),
-          conditionalPanel(
-            condition = "input.tmpl_carry_source == 'file'",
-            fileInput("tmpl_carry_file", "DTA YAML to carry metadata over from",
-              accept = c(".yaml", ".yml")
-            )
-          ),
-          checkboxGroupInput(
-            "tmpl_carry_fields", "Fields to carry over",
-            choices = stats::setNames(
-              dta_template_metadata_fields(), dta_template_metadata_fields()
-            ),
-            selected = carry_over_default_fields()
-          )
-        )
-      )
-    )
 
     showModal(modalDialog(
       title = paste0("Create from template: ", as.character(def$label %||% def$id %||% "template")),
-      if (nzchar(as.character(def$description %||% ""))) {
-        p(as.character(def$description), class = "msg-hint")
-      },
-      if (length(opts) == 0) {
-        p("This template has no configurable options.")
-      } else {
-        tagList(lapply(
-          opts,
-          render_template_option_input,
-          # Resolve ${today} for the preview as well, so the modal never offers
-          # a raw token as a default where the created DTA would carry a date.
-          base_metadata = resolve_template_expressions(
-            def$base$metadata %||% list(),
-            dta_template_today_env()
-          )
-        ))
-      },
-      party_ui,
-      vocab_ui,
-      carry_ui,
+      template_options_modal_body(
+        def, loaded, index, vocab_specs,
+        has_open_doc = !is.null(rv$dta)
+      ),
       footer = tagList(
+        actionButton("template_options_back", "Back to templates",
+          class = "btn btn-outline-secondary"
+        ),
         modalButton("Cancel"),
         actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
       ),
@@ -1546,121 +1428,176 @@ server <- function(input, output, session) {
   # configured private source (template_sources.R) visible here the same way
   # the packaged demo always was, with no separate code path for either:
   #
-  #   1. show_template_picker_modal()/output$template_picker_ui -- choose a
-  #      template (grouped by source) and a version.
-  #   2. show_template_options_modal() -- configure options, party slots and
-  #      metadata carry-over for the chosen template@version.
-
-  # One row per distinct, non-abstract creation-template id: the picker's
-  # first step shows one entry per id, keeping whichever row ranks highest by
-  # version (template_version_rank(), template_index.R) for its label/
-  # description/source -- the SPECIFIC version is a separate control
-  # (template_id_versions(), below). Ordered by source then label, both with
-  # method = "radix": this machine collates under German locale, CI under C
-  # collation, and a user-facing list must not silently depend on which one
-  # built it (the project's pinned "locale collation diverges from CI"
-  # lesson).
-  template_picker_entries <- function(index) {
-    rows <- index[index$kind == "dta_creation_template" & !index$abstract, , drop = FALSE]
-    if (nrow(rows) == 0) {
-      return(rows)
-    }
-    ids <- unique(rows$id)
-    picked <- lapply(ids, function(id) {
-      sub <- rows[rows$id == id, , drop = FALSE]
-      ranks <- template_version_rank(sub$version)
-      top <- order(ranks, decreasing = TRUE, na.last = TRUE)[[1]]
-      sub[top, , drop = FALSE]
-    })
-    out <- do.call(rbind, picked)
-    out <- out[order(out$label, method = "radix"), , drop = FALSE]
-    out <- out[order(out$source_name, method = "radix"), , drop = FALSE]
-    rownames(out) <- NULL
-    out
-  }
-
-  # selectInput() choices grouped into one <optgroup> per source_name -- a
-  # named list of named vectors is shiny's own recipe for optgroups (see
-  # ?shiny::selectInput). `entries` is already ordered by source then label
-  # (template_picker_entries()), so neither the groups nor the rows within
-  # them need re-sorting here.
-  template_picker_grouped_choices <- function(entries) {
-    groups <- unique(entries$source_name)
-    out <- list()
-    for (g in groups) {
-      sub <- entries[entries$source_name == g, , drop = FALSE]
-      out[[g]] <- stats::setNames(sub$id, sub$label)
-    }
-    out
-  }
-
-  # The descriptive reading list shown ABOVE the dropdown: one heading per
-  # source, one row per template naming its label and (when it has one) its
-  # description. The dropdown alone only ever shows a label; a template
-  # author's description would otherwise never be seen before creating a
-  # document from it.
-  template_picker_listing_ui <- function(entries) {
-    groups <- unique(entries$source_name)
-    tagList(lapply(groups, function(g) {
-      sub <- entries[entries$source_name == g, , drop = FALSE]
-      tagList(
-        tags$h6(g),
-        lapply(seq_len(nrow(sub)), function(i) {
-          div(
-            class = "tmpl-entry",
-            tags$strong(sub$label[[i]]),
-            if (nzchar(sub$description[[i]])) {
-              p(class = "msg-hint", style = "margin:0 0 6px;", sub$description[[i]])
-            }
-          )
-        })
-      )
-    }))
-  }
-
-  # Every version of ONE creation-template id, newest first -- the choices
-  # for the "Version:" selectInput. output$template_picker_ui (below) reads
-  # input$template_select_name directly and rebuilds this list every time it
-  # changes, rather than pushing an update via updateSelectInput(): that keeps
-  # the whole picker body ONE declarative render, and is what makes "changing
-  # the template updates the version list" directly observable in the
-  # rendered HTML instead of only in a client-side round trip a test harness
-  # cannot see.
-  template_id_versions <- function(index, id) {
-    rows <- index[index$kind == "dta_creation_template" & index$id == id, , drop = FALSE]
-    if (nrow(rows) == 0) {
-      return(character(0))
-    }
-    ord <- order(template_version_rank(rows$version), decreasing = TRUE, na.last = TRUE)
-    vers <- rows$version[ord]
-    stats::setNames(vers, vers)
-  }
+  #   1. show_template_picker_modal() -- pick a template and a version.
+  #   2. show_template_options_modal() -- fill in options, party slots,
+  #      vocabularies and metadata carry-over for the chosen template@version.
+  #
+  # Step 1 is THREE outputs rather than one, and that split is the design:
+  #
+  #   template_picker_ui      the frame -- source status rows, diagnostics,
+  #                           the search box, the source filter, the refresh
+  #                           button. It depends on the index and the refresh
+  #                           tick ONLY, and reads the search text and the
+  #                           current selection through isolate(), so typing
+  #                           never re-renders the box being typed into (which
+  #                           would move the caret) and clicking a row never
+  #                           re-renders the list under the pointer.
+  #   template_picker_list    the rows. Re-renders on a keystroke or a source
+  #                           change -- exactly what should, and nothing else.
+  #   template_picker_detail  the version dropdown, the resolved `extends`
+  #                           chain and what the template will build, for
+  #                           whichever row is selected.
+  #
+  # Which row IS selected lives in reactives rather than being re-derived at
+  # each use, because three different things need the same answer -- the
+  # detail panel, "Use this template", and the fallback when the user has
+  # typed a search but not clicked anything, where the first visible row is
+  # implied. "Back to templates" relies on the same reactives still holding
+  # after the options modal is dismissed.
+  #
+  # template_picker_loaded() resolves the definition as soon as a row is
+  # selected, not when the button is pressed. That is what lets the detail
+  # panel name the exact resolved lineage, and report a template that cannot
+  # be used, BEFORE the author commits to it. It costs one YAML read plus a
+  # merge, so arrowing through a family stays instant.
 
   show_template_picker_modal <- function() {
+    # Shiny's client keeps the LAST value of every output and re-inserts it the
+    # moment the output binds again, before any fresh render arrives -- and
+    # then reports the inputs inside that stale copy as if the user had just
+    # set them. Left alone, re-opening this modal after Cancel or "Back to
+    # templates" re-inserts a frame whose search box holds the text of the
+    # previous render and a list whose checked radio is whichever row was
+    # checked when the list was last rendered, and the server takes both as
+    # new input: the search typed before "Use this template" gone, the
+    # selection reverted. Seen happen, not theorised.
+    #
+    # So the picker's outputs render NOTHING while the modal is closed (a
+    # hidden.bs.modal listener in template_picker_scripts() reports the close
+    # as input$template_picker_closed), which leaves nothing stale to
+    # re-insert, and every open re-renders them fresh from the inputs Shiny is
+    # still holding. The tick covers an open while already "open" -- a close
+    # whose report never arrived.
+    tmpl_picker_open(TRUE)
+    tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
     showModal(modalDialog(
       title = "Create new from template",
-      p("Select a template, then configure options in the next step.", class = "msg-hint"),
+      p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
       uiOutput("template_picker_ui"),
       footer = tagList(
         modalButton("Cancel"),
-        actionButton("template_select_next", "Next", class = "btn btn-primary")
+        actionButton("template_select_next", "Use this template", class = "btn btn-primary")
       ),
       size = "l",
       easyClose = TRUE
     ))
   }
 
-  # Bumped by "Refresh templates" (below) to force output$template_picker_ui
-  # to recompute even though dta_template_index_cached() alone would not be
-  # seen as "changed" by the reactive graph -- it is a plain function call
-  # backed by a file-local cache (template_index.R), not a reactive value.
+  # Bumped by "Refresh templates" (below) to force the picker outputs to
+  # recompute even though dta_template_index_cached() alone would not be seen
+  # as "changed" by the reactive graph -- it is a plain function call backed by
+  # a file-local cache (template_index.R), not a reactive value.
   tmpl_refresh_tick <- reactiveVal(0)
+
+  # Bumped by show_template_picker_modal() on every open -- see the comment
+  # there for why a re-bound modal cannot be trusted to show current inputs.
+  tmpl_picker_open_tick <- reactiveVal(0)
+
+  # Whether the picker modal is on screen. While it is not, its three outputs
+  # render NOTHING -- same comment. The close is reported by the browser
+  # (template_picker_scripts(), template_ui.R), because Cancel, Escape and a
+  # click on the backdrop never reach the server any other way.
+  tmpl_picker_open <- reactiveVal(FALSE)
+  observeEvent(input$template_picker_closed, tmpl_picker_open(FALSE))
+
+  # One row per distinct, non-abstract creation-template id (template_picker_
+  # entries(), template_index.R), plus the family/depth/lineage/search columns
+  # that make a deviation template visible AS a deviation of its base
+  # (template_picker_lineage(), same file).
+  template_picker_rows <- reactive({
+    tmpl_refresh_tick()
+    idx <- dta_template_index_cached()
+    template_picker_lineage(idx, template_picker_entries(idx))
+  })
+
+  # The source filter is honoured only while it names a source that still has
+  # templates. Its control exists only when there are two or more of those
+  # (template_picker_source_ui()), so a refresh that leaves one source would
+  # take the control away while Shiny kept holding its last value -- and every
+  # row would stay filtered out behind a message asking the user to pick a
+  # source they can no longer see.
+  template_picker_visible <- reactive({
+    rows <- template_picker_rows()
+    source <- as.character(input$template_select_source %||% "")
+    if (!(source %in% unique(rows$source_name))) {
+      source <- ""
+    }
+    template_picker_filter(rows, input$template_search %||% "", source)
+  })
+
+  # The user's own choice for as long as it names a row that is still visible,
+  # else the first visible row. Falling back rather than clearing is what lets
+  # "type a search, press Enter" work with no click in between -- and it is
+  # also why a search that hides everything yields NULL, so "Use this
+  # template" warns instead of silently creating from a row nobody can see.
+  template_picker_selected <- reactive({
+    vis <- template_picker_visible()
+    if (nrow(vis) == 0) {
+      return(NULL)
+    }
+    chosen <- as.character(input$template_select_name %||% "")
+    if (nzchar(chosen) && chosen %in% vis$id) chosen else vis$id[[1]]
+  })
+
+  # Same rule one level down: the chosen version while it was chosen FOR this
+  # id, else the newest. The version control is re-rendered per template, but
+  # Shiny still holds the previous template's choice until the new control
+  # reports, and a "1.0" chosen on one template must not carry onto the next
+  # -- which may well have a 1.0 of its own -- and silently open an old
+  # version nobody picked. So the id a version was chosen for is recorded
+  # alongside it, ahead of the outputs that read it (priority).
+  tmpl_version_for <- reactiveVal(NULL)
+  observeEvent(input$template_select_version,
+    {
+      tmpl_version_for(isolate(template_picker_selected()))
+    },
+    priority = 10
+  )
+
+  template_picker_version <- reactive({
+    id <- template_picker_selected()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    vers <- template_id_versions(dta_template_index_cached(), id)
+    v <- as.character(input$template_select_version %||% "")
+    if (nzchar(v) && v %in% vers && identical(tmpl_version_for(), id)) {
+      v
+    } else if (length(vers) > 0) {
+      vers[[1]]
+    } else {
+      NULL
+    }
+  })
+
+  template_picker_loaded <- reactive({
+    id <- template_picker_selected()
+    v <- template_picker_version()
+    if (is.null(id) || is.null(v)) {
+      return(NULL)
+    }
+    load_template_definition(paste0(id, "@", v), index = dta_template_index_cached())
+  })
 
   output$template_picker_ui <- renderUI({
     tmpl_refresh_tick()
+    tmpl_picker_open_tick()
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
     idx <- dta_template_index_cached()
     sources <- attr(idx, "sources") %||% list()
-    entries <- template_picker_entries(idx)
+    rows <- template_picker_rows()
 
     diagnostics <- template_source_diagnostics_ui(sources)
     refresh_btn <- actionButton(
@@ -1668,7 +1605,7 @@ server <- function(input, output, session) {
       class = "btn btn-sm btn-outline-secondary"
     )
 
-    if (nrow(entries) == 0) {
+    if (nrow(rows) == 0) {
       # Private-replaces-public (template_sources.R): with a private source
       # configured and nothing usable in it, the packaged demo is NOT offered
       # as a fallback -- say so plainly, backed by the diagnostics above
@@ -1688,32 +1625,64 @@ server <- function(input, output, session) {
       return(tagList(diagnostics, msg, refresh_btn))
     }
 
-    status <- tagList(lapply(sources, template_source_status_row))
-
-    # The template currently highlighted for the version dropdown: the user's
-    # own choice if it still names a real entry, else the first one. This is
-    # what makes changing input$template_select_name rebuild the version list
-    # on the very next render, with no separate observer/updateSelectInput().
-    chosen_id <- as.character(input$template_select_name %||% "")
-    if (!nzchar(chosen_id) || !(chosen_id %in% entries$id)) {
-      chosen_id <- entries$id[[1]]
-    }
-    version_choices <- template_id_versions(idx, chosen_id)
-
     tagList(
-      status,
+      tagList(lapply(sources, template_source_status_row)),
       diagnostics,
-      template_picker_listing_ui(entries),
-      selectInput(
-        "template_select_name", "Template:",
-        choices = template_picker_grouped_choices(entries), selected = chosen_id
+      div(
+        class = "tmpl-search-row",
+        template_picker_search_ui(isolate(input$template_search %||% "")),
+        template_picker_source_ui(
+          unique(rows$source_name),
+          isolate(input$template_select_source %||% "")
+        )
       ),
-      selectInput(
-        "template_select_version", "Version:",
-        choices = version_choices,
-        selected = if (length(version_choices) > 0) version_choices[[1]] else character(0)
-      ),
-      refresh_btn
+      uiOutput("template_picker_list"),
+      uiOutput("template_picker_detail"),
+      refresh_btn,
+      template_picker_scripts()
+    )
+  })
+
+  # `selected` is isolated for the same reason the frame isolates the search
+  # text: a click checks the radio in the browser already, so re-rendering the
+  # list to say so would only throw away the focus and scroll position the
+  # user just established -- and would fight the client-side expand/collapse.
+  output$template_picker_list <- renderUI({
+    tmpl_picker_open_tick()
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
+    rows <- template_picker_rows()
+    vis <- template_picker_visible()
+    tokens <- template_picker_tokens(input$template_search %||% "")
+    template_picker_list_ui(
+      vis,
+      selected = isolate(input$template_select_name),
+      show_source = length(unique(rows$source_name)) > 1,
+      # A search result is a flat list: the matches rarely form whole
+      # families, and indenting a child under a parent that was filtered out
+      # would place it under nothing. Its `extends` line still names the
+      # ancestors, so the context survives the flattening.
+      flat = length(tokens) > 0,
+      tokens = tokens,
+      total = nrow(rows)
+    )
+  })
+
+  output$template_picker_detail <- renderUI({
+    if (!isTRUE(tmpl_picker_open())) {
+      return(NULL)
+    }
+    id <- template_picker_selected()
+    if (is.null(id)) {
+      return(NULL)
+    }
+    idx <- dta_template_index_cached()
+    template_picker_detail_ui(
+      template_picker_loaded(),
+      template_id_versions(idx, id),
+      template_picker_version(),
+      idx
     )
   })
 
@@ -1742,15 +1711,14 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$template_select_next, {
-    idx <- dta_template_index_cached()
-    tid <- as.character(input$template_select_name %||% "")
-    tver <- as.character(input$template_select_version %||% "")
-    if (!nzchar(tid) || !nzchar(tver)) {
-      showNotification("Choose a template and a version first.", type = "warning")
+    # The definition the detail panel is already showing -- NULL only when no
+    # row is visible to select, which is what a search matching nothing looks
+    # like from here.
+    loaded <- template_picker_loaded()
+    if (is.null(loaded)) {
+      showNotification("Pick a template first.", type = "warning")
       return()
     }
-    ref <- paste0(tid, "@", tver)
-    loaded <- load_template_definition(ref, index = idx)
     if (!isTRUE(loaded$ok)) {
       showNotification(paste("Template is invalid:", loaded$error), type = "error", duration = 10)
       return()
@@ -1758,11 +1726,34 @@ server <- function(input, output, session) {
     # Frozen HERE, not re-fetched at confirm time: the options/party/carry-
     # over step must build and create against the EXACT index the user picked
     # from, even if a background "Refresh templates" happens while that step
-    # is open.
-    rv$template_ref <- ref
-    rv$template_index <- idx
+    # is open. The ref comes off the resolved row rather than off the inputs,
+    # so an implied selection (first visible row, never clicked) is recorded
+    # as precisely as an explicit one.
+    rv$template_ref <- paste0(loaded$value$id, "@", loaded$value$version)
+    rv$template_index <- dta_template_index_cached()
     removeModal()
-    show_template_options_modal(loaded$value$def, idx)
+    show_template_options_modal(loaded, rv$template_index)
+  })
+
+  # The "render NOTHING while closed" rule above only works if the render
+  # actually runs, and a suspended output does not run. An output whose
+  # element has left the page can be left suspended -- it is reported hidden
+  # the moment its container binds behind a fade, and nothing un-hides an
+  # element that is gone -- and then the NULL is held back until the output is
+  # visible again, by which time the stale copy has already been re-inserted
+  # and its inputs reported (seen happen). Keeping the three live costs
+  # nothing: they ARE null whenever they are off screen.
+  outputOptions(output, "template_picker_ui", suspendWhenHidden = FALSE)
+  outputOptions(output, "template_picker_list", suspendWhenHidden = FALSE)
+  outputOptions(output, "template_picker_detail", suspendWhenHidden = FALSE)
+
+  # Back to step 1. show_template_picker_modal() re-renders the picker's three
+  # outputs from the inputs Shiny is still holding, so the search text and the
+  # selection come back with them -- dismissing a modal removes controls from
+  # the DOM, it does not clear their input values.
+  observeEvent(input$template_options_back, {
+    removeModal()
+    show_template_picker_modal()
   })
 
   observeEvent(input$template_create_confirm, {
@@ -1778,7 +1769,7 @@ server <- function(input, output, session) {
 
     sels <- collect_template_selections(def)
     party_sel <- collect_party_selections(def)
-    vocab_sel <- collect_vocab_selections(def)
+    vocab_sel <- collect_vocab_selections()
 
     co <- resolve_carry_over()
     if (!isTRUE(co$ok)) {

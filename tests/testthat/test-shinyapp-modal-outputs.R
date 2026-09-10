@@ -11,8 +11,9 @@
 # the dialog is recorded hidden and suspended for good.
 #
 # Concretely: the "Create new from template" picker opened with an EMPTY body,
-# because output$template_picker_ui -- the uiOutput holding the Template and
-# Version dropdowns -- was suspended and its HTML never sent. "Next" then found
+# because output$template_picker_ui -- the uiOutput holding the picker body,
+# at the time two dropdowns, today the search box and the nested list and
+# detail outputs -- was suspended and its HTML never sent. "Next" then found
 # no selection and reported it. Nothing on the server was wrong, which is
 # exactly why the whole existing testServer() suite passed throughout.
 #
