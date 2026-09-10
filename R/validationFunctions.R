@@ -108,6 +108,24 @@ validate_table <- function(specs, table, verbose = TRUE) {
 #' @noRd
 #' @keywords internal
 validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = NULL) {
+  # Guarded here rather than in each entry point, because this is where both
+  # of them arrive: `validate_table()` and the streaming scan's in-memory
+  # fallback.
+  #
+  # Without it, a `specs` that is not a collection -- an empty string from a
+  # path where an object was meant, a NULL coerced to text, a list still being
+  # assembled -- yields no schema, no rules and therefore no errors, and
+  # `validate_table()` returns the table unchanged. That is exactly how this
+  # function reports a delivery with nothing wrong with it, so the caller is
+  # told the data is clean by a run that never looked at it.
+  if (!inherits(specs, "DTAtools::DTAColumnSpecCollection")) {
+    cli::cli_abort(c(
+      "{.arg specs} must be a {.cls DTAColumnSpecCollection}.",
+      x = "Got {.cls {class(specs)[[1]]}}.",
+      i = "Nothing can be validated against a specification that is not one."
+    ))
+  }
+
   # Read before the table is touched: these were recorded when the table was
   # typed at import, and they ride on the table so they cannot be separated
   # from the data they describe.

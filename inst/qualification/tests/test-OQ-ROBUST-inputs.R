@@ -47,16 +47,33 @@ test_that("OQ-ROBUST-001 | an argument of the wrong type is refused | REQ-ROBUST
     )
   )
 
-  # DEV-008. The exception, and the worst-shaped one available: a specs
-  # argument that is not a specification returns the table unchanged, which is
-  # exactly how this function says a table is valid. A caller who assembled a
-  # specification dynamically and got a string is told the delivery is clean,
-  # and nothing downstream can tell that answer from a real one.
-  qa_known_deviation(
-    "DEV-008",
-    identical(
-      suppressMessages(validate_table(specs = "not a collection", table = frame, verbose = FALSE)),
-      frame
+  # The specification argument, in every shape a caller can arrive with by
+  # accident: a path where an object was meant, a NULL coerced along, a list
+  # still being assembled. This one is called out separately because of what
+  # the alternative looks like -- validate_table() signals a clean delivery by
+  # returning the table unchanged, so a specification that is silently ignored
+  # produces the same answer as one that was met. It was DEV-008 until the
+  # guard landed; the assertion is now on the correct behaviour, not the
+  # defect.
+  qa_step(
+    "a specification that is not one is refused rather than ignored",
+    rep(TRUE, 3L),
+    c(
+      refused(validate_table(specs = "not a collection", table = frame, verbose = FALSE)),
+      refused(validate_table(specs = NULL, table = frame, verbose = FALSE)),
+      refused(validate_table(specs = list(), table = frame, verbose = FALSE))
+    )
+  )
+  qa_step(
+    "and the refusal is a package condition naming the argument",
+    TRUE,
+    grepl(
+      "specs",
+      conditionMessage(tryCatch(
+        validate_table(specs = "not a collection", table = frame, verbose = FALSE),
+        error = function(e) e
+      )),
+      fixed = TRUE
     )
   )
 
