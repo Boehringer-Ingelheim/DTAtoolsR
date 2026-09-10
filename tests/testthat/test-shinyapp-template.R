@@ -6,6 +6,29 @@
 # system.file() calls inside the app helpers resolve bundled assets correctly
 # under both devtools::test() and R CMD check).
 
+# Detach this test from any template source configured on the developer's
+# machine, for the tests that build from the REAL bundled biomarker_gf
+# template. That template imports a dataset template and declares vocabulary
+# slots, so create_dta_from_template() takes the `needs_index` branch in
+# template_core.R and falls back to the ambient dta_template_index_cached().
+# An exported DTATOOLS_TEMPLATE_SOURCES flips that index into private-only
+# mode -- "private replaces public" -- dropping the packaged directory these
+# tests read from, and they fail locally while CI stays green.
+#
+# Only the two variables that decide the ROOT SET are cleared, not the seven
+# that test-shinyapp-template-sources.R's local_clean_template_env() clears:
+# the rest tune git fetching, which cannot matter once no source is
+# configured. This file is about template_core.R, not about source resolution.
+local_packaged_templates_only <- function(.local_envir = parent.frame()) {
+  withr::local_envvar(
+    c(
+      DTATOOLS_TEMPLATE_SOURCES = NA,
+      DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = NA
+    ),
+    .local_envir = .local_envir
+  )
+}
+
 # ---- dta_creation_templates_dir / list_dta_creation_templates / get_dta_creation_template_path ----
 
 test_that("dta_creation_templates_dir() resolves to a directory that exists", {
@@ -236,6 +259,7 @@ test_that("${version} reaches version_history after the options are applied", {
   # never called, so metadata.version took the chosen value while
   # version_history[[1]]$version kept the literal "${version}". Nothing caught
   # it because no test overrode version and then read the history back.
+  local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
   path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
@@ -255,6 +279,7 @@ test_that("${version} reaches version_history after the options are applied", {
 })
 
 test_that("${today} resolves to the creation date, not a literal token", {
+  local_packaged_templates_only()
   create <- app_fn("create_dta_from_template")
   read_tpl <- app_fn("read_dta_creation_template")
   path <- app_fn("get_dta_creation_template_path")("biomarker_gf.dta-template.yaml")
@@ -588,6 +613,7 @@ test_that("apply_template_metadata_path() rejects an unsupported metadata top-le
 # ---- create_dta_from_template -------------------------------------------
 
 test_that("create_dta_from_template() builds a DTA from the real bundled template", {
+  local_packaged_templates_only()
   real_path <- system.file(
     "extdata", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
