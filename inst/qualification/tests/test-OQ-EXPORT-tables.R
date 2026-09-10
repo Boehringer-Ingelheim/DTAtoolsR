@@ -224,10 +224,21 @@ test_that("OQ-EXPORT-033 | get_md5sum = FALSE returns no checksum and writes no 
 
 # ---- write_table_to_file(): atomicity (pinned finding) ---------------------
 
-test_that("OQ-EXPORT-034 | a failed write leaves a truncated file for compression = \"none\" and no file for \"gzip\" | REQ-EXPORT-025", {
+test_that("OQ-EXPORT-034 | a write that fails leaves the destination exactly as it was, on both branches | REQ-EXPORT-025", {
   dir <- qa_tempdir()
 
+  # The case that matters is not a failed write to a fresh path. It is a failed
+  # RE-export over a delivery that was already there and already good, because
+  # that is when a truncated file replaces something a receiver was relying on.
   plain <- file.path(dir, "plain.csv")
+  write_table_to_file(
+    et_dataset(),
+    table = "t1", filename = plain,
+    sep = ",", quiet = TRUE, arrange_by = NULL
+  )
+  before <- readLines(plain)
+  qa_check("a good export is in place to be overwritten", length(before) > 1)
+
   cond1 <- tryCatch(
     write_table_to_file(
       et_poison_dataset(),
@@ -237,13 +248,16 @@ test_that("OQ-EXPORT-034 | a failed write leaves a truncated file for compressio
     error = function(e) e
   )
   qa_check("the plain write fails, as the poisoned column is designed to make it", inherits(cond1, "condition"))
-  # PINNED: base R's write.table() opens and truncates the destination file
-  # and writes the header line to it BEFORE it converts the data columns (see
-  # utils::write.table's own source), so a column conversion failure after
-  # that point leaves the header sitting at the destination path --
-  # overwriting whatever was there before if overwrite = TRUE was given.
-  qa_check("PINNED: the destination file exists despite the failed write", file.exists(plain))
-  qa_step("PINNED: only the header row reached disk before the failure", "ID,EXTRA", readLines(plain))
+  # A header-only file is worse than no file: it still reads as a table, with
+  # no rows, and a table with no rows breaks no constraint and so validates
+  # perfectly clean. The write now goes to a temporary file beside the
+  # destination and is renamed into place only once the whole table converted.
+  qa_step("the delivery that was already there is byte-for-byte unchanged", before, readLines(plain))
+  qa_step(
+    "and no partial file is left beside it",
+    character(0),
+    Filter(function(f) endsWith(f, ".part"), list.files(dir))
+  )
 
   gzipped <- file.path(dir, "gzipped.csv.gz")
   cond2 <- tryCatch(
@@ -255,11 +269,20 @@ test_that("OQ-EXPORT-034 | a failed write leaves a truncated file for compressio
     error = function(e) e
   )
   qa_check("the gzip write fails the same way", inherits(cond2, "condition"))
-  # The gzip path writes to an anonymous temp file first and only gzips that
-  # to the destination on success, so the same failure leaves the destination
-  # untouched rather than truncated.
-  qa_check("the gzip path leaves no file at the destination", !file.exists(gzipped))
-  qa_known_deviation("DEV-013", file.exists(plain) && !file.exists(gzipped))
+  qa_step("and creates nothing at a destination that did not exist", FALSE, file.exists(gzipped))
+
+  # The same must hold for the plain branch at a fresh path: a failure there
+  # leaves nothing, rather than a file a later reader would take for an export.
+  fresh <- file.path(dir, "fresh.csv")
+  invisible(tryCatch(
+    write_table_to_file(
+      et_poison_dataset(),
+      table = "t1", filename = fresh,
+      sep = ",", quiet = TRUE, arrange_by = NULL
+    ),
+    error = function(e) e
+  ))
+  qa_step("the plain branch likewise creates nothing when it cannot finish", FALSE, file.exists(fresh))
 })
 
 # ---- write_table_to_file(): verdict round trip -----------------------------
