@@ -1,0 +1,23 @@
+kind: dta_creation_template
+id: fs_parent
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    title: FS Parent
+    version: "1.0"
+    date: "2026-01-01"
+    header: QA Org
+    receiver:
+      affiliation:
+        name: Our org
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+      notification: email
+    error_handling: Errors are reported by email.
+    authorized_for_corrections: Data Manager
+datasets:
+  - template: qa_ds@1.0
+    as: qa_data

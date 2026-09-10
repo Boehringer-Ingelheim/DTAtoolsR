@@ -1,0 +1,10 @@
+kind: dta_dataset_template
+id: pin_ds
+version: "1.0"
+dataset:
+  name: pin_data
+  columns:
+    - id: A
+      type: SAS Char
+      format: SAS $10.
+      nullable: Yes

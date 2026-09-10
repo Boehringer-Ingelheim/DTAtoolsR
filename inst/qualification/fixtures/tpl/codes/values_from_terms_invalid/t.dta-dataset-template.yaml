@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: vti1
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from:
+        vocabulary: vti_voc@1.0
+        include: [NOPE]

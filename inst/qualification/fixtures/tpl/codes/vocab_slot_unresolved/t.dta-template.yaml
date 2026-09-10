@@ -1,0 +1,9 @@
+kind: dta_creation_template
+id: vsu1
+version: "1.0"
+abstract: true
+vocabulary_slots:
+  - id: goodslot
+    label: Good slot
+    target: datasets.qa_data.columns.STATUS.values
+    vocabulary: nonexistent_vocab@1.0

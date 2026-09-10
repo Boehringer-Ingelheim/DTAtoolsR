@@ -1,0 +1,334 @@
+area: RULE
+title: Cross-column and grouped rules
+
+# The largest surface in the package and the one with the most edge cases.
+# Every operator has to decide what a missing value means, and a wrong answer
+# there is invisible: the delivery simply passes.
+
+requirements:
+  # ---- the operator vocabulary ----------------------------------------------
+
+  - id: REQ-RULE-001
+    text: >
+      A conditional clause shall accept exactly the operators equals, equal,
+      not_equals, not_equal, in, not_in, greater, less, greater_equal,
+      less_equal, min, max, range, pattern and empty, and shall reject any
+      other operator with a condition naming the supported set.
+    risk: high
+    category: interface
+    covers: [DTARuleColCondition, rule_check_col_condition]
+    source: R/evaluateRules.R dta_condition_operators()
+
+  - id: REQ-RULE-002
+    text: >
+      The equality operators equals and not_equals, and their aliases equal and
+      not_equal, shall compare a value with a single expected value.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-003
+    text: >
+      The set operators in and not_in shall test membership of a list of
+      permitted values.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-004
+    text: >
+      The ordering operators greater, less, greater_equal and less_equal shall
+      compare numerically, with greater_equal and less_equal including the
+      bound and greater and less excluding it.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-005
+    text: >
+      min and max given together shall select one inclusive band rather than
+      two independent tests.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+    notes: >
+      Treating them as two tests would make a row satisfying only one of them
+      count as in scope, silently widening every banded rule.
+
+  - id: REQ-RULE-006
+    text: >
+      The range operator shall select the inclusive band between the first and
+      second elements of its value.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition, rule_check_range]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-007
+    text: >
+      The pattern operator shall match a PCRE regular expression, and shall
+      treat a missing value and an empty string as not matching.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-008
+    text: >
+      The empty operator shall treat a missing value as empty in every column,
+      and a blank string as empty in character and factor columns; empty = TRUE
+      shall select the empty values and empty = FALSE the rest.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-009
+    text: >
+      A bound that parses as a number shall be compared numerically against a
+      numeric column, so that a value stored as a double and the same value
+      stored as an integer reach the same verdict.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+    notes: >
+      Left to R's implicit coercion the comparison would render the column as
+      text, and the verdict would then depend on integer-versus-double storage
+      -- which legitimately differs between the whole-column and streaming
+      engines. That would make the same file pass on one path and fail on the
+      other.
+
+  - id: REQ-RULE-010
+    text: >
+      A bound that does not parse as a number, and any comparison against a
+      character column, shall be compared as text, so that identifiers with
+      leading zeros keep them.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  # ---- conditional rules ------------------------------------------------------
+
+  - id: REQ-RULE-011
+    text: >
+      A conditional rule shall report a violation for every row where the IF
+      clause holds and the THEN clause does not.
+    risk: high
+    category: functional
+    covers: [DTARuleColCondition, rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-012
+    text: >
+      Several operators named for one column in an IF clause shall be combined
+      conjunctively, and so shall clauses naming several columns.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-013
+    text: >
+      A row whose IF clause cannot be decided because a value is missing shall
+      be treated as out of scope rather than as a violation.
+    risk: high
+    category: functional
+    covers: [rule_check_col_condition]
+    source: R/evaluateRules.R
+
+  # ---- range rules ------------------------------------------------------------
+
+  - id: REQ-RULE-014
+    text: >
+      A range rule shall report every value outside its inclusive bounds, and
+      shall accept its bounds either as a range of two values or as separate
+      min and max values.
+    risk: high
+    category: functional
+    covers: [DTARuleColRange, rule_check_range]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-015
+    text: >
+      A range rule shall ignore missing values rather than report them.
+    risk: high
+    category: functional
+    covers: [rule_check_range]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-016
+    text: >
+      A range rule shall require exactly one target column, and shall raise a
+      condition when given none or several.
+    risk: medium
+    category: interface
+    covers: [DTARuleColRange, rule_check_range]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-017
+    text: >
+      A range rule shall raise a condition of class dta_rule_not_applicable
+      when its target column is absent from the table.
+    risk: high
+    category: functional
+    covers: [rule_check_range]
+    source: R/evaluateRules.R
+    notes: >
+      A distinct class matters: a rule that cannot be evaluated is not a rule
+      that passed, and a caller must be able to tell the two apart.
+
+  # ---- uniqueness rules -------------------------------------------------------
+
+  - id: REQ-RULE-018
+    text: >
+      A uniqueness rule shall report duplicate rows across the combination of
+      all its named columns, not each column separately.
+    risk: high
+    category: functional
+    covers: [DTARuleColUnique, rule_check_unique]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-019
+    text: >
+      A uniqueness rule shall treat repeated missing values as duplicates of
+      one another.
+    risk: high
+    category: functional
+    covers: [rule_check_unique]
+    source: R/evaluateRules.R
+    notes: >
+      Pinned as observed. It follows base R's duplicated(), and it is the
+      stricter reading, but it is not the only defensible one: a key of unknown
+      value is arguably not equal to another key of unknown value.
+
+  - id: REQ-RULE-020
+    text: >
+      A uniqueness rule shall compare values case-sensitively.
+    risk: medium
+    category: functional
+    covers: [rule_check_unique]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-021
+    text: >
+      A uniqueness rule shall raise a condition of class
+      dta_rule_not_applicable when any of its columns is absent.
+    risk: high
+    category: functional
+    covers: [rule_check_unique]
+    source: R/evaluateRules.R
+
+  # ---- grouped rules ----------------------------------------------------------
+
+  - id: REQ-RULE-022
+    text: >
+      A grouped rule shall partition the table by all of its grouping columns
+      and evaluate its constraints once per group.
+    risk: high
+    category: functional
+    covers: [DTARuleGroupCondition, rule_check_group_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-023
+    text: >
+      The mutually_exclusive constraint shall report a group in which both of
+      its named conditions hold.
+    risk: high
+    category: functional
+    covers: [rule_check_group_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-024
+    text: >
+      The requires constraint shall report a group in which its antecedent
+      condition holds and its consequent does not.
+    risk: high
+    category: functional
+    covers: [rule_check_group_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-025
+    text: >
+      Constraint types shall be accepted under the aliases not_both for
+      mutually_exclusive and implies for requires.
+    risk: low
+    category: interface
+    covers: [DTARuleGroupCondition]
+    source: R/DTARuleGroupCondition-class.R
+
+  - id: REQ-RULE-026
+    text: >
+      A constraint of an unrecognised type, or one naming a condition the rule
+      does not define, shall be rejected when the rule is constructed rather
+      than ignored when it is evaluated.
+    risk: high
+    category: interface
+    covers: [DTARuleGroupCondition]
+    source: R/DTARuleGroupCondition-class.R
+    notes: >
+      Rejecting at construction is what stops a mistyped constraint from
+      reading as a rule that always passes. A rule that silently checks nothing
+      is indistinguishable from a delivery that is clean.
+
+  - id: REQ-RULE-027
+    text: >
+      A grouped rule shall raise a condition of class dta_rule_not_applicable
+      when a grouping column is absent from the table.
+    risk: high
+    category: functional
+    covers: [rule_check_group_condition]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-028
+    text: >
+      A reported group violation shall name the group it occurred in and the
+      rows that produced it.
+    risk: medium
+    category: interface
+    covers: [rule_check_group_condition]
+    source: R/evaluateRules.R
+
+  # ---- rules as a set ---------------------------------------------------------
+
+  - id: REQ-RULE-029
+    text: >
+      apply_rules() shall evaluate every rule in a specification and return one
+      result per rule, whether or not earlier rules failed.
+    risk: high
+    category: functional
+    covers: [apply_rules]
+    source: R/evaluateRules.R
+
+  - id: REQ-RULE-030
+    text: >
+      DTARuleFactory() shall build a rule of the type it is given, and shall
+      reject a type it does not recognise.
+    risk: medium
+    category: interface
+    covers: [DTARuleFactory]
+    source: R/DTARule-class.R
+
+  - id: REQ-RULE-031
+    text: >
+      rule_preview() shall summarise the rules of a specification as their
+      identifiers, abbreviating the middle of a long list, and shall report a
+      specification with no rules as "not set".
+    risk: low
+    category: interface
+    covers: [rule_preview]
+    source: R/DTAColumnSpecCollection-class.R:158
+
+  - id: REQ-RULE-032
+    text: >
+      validate_rules() shall raise a condition listing every violated rule when
+      any rule of a specification is violated.
+    risk: medium
+    category: interface
+    covers: [validate_rules]
+    source: R/evaluateRules.R

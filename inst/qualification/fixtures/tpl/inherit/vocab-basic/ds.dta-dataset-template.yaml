@@ -1,0 +1,7 @@
+kind: dta_dataset_template
+id: vb_ds
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from: vb_voc@1.0

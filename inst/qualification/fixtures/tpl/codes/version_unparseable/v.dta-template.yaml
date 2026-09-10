@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: v3
+version: "not-a-version"
+abstract: true

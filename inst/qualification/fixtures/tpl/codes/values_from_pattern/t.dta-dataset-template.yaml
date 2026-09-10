@@ -1,0 +1,8 @@
+kind: dta_dataset_template
+id: vfp1
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      pattern: "^[A-Z]+$"
+      values_from: whatever_voc@1.0
