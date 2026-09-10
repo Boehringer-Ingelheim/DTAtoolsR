@@ -141,6 +141,25 @@ contract.
   `Rscript .github/scripts/style.R` yourself before committing, never
   `styler::style_pkg()` (see Commands above for why); do not hand-format.
 
+## Qualification suite
+
+`inst/qualification/` is a second, separately-run test suite that produces
+audit-grade evidence (IQ/OQ/PQ) for an *installed* copy of the package. It is
+not part of `devtools::test()`; it runs on demand via `run_qualification()`.
+
+**If you change the package, it probably needs updating too** — a new export
+must be listed and covered, a changed behaviour means a changed requirement
+and not just a changed test, a fixed defect must be closed in the register,
+and anything under `inst/` needs the file manifest regenerated. The rules are
+enforced by meta-checks that fail the run, not by review.
+
+Read `inst/qualification/docs/maintaining.md` before touching it. It is
+task-oriented: find what you changed, do what it says. `inst/qualification/README.md`
+covers running and reviewing a qualification instead.
+
+The one rule that governs everything there: **an expected value never comes
+from the software.** Never paste observed output in as an expectation.
+
 ## Guardrails
 
 - Never hand-edit `man/`, `NAMESPACE`, or `renv.lock` — they are generated.
