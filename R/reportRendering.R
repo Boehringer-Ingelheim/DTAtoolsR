@@ -109,6 +109,69 @@
 
 
 #' @keywords internal
+#' @title Add the Metadata Axis to the Overview Rows
+#' @description
+#' `results()` carries one row per dataset target and none for metadata: the
+#' metadata verdict is computed by `check()` and kept on the object, never in
+#' the frame `results()` returns. The overview is the first thing a reviewer
+#' reads and for many it is the only thing, so a transfer that is invalid ONLY
+#' because of a metadata import error must not headline as "everything passed"
+#' while the fault sits in a message row further down the same page.
+#'
+#' One row is added for the metadata axis when, and only when, it has something
+#' to report. A clean transfer's overview stays a statement about its targets,
+#' which is what the per-target table below the cards is for.
+#' @param x The object being reported on.
+#' @param results_df The frame returned by `results(x)`.
+#' @return `results_df`, with one metadata row appended where warranted.
+.report_with_metadata_row <- function(x, results_df) {
+  if (!inherits(x, "DTAtools::DTA")) {
+    return(results_df)
+  }
+  md <- tryCatch(metadata(x), error = function(e) NULL)
+  if (is.null(md)) {
+    return(results_df)
+  }
+  errors <- tryCatch(metadata_import_errors(md), error = function(e) NULL)
+  n_errors <- if (is.data.frame(errors)) nrow(errors) else 0L
+  if (n_errors == 0) {
+    return(results_df)
+  }
+
+  # Built from the frame itself, so the row keeps every column results() has
+  # and the right type for each, whatever that set becomes.
+  row <- if (is.data.frame(results_df) && ncol(results_df) > 0) {
+    out <- results_df[NA_integer_, , drop = FALSE]
+    rownames(out) <- NULL
+    out
+  } else {
+    data.frame(
+      dataset = NA_character_, target = NA_character_, target_type = NA_character_,
+      status = NA_character_, n_columnspec_errors = NA_integer_,
+      n_rule_errors = NA_integer_, n_import_errors = NA_integer_,
+      stringsAsFactors = FALSE
+    )
+  }
+  # Blank rather than NA: this cell renders straight into the table, and the
+  # metadata axis belongs to the transfer rather than to any one dataset.
+  row$dataset <- ""
+  row$target <- "metadata"
+  if ("target_type" %in% names(row)) {
+    row$target_type <- "metadata"
+  }
+  row$status <- "failed"
+  row$n_columnspec_errors <- 0L
+  row$n_rule_errors <- 0L
+  row$n_import_errors <- as.integer(n_errors)
+
+  if (!is.data.frame(results_df) || nrow(results_df) == 0) {
+    return(row)
+  }
+  rbind(results_df, row)
+}
+
+
+#' @keywords internal
 #' @title Build Validation Summary HTML Section
 #' @description
 #' Renders the top-level summary section with pass/fail/pending counts and

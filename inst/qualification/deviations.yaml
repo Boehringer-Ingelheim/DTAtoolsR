@@ -250,7 +250,7 @@ deviations:
 
   - id: DEV-011
     title: The report overview shows all targets passed when only metadata failed
-    status: open
+    status: closed
     severity: major
     affects: [REQ-REPORT-003]
     observed: >
@@ -270,7 +270,7 @@ deviations:
     workaround: Read the message table as well as the overview.
     reference: R/validationReporting.R:115 with R/exportValidationReport.R
     opened: 2026-09-09
-    closed: null
+    closed: 2026-09-10
 
   - id: DEV-012
     title: One metadata import error removes the inspect detail from every message

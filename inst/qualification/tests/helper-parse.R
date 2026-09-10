@@ -84,11 +84,20 @@ qa_html_report <- function(path) {
     sub("^summary-card\\s*", "", xml2::xml_attr(card, "class"))
   }, character(1))
 
+  # The per-target rows under the cards. Read from the data attributes rather
+  # than the cell text, because those are what the document's own filtering
+  # keys on: a row the reader can filter to is a row the reader can find.
+  summary_rows <- xml2::xml_find_all(
+    doc, "//table[contains(concat(' ', normalize-space(@class), ' '), ' report-summary-table ')]//tbody/tr"
+  )
+
   list(
     title = xml2::xml_text(xml2::xml_find_first(doc, "//title"), trim = TRUE),
     n_messages = length(rows),
     messages = messages,
     counts = counts,
+    targets = vapply(summary_rows, function(r) xml2::xml_attr(r, "data-target"), character(1)),
+    target_statuses = vapply(summary_rows, function(r) xml2::xml_attr(r, "data-status"), character(1)),
     n_inspect_panels = length(
       xml2::xml_find_all(doc, "//*[starts-with(@id, 'inspect-panel-')]")
     ),
