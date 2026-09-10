@@ -20,6 +20,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   column/rule/file/details editors and the inline messages that report a
   rejected value were all blank the same way. The app now re-asserts the
   visibility of everything inside a dialog once it is really on screen.
+- **Repeat clicks on an overloaded server no longer stack up the same
+  dialog.** The button guard released a click after 1.5 seconds of silence
+  from the server; a machine busy enough not to acknowledge the click in that
+  time then let every further click through, and the *Edit contact* dialog
+  opened once per click when the server caught up. The guard now waits five
+  seconds, and the contact editor itself ignores a request for the dialog
+  that is already open -- it learns from the browser when that dialog is
+  closed, dismissed, or replaced, so reopening it deliberately still works.
+
+### Changed
+
+- **The app has a calmer, document-like look.** Same workflow, same
+  controls: the masthead is flat deep green with the logo's accent rule, the
+  landing page opens on one large drop target, the sidebar summarises
+  validation as a segmented status bar, and status is shown as a coloured
+  left rail on dataset rows, the dataset header and loaded files instead of
+  tinted backgrounds. Type is IBM Plex Sans with IBM Plex Mono for
+  identifiers, tabs are underlined, and dialogs, menus and notifications share
+  one set of surfaces.
 
 ## [0.25.0] - 2026-09-07
 
