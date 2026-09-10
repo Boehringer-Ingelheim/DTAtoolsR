@@ -1,0 +1,7 @@
+kind: dta_vocabulary
+id: vti_voc
+version: "1.0"
+type: text
+terms:
+  - code: A
+    label: Term A

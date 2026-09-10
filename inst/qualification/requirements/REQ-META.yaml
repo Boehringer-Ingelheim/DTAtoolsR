@@ -1,0 +1,244 @@
+area: META
+title: Transfer metadata
+
+# DTAMetaData is the only part of a transfer that describes the AGREEMENT
+# rather than the data: who is sending what to whom, on what dates, under
+# whose authority to request a correction. None of it is checked against a
+# column specification, so a defect here is invisible to the three validation
+# axes and would otherwise reach a signed document unnoticed.
+
+requirements:
+  # ---- the validator ----------------------------------------------------------
+
+  - id: REQ-META-001
+    text: >
+      title and version, when supplied, shall not be an empty string.
+    risk: medium
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R validator()
+
+  - id: REQ-META-002
+    text: >
+      Each version_history record shall be a list carrying version, date and
+      changes; a record that is not a list, or omits any of the three fields,
+      shall be rejected naming the missing field(s).
+    risk: medium
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R validator()
+
+  - id: REQ-META-003
+    text: >
+      A version_history record's changes, when it is a character value, shall
+      not be an empty string.
+    risk: low
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R validator()
+
+  - id: REQ-META-004
+    text: >
+      transmission$date_first_transfer and transmission$date_last_transfer,
+      when present, shall each be a Date or a character string; any other type
+      shall be rejected.
+    risk: medium
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R validator()
+
+  - id: REQ-META-005
+    text: >
+      template, when non-empty, shall carry id and version each as a single
+      non-empty character string, so that a partially written provenance
+      record cannot reach the rebase feature that trusts it.
+    risk: medium
+    category: integrity
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R validator()
+
+  # ---- date parsing -----------------------------------------------------------
+
+  - id: REQ-META-006
+    text: >
+      A date-valued field supplied as a string that is exactly an ISO date
+      (YYYY-MM-DD) shall become a Date, and shall record no import issue.
+    risk: high
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R .parse_metadata_date()
+
+  - id: REQ-META-007
+    text: >
+      A date-valued field supplied as a string that starts with an ISO date but
+      carries trailing text shall still become a Date, and shall record one
+      import issue carrying the field path, the original string verbatim, the
+      declared type and the reason "trailing_residue".
+    risk: high
+    category: integrity
+    covers: [DTAMetaData, metadata_import_errors]
+    source: R/DTAMetaData-class.R .parse_metadata_date()
+    notes: >
+      This is the dangerous case the whole mechanism exists for: as.Date()
+      alone would silently discard "at the earliest" or "pending signature"
+      from a data transfer agreement and leave a plain committed date behind.
+      Recording the loss as an import issue is what makes check() on the
+      enclosing DTA fail instead of passing over a qualified date as if it
+      were unconditional.
+
+  - id: REQ-META-008
+    text: >
+      A transmission date supplied as a string with no leading ISO date (a
+      free-text phrase such as "2 weeks after approval") shall be kept
+      verbatim as character, and shall record no import issue.
+    risk: medium
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R .parse_metadata_date()
+
+  - id: REQ-META-009
+    text: >
+      The top-level date property is typed Date and cannot hold a free-text
+      phrase. A string with no leading ISO date supplied there shall be
+      coerced to NA, and shall record no import issue.
+    risk: high
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R .parse_metadata_date()
+    notes: >
+      Pinned, not endorsed. .parse_metadata_date() is documented as keeping a
+      dateless phrase "verbatim as character", and that is true for
+      transmission$date_first_transfer/date_last_transfer (require_date =
+      FALSE), but the top-level date= argument is parsed with require_date =
+      TRUE, whose branch instead runs the whole original string through
+      as.Date(value, format = "\%Y-\%m-\%d") and stores whatever that returns
+      -- NA for anything that is not itself an ISO date. Unlike the trailing-
+      residue case, NO import issue is recorded, so a value such as
+      date = "after approval" reaches @date as a silent NA with nothing in
+      @import_issues to say a value was ever supplied. Verified directly:
+      DTAMetaData(date = "after approval")@date is NA and
+      @import_issues has length 0.
+
+  # ---- validate_transmission_dates() ------------------------------------------
+
+  - id: REQ-META-010
+    text: >
+      validate_transmission_dates() shall return a list with is_valid
+      (logical) and messages (character). Absent transmission data, or a
+      first-transfer date no later than the last-transfer date, shall report
+      is_valid = TRUE; a first-transfer Date later than the last-transfer Date
+      shall report is_valid = FALSE with a message naming the problem.
+    risk: high
+    category: functional
+    covers: [validate_transmission_dates]
+    source: R/DTAMetaData-helpers.R
+
+  # ---- accessors ---------------------------------------------------------------
+
+  - id: REQ-META-011
+    text: >
+      get_version_history_df() shall return a data.frame with exactly the
+      columns version, date and changes, one row per version_history record.
+      Each record's date shall be normalised to a Date whether it was
+      originally a Date, a character string (as loaded from YAML), or absent;
+      an empty version_history shall return a correctly typed zero-row frame.
+    risk: medium
+    category: interface
+    covers: [get_version_history_df]
+    source: R/DTAMetaData-helpers.R
+
+  - id: REQ-META-012
+    text: >
+      get_authorized_for_corrections() shall return the
+      authorized_for_corrections property verbatim, in whatever shape it was
+      supplied (character vector, list, or NULL).
+    risk: low
+    category: interface
+    covers: [get_authorized_for_corrections]
+    source: R/DTAMetaData-helpers.R
+
+  - id: REQ-META-013
+    text: >
+      get_receiver_reviewers() shall return the receiver contacts whose
+      reviewer flag is TRUE: names only when name_only = TRUE (the default),
+      full contact records when name_only = FALSE, and NULL when there is no
+      receiver or no contacts.
+    risk: medium
+    category: interface
+    covers: [get_receiver_reviewers]
+    source: R/DTAMetaData-helpers.R
+
+  - id: REQ-META-014
+    text: >
+      get_transmission_dates() shall return a list with first_transfer and
+      last_transfer, each carrying the transmission date verbatim (Date or
+      character), or both NULL when there is no transmission data.
+    risk: low
+    category: interface
+    covers: [get_transmission_dates]
+    source: R/DTAMetaData-helpers.R
+
+  - id: REQ-META-015
+    text: >
+      metadata_import_errors() shall return one row per import issue with the
+      columns row (always NA, metadata has no rows), column (the metadata
+      field path), raw, declared_type and reason, and zero rows when nothing
+      was coerced.
+    risk: high
+    category: interface
+    covers: [metadata_import_errors]
+    source: R/DTAMetaData-helpers.R
+
+  - id: REQ-META-016
+    text: >
+      messages() on a DTAMetaData object shall return one row per import issue
+      in the same ten-column shape as a table's messages, with source
+      "import", target "metadata" and dataset NA.
+    risk: medium
+    category: interface
+    covers: [messages]
+    source: R/DTAMetaData-helpers.R dta_metadata_messages_to_df()
+
+  # ---- YAML round trip ----------------------------------------------------------
+
+  - id: REQ-META-017
+    text: >
+      Every metadata key the specification accepts (title, version, date,
+      header, version_history, receiver, supplier, transmission,
+      error_handling, authorized_for_corrections, template) shall survive
+      being written to YAML and read back into an equivalent DTAMetaData
+      object. A Date-valued field shall be written as an ISO date string, not
+      as its underlying numeric day count. import_issues is derived, not
+      author-supplied, and shall never itself be written.
+    risk: high
+    category: integrity
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-helpers.R .date_to_iso(), as.list(DTAMetaData)
+
+  - id: REQ-META-018
+    text: >
+      Once a date-valued field that produced a trailing_residue import issue
+      has been round-tripped through as.list()/YAML, the qualifying text
+      shall be permanently and silently lost: the reloaded document shall
+      carry the plain resolved Date with no import issue, as if the field had
+      always been a clean ISO date.
+    risk: high
+    category: integrity
+    covers: [DTAMetaData, metadata_import_errors]
+    source: R/DTAMetaData-helpers.R .date_to_iso(), as.list(DTAMetaData)
+    notes: >
+      Pinned, not endorsed. as.list(DTAMetaData) serializes
+      x@transmission$date_last_transfer (already a resolved Date by
+      construction time) through .date_to_iso(), which only knows how to
+      format a Date - it has no access to, and so cannot re-emit, the
+      original raw string that @import_issues$raw recorded. A document
+      carrying "2026-12-31 at the earliest" therefore survives exactly one
+      write/read cycle looking identical in its @date value, but with its
+      only record of the qualification gone: metadata_import_errors() on the
+      reloaded object reports zero rows, not one. Saving and reopening a
+      transfer agreement is enough, on its own, to erase the evidence that a
+      date was ever qualified. Verified directly:
+      as.list(DTAMetaData(transmission = list(date_last_transfer =
+      "2026-12-31 at the earliest")))$transmission$date_last_transfer is the
+      clean string "2026-12-31", and reconstructing DTAMetaData from that
+      list reports metadata_import_errors() with 0 rows.

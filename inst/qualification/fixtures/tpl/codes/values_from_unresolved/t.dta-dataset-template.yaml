@@ -1,0 +1,7 @@
+kind: dta_dataset_template
+id: vfu1
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from: nonexistent_voc@1.0

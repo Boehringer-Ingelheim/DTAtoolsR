@@ -1,0 +1,334 @@
+area: STREAM
+title: Streaming validation and engine parity
+
+# The eager engine holds a whole table in memory and is the reference: it is
+# what every other requirement in this suite is written against. The streaming
+# engine exists so that a delivery larger than memory can be checked at all,
+# which only pays off if it reaches the SAME verdict as the reference on
+# everything smaller -- an eager-only user must never learn that a delivery
+# would have validated differently had it arrived too large to hold. This area
+# qualifies validate_file_stream() argument by argument and then throws
+# randomised data at both engines together, because a hand-picked fixture can
+# only find the divergence someone thought to write down.
+
+requirements:
+  # ---- reading the file: delim, quote, has_header ---------------------------
+
+  - id: REQ-STREAM-001
+    text: >
+      The delim argument shall determine how each line is split into fields,
+      so a file read with the delimiter it was written in and the same file
+      read with the wrong one shall not reach the same verdict.
+    risk: high
+    category: functional
+    covers: [validate_file_stream]
+    source: R/DTAFileTabular-class.R dta_delim_reader_plan()
+
+  - id: REQ-STREAM-002
+    text: >
+      A field wrapped in the declared quote character shall be read as one
+      value even when it contains the delimiter, and disabling quoting
+      (quote = "") on a file that relies on it to keep such a field together
+      shall raise a condition rather than silently misread the row.
+    risk: high
+    category: functional
+    covers: [validate_file_stream]
+    source: R/DTAFileTabular-class.R dta_delim_reader_plan()
+
+  - id: REQ-STREAM-003
+    text: >
+      has_header = TRUE shall consume the first line as column names and never
+      validate it as data. has_header = FALSE shall validate the first line as
+      data and name every column automatically, so a column the specification
+      declares is then reported as absent from every row and every automatic
+      name is reported as undeclared.
+    risk: medium
+    category: functional
+    covers: [validate_file_stream]
+    source: R/DTAFileTabular-class.R dta_delim_header_names()
+
+  # ---- batch_rows: memory scheduling, not a second answer -------------------
+
+  - id: REQ-STREAM-004
+    text: >
+      batch_rows shall change only how the scan is divided into batches. The
+      verdict, the three axis counts and the full set of reported errors for
+      one file shall be identical whatever size is chosen.
+    risk: high
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+    notes: >
+      This is the property that makes a batch a scheduling detail rather than
+      a second implementation of the checks: getting it wrong would mean a
+      delivery's verdict depended on a memory-tuning knob nobody validating
+      data thinks of as part of the specification.
+
+  # ---- max_errors: a cap on retained detail, never on a count ---------------
+
+  - id: REQ-STREAM-005
+    text: >
+      max_errors shall cap how many per-cell error rows are held in memory for
+      the column-specification, import and import-typing axes, and shall never
+      cap the count reported for any axis: rows past the cap spill to disk
+      rather than being discarded, and NULL retains everything.
+    risk: high
+    category: integrity
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R dta_error_sink()
+    notes: >
+      Mirrors REQ-VAL-018 for the path built to run past memory: on this path
+      a cap that also shrank the counts would understate exactly the delivery
+      that is worst, and worst at the scale streaming exists for.
+
+  - id: REQ-STREAM-006
+    text: >
+      collect_full_errors() shall reassemble the complete detail frame for the
+      columnspec, import and import_typing axes from the retained head plus
+      whatever spilled to disk, so its row count equals the axis's exact count
+      regardless of what max_errors was set to.
+    risk: high
+    category: integrity
+    covers: [collect_full_errors]
+    source: R/streamingValidation.R collect_full_errors()
+
+  - id: REQ-STREAM-007
+    text: >
+      A retained error frame that the cap truncated shall carry a truncated
+      attribute of TRUE and a spilled_rows attribute counting what was spilled.
+      The frame collect_full_errors() returns shall carry neither attribute
+      once the spilled rows have been reassembled into it.
+    risk: medium
+    category: interface
+    covers: [collect_full_errors]
+    source: R/streamingValidation.R dta_error_sink_collect()
+
+  # ---- stopping early, and columns the file does not have -------------------
+
+  - id: REQ-STREAM-008
+    text: >
+      fail_fast shall stop the scan at the first batch that shows any problem
+      rather than continuing to the end. The result shall carry a partial_scan
+      attribute of TRUE, and an axis not yet settled at that point shall report
+      NA rather than a verdict. A scan that finds nothing to stop for shall run
+      to completion and carry no partial_scan attribute at all.
+    risk: high
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+    notes: >
+      NA rather than TRUE matters here: a rule that has not failed yet has not
+      passed either, because a duplicate later in the file was never read.
+      Reporting it as passed would claim a fact the scan does not have.
+
+  - id: REQ-STREAM-009
+    text: >
+      on_missing_column = "scan" shall read the file and restate a required,
+      absent column once per row scanned. on_missing_column = "stop" shall
+      report the same absence once, structurally, without reading a row, and
+      the result shall carry a structural_only attribute; the "scan" result
+      shall carry none.
+    risk: medium
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+
+  # ---- threads, console output and instrumentation ---------------------------
+
+  - id: REQ-STREAM-010
+    text: >
+      use_threads shall change only how the scan is scheduled: the reported
+      structural detail (source, row, column, keyword) shall be identical
+      whether it is TRUE or FALSE.
+    risk: medium
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+
+  - id: REQ-STREAM-011
+    text: >
+      verbose shall control console reporting only. verbose = FALSE shall
+      print nothing, and verbose = TRUE shall name any column the specs do not
+      describe among what it prints.
+    risk: low
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+
+  - id: REQ-STREAM-012
+    text: >
+      benchmark = TRUE, or options(DTAtools.benchmark = TRUE) with the
+      argument left at its default, shall attach a one-row metrics record
+      readable with validation_benchmark(), carrying exactly the columns
+      elapsed_sec, cpu_user_sec, cpu_sys_sec, r_peak_mb, rss_start_mb,
+      rss_end_mb, arrow_pool_peak_mb, arrow_call_mb, arrow_call_exact, rows,
+      rows_per_sec, benchmarked_at and metrics_version, with metrics_version
+      equal to 1.
+    risk: low
+    category: interface
+    covers: [validate_file_stream, validation_benchmark]
+    source: R/benchmarking.R dta_benchmark_end()
+
+  - id: REQ-STREAM-013
+    text: >
+      A path naming a file that does not exist shall raise a condition rather
+      than return a result.
+    risk: medium
+    category: functional
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+
+  - id: REQ-STREAM-014
+    text: >
+      A streaming validation result shall carry the exact number of rows it
+      read: 0 for a structural early return, the number scanned before
+      fail_fast stopped, and the full row count for a scan that ran to
+      completion.
+    risk: medium
+    category: interface
+    covers: [validate_file_stream]
+    source: R/streamingValidation.R validate_file_stream()
+
+  # ---- an alternative on-disk format, and the compute engine -----------------
+
+  - id: REQ-STREAM-015
+    text: >
+      cache_as_parquet() shall write a Parquet dataset that validate_file_stream()
+      reports the same verdict, the same three axis counts and the same rule
+      outcomes for as it reports for the delimited file the cache was built
+      from.
+    risk: high
+    category: functional
+    covers: [cache_as_parquet, validate_file_stream]
+    source: R/streamingValidation.R cache_as_parquet()
+
+  - id: REQ-STREAM-016
+    text: >
+      set_dta_compute_threads() shall report the previously active thread
+      count, change it to the value requested, and restore a previously
+      reported value exactly, and changing the thread count this way shall
+      not change the verdict of a validation it governs.
+    risk: medium
+    category: functional
+    covers: [set_dta_compute_threads]
+    source: R/arrowCompute.R set_dta_compute_threads()
+
+  - id: REQ-STREAM-017
+    text: >
+      Enabling the Arrow-accelerated duplicate-counting engine
+      (options(DTAtools.use_arrow_compute = TRUE)) shall not change the
+      verdict of a uniqueness rule relative to the plain R implementation, for
+      the same data.
+    risk: high
+    category: functional
+    covers: [check, rule_check_unique]
+    source: R/arrowCompute.R dta_count_duplicates()
+    notes: >
+      The R implementation is the reference for every rule check; this option
+      is strictly opt-in for exactly that reason, so this requirement is the
+      one place the promise is actually exercised end to end rather than left
+      as an intention in the option's own documentation.
+
+  # ---- engine parity: the eager and streaming paths agree --------------------
+
+  - id: REQ-STREAM-018
+    text: >
+      For a delimited file whose specification and rules are drawn together at
+      random, the eager (whole-column) and streaming engines shall report
+      identical validation status, identical sorted error detail and identical
+      import-error counts, over enough generated cases to exercise every axis
+      and both a plain and a compressed delivery.
+    risk: high
+    category: functional
+    covers: [check, load_file]
+    source: tests/testthat/test-streaming-parity.R
+    notes: >
+      Ported from the package's own developer suite, where the campaign is
+      already established: with specs supplied, the lazy reader once pinned
+      every column to text while the eager one left an undeclared column to
+      Arrow's inference, so a uniqueness rule over that column saw 1.5 and 1.5
+      as a duplicate in memory and "1.5"/"1.50" as two distinct values when
+      streamed. Same file, two verdicts, no error anywhere. See
+      REQ-STREAM-021 for the reduced case this generator is built around.
+
+  - id: REQ-STREAM-019
+    text: >
+      For a table built directly in R and never passed through a file reader,
+      the eager engine validating the table in memory and the streaming engine
+      validating a record-batch reader over the identical data shall agree in
+      the same way as REQ-STREAM-018, over enough generated cases to exercise
+      every R type a constructed table can carry that this package recognises.
+    risk: high
+    category: functional
+    covers: [check]
+    source: tests/testthat/test-streaming-parity.R
+
+  - id: REQ-STREAM-020
+    text: >
+      The eager and streaming engines shall agree, in the same way as
+      REQ-STREAM-018 and REQ-STREAM-019, on the boundary cases a randomly
+      drawn row count is unlikely to hit: a table of zero rows and a table of
+      exactly one row, for both a file-backed delivery and a table built
+      directly in R.
+    risk: high
+    category: functional
+    covers: [check]
+    source: tests/testthat/test-streaming-parity.R
+    notes: >
+      A header-only file yields no batch at all, so every rule is settled from
+      the known column names alone rather than from any row; a one-row file
+      has exactly one. Both are exactly where two independently-written scan
+      loops are most likely to diverge, and a generator drawing a random row
+      count is not guaranteed ever to land on either.
+
+  - id: REQ-STREAM-021
+    text: >
+      A column no specification declares and no rule reads shall not change
+      the verdict on either engine. A column no specification declares but a
+      uniqueness rule DOES read shall be keyed identically by both engines,
+      in particular treating text differing only in numeric formatting (such
+      as "1.5" and "1.50") as the SAME key on both, because neither engine has
+      been told the column is a number.
+    risk: high
+    category: functional
+    covers: [check, rule_check_unique]
+    source: tests/testthat/test-streaming-parity.R
+    notes: >
+      This is the reduced form of the divergence REQ-STREAM-018 documents,
+      kept as its own case so that a failure names the mechanism (an
+      undeclared column keyed differently by the two engines) rather than
+      pointing at a seed a reader has to reproduce and diagnose from scratch.
+
+  - id: REQ-STREAM-022
+    text: >
+      A violation on any axis -- column-specification or import -- landing on
+      the exact last row of a batch, the first row of the next batch, or the
+      last row of the file shall be reported by the streaming engine exactly
+      as by the eager one: no row lost, duplicated, or misnumbered at the
+      boundary.
+    risk: high
+    category: functional
+    covers: [check, validate_file_stream]
+    source: R/streamingValidation.R dta_validate_table_stream()
+    notes: >
+      Row numbers are running totals carried across batches (see row_offset in
+      dta_validate_table_stream()); an off-by-one there would show up only at
+      a batch edge, which a randomly drawn defect position finds by chance at
+      best. The column-specification and import axes are accumulated in
+      separate sinks (columnspec_sink, carried_sink), so the boundary is worth
+      checking on each rather than assuming one proves the other.
+
+  - id: REQ-STREAM-023
+    text: >
+      A uniqueness rule whose two matching keys fall in different batches
+      shall still be detected by the streaming engine, exactly as it is by the
+      eager one.
+    risk: high
+    category: functional
+    covers: [check, rule_check_unique]
+    source: R/streamingValidation.R dta_rule_stream_update()
+    notes: >
+      The streaming accumulator has to carry every distinct key forward across
+      the whole scan for this to hold; a per-batch accumulator that forgot
+      what it had seen would miss exactly this case while still passing every
+      case where both occurrences share a batch.

@@ -59,7 +59,10 @@ Suggests:
 	doconv,
 	remotes,
 	pkgload,
-	ps
+	ps,
+	R6,
+	chromote,
+	shinytest2
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/Boehringer-Ingelheim/DTAtoolsR
@@ -101,6 +104,8 @@ Collate:
     'exportTemplateDocx.R'
     'exportValidationReport.R'
     'formattingHelpers.R'
+    'qualification-report.R'
+    'qualification.R'
     'reportRendering.R'
     'run_dta_app.R'
     'streamingScale.R'

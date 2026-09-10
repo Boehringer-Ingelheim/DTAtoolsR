@@ -1,0 +1,9 @@
+kind: dta_creation_template
+id: psi1
+version: "1.0"
+abstract: true
+party_slots:
+  - id: supplier
+    label: Supplier
+    target: metadata.supplier
+    profiles: [nonexistent_profile]

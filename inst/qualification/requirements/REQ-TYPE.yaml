@@ -1,0 +1,202 @@
+area: TYPE
+title: Declared types and typing at read
+
+# A specification's `type` is the one piece of metadata every other axis in
+# this package leans on: the column-specification checks trust it to name the
+# JSON type a value must have, and the reader trusts it to name the R storage
+# type a column should end up in. Get either mapping wrong and every later
+# check is asking the wrong question about the right data, or the right
+# question about data that was silently mistyped on the way in.
+
+requirements:
+  # ---- the declared-type vocabulary and its two mappings ---------------------
+
+  - id: REQ-TYPE-001
+    text: >
+      A SAS format string, given without an explicit type, shall infer the
+      column's type: "$w." infers Char, "w." infers Int, "w.d" infers Num,
+      "BESTw." infers Int, "DATEw." infers Date, "TIMEw." or "TIMEw.d" infers
+      Time, and "DATETIMEw." infers DateTime.
+    risk: high
+    category: functional
+    covers: [DTAColumnSpec, DTAColumnSpecStructureSAS]
+    source: R/DTAColumnSpecStructureSAS-class.R
+    notes: >
+      BESTw. is SAS's general numeric output format and may hold a fractional
+      value, so inferring "Int" from it is arguably wrong; that is DEV-001,
+      already bound by test-OQ-CORE-runner.R (OQ-CORE-006) and not repeated
+      here.
+
+  - id: REQ-TYPE-002
+    text: >
+      The R storage type import gives a declared column shall not depend on
+      whether the table is read whole or in batches: the same declared type
+      applied to the same value shall produce the same storage type
+      regardless of where a batch boundary falls.
+    risk: high
+    category: integrity
+    covers: [load_file, check]
+    source: R/importConversion.R
+    notes: >
+      Currently violated for a declared Int column: DEV-004, bound in
+      test-OQ-TYPE-declared.R.
+
+  - id: REQ-TYPE-003
+    text: >
+      A DTAColumnSpec's declared type shall accept only the backend-prefixed
+      values "SAS Char", "SAS Num", "SAS Int", "SAS Date", "SAS Time" and
+      "SAS DateTime", matched case-insensitively, and shall reject every
+      other value.
+    risk: medium
+    category: functional
+    covers: [DTAColumnSpec, DTAColumnSpecStructureSAS]
+    source: R/DTAColumnSpecStructureSAS-class.R
+
+  - id: REQ-TYPE-004
+    text: >
+      as_r_type() shall map a declared Char to R character, Num to double,
+      Int to integer, and Date, Time and DateTime to character, and shall
+      default an unset type to character.
+    risk: medium
+    category: interface
+    covers: [as_r_type]
+    source: R/DTAColumnSpecStructureSAS-class.R
+
+  - id: REQ-TYPE-005
+    text: >
+      get_arrow_type() shall map a declared Char to Arrow utf8, Num to
+      double and Int to int32.
+    risk: low
+    category: interface
+    covers: [get_arrow_type]
+    source: R/DTAColumnSpec-class.R
+    notes: >
+      Date, Time and DateTime fall through to NA_character_ rather than to an
+      Arrow temporal type: a documented gap already pinned at
+      tests/testthat/test-DTAColumnSpec.R:98, not a new finding here.
+      get_arrow_type() is not called anywhere else in the package, so the gap
+      has no reader today.
+
+  # ---- the headline "007" claim -----------------------------------------------
+
+  - id: REQ-TYPE-006
+    text: >
+      A declared Char column shall carry a value such as "007" through a
+      file round trip unchanged, as the string "007".
+    risk: high
+    category: functional
+    covers: [load_file, check, tables]
+    source: R/importConversion.R
+
+  - id: REQ-TYPE-007
+    text: >
+      A declared Num column shall parse the same text to its numeric value,
+      so that "007" reads as 7.
+    risk: high
+    category: functional
+    covers: [load_file, check, tables]
+    source: R/importConversion.R
+
+  # ---- what the reader is allowed to do to a column's shape -------------------
+
+  - id: REQ-TYPE-008
+    text: >
+      The reader's schema shall only ever widen a declared numeric column to
+      string, never narrow it: one unparseable value in an otherwise numeric
+      column shall cost exactly one import error, and the file shall still
+      be read to the end.
+    risk: high
+    category: integrity
+    covers: [load_file, check, messages]
+    source: R/importConversion.R
+
+  - id: REQ-TYPE-009
+    text: >
+      A value outside plus or minus 2^31-1 in a declared Int column shall be
+      stored as double rather than integer, because the column cannot be
+      narrowed as a whole.
+    risk: medium
+    category: functional
+    covers: [load_file, check, tables]
+    source: R/importConversion.R
+    notes: >
+      Pinned rather than endorsed: narrowing failure is never reported as an
+      error on any axis. A value such as 5,000,000,000 in a declared Int
+      column is accepted as a clean, valid delivery -- the column is
+      silently stored as double instead of integer, and nothing tells the
+      caller so.
+
+  # ---- typing at read versus typing in R --------------------------------------
+
+  - id: REQ-TYPE-010
+    text: >
+      A table already typed in R -- a factor, a Date, or (when bit64 is
+      installed) an integer64 column -- shall reach the same
+      column-specification and rule error counts as a file carrying an
+      equivalent textual representation of the same values.
+    risk: medium
+    category: functional
+    covers: [validate_table, check]
+    source: R/columnSpecChecks.R
+
+  - id: REQ-TYPE-011
+    text: >
+      A column holding native R logical values shall fail the declared-type
+      check against every currently declarable column type.
+    risk: medium
+    category: functional
+    covers: [validate_table, DTAColumnSpec]
+    source: R/columnSpecChecks.R
+    notes: >
+      Pinned rather than endorsed: a logical value's JSON type is "boolean",
+      and no declared column type maps to "boolean" (SAS Bool is rejected at
+      construction; see REQ-TYPE-003), so a table built directly in R with a
+      logical flag column is invalid against any spec, while the same values
+      written as "TRUE"/"FALSE" or "1"/"0" text and read from a file
+      validate normally.
+
+  # ---- strict numeric conversion ----------------------------------------------
+
+  - id: REQ-TYPE-012
+    text: >
+      Strict numeric conversion shall classify "42", " 42 ", "-3.5", "1e3",
+      "0x10", "Inf", "NaN", "", "   ", NA, "abc", "1,5" and "TRUE" each into
+      its documented value, missing flag and unconvertible flag.
+    risk: high
+    category: functional
+    covers: [apply_rules, check]
+    source: R/evaluateRules.R
+
+  - id: REQ-TYPE-013
+    text: >
+      Missing and unconvertible shall never both hold for the same value:
+      the two are mutually exclusive outcomes of strict numeric conversion.
+    risk: medium
+    category: functional
+    covers: [apply_rules, check]
+    source: R/evaluateRules.R
+
+  - id: REQ-TYPE-014
+    text: >
+      A Date, POSIXct, numeric or logical input to strict numeric conversion
+      shall take an early, type-specific conversion path and shall never be
+      classified unconvertible; a factor shall convert through its printed
+      labels rather than its integer level codes.
+    risk: high
+    category: functional
+    covers: [apply_rules, check]
+    source: R/evaluateRules.R
+
+  - id: REQ-TYPE-015
+    text: >
+      The text "NaN" shall be classified as unconvertible rather than
+      missing by strict numeric conversion.
+    risk: low
+    category: functional
+    covers: [apply_rules, check]
+    source: R/evaluateRules.R
+    notes: >
+      Pinned rather than endorsed: "NaN" parses to the double NaN, and
+      is.na(NaN) is TRUE, so it is classified as unconvertible and reported
+      on the import axis rather than treated as a missing value. Registered
+      as LIM-002.

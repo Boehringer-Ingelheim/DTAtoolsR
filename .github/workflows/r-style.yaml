@@ -108,6 +108,17 @@ jobs:
         shell: Rscript {0}
         run: source(".github/scripts/check_manifest.R")
 
+      # The installation qualification compares the files it finds in the
+      # installed package against this manifest, so that a deployment can show
+      # the bytes on the target machine are the bytes that were released. That
+      # only means anything if the manifest is regenerated whenever inst/
+      # changes, which is what this step enforces.
+      #
+      # Fails rather than repairs, for the same reason as the step above: the
+      # fix belongs in the commit that changed inst/.
+      - name: Check the qualification manifest describes inst/
+        run: Rscript .github/scripts/sync_qualification_manifest.R --check
+
       # Parity with style-files. Fails rather than auto-fixes: this workflow
       # has no write-back step (see the note on the roxygen step below for
       # why), so a fixable style diff and an unfixable one are treated the

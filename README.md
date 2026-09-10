@@ -956,6 +956,27 @@ metadata:
     date_last_transfer: 2026-03-31
 ```
 
+## Qualification
+
+Deploying the package where it gates clinical data usually means showing that
+the copy on that machine behaves as specified. `run_qualification()` does that
+and writes the evidence:
+
+```r
+DTAtools::run_qualification("~/dta-qualification")
+```
+
+It runs an installation, operational and performance qualification against the
+installed package and produces a Validation Summary Report, a requirements
+traceability matrix, per-step expected-versus-observed records, a record of the
+environment, and a hash manifest covering the whole bundle. Reports are written
+as Markdown always, and as HTML, Word and PDF where the tooling exists.
+
+This is separate from the package's developer tests, which are not installed
+and are not traced to requirements. See `inst/qualification/README.md` for the
+tiers, what each optional dependency adds, and how to review, sign and verify a
+run. `qualification_requirements()` lists the requirements being verified.
+
 ## Technical
 
 `DTAtools` is built on the S7 object system and uses JSON Schema for fast,

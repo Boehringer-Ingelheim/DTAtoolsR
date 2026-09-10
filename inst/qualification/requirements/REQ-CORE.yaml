@@ -1,0 +1,116 @@
+area: CORE
+title: The qualification runner itself
+
+# The runner is the instrument every other measurement is taken with, so it is
+# qualified like any other function of the package. An instrument that is not
+# itself checked cannot support a claim about what it measured: if `qa_step()`
+# silently dropped a failure, or the hash manifest did not cover the results,
+# every green report the suite ever produced would be worthless and nothing in
+# the report would say so.
+
+requirements:
+  - id: REQ-CORE-001
+    text: >
+      run_qualification() shall write an evidence bundle containing the
+      Validation Summary Report, machine-readable results, the environment
+      record, a contemporaneous run log and a hash manifest covering every
+      other file in the bundle.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-CORE-002
+    text: >
+      run_qualification() shall refuse to write into an existing evidence
+      bundle directory, so that a qualification record can never be
+      overwritten by a later run.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: 21 CFR Part 11 record integrity
+
+  - id: REQ-CORE-003
+    text: >
+      Every recorded step shall carry the description, the expected value and
+      the observed value in its message, and the source file and line of the
+      code that produced it.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: GAMP 5 second edition, recorded evidence
+
+  - id: REQ-CORE-004
+    text: >
+      A failing step shall be recorded and the run shall continue, and the
+      overall verdict shall be FAIL whenever any executed test case fails or
+      errors, any meta-consistency check fails, or any registered deviation
+      stops reproducing.
+    risk: high
+    category: functional
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-CORE-005
+    text: >
+      A test file that raises an error outside a test case shall be recorded as
+      a file-level failure, and every test case it declared but did not reach
+      shall be reported as not executed rather than omitted.
+    risk: high
+    category: functional
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-CORE-006
+    text: >
+      A registered deviation shall be reported as reproduced when the defect is
+      still observable, and shall fail the run when it is not.
+    risk: medium
+    category: functional
+    covers: [run_qualification]
+    source: inst/qualification/deviations.yaml
+
+  - id: REQ-CORE-007
+    text: >
+      qualification_requirements() shall return every requirement shipped with
+      the package, and shall abort rather than return a partial set when any
+      requirement file violates the schema.
+    risk: medium
+    category: interface
+    covers: [qualification_requirements]
+    source: inst/qualification/docs/validation-plan.md
+
+  - id: REQ-CORE-008
+    text: >
+      The suite shall contain no snapshot expectations, so that no expected
+      value is taken from a stored copy of the software's own output.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+  - id: REQ-CORE-009
+    text: >
+      Where the developer test suite is executed as supplementary evidence, the
+      report shall name every assertion of it that did not pass, and shall state
+      that those do not contribute to the verdict.
+    risk: medium
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      A count with no names cannot be assessed. A developer test can fail
+      against an installed library for reasons that say nothing about whether
+      the installation is sound, and the only way a reviewer can tell is to
+      read the one that failed.
+  - id: REQ-CORE-010
+    text: >
+      A failure to write one evidence file shall be recorded and the run shall
+      continue to write the remaining files, the report and the hash manifest.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      By the time the bundle is written every stage has already run. Aborting
+      there discards the whole run's evidence, which on a target system means
+      repeating a qualification that had in fact succeeded.

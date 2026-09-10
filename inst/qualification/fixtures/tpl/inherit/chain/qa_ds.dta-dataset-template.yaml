@@ -1,0 +1,14 @@
+kind: dta_dataset_template
+id: qa_ds
+version: "1.0"
+dataset:
+  name: qa_data
+  type: tabular
+  files:
+    filename: qa_data.tsv
+    type: tsv
+  columns:
+    - id: SUBJID
+      type: SAS Char
+      format: SAS $10.
+      nullable: No

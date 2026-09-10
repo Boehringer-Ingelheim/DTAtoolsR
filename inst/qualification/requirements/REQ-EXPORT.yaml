@@ -1,0 +1,388 @@
+area: EXPORT
+title: Document and data export
+
+# What this package produces for a human to read (Word/PDF/Markdown documents)
+# and for a downstream system to consume (delimited data files, YAML/JSON
+# column specifications) is the deliverable a receiving organisation actually
+# sees. A defect here is invisible to the validation engine's own tests: the
+# verdict can be perfectly correct while the document reporting it is blank,
+# stale, or silently truncated.
+
+requirements:
+  # ---- export_column_value_table() input validation (DEV-003) ---------------
+
+  - id: REQ-EXPORT-001
+    text: >
+      export_column_value_table() shall abort when its first argument is not a
+      DTAColumnSpecCollection.
+    risk: low
+    category: functional
+    covers: [export_column_value_table]
+    source: R/exportFunctions.R
+    notes: >
+      Pinned as DEV-003: the function has no input validation of its own, so a
+      plain list reaches `DTAColumnSpecCollection@columns[[id]]` and raises an
+      untranslated base R condition ("no applicable method for `@`") rather
+      than a cli condition naming the expected class, unlike the equivalent
+      guard in export_specs_table(). Recorded as observed behaviour, not
+      endorsed as correct; see deviations.yaml.
+
+  # ---- write_dta() content ----------------------------------------------------
+
+  - id: REQ-EXPORT-002
+    text: >
+      write_dta() shall produce a document whose text names the transfer's
+      title, version, supplier organisation, receiver organisation and the
+      name of every dataset it declares.
+    risk: high
+    category: functional
+    covers: [write_dta]
+    source: R/exportDocuments.R
+
+  - id: REQ-EXPORT-003
+    text: >
+      write_dta() shall render, for every dataset the transfer declares, a
+      column-specifications table naming every declared column's id, label,
+      type, nullability and permitted-values-or-pattern text, in the order the
+      specification declares them.
+    risk: high
+    category: functional
+    covers: [write_dta]
+    source: R/documentBuilders.R
+
+  - id: REQ-EXPORT-004
+    text: >
+      write_dta() shall render, for every dataset that declares validation
+      rules, a table naming every declared rule's id.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/documentBuilders.R
+
+  - id: REQ-EXPORT-005
+    text: >
+      write_dta(include_signatures = TRUE) shall add an "Approval &
+      Signatures" section naming every contact flagged as a signatory on the
+      transfer's supplier or receiver, and include_signatures = FALSE shall
+      omit the section entirely.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/documentBuilders.R
+
+  - id: REQ-EXPORT-006
+    text: >
+      write_dta(include_yaml = TRUE, yaml_text = <text>) shall embed the given
+      text verbatim as a section of the document, and shall warn and embed
+      nothing when yaml_text is NULL or empty.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/exportDocuments.R
+
+  - id: REQ-EXPORT-007
+    text: >
+      write_dta(format = "md") shall write a plain-text Markdown file whose
+      content names the same title, version and dataset facts as the DOCX
+      layout.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/exportDocuments.R
+
+  - id: REQ-EXPORT-008
+    text: >
+      write_dta(format = "pdf") shall produce a file beginning with the %PDF
+      signature whenever dta_pdf_backend() reports a usable backend.
+    risk: medium
+    category: functional
+    covers: [write_dta, dta_pdf_backend]
+    source: R/exportDocuments.R
+    notes: >
+      No PDF backend is guaranteed on a target system, so the OQ case for this
+      requirement skips with a stated reason rather than failing when
+      dta_pdf_backend() is NULL.
+
+  - id: REQ-EXPORT-009
+    text: >
+      write_dta() and write_dataset_metadata() shall refuse to overwrite an
+      existing file unless overwrite = TRUE, raising a condition and leaving
+      the existing file's content unchanged.
+    risk: high
+    category: integrity
+    covers: [write_dta, write_dataset_metadata]
+    source: R/exportDocuments.R
+
+  # ---- write_dataset_metadata() / write_file_specification() ----------------
+
+  - id: REQ-EXPORT-010
+    text: >
+      write_dataset_metadata() shall produce a document naming the dataset,
+      its declared file specifications and its declared column specifications;
+      write_file_specification() shall produce the identical document, being
+      an alias that forwards every argument unchanged.
+    risk: high
+    category: functional
+    covers: [write_dataset_metadata, write_file_specification]
+    source: R/exportDocuments.R
+
+  # ---- export_specs_table() ---------------------------------------------------
+
+  - id: REQ-EXPORT-011
+    text: >
+      export_specs_table() shall write a Word table with one row per column,
+      naming each column's id, label, type, nullability and description, in
+      the order the collection declares them.
+    risk: high
+    category: functional
+    covers: [export_specs_table]
+    source: R/exportFunctions.R
+
+  - id: REQ-EXPORT-012
+    text: >
+      export_specs_table() shall abort with a cli condition naming the
+      required class when its first argument is not a DTAColumnSpecCollection,
+      and shall abort without writing a file when the collection has no
+      columns to export.
+    risk: medium
+    category: functional
+    covers: [export_specs_table]
+    source: R/exportFunctions.R
+
+  # ---- export_column_value_table() content -----------------------------------
+
+  - id: REQ-EXPORT-013
+    text: >
+      export_column_value_table() shall write a Word table listing every
+      permitted value of the named column, and shall abort with a cli
+      condition when the named column does not exist in the collection or
+      exists but declares no permitted values.
+    risk: medium
+    category: functional
+    covers: [export_column_value_table]
+    source: R/exportFunctions.R
+
+  # ---- export_with_template() -------------------------------------------------
+
+  - id: REQ-EXPORT-014
+    text: >
+      export_with_template() shall replace every placeholder present in a
+      user-supplied Word template with the corresponding value extracted from
+      the DTA, shall leave a placeholder with no corresponding value
+      untouched, and shall warn, naming it, when it does.
+    risk: high
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateDocx.R
+
+  - id: REQ-EXPORT-015
+    text: >
+      export_with_template(variables = <list>) shall let caller-supplied
+      values take precedence over the automatically extracted value for the
+      same placeholder.
+    risk: medium
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateDocx.R
+
+  - id: REQ-EXPORT-016
+    text: >
+      write_dta(template = <path>) shall route the export through
+      export_with_template() and produce the filled document at the requested
+      file.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/exportDocuments.R
+
+  - id: REQ-EXPORT-017
+    text: >
+      export_with_template(fallback = TRUE) shall, when the template cannot be
+      processed, warn naming the failure (unless quiet = TRUE) and fall back
+      to the standard write_dta() layout rather than raising an error;
+      fallback = FALSE shall raise the error instead.
+    risk: medium
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateDocx.R
+
+  # ---- columns_specs_from_word() ---------------------------------------------
+
+  - id: REQ-EXPORT-018
+    text: >
+      columns_specs_from_word() shall reconstruct a DTAColumnSpecCollection
+      from a Word table whose id, type, length, nullable and description
+      cells match the collection it is given, arriving at the same column
+      identifiers and types.
+    risk: high
+    category: functional
+    covers: [columns_specs_from_word]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-EXPORT-019
+    text: >
+      columns_specs_from_word() shall reconstruct a DTAColumnSpecCollection
+      from the very Word table export_specs_table() writes for the same
+      collection.
+    risk: medium
+    category: integrity
+    covers: [columns_specs_from_word, export_specs_table]
+    source: R/DTAColumnSpecCollection-class.R
+    notes: >
+      Pinned as observed, not endorsed: the two functions do not currently
+      pair up. export_specs_table()'s "Format" column drops the "SAS " backend
+      prefix columns_specs_from_word() requires to rebuild a structure (it
+      writes structure@format, which the factory already stripped of its
+      prefix on the way in), and a column declaring no format at all writes a
+      blank cell that makes the reconstruction abort with a low-level "No
+      prefix could be extracted from ''" error rather than treating an absent
+      format as unset. Every column in the shipped clinical_dta.yaml example
+      has no explicit format, so this is the common case, not an edge one.
+
+  # ---- write_table_to_file() --------------------------------------------------
+
+  - id: REQ-EXPORT-020
+    text: >
+      write_table_to_file() shall write the table using the given field
+      separator and the given string for missing values, and the file read
+      back with the same settings shall reproduce the same values.
+    risk: high
+    category: functional
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-EXPORT-021
+    text: >
+      write_table_to_file(arrange_by = "all") shall sort the written rows by
+      every column, write_table_to_file(arrange_by = <columns>) shall sort by
+      exactly the named columns, and arrange_by = NULL shall leave the table's
+      own row order untouched.
+    risk: medium
+    category: functional
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-EXPORT-022
+    text: >
+      write_table_to_file(compression = "gzip") shall write a gzip-compressed
+      file whose decompressed content is the same table write_table_to_file()
+      writes uncompressed.
+    risk: high
+    category: functional
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-EXPORT-023
+    text: >
+      write_table_to_file() shall refuse to overwrite an existing file unless
+      overwrite = TRUE, raising a condition and leaving the existing file's
+      content unchanged.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-EXPORT-024
+    text: >
+      write_table_to_file(get_md5sum = TRUE, write_md5sum_to_file = TRUE)
+      shall write a sidecar "<file>.md5" naming the checksum of the file
+      actually written together with the row and column counts of the table
+      written, and get_md5sum = FALSE shall write no sidecar and report the
+      checksum as NA.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/exportFunctions.R
+
+  - id: REQ-EXPORT-025
+    text: >
+      write_table_to_file() shall not leave a file at the destination path
+      that is neither absent nor the complete table when the write does not
+      complete.
+    risk: medium
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+    notes: >
+      Pinned as observed, not endorsed, and this is the requirement the
+      current implementation VIOLATES rather than meets. compression = "none"
+      writes directly to the destination: base R's write.table() opens and
+      truncates that file and writes the header line before it converts the
+      data columns, so a failure while converting a column (a type write.table
+      cannot coerce) leaves a header-only file sitting at the destination path
+      -- silently replacing an existing good file if overwrite = TRUE was
+      given. compression = "gzip" does not have this exposure: it writes to an
+      anonymous temp file first and only gzips that to the destination on
+      success, so the same failure leaves no file at the destination at all.
+      Reported upstream as a finding rather than filed as a deviation, since no
+      reachable DTAtools-typed column currently exercises it.
+
+  - id: REQ-EXPORT-026
+    text: >
+      A table written by write_table_to_file() and loaded back into a fresh
+      dataset against the same column specification shall reach the same
+      validation verdict as the table it was written from.
+    risk: medium
+    category: functional
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  # ---- write_columns_to_yaml() / write_columns_to_json() --------------------
+
+  - id: REQ-EXPORT-027
+    text: >
+      write_columns_to_yaml() shall write a YAML file that
+      import_specs_from_yaml() reads back to a collection with the same
+      column identifiers, types, lengths, nullability, permitted values and
+      patterns, preserving a permitted value such as "007" as text rather than
+      as a number with its leading zero dropped.
+    risk: high
+    category: functional
+    covers: [write_columns_to_yaml, import_specs_from_yaml]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-EXPORT-028
+    text: >
+      write_columns_to_json() shall write a JSON file whose content, read as
+      JSON, names the same column identifiers, types, lengths, nullability and
+      permitted values as the collection it was written from.
+    risk: medium
+    category: functional
+    covers: [write_columns_to_json]
+    source: R/DTAColumnSpecCollection-class.R
+
+  - id: REQ-EXPORT-029
+    text: >
+      write_columns_to_json() shall write null for a column property that is
+      unset, so that a JSON round trip mirroring import_specs_from_yaml()'s
+      contract can reconstruct a DTAColumnSpecCollection from it.
+    risk: medium
+    category: integrity
+    covers: [write_columns_to_json]
+    source: R/DTAColumnSpecCollection-class.R
+    notes: >
+      Pinned as observed, not endorsed, and violated for every column rather
+      than an edge case: an unset scalar property (label, description,
+      pattern or colclass) is written as an empty JSON object "{}" rather than
+      null, which jsonlite reads back as an empty list rather than NULL, and
+      DTAColumnSpec()'s own property types then reject it ("must be
+      <character> or S3<NULL>, not <list>"). "values", "examples" and
+      "pattern" are mutually exclusive on one column, so at least two of the
+      three are always unset -- meaning no column, however fully specified,
+      currently survives this round trip. Reported upstream as a finding
+      rather than filed as a deviation.
+
+  - id: REQ-EXPORT-030
+    text: >
+      dta_template_placeholders() shall report the placeholder names a Word
+      template may use, with a description of each when called with no
+      transfer, and the transfer's own values when called with one.
+    risk: low
+    category: interface
+    covers: [dta_template_placeholders, export_with_template]
+    source: R/exportTemplateDocx.R
+    notes: >
+      This is the vocabulary a template author writes against. A placeholder
+      that is documented but not substituted, or substituted but not
+      documented, leaves the author guessing at the one thing the mechanism
+      exists to make explicit.

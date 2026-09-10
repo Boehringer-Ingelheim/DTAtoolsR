@@ -1,0 +1,11 @@
+kind: dta_creation_template
+id: pin1
+version: "1.0"
+abstract: true
+datasets:
+  - template: pin_ds@1.0
+    as: pin_data
+    patch:
+      modify_columns:
+        - id: NOSUCHCOLUMN
+          label: Renamed

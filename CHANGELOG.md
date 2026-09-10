@@ -8,6 +8,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A qualification suite that produces audit-grade evidence for an installed
+  copy of the package.** `run_qualification()` runs an installation,
+  operational and performance qualification against the *installed* namespace
+  and writes an evidence bundle: a Validation Summary Report, a requirements
+  traceability matrix, per-step expected-versus-observed records anchored to
+  the file and line that produced them, a record of the environment, a
+  contemporaneous run log, and a hash manifest covering all of it. The suite
+  ships in `inst/qualification/`, so it is available wherever the package is
+  installed, and needs nothing beyond R, the package and `testthat`; reports in
+  HTML, Word and PDF are produced when the tooling for them exists and are
+  recorded as unavailable when it does not.
+
+  It answers a question the developer test suite cannot. Those tests are not
+  installed with the package, are not traced to requirements, and record only
+  whether something held rather than what was expected. This suite states its
+  expected values before it runs, never takes one from a stored snapshot of the
+  software's own output, and keeps a register of known defects that fails the
+  run if a registered defect stops reproducing.
+
+  The suite covers every exported function across fifteen functional areas,
+  from reading a specification to the behaviour of the streaming engine at ten
+  million rows, and its performance stage checks that the same delivery yields
+  the same verdict whatever the scale tier, thread count, batch size or locale.
+  Expected results are computed from how the test data was built rather than
+  recorded from a run, which is what lets a correctness claim survive a change
+  of scale.
+
+  Writing it surfaced a number of defects and documented limitations in the
+  package itself. They are listed in `inst/qualification/deviations.yaml`, each
+  open entry bound to a test that asserts it still occurs, and each reported at
+  every run; a registered defect that stops reproducing fails the run rather
+  than passing quietly. Nothing here changes validation behaviour -- the
+  findings are recorded so that they can be assessed and fixed deliberately.
+
+  Before release, five defects were introduced into the package one at a time
+  to confirm the suite is capable of failing, and each was caught by the test
+  cases whose subject was the behaviour broken. The results, including one
+  control that did not fire and why, are recorded in section 4a of
+  `inst/qualification/docs/validation-plan.md`.
+
+  The developer test suite is executed too, when the package was installed
+  with its tests, and reported as supplementary evidence. It runs in a separate
+  process under a time bound, so it cannot influence the qualification and a
+  developer test that blocks cannot stop the run.
+
+  `qualification_requirements()` returns the requirements being verified.
+  See `inst/qualification/README.md` for how to run, review and sign a
+  qualification, and how to verify a bundle has not been altered.
+
 - **Word templates can now emit real tables, not just text.** Every
   `{PLACEHOLDER}` in a `.docx` template used to resolve to a character string
   written into a single Word text run, so the richest thing a template could
@@ -90,7 +139,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   identifiers, tabs are underlined, and dialogs, menus and notifications share
   one set of surfaces.
 
+- **A pull request that cannot affect `R CMD check` no longer runs it.**
+  `.github/workflows/R-CMD-check.yaml` gains a `changes` job that classifies
+  the pull request's diff and skips the five-leg matrix when every changed
+  path is inert for the check. The release-finishing manifest pin is the case
+  that prompted it: #124 was four lines of `inst/shiny/dta_app/manifest.json`,
+  and it spent 91 minutes of matrix time across five platforms establishing
+  that four lines of JSON had not broken the package.
+
+  The set of inert paths is an *allowlist*, so a file nobody has classified
+  runs the full matrix by default. It holds `docs/`, `thoughts/`, `.claude/`,
+  `CLAUDE.md`, `CLAUDE.local.md` and `CHANGELOG.md` — every one of which
+  `.Rbuildignore` already keeps out of the built tarball, so the check never
+  sees them at all — plus two paths that do ship: `inst/shiny/dta_app/manifest.json`,
+  a Posit Connect deployment descriptor that no R code, test, roxygen example
+  or vignette reads, and `README.md`, which `R CMD check` reads only under
+  `--as-cran` and only to scan for URLs, reporting what it finds as a note
+  that cannot fail a build configured to error on warnings. `.github/` is
+  deliberately *not* on the list, so a change to the workflows themselves
+  still runs everything.
+
+  This is a job-level conditional rather than `paths-ignore` on the trigger,
+  and the distinction is not a stylistic one. The five matrix legs are
+  required status checks on `master`, and a workflow skipped by path filtering
+  never reports its contexts at all — they would sit at pending and the pull
+  request could never be merged. Since every release ends in a manifest-only
+  pull request into `master`, `paths-ignore` would have deadlocked the release
+  process itself. A job skipped by a conditional reports success, which is why
+  the decision is spent there instead.
+
+  Nothing about what actually gets checked changes. `r-style.yaml` is gated by
+  none of this, so `check_manifest.R` — the check that genuinely validates a
+  manifest-only change — still runs on every pull request.
+
 ### Fixed
+
+- **The validation report's overview no longer says every target passed when
+  the metadata failed.** The summary cards were built from `results()`, which
+  carries one row per dataset target and none for metadata -- so a transfer
+  that was invalid *only* because of a metadata import error, a transmission
+  date carrying trailing text for instance, headlined as one target passed and
+  none failed, with the fault visible solely as a message row further down the
+  same page. The overview is the first thing a reviewer reads and for many it
+  is the only thing, and it disagreed with the transfer's own verdict, which
+  has always counted metadata import errors. The report now carries a row for
+  the metadata axis when, and only when, metadata has something to report. A
+  transfer with sound metadata renders exactly as before.
+
+- **A failed export no longer replaces a good delivery with a header-only
+  file.** `write_table_to_file()` wrote straight to the destination, and base
+  R truncates that file and writes the header before it converts the data
+  columns -- so a conversion that failed partway left a header sitting where a
+  complete export used to be. That is worse than leaving no file: a
+  header-only file still reads as a table, with no rows, and a table with no
+  rows breaks no constraint and so validates perfectly clean. Both the plain
+  and the gzip branch now write to a temporary file beside the destination and
+  put it in place only once the whole table has converted, so a write that
+  cannot finish leaves the previous contents exactly as they were.
+
+- **`validate_table()` no longer reports a clean pass when its specification is
+  not a specification.** This function signals "nothing wrong with this
+  delivery" by returning the table unchanged. A `specs` argument that was not a
+  `DTAColumnSpecCollection` -- a path where an object was meant, a `NULL`
+  coerced along the way, a list still being assembled -- produced no schema, no
+  rules and therefore no errors, and the table came back unchanged. The caller
+  was told the data was clean by a run that had never looked at it, and nothing
+  in the answer distinguished it from a real one. The specification is now
+  checked before anything else, at the point both the in-memory and the
+  streaming paths pass through, and a specification that is not one raises.
 
 - **The bundled Word template no longer prints its own placeholder.**
   `clinical_dta_template.docx` contains `{DATASETS_DETAIL}`, which was never in

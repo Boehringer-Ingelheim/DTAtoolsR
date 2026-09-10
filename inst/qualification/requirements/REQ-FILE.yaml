@@ -1,0 +1,376 @@
+area: FILE
+title: File handlers and readers
+
+# A file handler decides three things before any validation logic ever runs:
+# whether a delivered name counts as the file the specification means, how its
+# bytes are split into rows and columns, and whether those bytes can be turned
+# into rows and columns at all. A defect here is invisible to every check on
+# the values that follow it, because the wrong file, or the right file split
+# in the wrong place, never reaches them.
+
+requirements:
+  # ---- delimiter, quoting, header, missing values, encoding -----------------
+
+  - id: REQ-FILE-001
+    text: >
+      DTAFileCSV, DTAFileTSV and DTAFileDelim shall read a file with the field
+      separator fixed by the class -- comma, tab and a caller-supplied single
+      character respectively -- honouring that separator for every field on
+      every row.
+    risk: high
+    category: functional
+    covers: [DTAFileCSV, DTAFileTSV, DTAFileDelim, read_file]
+    source: R/DTAFileCSV-class.R; R/DTAFileTSV-class.R; R/DTAFileDelim-class.R
+
+  - id: REQ-FILE-002
+    text: >
+      The quote character declared on a tabular handler shall let a field
+      contain the delimiter or a line break without ending the field, and two
+      adjacent quote characters inside a quoted field shall be read as one
+      literal quote character.
+    risk: medium
+    category: functional
+    covers: [DTAFileCSV, read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-003
+    text: >
+      has_header shall control whether the first line of the file is consumed
+      as column names (TRUE, the default) or read as an ordinary data row
+      under generated column names (FALSE).
+    risk: medium
+    category: functional
+    covers: [DTAFileCSV, read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-004
+    text: >
+      The empty string shall always be read as missing. Values declared in
+      missing_values shall be treated as missing in addition to, never instead
+      of, the empty string and the reader's own default missing tokens.
+    risk: high
+    category: functional
+    covers: [DTAFileCSV, read_file]
+    source: R/DTAFileTabular-class.R
+    notes: >
+      missing_values defaults to "", which is itself the signal that nothing
+      extra was declared: a handler that declares no missing_values keeps the
+      reader's own default missing set, which already includes an empty cell
+      and the literal text "NA".
+
+  - id: REQ-FILE-005
+    text: >
+      encoding shall decode the file to UTF-8 before any value is read: a file
+      already declared as UTF-8 is read unchanged, a UTF-8 byte-order mark at
+      the start of the file shall not become part of the first column's name
+      or first value, and a file declared in another supported encoding (for
+      instance latin1) shall have its non-ASCII bytes transcoded to the
+      correct UTF-8 representation.
+    risk: high
+    category: functional
+    covers: [DTAFileCSV, read_file]
+    source: R/DTAFileTabular-class.R
+
+  # ---- naming, counting and non-tabular deliverables -------------------------
+
+  - id: REQ-FILE-006
+    text: >
+      matches_filename() shall compare a candidate name against a handler's
+      declared filename as an exact, case-sensitive match when pattern is
+      FALSE, and as an unanchored regular-expression search against the
+      candidate when pattern is TRUE.
+    risk: high
+    category: functional
+    covers: [matches_filename, DTAFile]
+    source: R/DTAFile-class.R
+    notes: >
+      Pinned from dta_matches_filename_base(): the non-pattern branch tests
+      candidate %in% declared_names, an exact comparison. The pattern branch
+      calls stringr::str_detect(), which reports a match anywhere in the
+      candidate string; a handler that means to match a whole file name and
+      nothing else must anchor its own pattern with ^ and $, because the
+      package does not do it for them.
+
+  - id: REQ-FILE-007
+    text: >
+      min_number_of_files() and max_number_of_files() on a dataset shall
+      return the sum of the same bound declared on each of its file handlers.
+    risk: medium
+    category: interface
+    covers: [min_number_of_files, max_number_of_files, DTADataSetFile]
+    source: R/DTADataSet-class.R
+
+  - id: REQ-FILE-008
+    text: >
+      DTAFileAny shall restrict the accepted file endings to its declared
+      extensions, matched case-insensitively by suffix rather than by the text
+      after the last dot, so that a multi-part ending such as tar.gz or nii.gz
+      is matched as a whole and is distinguished from a bare .gz or a lone
+      .tar.
+    risk: medium
+    category: functional
+    covers: [DTAFileAny, matches_filename]
+    source: R/DTAFileAny-class.R
+
+  - id: REQ-FILE-009
+    text: >
+      A handler's declared filename shall also match a candidate carrying a
+      supported compression suffix, so a plain filename declaration accepts
+      its gzip-compressed delivery without the declaration mentioning
+      compression at all.
+    risk: medium
+    category: functional
+    covers: [DTAFile, matches_filename]
+    source: R/DTAFile-class.R
+
+  - id: REQ-FILE-010
+    text: >
+      A file whose extension is .zip shall be refused by read_file() and
+      open_file() before any parsing is attempted, with a message that names
+      the reason and suggests a supported alternative, regardless of the
+      handler's declared filename or pattern.
+    risk: medium
+    category: integrity
+    covers: [read_file, open_file]
+    source: R/DTAFile-class.R
+    notes: >
+      Pinned as the current, deliberate behaviour: an earlier version let
+      Arrow attempt the archive's raw bytes as delimited text, which could
+      fail only after a long scan with an opaque "Is this a 'csv' file?"
+      schema error. That path is now cut off immediately in
+      dta_check_readable_file(); this requirement documents the replacement,
+      not the defect it replaced.
+
+  # ---- compression and edge-case files ---------------------------------------
+
+  - id: REQ-FILE-011
+    text: >
+      A file compressed with an extension dta_compression_extensions()
+      advertises shall be readable end to end, reaching the identical
+      validation verdict as the same content uncompressed, without the
+      handler's declared filename mentioning compression.
+    risk: high
+    category: functional
+    covers: [DTAFile, check]
+    source: R/streamingScale.R; R/DTAFile-class.R
+
+  - id: REQ-FILE-012
+    text: >
+      An empty (zero-byte) file shall be refused with a condition when it is
+      read or opened, rather than accepted as a table of zero rows.
+    risk: medium
+    category: functional
+    covers: [read_file, open_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-013
+    text: >
+      A file containing a header row and no further lines shall be read as a
+      valid table of zero rows exposing the declared column names.
+    risk: low
+    category: functional
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-014
+    text: >
+      A source line with no characters at all shall be treated as a record
+      separator and produce no row; a row that is only partially empty, in any
+      position, shall be read intact with the empty fields as missing values.
+    risk: medium
+    category: functional
+    covers: [read_file]
+    source: tests/testthat/test-validation-oracle.R
+    notes: >
+      Pinned per LIM-001 in the deviation register: this is documented,
+      observed behaviour, not an endorsed design. A file containing genuinely
+      blank lines validates fewer rows than a naive line count would suggest,
+      with no warning.
+
+  - id: REQ-FILE-015
+    text: >
+      A quoted field containing an embedded line break shall be read back with
+      that line break preserved, for a file small enough that the value
+      cannot straddle a read block.
+    risk: low
+    category: functional
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-016
+    text: >
+      A file using Windows CRLF line endings shall read to the identical table
+      as the same content using LF line endings.
+    risk: low
+    category: functional
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-017
+    text: >
+      A data row declaring fewer or more fields than the header shall abort
+      the read, whether the file is read eagerly or only opened lazily,
+      rather than silently truncating, padding or misaligning the row.
+    risk: high
+    category: integrity
+    covers: [read_file, open_file]
+    source: R/DTAFileTabular-class.R
+    notes: >
+      Pinned, with a surprising edge recorded rather than smoothed over: the
+      failure surfaces inside dta_delim_header_names() and is reported as
+      "Cannot read the column names of ... Is this a 'csv' file?" even when
+      the header itself is perfectly well-formed and the true cause is a data
+      row read later in the same block. The underlying Arrow error naming the
+      actual offending row is nested inside the message, not at its start.
+      This also means open_file() -- meant to be a schema-only, lazy operation
+      -- already touches enough of the file to reject a ragged row rather than
+      deferring the failure to the first scan.
+
+  - id: REQ-FILE-018
+    text: >
+      A header written plainly, double-quoted, or padded with surrounding
+      whitespace shall clean to the identical column name.
+    risk: low
+    category: functional
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-019
+    text: >
+      Column names that collide only after header cleaning (stripping
+      surrounding quotes and whitespace) shall abort the read with a message
+      identifying the file and the colliding name, rather than silently
+      keeping one of the two columns.
+    risk: medium
+    category: integrity
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-020
+    text: >
+      A file path containing spaces and non-ASCII characters, in either the
+      directory or the file name, shall be read exactly as the same content
+      under an all-ASCII path.
+    risk: low
+    category: functional
+    covers: [read_file]
+    source: R/DTAFile-class.R
+
+  - id: REQ-FILE-021
+    text: >
+      A table with an unusually large number of declared columns or an
+      unusually large single field shall be read correctly and complete in a
+      small, bounded time.
+    risk: low
+    category: performance
+    covers: [read_file]
+    source: R/DTAFileTabular-class.R
+
+  - id: REQ-FILE-022
+    text: >
+      load_file(stream = ) at "never", "auto" and "always" shall reach an
+      identical validation verdict for the same file and specification,
+      differing only in when the file's bytes are read.
+    risk: high
+    category: functional
+    covers: [load_file, check]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-023
+    text: >
+      handler_index shall route a delivered file to the file handler it
+      names, so that a dataset declaring several handlers loads each
+      delivered file under its own table.
+    risk: medium
+    category: functional
+    covers: [load_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-024
+    text: >
+      open_file() shall return a lazy dataset object exposing the column
+      names from the file's header alone, never a table already materialised
+      into memory.
+    risk: medium
+    category: interface
+    covers: [open_file]
+    source: R/DTAFile-class.R
+
+  # ---- writing ----------------------------------------------------------------
+
+  - id: REQ-FILE-025
+    text: >
+      write_table_to_file() shall honour sep, na, row.names, quote and
+      arrange_by exactly as declared, producing a file whose text reflects
+      each setting.
+    risk: medium
+    category: functional
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-026
+    text: >
+      write_table_to_file(compression = "gzip") shall write a valid gzip file
+      whose decompressed content is the same table as compression = "none"
+      would write, and which the package's own gzip-aware handler can read
+      back.
+    risk: medium
+    category: functional
+    covers: [write_table_to_file, read_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-027
+    text: >
+      get_md5sum = TRUE shall compute a checksum equal to tools::md5sum() of
+      the file just written, and write_md5sum_to_file = TRUE shall
+      additionally write it, with the written row and column counts, to a
+      "<filename>.md5" sidecar file.
+    risk: medium
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/exportFunctions.R
+    notes: >
+      Pinned: get_md5sum = TRUE returns its checksum nested inside a list
+      (md5sum, n_rows, n_cols) under the result's own md5sum element, not the
+      bare checksum string the function's own documentation describes -- that
+      bare form is only what get_md5sum = FALSE returns (NA). A caller who
+      follows the documented contract literally, e.g.
+      `if (!is.na(result$md5sum))`, hits R's own "the condition has length >
+      1" instead of the intended branch. Recorded as observed, not endorsed,
+      behaviour.
+
+  - id: REQ-FILE-028
+    text: >
+      Without overwrite = TRUE, write_table_to_file() shall abort rather than
+      replace a file that already exists at the target path; overwrite = TRUE
+      shall replace it.
+    risk: high
+    category: integrity
+    covers: [write_table_to_file]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-029
+    text: >
+      A table written by write_table_to_file() and read back through a
+      dataset declaring the same specification shall reach the identical
+      validation verdict as the table before it was written.
+    risk: high
+    category: functional
+    covers: [write_table_to_file, load_file, check]
+    source: R/DTADataSetTabular-class.R
+
+  - id: REQ-FILE-030
+    text: >
+      read_file_execution() and open_file_execution() shall perform the read
+      and the lazy open for a concrete tabular handler, and shall raise a
+      condition when called on the abstract tabular class, which knows no
+      separator of its own.
+    risk: medium
+    category: interface
+    covers: [read_file_execution, open_file_execution, DTAFileTabular]
+    source: R/DTAFileTabular-class.R:212 and :232
+    notes: >
+      These are the reading entry points the higher-level read_file() and
+      open_file() delegate to once a delivery has been matched to a handler. A
+      caller reaching them directly bypasses the filename matching, which is
+      the only reason to expose them.

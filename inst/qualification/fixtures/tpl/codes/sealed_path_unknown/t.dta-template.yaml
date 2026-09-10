@@ -1,0 +1,13 @@
+kind: dta_creation_template
+id: spu1
+version: "1.0"
+abstract: true
+sealed: ["nonexistent_field"]
+base:
+  metadata:
+    title: X
+datasets:
+  - name: x
+    type: tabular
+    columns:
+      - id: A

@@ -1,0 +1,284 @@
+area: ENV
+title: Installed system and environment
+
+# Every requirement OQ and PQ verify is checked by calling into one particular
+# copy of the package on one particular machine. If that copy were the wrong
+# version, missing a dependency, running under an unsupported R, or had a file
+# altered after release, every later stage would still produce a tidy report --
+# just one describing software that is not the software actually installed.
+# This area exists to answer, once and in writing, "is this the software the
+# specification describes, installed the way it is meant to be", so that every
+# later stage can simply assume the answer is yes.
+
+requirements:
+  - id: REQ-ENV-001
+    text: >
+      The Version recorded in the installed package's DESCRIPTION shall equal
+      the package_version declared in the qualification suite's own index, so
+      that an evidence bundle can never be produced by one release of the
+      software while claiming to qualify another.
+    risk: high
+    category: installation
+    covers: [run_qualification]
+    source: DESCRIPTION Version; inst/qualification/requirements/_index.yaml package_version
+
+  - id: REQ-ENV-002
+    text: >
+      The build timestamp, packaging timestamp and source revision (RemoteSha
+      or GithubSHA1) reported by the installed package's DESCRIPTION shall be
+      captured as installation evidence whenever present, so that a reviewer
+      can trace a deployed copy back to the commit and build that produced it.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: utils::packageDescription("DTAtools") Built, Packaged, RemoteSha and GithubSHA1 fields
+
+  - id: REQ-ENV-003
+    text: >
+      The R interpreter running the package shall be at least the minimum
+      version declared in DESCRIPTION's Depends field, and the running
+      version shall be recorded, so that a copy running under an unsupported
+      interpreter is caught before any other stage relies on its behaviour.
+    risk: high
+    category: installation
+    covers: [run_qualification]
+    source: "DESCRIPTION Depends: R (>= 4.1.0)"
+
+  - id: REQ-ENV-004
+    text: >
+      The platform triple, CPU architecture and operating system version of
+      the host running the package shall be recorded as installation
+      evidence, without constraining which values are acceptable, so that a
+      reviewer can identify the system a qualification run describes.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: R.version$platform, R.version$arch, utils::osVersion
+
+  - id: REQ-ENV-005
+    text: >
+      Every package named in DESCRIPTION's Depends field shall be installed
+      and shall satisfy its declared minimum version, because the package
+      cannot function -- let alone be validly qualified -- without them.
+    risk: high
+    category: installation
+    covers: [run_qualification]
+    source: DESCRIPTION Depends field, checked via qual_dependency_check()
+
+  - id: REQ-ENV-006
+    text: >
+      Every package named in DESCRIPTION's Imports field shall be installed
+      and shall satisfy its declared minimum version, because the package's
+      own code calls into them unconditionally.
+    risk: high
+    category: installation
+    covers: [run_qualification]
+    source: DESCRIPTION Imports field, checked via qual_dependency_check()
+
+  - id: REQ-ENV-007
+    text: >
+      The installation status of every package named in DESCRIPTION's
+      Suggests field shall be recorded, without the run failing when one is
+      absent, because a Suggests dependency enables optional evidence --
+      application tests, browser tests, alternate report formats -- rather
+      than the package's core behaviour.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: DESCRIPTION Suggests field, checked via qual_dependency_check()
+
+  - id: REQ-ENV-008
+    text: >
+      The process locale, system time zone and native encoding shall be
+      recorded as installation evidence, without requiring any particular
+      value, so that a later discrepancy between environments has a
+      documented starting point to compare against.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: Sys.getlocale(), Sys.timezone(), l10n_info()$codeset
+
+  - id: REQ-ENV-009
+    text: >
+      The version of the Arrow C++ library the package links against shall be
+      recorded as installation evidence.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: arrow::arrow_info()$version
+
+  - id: REQ-ENV-010
+    text: >
+      Arrow shall provide the dataset, acero (compute) and gzip capabilities
+      that the package's streaming and compute paths depend on.
+    risk: medium
+    category: functional
+    covers: [run_qualification]
+    source: arrow::arrow_info()$capabilities
+
+  - id: REQ-ENV-011
+    text: >
+      set_dta_compute_threads() shall report the previously active thread
+      count when called, shall change Arrow's active thread count to the
+      value requested, and shall be able to restore a previously reported
+      value exactly.
+    risk: medium
+    category: functional
+    covers: [set_dta_compute_threads]
+    source: R/arrowCompute.R:191 set_dta_compute_threads()
+
+  - id: REQ-ENV-012
+    text: >
+      The DTAtools namespace shall load and remain reachable by name for the
+      duration of a qualification run, since every other requirement in this
+      suite is verified by calling into it.
+    risk: high
+    category: installation
+    covers: [run_qualification]
+    source: base::isNamespaceLoaded(), base::getNamespace()
+
+  - id: REQ-ENV-013
+    text: >
+      Every create_example_*() constructor exported by the package shall
+      build, with its default arguments, a valid instance of the S7 class its
+      name identifies, so that the example objects the package's own
+      documentation and tests rely on are known to still construct on this
+      installation.
+    risk: medium
+    category: functional
+    covers: [create_example_DTA, create_example_DTAColumnSpec, create_example_DTAColumnSpecCollection, create_example_DTADataSetTabular, create_example_DTAFileCSV, create_example_DTAFileTSV, create_example_DTAMetaData, create_example_DTARuleColCondition, create_example_DTARuleColRange, create_example_DTARuleColUnique]
+    source: inst/qualification/requirements/_api.yaml create_example_* exports
+
+  - id: REQ-ENV-014
+    text: >
+      getNamespaceExports("DTAtools") shall equal, element for element, the
+      frozen export list recorded in requirements/_api.yaml, so that a public
+      interface which grew or shrank without a matching requirement update is
+      caught before it reaches a reviewer.
+    risk: high
+    category: interface
+    covers: [run_qualification]
+    source: inst/qualification/requirements/_api.yaml exports
+
+  - id: REQ-ENV-015
+    text: >
+      Where an MD5 manifest was installed with the package,
+      tools::checkMD5sums("DTAtools") shall report that every installed file
+      matches it, so that a file altered after installation is detected
+      rather than silently used.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: tools::checkMD5sums("DTAtools")
+
+  - id: REQ-ENV-016
+    text: >
+      Every file listed in the qualification suite's
+      baseline/inst-files.sha256 manifest shall be present in the installed
+      inst/ tree and shall match its recorded hash, so that a byte altered
+      after release -- accidentally or otherwise -- is detected rather than
+      silently shipped.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/baseline/inst-files.sha256
+
+  - id: REQ-ENV-017
+    text: >
+      Every file listed in the Shiny application's manifest.json shall be
+      present under inst/shiny/dta_app and shall match its recorded
+      checksum, so that the application deployed to Posit Connect is provably
+      the one the checksum manifest describes.
+    risk: medium
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/manifest.json
+
+  - id: REQ-ENV-018
+    text: >
+      Every symbol exported by the package's namespace shall have a
+      documented alias in its installed help database, so that a user of the
+      installed copy can always reach documentation for anything they can
+      call.
+    risk: medium
+    category: documentation
+    covers: [run_qualification]
+    source: tools::Rd_db("DTAtools")
+
+  - id: REQ-ENV-019
+    text: >
+      At least one vignette shall be installed with the package, so that the
+      walkthrough documentation referenced from its help pages is actually
+      reachable on this installation.
+    risk: low
+    category: documentation
+    covers: [run_qualification]
+    source: vignette(package = "DTAtools")
+
+  - id: REQ-ENV-020
+    text: >
+      Every package option read via getOption("DTAtools....") in the
+      package's own source shall, when not explicitly overridden, be in force
+      at the default value documented at its call site, so that behaviour a
+      reviewer expects from the documentation is the behaviour this
+      installation actually exhibits.
+    risk: medium
+    category: functional
+    source: >
+      R/00_helpers.R:159 (DTAtools.stream_threshold default 512*1024^2),
+      R/00_helpers.R:175 (DTAtools.stream_block_size default 8388608L),
+      R/00_helpers.R:277 (DTAtools.transcode_block_bytes default 4194304L),
+      R/00_helpers.R:364 (DTAtools.stream default "auto"),
+      R/DTA-class.R:719 (DTAtools.stream_batch_rows default 131072L),
+      R/DTA-class.R:720 (DTAtools.max_errors default 10000L),
+      R/DTA-class.R:728 (DTAtools.benchmark default FALSE),
+      R/arrowCompute.R:68 (DTAtools.use_arrow_compute default FALSE),
+      R/arrowCompute.R:112 (DTAtools.arrow_min_rows default 100000L),
+      R/importConversion.R:858 (DTAtools.stream_arrow_numeric default TRUE),
+      R/importConversion.R:872 (DTAtools.stream_arrow_numeric_min_rows default 20000L),
+      R/streamingScale.R:168 (DTAtools.stream_arrow_unique default TRUE),
+      R/streamingValidation.R:895 (DTAtools.progress_seconds default 30)
+    covers: [run_qualification]
+
+  - id: REQ-ENV-021
+    text: >
+      An evidence output directory created by the qualification run and R's
+      own tempdir() shall both accept a newly written file, since every stage
+      after this one depends on being able to write artefacts and results
+      somewhere.
+    risk: medium
+    category: installation
+    covers: [run_qualification]
+    source: qa_tempdir(), base::tempdir()
+
+  - id: REQ-ENV-022
+    text: >
+      The free disk space available at the location the qualification run
+      will write to shall be recorded as installation evidence, without
+      constraining how much is required, so that a later stage which runs out
+      of space has a documented starting point to explain why.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: platform free-space reporting (wmic on Windows, df elsewhere); informational only
+
+  - id: REQ-ENV-023
+    text: >
+      The availability of pandoc and of a headless browser suitable for the
+      application's browser tests shall be recorded, without either being
+      required, because their absence changes which parts of the suite can
+      execute rather than whether the package itself is fit for use.
+    risk: low
+    category: installation
+    covers: [run_qualification]
+    source: rmarkdown::pandoc_available(), chromote::find_chrome()
+
+  - id: REQ-ENV-024
+    text: >
+      dta_pdf_backend() shall report either NULL or a list naming a usable
+      backend, without a PDF backend being required for installation, because
+      PDF export is one of several report formats the package can produce.
+    risk: low
+    category: installation
+    covers: [dta_pdf_backend]
+    source: R/exportDocuments.R:579 dta_pdf_backend()

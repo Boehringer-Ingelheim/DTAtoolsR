@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: vie_ds_exclude
+version: "1.0"
+dataset:
+  columns:
+    - id: COL1
+      values_from:
+        vocabulary: vie_voc@1.0
+        exclude: [C]

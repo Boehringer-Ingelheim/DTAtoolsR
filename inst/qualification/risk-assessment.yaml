@@ -1,0 +1,205 @@
+# Risk assessment.
+#
+# What this decides is how much testing each part of the package earns. The
+# FDA's Computer Software Assurance guidance asks for exactly this judgement:
+# scripted testing with recorded results where a failure could matter, lighter
+# evidence where it could not. Writing the reasoning down is what makes the
+# depth of testing reviewable rather than arbitrary.
+#
+# `severity` is the harm if the feature fails, judged by one question: could
+# the failure let a non-conforming data delivery be accepted as clean, or
+# corrupt a delivery on its way out? That is the harm this package exists to
+# prevent.
+#
+#   critical  a non-conforming delivery could be accepted, or data corrupted,
+#             with nothing visible to the user
+#   major     a wrong answer that a careful user would probably notice
+#   minor     inconvenience, a poor message, a cosmetic defect
+#
+# `detectability` is how likely the failure is to be noticed WITHOUT this
+# suite. Low detectability raises the required depth, because nothing else
+# would catch it.
+
+assessment:
+  - area: VAL
+    title: Validation engine and result accessors
+    severity: critical
+    probability: medium
+    detectability: low
+    rationale: >
+      The verdict is the product. A checking error that reports a bad delivery
+      as clean is silent by construction: nothing downstream is looking, which
+      is the whole reason the check exists.
+    depth: >
+      Scripted case per constraint keyword, each with an explicit expected
+      count and location; the three-axis verdict algebra tested directly.
+
+  - area: RULE
+    title: Cross-column and grouped rules
+    severity: critical
+    probability: high
+    detectability: low
+    rationale: >
+      The largest surface in the package and the one with the most edge cases:
+      every operator has to decide what a missing value means, and a wrong
+      answer there is invisible.
+    depth: >
+      One scripted case per operator and per constraint type, each with a
+      satisfying row, a violating row and a missing value.
+
+  - area: TYPE
+    title: Declared types and typing at read
+    severity: critical
+    probability: medium
+    detectability: low
+    rationale: >
+      Typing decides what every later check sees. A value silently coerced is
+      a value never checked, and identifiers such as "007" losing their leading
+      zeros is a documented failure mode in this domain.
+    depth: >
+      Full mapping table per declared type and SAS format; the strict-numeric
+      matrix input by input; a round trip proving text stays text.
+
+  - area: STREAM
+    title: Streaming validation and engine parity
+    severity: critical
+    probability: high
+    detectability: low
+    rationale: >
+      Two engines that must agree. A divergence gives the same file two
+      verdicts depending only on how it was loaded, which no user would think
+      to look for.
+    depth: >
+      Randomised differential testing against the in-memory engine, with the
+      case count rising with the scale tier; defects placed on batch
+      boundaries.
+
+  - area: FILE
+    title: File handlers and readers
+    severity: critical
+    probability: medium
+    detectability: medium
+    rationale: >
+      A row the reader drops is a row nothing validates. Encoding and
+      compression failures are usually loud, but silent row loss is not.
+    depth: >
+      One case per handler property and per compression; explicit cases for
+      empty, header-only, malformed and oddly-encoded files.
+
+  - area: PERF
+    title: End-to-end workflows and behaviour at scale
+    severity: critical
+    probability: medium
+    detectability: medium
+    rationale: >
+      Correctness that holds on ten rows and fails on ten million is the
+      failure mode a small test suite cannot see, and production data is the
+      large case.
+    depth: >
+      The same injected defects at every tier with exact expected counts;
+      repeatability across threads, batch sizes and locales.
+
+  - area: EXPORT
+    title: Document and data export
+    severity: major
+    probability: medium
+    detectability: medium
+    rationale: >
+      Exported data leaves the system. A truncated or wrongly encoded file
+      would be found downstream, but the checksum that is supposed to prove
+      integrity has to be right or it proves nothing.
+    depth: >
+      Round-trip tests reading back what was written; the checksum sidecar
+      verified against an independent digest.
+
+  - area: SPEC
+    title: Specifications, YAML and factories
+    severity: major
+    probability: medium
+    detectability: medium
+    rationale: >
+      A specification read wrongly produces a check that is wrong in the same
+      direction, though a misread specification usually fails loudly.
+    depth: >
+      Round trips through YAML and JSON; one case per malformed input.
+
+  - area: META
+    title: Transfer metadata
+    severity: major
+    probability: low
+    detectability: high
+    rationale: >
+      Metadata documents the transfer rather than gating it, and errors show
+      up in the generated documents where a reader sees them.
+    depth: Accessor contracts and date round trips.
+
+  - area: TMPL
+    title: Templates, inheritance and controlled vocabulary
+    severity: major
+    probability: high
+    detectability: medium
+    rationale: >
+      Inheritance decides what a specification actually says. A wrongly
+      resolved template produces a plausible-looking specification that checks
+      the wrong thing, and the four-way distinction between absent, null, empty
+      and set is easy to get wrong.
+    depth: One case per validation code; explicit cases for each value state.
+
+  - area: ENV
+    title: Installed system and environment
+    severity: major
+    probability: low
+    detectability: low
+    rationale: >
+      Silent by nature: a wrong version or an altered file behaves normally
+      until it does not, and nothing else in the system is checking.
+    depth: Full inventory with file-level checksums against a released manifest.
+
+  - area: ROBUST
+    title: Error handling, integrity and isolation
+    severity: major
+    probability: medium
+    detectability: medium
+    rationale: >
+      A function that writes outside its output directory, or leaves the
+      session's options changed, damages work that has nothing to do with it.
+    depth: Bad input per exported function; before-and-after isolation checks.
+
+  - area: REPORT
+    title: The standalone HTML validation report
+    severity: major
+    probability: low
+    detectability: high
+    rationale: >
+      The report is how a human reads the verdict. Counts that disagree with
+      the underlying result would mislead, but the underlying result is
+      available beside it.
+    depth: Parsed and compared against the accessors it summarises.
+
+  - area: APP
+    title: The interactive application
+    severity: minor
+    probability: medium
+    detectability: high
+    rationale: >
+      Interactive and immediately visible. It drives the same engine that is
+      qualified above, so a defect here is a usability problem rather than a
+      data-integrity one.
+    depth: >
+      Server logic without a browser, plus a launch check. Browser scenarios
+      run where a browser is available and are reported as not executed
+      otherwise.
+
+  - area: CORE
+    title: The qualification runner itself
+    severity: critical
+    probability: low
+    detectability: low
+    rationale: >
+      The instrument every other measurement is taken with. If it dropped a
+      failure or hashed the wrong bytes, every report it ever produced would be
+      worthless and nothing in the report would say so.
+    depth: >
+      Tested like any other exported function, including that a failing step
+      is recorded, that a broken file cannot hide the cases it declared, and
+      that the manifest covers what it claims to.

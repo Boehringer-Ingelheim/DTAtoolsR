@@ -1,0 +1,4 @@
+kind: dta_vocabulary
+id: vef_b
+version: "1.0"
+extends: vef_a@1.0

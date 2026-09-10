@@ -1,0 +1,9 @@
+kind: dta_vocabulary
+id: vb_voc
+version: "1.0"
+type: text
+terms:
+  - code: A
+    label: Term A
+  - code: B
+    label: Term B

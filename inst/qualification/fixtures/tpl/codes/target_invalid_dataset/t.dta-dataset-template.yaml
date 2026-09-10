@@ -1,0 +1,11 @@
+kind: dta_dataset_template
+id: tivds1
+version: "1.0"
+options:
+  - id: bad
+    label: Bad option
+    type: text
+    target: metadata.wrong_root
+dataset:
+  columns:
+    - id: A
