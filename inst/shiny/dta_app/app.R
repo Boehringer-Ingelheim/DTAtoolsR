@@ -6642,9 +6642,14 @@ server <- function(input, output, session) {
             # Prepare template variables (dataset/specs content). Always supply
             # {YAML_EMBEDDED} so the placeholder is cleanly filled (or blanked)
             # rather than left as literal text in the document.
+            #
+            # {DATASETS_DETAIL} is deliberately NOT supplied here: it is now a
+            # block placeholder that export_with_template() itself renders as
+            # real Word tables. Adding a "{DATASETS_DETAIL}" entry to
+            # `variables` would override that block back to flat text, which
+            # would silently undo this feature for the app.
             variables <- list(
               "{DATASETS_SUMMARY}" = format_datasets_summary(doc),
-              "{DATASETS_DETAIL}" = format_datasets_detail(doc),
               "{YAML_EMBEDDED}" = ""
             )
 

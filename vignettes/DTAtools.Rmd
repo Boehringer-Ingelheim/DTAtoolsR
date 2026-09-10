@@ -1727,6 +1727,45 @@ write_dta(dta_from_file, "clinical_dta.docx", template = "my_template.docx")
 Dates in the generated documents are written as ISO 8601 (`YYYY-MM-DD`), so the
 same DTA produces the same document regardless of the machine's locale.
 
+#### What a Word template can ask for
+
+A template is an ordinary `.docx` carrying `{PLACEHOLDER}` markers.
+`dta_template_placeholders()` is the catalogue — call it with no argument for
+descriptions, or with a `DTA` to see what each marker resolves to for that
+object:
+
+```{r template_placeholders_example}
+ph <- dta_template_placeholders()
+kind <- attr(ph, "kind")
+
+head(ph[kind == "inline"], 3)
+ph[kind == "block"]
+```
+
+**Inline** markers resolve to text and may appear anywhere, including
+mid-sentence and in headers and footers. **Block** markers expand to document
+structure — tables, headings, lists — built by the same renderers the built-in
+layout uses, so a templated document and a built-in one say the same thing about
+the same `DTA`.
+
+`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}` and `{DATASETS}` take an
+optional dataset argument: `{COLUMN_SPECS:clinical_data}` renders that one
+dataset, and the bare form renders every applicable dataset under its own
+heading.
+
+Three rules govern block markers:
+
+- A block marker must be **the only text in its paragraph**. `Columns:
+  {COLUMN_SPECS}` is left alone, because replacing it with a table would destroy
+  the sentence.
+- It must sit in the **document body** — not a header, a footer, or a table
+  cell.
+- A value supplied through `template_variables` overrides a marker of either
+  kind and is always rendered as text.
+
+Anything left unrendered by those rules is named in a warning, alongside the
+existing report of markers the catalogue does not recognise.
+
 #### PDF output
 
 PDF is produced by building the Word document and converting it, which needs an

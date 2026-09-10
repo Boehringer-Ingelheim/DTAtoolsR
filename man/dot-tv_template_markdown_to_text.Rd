@@ -4,7 +4,7 @@
 \alias{.tv_template_markdown_to_text}
 \title{Convert markdown-like placeholder text to Word-friendly plain text}
 \usage{
-.tv_template_markdown_to_text(text, dta = NULL)
+.tv_template_markdown_to_text(text)
 }
 \description{
 Template placeholders are inserted as Word text runs, not a markdown parser.

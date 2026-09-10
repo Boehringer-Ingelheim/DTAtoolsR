@@ -598,7 +598,7 @@ test_that("dta_handler_type() returns 'any' for a DTAFileAny", {
 
 test_that("handler_expected() returns the filename/pattern only, never the extensions", {
   # handler_expected() must read back verbatim in the exported specification
-  # (format_datasets_detail(), utils_export.R), so the allowed-endings
+  # (.build_file_specs_table(), R/documentBuilders.R), so the allowed-endings
   # restriction moved to its own helper, handler_endings(), instead of being
   # glued onto this string.
   fn <- app_fn("handler_expected")

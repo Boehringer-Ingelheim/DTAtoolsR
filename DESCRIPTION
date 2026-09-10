@@ -100,6 +100,7 @@ Collate:
     'evaluateRules.R'
     'exportDocuments.R'
     'exportFunctions.R'
+    'exportTemplateBlocks.R'
     'exportTemplateDocx.R'
     'exportValidationReport.R'
     'formattingHelpers.R'

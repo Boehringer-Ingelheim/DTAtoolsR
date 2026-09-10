@@ -197,10 +197,11 @@ handler_is_pattern <- function(h) {
 
 # The declared filename or pattern ONLY -- never glue anything else onto this.
 # It is read back verbatim in the exported specification document
-# (format_datasets_detail(), utils_export.R), so a suffix here would make a
-# declared filename unrecoverable from the export. Callers that also want the
-# allowed-endings restriction use handler_endings() below and surface it as
-# its own, clearly-labelled field.
+# (.build_file_specs_table(), R/documentBuilders.R, which feeds both the
+# built-in layout and the {FILE_SPECS}/{DATASETS} template blocks), so a suffix
+# here would make a declared filename unrecoverable from the export. Callers
+# that also want the allowed-endings restriction use handler_endings() below
+# and surface it as its own, clearly-labelled field.
 handler_expected <- function(h) {
   fn <- tryCatch(h@filename, error = function(e) NA_character_)
   paste(fn, collapse = ", ")

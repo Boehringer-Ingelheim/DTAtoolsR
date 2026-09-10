@@ -57,6 +57,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   See `inst/qualification/README.md` for how to run, review and sign a
   qualification, and how to verify a bundle has not been altered.
 
+- **Word templates can now emit real tables, not just text.** Every
+  `{PLACEHOLDER}` in a `.docx` template used to resolve to a character string
+  written into a single Word text run, so the richest thing a template could
+  produce was one paragraph with manual line breaks and leading-space
+  indentation. Column specifications and validation rules had no table
+  representation at all — a template could ask for `{TOTAL_COLUMNS}` and
+  `{TOTAL_RULES}`, two integers, and nothing more.
+
+  Nine **block placeholders** now expand to document structure instead:
+  `{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`,
+  `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
+  `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}` and
+  `{AUTHORIZED_CORRECTIONS_LIST}`. The first four accept a dataset argument —
+  `{COLUMN_SPECS:ADSL}` renders one dataset, the bare form renders every
+  applicable one under its own heading. They are rendered by the same builders
+  the built-in layout uses, so a templated document and a built-in one now say
+  the same thing about the same `DTA`.
+
+  A block placeholder must be the only text in its paragraph, and must sit in
+  the document body — not inside a sentence, a table cell, a header or a
+  footer. Anything left over is reported in a single warning naming the tokens
+  and why. A `variables` entry of the same name still wins and still renders as
+  plain text, so existing callers are unaffected.
+
+  Tables are sized to 100% of whatever text column the template's page has
+  rather than to a fixed inch width: the built-in layout gives its widest tables
+  landscape pages of their own, but a user template's page geometry is not the
+  exporter's to change. Headings use the template's own `heading N` style when
+  it defines one — so the block joins the template's table of contents — and
+  fall back to direct formatting when it does not.
+
+  `dta_template_placeholders()` reports the block tokens alongside the inline
+  ones, tagged by a `"kind"` attribute.
+
 ### Changed
 
 - **Choosing a template is now a search, not a dropdown.** "Create new from
@@ -173,6 +207,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   in the answer distinguished it from a real one. The specification is now
   checked before anything else, at the point both the in-memory and the
   streaming paths pass through, and a specification that is not one raises.
+
+- **The bundled Word template no longer prints its own placeholder.**
+  `clinical_dta_template.docx` contains `{DATASETS_DETAIL}`, which was never in
+  the placeholder catalogue and was supplied only by the Shiny app. Exporting
+  with it from plain R — `write_dta(dta, template = ...)` — left the token
+  printed literally and the dataset section empty. `{DATASETS_DETAIL}` is now a
+  recognised alias for the `{DATASETS}` block, so the bundled template produces
+  its dataset section wherever it is used.
+
+- **The export dialog no longer offers a template with nothing to fill in.**
+  "Use custom template" listed every `.docx` under `inst/extdata/templates`,
+  which includes `dta_numbered_template.docx` — the reference document the
+  *built-in* layout opens for its numbered heading styles, and which contains no
+  placeholders at all. Choosing it produced a Word file with none of the user's
+  DTA in it, silently. A template must now prove it contains at least one
+  placeholder to be listed; a blocklisted filename would only have deferred the
+  problem to the next styles-only document dropped in that directory.
 
 - **A deviation of an abstract template no longer inherits `abstract: true`.**
   `extends:` merged the flag like any other scalar, so every concrete child of
