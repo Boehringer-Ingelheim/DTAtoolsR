@@ -32,6 +32,14 @@ files <- list.files("inst", recursive = TRUE, all.files = FALSE)
 # measured on the machine that runs the qualification rather than released
 # with the package, so the whole directory is excluded.
 files <- files[!startsWith(files, "qualification/baseline/")]
+# The Shiny app's manifest.json is excluded for a different reason: it is
+# itself a generated manifest, resynced by the manifest-sync workflow whenever
+# an app file or the deploy pin changes. Hashing one machine-maintained
+# manifest inside another makes the two chase each other -- every bot resync
+# would leave this file stale and block the pull request it just pushed to.
+# The app's contents stay covered: IQ-ENV-017 checks every file the app
+# manifest names against the checksum recorded there.
+files <- files[files != "shiny/dta_app/manifest.json"]
 # Radix ordering, so the file is byte-identical whatever locale it was written
 # in. The default collation on this project's development machines is not the
 # C collation continuous integration uses.
@@ -39,7 +47,11 @@ files <- sort(files, method = "radix")
 
 hashes <- unname(vapply(file.path("inst", files), hash_fun, character(1)))
 lines <- c(
-  sprintf("# %s of every file under inst/, excluding qualification/baseline/.", algorithm),
+  sprintf(
+    "# %s of every file under inst/, except qualification/baseline/ and the",
+    algorithm
+  ),
+  "# app's own generated manifest.json (see the script for why).",
   "# Regenerate with: Rscript .github/scripts/sync_qualification_manifest.R",
   sprintf("%s  %s", hashes, files)
 )

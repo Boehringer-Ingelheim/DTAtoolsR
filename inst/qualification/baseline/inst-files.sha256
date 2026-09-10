@@ -1,4 +1,5 @@
-# sha256 of every file under inst/, excluding qualification/baseline/.
+# sha256 of every file under inst/, except qualification/baseline/ and the
+# app's own generated manifest.json (see the script for why).
 # Regenerate with: Rscript .github/scripts/sync_qualification_manifest.R
 3476243763dcb5da8159365b294ec18318b53dd56597c35866854bd04277578e  extdata/clinical_data.csv
 071ae21e6a31d8d1d521abd7e197db63b28c3c8b8823a80e5348bde0f6c8e9fc  extdata/clinical_data2.csv
@@ -182,5 +183,4 @@ acaa00868d6b4c378062bbaf8a658d4083de3a81f37739c1de9f2b5117cff621  shiny/dta_app/
 a4b9e3bc95e3f11527a81547b9a823faa34e30d6ea9b1728710c5194a8ff1681  shiny/dta_app/R/vocabulary.R
 4b67cac8ce2a6e82a4e11ba210c84b4adfc72db7f4629785f7d3d09d6147795d  shiny/dta_app/VERSION
 049d222b75c3db0333a63be0aa8f2f76b8c645052ce681c62a81e28b9080c797  shiny/dta_app/app.R
-02f8bf7e7e4fd11d3dfb34b47be6edbcc8a28841404f1f824449f4e2b1835a08  shiny/dta_app/manifest.json
 1e9da3f71c9d67b9bc9c253c1b8419c77da221e7c2aceebac9132a946c882c8d  shiny/dta_app/www/dtatools_logo_small.png
