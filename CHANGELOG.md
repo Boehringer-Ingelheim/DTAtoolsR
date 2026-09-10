@@ -98,6 +98,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The validation report's overview no longer says every target passed when
+  the metadata failed.** The summary cards were built from `results()`, which
+  carries one row per dataset target and none for metadata -- so a transfer
+  that was invalid *only* because of a metadata import error, a transmission
+  date carrying trailing text for instance, headlined as one target passed and
+  none failed, with the fault visible solely as a message row further down the
+  same page. The overview is the first thing a reviewer reads and for many it
+  is the only thing, and it disagreed with the transfer's own verdict, which
+  has always counted metadata import errors. The report now carries a row for
+  the metadata axis when, and only when, metadata has something to report. A
+  transfer with sound metadata renders exactly as before.
+
 - **A failed export no longer replaces a good delivery with a header-only
   file.** `write_table_to_file()` wrote straight to the destination, and base
   R truncates that file and writes the header before it converts the data

@@ -30,10 +30,11 @@ requirements:
 
   - id: REQ-REPORT-002
     text: >
-      The overview's pass/fail/pending counts shall agree with results(): a
-      target counts as passed when its status is "validated", failed when its
-      status is "failed", and pending for every other status (skipped,
-      not_validated, unspecified).
+      The overview's pass/fail/pending counts shall agree with results(),
+      together with the metadata row REQ-REPORT-003 requires: a target counts
+      as passed when its status is "validated", failed when its status is
+      "failed", and pending for every other status (skipped, not_validated,
+      unspecified).
     risk: high
     category: functional
     covers: [write_validation_report, results]
@@ -41,25 +42,23 @@ requirements:
 
   - id: REQ-REPORT-003
     text: >
-      The overview's per-target table and its pass/fail/pending counts shall
-      be built only from results(), which carries one row per dataset target
-      and none for metadata.
+      The overview shall reflect the metadata axis of the verdict. A transfer
+      that is invalid only because of a metadata import error shall show that
+      failure in the overview's counts and in its per-target table, not solely
+      as a message row further down the document.
     risk: high
     category: functional
     covers: [write_validation_report, results]
-    source: R/exportValidationReport.R, R/validationReporting.R
+    source: R/exportValidationReport.R, R/reportRendering.R
     notes: >
-      Pinned, not endorsed. results(DTA) iterates x@datasets and never adds a
-      row for the metadata axis (check(DTA) computes a metadata verdict, but
-      keeps it in attr(x, "last_metadata_summary"), never in the data.frame
-      results() returns). write_validation_report()'s overview section is
-      built from results(x) alone, so a transfer that is invalid ONLY because
-      of a metadata import error (e.g. a qualified transmission date) shows
-      every target passed, zero failed, in the overview -- the failure is
-      visible solely as a message row further down the same document, never
-      in the summary a reader sees first. Verified directly: a DTA with one
-      clean dataset and a metadata date carrying trailing text reports
-      n_pass = 1, n_fail = 0 in the rendered overview.
+      results(DTA) iterates x@datasets and emits no row for metadata: check()
+      computes a metadata verdict but keeps it on the object rather than in
+      that frame. The report therefore adds one row for the metadata axis
+      itself, when and only when metadata carries import errors, so that the
+      overview cannot say every target passed while the transfer's own verdict
+      says the delivery is invalid. A clean transfer's overview is unchanged
+      and remains a statement about its targets. Was DEV-013's sibling defect
+      DEV-011 until the row was added.
 
   # ---- messages and inspect panels ---------------------------------------------
 

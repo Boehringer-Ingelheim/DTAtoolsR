@@ -132,35 +132,51 @@ test_that("OQ-REPORT-002 | the overview counts agree with results() | REQ-REPORT
   )
 })
 
-test_that("OQ-REPORT-003 | a metadata-only import failure is invisible in the overview counts | REQ-REPORT-003", {
-  # Pinned, not endorsed (see REQ-REPORT-003 notes): results(), which the
-  # overview is built from, never carries a row for metadata, so a transfer
-  # that is invalid only because of a metadata import error reports as
-  # entirely passing here.
+test_that("OQ-REPORT-003 | a metadata-only failure is visible in the overview, not just in the messages | REQ-REPORT-003", {
   dir <- qa_tempdir()
   ds <- qrpt_clean_dataset(dir, "clean")
   md <- DTAMetaData(title = "dirty meta", transmission = list(date_last_transfer = "2026-12-31 at the earliest"))
   dta <- DTA(datasets = list(clean = ds), metadata = md)
 
   qa_step("the fixture's metadata really does carry one import error", 1L, nrow(metadata_import_errors(metadata(dta))))
+  qa_step("and its only dataset is clean", 0L, nrow(messages(datasets(dta)[["clean"]], as_tibble = FALSE)))
 
   out <- file.path(dir, "report.html")
   write_validation_report(dta, out, quiet = TRUE)
   info <- qa_html_report(out)
 
+  # The overview is the first thing a reviewer reads and for many it is the
+  # only thing. A headline of "everything passed" over a document whose
+  # message table says otherwise invites exactly the wrong conclusion from a
+  # report a quality unit signs. This was DEV-011 until the metadata axis was
+  # given a row of its own.
   qa_step(
-    "the overview shows the single dataset passed, with no failures and nothing pending",
-    c(pass = 1L, fail = 0L, pending = 0L),
+    "the dataset passed and the metadata failure is counted",
+    c(pass = 1L, fail = 1L, pending = 0L),
     info$counts[c("pass", "fail", "pending")]
   )
   qa_step(
-    "the failure is visible only as a message row further down the document, never in the overview",
+    "the per-target table names the metadata axis alongside the dataset",
+    c("clean", "metadata"),
+    sort(info$targets)
+  )
+  qa_step(
+    "and the message row that reports it is still there",
     1L, info$n_messages
   )
-  qa_known_deviation(
-    "DEV-011",
-    identical(unname(info$counts[["fail"]]), 0L) && info$n_messages > 0L
+
+  # A clean transfer must be untouched by this: the overview stays a statement
+  # about its targets, with no metadata row invented to say nothing happened.
+  clean_dta <- DTA(datasets = list(clean = qrpt_clean_dataset(dir, "clean2")), metadata = DTAMetaData(title = "clean meta"))
+  clean_out <- file.path(dir, "clean.html")
+  write_validation_report(clean_dta, clean_out, quiet = TRUE)
+  clean_info <- qa_html_report(clean_out)
+  qa_step(
+    "a transfer with sound metadata reports only its targets",
+    c(pass = 1L, fail = 0L, pending = 0L),
+    clean_info$counts[c("pass", "fail", "pending")]
   )
+  qa_step("with no metadata row in the table", "clean2", clean_info$targets)
 })
 
 # ---- messages and inspect panels -------------------------------------------------

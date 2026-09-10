@@ -73,6 +73,11 @@ write_validation_report <- function(
 
   # Get results and messages
   res <- DTAtools::results(x)
+  # The metadata axis counts toward this transfer's verdict (check() folds
+  # metadata import errors into its overall ok), so the overview has to show
+  # it too. Without this the summary cards and the verdict disagree, and the
+  # cards are what a reader sees first.
+  res <- .report_with_metadata_row(x, res)
   msgs <- DTAtools::messages(x, as_tibble = FALSE)
 
   # Fetch inspect() detail for every message with ONE call, not one call per
