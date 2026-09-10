@@ -296,7 +296,7 @@ deviations:
 
   - id: DEV-013
     title: An uncompressed export can leave a header-only file at the destination
-    status: open
+    status: closed
     severity: major
     affects: [REQ-EXPORT-025, REQ-ROBUST-005]
     observed: >
@@ -315,7 +315,7 @@ deviations:
     workaround: Export with compression = "gzip", which writes atomically.
     reference: R/DTADataSetTabular-class.R:555
     opened: 2026-09-09
-    closed: null
+    closed: 2026-09-10
 
   - id: DEV-014
     title: The Word specification round trip cannot read its own output

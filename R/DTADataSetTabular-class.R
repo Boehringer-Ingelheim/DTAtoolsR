@@ -532,12 +532,26 @@ write_table_to_file <- function(
     ))
   }
 
-  # Write the table to a file
+  # Both branches write to a temporary file and only put it in place once the
+  # whole table has been converted.
+  #
+  # write.table() truncates its destination and writes the header BEFORE it
+  # converts the data columns, so writing straight to `filename` meant that a
+  # conversion failing partway left a header-only file where a good export used
+  # to be. That is worse than leaving no file at all: a header-only file still
+  # reads as a table, with no rows, and a table with no rows breaks no
+  # constraint and so validates perfectly clean.
+  #
+  # The temporary file is created beside the destination rather than in the
+  # session's temporary directory, so the final step is a rename within one
+  # filesystem rather than a copy across two.
+  temp_file <- tempfile(tmpdir = dirname(filename), fileext = ".part")
+  on.exit(unlink(temp_file), add = TRUE)
+
   if (compression == "gzip") {
     if (!isTRUE(quiet)) {
       cli::cli_alert_info("Write table in gzip format to {filename}.")
     }
-    temp_file <- tempfile()
     write.table(
       table_data,
       file = temp_file,
@@ -554,13 +568,19 @@ write_table_to_file <- function(
     }
     write.table(
       table_data,
-      file = filename,
+      file = temp_file,
       na = na,
       row.names = row.names,
       sep = sep,
       quote = quote,
       ...
     )
+    if (!file.rename(temp_file, filename)) {
+      cli::cli_abort(c(
+        "Could not move the finished export into place at {.path {filename}}.",
+        i = "The previous contents of {.path {filename}}, if any, are unchanged."
+      ))
+    }
   }
 
   # Print a success message

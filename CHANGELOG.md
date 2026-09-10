@@ -98,6 +98,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A failed export no longer replaces a good delivery with a header-only
+  file.** `write_table_to_file()` wrote straight to the destination, and base
+  R truncates that file and writes the header before it converts the data
+  columns -- so a conversion that failed partway left a header sitting where a
+  complete export used to be. That is worse than leaving no file: a
+  header-only file still reads as a table, with no rows, and a table with no
+  rows breaks no constraint and so validates perfectly clean. Both the plain
+  and the gzip branch now write to a temporary file beside the destination and
+  put it in place only once the whole table has converted, so a write that
+  cannot finish leaves the previous contents exactly as they were.
+
 - **`validate_table()` no longer reports a clean pass when its specification is
   not a specification.** This function signals "nothing wrong with this
   delivery" by returning the table unchanged. A `specs` argument that was not a
