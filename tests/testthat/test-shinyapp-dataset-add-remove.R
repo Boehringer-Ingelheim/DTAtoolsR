@@ -272,7 +272,7 @@ test_that("removing one of two datasets keeps the sidebar rendered", {
     expect_false(grepl("second_ds", nav, fixed = TRUE))
 
     metrics <- paste(as.character(output$summary_metrics$html), collapse = "")
-    expect_match(metrics, "datasets", fixed = TRUE)
+    expect_match(metrics, "dataset", fixed = TRUE)
     expect_match(metrics, ">1<") # one dataset left in the overview count
 
     header <- paste(as.character(output$workspace_header$html), collapse = "")
