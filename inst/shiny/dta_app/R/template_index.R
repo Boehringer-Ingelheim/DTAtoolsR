@@ -391,6 +391,284 @@ list_template_index_entries <- function(index, kind = "dta_creation_template", i
   rows
 }
 
+# One row per distinct, non-abstract creation-template id: the picker's
+# first step shows one entry per id, keeping whichever row ranks highest by
+# version (template_version_rank(), template_index.R) for its label/
+# description/source -- the SPECIFIC version is a separate control
+# (template_id_versions(), below). Ordered by source then label, both with
+# method = "radix": this machine collates under German locale, CI under C
+# collation, and a user-facing list must not silently depend on which one
+# built it (the project's pinned "locale collation diverges from CI"
+# lesson).
+template_picker_entries <- function(index) {
+  rows <- index[index$kind == "dta_creation_template" & !index$abstract, , drop = FALSE]
+  if (nrow(rows) == 0) {
+    return(rows)
+  }
+  ids <- unique(rows$id)
+  picked <- lapply(ids, function(id) {
+    sub <- rows[rows$id == id, , drop = FALSE]
+    ranks <- template_version_rank(sub$version)
+    top <- order(ranks, decreasing = TRUE, na.last = TRUE)[[1]]
+    sub[top, , drop = FALSE]
+  })
+  out <- do.call(rbind, picked)
+  out <- out[order(out$label, method = "radix"), , drop = FALSE]
+  out <- out[order(out$source_name, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+# Every version of ONE creation-template id, newest first -- the choices
+# for the "Version" selectInput in the picker's detail panel
+# (template_picker_detail_ui(), template_ui.R). The panel is a separate
+# renderUI that re-renders whenever the selected id changes, rather than
+# pushing an update via updateSelectInput(): that is what makes "changing the
+# template updates the version list" directly observable in the rendered HTML
+# instead of only in a client-side round trip a test harness cannot see.
+template_id_versions <- function(index, id) {
+  rows <- index[index$kind == "dta_creation_template" & index$id == id, , drop = FALSE]
+  if (nrow(rows) == 0) {
+    return(character(0))
+  }
+  ord <- order(template_version_rank(rows$version), decreasing = TRUE, na.last = TRUE)
+  vers <- rows$version[ord]
+  stats::setNames(vers, vers)
+}
+
+# The picker's family tree: template_picker_lineage() below infers it purely
+# from the `extends` column already in `index` (no file reads, no separate
+# schema key), and template_picker_filter() implements the search box over
+# its result.
+
+# The id -> {label, parent} lookup a chain is walked against. Built over
+# EVERY creation-template row of `index`, abstract ones included: an
+# abstract root is never itself an entry (template_picker_entries() drops
+# it), but it can still be somebody's parent, and the chain needs its label
+# to name the family. One row per id is kept, the top version by
+# template_version_rank() -- the same tie-break template_picker_entries()
+# applies to the entries themselves, so a family's root is described
+# identically whichever function is asking.
+template_picker_parent_lookup <- function(index) {
+  rows <- index[index$kind == "dta_creation_template", , drop = FALSE]
+  lookup <- new.env(parent = emptyenv())
+  if (nrow(rows) == 0) {
+    return(lookup)
+  }
+  ids <- unique(rows$id)
+  for (id in ids) {
+    sub <- rows[rows$id == id, , drop = FALSE]
+    ranks <- template_version_rank(sub$version)
+    top <- order(ranks, decreasing = TRUE, na.last = TRUE)[[1]]
+    row <- sub[top, , drop = FALSE]
+    lookup[[id]] <- list(
+      label = row$label[[1]],
+      parent = template_picker_strip_version(row$extends[[1]])
+    )
+  }
+  lookup
+}
+
+# The parent id an `extends:` value names, with any "@version" suffix
+# dropped -- NA/"" means "no parent" (a root). Deliberately its own function
+# rather than inlining resolve_template_ref()'s id/version split: that
+# function resolves a REFERENCE to a specific indexed row (and treats a bare
+# id as "@latest"); this only ever needs the bare parent id, for a family
+# tree that does not care which version of the parent is current.
+template_picker_strip_version <- function(ref) {
+  if (is.na(ref) || !nzchar(ref)) {
+    return(NA_character_)
+  }
+  at_pos <- regexpr("@", ref, fixed = TRUE)
+  if (at_pos > 0) substr(ref, 1, at_pos - 1) else ref
+}
+
+# Add family/search columns to `entries` (normally template_picker_entries()'s
+# result), walking each row's `extends` chain against
+# template_picker_parent_lookup(index).
+#
+# Columns added:
+#   family        root ancestor id (own id when the row has no parent)
+#   family_label  the root's label; the raw id when the root is unknown
+#   depth         ancestor count (0 = root)
+#   indent        of those ancestors, how many are THEMSELVES rows of
+#                 `entries` -- an abstract or otherwise hidden ancestor still
+#                 names the family (family/family_label/lineage) but must
+#                 not visually indent the row under nothing
+#   lineage       ancestor labels, root-first, joined by " \u203a "; "" at
+#                 depth 0
+#   search_text   everything a search should match, lower-cased: the row's
+#                 own fields plus every ancestor's label and id, so
+#                 searching a family name finds every variant even when a
+#                 variant's own label never mentions it
+#   sort_key      one radix-sortable string that puts the whole table into
+#                 depth-first tree order (parent immediately before its
+#                 children, siblings ordered by label then id) with a SINGLE
+#                 order(sort_key, method = "radix") and no recursion. Built
+#                 by encoding each ancestor, root-first, as "label\u0001id"
+#                 and joining those with "\u0002": both separators sort
+#                 below any ordinary character, so a parent's key is always
+#                 a byte-prefix of every descendant's key -- which is what
+#                 keeps a family together and ahead of the next one however
+#                 the labels compare (a root labelled "Base2" must not land
+#                 between "Base" and "Base"'s own children; a plain
+#                 same-case string join with no separator could not tell
+#                 "Base" + "2" apart from "Base" + a child whose label
+#                 starts with a character greater than "2").
+#
+# The walk stops after dta_template_max_inheritance_depth hops (template_
+# inherit.R's own constant, reused rather than redefined here), when a
+# parent id repeats (a cycle), or when a parent id is not in the lookup at
+# all -- that last case still appends the unknown id to the chain, labelled
+# with itself, and goes no further because there is nothing left to look up.
+template_picker_lineage <- function(index, entries) {
+  if (nrow(entries) == 0) {
+    out <- entries
+    out$family <- character(0)
+    out$family_label <- character(0)
+    out$depth <- integer(0)
+    out$indent <- integer(0)
+    out$lineage <- character(0)
+    out$search_text <- character(0)
+    out$sort_key <- character(0)
+    return(out)
+  }
+
+  lookup <- template_picker_parent_lookup(index)
+  entry_ids <- entries$id
+
+  chain_for <- function(i) {
+    ids <- character(0)
+    labels <- character(0)
+    seen <- entries$id[[i]]
+    parent_id <- template_picker_strip_version(entries$extends[[i]])
+
+    while (length(ids) < dta_template_max_inheritance_depth) {
+      if (is.na(parent_id) || parent_id %in% seen) {
+        break
+      }
+      node <- lookup[[parent_id]]
+      if (is.null(node)) {
+        ids <- c(ids, parent_id)
+        labels <- c(labels, parent_id)
+        break
+      }
+      ids <- c(ids, parent_id)
+      labels <- c(labels, node$label)
+      seen <- c(seen, parent_id)
+      parent_id <- node$parent
+    }
+    list(ids = ids, labels = labels)
+  }
+
+  n <- nrow(entries)
+  chains <- lapply(seq_len(n), chain_for)
+
+  depth <- vapply(chains, function(ch) length(ch$ids), integer(1))
+  indent <- vapply(chains, function(ch) sum(ch$ids %in% entry_ids), integer(1))
+  family <- vapply(seq_len(n), function(i) {
+    ch <- chains[[i]]
+    if (length(ch$ids) == 0) entries$id[[i]] else ch$ids[[length(ch$ids)]]
+  }, character(1))
+  family_label <- vapply(seq_len(n), function(i) {
+    ch <- chains[[i]]
+    if (length(ch$labels) == 0) entries$label[[i]] else ch$labels[[length(ch$labels)]]
+  }, character(1))
+  lineage <- vapply(chains, function(ch) {
+    paste(rev(ch$labels), collapse = " \u203a ")
+  }, character(1))
+  search_text <- vapply(seq_len(n), function(i) {
+    ch <- chains[[i]]
+    # Not the source name: that has its own filter, and a source called
+    # "lab" must not make the word "lab" match every template it holds.
+    tolower(paste(
+      entries$label[[i]], entries$id[[i]], entries$description[[i]],
+      entries$version[[i]],
+      paste(ch$labels, collapse = " "), paste(ch$ids, collapse = " ")
+    ))
+  }, character(1))
+  sort_key <- vapply(seq_len(n), function(i) {
+    ch <- chains[[i]]
+    ancestor_nodes <- if (length(ch$ids) == 0) {
+      character(0)
+    } else {
+      paste0(rev(ch$labels), "\u0001", rev(ch$ids))
+    }
+    own_node <- paste0(entries$label[[i]], "\u0001", entries$id[[i]])
+    paste(c(ancestor_nodes, own_node), collapse = "\u0002")
+  }, character(1))
+
+  out <- entries
+  out$family <- family
+  out$family_label <- family_label
+  out$depth <- depth
+  out$indent <- indent
+  out$lineage <- lineage
+  out$search_text <- search_text
+  out$sort_key <- sort_key
+
+  out <- out[order(out$sort_key, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+# Every whitespace-separated search word in `query`, lower-cased -- the AND
+# terms template_picker_filter() matches against search_text, and (later)
+# what the picker highlights in a search result. character(0) for
+# NULL/""/whitespace-only, so `for (tok in template_picker_tokens(x))`
+# simply does not iterate when there is nothing to search for.
+template_picker_tokens <- function(query) {
+  if (is.null(query) || length(query) == 0) {
+    return(character(0))
+  }
+  q <- trimws(tolower(query[[1]]))
+  if (!nzchar(q)) {
+    return(character(0))
+  }
+  toks <- strsplit(q, "\\s+")[[1]]
+  toks[nzchar(toks)]
+}
+
+# Search tokens as one regex that matches only at the START of a word: "one"
+# must not find "stand-alone" in every description, while "acme" must still
+# find "biomarker_gf_acme" (an underscore ends a word) and "bio" must still
+# find "biomarker". Every character of a token is literal. Shared by the
+# filter below and the highlighter (template_picker_highlight(), template_
+# ui.R), so what is marked is exactly what matched.
+#
+# "Word" is spelled out with Unicode properties rather than [[:alnum:]]: the
+# POSIX class is ASCII-only in PCRE unless Unicode mode happens to be on, and
+# a label such as "Prüfung" must not make "fung" a word start.
+template_picker_regex_escape <- function(x) {
+  gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", x)
+}
+
+template_picker_token_regex <- function(tokens) {
+  paste0(
+    "(?<![\\p{L}\\p{N}])(",
+    paste(template_picker_regex_escape(tokens), collapse = "|"),
+    ")"
+  )
+}
+
+# `entries` (normally template_picker_lineage()'s result) restricted to rows
+# whose search_text contains every token of `query` at the start of a word,
+# case-insensitively (AND, not OR -- "biomarker acme" must narrow, not
+# widen), and, when `source` is non-empty, to that source_name alone.
+template_picker_filter <- function(entries, query = "", source = "") {
+  tokens <- template_picker_tokens(query)
+  keep <- rep(TRUE, nrow(entries))
+  for (tok in tokens) {
+    keep <- keep & grepl(template_picker_token_regex(tok), entries$search_text, perl = TRUE)
+  }
+  if (nzchar(source %||% "")) {
+    keep <- keep & entries$source_name == source
+  }
+  out <- entries[keep, , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
 # ---- Memoised access -------------------------------------------------------
 
 # File-local cache: a fresh scan of every configured root (each of which may

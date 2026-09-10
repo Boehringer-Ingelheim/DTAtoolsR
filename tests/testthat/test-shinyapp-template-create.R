@@ -272,6 +272,55 @@ test_that("an abstract template cannot be instantiated directly", {
   expect_match(flat_message(res$error), "abstract")
 })
 
+test_that("a child of an abstract template is concrete unless it says otherwise", {
+  # THE BUG THIS GUARDS: `abstract` used to merge like any other scalar, so a
+  # child that did not write `abstract: false` inherited its parent's `true`
+  # and was refused by load_template_definition() -- which is why the
+  # child_ct fixture above spells `abstract: false` out. The flag describes
+  # the file that carries it, like id and version.
+  root <- withr::local_tempdir()
+  setup_fixture(root)
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: plain_child_ct",
+      'version: "1.0"',
+      "label: Plain Child CT",
+      "extends: base_ct",
+      "base:",
+      "  metadata:",
+      "    error_handling: Child-added handling note"
+    ),
+    file.path(root, "plain_child_ct.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: abstract_child_ct",
+      'version: "1.0"',
+      "label: Abstract Child CT",
+      "extends: base_ct",
+      "abstract: true",
+      "base:",
+      "  metadata:",
+      "    error_handling: Still abstract"
+    ),
+    file.path(root, "abstract_child_ct.dta-template.yaml")
+  )
+  idx <- index_over(root)
+  fn <- app_fn("load_template_definition")
+
+  plain <- fn("plain_child_ct", index = idx)
+  expect_true(plain$ok)
+  expect_false(isTRUE(plain$value$def$abstract))
+  expect_equal(plain$value$lineage, "base_ct@1.0")
+
+  # A child that declares itself abstract still is: only inheritance is gone.
+  own <- fn("abstract_child_ct", index = idx)
+  expect_false(own$ok)
+  expect_match(flat_message(own$error), "abstract")
+})
+
 test_that("extends: merges the child onto the parent, and lineage names the parent", {
   root <- withr::local_tempdir()
   setup_fixture(root)

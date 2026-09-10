@@ -772,7 +772,7 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
 
   # The scalars read the same four states, so `label: ""` (blank but present)
   # and `label: null` (gone) stop being the same instruction.
-  for (field in c("label", "description", "abstract", "kind")) {
+  for (field in c("label", "description", "kind")) {
     state <- dta_template_section_state(def, field)
     if (identical(state, "absent")) {
       next
@@ -788,6 +788,12 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # the other direction.
   merged$id <- def$id
   merged$version <- def$version
+  # `abstract` is not inherited either. It says that THIS file exists only to
+  # be extended; a child of an abstract base is concrete unless it says
+  # otherwise. Inheriting the flag would make every deviation of an abstract
+  # standard uninstantiable until it wrote `abstract: false` -- a trap nothing
+  # in the schema hints at, and the opposite of what an abstract base is for.
+  merged$abstract <- def$abstract
   # `extends`/`order` are merge INSTRUCTIONS consumed above, not template
   # content -- neither belongs in the merged shape.
   merged$extends <- NULL
