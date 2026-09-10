@@ -146,6 +146,7 @@ rendered, which ties the document to the data it describes.
 | `requirements/_api.yaml` | the frozen list of exported symbols the installation stage checks against |
 | `deviations.yaml` | known defects and documented limitations |
 | `docs/` | the Validation Plan and supporting documents |
+| `docs/maintaining.md` | what to change in this suite when the package changes, and how |
 | `tests/` | the test cases, one file per stage and area |
 | `fixtures/` | small hand-built inputs; anything large is generated at run time |
 | `baseline/` | the hash manifest of the installed files, checked by the installation stage |
@@ -164,6 +165,11 @@ test_that("OQ-VAL-007 | codelist violation reported per row | REQ-VAL-001", {
 in one expectation, so the evidence shows all three without anyone having to
 read the test code. The requirements named in the title are how the
 traceability matrix is built, so it cannot drift from the tests.
+
+If you are changing the package and need to know what that means for this
+suite, read [docs/maintaining.md](docs/maintaining.md). It covers adding an
+export, changing a behaviour, closing a defect, and what each meta-check
+failure is telling you.
 
 Two rules matter more than the rest. Expected values are written down before
 the run, never captured from the software's own output: the suite contains no
