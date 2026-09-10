@@ -105,6 +105,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   identifiers, tabs are underlined, and dialogs, menus and notifications share
   one set of surfaces.
 
+- **A pull request that cannot affect `R CMD check` no longer runs it.**
+  `.github/workflows/R-CMD-check.yaml` gains a `changes` job that classifies
+  the pull request's diff and skips the five-leg matrix when every changed
+  path is inert for the check. The release-finishing manifest pin is the case
+  that prompted it: #124 was four lines of `inst/shiny/dta_app/manifest.json`,
+  and it spent 91 minutes of matrix time across five platforms establishing
+  that four lines of JSON had not broken the package.
+
+  The set of inert paths is an *allowlist*, so a file nobody has classified
+  runs the full matrix by default. It holds `docs/`, `thoughts/`, `.claude/`,
+  `CLAUDE.md`, `CLAUDE.local.md` and `CHANGELOG.md` — every one of which
+  `.Rbuildignore` already keeps out of the built tarball, so the check never
+  sees them at all — plus two paths that do ship: `inst/shiny/dta_app/manifest.json`,
+  a Posit Connect deployment descriptor that no R code, test, roxygen example
+  or vignette reads, and `README.md`, which `R CMD check` reads only under
+  `--as-cran` and only to scan for URLs, reporting what it finds as a note
+  that cannot fail a build configured to error on warnings. `.github/` is
+  deliberately *not* on the list, so a change to the workflows themselves
+  still runs everything.
+
+  This is a job-level conditional rather than `paths-ignore` on the trigger,
+  and the distinction is not a stylistic one. The five matrix legs are
+  required status checks on `master`, and a workflow skipped by path filtering
+  never reports its contexts at all — they would sit at pending and the pull
+  request could never be merged. Since every release ends in a manifest-only
+  pull request into `master`, `paths-ignore` would have deadlocked the release
+  process itself. A job skipped by a conditional reports success, which is why
+  the decision is spent there instead.
+
+  Nothing about what actually gets checked changes. `r-style.yaml` is gated by
+  none of this, so `check_manifest.R` — the check that genuinely validates a
+  manifest-only change — still runs on every pull request.
+
 ### Fixed
 
 - **The validation report's overview no longer says every target passed when
