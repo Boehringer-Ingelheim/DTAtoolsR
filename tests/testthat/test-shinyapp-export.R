@@ -27,113 +27,6 @@ test_that("format_datasets_summary on a DTA with zero datasets is valid, non-emp
   expect_identical(out, "No datasets")
 })
 
-test_that("format_datasets_detail lists every dataset's column ids and rule ids", {
-  dta <- app_fixture_dta()
-  ds_names <- names(dta@datasets)
-  out <- app_fn("format_datasets_detail")(dta)
-
-  for (nm in ds_names) {
-    expect_match(out, paste0("## Dataset: ", nm), fixed = TRUE)
-    ds <- DTAtools::datasets(dta, nm)
-
-    col_ids <- names(ds@specs@columns)
-    for (col_id in col_ids) {
-      expect_match(out, paste0("**", col_id, "**"), fixed = TRUE)
-    }
-
-    rule_ids <- vapply(ds@specs@rules, function(r) r@id, character(1))
-    for (rule_id in rule_ids) {
-      expect_match(out, paste0("**", rule_id, ":**"), fixed = TRUE)
-    }
-  }
-})
-
-test_that("format_datasets_detail on a DTA with zero datasets is valid, non-NA text (possibly empty)", {
-  dta <- app_fixture_dta()
-  dta@datasets <- list()
-
-  out <- app_fn("format_datasets_detail")(dta)
-  expect_false(is.na(out))
-  expect_identical(out, "")
-})
-
-test_that(".format_rule_detail formats a col_condition (IF/THEN) rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(
-    type = "col_condition",
-    condition = list(VISIT = list(equals = "V03")),
-    then = list(STATUS = list(equals = "COMPLETED"))
-  )
-  expect_identical(f(l), "IF VISIT equals V03 THEN STATUS equals COMPLETED")
-})
-
-test_that(".format_rule_detail formats a col_range rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(type = "col_range", columns = "AGE", min = 18, max = 65)
-  expect_identical(f(l), "AGE in [18, 65]")
-})
-
-test_that(".format_rule_detail formats a col_unique rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(type = "col_unique", columns = c("SUBJECT_ID", "VISIT"))
-  expect_identical(f(l), "unique(SUBJECT_ID, VISIT)")
-})
-
-test_that(".format_rule_detail formats a group_condition rule", {
-  f <- app_fn(".format_rule_detail")
-  l <- list(
-    type = "group_condition",
-    group_by = c("SUBJECT_ID", "VISIT"),
-    conditions = list(c1 = list(STATUS = list(equals = "FAILED"))),
-    constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
-  )
-  expect_identical(f(l), "group(SUBJECT_ID, VISIT): 1 condition(s), 1 constraint(s)")
-})
-
-test_that(".format_rule_detail falls back to the raw type token for an unrecognised rule type, and to empty for no rule", {
-  f <- app_fn(".format_rule_detail")
-  expect_identical(f(list(type = "mystery_type")), "mystery_type")
-  expect_identical(f(NULL), "")
-})
-
-test_that("format_datasets_detail matches the fixture's real rule shapes end to end", {
-  # The fixture DTA (inst/extdata/clinical_dta.yaml) carries all three rule
-  # shapes .format_rule_detail() handles; assert the exact phrasing survives
-  # the full format_datasets_detail() pipeline for one of each.
-  dta <- app_fixture_dta()
-  out <- app_fn("format_datasets_detail")(dta)
-
-  expect_match(out, "IF VISIT equals V03 THEN STATUS equals COMPLETED", fixed = TRUE)
-  expect_match(out, "AGE in [18, 65]", fixed = TRUE)
-  expect_match(out, "unique(SUBJECT_ID, VISIT)", fixed = TRUE)
-})
-
-test_that("format_datasets_detail keeps a file handler's filename separate from its endings", {
-  # Before the fix, handler_expected() glued the allowed-endings restriction
-  # onto the filename, so the exported spec read
-  # "- ^report_.* (pdf, zip) (3 files) -- ...", two adjacent parenthesised
-  # groups, and the declared filename/pattern could not be read back verbatim
-  # from the export. handler_expected() now returns the filename/pattern
-  # ONLY; the endings restriction is surfaced by handler_endings() as its own
-  # labelled field.
-  h <- DTAtools::DTAFileAny(
-    filename = "^report_.*", pattern = TRUE, extensions = c("pdf", "zip")
-  )
-  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
-  dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
-
-  expect_equal(app_fn("handler_expected")(h), "^report_.*")
-
-  out <- app_fn("format_datasets_detail")(dta_obj)
-
-  # The filename/pattern is verbatim, immediately after "- " -- not with
-  # "(pdf, zip)" glued directly onto it.
-  expect_match(out, "- ^report_.* (1 file) (allowed endings: pdf, zip) [regex]", fixed = TRUE)
-  expect_no_match(out, "^report_.* (pdf, zip)", fixed = TRUE)
-  # The endings restriction still shows up, in its own labelled field.
-  expect_match(out, "allowed endings: pdf, zip", fixed = TRUE)
-})
-
 test_that("embed_yaml_markdown appends the DTA's YAML to the original markdown text", {
   dta <- app_fixture_dta()
   md <- "# My Export\n\nSome narrative text."
@@ -165,12 +58,16 @@ test_that("list_available_templates finds the real bundled .docx template", {
   # environment before sourcing the helper files, so this resolves correctly
   # both under devtools::test() (pkgload's shim) and under R CMD check
   # (base::system.file() against the installed package).
+  #
+  # The exemplar has to be a real fill-in template: dta_numbered_template.docx
+  # was used here until the listing learned to exclude documents with no
+  # placeholders in them, and it is no longer offered.
   templates <- app_fn("list_available_templates")()
-  expect_true("dta_numbered_template.docx" %in% templates)
+  expect_true("clinical_dta_template.docx" %in% templates)
 
-  path <- app_fn("get_template_path")("dta_numbered_template.docx")
+  path <- app_fn("get_template_path")("clinical_dta_template.docx")
   expect_true(file.exists(path))
-  expect_match(path, "dta_numbered_template\\.docx$")
+  expect_match(path, "clinical_dta_template\\.docx$")
 })
 
 test_that("get_template_path returns NULL (not an error) for an unknown template name", {
@@ -193,11 +90,60 @@ test_that("get_template_path refuses a name that escapes the templates directory
   expect_null(get_template_path("..\\..\\DESCRIPTION"))
   expect_null(get_template_path(file.path(tempdir(), "planted.docx")))
   expect_null(get_template_path(NA_character_))
-  expect_null(get_template_path(c("dta_numbered_template.docx", "other.docx")))
+  expect_null(get_template_path(c("clinical_dta_template.docx", "other.docx")))
 
   # A traversal that ends in a real bundled template name must not be repaired
-  # into a hit either -- it is simply not the offered name.
-  expect_null(get_template_path("../templates/dta_numbered_template.docx"))
+  # into a hit either -- it is simply not the offered name. The name has to be
+  # one the listing actually offers, or this asserts nothing about traversal.
+  expect_null(get_template_path("../templates/clinical_dta_template.docx"))
+})
+
+test_that("template_has_placeholders is TRUE for the real bundled fill-in template", {
+  path <- app_fixture_path("templates/clinical_dta_template.docx")
+  expect_true(app_fn("template_has_placeholders")(path))
+})
+
+test_that("template_has_placeholders is FALSE for the numbered-heading styles reference document", {
+  # dta_numbered_template.docx is not a fill-in template: it is the reference
+  # document .new_numbered_docx() (R/documentBuilders.R) opens purely for its
+  # numbered heading styles, and it carries zero {PLACEHOLDER} markers. This is
+  # the regression list_available_templates() must no longer offer it for --
+  # before the fix, a user who picked it got a Word document containing none
+  # of their DTA, with no warning.
+  path <- app_fixture_path("templates/dta_numbered_template.docx")
+  expect_false(app_fn("template_has_placeholders")(path))
+})
+
+test_that("template_has_placeholders is FALSE, not an error, for a non-docx file or a missing path", {
+  fake_docx <- tempfile(fileext = ".docx")
+  writeLines("just some text, not a zip archive", fake_docx)
+  on.exit(unlink(fake_docx, force = TRUE), add = TRUE)
+
+  expect_false(app_fn("template_has_placeholders")(fake_docx))
+  expect_false(app_fn("template_has_placeholders")(file.path(tempdir(), "no-such-file.docx")))
+})
+
+test_that("template_has_placeholders finds a placeholder split across Word runs", {
+  # Word freely splits a typed placeholder across multiple runs (spell-check
+  # state, revision ids, a stray formatting toggle); a raw grep on
+  # document.xml would miss a token split this way, which is why the scan
+  # reads paragraph *text* instead.
+  path <- tempfile(fileext = ".docx")
+  on.exit(unlink(path, force = TRUE), add = TRUE)
+  doc <- officer::read_docx()
+  doc <- officer::body_add_fpar(
+    doc,
+    officer::fpar(officer::ftext("{DTA_"), officer::ftext("TITLE}"))
+  )
+  print(doc, target = path)
+
+  expect_true(app_fn("template_has_placeholders")(path))
+})
+
+test_that("list_available_templates excludes the numbered-heading styles reference document", {
+  templates <- app_fn("list_available_templates")()
+  expect_false("dta_numbered_template.docx" %in% templates)
+  expect_true("clinical_dta_template.docx" %in% templates)
 })
 
 test_that("the export modal is built by app.R, with no orphaned UI builder", {

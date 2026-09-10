@@ -576,6 +576,42 @@ write_dta(dta, "clinical_dta.docx")
 write_dta(dta, "clinical_dta.docx", template = "my_template.docx")
 ```
 
+#### What a Word template can ask for
+
+A template is an ordinary `.docx` containing `{PLACEHOLDER}` markers.
+`dta_template_placeholders()` lists every marker that exists, and given a `DTA`
+resolves each one, so there is no need to export a document to find out what a
+token will become.
+
+Markers come in two kinds, distinguished by the `"kind"` attribute of that list.
+**Inline** markers resolve to text and may sit anywhere, including mid-sentence
+and in headers and footers: `{DTA_TITLE}`, `{SUPPLIER_NAME}`,
+`{TRANSMISSION_FREQUENCY}`, `{TOTAL_COLUMNS}` and so on.
+
+**Block** markers expand to document structure — tables, headings, lists — built
+by the same renderers the built-in layout uses:
+
+| Marker | Renders |
+| --- | --- |
+| `{COLUMN_SPECS}` | a column specification table per tabular dataset |
+| `{VALIDATION_RULES}` | a validation rule table per tabular dataset |
+| `{FILE_SPECS}` | the expected-file table per dataset |
+| `{DATASETS}` | a full section per dataset: type, description, files, columns, rules |
+| `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}` | contacts as a table |
+| `{SIGNATURES_TABLE}` | the approval and signature table |
+| `{VERSION_HISTORY_TABLE}` | version history as a table |
+| `{AUTHORIZED_CORRECTIONS_LIST}` | the authorized-for-corrections names |
+
+The first four take an optional dataset argument — `{COLUMN_SPECS:ADSL}` renders
+one dataset, the bare form renders every applicable one under its own heading.
+
+A block marker must be **the only text in its paragraph**, and must sit in the
+document body rather than a header, a footer or a table cell; anything left over
+is named in a warning. Tables are sized to the template's own text column, and
+headings use the template's `heading N` style when it defines one. A value
+supplied through `template_variables` overrides a marker of either kind and is
+always rendered as text.
+
 PDF output builds the Word document and converts it, which needs an external
 tool: LibreOffice (`soffice`), TinyTeX, or pandoc with another PDF engine.
 `dta_pdf_backend()` reports which will be used, or `NULL` if none is installed —

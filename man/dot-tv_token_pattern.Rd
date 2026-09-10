@@ -14,4 +14,13 @@ did: the gate matched \verb{[A-Za-z0-9_]+} while the leftover scan matched
 untouched \emph{and} never reported, silently breaking the documented warning
 contract.
 }
+\details{
+The optional \verb{:ARG} tail (e.g. \code{{COLUMN_SPECS:ADSL}}) lets a block
+placeholder name the one dataset it should render; inline placeholders never
+use it. The tail is \code{*} rather than \code{+} so that an empty argument --
+\verb{\{COLUMN_SPECS:\}}, the shape a deleted dataset name leaves behind -- is still
+token-shaped. With \code{+} it matched nothing at all, so it was neither
+substituted, nor rendered, nor reported: the one outcome this grammar exists
+to prevent.
+}
 \keyword{internal}

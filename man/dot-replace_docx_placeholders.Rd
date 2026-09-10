@@ -4,14 +4,26 @@
 \alias{.replace_docx_placeholders}
 \title{Replace placeholders in a DOCX template and write a new DOCX}
 \usage{
-.replace_docx_placeholders(template_path, variables, output_path)
+.replace_docx_placeholders(
+  template_path,
+  variables,
+  dta,
+  output_path,
+  quiet = FALSE
+)
 }
 \arguments{
 \item{template_path}{Character. Path to the template \code{.docx}.}
 
 \item{variables}{Named list of brace-delimited placeholder values.}
 
+\item{dta}{A \link{DTA} object, passed through to \code{\link[=.tv_render_blocks]{.tv_render_blocks()}} so a block
+placeholder left alone by the substitution above can be rendered.}
+
 \item{output_path}{Character. Path to the \code{.docx} to create.}
+
+\item{quiet}{Logical. Suppress the warning about block placeholders left
+unchanged. Default \code{FALSE}.}
 }
 \value{
 Invisibly returns \code{output_path}.

@@ -195,32 +195,10 @@ write_dta <- function(
   doc <- .add_metadata_section(doc, "Document Information", metadata)
 
   # Version history
-  if (length(meta@version_history) > 0) {
+  ft_history <- .build_version_history_table(meta@version_history)
+  if (!is.null(ft_history)) {
     doc <- .add_heading(doc, "Version History", level = 2)
-
-    version_data <- data.frame(
-      Version = character(),
-      Date = character(),
-      Changes = character(),
-      stringsAsFactors = FALSE
-    )
-
-    for (vh in meta@version_history) {
-      version_data <- rbind(version_data, data.frame(
-        Version = vh$version,
-        Date = if (inherits(vh$date, "Date")) as.character(vh$date) else vh$date,
-        Changes = vh$changes,
-        stringsAsFactors = FALSE
-      ))
-    }
-
-    ft <- flextable::flextable(version_data)
-    ft <- flextable::width(ft, j = 1, width = 1.0)
-    ft <- flextable::width(ft, j = 2, width = 1.2)
-    ft <- flextable::width(ft, j = 3, width = 4.0)
-    ft <- .style_table(ft, center_cols = c(1, 2))
-
-    doc <- flextable::body_add_flextable(doc, ft)
+    doc <- flextable::body_add_flextable(doc, ft_history)
     doc <- .add_spacer(doc)
   }
 

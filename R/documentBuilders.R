@@ -159,6 +159,48 @@ NULL
   ft
 }
 
+#' Build the version-history table (flextable). Shared by the built-in layout and
+#' by the `{VERSION_HISTORY_TABLE}` template block.
+#'
+#' `changes` is flattened rather than passed straight into the data.frame: the
+#' class permits a character vector there, and a vector of length > 1 makes
+#' `data.frame()` abort with "arguments imply differing number of rows". The
+#' date goes through [.format_document_date()] so it reads the same whatever the
+#' machine's locale, and whether it arrives as a `Date` or as text.
+#'
+#' @param version_history A list of `list(version =, date =, changes =)` records,
+#'   as `DTAMetaData@version_history` holds them, or `NULL`.
+#' @return A flextable, or `NULL` when there is no history.
+#' @keywords internal
+.build_version_history_table <- function(version_history) {
+  if (is.null(version_history) || length(version_history) == 0) {
+    return(NULL)
+  }
+
+  version_data <- data.frame(
+    Version = character(),
+    Date = character(),
+    Changes = character(),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  for (vh in version_history) {
+    version_data <- rbind(version_data, data.frame(
+      Version = if (is.null(vh$version)) "" else as.character(vh$version)[[1]],
+      Date = .format_document_date(vh$date),
+      Changes = paste(unlist(vh$changes), collapse = "; "),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    ))
+  }
+
+  ft <- flextable::flextable(version_data)
+  ft <- flextable::width(ft, j = 1, width = 1.0)
+  ft <- flextable::width(ft, j = 2, width = 1.2)
+  ft <- flextable::width(ft, j = 3, width = 4.0)
+  .style_table(ft, center_cols = c(1, 2))
+}
+
 #' Add a full organization section (affiliation + individual contact blocks).
 #' Backup-only contacts are grouped last. Signature lines are NOT drawn here:
 #' authorised signatories are collected into the single "Approval & Signatures"
@@ -260,25 +302,15 @@ NULL
   doc
 }
 
-#' Add signature approval section.
-#' @description
-#' Accepts either a data.frame(Organization, Name, Role) (as returned by
-#' \code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
-#' records, or NULL. One signature row is rendered per authorized signatory.
-#'
-#' When no signatory is known the section is omitted entirely rather than
-#' padded with blank "Approved by / Signature" rules: an anonymous underline
-#' is not something a reader can act on, and it left the document with a
-#' heading whose content was pure filler.
-#' @return The document, unchanged when there is nothing to sign.
+#' Build the approval/signature table (flextable). Shared by the built-in layout
+#' and by the `{SIGNATURES_TABLE}` template block.
+#' @param signatories Anything `.normalize_signatories()` accepts, or NULL.
 #' @keywords internal
-.add_signature_section <- function(doc, signatories = NULL) {
+.build_signature_table <- function(signatories) {
   sig_df <- .normalize_signatories(signatories)
   if (is.null(sig_df) || nrow(sig_df) == 0) {
-    return(doc)
+    return(NULL)
   }
-
-  doc <- .add_heading(doc, "Approval & Signatures", level = 2)
 
   sig_data <- data.frame(
     Organization = sig_df$Organization,
@@ -303,46 +335,40 @@ NULL
   ft <- flextable::hrule(ft, rule = "atleast", part = "body")
   ft <- flextable::bg(ft, j = c(4, 5), bg = THEME_COLORS$white, part = "body")
 
+  ft
+}
+
+#' Add signature approval section.
+#' @description
+#' Accepts either a data.frame(Organization, Name, Role) (as returned by
+#' \code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
+#' records, or NULL. One signature row is rendered per authorized signatory.
+#'
+#' When no signatory is known the section is omitted entirely rather than
+#' padded with blank "Approved by / Signature" rules: an anonymous underline
+#' is not something a reader can act on, and it left the document with a
+#' heading whose content was pure filler.
+#' @return The document, unchanged when there is nothing to sign.
+#' @keywords internal
+.add_signature_section <- function(doc, signatories = NULL) {
+  ft <- .build_signature_table(signatories)
+  if (is.null(ft)) {
+    return(doc)
+  }
+  doc <- .add_heading(doc, "Approval & Signatures", level = 2)
   doc <- flextable::body_add_flextable(doc, ft)
   doc <- .add_spacer(doc)
   doc
 }
 
-#' Add file specifications section
+#' Build the expected-files table (flextable). Shared by the built-in layout and
+#' by the `{FILE_SPECS}` template block.
 #' @keywords internal
-.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2) {
-  doc <- if (is.null(heading_level)) .add_bold_subheading(doc, title) else .add_heading(doc, title, level = heading_level)
-
+.build_file_specs_table <- function(files) {
   if (is.null(files) || length(files) == 0) {
-    doc <- .add_body_par(doc, "No files specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
-    return(doc)
+    return(NULL)
   }
-  total_min <- sum(sapply(files, function(f) {
-    tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
-  }))
 
-  total_max <- sum(sapply(files, function(f) {
-    tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
-  }))
-
-  file_word <- if (total_min == 1 && total_max == 1) "file" else "files"
-  count_txt <- if (total_min != total_max) {
-    paste0(total_min, " to ", total_max)
-  } else {
-    as.character(total_min)
-  }
-  doc <- .add_body_par(
-    doc,
-    paste0(
-      "The following ", file_word, " are expected for this dataset (",
-      count_txt, " in total). Each file name is given either as an exact ",
-      "name or as a regular-expression pattern that a delivered file must ",
-      "match; the expected count states how many files may match it."
-    )
-  )
-  doc <- .add_spacer(doc)
-
-  # Create file listing table
   file_data <- data.frame(
     `File Name / Pattern` = character(),
     `Match Type` = character(),
@@ -390,6 +416,44 @@ NULL
   ft <- flextable::width(ft, j = 5, width = 2.5)
   ft <- .style_table(ft, center_cols = c(2, 3, 4))
 
+  ft
+}
+
+#' Add file specifications section
+#' @keywords internal
+.add_file_specifications <- function(doc, files, title = "File Specifications", heading_level = 2) {
+  doc <- if (is.null(heading_level)) .add_bold_subheading(doc, title) else .add_heading(doc, title, level = heading_level)
+
+  if (is.null(files) || length(files) == 0) {
+    doc <- .add_body_par(doc, "No files specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
+    return(doc)
+  }
+  total_min <- sum(sapply(files, function(f) {
+    tryCatch(f@min_number_of_files %||% 0, error = function(e) 0)
+  }))
+
+  total_max <- sum(sapply(files, function(f) {
+    tryCatch(f@max_number_of_files %||% 0, error = function(e) 0)
+  }))
+
+  file_word <- if (total_min == 1 && total_max == 1) "file" else "files"
+  count_txt <- if (total_min != total_max) {
+    paste0(total_min, " to ", total_max)
+  } else {
+    as.character(total_min)
+  }
+  doc <- .add_body_par(
+    doc,
+    paste0(
+      "The following ", file_word, " are expected for this dataset (",
+      count_txt, " in total). Each file name is given either as an exact ",
+      "name or as a regular-expression pattern that a delivered file must ",
+      "match; the expected count states how many files may match it."
+    )
+  )
+  doc <- .add_spacer(doc)
+
+  ft <- .build_file_specs_table(files)
   doc <- flextable::body_add_flextable(doc, ft)
   doc <- .add_spacer(doc)
 

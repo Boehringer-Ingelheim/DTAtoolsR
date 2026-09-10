@@ -67,6 +67,16 @@ and reported via a warning.
 \item{Process}{\code{{ERROR_HANDLING}}, \code{{AUTHORIZED_CORRECTIONS}},
 \code{{SIGNATORIES}}, \code{{PROCESS_INFORMATION}}, \code{{VERSION_HISTORY}},
 \code{{GENERATED_DATE}}}
+\item{Block placeholders}{\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
+\code{{FILE_SPECS}}, \code{{DATASETS}} (each also takes a \verb{:DATASET} argument, e.g.
+\code{{COLUMN_SPECS:ADSL}}, to render one dataset instead of all of them),
+\code{{SUPPLIER_CONTACTS_TABLE}}, \code{{RECEIVER_CONTACTS_TABLE}},
+\code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}},
+\code{{AUTHORIZED_CORRECTIONS_LIST}}. Unlike the placeholders above, a block
+placeholder is replaced by rendered Word content -- a table, a heading, a
+list -- so it must be the only text in its paragraph, and only in the
+document body (not a header, footer or table cell). A \code{variables} entry
+of the same name still wins and renders as plain text instead.}
 }
 
 Additional or overriding values can be supplied through \code{variables}; names may
