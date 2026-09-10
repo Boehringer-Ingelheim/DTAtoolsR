@@ -81,6 +81,7 @@ test_that("OQ-APP-021 | a document built from a template takes the template's me
       template_select_version = creation$version[[1]]
     )
     session$setInputs(template_select_next = 1)
+    qapp_fill_template_vocab(session, rv)
     session$setInputs(tmpl_carry_source = "none")
     session$setInputs(template_create_confirm = 1)
 
@@ -211,6 +212,7 @@ test_that("OQ-APP-025 | a template that extends another carries the parent forwa
       template_select_version = extending$version[[1]]
     )
     session$setInputs(template_select_next = 1)
+    qapp_fill_template_vocab(session, rv)
     session$setInputs(tmpl_carry_source = "none")
     session$setInputs(template_create_confirm = 1)
 

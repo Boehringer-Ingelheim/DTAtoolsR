@@ -193,3 +193,34 @@ qapp_with_packages_unavailable <- function(pkgs, code) {
   )
   force(code)
 }
+
+# The vocabulary selections a browser would have supplied.
+#
+# A creation template may declare vocabulary slots with a `min:`, and the app
+# reads each slot's chosen terms from an input the browser creates when the
+# options dialog renders. `shiny::testServer()` has no browser, so those
+# inputs never exist -- and an ABSENT input is not the same answer as an
+# unopened slot: the app reads it as "deliberately none" (see
+# vocabulary_slot_values(), which distinguishes NULL from character(0) so that
+# a slot WITH a default can still be emptied on purpose). A slot with min >= 1
+# then refuses, and the document is never created.
+#
+# Setting each slot to its own declared default is what the rendered dialog
+# does, so this reproduces the browser rather than working around it. Reading
+# the slots from the session means it stays correct for whatever template the
+# caller picked, rather than hard-coding one template's slot names.
+qapp_fill_template_vocab <- function(session, rv) {
+  slots <- rv$template_vocab_specs$slots %||% list()
+  for (rec in slots) {
+    if (!is.null(rec$error)) {
+      next
+    }
+    default <- as.character(rec$slot$default %||% character(0))
+    if (length(default) == 0) {
+      next
+    }
+    args <- stats::setNames(list(default), paste0("tmpl_vocab_", rec$slot$id))
+    do.call(session$setInputs, args)
+  }
+  invisible(length(slots))
+}
