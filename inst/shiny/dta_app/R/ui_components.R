@@ -498,7 +498,14 @@ click_guard_script <- function() {
   // see an idle server, conclude no observer exists, and re-open the very
   // double-click window this guard is for. It only ever delays the release
   // of a button that has NO observer behind it, which costs nothing.
-  var SANITY_HOLD    = 1500;
+  // Five seconds, not the 1.5 it started at: a CPU-starved server (several
+  // R test runs hogging the machine) took longer than that to so much as
+  // acknowledge a click, the hold expired, and every repeat click a waiting
+  // user made went through -- each re-opening the same dialog once the
+  // server caught up. The round trip this waits for is the server's busy
+  // message, not the work itself, so five seconds is generous on a healthy
+  // machine and still shorter than anyone waits before clicking again.
+  var SANITY_HOLD    = 5000;
   var DOWNLOAD_HOLD  = 2000;  // ms a download link stays guarded
   var CEILING        = 30000; // ms failsafe release
   var CEILING_TRIES  = 4;     // ...re-armed at most this often while busy

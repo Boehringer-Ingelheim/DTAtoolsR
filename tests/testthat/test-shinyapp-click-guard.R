@@ -191,11 +191,16 @@ test_that("the sanity release cannot fire on a click still in flight", {
   expect_match(guard_js(), "onShiny('shiny:busy', function(){ busyTicks++; })", fixed = TRUE)
 
   # ...and the deadline outlasts a plausible round trip rather than racing it.
+  # Five seconds, because a CPU-starved server was seen taking longer than
+  # the original 1.5 to acknowledge a click at all: the hold expired, every
+  # repeat click went through, and the same dialog re-opened once per click
+  # when the server caught up. This only ever delays the release of a button
+  # with no observer behind it, so a generous value costs nothing.
   sanity_ms <- as.integer(sub(
     "(?s)^.*var SANITY_HOLD\\s*=\\s*(\\d+).*$", "\\1", guard_js(),
     perl = TRUE
   ))
-  expect_gte(sanity_ms, 1000L)
+  expect_gte(sanity_ms, 5000L)
 })
 
 test_that("releasing a button clears every timer it armed", {

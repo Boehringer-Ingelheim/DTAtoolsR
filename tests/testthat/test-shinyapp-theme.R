@@ -176,3 +176,37 @@ test_that("the status pill has a fill rule but no hover rule -- it is a label, n
   expect_match(txt, ".app-actions .brand-status", fixed = TRUE)
   expect_no_match(txt, ".app-actions .brand-status:hover", fixed = TRUE)
 })
+
+test_that("bi_theme sets IBM Plex Sans as the base/heading font and IBM Plex Mono as the monospace font", {
+  skip_if_not_installed("bslib")
+  theme <- app_fn("bi_theme")()
+  vars <- bslib::bs_get_variables(theme, c("font-family-base", "font-family-monospace"))
+
+  expect_match(vars[["font-family-base"]], "IBM Plex Sans", fixed = TRUE)
+  expect_match(vars[["font-family-monospace"]], "IBM Plex Mono", fixed = TRUE)
+})
+
+test_that("bi_css defines the status-rail language: a left rail on the dataset header, the dataset nav rows and a segmented status bar", {
+  skip_if_not_installed("bslib")
+  txt <- as.character(app_fn("bi_css")())
+
+  expect_match(txt, ".ds-head-block.ds-st-fail", fixed = TRUE)
+  # The rail is the border-left colour of the ROW, not a tinted background:
+  # the selector and the property have to sit in the same rule (the sheet
+  # aligns these four rules' braces, hence the \\s* rather than fixed = TRUE).
+  expect_match(txt, "\\.dataset-nav-row\\.nav-st-fail\\s*\\{\\s*border-left-color:")
+  expect_no_match(txt, "\\.dataset-nav-row\\.nav-st-fail\\s*\\{[^}]*background")
+  expect_match(txt, ".status-bar", fixed = TRUE)
+
+  # Sentence case is a rule of this stylesheet -- no tracked uppercase
+  # labels anywhere in the sheet.
+  expect_no_match(txt, "text-transform: uppercase", fixed = TRUE)
+})
+
+test_that("bi_css keeps exactly one prefers-reduced-motion block", {
+  skip_if_not_installed("bslib")
+  txt <- as.character(app_fn("bi_css")())
+
+  m <- gregexpr("@media \\(prefers-reduced-motion: reduce\\)", txt)[[1]]
+  expect_equal(if (identical(m, -1L)) 0L else length(m), 1L)
+})

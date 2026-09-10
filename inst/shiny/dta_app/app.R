@@ -19,7 +19,7 @@ brandbar <- div(
   tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
   div(
     div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Data Transfer Agreements (DTA) / Data Transmission Specifications (DTS) \u2014 validation & authoring")
+    div(class = "brand-sub", "Validation and authoring of Data Transfer Agreements (DTA) and Data Transmission Specifications (DTS)")
   ),
   div(
     class = "app-actions",
@@ -43,6 +43,20 @@ brandbar <- div(
     #  "Documentation"
     # )
   )
+)
+
+# Landing drop target glyph: the logo's document-and-tick motif as an outline,
+# in the brand greens. Inline SVG so it inherits the sheet's colours and needs
+# no extra asset; aria-hidden because the heading beside it carries the text.
+landing_drop_glyph <- paste0(
+  "<svg class='landing-drop-glyph' viewBox='0 0 48 48' fill='none' ",
+  "stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' ",
+  "aria-hidden='true' focusable='false'>",
+  "<path class='glyph-doc' d='M12 6h16l10 10v26H12z'/>",
+  "<path class='glyph-doc' d='M28 6v10h10'/>",
+  "<path class='glyph-doc' d='M18 24h8M18 30h6'/>",
+  "<path class='glyph-tick' d='M25 36l4 4 8-9'/>",
+  "</svg>"
 )
 
 # Non-floating footer: DTAtools version + author + link to the GitHub repo.
@@ -122,9 +136,9 @@ app_footer <- tags$footer(
   class = "app-footer",
   tags$span(class = "foot-name", "DTAtools"),
   if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
-  tags$span(class = "foot-sep", "\u2022"),
+  tags$span(class = "foot-sep", `aria-hidden` = "true"),
   tags$span("Boehringer Ingelheim"),
-  tags$span(class = "foot-sep", "\u2022"),
+  tags$span(class = "foot-sep", `aria-hidden` = "true"),
   tags$a(
     href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
     target = "_blank", rel = "noopener noreferrer", "GitHub repository"
@@ -278,6 +292,26 @@ document.addEventListener('shown.bs.modal', function (ev) {
 });
 "
 
+# Report every modal arriving on or leaving the screen, with the kind a
+# showModal() call stamped on it (data-dta-modal, currently only the contact
+# editor's 'edit_contact'). The server closes a dialog in exactly one place it
+# can see -- its own removeModal() -- while Cancel, Esc, a backdrop click and
+# one dialog replacing another all happen in the browser, so without this
+# report the server can never know whether the dialog it is about to open is
+# already open. edit_contact_flow() (server) is the consumer. Bootstrap fires
+# both events on the modal element and they bubble, hence the delegated
+# handler; jQuery strips the namespace, so ev.type is 'shown' or 'hidden'.
+modal_state_js <- "
+$(document).on('shown.bs.modal hidden.bs.modal', '#shiny-modal', function (ev) {
+  if (typeof Shiny === 'undefined' || !Shiny.setInputValue) return;
+  Shiny.setInputValue('dta_modal_state', {
+    event: ev.type,
+    kind: this.getAttribute('data-dta-modal') || '',
+    at: Date.now()
+  }, {priority: 'event'});
+});
+"
+
 # Per-browser secret backing 'Restore previous session'. The autosaved session
 # must outlive the Shiny session (the whole point is recovering after a reload
 # or a crash), so it cannot be keyed to session$token, which is regenerated on
@@ -405,7 +439,8 @@ ui <- bslib::page_fluid(
     tags$script(shiny::HTML(client_id_js)),
     tags$script(shiny::HTML(yaml_ace_resize_js)),
     tags$script(shiny::HTML(modal_unsuspend_js)),
-    # Unlike the seven above, this one is a function in R/ui_components.R
+    tags$script(shiny::HTML(modal_state_js)),
+    # Unlike the eight above, this one is a function in R/ui_components.R
     # rather than a string here, because its behaviour is worth testing
     # separately -- see click_guard_script() there, and the test file, for why
     # double-click protection cannot live on the server at all. Its position
@@ -5842,27 +5877,65 @@ server <- function(input, output, session) {
   }
 
   # Open a pre-filled modal to edit one contact's details.
+  #
+  # A repeat request for the dialog that is already open is dropped, not
+  # re-shown. The click guard (click_guard_script(), ui_components.R) swallows
+  # a double-click on a healthy server, but a starved one can take longer to
+  # acknowledge the first click than the guard holds the link, and then every
+  # further click a waiting user makes lands in one burst once the server
+  # catches up. Each showModal() in that burst would tear the dialog down and
+  # put it back -- the "popped up several times" the guard exists to prevent
+  # -- so the second and later requests for the same contact return here.
+  #
+  # rv$editing_contact is the record of which contact's dialog is open. It is
+  # set here, cleared by a successful Save (below), and cleared by the
+  # client's modal-state report (dta_modal_state, observer below) for every
+  # way a dialog can leave the screen that the server never sees itself:
+  # Cancel, Esc, the backdrop, or another dialog taking its place. The
+  # data-dta-modal stamp is what lets that report tell this dialog from any
+  # other.
   edit_contact_flow <- function(side, index) {
     req(editing())
+    target <- list(side = side, index = index)
+    if (identical(rv$editing_contact, target)) {
+      return()
+    }
     p <- dta_contact_at(isolate(rv$dta), side, index)
     if (is.null(p)) {
       return()
     }
-    rv$editing_contact <- list(side = side, index = index)
-    showModal(modalDialog(
-      title = paste("Edit", side, "contact"),
-      contact_modal_inputs("edit_contact", p),
-      div(
-        class = "msg-hint",
-        "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."
+    rv$editing_contact <- target
+    showModal(tagAppendAttributes(
+      modalDialog(
+        title = paste("Edit", side, "contact"),
+        contact_modal_inputs("edit_contact", p),
+        div(
+          class = "msg-hint",
+          "Separate multiple roles with commas. Other fields on this person (e.g. signature flags) are preserved."
+        ),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
+        ),
+        easyClose = TRUE
       ),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_edit_contact", "Save", class = "btn btn-primary")
-      ),
-      easyClose = TRUE
+      `data-dta-modal` = "edit_contact"
     ))
   }
+
+  # The browser's report of a modal arriving or leaving (modal_state_js, top
+  # of this file). Anything other than the contact editor itself being shown
+  # -- that editor closing, or any other dialog appearing -- means the contact
+  # editor is no longer on screen, so the next request for it must open it
+  # again rather than be dropped as a repeat. A Save has already cleared the
+  # record by the time its removeModal() reports 'hidden'; clearing twice is
+  # harmless.
+  observeEvent(input$dta_modal_state, {
+    st <- input$dta_modal_state
+    if (!identical(st$event, "shown") || !identical(st$kind, "edit_contact")) {
+      rv$editing_contact <- NULL
+    }
+  })
 
   observeEvent(input$confirm_edit_contact, {
     req(editing())
@@ -6656,8 +6729,9 @@ server <- function(input, output, session) {
       return(NULL)
     }
     complete <- length(validated) == length(st)
+    # No divider of its own: this button belongs to the sidebar's Export
+    # group, whose label sits above the two export buttons it follows.
     tagList(
-      tags$hr(),
       downloadButton("dl_validation_summary", "Validation summary",
         class = if (complete) "btn btn-success w-100" else "btn btn-warning w-100",
         title = if (complete) {
@@ -6728,6 +6802,7 @@ server <- function(input, output, session) {
     desc <- tryCatch(ds@description, error = function(e) NULL) %||% ""
     heading <- if (nzchar(desc)) desc else rv$active
     div(
+      class = paste0("ds-head-block ds-st-", st),
       div(
         class = "ds-head",
         tags$h4(class = "ds-desc", heading)
@@ -6853,12 +6928,43 @@ server <- function(input, output, session) {
     np <- sum(st == "pass")
     nf <- sum(st == "fail")
     nd <- sum(st == "nodata")
+    # Datasets with data bound but never checked, plus datasets with no
+    # status at all: everything the three counts above do not cover.
+    npend <- max(n - np - nf - nd, 0L)
+    # One bar segment per non-zero state, sized by its share of the datasets.
+    seg <- function(k, cls) {
+      if (k > 0) span(class = paste("status-seg", cls), style = sprintf("flex: %d 1 0;", k))
+    }
+    item <- function(k, cls, label) {
+      if (k > 0) {
+        span(
+          class = paste("status-item", cls),
+          span(class = "status-dot"), span(class = "status-n", k), label
+        )
+      }
+    }
     div(
-      style = "display:flex; gap:18px; margin-bottom:8px; flex-wrap:wrap;",
-      div(div(class = "metric", n), div(class = "slot-meta", "datasets")),
-      div(div(class = "metric", np), div(class = "slot-meta", "passed")),
-      div(div(class = "metric", nf), div(class = "slot-meta", "failed")),
-      div(div(class = "metric", nd), div(class = "slot-meta", "no data"))
+      class = "status-summary",
+      div(
+        class = "status-bar", role = "img",
+        `aria-label` = sprintf(
+          "%d passed, %d failed, %d without data, %d not checked",
+          np, nf, nd, npend
+        ),
+        seg(np, "seg-pass"), seg(nf, "seg-fail"),
+        seg(nd, "seg-nodata"), seg(npend, "seg-pending")
+      ),
+      div(
+        class = "status-legend",
+        span(
+          class = "status-total",
+          span(class = "status-n", n), if (n == 1) " dataset" else " datasets"
+        ),
+        item(np, "st-pass", " passed"),
+        item(nf, "st-fail", " failed"),
+        item(nd, "st-nodata", " no data"),
+        item(npend, "st-pending", " not checked")
+      )
     )
   })
 
@@ -6936,7 +7042,7 @@ server <- function(input, output, session) {
             div(
               tags$strong("Expected: "),
               tags$span(class = "slot-expected", h$expected),
-              tags$span(class = "slot-meta", paste0("  \u2022  ", h$count))
+              tags$span(class = "slot-count", h$count)
             )
           ),
           card_body(
@@ -7040,27 +7146,36 @@ server <- function(input, output, session) {
         sf <- session_file()
         !is.null(sf) && file.exists(sf)
       }
-      card(
-        max_height = "620px",
-        card_header(tags$h3("Load a DTA / DTS specification file", style = "margin:0;")),
-        card_body(
+      div(
+        class = "landing",
+        div(
+          class = "landing-hero",
+          tags$h1(class = "landing-title", "Check a data transfer against its specification."),
           p(
-            "Drag and drop a DTA / DTS settings ", tags$code(".yaml"),
-            " file to begin, or load the bundled example."
-          ),
+            class = "landing-lede",
+            "Open a DTA or DTS YAML file, load the data files it expects, run the checks, and export the agreement."
+          )
+        ),
+        div(
+          class = "landing-drop",
+          HTML(landing_drop_glyph),
+          tags$h2(class = "landing-drop-title", "Load a DTA / DTS specification file"),
           div(
-            class = "msg-hint", style = "margin:-6px 0 8px;",
-            "A full DTA (with metadata) or a standalone dataset spec is accepted; ",
-            "a dataset-only file is loaded without a Metadata section."
+            class = "landing-drop-hint",
+            "A full DTA with metadata or a standalone dataset specification is accepted. A dataset-only file opens without a Metadata section."
           ),
           div(
             class = "dropzone",
-            fileInput("dta_file", "Drop or choose a .yaml / .yml file",
+            fileInput("dta_file", "Drop a .yaml / .yml file here, or browse",
               accept = c(".yaml", ".yml"), width = "100%"
             )
-          ),
+          )
+        ),
+        div(
+          class = "landing-alt",
+          span(class = "landing-alt-label", "Other ways to start"),
           div(
-            style = "display:flex; gap:10px; margin-top:8px;",
+            class = "landing-alt-actions",
             actionButton("create_new", "Create new", class = "btn btn-outline-primary"),
             actionButton("create_from_template", "Create new from template", class = "btn btn-primary"),
             actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
@@ -7083,8 +7198,9 @@ server <- function(input, output, session) {
           uiOutput("add_dataset_ui"),
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
+          div(class = "section-label", "Export"),
           downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100", style = "margin-top: 6px;"),
+          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100"),
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
