@@ -1740,6 +1740,7 @@ kind <- attr(ph, "kind")
 
 head(ph[kind == "inline"], 3)
 ph[kind == "block"]
+ph[kind == "region"]
 ```
 
 **Inline** markers resolve to text and may appear anywhere, including
@@ -1765,6 +1766,41 @@ Three rules govern block markers:
 
 Anything left unrendered by those rules is named in a warning, alongside the
 existing report of markers the catalogue does not recognise.
+
+#### Repeating a region per dataset
+
+A paragraph holding only `{#DATASETS}`, paired with a later paragraph holding
+only `{/DATASETS}`, marks a repeating region: everything between the two —
+paragraphs and tables alike — is emitted once per dataset the DTA declares,
+in the DTA's own dataset order, and the marker paragraphs themselves do not
+appear in the output. A DTA with no datasets produces no region at all.
+
+```
+{#DATASETS}
+Dataset {DATASET_NAME}          <- the author's own Heading 2
+{DATASET_DESCRIPTION}
+{FILE_SPECS}
+{COLUMN_SPECS}
+{VALIDATION_RULES}
+{/DATASETS}
+```
+
+Six placeholders resolve inside a repetition to that one dataset's own
+values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
+`{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
+(the last two are `0` for a non-tabular dataset). A dataset block marker
+written bare inside the region, as `{COLUMN_SPECS}` is above, binds to the
+current dataset and contributes only its table, without the heading it would
+generate outside a region — the region's own paragraphs are what supply the
+heading, as `Dataset {DATASET_NAME}` does here. An explicit
+`{COLUMN_SPECS:clinical_data}` inside a region is unaffected and renders
+exactly as it does anywhere else.
+
+A region marker must be the only text in its paragraph too, and regions do
+not nest — an inner `{#DATASETS}` is left as ordinary text, though sequential
+regions in the same document are fine. A marker that is not alone in its
+paragraph, or that has no counterpart to open or close it, is left as written
+and named in the same warning as an unrendered block marker.
 
 #### PDF output
 

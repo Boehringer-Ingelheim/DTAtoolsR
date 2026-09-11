@@ -83,6 +83,30 @@
 #' @keywords internal
 .tv_block_sentinel <- function(nonce, i) paste0("DTABLOCK", nonce, "_", i)
 
+#' Stamp one paragraph's text runs with a sentinel, blanking the rest
+#'
+#' Shared by [.tv_mark_block_paragraphs()] (stamping the template's own block
+#' paragraphs) and [.tv_bind_region_block()] (stamping a bare dataset block
+#' inside a freshly-copied region repetition). A paragraph with no text run at
+#' all -- possible for an empty or purely-graphical paragraph -- cannot carry
+#' a sentinel, so it is left alone and reported as `FALSE`.
+#'
+#' @param p An `xml_node` for the paragraph to stamp.
+#' @param sentinel Character. The sentinel text to write into the first run.
+#' @return `TRUE` if a run was found and stamped, `FALSE` otherwise.
+#' @keywords internal
+.tv_stamp_paragraph <- function(p, sentinel) {
+  t_nodes <- xml2::xml_find_all(p, ".//*[local-name()='r']/*[local-name()='t']")
+  if (length(t_nodes) == 0) {
+    return(FALSE)
+  }
+  .tv_set_run_text(t_nodes[[1]], sentinel)
+  for (i in seq_along(t_nodes)[-1]) {
+    .tv_set_run_text(t_nodes[[i]], "")
+  }
+  TRUE
+}
+
 #' Stamp every template paragraph that is wholly a block placeholder
 #'
 #' Called on the template's `word/document.xml` *before* any substitution, and
@@ -126,14 +150,9 @@
     if (!nzchar(token) || token %in% keys || !.tv_is_block_token(token)) {
       next
     }
-    t_nodes <- xml2::xml_find_all(p, ".//*[local-name()='r']/*[local-name()='t']")
-    if (length(t_nodes) == 0) {
-      next
-    }
     sentinel <- .tv_block_sentinel(nonce, length(found) + 1L)
-    .tv_set_run_text(t_nodes[[1]], sentinel)
-    for (i in seq_along(t_nodes)[-1]) {
-      .tv_set_run_text(t_nodes[[i]], "")
+    if (!.tv_stamp_paragraph(p, sentinel)) {
+      next
     }
     found <- c(found, stats::setNames(token, sentinel))
   }
@@ -155,6 +174,8 @@
 #' Scans the paragraph *text* of `word/document.xml` and every header/footer
 #' part, not the raw XML: Word freely splits a typed placeholder across runs, so
 #' a raw grep would miss a token the exporter itself handles perfectly well.
+#' Also collects region markers (`{#DATASETS}` / `{/DATASETS}`) left behind by
+#' a malformed region -- unclosed, unopened, or not alone in its paragraph.
 #' @return Character vector of unique tokens exactly as they appear.
 #' @keywords internal
 .tv_scan_block_tokens <- function(docx_path) {
@@ -201,7 +222,7 @@
       if (length(matches) == 0) {
         next
       }
-      tokens <- c(tokens, Filter(.tv_is_block_token, matches))
+      tokens <- c(tokens, Filter(function(t) .tv_is_block_token(t) || .tv_is_region_marker(t), matches))
     }
   }
 
@@ -271,15 +292,18 @@
 #' @keywords internal
 .tv_block_dataset_exists <- function(dta, name) name %in% names(dta@datasets)
 
-#' `{COLUMN_SPECS}` block: a column-specification table per tabular dataset
+#' `{COLUMN_SPECS}` block: a column-specification table per tabular dataset,
+#' optionally without its heading (for a region-bound repetition)
 #' @keywords internal
-.tv_block_render_column_specs <- function(doc, dta, arg) {
+.tv_block_render_column_specs <- function(doc, dta, arg, heading = TRUE) {
   sets <- .tv_block_datasets(dta, arg, tabular_only = TRUE)
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No tabular datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
   }
   for (nm in names(sets)) {
-    doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", nm), level = 2)
+    if (isTRUE(heading)) {
+      doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", nm), level = 2)
+    }
     doc <- .tv_block_table(
       doc, .build_column_specs_table(sets[[nm]]@specs),
       "No column specifications available."
@@ -288,15 +312,18 @@
   doc
 }
 
-#' `{VALIDATION_RULES}` block: a validation-rule table per tabular dataset
+#' `{VALIDATION_RULES}` block: a validation-rule table per tabular dataset,
+#' optionally without its heading (for a region-bound repetition)
 #' @keywords internal
-.tv_block_render_validation_rules <- function(doc, dta, arg) {
+.tv_block_render_validation_rules <- function(doc, dta, arg, heading = TRUE) {
   sets <- .tv_block_datasets(dta, arg, tabular_only = TRUE)
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No tabular datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
   }
   for (nm in names(sets)) {
-    doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", nm), level = 2)
+    if (isTRUE(heading)) {
+      doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", nm), level = 2)
+    }
     doc <- .tv_block_table(
       doc, .build_rules_table(sets[[nm]]@specs@rules),
       "No validation rules specified."
@@ -305,15 +332,18 @@
   doc
 }
 
-#' `{FILE_SPECS}` block: an expected-files table per dataset
+#' `{FILE_SPECS}` block: an expected-files table per dataset, optionally
+#' without its heading (for a region-bound repetition)
 #' @keywords internal
-.tv_block_render_file_specs <- function(doc, dta, arg) {
+.tv_block_render_file_specs <- function(doc, dta, arg, heading = TRUE) {
   sets <- .tv_block_datasets(dta, arg, tabular_only = FALSE)
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
   }
   for (nm in names(sets)) {
-    doc <- .tv_block_heading(doc, paste0("Files \u2014 ", nm), level = 2)
+    if (isTRUE(heading)) {
+      doc <- .tv_block_heading(doc, paste0("Files \u2014 ", nm), level = 2)
+    }
     doc <- .tv_block_table(
       doc, .build_file_specs_table(sets[[nm]]@files),
       "No files specified."
@@ -323,9 +353,11 @@
 }
 
 #' `{DATASETS}` block: the full per-dataset section -- description, files,
-#' columns, rules
+#' columns, rules -- optionally without the dataset-name heading (for a
+#' region-bound repetition; the Files/Column Specifications/Validation Rules
+#' sub-headings always stay)
 #' @keywords internal
-.tv_block_render_datasets <- function(doc, dta, arg) {
+.tv_block_render_datasets <- function(doc, dta, arg, heading = TRUE) {
   sets <- .tv_block_datasets(dta, arg, tabular_only = FALSE)
   if (length(sets) == 0) {
     return(.add_body_par(doc, "No datasets.", italic = TRUE, color = THEME_COLORS$gray_mid))
@@ -333,7 +365,9 @@
   for (nm in names(sets)) {
     ds <- sets[[nm]]
 
-    doc <- .tv_block_heading(doc, nm, level = 2)
+    if (isTRUE(heading)) {
+      doc <- .tv_block_heading(doc, nm, level = 2)
+    }
     doc <- .add_body_par(doc, paste0("Type: ", ds@type))
     if (!is.null(ds@description) && nzchar(ds@description)) {
       doc <- .add_body_par(doc, ds@description)
@@ -412,13 +446,17 @@
 }
 
 #' Render one block placeholder at the cursor
+#' @param heading Logical. Passed through to the four dataset-block renderers:
+#'   `FALSE` renders the dataset content without its generated heading (used
+#'   for a region-bound block, whose paragraph already names the dataset via
+#'   `{DATASET_NAME}`). Ignored by every other block.
 #' @keywords internal
-.tv_block_render <- function(doc, spec, dta) {
+.tv_block_render <- function(doc, spec, dta, heading = TRUE) {
   switch(spec$name,
-    "{COLUMN_SPECS}" = .tv_block_render_column_specs(doc, dta, spec$arg),
-    "{VALIDATION_RULES}" = .tv_block_render_validation_rules(doc, dta, spec$arg),
-    "{FILE_SPECS}" = .tv_block_render_file_specs(doc, dta, spec$arg),
-    "{DATASETS}" = .tv_block_render_datasets(doc, dta, spec$arg),
+    "{COLUMN_SPECS}" = .tv_block_render_column_specs(doc, dta, spec$arg, heading = heading),
+    "{VALIDATION_RULES}" = .tv_block_render_validation_rules(doc, dta, spec$arg, heading = heading),
+    "{FILE_SPECS}" = .tv_block_render_file_specs(doc, dta, spec$arg, heading = heading),
+    "{DATASETS}" = .tv_block_render_datasets(doc, dta, spec$arg, heading = heading),
     "{SUPPLIER_CONTACTS_TABLE}" = .tv_block_render_contacts(doc, dta, spec$arg, side = "supplier"),
     "{RECEIVER_CONTACTS_TABLE}" = .tv_block_render_contacts(doc, dta, spec$arg, side = "receiver"),
     "{SIGNATURES_TABLE}" = .tv_block_render_signatures(doc, dta, spec$arg),
@@ -439,12 +477,16 @@
 #'
 #' @param docx_path Character. The .docx produced by pass 1; rewritten in place.
 #' @param dta A [DTA] object.
-#' @param blocks Named character vector from [.tv_mark_block_paragraphs()]:
-#'   sentinel to the token it replaced.
+#' @param blocks Named character vector from [.tv_mark_block_paragraphs()] and
+#'   [.tv_expand_regions()] combined: sentinel to the token it replaced.
 #' @param quiet Logical. Suppress the warning about placeholders left behind.
+#' @param bare Character vector of sentinels (a subset of `names(blocks)`)
+#'   stamped by [.tv_expand_regions()] rather than [.tv_mark_block_paragraphs()]:
+#'   these render their dataset content without the generated dataset-name
+#'   heading a top-level `{DATASETS}` block would otherwise add.
 #' @return Invisibly, `docx_path`.
 #' @keywords internal
-.tv_render_blocks <- function(docx_path, dta, blocks = character(0), quiet = FALSE) {
+.tv_render_blocks <- function(docx_path, dta, blocks = character(0), quiet = FALSE, bare = character(0)) {
   if (length(blocks) > 0) {
     doc <- officer::read_docx(docx_path)
     for (sentinel in names(blocks)) {
@@ -465,7 +507,7 @@
 
       # Consume the placeholder paragraph, then let the renderer append after it.
       doc <- officer::body_add_par(doc, "", pos = "on")
-      doc <- .tv_block_render(doc, spec, dta)
+      doc <- .tv_block_render(doc, spec, dta, heading = !sentinel %in% bare)
     }
     print(doc, target = docx_path)
   }
@@ -479,7 +521,8 @@
       items,
       i = "A block placeholder must be the only text in its paragraph, in the document body -- not inside a sentence, a table cell, a header or a footer.",
       i = "A {.code :DATASET} argument must name a dataset the DTA contains.",
-      i = "Text that only reads like a placeholder because a value spelled one is listed here too, and is deliberately left as written."
+      i = "Text that only reads like a placeholder because a value spelled one is listed here too, and is deliberately left as written.",
+      i = "A {{#DATASETS}} marker must be the only text in its paragraph, in the document body, and be closed by a {{/DATASETS}} paragraph further down; regions do not nest."
     ))
   }
   invisible(docx_path)

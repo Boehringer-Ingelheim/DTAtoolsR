@@ -102,6 +102,7 @@ Collate:
     'exportFunctions.R'
     'exportTemplateBlocks.R'
     'exportTemplateDocx.R'
+    'exportTemplateRegions.R'
     'exportValidationReport.R'
     'formattingHelpers.R'
     'qualification-report.R'

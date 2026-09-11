@@ -2,11 +2,13 @@
 % Please edit documentation in R/exportTemplateBlocks.R
 \name{.tv_block_render_column_specs}
 \alias{.tv_block_render_column_specs}
-\title{\code{{COLUMN_SPECS}} block: a column-specification table per tabular dataset}
+\title{\code{{COLUMN_SPECS}} block: a column-specification table per tabular dataset,
+optionally without its heading (for a region-bound repetition)}
 \usage{
-.tv_block_render_column_specs(doc, dta, arg)
+.tv_block_render_column_specs(doc, dta, arg, heading = TRUE)
 }
 \description{
-\code{{COLUMN_SPECS}} block: a column-specification table per tabular dataset
+\code{{COLUMN_SPECS}} block: a column-specification table per tabular dataset,
+optionally without its heading (for a region-bound repetition)
 }
 \keyword{internal}

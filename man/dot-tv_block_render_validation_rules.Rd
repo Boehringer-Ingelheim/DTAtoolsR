@@ -2,11 +2,13 @@
 % Please edit documentation in R/exportTemplateBlocks.R
 \name{.tv_block_render_validation_rules}
 \alias{.tv_block_render_validation_rules}
-\title{\code{{VALIDATION_RULES}} block: a validation-rule table per tabular dataset}
+\title{\code{{VALIDATION_RULES}} block: a validation-rule table per tabular dataset,
+optionally without its heading (for a region-bound repetition)}
 \usage{
-.tv_block_render_validation_rules(doc, dta, arg)
+.tv_block_render_validation_rules(doc, dta, arg, heading = TRUE)
 }
 \description{
-\code{{VALIDATION_RULES}} block: a validation-rule table per tabular dataset
+\code{{VALIDATION_RULES}} block: a validation-rule table per tabular dataset,
+optionally without its heading (for a region-bound repetition)
 }
 \keyword{internal}

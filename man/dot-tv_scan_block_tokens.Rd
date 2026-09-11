@@ -20,5 +20,7 @@ than drives -- what gets rendered is decided before substitution, by
 Scans the paragraph \emph{text} of \code{word/document.xml} and every header/footer
 part, not the raw XML: Word freely splits a typed placeholder across runs, so
 a raw grep would miss a token the exporter itself handles perfectly well.
+Also collects region markers (\verb{\{#DATASETS\}} / \verb{\{/DATASETS\}}) left behind by
+a malformed region -- unclosed, unopened, or not alone in its paragraph.
 }
 \keyword{internal}

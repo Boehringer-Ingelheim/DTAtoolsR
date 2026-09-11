@@ -3,12 +3,16 @@
 \name{.tv_block_render_datasets}
 \alias{.tv_block_render_datasets}
 \title{\code{{DATASETS}} block: the full per-dataset section -- description, files,
-columns, rules}
+columns, rules -- optionally without the dataset-name heading (for a
+region-bound repetition; the Files/Column Specifications/Validation Rules
+sub-headings always stay)}
 \usage{
-.tv_block_render_datasets(doc, dta, arg)
+.tv_block_render_datasets(doc, dta, arg, heading = TRUE)
 }
 \description{
 \code{{DATASETS}} block: the full per-dataset section -- description, files,
-columns, rules
+columns, rules -- optionally without the dataset-name heading (for a
+region-bound repetition; the Files/Column Specifications/Validation Rules
+sub-headings always stay)
 }
 \keyword{internal}

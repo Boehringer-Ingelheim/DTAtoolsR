@@ -15,10 +15,7 @@
 Character vector of unresolved placeholder tokens found in the part.
 }
 \description{
-Operates paragraph by paragraph. Within each paragraph the text of all runs is
-concatenated before substitution so that placeholders split across runs are
-still matched; the replacement text is written to the first run and the
-remaining runs of that paragraph are blanked. Setting text through \code{xml2}
-escapes XML special characters automatically.
+Reads \code{xml_path}, delegates the actual substitution to
+\code{\link[=.tv_substitute_paragraphs]{.tv_substitute_paragraphs()}}, then writes the result back.
 }
 \keyword{internal}
