@@ -2,11 +2,13 @@
 % Please edit documentation in R/exportTemplateBlocks.R
 \name{.tv_block_render_file_specs}
 \alias{.tv_block_render_file_specs}
-\title{\code{{FILE_SPECS}} block: an expected-files table per dataset}
+\title{\code{{FILE_SPECS}} block: an expected-files table per dataset, optionally
+without its heading (for a region-bound repetition)}
 \usage{
-.tv_block_render_file_specs(doc, dta, arg)
+.tv_block_render_file_specs(doc, dta, arg, heading = TRUE)
 }
 \description{
-\code{{FILE_SPECS}} block: an expected-files table per dataset
+\code{{FILE_SPECS}} block: an expected-files table per dataset, optionally
+without its heading (for a region-bound repetition)
 }
 \keyword{internal}

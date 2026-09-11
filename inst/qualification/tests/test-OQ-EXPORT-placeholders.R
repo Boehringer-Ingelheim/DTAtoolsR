@@ -6,6 +6,14 @@
 # are the same set -- a name that is documented but never filled in, or filled
 # in but never documented, leaves the author guessing at exactly the thing this
 # mechanism exists to make explicit.
+#
+# Four kinds share the one token grammar and are told apart by the "kind"
+# attribute: "inline" (plain text, anywhere), "block" (document structure,
+# alone in a body paragraph), "region" (the {#DATASETS}/{/DATASETS} markers
+# that bound a repeat -- REQ-EXPORT-031) and "dataset" (the six placeholders
+# that only resolve inside a region). Region and dataset entries have no
+# single value to report, so they keep their description even when a transfer
+# is passed in, exactly as a block entry does.
 
 test_that("OQ-EXPORT-040 | the placeholder vocabulary is reported with a description of each | REQ-EXPORT-030", {
   described <- dta_template_placeholders()
@@ -14,7 +22,7 @@ test_that("OQ-EXPORT-040 | the placeholder vocabulary is reported with a descrip
   qa_step(
     "every entry is named for the token a template writes",
     TRUE,
-    all(grepl("^\\{[A-Z0-9_]+\\}$", names(described)))
+    all(grepl("^\\{[#/]?[A-Z0-9_]+\\}$", names(described)))
   )
   qa_step(
     "and every entry carries a description rather than an empty string",
@@ -32,6 +40,11 @@ test_that("OQ-EXPORT-040 | the placeholder vocabulary is reported with a descrip
     "and so are both parties to it",
     c("{SUPPLIER_NAME}", "{RECEIVER_NAME}"),
     intersect(c("{SUPPLIER_NAME}", "{RECEIVER_NAME}"), names(described))
+  )
+  qa_step(
+    "region markers and dataset placeholders are tagged by kind",
+    c("region", "region", "dataset"),
+    unname(attr(described, "kind")[c("{#DATASETS}", "{/DATASETS}", "{DATASET_NAME}")])
   )
 })
 
@@ -69,5 +82,10 @@ test_that("OQ-EXPORT-041 | the same vocabulary carries a transfer's values | REQ
     "the date is rendered as an ISO date rather than as a number",
     TRUE,
     grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", filled[["{DTA_DATE}"]])
+  )
+  qa_step(
+    "a dataset placeholder has no single value, so it keeps its description",
+    described[["{DATASET_NAME}"]],
+    filled[["{DATASET_NAME}"]]
   )
 })

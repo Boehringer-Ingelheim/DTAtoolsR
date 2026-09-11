@@ -39,7 +39,8 @@ Fills a user-authored Word (\code{.docx}) template by replacing placeholder
 markers with values extracted from a \link{DTA} object. Placeholders use a
 single-brace, upper-case convention (for example \code{{DTA_TITLE}} or
 \code{{SUPPLIER_NAME}}) and may appear in the document body, headers, footers and
-table cells.
+table cells. A \verb{\{#DATASETS\}} ... \verb{\{/DATASETS\}} region repeats a span of the
+document body once per dataset in \code{dta}.
 
 The template is treated as an Open Packaging Conventions (OPC) archive: it is
 unzipped, the WordprocessingML text of each paragraph is substituted at the
@@ -77,6 +78,20 @@ placeholder is replaced by rendered Word content -- a table, a heading, a
 list -- so it must be the only text in its paragraph, and only in the
 document body (not a header, footer or table cell). A \code{variables} entry
 of the same name still wins and renders as plain text instead.}
+\item{Repeating regions}{A body paragraph whose whole text is
+\verb{\{#DATASETS\}} opens a region, repeated once per dataset in \code{dta}, that
+ends at the next body paragraph whose whole text is \verb{\{/DATASETS\}}; both
+markers must be alone in their paragraph, and a region does not nest.
+Inside each repetition, six placeholders resolve to that dataset's
+values: \code{{DATASET_NAME}}, \code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}},
+\code{{DATASET_FILE_COUNT}}, \code{{DATASET_COLUMN_COUNT}} and
+\code{{DATASET_RULE_COUNT}} (the last two are \code{0} for a non-tabular
+dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
+\code{{FILE_SPECS}}, \code{{DATASETS}}) alone in a paragraph of the region is
+bound to the repetition's dataset and rendered without its generated
+heading; an explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
+malformed marker -- unclosed, unopened, or not alone in its paragraph
+-- is left in place and reported alongside unrendered blocks.}
 }
 
 Additional or overriding values can be supplied through \code{variables}; names may

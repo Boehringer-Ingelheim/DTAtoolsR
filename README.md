@@ -583,7 +583,7 @@ A template is an ordinary `.docx` containing `{PLACEHOLDER}` markers.
 resolves each one, so there is no need to export a document to find out what a
 token will become.
 
-Markers come in two kinds, distinguished by the `"kind"` attribute of that list.
+Markers come in four kinds, distinguished by the `"kind"` attribute of that list.
 **Inline** markers resolve to text and may sit anywhere, including mid-sentence
 and in headers and footers: `{DTA_TITLE}`, `{SUPPLIER_NAME}`,
 `{TRANSMISSION_FREQUENCY}`, `{TOTAL_COLUMNS}` and so on.
@@ -611,6 +611,39 @@ is named in a warning. Tables are sized to the template's own text column, and
 headings use the template's `heading N` style when it defines one. A value
 supplied through `template_variables` overrides a marker of either kind and is
 always rendered as text.
+
+**Repeating a region per dataset.** A paragraph holding only `{#DATASETS}`,
+paired with a later paragraph holding only `{/DATASETS}`, marks a repeating
+region: everything between the two — paragraphs and tables alike — is emitted
+once per dataset the DTA declares, in the DTA's own dataset order, and the
+marker paragraphs themselves do not appear. A DTA with no datasets produces no
+region at all.
+
+```
+{#DATASETS}
+Dataset {DATASET_NAME}          <- the author's own Heading 2
+{DATASET_DESCRIPTION}
+{FILE_SPECS}
+{COLUMN_SPECS}
+{VALIDATION_RULES}
+{/DATASETS}
+```
+
+Six placeholders resolve inside a repetition to that one dataset's own values:
+`{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
+`{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
+(the last two are `0` for a non-tabular dataset). A dataset block marker
+written bare inside a region binds to the current dataset and contributes only
+its table, without the heading it would generate outside a region — the
+region's own paragraphs are what supply the heading. An explicit
+`{COLUMN_SPECS:ADSL}` inside a region is unaffected and renders exactly as it
+does anywhere else.
+
+A region marker must be the only text in its paragraph too, and regions do not
+nest — an inner `{#DATASETS}` is left as ordinary text, though sequential
+regions in the same document are fine. A marker that is not alone in its
+paragraph, or that has no counterpart to open or close it, is left as written
+and named in the warning above.
 
 PDF output builds the Word document and converts it, which needs an external
 tool: LibreOffice (`soffice`), TinyTeX, or pandoc with another PDF engine.

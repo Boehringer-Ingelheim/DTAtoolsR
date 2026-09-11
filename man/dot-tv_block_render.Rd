@@ -4,7 +4,13 @@
 \alias{.tv_block_render}
 \title{Render one block placeholder at the cursor}
 \usage{
-.tv_block_render(doc, spec, dta)
+.tv_block_render(doc, spec, dta, heading = TRUE)
+}
+\arguments{
+\item{heading}{Logical. Passed through to the four dataset-block renderers:
+\code{FALSE} renders the dataset content without its generated heading (used
+for a region-bound block, whose paragraph already names the dataset via
+\code{{DATASET_NAME}}). Ignored by every other block.}
 }
 \description{
 Render one block placeholder at the cursor

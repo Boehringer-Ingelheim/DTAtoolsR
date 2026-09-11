@@ -28,9 +28,10 @@ The match set is "any known key" \emph{or} "anything token-shaped". Known keys
 come first so that an exact variable name wins over the generic grammar, and
 so that keys which do not fit the grammar still match.
 
-A block placeholder (see \code{\link[=.tv_is_block_token]{.tv_is_block_token()}}) is a third case: absent a
-\code{variables} entry it passes through unchanged like an unresolved token, but
-it is not counted as unresolved, because the block-rendering pass that runs
-after this one fills it in.
+A block placeholder (see \code{\link[=.tv_is_block_token]{.tv_is_block_token()}}) or a region marker (see
+\code{\link[=.tv_is_region_marker]{.tv_is_region_marker()}}) is a third case: absent a \code{variables} entry it
+passes through unchanged like an unresolved token, but it is not counted as
+unresolved, because the block-rendering pass that runs after this one fills
+in a block, and reports a leftover region marker itself.
 }
 \keyword{internal}

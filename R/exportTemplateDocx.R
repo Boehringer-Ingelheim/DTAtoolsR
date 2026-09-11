@@ -4,7 +4,8 @@
 #' markers with values extracted from a [DTA] object. Placeholders use a
 #' single-brace, upper-case convention (for example `{DTA_TITLE}` or
 #' `{SUPPLIER_NAME}`) and may appear in the document body, headers, footers and
-#' table cells.
+#' table cells. A `{#DATASETS}` ... `{/DATASETS}` region repeats a span of the
+#' document body once per dataset in `dta`.
 #'
 #' The template is treated as an Open Packaging Conventions (OPC) archive: it is
 #' unzipped, the WordprocessingML text of each paragraph is substituted at the
@@ -42,6 +43,20 @@
 #'     list -- so it must be the only text in its paragraph, and only in the
 #'     document body (not a header, footer or table cell). A `variables` entry
 #'     of the same name still wins and renders as plain text instead.}
+#'   \item{Repeating regions}{A body paragraph whose whole text is
+#'     `{#DATASETS}` opens a region, repeated once per dataset in `dta`, that
+#'     ends at the next body paragraph whose whole text is `{/DATASETS}`; both
+#'     markers must be alone in their paragraph, and a region does not nest.
+#'     Inside each repetition, six placeholders resolve to that dataset's
+#'     values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
+#'     `{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and
+#'     `{DATASET_RULE_COUNT}` (the last two are `0` for a non-tabular
+#'     dataset). A bare dataset block (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
+#'     `{FILE_SPECS}`, `{DATASETS}`) alone in a paragraph of the region is
+#'     bound to the repetition's dataset and rendered without its generated
+#'     heading; an explicit `{COLUMN_SPECS:NAME}` is left as written. A
+#'     malformed marker -- unclosed, unopened, or not alone in its paragraph
+#'     -- is left in place and reported alongside unrendered blocks.}
 #' }
 #'
 #' Additional or overriding values can be supplied through `variables`; names may
@@ -202,28 +217,34 @@ export_with_template <- function(
 #' `DTA`, what each one would currently expand to -- rather than exporting a
 #' document to find out, or reading the list out of the documentation by hand.
 #'
-#' A placeholder is either **inline** (resolves to a string substituted into a
-#' run of text, and may sit mid-sentence) or a **block** (replaces a whole
-#' paragraph with rendered Word content -- a table, a heading, a list -- so it
-#' must be the only text in its paragraph, in the document body). The two kinds
-#' share one token grammar and are told apart by the `kind` attribute of the
-#' returned vector, not by the vector's type.
+#' A placeholder is one of four kinds. An **inline** placeholder resolves to a
+#' string substituted into a run of text, and may sit mid-sentence. A **block**
+#' replaces a whole paragraph with rendered Word content -- a table, a
+#' heading, a list -- so it must be the only text in its paragraph, in the
+#' document body. A **region** marker (`{#DATASETS}` / `{/DATASETS}`) opens
+#' and closes a span of the document body that is repeated once per dataset;
+#' each marker, too, must be alone in its own body paragraph. A **dataset**
+#' placeholder (such as `{DATASET_NAME}`) resolves inside a region, once per
+#' repetition, to a value of the dataset that repetition belongs to. All four
+#' kinds share one token grammar and are told apart by the `kind` attribute of
+#' the returned vector, not by the vector's type.
 #'
 #' @param dta Optional [DTA] object. When supplied, the returned values are the
-#'   resolved text for that object's inline placeholders; a block placeholder
-#'   has no text value of its own, so its entry stays its description. When
-#'   `NULL` (the default) every entry is a short description of what the
-#'   placeholder means.
+#'   resolved text for that object's inline placeholders; a block, region or
+#'   dataset entry has no text value of its own outside of a repetition, so it
+#'   keeps its description either way. When `NULL` (the default) every entry
+#'   is a short description of what the placeholder means.
 #'
 #' @return A named character vector whose names are the brace-delimited
 #'   placeholder tokens (`"{DTA_TITLE}"` and so on), in documentation order.
 #'   The values are \describe{
 #'     \item{descriptions}{when `dta` is `NULL`.}
 #'     \item{the resolved text}{when `dta` is a [DTA], for inline placeholders;
-#'       a block placeholder keeps its description either way.}
+#'       a block, region or dataset entry keeps its description either way.}
 #'   }
 #'   The returned vector also carries a `kind` attribute: a character vector,
-#'   named like the return value, of `"inline"` or `"block"`.
+#'   named like the return value, of `"inline"`, `"block"`, `"region"` or
+#'   `"dataset"`.
 #'
 #' @seealso [export_with_template()], [write_dta()]
 #' @export
@@ -235,6 +256,9 @@ export_with_template <- function(
 #' dta_template_placeholders()[["{COLUMN_SPECS}"]]
 #' attr(dta_template_placeholders(), "kind")[["{COLUMN_SPECS}"]]
 #'
+#' # The placeholders usable inside a {#DATASETS} repeating region.
+#' dta_template_placeholders()[attr(dta_template_placeholders(), "kind") == "dataset"]
+#'
 #' # What would those become for a real DTA?
 #' dta <- read_dta_from_yaml(
 #'   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
@@ -243,10 +267,17 @@ export_with_template <- function(
 dta_template_placeholders <- function(dta = NULL) {
   inline <- .tv_placeholder_catalog()
   block <- .tv_block_catalog()
-  kinds <- c(rep("inline", length(inline)), rep("block", length(block)))
+  region <- .tv_region_catalog()
+  dataset <- .tv_dataset_catalog()
+  kinds <- c(
+    rep("inline", length(inline)),
+    rep("block", length(block)),
+    rep("region", length(region)),
+    rep("dataset", length(dataset))
+  )
 
   if (is.null(dta)) {
-    out <- c(inline, block)
+    out <- c(inline, block, region, dataset)
   } else {
     if (!inherits(dta, "DTAtools::DTA")) {
       cli::cli_abort("{.arg dta} must be a DTA object or {.code NULL}.")
@@ -256,9 +287,11 @@ dta_template_placeholders <- function(dta = NULL) {
       v <- vars[[k]]
       if (is.null(v) || length(v) == 0) "" else as.character(v)[[1]]
     }, character(1))
-    # A block has no text value: it expands to document content, so its
-    # description is the only thing there is to report.
-    out <- c(resolved, block)
+    # A block, region marker or dataset placeholder has no text value of its
+    # own to report outside of a repetition: it expands to document content
+    # (block), delimits one (region), or resolves per repetition (dataset), so
+    # its description is the only thing there is to report either way.
+    out <- c(resolved, block, region, dataset)
   }
   attr(out, "kind") <- stats::setNames(kinds, names(out))
   out
@@ -720,16 +753,22 @@ dta_template_placeholders <- function(dta = NULL) {
     cli::cli_abort("Template does not contain a Word document part ({.file word/document.xml}).")
   }
 
-  # Stamp the template's own block placeholders BEFORE substituting anything.
-  # Pass 2 must act on the paragraphs that carried a block placeholder in the
+  # Pass 0 expands repeating regions and binds any bare dataset block inside
+  # them to its dataset BEFORE pass 1 stamps the template's own (non-region)
+  # block placeholders -- a region multiplies and deletes body paragraphs, so
+  # it must run first, and it stamps the blocks it binds with its own sentinel
+  # family so pass 1 can never re-stamp (or orphan) one of them.
+  #
+  # Pass 1 must act on the paragraphs that carried a block placeholder in the
   # *template*, and after substitution those are no longer identifiable by text:
   # a DTA whose title is the literal string "{COLUMN_SPECS}" would otherwise
   # have its title paragraph replaced by a table.
   nonce <- .tv_block_nonce()
-  blocks <- if (file.exists(main)) {
-    .tv_mark_block_paragraphs(main, nonce, variables)
-  } else {
-    character(0)
+  region_blocks <- character(0)
+  blocks <- character(0)
+  if (file.exists(main)) {
+    region_blocks <- .tv_expand_regions(main, dta, nonce, variables)
+    blocks <- .tv_mark_block_paragraphs(main, nonce, variables)
   }
 
   unresolved <- character(0)
@@ -749,7 +788,13 @@ dta_template_placeholders <- function(dta = NULL) {
   }
 
   .zip_docx_dir(temp_dir, output_path)
-  .tv_render_blocks(output_path, dta = dta, blocks = blocks, quiet = quiet)
+  .tv_render_blocks(
+    output_path,
+    dta = dta,
+    blocks = c(region_blocks, blocks),
+    quiet = quiet,
+    bare = names(region_blocks)
+  )
 
   valid <- tryCatch(
     {
@@ -766,24 +811,27 @@ dta_template_placeholders <- function(dta = NULL) {
 }
 
 
-#' Substitute placeholders within a single WordprocessingML XML part
+#' Substitute placeholders across a set of paragraph nodes
 #'
-#' Operates paragraph by paragraph. Within each paragraph the text of all runs is
-#' concatenated before substitution so that placeholders split across runs are
-#' still matched; the replacement text is written to the first run and the
-#' remaining runs of that paragraph are blanked. Setting text through `xml2`
-#' escapes XML special characters automatically.
+#' The paragraph-by-paragraph substitution loop shared by
+#' [.replace_placeholders_in_xml()] (given every paragraph of a whole document
+#' part) and [.tv_expand_regions()] (given only the paragraphs of one
+#' freshly-copied region repetition). Mutates `paras` in place -- xml2 nodes
+#' are external pointers into their owning document -- so the caller is
+#' responsible for writing the owning document back to disk; this function's
+#' return value is only the leftover report.
 #'
-#' @param xml_path Character. Path to the XML part to modify in place.
+#' Within each paragraph the text of all runs is concatenated before
+#' substitution so that placeholders split across runs are still matched; the
+#' replacement text is written to the first run and the remaining runs of that
+#' paragraph are blanked. Setting text through `xml2` escapes XML special
+#' characters automatically.
+#'
+#' @param paras An `xml_nodeset` of `<w:p>` paragraph nodes to substitute into.
 #' @param variables Named list of brace-delimited placeholder values.
-#' @return Character vector of unresolved placeholder tokens found in the part.
+#' @return Character vector of unique unresolved placeholder tokens found.
 #' @keywords internal
-.replace_placeholders_in_xml <- function(xml_path, variables) {
-  doc <- xml2::read_xml(xml_path)
-
-  # Namespace-agnostic XPath: match by local element name so we do not depend on
-  # the 'w' prefix being declared in a particular way.
-  paras <- xml2::xml_find_all(doc, ".//*[local-name()='p']")
+.tv_substitute_paragraphs <- function(paras, variables) {
   unresolved <- character(0)
 
   for (p in paras) {
@@ -837,8 +885,29 @@ dta_template_placeholders <- function(dta = NULL) {
     }
   }
 
-  xml2::write_xml(doc, xml_path)
   unique(unresolved)
+}
+
+
+#' Substitute placeholders within a single WordprocessingML XML part
+#'
+#' Reads `xml_path`, delegates the actual substitution to
+#' [.tv_substitute_paragraphs()], then writes the result back.
+#'
+#' @param xml_path Character. Path to the XML part to modify in place.
+#' @param variables Named list of brace-delimited placeholder values.
+#' @return Character vector of unresolved placeholder tokens found in the part.
+#' @keywords internal
+.replace_placeholders_in_xml <- function(xml_path, variables) {
+  doc <- xml2::read_xml(xml_path)
+
+  # Namespace-agnostic XPath: match by local element name so we do not depend on
+  # the 'w' prefix being declared in a particular way.
+  paras <- xml2::xml_find_all(doc, ".//*[local-name()='p']")
+  unresolved <- .tv_substitute_paragraphs(paras, variables)
+
+  xml2::write_xml(doc, xml_path)
+  unresolved
 }
 
 
@@ -858,8 +927,19 @@ dta_template_placeholders <- function(dta = NULL) {
 #' token-shaped. With `+` it matched nothing at all, so it was neither
 #' substituted, nor rendered, nor reported: the one outcome this grammar exists
 #' to prevent.
+#'
+#' The optional leading `#`/`/` makes a region marker (`{#DATASETS}` /
+#' `{/DATASETS}`) token-shaped too, for the same reason: a malformed one --
+#' unclosed, unopened, or not alone in its paragraph -- must be reported by the
+#' leftover scan rather than silently left out of the grammar altogether. The
+#' prefix is deliberately not restricted to the known marker names: any
+#' `{#word}` or `{/word}` a template contains is token-shaped, so one that is
+#' neither a marker nor a value -- a mistyped `{#DATASET}`, say -- is named by
+#' the unresolved-placeholder warning exactly as `{customField}` is, instead of
+#' surviving unreported into a signed document. Before regions existed such
+#' text was silently left alone.
 #' @keywords internal
-.tv_token_pattern <- function() "\\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]*)?\\}"
+.tv_token_pattern <- function() "\\{[#/]?[A-Za-z_][A-Za-z0-9_]*(?::[^{}]*)?\\}"
 
 
 #' Is there anything in this text that could possibly be substituted?
@@ -983,10 +1063,11 @@ dta_template_placeholders <- function(dta = NULL) {
 #' come first so that an exact variable name wins over the generic grammar, and
 #' so that keys which do not fit the grammar still match.
 #'
-#' A block placeholder (see [.tv_is_block_token()]) is a third case: absent a
-#' `variables` entry it passes through unchanged like an unresolved token, but
-#' it is not counted as unresolved, because the block-rendering pass that runs
-#' after this one fills it in.
+#' A block placeholder (see [.tv_is_block_token()]) or a region marker (see
+#' [.tv_is_region_marker()]) is a third case: absent a `variables` entry it
+#' passes through unchanged like an unresolved token, but it is not counted as
+#' unresolved, because the block-rendering pass that runs after this one fills
+#' in a block, and reports a leftover region marker itself.
 #'
 #' @param text Character scalar to substitute into.
 #' @param variables Named list of brace-delimited placeholder values.
@@ -1021,7 +1102,7 @@ dta_template_placeholders <- function(dta = NULL) {
       value <- variables[[token]]
       out <- c(out, if (length(value) == 0) "" else as.character(value)[[1]])
       replaced_keys <- c(replaced_keys, token)
-    } else if (.tv_is_block_token(token)) {
+    } else if (.tv_is_block_token(token) || .tv_is_region_marker(token)) {
       # Left for the block pass, which needs the paragraph intact. Not
       # unresolved: a value for it exists, it is just not a string.
       out <- c(out, token)

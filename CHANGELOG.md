@@ -91,6 +91,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `dta_template_placeholders()` reports the block tokens alongside the inline
   ones, tagged by a `"kind"` attribute.
 
+- **Word templates can repeat a region once per dataset.** A body paragraph
+  holding only `{#DATASETS}`, paired with a later paragraph holding only
+  `{/DATASETS}`, now marks a repeating region: everything between the two —
+  paragraphs and tables alike — is emitted once per dataset the transfer
+  declares, in the transfer's own dataset order, and the marker paragraphs
+  themselves are removed. A transfer with no datasets produces no region at
+  all.
+
+  Six placeholders resolve inside a repetition to that one dataset's own
+  values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
+  `{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
+  (the last two are zero for a non-tabular dataset). A dataset block
+  placeholder written bare inside the region — `{COLUMN_SPECS}`,
+  `{VALIDATION_RULES}`, `{FILE_SPECS}` or `{DATASETS}` — binds to the current
+  dataset and contributes only its table, without the heading it would
+  otherwise generate, because the region's own paragraphs are what supply
+  that heading; an explicit `{COLUMN_SPECS:ADSL}` is left exactly as written,
+  the same as it renders anywhere outside a region. A value supplied through
+  `variables` still wins over any marker in every repetition, and images
+  inside a region are repeated with fresh drawing ids (bookmarks, footnote
+  and comment references inside a region are copied as they are).
+
+  A region marker must be the only text in its body paragraph, the same rule
+  a block placeholder already follows, and regions do not nest — an inner
+  `{#DATASETS}` is left as ordinary text. Sequential regions in the same
+  document are fine. A marker that is not alone in its paragraph, or that has
+  no counterpart to open or close it, is left as written and named in the
+  existing warning about block placeholders left unchanged, which now also
+  explains the region rules. The marker prefix is part of the placeholder
+  grammar, so any `{#word}` or `{/word}` a template contains is treated like
+  an unknown placeholder and named in the unresolved-placeholder warning — a
+  mistyped `{#DATASET}` is reported rather than silently left in place, where
+  such text used to pass unnoticed.
+
+  `dta_template_placeholders()` lists `{#DATASETS}` and `{/DATASETS}` with
+  kind `"region"` and the six dataset placeholders with kind `"dataset"`;
+  both keep their description rather than a single value even when called
+  with a transfer, exactly as a block placeholder does.
+
 ### Changed
 
 - **Choosing a template is now a search, not a dropdown.** "Create new from

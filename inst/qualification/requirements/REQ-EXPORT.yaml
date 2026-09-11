@@ -374,9 +374,13 @@ requirements:
 
   - id: REQ-EXPORT-030
     text: >
-      dta_template_placeholders() shall report the placeholder names a Word
-      template may use, with a description of each when called with no
-      transfer, and the transfer's own values when called with one.
+      dta_template_placeholders() shall report every placeholder name a Word
+      template may use -- inline placeholders, block placeholders, the
+      repeating-region markers and the per-dataset placeholders -- each
+      tagged with its kind, with a description of each when called with no
+      transfer; when called with a transfer the inline entries shall carry
+      the transfer's own values and the other kinds shall keep their
+      descriptions.
     risk: low
     category: interface
     covers: [dta_template_placeholders, export_with_template]
@@ -386,3 +390,26 @@ requirements:
       that is documented but not substituted, or substituted but not
       documented, leaves the author guessing at the one thing the mechanism
       exists to make explicit.
+
+  - id: REQ-EXPORT-031
+    text: >
+      export_with_template() shall treat a body paragraph whose only text is
+      {#DATASETS} together with the next body paragraph whose only text is
+      {/DATASETS} as a repeating region: the content between the two shall
+      appear in the output once per dataset of the DTA, in the DTA's dataset
+      order, and neither marker paragraph shall appear. Within each repetition
+      {DATASET_NAME}, {DATASET_TYPE}, {DATASET_DESCRIPTION},
+      {DATASET_FILE_COUNT}, {DATASET_COLUMN_COUNT} and {DATASET_RULE_COUNT}
+      shall resolve to that dataset's values, and a dataset block placeholder
+      written without a dataset argument shall render that dataset alone,
+      without a generated dataset heading. A marker that is not the only text
+      of a body paragraph, or that has no counterpart, shall be left as
+      written and named in a warning.
+    risk: medium
+    category: functional
+    covers: [export_with_template]
+    source: R/exportTemplateRegions.R
+    notes: >
+      The region author writes the headings, so a bound block contributes
+      only its table; outside a region a block still renders under its own
+      generated heading.
