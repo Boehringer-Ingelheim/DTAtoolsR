@@ -81,8 +81,15 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   ), header_file)
   on.exit(unlink(c(html_file, header_file), force = TRUE), add = TRUE)
 
+  # md_file is markdown built from document text a third party controls
+  # (metadata title, dataset description, error_handling, contact names,
+  # ...), so the reader is pinned to a dialect without raw passthrough --
+  # left at the default "markdown" reader, a `\input{}` planted in any of
+  # those fields reads a server-side file into the PDF, and a `<script>`
+  # in one runs in the headless browser this HTML is about to be printed by.
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
     to = "html5",
     output = html_file,
     options = c("--standalone", "--include-in-header", header_file)
@@ -100,6 +107,7 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
     args <- c(
       headless_flag, "--disable-gpu", "--no-first-run",
       "--no-default-browser-check", "--disable-extensions",
+      "--disable-javascript",
       sprintf("--user-data-dir=%s", udd),
       "--no-pdf-header-footer",
       sprintf("--print-to-pdf=%s", pdf_file),

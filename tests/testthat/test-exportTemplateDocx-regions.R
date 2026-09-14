@@ -373,3 +373,102 @@ test_that("dta_template_placeholders() lists region markers and dataset placehol
     names(.tv_dataset_variables(dta@datasets[[1]], "x"))
   )
 })
+
+# A per-dataset value substituted into a region copy is document data, not
+# markup. A dataset whose description happens to be spelled exactly like a
+# block placeholder must still render as that text -- the same rule already
+# applied to a `variables` value outside a region -- rather than being
+# re-read as a placeholder and rendered as a table.
+
+test_that("a dataset value that spells a block token renders as text inside a region", {
+  dta <- create_example_DTA()
+  dta@datasets[[1]]@description <- "{SIGNATURES_TABLE}"
+  dta@datasets[[2]]@description <- "{SIGNATURES_TABLE}"
+  template <- .make_template(c("{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}"))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  expect_identical(.docx_paragraphs(out), c("{SIGNATURES_TABLE}", "{SIGNATURES_TABLE}"))
+  expect_length(.region_table_cells(.region_docx_summary(out)), 0)
+})
+
+test_that("a block token written by the template still renders inside a region", {
+  # The regression half of the fix above: a block the TEMPLATE bound to a
+  # dataset (as opposed to a value that merely spells one) must keep
+  # rendering as a real table, even though an ordinary dataset value is
+  # substituted into the same region repetition alongside it.
+  dta <- create_example_DTA()
+  dta@datasets[[1]]@description <- "An ordinary description."
+  dta@datasets[[2]]@description <- "Another ordinary description."
+  template <- .make_template(c(
+    "{#DATASETS}", "{DATASET_NAME}", "{DATASET_DESCRIPTION}", "{COLUMN_SPECS}", "{/DATASETS}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  summary <- .region_docx_summary(out)
+  cell_text <- .region_table_cells(summary)
+  expect_true("AGE" %in% cell_text)
+  expect_true("AVAL" %in% cell_text)
+
+  para_text <- summary$text[summary$content_type == "paragraph"]
+  expect_true("An ordinary description." %in% para_text)
+  expect_true("Another ordinary description." %in% para_text)
+
+  txt <- .docx_text(out)
+  expect_false(grepl("{COLUMN_SPECS}", txt, fixed = TRUE))
+})
+
+test_that("a block token outside a region still renders", {
+  # Guards against the `literal` hand-off leaking into the ordinary
+  # (non-region) path: with no region at all, .tv_expand_regions() must
+  # produce an empty `literal`, and an unrelated {SIGNATURES_TABLE} block
+  # placeholder must render exactly as it always did.
+  dta <- DTA(datasets = create_example_DTA()@datasets, metadata = create_example_DTAMetaData(2))
+  template <- .make_template("{SIGNATURES_TABLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  txt <- .docx_text(out)
+  expect_match(txt, "Emily Turner", fixed = TRUE)
+  expect_false(grepl("{SIGNATURES_TABLE}", txt, fixed = TRUE))
+})
+
+test_that("KNOWN DEFECT: a dataset value that spells an INLINE placeholder is substituted", {
+  # KNOWN DEFECT, pinned rather than endorsed -- DEV-016.
+  #
+  # The block half of this is fixed above: a value spelling {SIGNATURES_TABLE}
+  # renders as that text. The inline half is not. The pass that substitutes
+  # {DTA_TITLE} and friends runs over every paragraph of the document, the
+  # region copies included, so a value written by the region pass is read once
+  # more and resolved. Fixing it needs paragraph identity carried across the
+  # two passes, which a write and a re-read of word/document.xml destroys --
+  # only a token's spelling survives, and that is enough to recognise a block
+  # paragraph but not an inline placeholder sitting inside a sentence.
+  #
+  # When that lands, this test is meant to fail. Switch the two assertions to
+  # their opposites: the paragraph must then read "Title is {DTA_TITLE}"
+  # verbatim, and must NOT contain the resolved title.
+  dta <- create_example_DTA()
+  dta@datasets[[1]]@description <- "Title is {DTA_TITLE}"
+  dta@datasets[[2]]@description <- "An ordinary description."
+  template <- .make_template(c("{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}"))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  paras <- .docx_paragraphs(out)
+  expect_true("Title is Example DTA" %in% paras)
+  expect_false("Title is {DTA_TITLE}" %in% paras)
+})

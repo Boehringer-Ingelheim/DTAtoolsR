@@ -379,7 +379,7 @@ test_that("get_dta_creation_template_path() prefers an earlier directory and can
 
 # ---- resolve_template_dataset_path -----------------------------------------
 
-test_that("resolve_template_dataset_path() resolves an absolute path directly", {
+test_that("resolve_template_dataset_path() does not resolve an absolute path", {
   tmp_dir <- tempfile()
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
@@ -387,11 +387,12 @@ test_that("resolve_template_dataset_path() resolves an absolute path directly", 
   writeLines("name: x", ds_file)
 
   fn <- app_fn("resolve_template_dataset_path")
-  # template_path points somewhere else entirely -- the absolute ref must win
-  # without even consulting it.
+  # An absolute ref names a file outside the template's own directory, so it
+  # is no longer honored -- see the dedicated path-traversal test below for
+  # the rest of that contract.
   result <- fn(ds_file, "/some/unrelated/dir/template.yaml")
 
-  expect_equal(result, normalizePath(ds_file, winslash = "/", mustWork = TRUE))
+  expect_identical(result, "")
 })
 
 test_that("resolve_template_dataset_path() resolves a path relative to the template file", {
@@ -437,6 +438,39 @@ test_that("resolve_template_dataset_path() returns '' when the reference resolve
   fn <- app_fn("resolve_template_dataset_path")
   expect_equal(fn("does-not-exist-anywhere.yaml", template_path), "")
   expect_equal(fn("", template_path), "")
+})
+
+test_that("a template dataset reference cannot escape the template directory", {
+  root <- tempfile()
+  dir.create(root)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  tpl_dir <- file.path(root, "tpl")
+  dir.create(tpl_dir)
+  tpl <- file.path(tpl_dir, "t.yaml")
+  writeLines("kind: dta_creation_template", tpl)
+  ds <- file.path(tpl_dir, "ds.yaml")
+  writeLines("name: x", ds)
+  secret <- file.path(root, "secret.yaml")
+  writeLines("name: secret", secret)
+
+  fn <- app_fn("resolve_template_dataset_path")
+  under <- app_fn(".dta_path_under")
+
+  # Regression half: the legitimate sibling must still resolve, or the guard
+  # below is too strict to be usable.
+  legit <- fn("ds.yaml", tpl)
+  expect_true(file.exists(legit))
+  expect_true(under(legit, tpl_dir))
+
+  expect_identical(fn("../secret.yaml", tpl), "")
+  expect_identical(fn("..\\secret.yaml", tpl), "")
+
+  climb <- paste(rep("..", 8), collapse = "/")
+  expect_identical(fn(file.path(climb, "Windows/win.ini"), tpl), "")
+
+  # The branch this removed: an absolute path to a file that genuinely exists
+  # must not resolve either.
+  expect_identical(fn(normalizePath(secret, winslash = "/", mustWork = TRUE), tpl), "")
 })
 
 # ---- dta_template_choices / default / allow_custom -------------------------

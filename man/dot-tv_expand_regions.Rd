@@ -16,9 +16,13 @@
 \item{variables}{Named list of caller-supplied placeholder values.}
 }
 \value{
-A named character vector, sentinel to \code{"{NAME:dataset}"}, for every
-dataset block a region copy bound -- to be added to the \code{blocks}
-argument of \code{\link[=.tv_render_blocks]{.tv_render_blocks()}}. Empty when nothing was expanded.
+A list with two elements. \code{blocks}: a named character vector,
+sentinel to \code{"{NAME:dataset}"}, for every dataset block a region copy
+bound -- to be added to the \code{blocks} argument of \code{\link[=.tv_render_blocks]{.tv_render_blocks()}}.
+\code{literal}: a character vector of every block-token spelling produced by
+substituting a dataset value into a region copy, for
+\code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}}'s \code{literal} argument. Both \code{character(0)}
+when nothing was expanded.
 }
 \description{
 Runs as "pass 0", before \code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}}, directly on the

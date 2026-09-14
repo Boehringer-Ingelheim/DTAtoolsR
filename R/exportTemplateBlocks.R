@@ -125,15 +125,21 @@
 #' alone and reported instead.
 #'
 #' A token the caller supplied a value for is left unstamped too: `variables`
-#' wins over a block, and pass 1 needs the token intact to substitute into.
+#' wins over a block, and pass 1 needs the token intact to substitute into. A
+#' token spelling listed in `literal` is left unstamped for the same reason:
+#' it names a value [.tv_expand_regions()] already substituted into a region
+#' copy, not a block the template asked for.
 #'
 #' @param xml_path Character. Path to the template's `word/document.xml`.
 #' @param nonce Character. This export's nonce, from [.tv_block_nonce()].
 #' @param variables Named list of placeholder values; keys here take precedence.
+#' @param literal Character vector of block-token spellings [.tv_expand_regions()]
+#'   produced by substituting a dataset value into a region copy; left as
+#'   written for the same reason a `variables` key is.
 #' @return A named character vector mapping sentinel to the token it replaced,
 #'   in document order. Empty when the template has no block placeholder.
 #' @keywords internal
-.tv_mark_block_paragraphs <- function(xml_path, nonce, variables = list()) {
+.tv_mark_block_paragraphs <- function(xml_path, nonce, variables = list(), literal = character(0)) {
   doc <- tryCatch(xml2::read_xml(xml_path), error = function(e) NULL)
   if (is.null(doc)) {
     return(character(0))
@@ -147,7 +153,7 @@
   found <- character(0)
   for (p in paras) {
     token <- trimws(xml2::xml_text(p))
-    if (!nzchar(token) || token %in% keys || !.tv_is_block_token(token)) {
+    if (!nzchar(token) || token %in% keys || token %in% literal || !.tv_is_block_token(token)) {
       next
     }
     sentinel <- .tv_block_sentinel(nonce, length(found) + 1L)

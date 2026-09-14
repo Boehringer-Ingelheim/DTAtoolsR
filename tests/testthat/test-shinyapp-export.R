@@ -275,3 +275,103 @@ test_that("the export modal names itself once", {
     1L
   )
 })
+
+test_that("raw LaTeX in document text does not reach the generated .tex", {
+  skip_if_not(rmarkdown::pandoc_available())
+
+  # The markdown pandoc_convert() reads here is built from document text a
+  # third party controls (metadata title, dataset description, contact
+  # names, ...), so the reader has to be pinned to a dialect without raw
+  # passthrough: left at the default "markdown" reader, a `\input{}` planted
+  # in any of those fields is typeset verbatim into the PDF, reading an
+  # arbitrary server-side file into the delivered document.
+  backslash <- rawToChar(as.raw(92))
+  md_file <- tempfile(fileext = ".md")
+  on.exit(unlink(md_file, force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "# Study Title",
+      "",
+      paste0("Some narrative text with a raw command: ", backslash, "input{some/path.tex}"),
+      "",
+      "More surrounding prose that must survive conversion."
+    ),
+    md_file
+  )
+
+  tex_file <- tempfile(fileext = ".tex")
+  on.exit(unlink(tex_file, force = TRUE), add = TRUE)
+  rmarkdown::pandoc_convert(
+    input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
+    to = "latex",
+    output = tex_file
+  )
+  tex <- paste(readLines(tex_file, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl(paste0(backslash, "input{"), tex, fixed = TRUE))
+  # The rest of the line must still have made it through, so the assertion
+  # above fails on a conversion that silently dropped the whole line rather
+  # than on one that neutralised only the raw command.
+  expect_match(tex, "More surrounding prose that must survive conversion", fixed = TRUE)
+})
+
+test_that("raw HTML in document text does not reach the generated HTML", {
+  skip_if_not(rmarkdown::pandoc_available())
+
+  # Same reasoning as the LaTeX case above: a <script> planted in document
+  # text must not survive as a live tag, or it executes in the headless
+  # browser that markdown_to_pdf_via_chrome() drives server-side.
+  md_file <- tempfile(fileext = ".md")
+  on.exit(unlink(md_file, force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "# Study Title",
+      "",
+      "Some narrative text with a raw tag: <script>alert(1)</script>",
+      "",
+      "More surrounding prose that must survive conversion."
+    ),
+    md_file
+  )
+
+  html_file <- tempfile(fileext = ".html")
+  on.exit(unlink(html_file, force = TRUE), add = TRUE)
+  rmarkdown::pandoc_convert(
+    input = normalizePath(md_file),
+    from = "markdown-raw_tex-raw_html-raw_attribute",
+    to = "html5",
+    output = html_file
+  )
+  html <- paste(readLines(html_file, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("<script>", html, fixed = TRUE))
+  expect_match(html, "More surrounding prose that must survive conversion", fixed = TRUE)
+})
+
+test_that("editor tables escape document text but keep the action buttons", {
+  skip_if_not_installed("DT")
+
+  df <- data.frame(
+    filename = "<img src=x onerror=alert(1)>",
+    description = "plain text",
+    stringsAsFactors = FALSE
+  )
+  df$Actions <- "<button>x</button>"
+
+  wid <- DT::datatable(df, rownames = FALSE, escape = -ncol(df))
+
+  # DT neither escapes `x$data` eagerly nor carries a plain `options$escape`
+  # field: the resolved column index is stashed in the "escapeIdx" attribute
+  # of `options`, and per-cell escaping happens lazily in the widget's
+  # preRenderHook, which htmlwidgets runs immediately before the table's JSON
+  # reaches the browser -- Shiny's renderDT() included. So the hook is what
+  # has to be exercised, not the raw `x$data`/`x$options$escape` fields, which
+  # this DT version does not populate the way one might guess. Called through
+  # the widget's own public field rather than htmlwidgets:::createPayload(),
+  # to keep the suite off another package's internals.
+  rendered <- unlist(wid$preRenderHook(wid)$x$data)
+
+  expect_true(any(grepl("&lt;img src=x onerror=alert(1)&gt;", rendered, fixed = TRUE)))
+  expect_true(any(grepl("<button>x</button>", rendered, fixed = TRUE)))
+})

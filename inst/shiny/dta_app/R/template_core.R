@@ -306,36 +306,53 @@ dta_template_list_fields <- function() {
   )]
 }
 
+# TRUE when `path` resolves to somewhere strictly inside `root`. Both sides are
+# normalized first, so ".." components, mixed slash styles and a symlink or
+# junction pointing out of `root` are all resolved before the comparison. The
+# trailing slash forced onto `root` is what stops a sibling whose name merely
+# starts with it -- "<root>2/x" against root "<root>" -- from counting as
+# inside. `root` itself is therefore NOT under `root`, which no caller needs:
+# a dataset reference always names a file.
+.dta_path_under <- function(path, root) {
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  root <- normalizePath(root, winslash = "/", mustWork = FALSE)
+  root <- paste0(sub("/+$", "", root), "/")
+  startsWith(path, root)
+}
+
 # Resolve a dataset reference from template YAML.
+#
+# A dataset reference is document content, not configuration: it comes
+# straight out of a template file that may itself have come from anywhere
+# (a git-fetched template repository, a user upload). It may therefore only
+# ever name a file inside the directory the template was found in, or a
+# bundled file by bare name -- never an arbitrary path elsewhere on disk. An
+# absolute ref and any ".." that climbs out of the template directory both
+# resolve to nothing rather than to whatever they happen to point at.
+#
 # Resolution order:
-# 1) absolute path
-# 2) relative to template file directory
-# 3) package extdata root
+# 1) relative to template file directory, and still inside it
+# 2) package extdata root, by basename only
 resolve_template_dataset_path <- function(ref, template_path) {
   if (is.null(ref) || !nzchar(ref)) {
     return("")
   }
-  # 1) absolute only. A bare relative name must NOT be resolved against the
-  # process working directory: the app's cwd is wherever it happened to be
-  # launched from, so a packaged template asking for "gf_dataset.yaml" could
-  # otherwise silently pick up an unrelated file of that name and quietly build
-  # a different DTA. R.utils::isAbsolutePath() gets Windows drive letters and
-  # UNC paths right, which a hand-rolled regex does not.
-  if (R.utils::isAbsolutePath(ref) && file.exists(ref)) {
-    return(normalizePath(ref, winslash = "/", mustWork = TRUE))
-  }
-
-  # 2) relative to template file
+  # 1) relative to template file, and constrained to stay there. A bare
+  # relative name must NOT be resolved against the process working directory:
+  # the app's cwd is wherever it happened to be launched from, so a packaged
+  # template asking for "gf_dataset.yaml" could otherwise silently pick up an
+  # unrelated file of that name and quietly build a different DTA.
   td <- dirname(template_path %||% "")
   if (nzchar(td)) {
     p2 <- file.path(td, ref)
-    if (file.exists(p2)) {
+    if (file.exists(p2) && .dta_path_under(p2, td)) {
       return(normalizePath(p2, winslash = "/", mustWork = TRUE))
     }
   }
 
-  # 3) package extdata root
-  p3 <- system.file("extdata", ref, package = "DTAtools")
+  # 2) package extdata root, by basename -- a reference cannot reach outside
+  # this directory either.
+  p3 <- system.file("extdata", basename(ref), package = "DTAtools")
   if (nzchar(p3) && file.exists(p3)) {
     return(normalizePath(p3, winslash = "/", mustWork = TRUE))
   }

@@ -217,7 +217,11 @@ requirements:
       Creating a document from a bundled creation template shall apply the
       template's base metadata, and a party profile chosen for one of the
       template's party slots shall overwrite that slot's affiliation and
-      contacts in the new document's metadata.
+      contacts in the new document's metadata. A datasets[] reference in the
+      template shall resolve only to a file inside the directory the template
+      itself was found in, or to a bundled file named without a path; a
+      reference that is absolute, or that climbs out of that directory, shall
+      resolve to nothing rather than to the file it names.
     risk: medium
     category: functional
     covers: [run_dta_app]

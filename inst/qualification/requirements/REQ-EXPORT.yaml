@@ -404,7 +404,11 @@ requirements:
       written without a dataset argument shall render that dataset alone,
       without a generated dataset heading. A marker that is not the only text
       of a body paragraph, or that has no counterpart, shall be left as
-      written and named in a warning.
+      written and named in a warning. A dataset value substituted into a
+      repetition shall render as the text it is and not as markup: a value
+      that spells a block placeholder shall not be rendered as that block,
+      and a value that spells an inline placeholder shall not itself be
+      substituted.
     risk: medium
     category: functional
     covers: [export_with_template]

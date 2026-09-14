@@ -91,7 +91,17 @@ dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}}
 bound to the repetition's dataset and rendered without its generated
 heading; an explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
 malformed marker -- unclosed, unopened, or not alone in its paragraph
--- is left in place and reported alongside unrendered blocks.}
+-- is left in place and reported alongside unrendered blocks. A dataset
+value that happens to spell a \emph{block} placeholder renders as the text it
+is, not as that block. The same is not yet true of an \emph{inline}
+placeholder: a value spelling one is substituted again by the pass that
+follows region expansion, so a dataset described as
+\code{"Title is {DTA_TITLE}"} comes out with the title resolved. That is a
+known defect (DEV-016 in \code{inst/qualification/deviations.yaml}), not a
+documented behaviour to rely on -- the two passes are separated by a
+write and a re-read of the document, and only a token's spelling
+survives that, which identifies a block paragraph but not an inline
+placeholder inside a sentence.}
 }
 
 Additional or overriding values can be supplied through \code{variables}; names may

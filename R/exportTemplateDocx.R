@@ -56,7 +56,17 @@
 #'     bound to the repetition's dataset and rendered without its generated
 #'     heading; an explicit `{COLUMN_SPECS:NAME}` is left as written. A
 #'     malformed marker -- unclosed, unopened, or not alone in its paragraph
-#'     -- is left in place and reported alongside unrendered blocks.}
+#'     -- is left in place and reported alongside unrendered blocks. A dataset
+#'     value that happens to spell a *block* placeholder renders as the text it
+#'     is, not as that block. The same is not yet true of an *inline*
+#'     placeholder: a value spelling one is substituted again by the pass that
+#'     follows region expansion, so a dataset described as
+#'     `"Title is {DTA_TITLE}"` comes out with the title resolved. That is a
+#'     known defect (DEV-016 in `inst/qualification/deviations.yaml`), not a
+#'     documented behaviour to rely on -- the two passes are separated by a
+#'     write and a re-read of the document, and only a token's spelling
+#'     survives that, which identifies a block paragraph but not an inline
+#'     placeholder inside a sentence.}
 #' }
 #'
 #' Additional or overriding values can be supplied through `variables`; names may
@@ -767,8 +777,9 @@ dta_template_placeholders <- function(dta = NULL) {
   region_blocks <- character(0)
   blocks <- character(0)
   if (file.exists(main)) {
-    region_blocks <- .tv_expand_regions(main, dta, nonce, variables)
-    blocks <- .tv_mark_block_paragraphs(main, nonce, variables)
+    regions <- .tv_expand_regions(main, dta, nonce, variables)
+    region_blocks <- regions$blocks
+    blocks <- .tv_mark_block_paragraphs(main, nonce, variables, literal = regions$literal)
   }
 
   unresolved <- character(0)

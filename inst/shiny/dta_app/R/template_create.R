@@ -177,8 +177,9 @@ template_dataset_entry_kind <- function(ref) {
 # cannot resolve a dataset path "relative to the template file" without it --
 # it defaults to NULL, under which those two branches degrade to exactly what
 # resolve_template_dataset_path() already does with a NULL template_path
-# (absolute-path and package-extdata resolution still work; the
-# relative-to-template-file branch simply never matches).
+# (package-extdata resolution by bare name still works; the
+# relative-to-template-file branch simply never matches, and there is no
+# absolute-path branch left for it to fall back on).
 #
 # Returns list(datasets = <list of DTADataSet objects>, provenance = <list,
 # one entry per "template" dataset entry, in encounter order>). The legacy
