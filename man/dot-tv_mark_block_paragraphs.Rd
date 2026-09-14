@@ -4,7 +4,12 @@
 \alias{.tv_mark_block_paragraphs}
 \title{Stamp every template paragraph that is wholly a block placeholder}
 \usage{
-.tv_mark_block_paragraphs(xml_path, nonce, variables = list())
+.tv_mark_block_paragraphs(
+  xml_path,
+  nonce,
+  variables = list(),
+  literal = character(0)
+)
 }
 \arguments{
 \item{xml_path}{Character. Path to the template's \code{word/document.xml}.}
@@ -12,6 +17,10 @@
 \item{nonce}{Character. This export's nonce, from \code{\link[=.tv_block_nonce]{.tv_block_nonce()}}.}
 
 \item{variables}{Named list of placeholder values; keys here take precedence.}
+
+\item{literal}{Character vector of block-token spellings \code{\link[=.tv_expand_regions]{.tv_expand_regions()}}
+produced by substituting a dataset value into a region copy; left as
+written for the same reason a \code{variables} key is.}
 }
 \value{
 A named character vector mapping sentinel to the token it replaced,
@@ -35,6 +44,9 @@ whose only content is the token would match as a whole. Unstamped, it is left
 alone and reported instead.
 
 A token the caller supplied a value for is left unstamped too: \code{variables}
-wins over a block, and pass 1 needs the token intact to substitute into.
+wins over a block, and pass 1 needs the token intact to substitute into. A
+token spelling listed in \code{literal} is left unstamped for the same reason:
+it names a value \code{\link[=.tv_expand_regions]{.tv_expand_regions()}} already substituted into a region
+copy, not a block the template asked for.
 }
 \keyword{internal}

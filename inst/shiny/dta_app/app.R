@@ -2806,7 +2806,10 @@ server <- function(input, output, session) {
 
   # Per-row edit (pencil) + delete (bin) buttons for the editor DT tables.
   # Clicking sets a Shiny input to the 1-based data-row index (priority=event
-  # so re-clicking the same row still fires). Render the column with escape=FALSE.
+  # so re-clicking the same row still fires). The datatable() call escapes
+  # every other column and disables escaping for this one column alone
+  # (escape = -ncol(ov)), because everything else in the frame is document
+  # text and only this generated column is meant to be raw HTML.
   row_action_buttons <- function(edit_input, del_input, n,
                                  up_input = NULL, down_input = NULL) {
     vapply(seq_len(n), function(i) {
@@ -3103,7 +3106,7 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
         pageLength = 8, dom = "tp", scrollX = TRUE,
@@ -3456,7 +3459,7 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
         pageLength = 8, dom = "tp", scrollX = TRUE,
@@ -4365,7 +4368,7 @@ server <- function(input, output, session) {
     }
     DT::datatable(
       ov,
-      rownames = FALSE, selection = "none", escape = FALSE,
+      rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
         pageLength = 8, dom = "tp", scrollX = TRUE,
@@ -6579,8 +6582,17 @@ server <- function(input, output, session) {
             if (has_pandoc && has_pdf_engine()) {
               pdf_ok <- tryCatch(
                 {
+                  # output_file is markdown built from document text a third
+                  # party controls (metadata title, dataset description,
+                  # error_handling, contact names, ...), so the reader is
+                  # pinned to a dialect without raw passthrough -- left at
+                  # the default "markdown" reader, a `\input{}` planted in
+                  # any of those fields reads a server-side file into the
+                  # PDF, and a `<script>` in one runs in whatever headless
+                  # browser ends up rendering it (wkhtmltopdf included).
                   rmarkdown::pandoc_convert(
                     input = normalizePath(output_file),
+                    from = "markdown-raw_tex-raw_html-raw_attribute",
                     to = "pdf",
                     output = pdf_file
                   )

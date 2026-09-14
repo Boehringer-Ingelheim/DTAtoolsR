@@ -360,6 +360,41 @@ deviations:
     opened: 2026-09-09
     closed: null
 
+  - id: DEV-016
+    title: An inline placeholder spelled by a dataset value is substituted inside a region
+    status: pending
+    severity: minor
+    affects: [REQ-EXPORT-031]
+    observed: >
+      Expanding a {#DATASETS} region substitutes each dataset's values into the
+      copied paragraphs, and the inline substitution pass afterwards walks every
+      paragraph of the document, those copies included. A value that spells an
+      inline placeholder is therefore read a second time and substituted: a
+      dataset described as "Title is {DTA_TITLE}" comes out with the title
+      resolved, and one described as "{YAML_EMBEDDED}" pulls the whole
+      serialised specification into the middle of a dataset section.
+    expected: >
+      A value substituted into a repetition renders as the text it is, the way
+      a value that spells a *block* placeholder now does.
+    impact: >
+      A document's own text can place content where its template author did not
+      put it. Everything reachable this way already belongs to the same
+      transfer, so the cost is document integrity, not confidentiality -- the
+      reader of an exported agreement can be shown a section the template did
+      not lay out, and nothing outside the document can be reached. The block
+      half of the same problem is fixed; this half is not, because the two
+      passes are separated by a write and a re-read of word/document.xml and
+      only the token's spelling survives that, which is enough to identify a
+      block paragraph but not an inline placeholder inside a sentence. Closing
+      it means carrying paragraph identity across the two passes.
+    workaround: >
+      A template author who repeats a region can keep free-text dataset
+      placeholders out of it. A reviewer comparing the export against the
+      template sees the inserted content.
+    reference: R/exportTemplateDocx.R:775-777
+    opened: 2026-09-14
+    closed: null
+
 limitations:
   - id: LIM-001
     title: A row whose every field is empty is dropped by the CSV reader

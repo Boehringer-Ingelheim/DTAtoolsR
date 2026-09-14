@@ -293,6 +293,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   that is already open -- it learns from the browser when that dialog is
   closed, dismissed, or replaced, so reopening it deliberately still works.
 
+### Security
+
+- **The PDF export no longer lets a document's own text act as markup.** A DTA
+  is a file that arrives from outside -- a supplier, a partner lab -- and its
+  free-text fields were written into the intermediate Markdown unchanged. Both
+  PDF routes then read that Markdown with Pandoc's default dialect, which has
+  raw LaTeX and raw HTML passthrough switched on, so a metadata title of
+  `\input{...}` typeset a file from the server into the delivered PDF, and one
+  containing a `<script>` ran in the headless browser that prints the
+  second route's PDF -- a document could reach the network from inside the
+  server. Both conversions now pin the reader to a dialect without raw
+  passthrough, and the browser is started with scripting disabled. Text that
+  looks like markup renders as the text it is.
+
+- **The file, column and rule editors escape the document text they display.**
+  All three tables disabled HTML escaping for the whole table so that a row's
+  action buttons would render, which also handed every other column -- file
+  names, column labels and descriptions, rule descriptions and the values in a
+  rule's conditions -- to the browser as live HTML. Escaping is now disabled
+  for the button column alone.
+
+- **A template's dataset reference can no longer name a file outside the
+  template's own directory.** A `datasets:` entry is document content, not
+  configuration, but it was resolved as an absolute path, or joined to the
+  template directory and followed wherever it led, so a reference could climb
+  out and load an unrelated file into the workspace. A reference now resolves
+  only inside the directory the template was found in, or to a bundled file by
+  bare name; an absolute path resolves nowhere. This is the rule
+  `get_dta_creation_template_path()` already applied to template names.
+
+- **A dataset value that spells a block placeholder renders as text inside a
+  repeating region.** Expanding a `{#DATASETS}` region substitutes each
+  dataset's values, and the pass that decides what is a block placeholder then
+  read those values back as if the template had written them: a dataset
+  described as `{SIGNATURES_TABLE}` grew a real approval-and-signatures table
+  in the document people sign. The two passes now agree that a value is a
+  value, which is the rule the rest of the mechanism already followed.
+
 ## [0.25.0] - 2026-09-07
 
 ### Added

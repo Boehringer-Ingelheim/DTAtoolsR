@@ -180,21 +180,25 @@
 #' @param dta A [DTA] object.
 #' @param nonce Character. This export's nonce, from [.tv_block_nonce()].
 #' @param variables Named list of caller-supplied placeholder values.
-#' @return A named character vector, sentinel to `"{NAME:dataset}"`, for every
-#'   dataset block a region copy bound -- to be added to the `blocks`
-#'   argument of [.tv_render_blocks()]. Empty when nothing was expanded.
+#' @return A list with two elements. `blocks`: a named character vector,
+#'   sentinel to `"{NAME:dataset}"`, for every dataset block a region copy
+#'   bound -- to be added to the `blocks` argument of [.tv_render_blocks()].
+#'   `literal`: a character vector of every block-token spelling produced by
+#'   substituting a dataset value into a region copy, for
+#'   [.tv_mark_block_paragraphs()]'s `literal` argument. Both `character(0)`
+#'   when nothing was expanded.
 #' @keywords internal
 .tv_expand_regions <- function(xml_path, dta, nonce, variables = list()) {
   doc <- tryCatch(xml2::read_xml(xml_path), error = function(e) NULL)
   if (is.null(doc)) {
-    return(character(0))
+    return(list(blocks = character(0), literal = character(0)))
   }
   body <- xml2::xml_find_first(
     doc,
     "/*[local-name()='document']/*[local-name()='body']"
   )
   if (inherits(body, "xml_missing")) {
-    return(character(0))
+    return(list(blocks = character(0), literal = character(0)))
   }
 
   markers <- .tv_region_markers()
@@ -203,6 +207,7 @@
   }
 
   found <- character(0)
+  literal <- character(0)
   changed <- FALSE
   from <- 1L
   repeat {
@@ -237,10 +242,37 @@
         xml2::xml_add_sibling(close, node, .where = "before")
         copy <- xml2::xml_find_first(close, "preceding-sibling::*[1]")
         found <- c(found, .tv_bind_region_block(copy, nm, nonce, length(found) + 1L, variables))
-        .tv_substitute_paragraphs(
-          xml2::xml_find_all(copy, "descendant-or-self::*[local-name()='p']"),
-          ds_vars
-        )
+        copy_paras <- xml2::xml_find_all(copy, "descendant-or-self::*[local-name()='p']")
+        before <- vapply(seq_along(copy_paras), function(k) trimws(xml2::xml_text(copy_paras[[k]])), character(1))
+        .tv_substitute_paragraphs(copy_paras, ds_vars)
+        # A value just substituted above is document data, not markup: a
+        # dataset description of exactly "{SIGNATURES_TABLE}" leaves this
+        # paragraph reading a block token it never asked to be. Outside a
+        # region that is already left as written --
+        # .tv_mark_block_paragraphs() skips any token a `variables` value
+        # spelled -- and a region copy deserves the same treatment, not a
+        # table it never asked for. The difference is that by the time pass 1
+        # runs, the document has already been written and re-read: there is
+        # no paragraph identity left to hand this off by, only the token's
+        # spelling. So that is what gets handed off, as `literal`, for pass 1
+        # to leave alone.
+        #
+        # Only a paragraph the substitution above actually rewrote counts --
+        # comparing its text before and after is what tells "a value was
+        # just written here" apart from "this paragraph already read like a
+        # block token and .tv_substitute_paragraphs() had nothing to do with
+        # it", e.g. an explicit `{COLUMN_SPECS:vitals}` deliberately left
+        # untouched by .tv_bind_region_block() above, which pass 1 must still
+        # be free to stamp in every repetition.
+        #
+        # The known cost of a spelling-based hand-off: a template that uses
+        # this same token spelling elsewhere as an actual block placeholder
+        # is left unrendered there too. That fails toward literal text rather
+        # than toward rendering the wrong thing, and the leftover scan at the
+        # end of .tv_render_blocks() reports it, same as any other
+        # placeholder left unrendered.
+        after <- vapply(seq_along(copy_paras), function(k) trimws(xml2::xml_text(copy_paras[[k]])), character(1))
+        literal <- c(literal, Filter(.tv_is_block_token, after[after != before]))
         .tv_renumber_drawings(copy, doc)
       }
     }
@@ -258,5 +290,5 @@
   if (changed) {
     xml2::write_xml(doc, xml_path)
   }
-  found
+  list(blocks = found, literal = unique(literal))
 }
