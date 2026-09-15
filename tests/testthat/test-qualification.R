@@ -167,6 +167,52 @@ test_that("bad arguments to the runner are rejected by name", {
   )
 })
 
+test_that("the runner still accepts the abbreviations match.arg() accepted", {
+  # Changing HOW an argument is rejected must not change WHICH values it
+  # accepts. match.arg() resolves a prefix that fits exactly one choice, so
+  # `scale = "qu"` has always meant "quick"; a caller's script that spelled it
+  # that way is not a caller this change is entitled to break.
+  expect_identical(qual_match_arg("qu", qual_scales(), "scale"), "quick")
+  expect_identical(qual_match_arg("st", qual_scales(), "scale"), "standard")
+  expect_identical(qual_match_arg("f", qual_scales(), "scale"), "full")
+  expect_identical(
+    qual_match_arg("n", qual_unit_test_modes(), "include_unit_tests"), "never"
+  )
+  # Exact spellings, the whole default vector (meaning "not supplied"), and an
+  # ambiguous prefix -- "a" fits both "auto" and "always", which match.arg()
+  # refuses too.
+  expect_identical(qual_match_arg("quick", qual_scales(), "scale"), "quick")
+  expect_identical(qual_match_arg(qual_scales(), qual_scales(), "scale"), "full")
+  expect_error(
+    qual_match_arg("a", qual_unit_test_modes(), "include_unit_tests"),
+    class = "rlang_error"
+  )
+
+  # And through the exported function: an abbreviated `scale` gets past the
+  # matcher, leaving the deliberately bad `formats` to be the thing that
+  # aborts. Were the abbreviation rejected, the message would name `scale`.
+  expect_error(
+    run_qualification(tempfile(), scale = "qu", formats = "epub"), "formats"
+  )
+  expect_error(
+    run_qualification(tempfile(), include_unit_tests = "n", formats = "epub"),
+    "formats"
+  )
+})
+
+test_that("the runner's declared defaults are the vocabulary they are checked against", {
+  # `qual_match_arg()` treats a value identical to the whole choice vector as
+  # "not supplied", which is only correct while the signature's default and the
+  # vocabulary function are the same vector. Nothing else would notice them
+  # drifting apart: the default would simply stop being recognised as one.
+  expect_identical(eval(formals(run_qualification)$scale), qual_scales())
+  expect_identical(
+    eval(formals(run_qualification)$include_unit_tests), qual_unit_test_modes()
+  )
+  expect_identical(eval(formals(run_qualification)$stages), qual_stages())
+  expect_identical(eval(formals(run_qualification)$formats), qual_formats())
+})
+
 test_that("the generated fixture's expected result is arithmetic, not a recording", {
   skip_on_cran()
   # The oracle must agree with a real validation, or every correctness claim in
