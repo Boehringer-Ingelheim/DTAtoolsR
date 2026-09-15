@@ -12,7 +12,7 @@ as_json_schema_length(x, ...)
 \item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-The column's declared maximum length, as a number, or \code{NA}
+The column's declared maximum length, as a number, or \code{NULL}
 when the specification declares none.
 }
 \description{

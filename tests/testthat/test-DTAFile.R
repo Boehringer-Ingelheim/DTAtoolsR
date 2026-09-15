@@ -85,7 +85,12 @@ test_that("Testing pattern with DTAFileTSV", {
 
   x <- read_file(file_info, path)
 
-  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+  # ANY-match on "R6" alone would also accept an un-materialised Dataset,
+  # Scanner or RecordBatchReader -- pin the real Table and its shape instead.
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 33)
+  expect_equal(nrow(x), 490)
+  expect_true(all(c("STUDYID", "DOMAIN") %in% names(x)))
 })
 
 
@@ -154,7 +159,13 @@ test_that("DTAFileDelim reads tab-delimited files", {
   expect_true(matches_filename(file_info, basename(path)))
 
   x <- read_file(file_info, path)
-  expect_s3_class(x, c("R6", "Table", "ArrowTabular", "ArrowObject"))
+
+  # ANY-match on "R6" alone would also accept an un-materialised Dataset,
+  # Scanner or RecordBatchReader -- pin the real Table and its shape instead.
+  expect_true(all(c("Table", "ArrowTabular") %in% class(x)))
+  expect_equal(ncol(x), 33)
+  expect_equal(nrow(x), 490)
+  expect_true(all(c("STUDYID", "DOMAIN") %in% names(x)))
 })
 
 

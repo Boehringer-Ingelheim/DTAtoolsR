@@ -442,7 +442,7 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
 #' @title as_json_schema_length
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema length.
-#' @return The column's declared maximum length, as a number, or \code{NA}
+#' @return The column's declared maximum length, as a number, or \code{NULL}
 #'   when the specification declares none.
 #' @usage as_json_schema_length(x, ...)
 #' @export

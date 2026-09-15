@@ -154,7 +154,17 @@ test_that("bad arguments to the runner are rejected by name", {
   expect_error(run_qualification(tempfile(), stages = "SIT"), class = "rlang_error")
   expect_error(run_qualification(tempfile(), formats = "epub"), class = "rlang_error")
   expect_error(run_qualification(tempfile(), filter = c("a", "b")), class = "rlang_error")
-  expect_error(run_qualification(tempfile(), scale = "enormous"))
+  # `scale` and `include_unit_tests` used base::match.arg(), whose failure is a
+  # plain simpleError carrying a message in the system language -- so the only
+  # thing assertable about it was "some base R error happened", which a typo in
+  # the call satisfies just as well as the rejection. They now fail the way
+  # their four siblings above do, which is what REQ-ROBUST-015 requires of a
+  # user-facing error.
+  expect_error(run_qualification(tempfile(), scale = "enormous"), class = "rlang_error")
+  expect_error(
+    run_qualification(tempfile(), include_unit_tests = "sometimes"),
+    class = "rlang_error"
+  )
 })
 
 test_that("the generated fixture's expected result is arithmetic, not a recording", {

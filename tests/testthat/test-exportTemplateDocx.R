@@ -578,9 +578,12 @@ test_that("export_with_template validates its inputs", {
   txt_template <- tempfile(fileext = ".txt")
   file.create(txt_template)
   on.exit(unlink(txt_template, force = TRUE), add = TRUE)
+  # "must be a" alone matches all six cli_abort() validation messages in
+  # exportTemplateDocx.R; ".docx" pins this to the extension check specifically.
   expect_error(
     export_with_template(dta, txt_template, tempfile(fileext = ".docx")),
-    "must be a"
+    ".docx",
+    fixed = TRUE
   )
 })
 

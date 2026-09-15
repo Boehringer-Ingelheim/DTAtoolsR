@@ -349,29 +349,129 @@ test_that("raw HTML in document text does not reach the generated HTML", {
   expect_match(html, "More surrounding prose that must survive conversion", fixed = TRUE)
 })
 
-test_that("editor tables escape document text but keep the action buttons", {
+test_that("editor tables escape attacker-controlled text but keep the Actions buttons live", {
   skip_if_not_installed("DT")
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("shinyjs")
 
-  df <- data.frame(
-    filename = "<img src=x onerror=alert(1)>",
-    description = "plain text",
-    stringsAsFactors = FALSE
-  )
-  df$Actions <- "<button>x</button>"
+  # The previous version of this test built its OWN one-row data frame and
+  # called DT::datatable() on it directly: it proved DT escapes correctly
+  # when handed the right `escape=` argument, and nothing about
+  # output$file_tbl, output$col_tbl or output$rule_tbl (app.R), the three real
+  # call sites that each independently pass `escape = -ncol(ov)`. It would
+  # have kept passing had all three reverted to `escape = FALSE`.
+  #
+  # Driving the real render through shiny::testServer() only gets partway,
+  # and it is worth being explicit about the wall: DT::renderDataTable()
+  # defaults to `server = TRUE` (all three call sites take that default), and
+  # in server mode the render strips `x$data` before the value testServer can
+  # read is built -- the escaped cells are computed later, per AJAX request,
+  # by DT:::dataTablesFilter(), reached only through a live browser round
+  # trip. shiny's MockShinySession (what testServer runs on) deliberately
+  # refuses that round trip -- its handleRequest is `stop("for internal use
+  # only")` and its data-object registry is guarded the same way -- so no
+  # amount of testServer plumbing reaches the actual escaped output. What IS
+  # reachable, and what the first block below checks, is that the real render
+  # runs against real edited state without error and in the real
+  # `serverSide = TRUE` configuration.
+  #
+  # The escaping guarantee itself -- the actual point of this test -- is
+  # checked the same way the original test did (DT's own preRenderHook, kept
+  # off DT's private internals), but now against the LIVE overview each call
+  # site builds (dta_handlers_overview()/dta_columns_overview()/
+  # dta_rules_overview(), fed by state this block edits through the real
+  # editor inputs) and the identical `DT::datatable()` arguments each call
+  # site uses. The Actions column is the one stand-in left: row_action_buttons()
+  # is a closure private to the server function, unreachable from a test, so a
+  # representative button tag takes its place there.
+  #
+  # A source-level pin closes the remaining gap: it fails if any call site's
+  # `escape = -ncol(ov)` argument itself is ever edited away, which is exactly
+  # the regression neither the render check nor the escaping check above can
+  # see.
 
-  wid <- DT::datatable(df, rownames = FALSE, escape = -ncol(df))
+  app_server_dir <- function() .shiny_app_dir()
+  app_file_input <- function(filename) {
+    path <- app_fixture_path(filename)
+    data.frame(
+      name = filename, size = file.size(path), type = "", datapath = path,
+      stringsAsFactors = FALSE
+    )
+  }
 
-  # DT neither escapes `x$data` eagerly nor carries a plain `options$escape`
-  # field: the resolved column index is stashed in the "escapeIdx" attribute
-  # of `options`, and per-cell escaping happens lazily in the widget's
-  # preRenderHook, which htmlwidgets runs immediately before the table's JSON
-  # reaches the browser -- Shiny's renderDT() included. So the hook is what
-  # has to be exercised, not the raw `x$data`/`x$options$escape` fields, which
-  # this DT version does not populate the way one might guess. Called through
-  # the widget's own public field rather than htmlwidgets:::createPayload(),
-  # to keep the suite off another package's internals.
-  rendered <- unlist(wid$preRenderHook(wid)$x$data)
+  xss <- "<img src=x onerror=alert(1)>"
+  escaped_xss <- "&lt;img src=x onerror=alert(1)&gt;"
 
-  expect_true(any(grepl("&lt;img src=x onerror=alert(1)&gt;", rendered, fixed = TRUE)))
-  expect_true(any(grepl("<button>x</button>", rendered, fixed = TRUE)))
+  # Re-escape the LIVE overview data through the same call DT::datatable()
+  # receives at each real site (rownames/escape are what decide escaping;
+  # class/width/options do not, and are dropped as noise).
+  escaped_cells <- function(ov) {
+    ov$Actions <- "<button>x</button>" # stand-in -- see the WHY comment above
+    wid <- DT::datatable(ov, rownames = FALSE, selection = "none", escape = -ncol(ov))
+    unlist(wid$preRenderHook(wid)$x$data)
+  }
+
+  check_table <- function(output_json, ov) {
+    out <- unclass(output_json)
+    expect_match(out, '"serverSide":true', fixed = TRUE)
+    expect_match(out, ">Actions<", fixed = TRUE)
+
+    cells <- escaped_cells(ov)
+    expect_true(any(grepl(escaped_xss, cells, fixed = TRUE)))
+    expect_false(any(grepl(xss, cells, fixed = TRUE)))
+    expect_true(any(grepl("<button>x</button>", cells, fixed = TRUE)))
+  }
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    # file_tbl: attacker text in a handler's pattern description.
+    session$setInputs(edit_files = 1)
+    session$setInputs(file_add = 1)
+    session$setInputs(
+      file_filename = "extra.csv", file_type = "csv", file_pattern = FALSE,
+      file_pattern_description = xss
+    )
+    session$setInputs(file_save = 1)
+    expect_null(rv$file_msg)
+    check_table(output$file_tbl, app_fn("dta_handlers_overview")(rv$dta, "clinical_data"))
+
+    # col_tbl: attacker text in a column's description.
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(
+      col_id = "ZZXSS", col_label = "Test column", col_backend = "SAS",
+      col_type = "Char", col_format = "", col_length = "10",
+      col_nullable = TRUE, col_values = "", col_pattern = "",
+      col_desc = xss
+    )
+    session$setInputs(col_save = 1)
+    expect_null(rv$col_msg)
+    check_table(output$col_tbl, app_fn("dta_columns_overview")(rv$dta, "clinical_data"))
+
+    # rule_tbl: attacker text in a rule's description.
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_unique")
+    session$setInputs(rule_id = "zzxss_unique", rule_desc = xss, rule_cols = "SUBJECT_ID")
+    session$setInputs(rule_save = 1)
+    expect_null(rv$rule_msg)
+    check_table(output$rule_tbl, app_fn("dta_rules_overview")(rv$dta, "clinical_data"))
+  })
+
+  app_code <- app_source("app.R")
+  for (id in c("file_tbl", "col_tbl", "rule_tbl")) {
+    block <- regmatches(
+      app_code,
+      regexpr(
+        paste0("(?s)output\\$", id, " <- DT::renderDataTable\\(\\{.*?\\n  \\}\\)"),
+        app_code,
+        perl = TRUE
+      )
+    )
+    expect_length(block, 1)
+    expect_match(block, "escape = -ncol(ov)", fixed = TRUE)
+  }
 })

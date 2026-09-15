@@ -83,15 +83,20 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
   unscoped_names <- c("names", "print", "labels")
 
   r_dir <- testthat::test_path("..", "..", "R")
+  testthat::skip_if_not(dir.exists(r_dir), "package source not available")
+
   r_files <- list.files(r_dir, pattern = "\\.R$", full.names = TRUE)
+  expect_gt(length(r_files), 0)
 
   guard_pattern <- 'exists\\("([a-zA-Z_.]+)",\\s*mode\\s*=\\s*"function"'
 
   offenders <- character(0)
+  total_hits <- 0
 
   for (f in r_files) {
     lines <- readLines(f, warn = FALSE)
     hits <- grep(guard_pattern, lines)
+    total_hits <- total_hits + length(hits)
 
     for (i in hits) {
       line <- lines[i]
@@ -116,6 +121,12 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
       }
     }
   }
+
+  # The scan is line-based: a styler reflow that folds the pattern or a
+  # matching line across lines would silently leave `hits` empty in every
+  # file without failing anything above. Pin a nonzero total so that
+  # happens loudly instead.
+  expect_gt(total_hits, 0)
 
   expect_true(
     length(offenders) == 0,

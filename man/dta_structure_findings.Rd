@@ -16,6 +16,10 @@ A list with \code{missing}, \code{unexpected} and \code{ok}. \code{ok} is \code{
 when the table's columns are EXACTLY the declared ones: a spec describes a
 transfer, and a column nobody agreed to carry is as much a departure from
 it as a column that was promised and never arrived.
+
+Aborts instead of returning when \code{column_names} repeats a name: that table
+cannot be validated at all, as neither the per-row checks nor the set
+comparisons here can see past the first column of a given name.
 }
 \description{
 Compares the columns a spec collection declares against the columns a file

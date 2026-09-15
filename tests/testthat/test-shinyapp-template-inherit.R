@@ -11,8 +11,6 @@
 # around, so the not-yet-written template index never has to exist for this
 # suite to run.
 
-Sys.setenv(NOT_CRAN = "true")
-
 # cli wraps a long condition message across lines at the console width, which
 # breaks a naive substring/regexp match the moment the wrap lands inside the
 # very text being asserted on (verified empirically while writing this file --

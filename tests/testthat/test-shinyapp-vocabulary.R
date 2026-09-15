@@ -3,8 +3,6 @@
 # app's helper files are auto-sourced by Shiny at launch and are not part of
 # the package namespace).
 
-Sys.setenv(NOT_CRAN = "true")
-
 # cli wraps a long condition message at the console width, which breaks a naive
 # substring match the moment the wrap lands inside the text being asserted on.
 # Same helper, same rationale, as test-shinyapp-template-parties.R and

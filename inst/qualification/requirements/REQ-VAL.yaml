@@ -303,3 +303,18 @@ requirements:
     category: functional
     covers: [validate_table]
     source: R/validationFunctions.R
+
+  - id: REQ-VAL-028
+    text: >
+      A table carrying the same column name more than once shall be refused
+      with an error naming the repeated name, rather than validated.
+    risk: high
+    category: functional
+    covers: [validate_table, check]
+    source: R/streamingValidation.R
+    notes: >
+      A refusal rather than a finding, because such a table is not invalid but
+      undecidable: a declared name must identify exactly one column, and
+      nothing in the package may choose which of two the constraints describe.
+      Reported on as a finding it would have to name a verdict for constraints
+      that were never evaluated against one of the columns.

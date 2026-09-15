@@ -3,8 +3,6 @@
 # is necessary: the app's helper files are auto-sourced by Shiny at launch and
 # are not part of the package namespace).
 
-Sys.setenv(NOT_CRAN = "true")
-
 # A minimal but complete `dta_dataset_template` YAML, matching the shape
 # documented at the top of dataset_template.R. `version_line`/`date_line` are
 # parameterised so individual tests can swap in the unquoted-numeric /

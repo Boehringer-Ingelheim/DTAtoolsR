@@ -688,6 +688,60 @@ test_that("a column named only by a rule is described, not undeclared", {
 })
 
 
+test_that("a table carrying one name twice is refused, not silently half-checked", {
+  # Was certified CLEAN. `table[[name]]` returns the first match, so the second
+  # column of a repeated name was never checked, and both comparisons in the
+  # structural gate are `setdiff()` on sets, which cannot see repetition: three
+  # columns with two distinct names looked like an exact match for two declared
+  # ones. A whole column of data went uninspected and the transfer passed.
+  #
+  # Refused rather than reported as a finding, because the table is not invalid
+  # -- it is undecidable. Nothing here may choose which of the two columns the
+  # specification meant.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+      VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = FALSE)
+    )
+  )
+
+  expect_error(
+    dta_structure_findings(specs, c("ID", "VAL", "VAL")),
+    "duplicate column name"
+  )
+
+  # The regression as a user meets it: the second VAL holds values that must
+  # fail, and the verdict used to come back clean anyway.
+  duplicated_table <- data.frame(
+    ID = c("A001", "A002"),
+    VAL = c(50, 60),
+    VAL = c(999, -999),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  expect_error(
+    validate_table_detailed(specs = specs, table = duplicated_table, verbose = FALSE),
+    "duplicate column name"
+  )
+
+  # The guard is about repetition alone: the same table without the second VAL
+  # still validates, so this did not simply make every table fail.
+  sound_table <- data.frame(
+    ID = c("A001", "A002"),
+    VAL = c(50, 60),
+    stringsAsFactors = FALSE
+  )
+  sound <- validate_table_detailed(
+    specs = specs, table = sound_table, verbose = FALSE
+  )
+  expect_true(sound$ok)
+
+  # A table with no columns at all has no repetition to find, so the guard must
+  # not fire there -- it is missing columns, which is a finding, not a refusal.
+  expect_no_error(dta_structure_findings(specs, character(0)))
+})
+
+
 test_that("a scan that stopped early still settles closedness", {
   # `fail_fast` stops at the first problem, so nothing the BATCHES would have
   # decided may be reported as a pass. Closedness is not one of those: it is

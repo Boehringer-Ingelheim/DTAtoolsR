@@ -1,5 +1,3 @@
-Sys.setenv(NOT_CRAN = "true")
-
 # Coverage for R/createTemplateRepo.R -- the exported, package-namespace
 # create_template_repo(), which is the WRITE side of the feature
 # validate_template() (R/validateTemplate.R) is the read side of: it scaffolds

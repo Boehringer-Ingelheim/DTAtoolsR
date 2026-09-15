@@ -3,8 +3,6 @@
 # is necessary: the app's helper files are auto-sourced by Shiny at launch and
 # are not part of the package namespace).
 
-Sys.setenv(NOT_CRAN = "true")
-
 # cli wraps a long condition message across lines at the console width, which
 # breaks a naive substring/regexp match the moment the wrap lands inside the
 # very text being asserted on -- see the identical helper (and identical
