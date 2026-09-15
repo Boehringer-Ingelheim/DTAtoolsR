@@ -2270,6 +2270,13 @@ dta_validate_any_table <- function(specs,
   # judged against what the file really has.
   column_names <- dta_table_column_names(table)
 
+  # Refused here, where the names are first in hand, rather than at the
+  # structural gate below the scan: that gate is the same call, but it runs
+  # AFTER the batch loop, so a repeated name used to cost a full pass over the
+  # source -- with the uniqueness precompute, the spill files and the hours a
+  # 60 GB scan takes -- before an answer its header had already settled.
+  dta_abort_on_duplicate_columns(column_names)
+
   # Eligible uniqueness rules are answered by Arrow's grouped aggregation over
   # the whole source before the batch scan -- the distinct keys then live in
   # the C++ engine instead of an R hash that grows with key cardinality.
@@ -2329,6 +2336,31 @@ dta_validate_any_table <- function(specs,
 # is retained as the default. But it is a poor way to learn that a column is
 # absent, so a caller can ask to be told structurally instead.
 
+# Refuses a table that carries one name twice.
+#
+# A name carried twice makes the table UNVALIDATABLE rather than invalid, so it
+# is refused rather than reported as a finding. `table[[name]]` resolves to the
+# first occurrence, so every per-row check would silently inspect one column and
+# never see the other, while the structural comparisons are `setdiff()` on sets,
+# blind to repetition, and would call the shape sound. The result was a table
+# whose second column nobody looked at being certified clean, which is the one
+# verdict a transfer specification must never produce. Which of the two the spec
+# describes is not something this package may decide on the submitter's behalf.
+#
+# Kept as its own function because the answer is decidable from the names alone,
+# so it belongs wherever the names are first obtained -- before a scanner is
+# built, not after the scan it drives has finished.
+dta_abort_on_duplicate_columns <- function(column_names) {
+  duplicated_names <- unique(column_names[duplicated(column_names)])
+  if (length(duplicated_names) > 0) {
+    cli::cli_abort(c(
+      "The table has duplicate column name{?s}: {.field {duplicated_names}}.",
+      i = "A declared name must identify exactly one column."
+    ))
+  }
+  invisible(column_names)
+}
+
 #' @title Structural Findings from Column Names Alone
 #' @description
 #' Compares the columns a spec collection declares against the columns a file
@@ -2351,22 +2383,11 @@ dta_validate_any_table <- function(specs,
 #'   comparisons here can see past the first column of a given name.
 #' @keywords internal
 dta_structure_findings <- function(specs, column_names) {
-  # A name carried twice makes the table UNVALIDATABLE rather than invalid, so
-  # it is refused here instead of being reported as a finding. `table[[name]]`
-  # resolves to the first occurrence, so every per-row check would silently
-  # inspect one column and never see the other, while the comparisons below --
-  # both `setdiff()`, on sets -- are blind to repetition and would call the
-  # shape sound. The result was a table whose second column nobody looked at
-  # being certified clean, which is the one verdict a transfer specification
-  # must never produce. Which of the two the spec describes is not something
-  # this package may decide on the submitter's behalf.
-  duplicated_names <- unique(column_names[duplicated(column_names)])
-  if (length(duplicated_names) > 0) {
-    cli::cli_abort(c(
-      "The table has duplicate column name{?s}: {.field {duplicated_names}}.",
-      i = "A declared name must identify exactly one column."
-    ))
-  }
+  # The backstop. Every caller that can obtain the names earlier refuses there
+  # instead, so that a 60 GB source is not scanned to reach a verdict decided by
+  # its header; this keeps the refusal true of the function itself, for callers
+  # that arrive with nothing read yet.
+  dta_abort_on_duplicate_columns(column_names)
 
   columns <- tryCatch(specs@columns, error = function(e) NULL)
   declared <- if (is.null(columns) || length(columns) == 0) {

@@ -126,6 +126,12 @@ validate_table_detailed <- function(specs, table, verbose = TRUE, max_errors = N
     ))
   }
 
+  # Decidable from the names, so it is settled before the table is read rather
+  # than at the structural gate near the end of this function -- which reaches
+  # the same refusal, but only after every per-column check has run against a
+  # column set one of whose members was never visible to it.
+  dta_abort_on_duplicate_columns(names(table))
+
   # Read before the table is touched: these were recorded when the table was
   # typed at import, and they ride on the table so they cannot be separated
   # from the data they describe.
