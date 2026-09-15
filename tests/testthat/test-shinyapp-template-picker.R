@@ -13,8 +13,6 @@
 # file on disk: that keeps a chain-of-several/cycle/missing-parent fixture to
 # one line per template instead of one YAML file per template.
 
-Sys.setenv(NOT_CRAN = "true")
-
 skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")

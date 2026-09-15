@@ -3,8 +3,6 @@
 # HTML, with no server: that is the whole point of moving these out of app.R,
 # and test-shinyapp-template-ui.R covers the server wiring that calls them.
 
-Sys.setenv(NOT_CRAN = "true")
-
 skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")

@@ -25,8 +25,6 @@
 # on -- a regression in any one of them puts the modals back to blank, silently
 # and with every other test still green.
 
-Sys.setenv(NOT_CRAN = "true")
-
 skip_if_not_installed("shiny")
 
 # app.R is not part of app_env() (which sources only inst/shiny/dta_app/R), so

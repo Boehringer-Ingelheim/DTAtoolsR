@@ -19,8 +19,6 @@
 # test-bundled-templates.R are about. This file sets the live variable itself,
 # scoped to the one test that needs it.
 
-Sys.setenv(NOT_CRAN = "true")
-
 # The configured library, or "" when the developer has not set one up.
 local_template_library <- function() {
   lib <- trimws(Sys.getenv("DTATOOLS_LOCAL_LIBRARY", unset = ""))

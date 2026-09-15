@@ -1,5 +1,3 @@
-Sys.setenv(NOT_CRAN = "true")
-
 # Coverage for R/validateTemplate.R -- the exported, package-namespace
 # validate_template(), which re-uses (never re-implements) the Shiny app's own
 # template engine (inst/shiny/dta_app/R/*.R) via a private, memoised

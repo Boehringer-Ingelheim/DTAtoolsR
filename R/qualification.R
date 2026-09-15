@@ -33,6 +33,28 @@ qual_scales <- function() c("full", "standard", "quick")
 
 qual_formats <- function() c("md", "html", "docx", "pdf")
 
+# `match.arg()` with this package's error convention.
+#
+# Its own failure is a base R error: rendered in the system language and
+# carrying no class beyond `simpleError`, so a caller cannot match it portably
+# and a test asserting on it cannot tell the rejection apart from any other
+# base R failure in the same call. That is what REQ-ROBUST-015 rules out for a
+# user-facing error, and `run_qualification()` is exported.
+#
+# `choices` is read from the caller's own formals at the call site, so the
+# permitted values are stated once, in the signature, and cannot drift.
+qual_match_arg <- function(value, choices, arg) {
+  # The whole default vector means the caller supplied nothing, which is how
+  # match.arg() distinguishes a default from a choice.
+  if (identical(value, choices)) {
+    return(choices[[1]])
+  }
+  if (!is.character(value) || length(value) != 1L || !(value %in% choices)) {
+    cli::cli_abort("{.arg {arg}} must be one of {.val {choices}}.")
+  }
+  value
+}
+
 # The grammar every qualification test title must satisfy. It carries the test
 # case id, a human title, and the requirements the case verifies, so the
 # traceability matrix is derived from the tests themselves rather than
@@ -1688,8 +1710,10 @@ run_qualification <- function(output_dir,
                               perf_floor = NULL,
                               seed = 20260101L,
                               quiet = FALSE) {
-  scale <- match.arg(scale)
-  include_unit_tests <- match.arg(include_unit_tests)
+  scale <- qual_match_arg(scale, eval(formals()$scale), "scale")
+  include_unit_tests <- qual_match_arg(
+    include_unit_tests, eval(formals()$include_unit_tests), "include_unit_tests"
+  )
 
   if (!is.character(output_dir) || length(output_dir) != 1 || is.na(output_dir)) {
     cli::cli_abort("{.arg output_dir} must be a single directory path.")

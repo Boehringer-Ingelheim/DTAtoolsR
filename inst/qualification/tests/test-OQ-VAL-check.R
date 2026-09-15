@@ -303,3 +303,65 @@ test_that("OQ-VAL-028 | validate_table reaches the same verdict without a datase
     c(rules = dirty$rules_valid, import = dirty$import_valid)
   )
 })
+
+test_that("OQ-VAL-029 | a repeated column name is refused, not validated | REQ-VAL-028", {
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = FALSE)
+  ))
+
+  # The second VAL holds values outside anything the specification permits for
+  # a declared numeric column, so a verdict of "clean" could only mean the
+  # column was never looked at. Expected from how the frame is built, not from
+  # what the engine says about it.
+  repeated <- data.frame(
+    ID = c("A001", "A002"),
+    VAL = c(50, 60),
+    VAL = c(999, -999),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  qa_step(
+    "the frame really does carry one name twice",
+    c(n_columns = 3L, n_distinct_names = 2L),
+    c(
+      n_columns = ncol(repeated),
+      n_distinct_names = length(unique(names(repeated)))
+    )
+  )
+
+  outcome <- tryCatch(
+    {
+      validate_table(specs = specs, table = repeated, verbose = FALSE)
+      "returned a verdict"
+    },
+    error = function(e) "refused"
+  )
+  qa_step(
+    "validating it is refused rather than answered",
+    "refused", outcome
+  )
+
+  condition <- tryCatch(
+    validate_table(specs = specs, table = repeated, verbose = FALSE),
+    error = function(e) e
+  )
+  qa_check(
+    "the refusal names the repeated column",
+    grepl("VAL", conditionMessage(condition), fixed = TRUE),
+    conditionMessage(condition)
+  )
+
+  # Repetition alone is what is refused: the same specification and the same
+  # values, carried under distinct names, still reach a verdict.
+  distinct <- data.frame(
+    ID = c("A001", "A002"),
+    VAL = c(50, 60),
+    stringsAsFactors = FALSE
+  )
+  qa_step(
+    "a table with distinct names is validated as before",
+    "data.frame",
+    class(validate_table(specs = specs, table = distinct, verbose = FALSE))[[1]]
+  )
+})

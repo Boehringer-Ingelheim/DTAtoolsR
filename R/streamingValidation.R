@@ -2345,8 +2345,29 @@ dta_validate_any_table <- function(specs,
 #'   when the table's columns are EXACTLY the declared ones: a spec describes a
 #'   transfer, and a column nobody agreed to carry is as much a departure from
 #'   it as a column that was promised and never arrived.
+#'
+#'   Aborts instead of returning when `column_names` repeats a name: that table
+#'   cannot be validated at all, as neither the per-row checks nor the set
+#'   comparisons here can see past the first column of a given name.
 #' @keywords internal
 dta_structure_findings <- function(specs, column_names) {
+  # A name carried twice makes the table UNVALIDATABLE rather than invalid, so
+  # it is refused here instead of being reported as a finding. `table[[name]]`
+  # resolves to the first occurrence, so every per-row check would silently
+  # inspect one column and never see the other, while the comparisons below --
+  # both `setdiff()`, on sets -- are blind to repetition and would call the
+  # shape sound. The result was a table whose second column nobody looked at
+  # being certified clean, which is the one verdict a transfer specification
+  # must never produce. Which of the two the spec describes is not something
+  # this package may decide on the submitter's behalf.
+  duplicated_names <- unique(column_names[duplicated(column_names)])
+  if (length(duplicated_names) > 0) {
+    cli::cli_abort(c(
+      "The table has duplicate column name{?s}: {.field {duplicated_names}}.",
+      i = "A declared name must identify exactly one column."
+    ))
+  }
+
   columns <- tryCatch(specs@columns, error = function(e) NULL)
   declared <- if (is.null(columns) || length(columns) == 0) {
     character(0)

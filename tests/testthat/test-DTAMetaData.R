@@ -324,10 +324,10 @@ test_that("get_authorized_for_corrections returns configured values", {
   auth2 <- get_authorized_for_corrections(md2)
   auth3 <- get_authorized_for_corrections(md3)
 
-  expect_true(is.character(auth2) || is.list(auth2))
-  expect_true(length(auth2) >= 1)
-  expect_type(auth3, "character")
-  expect_true(nchar(auth3) > 0)
+  # create_example_DTAMetaData() hardcodes these values -- assert them
+  # directly rather than just their type and length.
+  expect_identical(auth2, c("Alice Smith", "Bob Johnson"))
+  expect_identical(auth3, "BI Data Management Team")
 })
 
 test_that("get_receiver_reviewers handles reviewer extraction", {

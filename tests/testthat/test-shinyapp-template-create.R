@@ -5,8 +5,6 @@
 # app_env()/app_fn() harness in helper-shinyapp.R (see that file for why the
 # app's helper files must be sourced into a private environment for testing).
 
-Sys.setenv(NOT_CRAN = "true")
-
 # Local copy of the isolation helper defined in test-shinyapp-template-
 # sources.R -- deliberately duplicated rather than shared, per that file's own
 # guidance, so this file does not depend on another test file's internals.

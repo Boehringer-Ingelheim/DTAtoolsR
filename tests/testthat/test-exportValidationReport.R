@@ -206,9 +206,17 @@ test_that("write_validation_report overwrite = TRUE allows replacing existing fi
   )
   expect_true(file.exists(out))
 
-  # File is still valid HTML
+  # read_html() returns a document even for an empty or truncated file, so
+  # !is.na(doc) passes regardless -- check that the second write actually
+  # produced the same report content the "zero messages" test expects.
   doc <- xml2::read_html(out)
-  expect_true(!is.na(doc))
+  summary_sections <- xml2::xml_find_all(doc, "//section[@class='report-summary']")
+  expect_length(summary_sections, 1)
+  msg_rows <- xml2::xml_find_all(
+    doc,
+    "//tr[contains(concat(' ', normalize-space(@class), ' '), ' msg-row ')]"
+  )
+  expect_length(msg_rows, 0)
 })
 
 test_that("write_validation_report validates title and falls back on NA", {

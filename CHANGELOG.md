@@ -213,6 +213,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **`run_qualification()` now rejects a bad `scale` or `include_unit_tests` the
+  same way it rejects its other arguments.** Both went through `match.arg()`,
+  whose failure is a base R error: no condition class a caller can match, and a
+  message rendered in the system language, sitting two lines above four
+  arguments that abort with a package condition. A caller could not branch on
+  it portably, and a test could assert nothing about it beyond "some base R
+  error occurred" -- which any unrelated failure in the same call satisfies
+  equally. Both now abort with a package condition naming the argument and its
+  permitted values. The accepted values and the defaults are unchanged.
+
+- **A table carrying the same column name twice is no longer certified clean
+  with one of those columns never checked.** `table[[name]]` returns the first
+  match, so every per-row check inspected one column and never saw the other,
+  while the structural gate compared the declared names against the table's
+  with `setdiff()` -- a set operation, blind to repetition, so three columns
+  bearing two distinct names looked like an exact match for the two that were
+  declared. A delivery whose duplicated column held values that must fail came
+  back with no errors at all. Duplicate names arise in practice from merged
+  extracts, a copy-paste in an export program, or two long names truncating to
+  the same string. Such a table is now refused rather than reported on, because
+  it is not invalid but undecidable: nothing in the package may choose which of
+  the two columns the specification describes. Tables with distinct column
+  names are unaffected.
+
 - **The validation report's overview no longer says every target passed when
   the metadata failed.** The summary cards were built from `results()`, which
   carries one row per dataset target and none for metadata -- so a transfer

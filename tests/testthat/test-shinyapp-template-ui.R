@@ -7,8 +7,6 @@
 # is only about the server wiring that joins it to the UI, driven through
 # shiny::testServer() exactly like test-shinyapp-server.R.
 
-Sys.setenv(NOT_CRAN = "true")
-
 skip_if_not_installed("shiny")
 skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
