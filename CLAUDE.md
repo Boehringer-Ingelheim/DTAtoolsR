@@ -14,12 +14,18 @@ Run everything from the repo root.
 | Tests | `Rscript -e "devtools::test()"` (one file: `devtools::test(filter='DTAFile')`) |
 | Style R code | `Rscript .github/scripts/style.R` |
 | Regenerate docs | `Rscript -e "roxygen2::roxygenise()"` |
-| Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
+| Full check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual', env=c(NOT_CRAN='true'))"` |
 | Fast hooks | `pre-commit run --all-files` (also runs in CI) |
 
 In PowerShell, `R` is an alias for `Invoke-History` — always use `Rscript`, and
 quote `-e` with double quotes so the argument survives. If `Rscript` is not on
 `PATH`, `CLAUDE.local.md` holds the absolute path for this machine.
+
+`NOT_CRAN` is part of the full-check command, not decoration: `R CMD check` does
+not set it, and without it every `skip_on_cran()` test skips — including the two
+in `test-generic-guards.R` that are the only way to observe a package-load
+failure. The `R-CMD-check` workflow sets the same variable, so leaving it out
+locally means checking something CI does not.
 
 `.Rprofile` sources `renv/activate.R`, which repoints `.libPaths()` at a project
 library keyed by the project *directory name*. The main checkout's is populated;

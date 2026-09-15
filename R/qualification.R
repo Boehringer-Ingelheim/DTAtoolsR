@@ -33,6 +33,8 @@ qual_scales <- function() c("full", "standard", "quick")
 
 qual_formats <- function() c("md", "html", "docx", "pdf")
 
+qual_unit_test_modes <- function() c("auto", "never", "always")
+
 # `match.arg()` with this package's error convention.
 #
 # Its own failure is a base R error: rendered in the system language and
@@ -41,18 +43,26 @@ qual_formats <- function() c("md", "html", "docx", "pdf")
 # base R failure in the same call. That is what REQ-ROBUST-015 rules out for a
 # user-facing error, and `run_qualification()` is exported.
 #
-# `choices` is read from the caller's own formals at the call site, so the
-# permitted values are stated once, in the signature, and cannot drift.
+# What it replaces, it replaces exactly: the values accepted are match.arg()'s,
+# abbreviations included. Only the failure differs. Narrowing an exported
+# function's accepted values is a separate decision from changing how it says
+# no, and it is not one this change is entitled to make on a caller's behalf.
 qual_match_arg <- function(value, choices, arg) {
   # The whole default vector means the caller supplied nothing, which is how
   # match.arg() distinguishes a default from a choice.
   if (identical(value, choices)) {
     return(choices[[1]])
   }
-  if (!is.character(value) || length(value) != 1L || !(value %in% choices)) {
-    cli::cli_abort("{.arg {arg}} must be one of {.val {choices}}.")
+  if (is.character(value) && length(value) == 1L) {
+    # pmatch() is what match.arg() itself resolves with: an exact hit first,
+    # then a prefix that fits exactly one choice. NA for no match and for an
+    # ambiguous one alike, both of which belong in the abort below.
+    hit <- pmatch(value, choices)
+    if (!is.na(hit)) {
+      return(choices[[hit]])
+    }
   }
-  value
+  cli::cli_abort("{.arg {arg}} must be one of {.val {choices}}.")
 }
 
 # The grammar every qualification test title must satisfy. It carries the test
@@ -1710,9 +1720,9 @@ run_qualification <- function(output_dir,
                               perf_floor = NULL,
                               seed = 20260101L,
                               quiet = FALSE) {
-  scale <- qual_match_arg(scale, eval(formals()$scale), "scale")
+  scale <- qual_match_arg(scale, qual_scales(), "scale")
   include_unit_tests <- qual_match_arg(
-    include_unit_tests, eval(formals()$include_unit_tests), "include_unit_tests"
+    include_unit_tests, qual_unit_test_modes(), "include_unit_tests"
   )
 
   if (!is.character(output_dir) || length(output_dir) != 1 || is.na(output_dir)) {

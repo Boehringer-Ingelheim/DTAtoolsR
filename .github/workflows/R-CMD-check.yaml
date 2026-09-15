@@ -205,6 +205,17 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      # `R CMD check` does not set this, so every `skip_on_cran()` test skips
+      # under it unless something does. Six tests are gated that way -- the two
+      # subprocess tests in test-generic-guards.R that are the ONLY way to
+      # observe a package-load failure, and three that run the qualification
+      # runner end to end -- and they are exactly the tests this package most
+      # needs a full check to run. They used to run here only because fourteen
+      # test files each called `Sys.setenv(NOT_CRAN = "true")` at file level,
+      # which leaked into every file sourced after them; when that leak was
+      # cleaned up the six went quiet without failing anything. Declared once,
+      # here, where it is visible: this package is not on CRAN, so run them.
+      NOT_CRAN: true
 
     steps:
       - uses: actions/checkout@v5

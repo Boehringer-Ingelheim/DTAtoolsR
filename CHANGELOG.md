@@ -234,8 +234,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   extracts, a copy-paste in an export program, or two long names truncating to
   the same string. Such a table is now refused rather than reported on, because
   it is not invalid but undecidable: nothing in the package may choose which of
-  the two columns the specification describes. Tables with distinct column
-  names are unaffected.
+  the two columns the specification describes. The refusal is reached from the
+  column names, before a row is read, so a large source is not scanned to the
+  end to be told something its header already settled. Tables with distinct
+  column names are unaffected.
 
 - **The validation report's overview no longer says every target passed when
   the metadata failed.** The summary cards were built from `results()`, which
