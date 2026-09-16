@@ -319,6 +319,100 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   that is already open -- it learns from the browser when that dialog is
   closed, dismissed, or replaced, so reopening it deliberately still works.
 
+- **A column spec that declares `values`, `pattern` or `nullable` but no
+  `type`, `format` or `length` had every one of those constraints silently
+  skipped.** Both the materialising and the streaming validation engines built
+  their checks from the column's compiled JSON Schema, and a column with no
+  declared type compiled to no schema at all, so a value list a specification
+  author had written down -- the one thing that column actually constrained --
+  was never checked against the data. Such a column is now checked like any
+  other; a column whose schema still cannot be compiled now raises a warning
+  of class `dta_columnspec_schema_failed` instead of failing silently.
+
+- **`missing_values` on a tabular handler stopped the reader's own defaults
+  from applying.** The declared tokens replaced the readers' default missing
+  set of `""` and `"NA"` instead of adding to it, so a handler that declared,
+  say, `"."` as missing also made a literal `"NA"` in the data stop being
+  treated as missing. Declared tokens now add to the reader defaults rather
+  than replacing them (REQ-FILE-004).
+
+- **A DTA with duplicate, empty or `NA` dataset names is now rejected outright
+  instead of silently validating the wrong one twice.** `check()` looks a
+  dataset up by name, so two datasets sharing a name had the first validated
+  twice and the second never -- and a `datasets` list assembled with no names
+  at all, or with an empty string among them, was just as unrecoverable. The
+  class validator now refuses such a `datasets` list, naming the duplicate
+  names in the message.
+
+- **A file dataset handler that declares several file name patterns no longer
+  hides a missing one behind a delivered match for another.** When
+  `pattern = TRUE`, one delivered file satisfying any of the declared patterns
+  used to mark the whole handler as satisfied, so a second, still-missing
+  pattern was never reported. Every declared pattern with no delivered file
+  matching it is now reported missing on its own. Handlers using
+  `pattern = FALSE`, where several names are alternates for one file, are
+  unaffected.
+
+- **A free-text top-level metadata date now records why it could not be read,
+  instead of disappearing without a trace (closes DEV-009).** The top-level
+  `date` field is `Date`-typed, so a phrase with no leading ISO date -- unlike
+  the same phrase in a transmission date field, which is legitimate free
+  text -- still becomes `NA`, but it now records an import issue for field
+  `"date"` with reason `"not_convertible"`, carrying the original text.
+  `check()` on the DTA now reports metadata as not ok for such a delivery
+  instead of passing a date that was silently discarded. Transmission-date
+  phrases are unchanged.
+
+- **A descendant template can no longer overwrite a metadata field its parent
+  chain sealed through an `options:` or `party_slots:` entry.** Only a direct
+  edit of the definition tree was checked before, so a sealed field reachable
+  through an option's `target:`, `effects:`, `effects_all:` or `set:` map --
+  written only once the template is instantiated and a value is chosen --
+  could still be overwritten from a descendant template with no warning. Such
+  an entry must now be inherited unchanged from the parent that declared it;
+  a violation aborts inheritance resolution with the sealed message, and
+  `validate_template()` reports it under code `sealed_violation`.
+
+- **A failed document export no longer replaces a good file with a corrupt or
+  truncated one.** `write_dta()` (DOCX, Markdown and PDF),
+  `write_dataset_metadata()`, the template-based DOCX writer, and the
+  DOCX-to-PDF conversion all wrote to the destination directly, and each of
+  their backends -- `officer::print()`, `writeLines()`, the PDF converters --
+  truncates or creates its target before the write finishes, so a failure
+  partway left a corrupt or empty file where a good export, possibly untouched
+  for months, used to sit. Every one of these writers now writes to a staging
+  file beside the destination first and puts it in place only once the output
+  is complete and valid; a failed export now leaves an existing destination
+  file byte-for-byte unchanged and no staging file behind.
+
+- **The Shiny app's column and rule editors no longer lose or destroy data
+  silently.** Renaming a column onto an id another column already holds is
+  now refused with "A column named ... already exists." instead of the
+  rename overwriting that column outright; saving a column in the editor no
+  longer drops its examples and column class, since the editor form has no
+  field for either and previously rebuilt the spec from the visible fields
+  alone; and removing a group-condition or group-constraint row in the rule
+  editor now actually removes it, instead of a deleted row's stale inputs
+  being re-read and saved again.
+
+- **`run_qualification()` no longer reports a clean pass over an evidence
+  bundle it failed to write.** A results CSV or `results.json` that could not
+  be written used to either go unnoticed or, for `results.json`, be replaced
+  with a `"{}"` stub that then hashed and verified as if nothing were wrong.
+  Any evidence file that fails to write is now recorded, the verdict is
+  downgraded to `FAIL` (or `FAIL (PARTIAL)`), the missing files are named in
+  `SUMMARY.txt` and the report, and no stub is written or hashed in their
+  place; the remaining evidence, report and hash manifest are still produced.
+
+- **Inspecting one message from a streamed table no longer materialises the
+  whole table.** `inspect()` on a lazily-held (Arrow) table called
+  `as.data.frame()` on the full delivery to show a few rows of context around
+  a single failing row -- exactly the read `check()` had streamed to avoid.
+  Only the columns, and, where a single row is shown, the rows actually
+  needed for that message, are now read; row context on a one-shot stream
+  already consumed by validation is reported as unavailable rather than
+  silently empty.
+
 ### Security
 
 - **The PDF export no longer lets a document's own text act as markup.** A DTA
@@ -356,6 +450,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   described as `{SIGNATURES_TABLE}` grew a real approval-and-signatures table
   in the document people sign. The two passes now agree that a value is a
   value, which is the rule the rest of the mechanism already followed.
+
+- **Text taken from a specification could execute as a `cli` format string in
+  a validation failure message.** Rule ids, rule and constraint messages,
+  column names, and template file names and paths all reach a condition
+  message built with `cli`, which treats `{...}` in its input as R code to
+  evaluate -- so a rule id or a template file name containing `{some.expr}`,
+  arbitrary text chosen by whoever wrote the specification or template rather
+  than by the person running validation, was evaluated instead of shown.
+  `validate_rules()`, `validate_table()` and `validate_template(strict = TRUE)`
+  now reproduce such text literally in their condition messages, and so does
+  `summary()` of a qualification result when it prints a failure message.
 
 ## [0.25.0] - 2026-09-07
 
