@@ -408,7 +408,7 @@ test_that("OQ-CORE-009 | developer evidence is reported by name, and says it doe
   )
 })
 
-test_that("OQ-CORE-010 | one unwritable evidence file does not cost the run its evidence | REQ-CORE-010", {
+test_that("OQ-CORE-010 | one unwritable evidence file does not cost the run its evidence, and forces a FAIL verdict recorded in the run, SUMMARY.txt and the report | REQ-CORE-010 | tags: white-box", {
   dir <- qa_tempdir()
 
   # testthat's own per-test frame carries a list column, which is exactly the
@@ -459,5 +459,66 @@ test_that("OQ-CORE-010 | one unwritable evidence file does not cost the run its 
   qa_check(
     "and what is left serialises",
     !inherits(tryCatch(jsonlite::toJSON(stripped), error = function(e) e), "condition")
+  )
+
+  # The verdict-forcing side: a real evidence-write failure, injected by
+  # mocking the write primitive rather than pointing at an impossible path,
+  # so the run proceeds all the way through the stages (there are none here,
+  # stages = character(0), which keeps this cheap) and into qual_write_bundle()
+  # exactly as run_qualification() calls it.
+  real_write_csv <- qual_write_csv
+  testthat::local_mocked_bindings(
+    qual_write_csv = function(x, path) {
+      if (identical(basename(path), "meta_checks.csv")) {
+        stop("disk full")
+      }
+      real_write_csv(x, path)
+    }
+  )
+
+  out <- qa_tempdir()
+  bundle <- run_qualification(
+    out,
+    stages = character(0), scale = "quick", formats = "md", quiet = TRUE
+  )
+
+  # stages = character(0) already makes this a partial run on its own account
+  # (nothing was asked to run), so the verdict is "FAIL (PARTIAL)" here rather
+  # than a bare "FAIL" -- either way it must start with FAIL, which is the
+  # part the evidence-write failure is responsible for forcing.
+  qa_check("the verdict is downgraded to FAIL even though every stage that ran passed", grepl("^FAIL", bundle$verdict))
+  qa_step("the summary object carries the identical verdict", bundle$verdict, bundle$summary$verdict)
+  qa_step("the file that could not be written is named in the run record", "meta_checks.csv", bundle$run$evidence_write_failures)
+  qa_check(
+    "and no file was left at the path that failed to write",
+    !file.exists(file.path(bundle$bundle_dir, "results", "meta_checks.csv"))
+  )
+
+  run_json <- jsonlite::read_json(file.path(bundle$bundle_dir, "results", "run.json"))
+  qa_step(
+    "the JSON run record on disk also names it, not just the in-memory result",
+    "meta_checks.csv", unlist(run_json$evidence_write_failures)
+  )
+
+  summary_txt <- readLines(file.path(bundle$bundle_dir, "SUMMARY.txt"))
+  qa_check(
+    "SUMMARY.txt states the bundle is incomplete",
+    any(grepl("EVIDENCE BUNDLE INCOMPLETE", summary_txt, fixed = TRUE))
+  )
+
+  report_md <- readLines(file.path(bundle$bundle_dir, "report", "qualification-report.md"))
+  qa_check(
+    "and the rendered report states it too",
+    any(grepl("Evidence bundle incomplete", report_md, fixed = TRUE))
+  )
+
+  results_json <- jsonlite::read_json(file.path(bundle$bundle_dir, "results", "results.json"))
+  qa_step(
+    "results.json, the machine-readable record, carries the same verdict and names the file",
+    list(verdict = bundle$verdict, failures = "meta_checks.csv"),
+    list(
+      verdict = results_json$summary$verdict,
+      failures = unlist(results_json$run$evidence_write_failures)
+    )
   )
 })

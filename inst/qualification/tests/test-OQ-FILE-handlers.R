@@ -147,6 +147,25 @@ test_that("OQ-FILE-007 | an undeclared literal 'NA' token is missing by the read
   )
 })
 
+test_that("OQ-FILE-053 | a declared missing token and the reader's own literal 'NA' default are both missing in the same file | REQ-FILE-004", {
+  dir <- qa_tempdir()
+  p <- fh_path(dir, "na_combined.csv")
+  # Neither OQ-FILE-006 nor OQ-FILE-007 puts a declared token and a literal
+  # "NA" in the same file: 006 declares tokens but never writes "NA" itself,
+  # and 007 writes "NA" but declares nothing. This pins that a declared token
+  # ADDS to the default set rather than replacing it, in one file where both
+  # kinds of missing marker are present together.
+  fh_write_raw(c("ID,VAL", "A001,.", "A002,NA", "A003,present"), p)
+
+  t <- read_file(DTAFileCSV(filename = "na_combined.csv", missing_values = "."), p, specs = fh_text_specs)
+
+  qa_step(
+    "the declared token and the reader's own 'NA' default are both missing; a real value is not",
+    c(NA, NA, "present"),
+    as.data.frame(t)$VAL
+  )
+})
+
 # ---- encoding ---------------------------------------------------------------------
 
 test_that("OQ-FILE-008 | UTF-8, a UTF-8 byte-order mark, and transcoded latin1 all decode to the same text | REQ-FILE-005", {
@@ -252,4 +271,37 @@ test_that("OQ-FILE-013 | a declared filename also matches its gzip-compressed de
 
   qa_step("the gzip-compressed name satisfies a declaration that says nothing about compression", TRUE, isTRUE(matches_filename(h, "data.csv.gz")))
   qa_step("a compression this package does not advertise does not get the same treatment", FALSE, isTRUE(matches_filename(h, "data.csv.bz2")))
+})
+
+# ---- per-pattern missing reporting -----------------------------------------------
+
+test_that("OQ-FILE-054 | check() reports every declared pattern with no delivered match, not just the whole handler | REQ-FILE-031", {
+  dir <- qa_tempdir()
+  path_a <- fh_path(dir, "a_2026.pdf")
+  fh_write_raw("content", path_a)
+
+  # One handler declaring two patterns. Only the "a_" pattern is delivered;
+  # the "b_" pattern never arrives.
+  h <- DTAFileAny(filename = c("^a_.*\\.pdf$", "^b_.*\\.pdf$"), pattern = TRUE, number_of_files = 2)
+  ds <- DTADataSetFile(name = "d", files = list(h))
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  qa_step("both the delivered file and the still-missing pattern are reported as their own target", 2L, nrow(status))
+  qa_step(
+    # The delivered target is keyed by the file that satisfied it; only the
+    # UNMATCHED pattern is keyed by its own declared name -- that name is
+    # exactly what a delivery report has no other way to mention.
+    "the delivered file is ok and the pattern with no match is not, each under its own key",
+    list(delivered = TRUE, undelivered = FALSE),
+    list(
+      delivered = isTRUE(status$ok[status$table == "a_2026.pdf"]),
+      undelivered = isTRUE(status$ok[status$table == "^b_.*\\.pdf$"])
+    )
+  )
+
+  msgs <- messages(ds, as_tibble = FALSE)
+  qa_step("exactly one message is recorded, for the pattern that never arrived", 1L, nrow(msgs))
+  qa_step("its text names that pattern", TRUE, grepl("^b_.*\\.pdf$", msgs$message[[1]], fixed = TRUE))
 })

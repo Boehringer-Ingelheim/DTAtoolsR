@@ -374,3 +374,24 @@ requirements:
       open_file() delegate to once a delivery has been matched to a handler. A
       caller reaching them directly bypasses the filename matching, which is
       the only reason to expose them.
+
+  - id: REQ-FILE-031
+    text: >
+      check() on a DTADataSetFile whose handler declares several file names
+      or patterns (pattern = TRUE) shall report each declared name as its own
+      target and shall report not ok, with a message naming that name, every
+      declared name with no delivered path matching it -- even when another
+      name declared by the same handler was delivered. A handler declaring
+      several names with pattern = FALSE is unaffected: those names are
+      alternates for the one file the handler's number_of_files = 1 requires,
+      not independent targets.
+    risk: high
+    category: integrity
+    covers: [check, DTADataSetFile]
+    source: R/DTADataSetFile-class.R dta_file_dataset_targets()
+    notes: >
+      Before the fix, the handler as a whole was "satisfied" as soon as any
+      one delivered path matched any one of its declared names, so delivering
+      one of several declared patterns hid every other, still-missing pattern
+      from the report entirely -- a partial delivery could check() as if every
+      declared pattern had arrived.

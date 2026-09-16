@@ -415,3 +415,57 @@ test_that("OQ-VAL-014 | the verdict is the conjunction of the three axes | REQ-V
     )
   }
 })
+
+test_that("OQ-VAL-036 | values, a pattern and nullability are still checked on a column with no declared type | REQ-VAL-029", {
+  dir <- qa_tempdir()
+  # Neither SEX nor CODE declares a type, format or length -- both have no
+  # @structure at all, only the constraints a caller can still declare
+  # without one. `values` and `pattern` are mutually exclusive on one column
+  # (DTAColumnSpec's own validator), so the codelist and the pattern are
+  # exercised on two different untyped columns rather than one. SEX_T is the
+  # typed control REQ-VAL-029 measures against: the same codelist and
+  # nullability, declared SAS Char, fed the same values.
+  specs <- vs_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "SEX", nullable = FALSE, values = c("M", "F")),
+    DTAColumnSpec(id = "SEX_T", type = "SAS Char", nullable = FALSE, values = c("M", "F")),
+    DTAColumnSpec(id = "CODE", nullable = TRUE, pattern = "^[A-Z]{3}$")
+  ))
+  frame <- data.frame(
+    ID = c("A001", "A002", "A003"),
+    SEX = c("M", "X", NA_character_),
+    SEX_T = c("M", "X", NA_character_),
+    CODE = c("ABC", "ab1", "XYZ"),
+    stringsAsFactors = FALSE
+  )
+  ds <- vs_check(frame, specs, dir)
+  found <- vs_found(ds)
+
+  # The requirement names three findings: the out-of-codelist value (SEX row
+  # 2), the non-nullable column's missing value (SEX row 3) and the value
+  # that does not match the pattern (CODE row 2). Before the fix, a column
+  # with no @structure had no schema at all and none of them was reported.
+  # Which keywords each finding carries is not what this case is about --
+  # that is the typed-column behaviour compared below.
+  untyped <- unique(found[found$column %in% c("SEX", "CODE"), c("row", "column"), drop = FALSE])
+  rownames(untyped) <- NULL
+  qa_step(
+    "the codelist violation, the missing value and the pattern violation are each reported",
+    data.frame(row = c(2L, 2L, 3L), column = c("CODE", "SEX", "SEX"), stringsAsFactors = FALSE),
+    untyped
+  )
+
+  # "Exactly as a typed column's are": the untyped column's findings are the
+  # typed control's, row for row and keyword for keyword.
+  by_column <- function(col) {
+    out <- found[found$column == col, c("source", "row", "keyword"), drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }
+  qa_step(
+    "and SEX is reported exactly as the typed control column SEX_T is",
+    by_column("SEX_T"),
+    by_column("SEX")
+  )
+  qa_step("and the table is invalid because of them", FALSE, validation_status(ds)$ok)
+})

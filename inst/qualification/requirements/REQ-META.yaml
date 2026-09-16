@@ -100,24 +100,25 @@ requirements:
     text: >
       The top-level date property is typed Date and cannot hold a free-text
       phrase. A string with no leading ISO date supplied there shall be
-      coerced to NA, and shall record no import issue.
+      coerced to NA, the same coercion as.Date() would perform, and shall
+      record an import issue naming the field "date" with reason
+      "not_convertible" and carrying the original string verbatim, so that
+      the loss is never silent.
     risk: high
     category: functional
     covers: [DTAMetaData]
     source: R/DTAMetaData-class.R .parse_metadata_date()
     notes: >
-      Pinned, not endorsed. .parse_metadata_date() is documented as keeping a
+      Closes DEV-009. .parse_metadata_date() is documented as keeping a
       dateless phrase "verbatim as character", and that is true for
       transmission$date_first_transfer/date_last_transfer (require_date =
       FALSE), but the top-level date= argument is parsed with require_date =
-      TRUE, whose branch instead runs the whole original string through
+      TRUE, whose branch runs the whole original string through
       as.Date(value, format = "\%Y-\%m-\%d") and stores whatever that returns
-      -- NA for anything that is not itself an ISO date. Unlike the trailing-
-      residue case, NO import issue is recorded, so a value such as
-      date = "after approval" reaches @date as a silent NA with nothing in
-      @import_issues to say a value was ever supplied. Verified directly:
-      DTAMetaData(date = "after approval")@date is NA and
-      @import_issues has length 0.
+      -- NA for anything that is not itself an ISO date -- and now also
+      records an import issue for that loss, unlike the free-text
+      transmission fields, where a dateless phrase is legitimate input and no
+      issue is recorded.
 
   # ---- validate_transmission_dates() ------------------------------------------
 

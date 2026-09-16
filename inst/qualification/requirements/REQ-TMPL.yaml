@@ -305,7 +305,7 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:632-671;
-      inst/shiny/dta_app/R/template_inherit.R:675-722 (resolve_template_inheritance)
+      inst/shiny/dta_app/R/template_inherit.R:826-873 (resolve_template_inheritance)
 
   - id: REQ-TMPL-020
     text: >
@@ -333,17 +333,28 @@ requirements:
       A descendant that changes the value at a path an ancestor sealed shall
       be reported sealed_violation at severity "warning" (and, being an
       extends-resolution failure, also instantiate_failed per REQ-TMPL-020
-      when the descendant is not abstract). A sealed path that resolves to
-      nothing in the fully-resolved definition shall be reported
-      sealed_path_unknown at severity "warning", because such a seal protects
-      nothing and only a typo produces one.
+      when the descendant is not abstract). This holds whether the change
+      reaches the sealed field directly in the merged definition tree (a
+      `base:` override, a `modify:` verb, a `remove:`, an explicit null, or a
+      whole-section replacement) or indirectly, through an `options:` or
+      `party_slots:` entry the descendant adds or changes whose `target:`, or
+      whose `effects:`/`effects_all:` (any `set:` map included), would write
+      that sealed field once the template is instantiated -- a seal must hold
+      for every value such an entry lets an author pick, not only whichever
+      happens to be selected at merge time. An entry inherited unchanged from
+      an ancestor is not itself a violation even when its effect reaches a
+      sealed field, because a template's own seals do not bind itself. A
+      sealed path that resolves to nothing in the fully-resolved definition
+      shall be reported sealed_path_unknown at severity "warning", because
+      such a seal protects nothing and only a typo produces one.
     risk: high
     category: functional
     covers: [validate_template]
     source: >
       R/validateTemplate.R:672-694;
-      inst/shiny/dta_app/R/template_inherit.R:573-594 (dta_template_check_sealed),
-      539-558 (dta_template_path_get)
+      inst/shiny/dta_app/R/template_inherit.R:686-745 (dta_template_check_sealed),
+      542-558 (dta_template_path_get), 588-661 (dta_template_entry_metadata_paths,
+      dta_template_entry_seal_paths, dta_template_paths_overlap)
 
   - id: REQ-TMPL-022
     text: >
@@ -386,7 +397,7 @@ requirements:
     risk: medium
     category: functional
     covers: [validate_template]
-    source: inst/shiny/dta_app/R/template_inherit.R:715-722
+    source: inst/shiny/dta_app/R/template_inherit.R:866-873
 
   # ---- controlled vocabulary: extends, cycles, term algebra ------------------
 

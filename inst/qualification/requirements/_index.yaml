@@ -20,40 +20,40 @@ areas:
     min_tests: 24
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 22
+    min_tests: 23
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 31
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 29
+    min_tests: 31
   - area: RULE
     title: Cross-column and grouped rules
     min_tests: 40
   - area: FILE
     title: File handlers and readers
-    min_tests: 40
+    min_tests: 42
   - area: STREAM
     title: Streaming validation and engine parity
-    min_tests: 30
+    min_tests: 31
   - area: META
     title: Transfer metadata
     min_tests: 18
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 60
+    min_tests: 61
   - area: EXPORT
     title: Document and data export
-    min_tests: 43
+    min_tests: 44
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 16
   - area: APP
     title: The interactive application
-    min_tests: 22
+    min_tests: 25
   - area: ROBUST
     title: Error handling, integrity and isolation
-    min_tests: 15
+    min_tests: 16
   - area: PERF
     title: End-to-end workflows and behaviour at scale
     min_tests: 25

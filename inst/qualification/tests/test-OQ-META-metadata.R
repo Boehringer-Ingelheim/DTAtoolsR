@@ -185,20 +185,23 @@ test_that("OQ-META-006 | a bare ISO date, a date with trailing text, and a datel
   qa_step("the import issue carries no row - metadata has none", TRUE, is.na(issues$row[[1]]))
 })
 
-test_that("OQ-META-007 | the top-level date field cannot hold a phrase, and is silently coerced to NA | REQ-META-009", {
-  # Pinned, not endorsed (see REQ-META-009 notes): unlike a transmission date,
-  # the top-level `date` property is typed Date and so cannot store a phrase
-  # verbatim. A phrase with no leading ISO date supplied there is coerced the
-  # way as.Date() would coerce it - to NA - and, unlike the trailing-residue
-  # case, records no import issue at all: the loss is completely silent.
+test_that("OQ-META-007 | the top-level date field cannot hold a phrase, and is coerced to NA with an import issue recorded | REQ-META-009", {
+  # Closes DEV-009: unlike a transmission date, the top-level `date` property
+  # is typed Date and so cannot store a phrase verbatim. A phrase with no
+  # leading ISO date supplied there is coerced the way as.Date() would coerce
+  # it - to NA - but, unlike the earlier behaviour, that loss is now recorded
+  # as an import issue rather than passing silently.
   md <- DTAMetaData(title = "t", date = "after approval")
 
   qa_step("the date becomes NA", TRUE, is.na(md@date))
   qa_step("the property keeps its Date class even when NA", "Date", class(md@date))
-  qa_step("no import issue is recorded for the silently discarded phrase", 0L, length(md@import_issues))
-  qa_known_deviation(
-    "DEV-009",
-    is.na(md@date) && length(md@import_issues) == 0L
+
+  issues <- metadata_import_errors(md)
+  qa_step("exactly one import issue is recorded for the discarded phrase", 1L, nrow(issues))
+  qa_step(
+    "the import issue names the field, keeps the raw value verbatim, and gives the reason",
+    list(column = "date", raw = "after approval", reason = "not_convertible"),
+    list(column = issues$column[[1]], raw = issues$raw[[1]], reason = issues$reason[[1]])
   )
 })
 

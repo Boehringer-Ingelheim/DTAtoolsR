@@ -272,3 +272,54 @@ test_that("OQ-SPEC-037 | every shipped example constructor builds its class | RE
     unname(expected), unname(built)
   )
 })
+
+test_that("OQ-SPEC-045 | a DTA whose datasets carry a duplicate, empty or NA name is refused | REQ-SPEC-024", {
+  one_ds <- function(name) {
+    DTADataSetTabular(name = name, specs = create_example_DTAColumnSpecCollection(1))
+  }
+
+  # An unnamed list: DTA() derives names from each dataset's own @name, and
+  # two datasets sharing "clinical" collide there before check() ever runs.
+  dup_err <- tryCatch(
+    DTA(datasets = list(one_ds("clinical"), one_ds("clinical")), metadata = create_example_DTAMetaData()),
+    error = function(e) e
+  )
+  qa_check("a repeated dataset name is refused rather than silently accepted", inherits(dup_err, "condition"))
+  qa_step(
+    "naming the duplicate rather than a generic complaint",
+    TRUE,
+    grepl("duplicate name", conditionMessage(dup_err), fixed = TRUE) &&
+      grepl("clinical", conditionMessage(dup_err), fixed = TRUE)
+  )
+
+  # A named list this time, so DTA() keeps the caller's own (broken) names
+  # instead of deriving them -- the route a hand-assembled @datasets<- or a
+  # malformed YAML read can still reach.
+  empty_err <- tryCatch(
+    DTA(
+      datasets = stats::setNames(list(one_ds("a"), one_ds("b")), c("", "b")),
+      metadata = create_example_DTAMetaData()
+    ),
+    error = function(e) e
+  )
+  na_err <- tryCatch(
+    DTA(
+      datasets = stats::setNames(list(one_ds("a"), one_ds("b")), c(NA_character_, "b")),
+      metadata = create_example_DTAMetaData()
+    ),
+    error = function(e) e
+  )
+  qa_step(
+    "an empty name and an NA name are refused the same way",
+    c(empty = TRUE, na = TRUE),
+    c(empty = inherits(empty_err, "condition"), na = inherits(na_err, "condition"))
+  )
+
+  # Distinct, non-empty, non-NA names: the control case, so a reader knows
+  # the validator is not simply refusing every DTA with two datasets.
+  ok <- tryCatch(
+    DTA(datasets = list(one_ds("clinical"), one_ds("labs")), metadata = create_example_DTAMetaData()),
+    error = function(e) e
+  )
+  qa_check("two datasets with distinct names construct without complaint", !inherits(ok, "condition"))
+})

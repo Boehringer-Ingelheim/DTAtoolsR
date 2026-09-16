@@ -324,3 +324,89 @@ test_that("OQ-STREAM-030 | a duplicate key split across two batches is detected 
     isFALSE(eager$status$ok) && isFALSE(lazy$status$ok)
   )
 })
+
+# ---- inspect() row context on a streamed table -----------------------------
+
+test_that("OQ-STREAM-031 | inspect() reports the same row context for a streamed table as for the same data in memory | REQ-STREAM-024 | tags: white-box", {
+  dir <- qa_tempdir()
+  path <- file.path(dir, "inspect_parity.csv")
+  writeLines(c(
+    "SUBJECT_ID,VISIT,SCORE,STATUS",
+    "S001,V1,50,OK", # clean
+    "S002,V1,150,OK", # rule error: SCORE out of range
+    "S003,V1,70,WRONG" # columnspec error: STATUS not in {OK, BAD}
+  ), path)
+
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      SUBJECT_ID = DTAColumnSpec(id = "SUBJECT_ID", type = "SAS Char", length = 4, nullable = FALSE),
+      VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", nullable = TRUE),
+      SCORE = DTAColumnSpec(id = "SCORE", type = "SAS Num", nullable = TRUE),
+      STATUS = DTAColumnSpec(id = "STATUS", type = "SAS Char", nullable = FALSE, values = c("OK", "BAD"))
+    ),
+    rules = list(DTARuleFactory("score_range", "col_range", columns = "SCORE", min = 0, max = 99))
+  )
+
+  ip_run <- function(stream) {
+    ds <- DTADataSetTabular(
+      name = "parity", specs = specs,
+      files = list(DTAFileCSV(filename = basename(path)))
+    )
+    ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
+    check(ds, persist = FALSE, quiet = TRUE)
+  }
+
+  eager <- ip_run("never")
+  lazy <- ip_run("always")
+
+  # The table is keyed by what the reader derives from the delivered file,
+  # not by the dataset's own name -- read it back rather than assume it.
+  eager_table <- tables(eager)[[names(tables(eager))[[1]]]]
+  lazy_table <- tables(lazy)[[names(tables(lazy))[[1]]]]
+
+  # dta_table_is_lazy() is internal (R/streamingValidation.R); reached
+  # directly here only to confirm the fixture actually exercises a lazily-
+  # held table -- otherwise the comparison below would prove nothing.
+  qa_check(
+    "the eager table is in memory and the streamed one is genuinely lazy",
+    !dta_table_is_lazy(eager_table) && dta_table_is_lazy(lazy_table)
+  )
+
+  ip_key <- function(msgs) paste(msgs$source, msgs$row, msgs$column, msgs$rule_id, sep = "|")
+  eager_msgs <- messages(eager, as_tibble = FALSE)
+  lazy_msgs <- messages(lazy, as_tibble = FALSE)
+  eager_key <- ip_key(eager_msgs)
+  lazy_key <- ip_key(lazy_msgs)
+
+  qa_step(
+    "eager and streamed report the same set of messages",
+    sort(unique(eager_key)), sort(unique(lazy_key))
+  )
+  qa_check(
+    "and both the rule and the column-specification axis are exercised, or the parity check below is incomplete",
+    any(eager_msgs$source == "rule") && any(eager_msgs$source == "columnspec")
+  )
+
+  ip_as_char <- function(df) as.data.frame(lapply(df, as.character), stringsAsFactors = FALSE)
+
+  for (k in unique(eager_key)) {
+    eager_id <- eager_msgs$id[eager_key == k][[1]]
+    lazy_id <- lazy_msgs$id[lazy_key == k][[1]]
+    eager_info <- inspect(eager, id = eager_id, as_tibble = FALSE)
+    lazy_info <- inspect(lazy, id = lazy_id, as_tibble = FALSE)
+
+    # A columnspec message carries its row context under context_*; a rule
+    # message instead carries a failing-row preview under failing_* (see
+    # dta_inspect_tabular_message()). Whichever this message has, compare it.
+    compare_cols <- intersect(
+      grep("^(context_|failing_)", names(eager_info), value = TRUE),
+      grep("^(context_|failing_)", names(lazy_info), value = TRUE)
+    )
+    qa_check(paste("row detail is reported on both engines for", k), length(compare_cols) > 0)
+    qa_step(
+      paste("and it matches between the eager and the streamed engine for", k),
+      ip_as_char(eager_info[, compare_cols, drop = FALSE]),
+      ip_as_char(lazy_info[, compare_cols, drop = FALSE])
+    )
+  }
+})

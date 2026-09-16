@@ -416,3 +416,135 @@ test_that("OQ-APP-016 | the double-click guard is a self-contained capture-phase
     TRUE, grepl("}, true);", script, fixed = TRUE)
   )
 })
+
+# ---- editing a dataset's columns and rules ---------------------------------
+
+test_that("OQ-APP-026 | renaming a column onto an id another column already holds is refused | REQ-APP-019", {
+  qapp_skip_unless_app_installed()
+  set_column <- qapp_fn("dta_set_column")
+
+  dta <- DTAtools::read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  cols_before <- DTAtools::datasets(dta, "clinical_data")@specs@columns
+  visit_before <- cols_before[["VISIT"]]
+  studyid_before <- cols_before[["STUDYID"]]
+
+  # Renaming VISIT onto STUDYID would otherwise fall straight through to
+  # cols[[id]] <- spec and silently destroy the STUDYID column it collides with.
+  res <- set_column(dta, "clinical_data", id = "STUDYID", old_id = "VISIT")
+
+  qa_check("the rename is refused rather than silently applied", isFALSE(res$ok))
+  qa_step(
+    "naming the id that already exists",
+    TRUE, grepl("already exists", res$error, fixed = TRUE)
+  )
+
+  cols_after <- DTAtools::datasets(dta, "clinical_data")@specs@columns
+  qa_step(
+    "both columns remain, unchanged, under their original ids",
+    list(visit = visit_before@label, studyid = studyid_before@label),
+    list(visit = cols_after[["VISIT"]]@label, studyid = cols_after[["STUDYID"]]@label)
+  )
+
+  # Control case: renaming onto an id nothing else holds proceeds normally.
+  ok <- set_column(dta, "clinical_data", id = "VISIT_CODE", old_id = "VISIT")
+  qa_check("renaming onto a free id succeeds", isTRUE(ok$ok))
+})
+
+test_that("OQ-APP-027 | saving a column keeps its examples and colclass, which the editor form has no field for | REQ-APP-020", {
+  qapp_skip_unless_app_installed()
+  set_column <- qapp_fn("dta_set_column")
+
+  dta <- DTAtools::read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  age_before <- DTAtools::datasets(dta, "clinical_data")@specs@columns[["AGE"]]
+  # AGE carries no values, so examples may legally be set alongside it. Set
+  # directly on the specification, since the editor form itself has no field
+  # for either property -- exactly the point under test.
+  age_with_extras <- DTAtools::DTAColumnSpec(
+    id = age_before@id, label = age_before@label,
+    type = paste(age_before@structure@backend, age_before@structure@type),
+    nullable = age_before@nullable, description = age_before@description,
+    examples = c(34, 45), colclass = "measurement"
+  )
+  dta@datasets[["clinical_data"]]@specs@columns[["AGE"]] <- age_with_extras
+
+  res <- set_column(
+    dta, "clinical_data",
+    id = "AGE", label = "Age (years)", backend = "SAS", type = "Num",
+    nullable = FALSE, description = "reworded through the editor form"
+  )
+
+  qa_check("the save succeeds", isTRUE(res$ok))
+  col <- DTAtools::datasets(res$value, "clinical_data")@specs@columns[["AGE"]]
+  qa_step(
+    "the fields the form controls are updated as saved",
+    list(label = "Age (years)", description = "reworded through the editor form"),
+    list(label = col@label, description = col@description)
+  )
+  qa_step(
+    "and examples/colclass, invisible to the form, survive the save unchanged",
+    list(examples = c(34, 45), colclass = "measurement"),
+    list(examples = col@examples, colclass = col@colclass)
+  )
+})
+
+test_that("OQ-APP-028 | a group-condition row removed with the rule editor's own control stays out of the saved rule | REQ-APP-021", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("g", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+    session$setInputs(
+      rule_id = "oq_app_028_removed_row",
+      rule_desc = "row 2 of each is removed before Save",
+      rule_group_by = c("SUBJECT_ID", "VISIT")
+    )
+
+    # Row 1 of each: the row expected to survive.
+    session$setInputs(
+      gcond_name_1 = "c1_failed", gcond_col_1 = "STATUS", gcond_op_1 = "equals", gcond_val_1 = "FAILED"
+    )
+    session$setInputs(
+      gconstr_id_1 = "keep_constraint", gconstr_type_1 = "mutually_exclusive",
+      gconstr_left_1 = "c1_failed", gconstr_right_1 = "c1_failed",
+      gconstr_lscope_1 = "any", gconstr_rscope_1 = "any", gconstr_msg_1 = "Row 1"
+    )
+
+    # Row 2 of each: added, filled in, then removed via the real remove
+    # button inputs before Save is ever pressed.
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "c2_removed", gcond_col_2 = "CONSENT_DATE", gcond_op_2 = "empty", gcond_val_2 = "false"
+    )
+    session$setInputs(gconstr_add = 1)
+    session$setInputs(
+      gconstr_id_2 = "remove_constraint", gconstr_type_2 = "mutually_exclusive",
+      gconstr_left_2 = "c2_removed", gconstr_right_2 = "c2_removed",
+      gconstr_lscope_2 = "any", gconstr_rscope_2 = "any", gconstr_msg_2 = "Row 2"
+    )
+    # The constraint row first: removing the condition row it depends on
+    # while the constraint is still visible would otherwise be blocked.
+    session$setInputs(gconstr_remove_2 = 1)
+    session$setInputs(gcond_remove_2 = 1)
+
+    session$setInputs(rule_save = 1)
+
+    qa_check("the save reports no error", is.null(rv$rule_msg))
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    qa_step(
+      "the saved rule carries only the condition row that was never removed",
+      "c1_failed", names(new_rule@conditions)
+    )
+    qa_step(
+      "and only the constraint row that was never removed",
+      list(n = 1L, id = "keep_constraint"),
+      list(n = length(new_rule@constraints), id = new_rule@constraints[[1]]$id)
+    )
+  })
+})
