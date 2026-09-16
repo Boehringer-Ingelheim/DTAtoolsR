@@ -487,6 +487,56 @@ test_that("check() does not crash on a handler declaring several file names", {
   expect_false(any(status$ok))
 })
 
+test_that("check() still reports the undelivered name when only one of a handler's two names arrives", {
+  # Before the fix, a handler was "satisfied" (and so contributed nothing to
+  # the missing list) as soon as ANY delivered path matched ANY one of its
+  # declared names -- so delivering a.pdf hid a still-missing b.pdf entirely.
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_a <- file.path(dir, "a.pdf")
+  writeLines("content", path_a)
+
+  ds <- DTADataSetFile(
+    name = "d",
+    files = list(
+      DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
+    )
+  )
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_setequal(status$table, c("a.pdf", "b.pdf"))
+  expect_true(status$ok[status$table == "a.pdf"])
+  expect_false(status$ok[status$table == "b.pdf"])
+})
+
+test_that("check() reports both names ok once a handler declaring two names gets both delivered", {
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_a <- file.path(dir, "a.pdf")
+  path_b <- file.path(dir, "b.pdf")
+  writeLines("content", path_a)
+  writeLines("content", path_b)
+
+  ds <- DTADataSetFile(
+    name = "d",
+    files = list(
+      DTAFileAny(filename = c("a.pdf", "b.pdf"), pattern = TRUE, number_of_files = 2)
+    )
+  )
+  ds <- load_file(ds, file = path_a, handler_index = 1)
+  ds <- load_file(ds, file = path_b, handler_index = 1)
+  ds <- check(ds, quiet = TRUE, persist = FALSE)
+
+  status <- validation_status(ds)
+  expect_equal(nrow(status), 2)
+  expect_true(all(status$ok))
+})
+
 # ---------------------------------------------------------------------------
 # load_file() key handling
 # ---------------------------------------------------------------------------

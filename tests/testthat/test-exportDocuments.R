@@ -652,6 +652,85 @@ test_that("the abort reports every backend that failed, with braces intact", {
   expect_false(file.exists(out))
 })
 
+test_that("a failed PDF conversion never touches a valid file already at the destination", {
+  # Regression guard: every backend used to unlink() the destination on its own
+  # failure, so a conversion attempted against an already-exported PDF (e.g. a
+  # re-run with overwrite = TRUE) destroyed that valid file even though the new
+  # attempt never produced a replacement.
+  test_dir <- tempfile("pdf_export_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  out <- file.path(test_dir, "out.pdf")
+  original <- charToRaw("%PDF-1.4\nold valid pdf bytes\n%%EOF\n")
+  writeBin(original, out)
+
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(docx, force = TRUE), add = TRUE)
+  print(officer::read_docx(), target = docx)
+
+  local_mocked_bindings(
+    .pdf_backends_available = function() c("libreoffice", "pandoc"),
+    .soffice_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("soffice exploded"),
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) cli::cli_abort("pandoc exploded")
+  )
+
+  expect_error(.convert_docx_to_pdf(docx, out), class = "rlang_error")
+  expect_identical(readBin(out, what = "raw", n = length(original)), original)
+  # No staging file left behind next to the untouched destination.
+  expect_identical(list.files(test_dir), "out.pdf")
+})
+
+test_that(".dta_write_staged leaves an existing destination untouched when write() fails", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+  original <- charToRaw("original bytes, must survive")
+  writeBin(original, dest)
+
+  expect_error(
+    .dta_write_staged(dest, write = function(stage) cli::cli_abort("write blew up")),
+    class = "rlang_error"
+  )
+  expect_identical(readBin(dest, what = "raw", n = length(original)), original)
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
+test_that(".dta_write_staged leaves an existing destination untouched when check() rejects it", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+  original <- charToRaw("original bytes, must survive")
+  writeBin(original, dest)
+
+  expect_error(
+    .dta_write_staged(
+      dest,
+      write = function(stage) writeBin(charToRaw("garbage"), stage),
+      check = function(stage) cli::cli_abort("rejected")
+    ),
+    class = "rlang_error"
+  )
+  expect_identical(readBin(dest, what = "raw", n = length(original)), original)
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
+test_that(".dta_write_staged replaces the destination and leaves no staging file on success", {
+  test_dir <- tempfile("staged_write_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  dest <- file.path(test_dir, "out.bin")
+
+  .dta_write_staged(
+    dest,
+    write = function(stage) writeBin(charToRaw("new content"), stage),
+    check = function(stage) invisible(TRUE)
+  )
+  expect_identical(readBin(dest, what = "raw", n = 11L), charToRaw("new content"))
+  expect_identical(list.files(test_dir), "out.bin")
+})
+
 test_that(".cli_escape neutralises braces so cli cannot reinterpret tool output", {
   expect_identical(.cli_escape("a {b} c"), "a {{b}} c")
   expect_identical(.cli_escape("no braces"), "no braces")

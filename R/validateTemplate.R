@@ -656,7 +656,7 @@
       msg <- conditionMessage(resolved)
       code <- if (grepl("cycle detected", msg, fixed = TRUE) || grepl("exceeds the depth limit", msg, fixed = TRUE)) {
         "extends_cycle"
-      } else if (grepl("which an ancestor sealed", msg, fixed = TRUE)) {
+      } else if (inherits(resolved, "dta_template_sealed_violation")) {
         # A seal violation is not an unresolvable reference: the chain resolved
         # fine and the template then broke a rule an ancestor set. Reporting it
         # as extends_unresolved would send the author looking for a missing
@@ -1180,7 +1180,9 @@
   }
 
   preview <- utils::head(errs, 5)
-  lines <- sprintf("%s [%s]: %s", preview$file, preview$code, preview$message)
+  # file/code/message are template-authored text (a file name, an option
+  # target, a sealed path, ...); escape before it becomes bullet content.
+  lines <- .cli_escape(sprintf("%s [%s]: %s", preview$file, preview$code, preview$message))
   n_more <- n - nrow(preview)
 
   body <- stats::setNames(lines, rep("x", length(lines)))

@@ -2433,6 +2433,18 @@ dta_column_fields <- function(dta, dataset, id) {
 }
 
 # Add or update a column (rename when old_id differs). Returns dta_try().
+#
+# RENAME GUARD mirrors dta_set_dataset_meta() (~L2244-2251): renaming onto an
+# id another column already holds would otherwise fall straight through to
+# `cols[[id]] <- spec` and silently destroy that column. Adding a column
+# under an already-existing id with old_id = NULL is a different, intended
+# operation -- an in-place update of that column -- and is left alone.
+#
+# CARRYOVER: the editor form exposes only a subset of DTAColumnSpec's
+# properties. `examples` and `colclass` have no field in the UI, so rebuilding
+# the spec from form values alone would silently drop them on every save.
+# They are looked up on the column being edited (by old_id when renaming,
+# else by id) and passed through unchanged.
 dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
                            type = NULL, format = NULL, length = NULL,
                            nullable = NULL, values = NULL, pattern = NULL,
@@ -2441,6 +2453,17 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
     if (grepl("\\s", id)) stop("Column id cannot contain whitespace.")
+
+    ds <- DTAtools::datasets(dta, dataset)
+    specs <- ds@specs
+    cols <- specs@columns %||% list()
+
+    renaming <- !is.null(old_id) && nzchar(old_id) && !identical(old_id, id)
+    if (renaming && id %in% names(cols)) {
+      stop(sprintf("A column named '%s' already exists.", id))
+    }
+    existing <- cols[[if (renaming) old_id else id]]
+
     bk <- backend %||% "SAS"
     type_arg <- if (!is.null(type) && nzchar(type)) paste(bk, type) else NULL
     format_arg <- if (!is.null(format) && nzchar(format)) paste(bk, format) else NULL
@@ -2461,12 +2484,11 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     spec <- DTAtools::DTAColumnSpec(
       id = id, label = lbl, type = type_arg, format = format_arg,
       length = len_arg, nullable = nullable, pattern = patt, values = vals,
-      description = desc
+      description = desc,
+      examples = if (!is.null(existing)) existing@examples else NULL,
+      colclass = if (!is.null(existing)) existing@colclass else NULL
     )
-    ds <- DTAtools::datasets(dta, dataset)
-    specs <- ds@specs
-    cols <- specs@columns %||% list()
-    if (!is.null(old_id) && nzchar(old_id) && !identical(old_id, id)) cols[[old_id]] <- NULL
+    if (renaming) cols[[old_id]] <- NULL
     cols[[id]] <- spec
     specs@columns <- cols
     ds@specs <- specs

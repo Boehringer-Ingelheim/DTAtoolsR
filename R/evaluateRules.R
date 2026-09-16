@@ -1490,7 +1490,9 @@ apply_rules <- function(rules, df, verbose = TRUE) {
     if (!rule_type %in% names(rule_functions)) {
       msg <- paste("Unknown rule type:", rule_type)
       if (isTRUE(verbose)) {
-        cli::cli_alert_danger(msg)
+        # rule_type is YAML-derived: interpolate it, never pass msg itself as
+        # the format string.
+        cli::cli_alert_danger("Unknown rule type: {rule_type}")
       }
       return(list(
         id = rule@id,
@@ -1578,10 +1580,12 @@ validate_rules <- function(DTAColumnSpecCollection, table) {
   failed <- Filter(function(x) isFALSE(x$valid), results)
   if (length(failed) > 0) {
     messages <- vapply(failed, function(x) x$message, character(1))
-    # Bulleted abort for nice CLI output
+    # Bulleted abort for nice CLI output. Rule ids and messages can carry
+    # YAML- or data-derived text, so escape before it reaches cli as a
+    # format string -- these are bullet CONTENT, never the format itself.
     bullets <- c(
-      "Rule violations:" = "!",
-      setNames(messages, rep("x", length(messages)))
+      "!" = "Rule violations:",
+      setNames(.cli_escape(messages), rep("x", length(messages)))
     )
     cli::cli_abort(bullets)
   }

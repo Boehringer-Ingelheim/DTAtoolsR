@@ -61,6 +61,12 @@ qual_report_md <- function(x) {
     "# DTAtools Software Qualification Report",
     "",
     sprintf("**Verdict: %s**", x$verdict),
+    if (length(x$run$evidence_write_failures) > 0) {
+      sprintf(
+        "**Evidence bundle incomplete: could not write %s.**",
+        paste(x$run$evidence_write_failures, collapse = ", ")
+      )
+    },
     "",
     qual_md_kv(stats::setNames(
       list(

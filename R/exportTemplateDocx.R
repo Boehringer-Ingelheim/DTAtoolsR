@@ -711,8 +711,10 @@ dta_template_placeholders <- function(dta = NULL) {
 #' Replace placeholders in a DOCX template and write a new DOCX
 #'
 #' Unzips `template_path`, substitutes placeholders in the main document part and
-#' any header/footer parts, repackages the archive to `output_path`, and verifies
-#' the result opens as a valid DOCX.
+#' any header/footer parts, repackages the archive, verifies the result opens
+#' as a valid DOCX, and only then moves it to `output_path` (via
+#' [.dta_write_staged()]) -- any file already at `output_path` is left
+#' untouched until that last step succeeds.
 #'
 #' @param template_path Character. Path to the template `.docx`.
 #' @param variables Named list of brace-delimited placeholder values.
@@ -798,25 +800,36 @@ dta_template_placeholders <- function(dta = NULL) {
     ))
   }
 
-  .zip_docx_dir(temp_dir, output_path)
-  .tv_render_blocks(
+  # Zipped, rendered and validated on a staging file beside output_path, and
+  # moved into place only once that staging file is a valid DOCX -- a failure
+  # at any of those three steps (a bad block placeholder, a render error, a
+  # corrupt archive) must never touch whatever was already at output_path.
+  .dta_write_staged(
     output_path,
-    dta = dta,
-    blocks = c(region_blocks, blocks),
-    quiet = quiet,
-    bare = names(region_blocks)
-  )
-
-  valid <- tryCatch(
-    {
-      officer::read_docx(output_path)
-      TRUE
+    write = function(stage) {
+      .zip_docx_dir(temp_dir, stage)
+      .tv_render_blocks(
+        stage,
+        dta = dta,
+        blocks = c(region_blocks, blocks),
+        quiet = quiet,
+        bare = names(region_blocks)
+      )
+      invisible(NULL)
     },
-    error = function(e) FALSE
+    check = function(stage) {
+      valid <- tryCatch(
+        {
+          officer::read_docx(stage)
+          TRUE
+        },
+        error = function(e) FALSE
+      )
+      if (!isTRUE(valid)) {
+        cli::cli_abort("The generated document is not a valid DOCX: {.file {output_path}}")
+      }
+    }
   )
-  if (!isTRUE(valid)) {
-    cli::cli_abort("The generated document is not a valid DOCX: {.file {output_path}}")
-  }
 
   invisible(output_path)
 }

@@ -61,7 +61,9 @@ validate_table <- function(specs, table, verbose = TRUE) {
     columnspec_errors["import_errors"] <- list(details$import_errors)
 
     if (length(rule_messages) > 0) {
-      bullets <- c("Rule violations were also found:", rule_messages)
+      # Rule messages can carry YAML- or data-derived text (rule ids, column
+      # names, ...); escape before it reaches cli as bullet content.
+      bullets <- c("Rule violations were also found:", .cli_escape(rule_messages))
       names(bullets) <- c("", rep("x", length(rule_messages)))
       cli::cli_warn(bullets)
     }
@@ -70,7 +72,7 @@ validate_table <- function(specs, table, verbose = TRUE) {
   }
 
   if (length(rule_messages) > 0) {
-    cli::cli_abort(c("Rule violations:", rule_messages))
+    cli::cli_abort(c("Rule violations:", .cli_escape(rule_messages)))
   }
 
   # The import axis fails validation independently of column spec and rules: a value

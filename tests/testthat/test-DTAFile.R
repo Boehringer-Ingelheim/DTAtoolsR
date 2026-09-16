@@ -1085,6 +1085,25 @@ test_that("the reader plan's encoding argument overrides the handler's", {
   )
 })
 
+test_that("a declared missing value adds to Arrow's default NA markers rather than replacing them", {
+  # Before the fix, dta_reader_na_values() returned unique(c("", declared)),
+  # dropping "NA" from the set the readers fall back to when `na` is NULL --
+  # so a literal "NA" cell stopped reading as missing the moment a handler
+  # declared any missing_values of its own. Both readers must keep treating
+  # "NA" as missing AND honour the newly declared marker.
+  path <- file.path(tempdir(), "declared_missing.csv")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(c("ID,VAL", "A001,NA", "A002,.", "A003,5"), path)
+
+  handler <- DTAFileCSV(basename(path), missing_values = ".")
+
+  eager <- as.data.frame(read_file(handler, path))
+  expect_identical(is.na(eager$VAL), c(TRUE, TRUE, FALSE))
+
+  lazy <- as.data.frame(open_file(handler, path))
+  expect_identical(is.na(lazy$VAL), c(TRUE, TRUE, FALSE))
+})
+
 
 # ---- pattern_description reaches the concrete subclasses ---------------------
 # DTAFile has carried a `pattern_description` property from the start, and the

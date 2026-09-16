@@ -639,6 +639,39 @@ test_that("export_with_template falls back to the standard layout on failure", {
   )
 })
 
+test_that("a failed template render never touches a valid file already at the destination", {
+  # Regression guard: .replace_docx_placeholders() used to zip and render
+  # straight onto output_path, so a render failure after the zip step (or a
+  # DOCX that failed the post-render validity check) left a half-written or
+  # missing file where a good export used to be.
+  template <- .make_template("Title: {DTA_TITLE}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+
+  dta <- create_example_DTA()
+
+  test_dir <- tempfile("template_export_")
+  dir.create(test_dir)
+  on.exit(unlink(test_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  out <- file.path(test_dir, "out.docx")
+
+  # A valid, pre-existing DOCX at the destination -- the render failure below
+  # must leave it exactly as it was.
+  print(officer::read_docx(), target = out)
+  original <- readBin(out, what = "raw", n = file.info(out)$size)
+
+  local_mocked_bindings(
+    .tv_render_blocks = function(...) cli::cli_abort("block rendering blew up")
+  )
+
+  expect_error(
+    export_with_template(dta, template, out, quiet = TRUE, fallback = FALSE),
+    "Template processing failed"
+  )
+  expect_identical(readBin(out, what = "raw", n = length(original)), original)
+  # No staging file left behind next to the untouched destination.
+  expect_identical(list.files(test_dir), "out.docx")
+})
+
 test_that("the template fallback is detectable programmatically", {
   # The Shiny app (and any script) must be able to notice that the requested
   # template was silently replaced by the built-in layout. cli_alert_warning()

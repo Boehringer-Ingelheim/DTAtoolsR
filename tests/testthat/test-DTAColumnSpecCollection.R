@@ -78,6 +78,11 @@ test_that("permitted values a YAML parser turned into numbers are flagged", {
   columns_quoted <- columns
   columns_quoted[[1]]$values <- c("1.10", "2.00")
   expect_no_warning(specs_from_list(columns_quoted))
+
+  # A column with no declared type is not a text column, so its numeric
+  # values are not flagged either.
+  columns_untyped <- list(list(id = "VISIT", values = c(1, 2)))
+  expect_no_warning(specs_from_list(columns_untyped))
 })
 
 test_that("specs_from_list(NULL) means no columns declared, not an error", {

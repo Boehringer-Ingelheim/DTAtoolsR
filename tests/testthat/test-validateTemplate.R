@@ -613,6 +613,26 @@ test_that("strict = TRUE aborts, summarising the error count, when any row is se
   )
 })
 
+test_that("strict = TRUE never evaluates the offending file's path as a cli format string", {
+  # .dta_template_strict_check() sprintf()s preview$file (author-controlled --
+  # here, the template's own file name) straight into a cli_abort() bullet.
+  # Before the fix, a `{`/`}` in that path was glue-evaluated in the
+  # validating session instead of printed literally.
+  dir <- withr::local_tempdir()
+  payload_file <- "u{stop('evaluated')}.dta-template.yaml"
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: unquoted_tpl", "version: 1.0",
+      "base: {metadata: {}}", "datasets: []"
+    ),
+    file.path(dir, payload_file)
+  )
+
+  err <- tryCatch(validate_template(dir, strict = TRUE), error = function(e) e)
+  expect_s3_class(err, "rlang_error")
+  expect_true(grepl(payload_file, conditionMessage(err), fixed = TRUE))
+})
+
 # ---- kinds filter -------------------------------------------------------------
 
 test_that("kinds restricts which files get their own report row but not cross-file resolution", {

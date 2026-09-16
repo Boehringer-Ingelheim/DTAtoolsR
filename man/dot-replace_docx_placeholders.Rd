@@ -30,7 +30,9 @@ Invisibly returns \code{output_path}.
 }
 \description{
 Unzips \code{template_path}, substitutes placeholders in the main document part and
-any header/footer parts, repackages the archive to \code{output_path}, and verifies
-the result opens as a valid DOCX.
+any header/footer parts, repackages the archive, verifies the result opens
+as a valid DOCX, and only then moves it to \code{output_path} (via
+\code{\link[=.dta_write_staged]{.dta_write_staged()}}) -- any file already at \code{output_path} is left
+untouched until that last step succeeds.
 }
 \keyword{internal}

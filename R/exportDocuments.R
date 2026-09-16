@@ -129,7 +129,7 @@ write_dta <- function(
   doc <- NULL
   if (format == "docx") {
     doc <- .write_dta_docx(x, include_signatures, signature_list, include_yaml, yaml_text)
-    print(doc, target = file)
+    .dta_write_staged(file, function(stage) print(doc, target = stage))
   } else if (format == "pdf") {
     # First create DOCX, then convert to PDF
     temp_docx <- tempfile(fileext = ".docx")
@@ -151,6 +151,52 @@ write_dta <- function(
     cli::cli_alert_success("Document saved to {file}")
   }
   invisible(doc)
+}
+
+#' Write a document to a staging file, then move it into place
+#'
+#' Every document writer in this file, and the template writer in
+#' `exportTemplateDocx.R`, produces its output through this helper instead of
+#' writing straight to the destination. `officer::print(target = )`,
+#' `writeLines()` and the PDF backends all truncate or create their target
+#' before the write finishes, so a failure partway used to leave a corrupt (or
+#' entirely wiped) file where a good export -- possibly one nobody has touched
+#' in months -- used to be. That is worse than aborting with nothing written:
+#' the destination must come out of a failed export exactly as it went in.
+#'
+#' Mirrors the stage-then-rename pattern already used by
+#' `write_table_to_file()` (`R/DTADataSetTabular-class.R`): the staging file is
+#' created in `dirname(path)` so the final step is a rename within one
+#' filesystem rather than a copy across two, and it is named with the same
+#' extension as `path` because officer and pandoc both dispatch on the
+#' extension of their output path.
+#'
+#' @param path Character. Final destination.
+#' @param write Function of one argument (the staging path) that produces the
+#'   file there. Its return value is ignored.
+#' @param check Optional function of one argument (the staging path) that
+#'   signals an error (typically via `cli::cli_abort()`) if the staged file is
+#'   unacceptable. Runs after `write()` and before the file is moved into
+#'   place.
+#' @return Invisibly returns `path`.
+#' @keywords internal
+.dta_write_staged <- function(path, write, check = NULL) {
+  ext <- tools::file_ext(path)
+  stage <- tempfile(tmpdir = dirname(path), fileext = if (nzchar(ext)) paste0(".", ext) else "")
+  on.exit(unlink(stage, force = TRUE), add = TRUE)
+
+  write(stage)
+  if (!is.null(check)) {
+    check(stage)
+  }
+
+  if (!file.rename(stage, path)) {
+    cli::cli_abort(c(
+      "Could not move the finished export into place at {.path {path}}.",
+      i = "The previous contents of {.path {path}}, if any, are unchanged."
+    ))
+  }
+  invisible(path)
 }
 
 #' @keywords internal
@@ -373,7 +419,7 @@ write_dta <- function(
     paste("*Generated on:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "*")
   )
 
-  writeLines(lines, con = file)
+  .dta_write_staged(file, function(stage) writeLines(lines, con = stage))
 }
 
 #' Render an organization block (affiliation + individual contact blocks) as Markdown lines.
@@ -756,11 +802,12 @@ dta_pdf_backend <- function() {
 #' Convert a DOCX to a PDF, or fail loudly
 #'
 #' Tries every backend reported by [.pdf_backends_available()] in priority order
-#' and returns as soon as one yields a genuine PDF. Produces a real PDF or
-#' aborts: a DOCX is never renamed to `.pdf`, and no file is ever written to a
-#' path other than the requested `pdf_file`. Any partial output is removed
-#' before the abort so the caller is not left with a misnamed or truncated
-#' document.
+#' and returns as soon as one yields a genuine PDF. Each attempt is written to
+#' its own staging file beside `pdf_file` (via [.dta_write_staged()]); the
+#' destination is only ever touched by the final rename, once
+#' [.is_pdf_file()] has accepted the staged output. A file already at
+#' `pdf_file` -- valid or not -- is therefore left completely alone by every
+#' failed attempt; only a successful conversion replaces it.
 #'
 #' @param docx_file Character. Existing `.docx` to convert.
 #' @param pdf_file Character. Path of the `.pdf` to create.
@@ -777,36 +824,38 @@ dta_pdf_backend <- function() {
   for (backend in backends) {
     err <- tryCatch(
       {
-        switch(backend,
-          libreoffice = .soffice_docx_to_pdf(docx_file, pdf_file),
-          tinytex = .tinytex_docx_to_pdf(docx_file, pdf_file),
-          .pandoc_docx_to_pdf(docx_file, pdf_file)
+        .dta_write_staged(
+          pdf_file,
+          write = function(stage) {
+            switch(backend,
+              libreoffice = .soffice_docx_to_pdf(docx_file, stage),
+              tinytex = .tinytex_docx_to_pdf(docx_file, stage),
+              .pandoc_docx_to_pdf(docx_file, stage)
+            )
+            invisible(NULL)
+          },
+          check = function(stage) {
+            if (!.is_pdf_file(stage)) {
+              cli::cli_abort("conversion ran but the output did not start with the %PDF signature")
+            }
+          }
         )
         NULL
       },
       error = function(e) conditionMessage(e)
     )
 
-    if (is.null(err) && .is_pdf_file(pdf_file)) {
+    if (is.null(err)) {
       return(invisible(pdf_file))
     }
 
-    # Never leave a failed or non-PDF artefact at the requested path.
-    unlink(pdf_file, force = TRUE)
-    detail <- paste0(
-      backend, ": ",
-      if (is.null(err)) {
-        "conversion ran but the output did not start with the %PDF signature"
-      } else {
-        .cli_escape(err)
-      }
-    )
+    detail <- paste0(backend, ": ", .cli_escape(err))
     names(detail) <- "x"
     failures <- c(failures, detail)
   }
 
   cli::cli_abort(c(
-    "PDF conversion failed; {.file {pdf_file}} was not created.",
+    "PDF conversion failed; nothing was written to {.file {pdf_file}}.",
     failures,
     i = "Check the backend in use with {.run DTAtools::dta_pdf_backend()}.",
     i = "Install a PDF engine with {.run tinytex::install_tinytex()}, or export with {.code format = \"docx\"} instead."
@@ -874,7 +923,7 @@ write_dataset_metadata <- function(
 
   if (format == "docx") {
     doc <- .write_dataset_docx(x, include_signatures, include_file_specs, include_rules, signature_list)
-    print(doc, target = file)
+    .dta_write_staged(file, function(stage) print(doc, target = stage))
   } else if (format == "pdf") {
     temp_docx <- tempfile(fileext = ".docx")
     on.exit(unlink(temp_docx, force = TRUE), add = TRUE)
@@ -980,7 +1029,7 @@ write_dataset_metadata <- function(
     paste("*Generated on:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "*")
   )
 
-  writeLines(lines, con = file)
+  .dta_write_staged(file, function(stage) writeLines(lines, con = stage))
 }
 
 #' @title Alias: Export File Dataset Specifications

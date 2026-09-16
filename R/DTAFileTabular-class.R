@@ -1425,9 +1425,9 @@ dta_read_delim_normalized <- function(
 #' @title Missing-Value Markers for a Tabular Handler
 #' @description
 #' Maps a `DTAFileTabular` handler's declared `missing_values` onto the `na`
-#' argument the readers expect. An empty cell is always treated as missing
-#' regardless of what a handler declares; anything in `missing_values` adds to
-#' that rather than replacing it.
+#' argument the readers expect. Both readers default (when `na` is `NULL`) to
+#' Arrow's own `c("", "NA")`; anything a handler declares in `missing_values`
+#' is ADDED to that default set, never used in place of it.
 #' @param x A `DTAFileTabular` object (or subclass).
 #' @return A character vector to pass as `na`, or `NULL` when the handler
 #'   declares no missing-value markers -- `NULL` lets the reader keep Arrow's
@@ -1447,7 +1447,10 @@ dta_reader_na_values <- function(x) {
     return(NULL)
   }
 
-  unique(c("", declared))
+  # Declared tokens ADD to Arrow's default missing set; they never replace
+  # it, or a handler declaring "." as missing would turn literal "NA" text
+  # back into a value (REQ-FILE-004).
+  unique(c("", "NA", declared))
 }
 
 

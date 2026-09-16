@@ -500,6 +500,84 @@ test_that("saving a group_condition rule from the rule editor updates spec and Y
   })
 })
 
+test_that("removing a group_condition row keeps it out of the saved rule instead of resurrecting it", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # These tests were written when every surface was unconditionally
+    # editable. Edit mode now gates them, so turning it on here preserves
+    # each test's original intent; the gate itself is covered in
+    # test-shinyapp-edit-mode.R.
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+
+    session$setInputs(
+      rule_id = "removed_row_regression",
+      rule_desc = "Two rows of each, row 2 removed before save",
+      rule_group_by = c("SUBJECT_ID", "VISIT")
+    )
+
+    # Row 1 of each -- these are the rows expected to survive.
+    session$setInputs(
+      gcond_name_1 = "c1_failed",
+      gcond_col_1 = "STATUS",
+      gcond_op_1 = "equals",
+      gcond_val_1 = "FAILED"
+    )
+    session$setInputs(
+      gconstr_id_1 = "keep_constraint",
+      gconstr_type_1 = "mutually_exclusive",
+      gconstr_left_1 = "c1_failed",
+      gconstr_right_1 = "c1_failed",
+      gconstr_lscope_1 = "any",
+      gconstr_rscope_1 = "any",
+      gconstr_msg_1 = "Row 1"
+    )
+
+    # Row 2 of each -- added, filled, then removed via the real remove
+    # button inputs before saving.
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "c2_removed",
+      gcond_col_2 = "CONSENT_DATE",
+      gcond_op_2 = "empty",
+      gcond_val_2 = "false"
+    )
+    session$setInputs(gconstr_add = 1)
+    session$setInputs(
+      gconstr_id_2 = "remove_constraint",
+      gconstr_type_2 = "mutually_exclusive",
+      gconstr_left_2 = "c2_removed",
+      gconstr_right_2 = "c2_removed",
+      gconstr_lscope_2 = "any",
+      gconstr_rscope_2 = "any",
+      gconstr_msg_2 = "Row 2"
+    )
+
+    # Remove the constraint row first: removing the condition row afterwards
+    # would otherwise be blocked by a (still-visible) dependent constraint.
+    session$setInputs(gconstr_remove_2 = 1)
+    session$setInputs(gcond_remove_2 = 1)
+
+    session$setInputs(rule_save = 1)
+
+    expect_null(rv$rule_msg)
+    expect_equal(rv$rule_view, "list")
+
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    expect_s3_class(new_rule, "DTAtools::DTARuleGroupCondition")
+    expect_equal(new_rule@id, "removed_row_regression")
+    expect_equal(names(new_rule@conditions), "c1_failed")
+    expect_equal(length(new_rule@constraints), 1)
+    expect_equal(new_rule@constraints[[1]]$id, "keep_constraint")
+  })
+})
+
 test_that("group_condition constraint selectors follow condition name changes", {
   clean_session_file()
 
