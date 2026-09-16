@@ -3130,7 +3130,7 @@
       "checksum": "4224f61f66231653d9551bfc7fb030ec"
     },
     "R/template_inherit.R": {
-      "checksum": "dd238e21ee1421533ef76dabb701d5c8"
+      "checksum": "df2cfe3cd9154c8771a7af2bbfe33a3d"
     },
     "R/template_sources.R": {
       "checksum": "264c117393a5c0f08b4d1c5c73d7cff6"
@@ -3145,7 +3145,7 @@
       "checksum": "93d843db3234a27298b5d60fcd05e1cf"
     },
     "R/utils_dta.R": {
-      "checksum": "2b94ad3536faffcbb6df75f59dab3f82"
+      "checksum": "a0f8c3cc5eff1c5c86fae18479a33a26"
     },
     "R/utils_export.R": {
       "checksum": "92089890cb9586311997d654a71bf4ca"
@@ -3160,7 +3160,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "3724ebe49d90c2084f1cd1cb164bfacb"
+      "checksum": "4b02007c9add904af2aace1240deef20"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
