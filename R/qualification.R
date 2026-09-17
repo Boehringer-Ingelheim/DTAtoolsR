@@ -1339,6 +1339,19 @@ qual_verdict <- function(tests_df, meta_df, dev_status, partial) {
   if (isTRUE(partial)) paste(verdict, "(PARTIAL)") else verdict
 }
 
+# A bundle missing any of its own evidence files cannot carry a passing
+# verdict, whatever the tests said: the audit trail it claims is not there.
+qual_mark_incomplete <- function(x, failed) {
+  if (length(failed) == 0) {
+    return(x)
+  }
+  verdict <- if (isTRUE(x$run$partial)) "FAIL (PARTIAL)" else "FAIL"
+  x$verdict <- verdict
+  x$summary$verdict <- verdict
+  x$run$evidence_write_failures <- failed
+  x
+}
+
 # ---- hashing ----------------------------------------------------------------
 
 qual_hash_algorithm <- function() {
@@ -1428,24 +1441,36 @@ qual_write_bundle <- function(x, dir) {
   results_dir <- file.path(dir, "results")
   dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
 
-  qual_write_evidence(x$tests, file.path(results_dir, "tests.csv"))
-  qual_write_evidence(x$expectations, file.path(results_dir, "expectations.csv"))
-  qual_write_evidence(x$traceability, file.path(results_dir, "traceability.csv"))
-  qual_write_evidence(x$requirements, file.path(results_dir, "requirements.csv"))
-  qual_write_evidence(x$deviations, file.path(results_dir, "deviations.csv"))
-  qual_write_evidence(x$limitations, file.path(results_dir, "limitations.csv"))
-  qual_write_evidence(x$meta_checks, file.path(results_dir, "meta_checks.csv"))
-  qual_write_evidence(attr(x$traceability, "requirements"), file.path(results_dir, "coverage.csv"))
+  # Every evidence write is tracked here rather than fired and forgotten, so a
+  # bundle that is missing a file can never be reported as a clean PASS.
+  failed <- character(0)
+  track <- function(evidence, path) {
+    if (!qual_write_evidence(evidence, path)) {
+      failed <<- c(failed, basename(path))
+    }
+  }
+
+  track(x$tests, file.path(results_dir, "tests.csv"))
+  track(x$expectations, file.path(results_dir, "expectations.csv"))
+  track(x$traceability, file.path(results_dir, "traceability.csv"))
+  track(x$requirements, file.path(results_dir, "requirements.csv"))
+  track(x$deviations, file.path(results_dir, "deviations.csv"))
+  track(x$limitations, file.path(results_dir, "limitations.csv"))
+  track(x$meta_checks, file.path(results_dir, "meta_checks.csv"))
+  track(attr(x$traceability, "requirements"), file.path(results_dir, "coverage.csv"))
   if (!is.null(x$performance) && nrow(x$performance) > 0) {
-    qual_write_evidence(x$performance, file.path(results_dir, "performance.csv"))
+    track(x$performance, file.path(results_dir, "performance.csv"))
   }
   # Written whenever the developer suite ran, so that its result is auditable
   # in the same way the stages are rather than existing only as four numbers
   # in the report. testthat's own frame carries list columns, which is why it
   # goes through the same flattening every other evidence frame does.
   if (isTRUE(x$unit_tests$run) && !is.null(x$unit_tests$results)) {
-    qual_write_evidence(x$unit_tests$results, file.path(results_dir, "unit-tests.csv"))
+    track(x$unit_tests$results, file.path(results_dir, "unit-tests.csv"))
   }
+  # Settled before results.json is built, so the machine-readable record
+  # carries the same verdict as the report and SUMMARY.txt.
+  x <- qual_mark_incomplete(x, failed)
 
   jsonlite::write_json(
     x$environment, file.path(results_dir, "environment.json"),
@@ -1482,19 +1507,30 @@ qual_write_bundle <- function(x, dir) {
   json_path <- file.path(results_dir, "results.json")
   # Guarded for the same reason the CSVs are: every stage has already run by
   # this point, and an object that will not serialise must not cost the run
-  # its report and its manifest as well as this one file.
+  # its report and its manifest as well as this one file. A failure here is
+  # never papered over with a stub: a hash taken over "{}" would make an
+  # incomplete bundle hash-verify as if nothing were missing.
+  # write_json() returns NULL on success just as much as qual_safe()'s default
+  # does on failure, so success is read off a sentinel produced only when the
+  # call actually completes, not off write_json()'s own return value.
   written <- qual_safe(
-    jsonlite::write_json(
-      payload, json_path,
-      auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null", digits = NA
-    ),
-    NULL
+    {
+      jsonlite::write_json(
+        payload, json_path,
+        auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null", digits = NA
+      )
+      TRUE
+    },
+    FALSE
   )
-  if (is.null(written) && !file.exists(json_path)) {
+  if (!written) {
     qual_log("write_failed", basename(json_path))
-    writeLines("{}", json_path)
+    if (file.exists(json_path)) {
+      file.remove(json_path)
+    }
+    failed <- c(failed, basename(json_path))
   }
-  json_path
+  list(json_path = json_path, failed = failed)
 }
 
 qual_write_summary_txt <- function(x, dir) {
@@ -1525,6 +1561,15 @@ qual_write_summary_txt <- function(x, dir) {
     ),
     sprintf("Meta checks      : %d of %d passed", sum(x$meta_checks$ok), nrow(x$meta_checks)),
     "",
+    if (length(x$run$evidence_write_failures) > 0) {
+      c(
+        sprintf(
+          "EVIDENCE BUNDLE INCOMPLETE: could not write %s.",
+          paste(x$run$evidence_write_failures, collapse = ", ")
+        ),
+        ""
+      )
+    },
     sprintf("%s of results.json: %s", algo, x$run$results_json_hash),
     "",
     "To verify this bundle has not been altered, run from this directory:",
@@ -1583,10 +1628,10 @@ summary.dta_qualification <- function(object, ...) {
           object$expectations$type != "success", ,
         drop = FALSE
       ]
-      cli::cli_li(sprintf(
+      cli::cli_li(.cli_escape(sprintf(
         "%s [%s] %s", bad$tc_id[[i]], bad$status[[i]],
         if (nrow(first)) substr(first$message[[1]], 1, 120) else ""
-      ))
+      )))
     }
   }
   invisible(per_stage)
@@ -1877,8 +1922,20 @@ run_qualification <- function(output_dir,
     environment = environment_record, bundle_dir = bundle_dir
   )
 
-  json_path <- qual_write_bundle(x, bundle_dir)
+  bundle <- qual_write_bundle(x, bundle_dir)
+  json_path <- bundle$json_path
   x$run$results_json_hash <- qual_hash_one(json_path)
+
+  # The verdict was computed above from the test results, but a bundle that
+  # failed to write some of its own evidence cannot honestly report that
+  # verdict: the audit trail it promises would not exist. Downgrade to FAIL
+  # and name the missing files before anything reads x$verdict again -- the
+  # report, SUMMARY.txt and the printed result that follow all do.
+  if (length(bundle$failed) > 0) {
+    qual_log("evidence_incomplete", paste(bundle$failed, collapse = ", "))
+    x <- qual_mark_incomplete(x, bundle$failed)
+    verdict <- x$verdict
+  }
 
   report_paths <- qual_write_report(x, bundle_dir, formats)
   x$run$formats_rendered <- report_paths

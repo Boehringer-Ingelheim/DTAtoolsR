@@ -87,6 +87,70 @@ test_that("DTA() names datasets from the DTADataSet it is given", {
   expect_named(dta_named@datasets, "other")
 })
 
+test_that("DTA() rejects a datasets list with a repeated name", {
+  # check() loops over names(x@datasets) and reads/writes x@datasets[[ds_name]],
+  # so a repeated name validates the first entry twice and the second never --
+  # and the run can still report "Validation PASSED". F4.
+  ds1 <- DTADataSetTabular(
+    name = "same",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(t1 = data.frame(STUDYID = "1234", VISIT = "V03"))
+  )
+  ds2 <- DTADataSetTabular(
+    name = "same",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(t2 = data.frame(STUDYID = "5678", VISIT = "V05"))
+  )
+
+  expect_error(
+    DTA(datasets = list(ds1, ds2), metadata = create_example_DTAMetaData()),
+    regexp = "duplicate"
+  )
+  expect_error(
+    DTA(datasets = list(same = ds1, same = ds2), metadata = create_example_DTAMetaData()),
+    regexp = "duplicate"
+  )
+})
+
+test_that("DTA() rejects an unnamed, empty-named or NA-named datasets list", {
+  ds <- create_example_DTADataSetTabular(2)
+
+  # An unnamed list reaching the constructor is auto-named from @name (see the
+  # dedicated test above), so a totally unnamed @datasets can only be produced
+  # by assigning the property directly, bypassing that constructor logic.
+  dta <- create_example_DTA()
+  expect_error(
+    {
+      dta@datasets <- unname(dta@datasets)
+    },
+    regexp = "name"
+  )
+
+  expect_error(
+    DTA(datasets = stats::setNames(list(ds), ""), metadata = create_example_DTAMetaData()),
+    regexp = "name"
+  )
+  expect_error(
+    DTA(datasets = stats::setNames(list(ds), NA_character_), metadata = create_example_DTAMetaData()),
+    regexp = "name"
+  )
+
+  # An empty or NULL datasets list is unaffected -- there is nothing to name.
+  expect_length(DTA(datasets = list(), metadata = create_example_DTAMetaData())@datasets, 0)
+})
+
+test_that("replacing a dataset by name still works after the uniqueness validator", {
+  dta <- create_example_DTA()
+  original_name <- names(dta@datasets)[1]
+  replacement <- dta@datasets[[original_name]]
+  replacement@description <- "replaced"
+
+  dta@datasets[[original_name]] <- replacement
+
+  expect_length(dta@datasets, 2)
+  expect_identical(dta@datasets[[original_name]]@description, "replaced")
+})
+
 test_that("DTA() builds metadata from ... when metadata is not supplied", {
   dta <- DTA(datasets = list(), title = "Constructed From Dots", version = "1.0")
 

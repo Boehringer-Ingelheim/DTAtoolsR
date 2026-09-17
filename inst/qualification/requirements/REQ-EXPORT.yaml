@@ -304,18 +304,19 @@ requirements:
     covers: [write_table_to_file]
     source: R/DTADataSetTabular-class.R
     notes: >
-      Pinned as observed, not endorsed, and this is the requirement the
-      current implementation VIOLATES rather than meets. compression = "none"
-      writes directly to the destination: base R's write.table() opens and
-      truncates that file and writes the header line before it converts the
-      data columns, so a failure while converting a column (a type write.table
-      cannot coerce) leaves a header-only file sitting at the destination path
-      -- silently replacing an existing good file if overwrite = TRUE was
-      given. compression = "gzip" does not have this exposure: it writes to an
-      anonymous temp file first and only gzips that to the destination on
-      success, so the same failure leaves no file at the destination at all.
-      Reported upstream as a finding rather than filed as a deviation, since no
-      reachable DTAtools-typed column currently exercises it.
+      Closes DEV-013. compression = "none" used to write directly to the
+      destination: base R's write.table() opens and truncates that file and
+      writes the header line before it converts the data columns, so a
+      failure while converting a column (a type write.table cannot coerce)
+      left a header-only file sitting at the destination path -- silently
+      replacing an existing good file if overwrite = TRUE was given.
+      compression = "gzip" never had this exposure: it writes to an anonymous
+      temp file first and only gzips that to the destination on success. Both
+      branches now convert the whole table into a staging file beside the
+      destination first -- the plain branch then renames it into place, the
+      gzip branch compresses it there -- so a conversion failure never reaches
+      the destination, closing the exposure on the compression = "none" branch
+      too.
 
   - id: REQ-EXPORT-026
     text: >
@@ -417,3 +418,26 @@ requirements:
       The region author writes the headings, so a bound block contributes
       only its table; outside a region a block still renders under its own
       generated heading.
+
+  - id: REQ-EXPORT-032
+    text: >
+      write_dta(), write_dataset_metadata() and export_with_template() shall
+      not leave a file at the destination path that is neither absent nor the
+      complete document when the export does not complete: a document export
+      that fails, at any format (docx, md, pdf) or at DOCX-to-PDF conversion,
+      shall leave a file already at the destination byte-for-byte unchanged
+      and shall leave no staging file behind.
+    risk: high
+    category: integrity
+    covers: [write_dta, write_dataset_metadata, export_with_template]
+    source: R/exportDocuments.R .dta_write_staged(); R/exportTemplateDocx.R .replace_docx_placeholders()
+    notes: >
+      Every document writer in exportDocuments.R, the template writer in
+      exportTemplateDocx.R, and the DOCX-to-PDF conversion route their output
+      through .dta_write_staged(), which mirrors the stage-then-rename pattern
+      write_table_to_file() uses for REQ-EXPORT-025: the output is written and
+      validated on a staging file beside the destination, and the destination
+      is touched only by the final rename, once the staged file is accepted.
+      Unlike REQ-EXPORT-025, which the compression = "none" branch used to
+      violate (see DEV-013, closed), no open deviation is recorded against
+      this requirement.

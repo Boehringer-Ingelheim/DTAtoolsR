@@ -29,5 +29,10 @@ answers.
 
 Compiling once and passing the result in makes that cost proportional to the
 spec rather than to the data.
+
+A column whose schema cannot be derived (\code{as_json_schema()} errors) gets a
+\code{NULL} schema and is warned about here, once for the whole scan rather than
+once per batch -- \code{dta_columnspec_errors()} then skips its value checks
+entirely, exactly as it does for a column absent from \code{schemas}.
 }
 \keyword{internal}

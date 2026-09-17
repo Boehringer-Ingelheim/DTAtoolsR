@@ -405,6 +405,14 @@ method(as.list, DTAColumnSpec) <- function(x, ...) {
 #' called on the underlying structure it reports the type alone. The base
 #' \code{\link{DTAColumnSpecStructure}} method aborts, because a structure that
 #' names no backend cannot say how it should be validated.
+#'
+#' A column declared with no \code{type}, \code{format} or \code{length} has no
+#' \code{@structure} at all, so there is no backend to dispatch on. Such a
+#' column is still checked on \code{values}/\code{pattern}/\code{nullable} (see
+#' \code{\link{as_json_schema}()}), so "type" itself must never be the reason a
+#' present value fails: every JSON base type \code{\link{dta_base_json_type}()}
+#' can produce is returned, which is a no-op constraint for "type" while
+#' leaving missingness governed by the same nullable rule as a typed column.
 #' @return A character vector naming the JSON Schema type of the column, with
 #'   \code{"null"} appended when the column is nullable.
 #' @examples
@@ -426,7 +434,19 @@ if (!exists("as_json_schema_type", mode = "function", inherits = FALSE)) {
 }
 #' @export
 method(as_json_schema_type, DTAColumnSpec) <- function(x) {
-  type <- as_json_schema_type(x@structure)
+  type <- if (is.null(x@structure)) {
+    # Every base type dta_base_json_type() (R/columnSpecChecks.R) can return
+    # for a value, derived from that function rather than duplicated here so
+    # the two cannot drift apart. "type" is then unconstrained: whichever base
+    # type a present value has, it is in this set.
+    unique(vapply(
+      list(character(1), integer(1), double(1), logical(1)),
+      dta_base_json_type,
+      character(1)
+    ))
+  } else {
+    as_json_schema_type(x@structure)
+  }
 
   if (!is.null(x@nullable) && x@nullable) {
     type <- c(type, "null")
@@ -443,7 +463,9 @@ method(as_json_schema_type, DTAColumnSpec) <- function(x) {
 #' @description
 #' Converts a DTAColumnSpec to a JSON Schema length.
 #' @return The column's declared maximum length, as a number, or \code{NULL}
-#'   when the specification declares none.
+#'   when the specification declares none -- including a column with no
+#'   \code{@structure} at all (no \code{type}, \code{format} or \code{length}),
+#'   which has no length to read.
 #' @usage as_json_schema_length(x, ...)
 #' @export
 if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {
@@ -451,6 +473,9 @@ if (!exists("as_json_schema_length", mode = "function", inherits = FALSE)) {
 }
 #' @export
 method(as_json_schema_length, DTAColumnSpec) <- function(x) {
+  if (is.null(x@structure)) {
+    return(NULL)
+  }
   x@structure@length
 }
 
@@ -511,21 +536,34 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
     }
 
     schema_types <- schema$type
-    base_type <- schema_types[schema_types != "null"][1]
+    non_null_types <- unique(schema_types[schema_types != "null"])
 
-    values <- switch(base_type,
-      "integer" = as.integer(values_flat),
-      "number" = as.numeric(values_flat),
-      "boolean" = as.logical(values_flat),
-      "string" = {
-        if (is.list(values_raw)) {
-          unlist(lapply(values_raw, as.character), recursive = TRUE, use.names = FALSE)
-        } else {
-          as.character(values_flat)
-        }
-      },
+    values <- if (length(non_null_types) > 1) {
+      # No declared type (see as_json_schema_type()): the column's actual
+      # runtime storage is unknown, so the declared values are kept in their
+      # YAML representation rather than coerced to any one of them. `%in%`
+      # (dta_check_column_spec()'s enum check) compares by coercing both sides
+      # to a common type at match time, so an un-coerced numeric `1` still
+      # matches a character column holding "1", and a character "1" still
+      # matches a numeric column holding 1 -- coercing here to a single type
+      # would only ever satisfy one of the two.
       values_flat
-    )
+    } else {
+      base_type <- non_null_types[1]
+      switch(base_type,
+        "integer" = as.integer(values_flat),
+        "number" = as.numeric(values_flat),
+        "boolean" = as.logical(values_flat),
+        "string" = {
+          if (is.list(values_raw)) {
+            unlist(lapply(values_raw, as.character), recursive = TRUE, use.names = FALSE)
+          } else {
+            as.character(values_flat)
+          }
+        },
+        values_flat
+      )
+    }
 
     if (!is.null(x@nullable)) {
       if (x@nullable) {

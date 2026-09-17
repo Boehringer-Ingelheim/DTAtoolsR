@@ -332,3 +332,26 @@ requirements:
       the whole scan for this to hold; a per-batch accumulator that forgot
       what it had seen would miss exactly this case while still passing every
       case where both occurrences share a batch.
+
+  # ---- inspecting a message on a streamed table ------------------------------
+
+  - id: REQ-STREAM-024
+    text: >
+      inspect() on a message raised against a lazily-held (streamed) table
+      shall report the same row context, and for a rule the same failing-row
+      preview, as inspect() reports for the same message on the same data
+      held in memory, without materialising the table in full to do so; when
+      the held table cannot be safely re-read, inspect() shall say so rather
+      than report an empty or a clean result.
+    risk: medium
+    category: functional
+    covers: [inspect]
+    source: R/validationReporting.R dta_inspect_tabular_message(), dta_inspect_table_frame()
+    notes: >
+      Before the fix, dta_inspect_tabular_message() called
+      as.data.frame(x@tables[[table_name]]) unconditionally, pulling a whole
+      streamed delivery into memory just to show the context of one row --
+      exactly what check() was streaming to avoid in the first place. The row
+      context and failing-row preview it produced were otherwise the same
+      values a reader would get from the in-memory path; the fix changes how
+      they are obtained, not what they say.

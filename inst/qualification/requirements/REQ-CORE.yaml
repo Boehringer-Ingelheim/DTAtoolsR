@@ -106,6 +106,12 @@ requirements:
     text: >
       A failure to write one evidence file shall be recorded and the run shall
       continue to write the remaining files, the report and the hash manifest.
+      An evidence bundle left incomplete this way shall force the run's
+      verdict to FAIL (or "FAIL (PARTIAL)" for a run that is itself partial),
+      and the file(s) that could not be written shall be named in the run
+      record, in results.json, in SUMMARY.txt and in the report, each of
+      which shall carry that verdict -- so a bundle missing part of
+      its own audit trail can never be read as a clean pass.
     risk: high
     category: integrity
     covers: [run_qualification]
@@ -113,4 +119,7 @@ requirements:
     notes: >
       By the time the bundle is written every stage has already run. Aborting
       there discards the whole run's evidence, which on a target system means
-      repeating a qualification that had in fact succeeded.
+      repeating a qualification that had in fact succeeded. Recording the
+      failure and continuing is not enough on its own: a PASS verdict sitting
+      next to a bundle missing one of its own CSVs would tell a reviewer
+      everything was fine when the evidence to show that is incomplete.

@@ -592,3 +592,41 @@ test_that("OQ-EXPORT-026 | columns_specs_from_word cannot read the table export_
   )
   qa_known_deviation("DEV-014", inherits(cond, "condition"))
 })
+
+# ---- document exports write atomically ---------------------------------------
+
+test_that("OQ-EXPORT-044 | a document export that fails leaves an existing destination file byte-for-byte unchanged | REQ-EXPORT-032 | tags: white-box", {
+  dir <- qa_tempdir()
+  out <- file.path(dir, "existing.pdf")
+  original <- charToRaw("PRE-EXISTING PDF BYTES, NOT REGENERATED")
+  writeBin(original, out)
+
+  # Only one backend is reported, and it produces bytes that do not start
+  # with the %PDF signature -- conversion reaches the staging file, fails
+  # .is_pdf_file()'s check, and write_dta() must abort without ever touching
+  # `out`.
+  testthat::local_mocked_bindings(
+    .pdf_backends_available = function() "pandoc",
+    .pdf_conversion_available = function() TRUE,
+    .pandoc_docx_to_pdf = function(docx_file, pdf_file) {
+      writeBin(charToRaw("not a pdf"), pdf_file)
+      invisible(pdf_file)
+    }
+  )
+
+  cond <- tryCatch(
+    write_dta(et_minimal_dta(), file = out, format = "pdf", overwrite = TRUE, quiet = TRUE),
+    error = function(e) e
+  )
+  qa_check("the export raises rather than silently replacing the destination", inherits(cond, "condition"))
+  qa_step(
+    "the file already at the destination is byte-for-byte unchanged",
+    original,
+    readBin(out, what = "raw", n = file.info(out)$size)
+  )
+  qa_step(
+    "no staging file is left behind next to the destination",
+    "existing.pdf",
+    basename(list.files(dir))
+  )
+})

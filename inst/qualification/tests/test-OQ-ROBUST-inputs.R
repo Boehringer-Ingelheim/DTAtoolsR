@@ -296,3 +296,69 @@ test_that("OQ-ROBUST-015 | a user-facing failure carries a matchable condition c
     TRUE, inherits(conditions$bad_rule_column, "dta_rule_not_applicable")
   )
 })
+
+test_that("OQ-ROBUST-016 | specification-derived text in a condition message is shown literally, never evaluated | REQ-ROBUST-016", {
+  # A payload that would visibly misbehave if handed to cli as part of the
+  # FORMAT string rather than as literal content: cli/glue evaluates an
+  # interpolated "{1+1}" and would print "2" in its place. Escaped, the
+  # braces come through the abort unchanged -- this is the only way to tell
+  # the two apart from outside the function.
+  payload_id <- "range_rule_{1+1}"
+
+  specs <- DTAColumnSpecCollection(
+    columns = list(AGE = DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)),
+    rules = list(DTARuleColRange(id = payload_id, columns = "AGE", range = c(0, 10)))
+  )
+  # Clean on the column-specification axis, so validate_table() takes the
+  # direct "Rule violations:" abort rather than the columnspec-error return
+  # path, whose warning a tryCatch(error = ) would not even catch.
+  frame <- data.frame(AGE = c(5, 99), stringsAsFactors = FALSE)
+
+  rules_err <- tryCatch(validate_rules(specs, frame), error = function(e) e)
+  table_err <- tryCatch(validate_table(specs, frame, verbose = FALSE), error = function(e) e)
+
+  qa_check(
+    "validate_rules() and validate_table() both refuse the out-of-range table",
+    inherits(rules_err, "condition") && inherits(table_err, "condition")
+  )
+  qa_step(
+    "and each carries the rule id literally, braces and all",
+    c(rules = TRUE, table = TRUE),
+    c(
+      rules = grepl(payload_id, conditionMessage(rules_err), fixed = TRUE),
+      table = grepl(payload_id, conditionMessage(table_err), fixed = TRUE)
+    )
+  )
+  qa_step(
+    "not what an evaluated \"{1+1}\" would have printed instead",
+    c(rules = FALSE, table = FALSE),
+    c(
+      rules = grepl("range_rule_2", conditionMessage(rules_err), fixed = TRUE),
+      table = grepl("range_rule_2", conditionMessage(table_err), fixed = TRUE)
+    )
+  )
+
+  # validate_template(strict = TRUE): the payload arrives as a template FILE
+  # NAME this time rather than a rule id, but the mechanism under test
+  # (.cli_escape(), R/validateTemplate.R) and the visible misbehaviour if it
+  # were skipped are the same.
+  tdir <- qa_tempdir()
+  writeLines(
+    c("kind: dta_creation_template", "id: cli_inj", "version: 1.10", "abstract: true"),
+    file.path(tdir, "bad_{1+1}_version.dta-template.yaml")
+  )
+  tmpl_err <- tryCatch(validate_template(tdir, strict = TRUE), error = function(e) e)
+
+  qa_check(
+    "a strict validation with an error-severity finding (unquoted version) aborts",
+    inherits(tmpl_err, "condition")
+  )
+  qa_step(
+    "and the offending file name is shown literally, not evaluated",
+    c(literal = TRUE, evaluated = FALSE),
+    c(
+      literal = grepl("bad_{1+1}_version", conditionMessage(tmpl_err), fixed = TRUE),
+      evaluated = grepl("bad_2_version", conditionMessage(tmpl_err), fixed = TRUE)
+    )
+  )
+})

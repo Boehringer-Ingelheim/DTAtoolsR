@@ -504,7 +504,10 @@ dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets
 # different moments:
 #
 #   sealed:   at MERGE. A descendant changing a sealed path is wrong the moment
-#             the chain resolves, whatever route the change came in by.
+#             the chain resolves, whatever route the change came in by --
+#             including an `options:`/`party_slots:` entry whose `target:` or
+#             `effects:` writes the sealed metadata field at INSTANTIATION,
+#             not just a direct edit of the definition tree itself.
 #   required: at INSTANTIATION (see template_core.R). An abstract parent is
 #             ALLOWED to leave a required path unset -- being required of
 #             someone further down is the entire point -- so a merge-time check
@@ -570,26 +573,174 @@ dta_template_union_paths <- function(parent_paths, child_paths) {
   merged
 }
 
+# Every metadata path ONE options:/party_slots: entry could write once the
+# template is instantiated -- its `target:`, and every `path:` and every name
+# of a `set:` map inside `effects:` (the "__selection__" catch-all and the
+# direct single-map form included) and inside `effects_all:`. This mirrors
+# collect_option_effects() and dta_template_option_path() (template_core.R)
+# structurally rather than reading either helper's return value, because both
+# of those resolve to what ONE selected value does -- a seal has to hold for
+# every value an author could ever pick, not just whichever one happens to be
+# selected at merge time, so every branch of `effects:` is walked regardless
+# of key. A party_slots: entry has no `effects:`, so it falls straight through
+# to its `target:` -- the only path such an entry can ever write (see
+# party_slot_target_valid(), party_profiles.R).
+dta_template_entry_metadata_paths <- function(entry) {
+  if (!is.list(entry)) {
+    return(character(0))
+  }
+
+  ops <- list()
+  target <- as.character(entry[["target"]] %||% "")
+  # `[[` rather than `$`: `$effects` partially matches `effects_all`, which
+  # would hide a `target:` declared next to an `effects_all:` block.
+  eff <- entry[["effects"]] %||% list()
+  if (length(eff) == 0 && nzchar(target)) {
+    eff <- list("__selection__" = list(list(path = target)))
+  }
+  if (length(eff) > 0) {
+    if (!is.null(eff[["path"]]) || !is.null(eff[["set"]])) {
+      # The whole `effects:` block is ONE operation, not keyed by value.
+      ops <- c(ops, list(eff))
+    } else {
+      for (block in eff) {
+        if (is.list(block) && (!is.null(block$path) || !is.null(block$set))) {
+          ops <- c(ops, list(block))
+        } else if (is.list(block)) {
+          ops <- c(ops, block)
+        }
+      }
+    }
+  }
+  if (length(entry[["effects_all"]] %||% list()) > 0) {
+    ops <- c(ops, entry[["effects_all"]])
+  }
+
+  paths <- character(0)
+  for (op in ops) {
+    if (!is.list(op)) next
+    if (!is.null(op$set) && is.list(op$set)) {
+      paths <- c(paths, names(op$set))
+    } else {
+      p <- as.character(op$path %||% "")
+      if (nzchar(p)) paths <- c(paths, p)
+    }
+  }
+  unique(paths)
+}
+
+# Map one of the doc-space paths above ("metadata.…", the vocabulary
+# apply_template_metadata_path() consumes) into the address space `sealed:`
+# paths use ("base.metadata.…", since `base:` is the metadata seed --
+# dta_template_check_required() makes exactly this same correspondence in the
+# other direction). Anything not rooted at "metadata" is not something an
+# option effect could actually apply (apply_template_metadata_path() rejects
+# it), so it maps to NA and is filtered out.
+dta_template_entry_seal_paths <- function(entry) {
+  doc_paths <- dta_template_entry_metadata_paths(entry)
+  seal_paths <- vapply(doc_paths, function(p) {
+    if (identical(p, "metadata") || startsWith(p, "metadata.")) {
+      paste0("base.", p)
+    } else {
+      NA_character_
+    }
+  }, character(1))
+  unname(seal_paths[!is.na(seal_paths)])
+}
+
+# Do two dotted paths overlap -- equal, or one a dot-segment prefix of the
+# other? A sealed "base.metadata.supplier" and a write path of
+# "base.metadata.supplier.affiliation" name the same protected ground even
+# though neither string equals the other, and a party slot always writes at
+# exactly that coarser level (see party_slot_target_valid()).
+dta_template_paths_overlap <- function(a, b) {
+  if (is.na(a) || is.na(b)) {
+    return(FALSE)
+  }
+  identical(a, b) || startsWith(a, paste0(b, ".")) || startsWith(b, paste0(a, "."))
+}
+
 # Abort if the child changed anything the PARENT CHAIN sealed.
 #
-# One comparison per sealed path, of the value before and after the merge,
-# rather than a guard inside each merge rule. That is deliberate: a child can
-# reach a field by a `base:` override, a `modify:` verb, a `remove:`, an
-# explicit `null`, or a whole-section replacement, and comparing resolved values
-# catches every one of them without the seal knowing which route was taken --
-# including routes added to the merge after this was written.
+# Two routes are checked, both against the SAME `parent_def`/`merged` pair:
+#
+#   1) One comparison per sealed path, of the value before and after the
+#      merge, rather than a guard inside each merge rule. A child can reach a
+#      field by a `base:` override, a `modify:` verb, a `remove:`, an
+#      explicit `null`, or a whole-section replacement, and comparing
+#      resolved values catches every one of them without the seal knowing
+#      which route was taken -- including routes added to the merge after
+#      this was written.
+#   2) Every `options:`/`party_slots:` entry in the merged result whose
+#      *effect* -- not its own definition path -- reaches a sealed metadata
+#      field. Route (1) alone misses this: a child can ADD a brand-new option
+#      targeting `metadata.title`, or MODIFY an inherited one that does, and
+#      the definition VALUE at `base.metadata.title` never moves, because
+#      `base:` itself was never touched -- the field only changes once
+#      create_dta_from_template() applies the option's effect, far past
+#      where route (1) looks. An entry survives this only when it is, key for
+#      key and value for value, the SAME entry the parent chain already
+#      declared: a template's own seals still do not bind itself, so a
+#      parent that declares such an option (and a child that leaves it
+#      untouched) is not a violation.
 dta_template_check_sealed <- function(parent_def, merged, child_id) {
-  for (path in as.character(parent_def$sealed %||% character(0))) {
-    before <- dta_template_path_get(parent_def, path)
-    after <- dta_template_path_get(merged, path)
-    if (!identical(before, after)) {
-      cli::cli_abort(c(
+  sealed_paths <- as.character(parent_def$sealed %||% character(0))
+  if (length(sealed_paths) == 0) {
+    return(invisible(NULL))
+  }
+
+  # The class is what validate_template() classifies on: cli wraps the
+  # rendered message at the console width, so matching its text breaks for
+  # some id/path lengths.
+  abort_sealed <- function(path) {
+    cli::cli_abort(
+      c(
         "Template {.val {child_id}} changes {.field {path}}, which an ancestor sealed.",
         i = "A sealed path is fixed for every descendant. Drop the override here, or
              unseal it in the template that declares the seal."
-      ))
+      ),
+      class = "dta_template_sealed_violation"
+    )
+  }
+
+  for (path in sealed_paths) {
+    before <- dta_template_path_get(parent_def, path)
+    after <- dta_template_path_get(merged, path)
+    if (!identical(before, after)) {
+      abort_sealed(path)
     }
   }
+
+  for (section in c("options", "party_slots")) {
+    parent_items <- parent_def[[section]] %||% list()
+    for (entry in merged[[section]] %||% list()) {
+      write_paths <- dta_template_entry_seal_paths(entry)
+      if (length(write_paths) == 0) {
+        next
+      }
+      for (sealed_path in sealed_paths) {
+        overlaps <- any(vapply(
+          write_paths, dta_template_paths_overlap, logical(1),
+          b = sealed_path
+        ))
+        if (!overlaps) {
+          next
+        }
+        key <- dta_template_entry_key(entry)
+        parent_entry <- NULL
+        if (!is.na(key)) {
+          hit <- Filter(function(it) identical(dta_template_entry_key(it), key), parent_items)
+          if (length(hit) > 0) {
+            parent_entry <- hit[[1]]
+          }
+        }
+        if (is.null(parent_entry) || !identical(parent_entry, entry)) {
+          abort_sealed(sealed_path)
+        }
+      }
+    }
+  }
+
   invisible(NULL)
 }
 

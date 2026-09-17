@@ -178,12 +178,18 @@ dta_file_id_to_names <- function(all_names, tables = NULL) {
 # declared handler is never dropped just because nothing arrived for it --
 # doing the latter used to make a 1-of-3 delivery report as a clean PASS.
 #
-# For every handler with no delivered path satisfying it (tested with
+# For every declared NAME with no delivered path matching IT (tested with
 # matches_filename(), never by treating the declared name as a path to stat),
-# every name it declares contributes one entry with path = NA_character_ --
-# the marker for "declared but not delivered". `filename` is a VECTOR, so this
-# flattens with unlist()/lapply(), never vapply(..., character(1)), which
-# would crash on a handler that declares more than one name.
+# that one name contributes an entry with path = NA_character_ -- the marker
+# for "declared but not delivered". matches_filename() yields one logical PER
+# declared name/pattern (see the comment above dta_matches_filename_base in
+# R/DTAFile-class.R), so the per-name verdicts across every delivered path are
+# OR-ed together (Reduce(`|`, ...), NA treated as FALSE) rather than collapsed
+# with any() first -- collapsing first only asks "did SOMETHING about this
+# handler match", so a handler declaring two names had the one delivered name
+# hide the other, still-missing one from the report. `filename` is a VECTOR,
+# so this flattens with unlist()/lapply(), never vapply(..., character(1)),
+# which would crash on a handler that declares more than one name.
 #
 # Names are deduplicated; where a declared name collides with a delivered
 # key, the delivered entry wins (setdiff() drops it from the missing side).
@@ -193,13 +199,19 @@ dta_file_dataset_targets <- function(x) {
   delivered <- stats::setNames(paths, dta_file_target_keys(paths))
 
   declared_names <- unlist(lapply(x@files, function(handler) {
-    satisfied <- length(paths) > 0 && any(vapply(
-      paths,
-      function(p) any(matches_filename(handler, basename(p))),
-      logical(1)
-    ))
+    names_i <- handler@filename
 
-    if (satisfied) character(0) else handler@filename
+    if (length(paths) == 0) {
+      return(names_i)
+    }
+
+    matched <- Reduce(`|`, lapply(paths, function(p) {
+      m <- matches_filename(handler, basename(p))
+      m[is.na(m)] <- FALSE
+      m
+    }))
+
+    names_i[!matched]
   }))
 
   missing_names <- setdiff(declared_names, names(delivered))

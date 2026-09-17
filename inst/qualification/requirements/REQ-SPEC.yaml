@@ -256,3 +256,20 @@ requirements:
       These are what a new user meets first, in every help page's examples. One
       that does not build makes the documentation wrong in the place a reader
       is most likely to trust it.
+
+  - id: REQ-SPEC-024
+    text: >
+      DTA() shall refuse a non-empty @datasets whose names are not all
+      distinct, non-empty and non-NA, with a condition naming the offending
+      names, rather than construct an object in which one dataset is
+      unreachable by name.
+    risk: high
+    category: integrity
+    covers: [DTA]
+    source: R/DTA-class.R
+    notes: >
+      check() and every accessor that follows read and write @datasets[[name]].
+      A duplicated name is not a cosmetic problem: the second dataset sharing
+      it is never reachable by name, so it is validated only insofar as the
+      first entry stands in for it, and the caller sees one verdict where two
+      were meant.

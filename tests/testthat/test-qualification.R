@@ -137,6 +137,106 @@ test_that("the runner produces a complete evidence bundle", {
   expect_true(nzchar(json$run$id))
 })
 
+# A minimal `dta_qualification`-shaped object, just enough for
+# qual_write_bundle() to walk without needing a real run. Every data frame is
+# a stand-in; what these tests exercise is which files get written, not what
+# is in them.
+qual_bundle_fixture <- function() {
+  stub <- data.frame(a = 1, stringsAsFactors = FALSE)
+  trace <- stub
+  attr(trace, "requirements") <- stub
+  structure(
+    list(
+      run = list(id = "Q-fixture", hash_algorithm = "md5"),
+      environment = list(package = list(version = "9.9.9")),
+      summary = list(verdict = "PASS"),
+      tests = stub, expectations = stub, traceability = trace,
+      requirements = stub, deviations = stub, limitations = stub,
+      deviation_status = stub, meta_checks = stub, performance = NULL,
+      unit_tests = list(run = FALSE, results = NULL)
+    ),
+    class = "dta_qualification"
+  )
+}
+
+test_that("qual_write_bundle() records a failed evidence write and still writes the rest", {
+  dir <- withr::local_tempdir()
+  x <- qual_bundle_fixture()
+
+  real_write_csv <- qual_write_csv
+  testthat::local_mocked_bindings(
+    qual_write_csv = function(x, path) {
+      if (identical(basename(path), "tests.csv")) {
+        stop("disk full")
+      }
+      real_write_csv(x, path)
+    }
+  )
+
+  bundle <- qual_write_bundle(x, dir)
+
+  expect_identical(bundle$failed, "tests.csv")
+  expect_false(file.exists(file.path(dir, "results", "tests.csv")))
+  expect_true(file.exists(file.path(dir, "results", "expectations.csv")))
+  expect_true(file.exists(file.path(dir, "results", "coverage.csv")))
+  expect_true(file.exists(file.path(dir, "results", "results.json")))
+})
+
+test_that("qual_write_bundle() leaves no results.json when it fails to serialise, and reports it", {
+  dir <- withr::local_tempdir()
+  x <- qual_bundle_fixture()
+  # An environment has no jsonlite method, so payload$run fails to serialise
+  # while environment.json (built from x$environment alone) still succeeds.
+  x$run$unserialisable <- new.env()
+
+  bundle <- qual_write_bundle(x, dir)
+
+  expect_identical(bundle$failed, "results.json")
+  expect_false(file.exists(file.path(dir, "results", "results.json")))
+  # qual_hash_one() must not error over a file that was never written.
+  expect_true(is.na(qual_hash_one(bundle$json_path)))
+})
+
+test_that("a failed evidence write downgrades the run verdict to FAIL and is recorded everywhere", {
+  skip_on_cran()
+  out <- withr::local_tempdir()
+
+  real_write_csv <- qual_write_csv
+  testthat::local_mocked_bindings(
+    qual_write_csv = function(x, path) {
+      if (identical(basename(path), "meta_checks.csv")) {
+        stop("disk full")
+      }
+      real_write_csv(x, path)
+    }
+  )
+
+  bundle <- run_qualification(
+    out,
+    stages = character(0), scale = "quick", formats = "md", quiet = TRUE
+  )
+
+  expect_match(bundle$verdict, "^FAIL")
+  expect_identical(bundle$summary$verdict, bundle$verdict)
+  expect_identical(bundle$run$evidence_write_failures, "meta_checks.csv")
+  expect_false(file.exists(file.path(bundle$bundle_dir, "results", "meta_checks.csv")))
+
+  run_json <- jsonlite::read_json(file.path(bundle$bundle_dir, "results", "run.json"))
+  expect_identical(unlist(run_json$evidence_write_failures), "meta_checks.csv")
+
+  # results.json is written inside the bundle step, after the CSVs: it must
+  # already carry the downgraded verdict, not the one the tests produced.
+  results_json <- jsonlite::read_json(file.path(bundle$bundle_dir, "results", "results.json"))
+  expect_identical(results_json$summary$verdict, bundle$verdict)
+  expect_identical(unlist(results_json$run$evidence_write_failures), "meta_checks.csv")
+
+  summary_txt <- readLines(file.path(bundle$bundle_dir, "SUMMARY.txt"))
+  expect_true(any(grepl("EVIDENCE BUNDLE INCOMPLETE", summary_txt, fixed = TRUE)))
+
+  report_md <- readLines(file.path(bundle$bundle_dir, "report", "qualification-report.md"))
+  expect_true(any(grepl("Evidence bundle incomplete", report_md, fixed = TRUE)))
+})
+
 test_that("the runner refuses to overwrite an existing evidence bundle", {
   skip_on_cran()
   out <- withr::local_tempdir()

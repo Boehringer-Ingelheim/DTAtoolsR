@@ -269,6 +269,11 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
 #'
 #' Compiling once and passing the result in makes that cost proportional to the
 #' spec rather than to the data.
+#'
+#' A column whose schema cannot be derived (`as_json_schema()` errors) gets a
+#' `NULL` schema and is warned about here, once for the whole scan rather than
+#' once per batch -- `dta_columnspec_errors()` then skips its value checks
+#' entirely, exactly as it does for a column absent from `schemas`.
 #' @param specs A `DTAColumnSpecCollection`.
 #' @return A list with one element per column, each a list of `name` (the
 #'   expected column name) and `schema` (the column's schema, or `NULL` when it
@@ -297,10 +302,24 @@ dta_compile_columnspec_schemas <- function(specs) {
   spec_names[fallback] <- ids[fallback]
 
   lapply(seq_along(columns), function(i) {
-    list(
-      name = spec_names[[i]],
-      schema = tryCatch(as_json_schema(columns[[i]]), error = function(e) NULL)
+    column_name <- spec_names[[i]]
+    schema <- tryCatch(
+      as_json_schema(columns[[i]]),
+      error = function(e) {
+        # Not silent: a column whose schema fails to compile loses ALL of its
+        # value checks (type, length, pattern, enum) in both the materialising
+        # and streaming engines, which is worth a warning rather than a table
+        # that quietly reports "ok" on data it never actually examined. `NULL`
+        # is still returned so the scan itself is not interrupted -- the same
+        # degraded-but-running behaviour as before, just no longer silent.
+        cli::cli_warn(
+          "Column {.val {column_name}} could not be compiled into a schema; its value checks are skipped.",
+          class = "dta_columnspec_schema_failed"
+        )
+        NULL
+      }
     )
+    list(name = column_name, schema = schema)
   })
 }
 
@@ -388,6 +407,9 @@ dta_columnspec_errors <- function(specs, table, schemas = NULL, summarise = TRUE
       next
     }
 
+    # A NULL schema means as_json_schema() could not be derived for this
+    # column -- dta_compile_columnspec_schemas() already warned about it once
+    # for the whole scan, so this is a silent skip of the value checks here.
     col_spec <- schemas[[i]]$schema
     if (is.null(col_spec)) {
       next

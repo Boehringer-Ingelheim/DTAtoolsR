@@ -406,6 +406,13 @@ dta_warn_numeric_values_on_text_column <- function(spec) {
     return(invisible(NULL))
   }
 
+  # A column with no declared type has no text type to warn about: its schema
+  # admits every base type, "string" included, so the test below would fire
+  # for any numeric `values` on it.
+  if (is.null(spec@structure)) {
+    return(invisible(NULL))
+  }
+
   types <- tryCatch(as_json_schema_type(spec), error = function(e) NULL)
   if (!"string" %in% types) {
     return(invisible(NULL))

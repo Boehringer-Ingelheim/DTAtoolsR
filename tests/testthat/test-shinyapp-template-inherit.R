@@ -810,6 +810,205 @@ test_that("a template that seals nothing carries no sealed key at all", {
   expect_false("required" %in% names(result$def))
 })
 
+# ---- sealed vs. option/party-slot effects -----------------------------------
+#
+# The checks above compare the DEFINITION at a sealed path before and after
+# the merge (dta_template_path_get()) -- but an option's `target:`/`effects:`,
+# or a party slot's `target:`, does not write its metadata field until
+# create_dta_from_template() applies it, long after the merge. A child can
+# ADD a brand-new option/party-slot targeting a sealed field, or MODIFY an
+# inherited one that already does, and `base:` itself never moves -- so the
+# plain before/after comparison sees no change and the seal would silently
+# fail to protect the very field it names.
+
+sealed_option_parent <- function(sealed = "base.metadata.title", options = list(),
+                                 party_slots = list()) {
+  list(
+    id = "parent", version = "1.0",
+    base = list(metadata = list(title = "P title", header = "P header")),
+    options = options,
+    party_slots = party_slots,
+    sealed = sealed
+  )
+}
+
+sealed_option_resolve <- function(parent, ...) {
+  app_fn("resolve_template_inheritance")(
+    c(list(id = "child", version = "1.0", extends = "parent"), list(...)),
+    make_resolver(list(parent = parent))
+  )
+}
+
+test_that("an option a child ADDS cannot target a field an ancestor sealed", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(
+      list(id = "sneaky", label = "Sneaky", target = "metadata.title")
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("the same field is fine when the PARENT declares the option and the child leaves it alone", {
+  # A template's own seal does not bind itself: the parent may write straight
+  # to the field it seals, and a descendant that never touches that option is
+  # not violating anything.
+  parent <- sealed_option_parent(options = list(
+    list(id = "o1", label = "Title", target = "metadata.title")
+  ))
+
+  result <- sealed_option_resolve(parent)
+
+  expect_equal(result$def$options[[1]]$target, "metadata.title")
+})
+
+test_that("a child MODIFYING an inherited option that targets a sealed field is a violation", {
+  parent <- sealed_option_parent(options = list(
+    list(id = "o1", label = "Title", target = "metadata.title", default = "Standard")
+  ))
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(
+      modify = list(list(id = "o1", default = "Overridden"))
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option targeting an UNsealed field is unaffected by an unrelated seal", {
+  parent <- sealed_option_parent()
+
+  result <- sealed_option_resolve(parent, options = list(
+    list(id = "o2", label = "Header", target = "metadata.header")
+  ))
+
+  expect_equal(result$def$options[[1]]$target, "metadata.header")
+})
+
+test_that("an option reaching a sealed field through `effects:` (not `target:`) is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky", type = "boolean",
+      effects = list("yes" = list(list(path = "metadata.title", value = "Sneaky")))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option reaching a sealed field through `effects_all:` is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky",
+      effects_all = list(list(path = "metadata.title", value = "Sneaky"))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a `target:` next to an unrelated `effects_all:` block is still checked", {
+  # `$effects` partially matches `effects_all`; read by partial match, the
+  # effects_all block would stand in for `effects:` and hide the target.
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky", target = "metadata.title",
+      effects_all = list(list(path = "metadata.header", value = "H"))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("an option reaching a sealed field through a `set:` map inside `effects_all:` is caught too", {
+  parent <- sealed_option_parent()
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, options = list(list(
+      id = "sneaky", label = "Sneaky",
+      effects_all = list(list(set = list("metadata.title" = "Sneaky")))
+    ))),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a party slot a child ADDS cannot target a field an ancestor sealed", {
+  parent <- sealed_option_parent(sealed = "base.metadata.supplier")
+
+  expect_error_message_contains(
+    sealed_option_resolve(parent, party_slots = list(
+      list(id = "ps1", target = "metadata.supplier")
+    )),
+    "which an ancestor sealed"
+  )
+})
+
+test_that("a party slot targeting the OTHER metadata field is unaffected by an unrelated seal", {
+  parent <- sealed_option_parent(sealed = "base.metadata.supplier")
+
+  result <- sealed_option_resolve(parent, party_slots = list(
+    list(id = "ps1", target = "metadata.receiver")
+  ))
+
+  expect_equal(result$def$party_slots[[1]]$target, "metadata.receiver")
+})
+
+test_that("validate_template() reports sealed_violation, and fails instantiation, for an option effect that reaches a sealed field", {
+  # End-to-end through the package's own validate_template(), which sys.
+  # sources this same engine file (see the file banner at the top of this
+  # test file) -- so this is the one test in the suite that also proves the
+  # abort message still classifies as "sealed_violation"
+  # (R/validateTemplate.R), not just that resolve_template_inheritance()
+  # aborts.
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: parent_tpl",
+      "version: \"1.0\"",
+      "sealed: [\"base.metadata.title\"]",
+      "base:",
+      "  metadata:",
+      "    title: Standard Title",
+      "datasets:",
+      "  - name: placeholder"
+    ),
+    file.path(dir, "parent.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: child_tpl",
+      "version: \"1.0\"",
+      "extends: parent_tpl@1.0",
+      "options:",
+      "  - id: sneaky_title",
+      "    label: Title override",
+      "    target: metadata.title",
+      "    default: Sneaky"
+    ),
+    file.path(dir, "child.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+  child_rows <- result[result$id == "child_tpl", , drop = FALSE]
+
+  expect_true(any(child_rows$code == "sealed_violation"))
+
+  # At this width cli wraps the abort between "which" and "an ancestor
+  # sealed", so a classifier matching the rendered text would call it
+  # extends_unresolved. The condition class does not depend on wrapping.
+  withr::local_options(cli.width = 65)
+  wrapped <- validate_template(dir)
+  expect_true(any(wrapped$code[wrapped$id == "child_tpl"] == "sealed_violation"))
+  expect_false(any(wrapped$code[wrapped$id == "child_tpl"] == "extends_unresolved"))
+  expect_true(any(child_rows$code == "instantiate_failed"))
+})
+
 test_that("a duplicate dataset key is rejected rather than silently appended", {
   # SEAL BYPASS, pinned. `datasets:` matched each child entry to at most one
   # parent entry and appended the rest unconditionally, so a child could write

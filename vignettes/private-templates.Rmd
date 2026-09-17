@@ -625,10 +625,14 @@ identity the merge uses.
 
 **`sealed:` — this may not change.** A descendant that alters a sealed path
 fails when the chain resolves, whichever way it tried: a `base:` override, a
-`modify:` verb, a `remove:`, an explicit `null`, or replacing the whole section.
-Sealing a section (`sealed: [options]`) fixes its membership *and its order*, so
-adding an entry or reordering with `order:` both fail; sealing
-`options.header.default` leaves every other option free.
+`modify:` verb, a `remove:`, an explicit `null`, or replacing the whole
+section — and the same check catches an `options:` or `party_slots:` entry
+whose `target:`, `effects:`, `effects_all:` or `set:` map would write a
+sealed metadata field once the document is created, even where the option's
+own definition never touches the sealed path directly. Sealing a section
+(`sealed: [options]`) fixes its membership *and its order*, so adding an
+entry or reordering with `order:` both fail; sealing `options.header.default`
+leaves every other option free.
 
 **`required:` — this may not be left unset.** Checked when a document is
 created, not when the chain resolves, because an abstract parent is *supposed*

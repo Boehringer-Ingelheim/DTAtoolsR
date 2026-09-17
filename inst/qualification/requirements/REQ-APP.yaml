@@ -264,3 +264,53 @@ requirements:
     category: functional
     covers: [run_dta_app]
     source: inst/shiny/dta_app/app.R
+
+  # ---- editing a dataset's columns and rules -------------------------------------
+
+  - id: REQ-APP-019
+    text: >
+      Saving a column under an id renamed from another column's id shall be
+      refused with a message naming the id that already exists when a column
+      under that id already exists, leaving both the renamed and the existing
+      column unchanged; renaming onto an id nothing else holds shall proceed.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R dta_set_column
+    notes: >
+      Before the fix, a rename onto an existing id fell straight through to
+      `cols[[id]] <- spec`, so the editor's rename field could silently
+      destroy an unrelated column with no warning and no way back short of
+      re-adding it from memory.
+
+  - id: REQ-APP-020
+    text: >
+      Saving a column through the editor form shall carry that column's
+      `examples` and `colclass` forward unchanged, because the form exposes no
+      field for either.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R dta_set_column
+    notes: >
+      Before the fix, every save rebuilt the column's DTAColumnSpec from the
+      form's fields alone, so a column carrying examples or a colclass -- set
+      by importing a specification written outside the app -- lost them the
+      first time anyone touched that column in the editor, without the form
+      ever showing what was about to be dropped.
+
+  - id: REQ-APP-021
+    text: >
+      A group-condition or group-constraint row removed with the rule
+      editor's own remove control shall be excluded from the rule that
+      results from Save, even when the row was filled in before it was
+      removed; only the rows still present shall be saved.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (gcond_remove_/gconstr_remove_ observers)
+    notes: >
+      Before the fix, a row's inputs stayed registered after removal, and the
+      save path iterated every index up to the row count rather than the
+      rows still present, so a removed-but-once-filled row was written back
+      into the saved rule as if it had never been removed.

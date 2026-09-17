@@ -7,7 +7,9 @@
 DTA(datasets = NULL, metadata = NULL, ...)
 }
 \arguments{
-\item{datasets}{A named list of DTADataSet objects.}
+\item{datasets}{A named list of DTADataSet objects. Names must be
+non-empty and unique -- \code{check()} looks datasets up by name, so a
+repeated name would validate one entry twice and the other never.}
 
 \item{metadata}{A DTAMetaData object.}
 

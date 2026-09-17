@@ -512,6 +512,8 @@ server <- function(input, output, session) {
     then_n = 1L, # condition-builder row count (THEN ...)
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
+    gcond_removed = integer(0), # indices of removed (not just cleared) group condition rows
+    gconstr_removed = integer(0), # indices of removed (not just cleared) group constraint rows
     template_ref = NULL, # "id@version" of the creation template chosen in the picker
     template_index = NULL, # index snapshot frozen at "Use this template"
     template_vocab_specs = NULL, # vocabulary slots resolved when the options modal opened
@@ -3878,7 +3880,9 @@ server <- function(input, output, session) {
 
   collect_group_conditions <- function(n) {
     out <- list()
+    removed <- isolate(rv$gcond_removed)
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
       col <- trimws(input[[paste0("gcond_col_", i)]] %||% "")
       if (!nzchar(nm) || !nzchar(col)) next
@@ -3967,7 +3971,9 @@ server <- function(input, output, session) {
 
   visible_group_condition_rows <- function() {
     out <- integer(0)
+    removed <- isolate(rv$gcond_removed)
     for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
+      if (i %in% removed) next
       if (!is.null(input[[paste0("gcond_name_", i)]])) {
         out <- c(out, i)
       }
@@ -3977,7 +3983,9 @@ server <- function(input, output, session) {
 
   visible_group_constraint_rows <- function() {
     out <- integer(0)
+    removed <- isolate(rv$gconstr_removed)
     for (i in seq_len(max(1L, isolate(rv$gconstr_n)))) {
+      if (i %in% removed) next
       if (!is.null(input[[paste0("gconstr_type_", i)]])) {
         out <- c(out, i)
       }
@@ -4065,6 +4073,7 @@ server <- function(input, output, session) {
           clear_group_condition_row(i)
         } else {
           removeUI(selector = paste0("#gcond_row_", i))
+          rv$gcond_removed <- c(isolate(rv$gcond_removed), i)
         }
         rv$rule_msg <- NULL
       },
@@ -4086,6 +4095,7 @@ server <- function(input, output, session) {
           clear_group_constraint_row(i)
         } else {
           removeUI(selector = paste0("#gconstr_row_", i))
+          rv$gconstr_removed <- c(isolate(rv$gconstr_removed), i)
         }
         rv$rule_msg <- NULL
       },
@@ -4106,7 +4116,9 @@ server <- function(input, output, session) {
 
   collect_group_constraints <- function(n) {
     out <- list()
+    removed <- isolate(rv$gconstr_removed)
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       ctype <- trimws(input[[paste0("gconstr_type_", i)]] %||% "")
       left <- trimws(input[[paste0("gconstr_left_", i)]] %||% "")
       right <- trimws(input[[paste0("gconstr_right_", i)]] %||% "")
@@ -4160,6 +4172,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
       title = paste("Edit rules \u2014", rv$active),
@@ -4399,6 +4413,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -4427,6 +4443,8 @@ server <- function(input, output, session) {
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
     rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
     rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
+    rv$gcond_removed <- integer(0)
+    rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
     rv$rule_token <- rv$rule_token + 1
   })
@@ -4607,6 +4625,8 @@ server <- function(input, output, session) {
       rv$then_n <- 1L
       rv$gcond_n <- 1L
       rv$gconstr_n <- 1L
+      rv$gcond_removed <- integer(0)
+      rv$gconstr_removed <- integer(0)
       rv$rule_msg <- NULL
       rv$rule_token <- rv$rule_token + 1
     },

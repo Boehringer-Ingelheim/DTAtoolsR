@@ -917,12 +917,92 @@ dta_filter_import_matches <- function(import_errors, msg_row) {
   hits
 }
 
+#' @title Table Frame for Inspection, Bounded and Column-Limited
+#' @description
+#' `dta_inspect_tabular_message()` used to call
+#' `as.data.frame(x@tables[[table_name]])` unconditionally, which for a
+#' streamed table materialises the whole delivery -- everything `check()` was
+#' streaming specifically to avoid -- just to show one row of context. This
+#' collects only what a preview actually needs: a column subset and,
+#' when supplied, the first `max_row` rows.
+#'
+#' A table already in memory is untouched: `as.data.frame()`, exactly as
+#' before. A `RecordBatchReader` cannot be safely re-read -- it is one-shot,
+#' and the scan `check()` ran may already have consumed it -- so this returns
+#' `NULL` rather than reading (and thereby destroying) whatever is left of it.
+#' Any other lazy source (`Dataset`, `arrow_dplyr_query`) is scanned fresh via
+#' `dplyr`, which is safe to repeat.
+#' @param tbl A table representation, as held in `x@tables[[table_name]]`.
+#' @param columns Character, or `NULL` for every column.
+#' @param max_row Numeric, or `NULL`/non-finite for no row bound. When finite
+#'   and positive, only the first `max_row` rows are read, so row `k` of the
+#'   returned frame stays row `k` of the underlying table.
+#' @return A data.frame, or `NULL` when `tbl` cannot be safely re-read.
+#' @keywords internal
+dta_inspect_table_frame <- function(tbl, columns = NULL, max_row = NULL) {
+  if (!dta_table_is_lazy(tbl)) {
+    return(as.data.frame(tbl))
+  }
+
+  if (inherits(tbl, "RecordBatchReader")) {
+    return(NULL)
+  }
+
+  query <- tbl
+  if (!is.null(columns) && length(columns) > 0) {
+    # dta_build_inspect_row_context() falls back to the first six columns when
+    # none of the ones it wants exist; select those here so a lazy table gets
+    # the same fallback rather than an empty frame.
+    available <- names(tbl)
+    if (!any(columns %in% available)) {
+      columns <- available[seq_len(min(6, length(available)))]
+    }
+    query <- dplyr::select(query, dplyr::any_of(columns))
+  }
+  if (!is.null(max_row) && is.finite(max_row) && max_row > 0) {
+    query <- utils::head(query, max_row)
+  }
+
+  as.data.frame(dplyr::collect(query))
+}
+
+#' @title Columns a Rule's Inspection Needs
+#' @description
+#' The columns `dta_inspect_tabular_message()` must load to recompute a rule's
+#' failing rows and build its preview: the rule's own target column(s) (a
+#' group condition's `group_by` and condition columns for that rule type),
+#' plus `SUBJECT_ID`/`VISIT`, which the preview always tries to show for
+#' context. Requesting only these keeps a lazily-held table from being pulled
+#' into memory in full just to inspect one message.
+#' @param rule_def A rule object, or `NULL` when the rule could not be
+#'   resolved.
+#' @return Character. Deduplicated column names.
+#' @keywords internal
+dta_inspect_rule_needed_columns <- function(rule_def) {
+  rule_cols <- if (is.null(rule_def)) {
+    character(0)
+  } else if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
+    cond_cols <- unique(unlist(lapply(rule_def@conditions, names), use.names = FALSE))
+    c(rule_def@group_by %||% character(0), cond_cols)
+  } else if (inherits(rule_def, "DTAtools::DTARuleColRange")) {
+    rule_def@columns
+  } else if (inherits(rule_def, "DTAtools::DTARuleColUnique")) {
+    dta_unique_columns(rule_def)
+  } else if (inherits(rule_def, "DTAtools::DTARuleColCondition")) {
+    c(names(rule_def@condition), names(rule_def@then))
+  } else {
+    character(0)
+  }
+
+  unique(c(rule_cols, "SUBJECT_ID", "VISIT"))
+}
+
 #' @keywords internal
 dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory", "artifact")) {
   source <- match.arg(source)
   table_name <- as.character(msg_row$target)
   details <- validation_errors(x, table = table_name, source = source)
-  table_df <- as.data.frame(x@tables[[table_name]])
+  raw_table <- x@tables[[table_name]]
 
   out <- list(
     id = as.integer(msg_row$id),
@@ -934,13 +1014,32 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
     message = as.character(msg_row$message)
   )
 
+  # Both branches below build a row context for exactly one row (msg_row$row),
+  # so only that row -- and only the columns dta_build_inspect_row_context()
+  # can use -- is ever requested from a lazily-held table. Without a row to
+  # show, there is nothing worth reading: dta_build_inspect_row_context()
+  # would return NULL anyway, so the read is skipped rather than materialising
+  # (or scanning) the table for no reason.
+  msg_row_no <- suppressWarnings(as.numeric(msg_row$row))
+  has_row <- length(msg_row_no) == 1 && !is.na(msg_row_no) && msg_row_no >= 1
+
   if (identical(as.character(msg_row$source), "columnspec")) {
     columnspec_full <- details$columnspec_errors$full_error
     schema_match <- dta_filter_columnspec_matches(columnspec_full, msg_row)
 
+    row_cols <- unique(c("SUBJECT_ID", "VISIT", as.character(msg_row$column)))
+    row_cols <- row_cols[!is.na(row_cols) & nzchar(row_cols)]
+    table_df <- if (has_row) dta_inspect_table_frame(raw_table, columns = row_cols, max_row = msg_row_no) else NULL
+
     out$type <- "columnspec"
     out$why <- "Column values violate JSON schema constraints (type/value/length/required)."
-    out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
+    if (has_row && is.null(table_df)) {
+      out$why <- paste(
+        out$why,
+        "Row context is unavailable: the table is a one-shot stream already consumed by validation."
+      )
+    }
+    out$row_context <- if (is.null(table_df)) NULL else dta_build_inspect_row_context(table_df, msg_row)
     out$columnspec_matches <- utils::head(schema_match, 20)
     return(out)
   }
@@ -948,12 +1047,22 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   # Without an explicit branch an import message would fall through to the rule
   # branch below, look up rule_id = NA, and return a nonsense record.
   if (identical(as.character(msg_row$source), "import")) {
+    row_cols <- unique(c("SUBJECT_ID", "VISIT", as.character(msg_row$column)))
+    row_cols <- row_cols[!is.na(row_cols) & nzchar(row_cols)]
+    table_df <- if (has_row) dta_inspect_table_frame(raw_table, columns = row_cols, max_row = msg_row_no) else NULL
+
     out$type <- "import"
     out$why <- paste(
       "A value could not be represented in the column's declared type,",
       "so the typed column holds NA and the raw value was kept."
     )
-    out$row_context <- dta_build_inspect_row_context(table_df, msg_row)
+    if (has_row && is.null(table_df)) {
+      out$why <- paste(
+        out$why,
+        "Row context is unavailable: the table is a one-shot stream already consumed by validation."
+      )
+    }
+    out$row_context <- if (is.null(table_df)) NULL else dta_build_inspect_row_context(table_df, msg_row)
     out$import_matches <- utils::head(
       dta_filter_import_matches(details$import_errors, msg_row),
       20
@@ -968,12 +1077,41 @@ dta_inspect_tabular_message <- function(x, msg_row, source = c("auto", "memory",
   }
   rule_idx <- which(vapply(rules_list, function(r) identical(r@id, rule_id), logical(1)))
   rule_def <- if (length(rule_idx) > 0) rules_list[[rule_idx[[1]]]] else NULL
+
+  is_group_condition <- !is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleGroupCondition")
+
+  # Failing rows are recomputed from the table, not read off `details`, so
+  # there is no row bound to apply here (unlike the columnspec/import
+  # branches above): the whole table -- narrowed to the columns this rule
+  # actually reads -- has to be scanned regardless.
+  table_df <- if (!is.null(rule_def)) {
+    dta_inspect_table_frame(raw_table, columns = dta_inspect_rule_needed_columns(rule_def))
+  } else {
+    NULL
+  }
+
+  if (!is.null(rule_def) && is.null(table_df)) {
+    out$type <- "rule"
+    out$why <- paste(
+      if (is_group_condition) {
+        "A group-level constraint was violated: within one or more groups of rows, conditions that must be mutually exclusive co-occur, or a required follow-on condition is absent."
+      } else {
+        "Rule logic found rows that violate IF/THEN, range, or uniqueness constraints."
+      },
+      "Failing rows are unavailable: the table is a one-shot stream already consumed by validation."
+    )
+    out$rule_id <- rule_id
+    out$rule_definition <- rule_def
+    out$failing_row_count <- NA_integer_
+    out$failing_rows_preview <- NULL
+    out$group_violation_details <- NULL
+    return(out)
+  }
+
   failing_rows <- if (!is.null(rule_def)) dta_rule_failure_row_indices(rule_def, table_df) else integer(0)
 
   row_preview <- NULL
   group_violation_details <- NULL
-
-  is_group_condition <- !is.null(rule_def) && inherits(rule_def, "DTAtools::DTARuleGroupCondition")
 
   if (length(failing_rows) > 0) {
     # Group condition rules show ALL failing rows and include all involved columns.

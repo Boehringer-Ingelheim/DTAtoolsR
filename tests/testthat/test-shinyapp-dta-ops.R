@@ -394,6 +394,59 @@ test_that("dta_set_column returns ok=FALSE without throwing for an id containing
   expect_true(nzchar(res$error))
 })
 
+test_that("dta_set_column refuses a rename onto an id another column already holds", {
+  fn <- app_fn("dta_set_column")
+  ids_fn <- app_fn("dta_column_ids")
+  dta <- app_fixture_dta()
+
+  # Renaming VISIT to STUDYID would otherwise silently destroy STUDYID.
+  res <- fn(dta, "clinical_data", id = "STUDYID", old_id = "VISIT")
+
+  expect_false(res$ok)
+  expect_match(res$error, "already exists", fixed = TRUE)
+
+  # Nothing was mutated: both columns are still present and distinct.
+  ids <- ids_fn(dta, "clinical_data")
+  expect_true(all(c("STUDYID", "VISIT") %in% ids))
+  cols <- datasets(dta, "clinical_data")@specs@columns
+  expect_equal(cols[["VISIT"]]@label, "Visit")
+  expect_equal(cols[["STUDYID"]]@label, "Study Identifier")
+})
+
+test_that("dta_set_column carries examples and colclass over, since the editor form has no field for them", {
+  fn <- app_fn("dta_set_column")
+  dta <- app_fixture_dta()
+
+  # AGE has no `values`, so `examples` may legally be set alongside it.
+  age_before <- datasets(dta, "clinical_data")@specs@columns[["AGE"]]
+  age_with_extras <- DTAtools::DTAColumnSpec(
+    id = age_before@id, label = age_before@label,
+    type = paste(age_before@structure@backend, age_before@structure@type),
+    nullable = age_before@nullable, description = age_before@description,
+    examples = c(34, 45), colclass = "measurement"
+  )
+  dta@datasets[["clinical_data"]]@specs@columns[["AGE"]] <- age_with_extras
+
+  res <- fn(
+    dta, "clinical_data",
+    id = "AGE", label = "Age (years)", backend = "SAS", type = "Num",
+    nullable = FALSE, description = "updated by the test suite"
+  )
+
+  expect_true(res$ok)
+  col <- datasets(res$value, "clinical_data")@specs@columns[["AGE"]]
+  expect_equal(col@label, "Age (years)")
+  expect_equal(col@description, "updated by the test suite")
+  expect_equal(col@examples, c(34, 45))
+  expect_equal(col@colclass, "measurement")
+
+  yaml_fn <- app_fn("dta_dataset_to_yaml_text")
+  yres <- yaml_fn(res$value, "clinical_data")
+  expect_true(yres$ok)
+  expect_match(yres$value, "examples", fixed = TRUE)
+  expect_match(yres$value, "measurement", fixed = TRUE)
+})
+
 test_that("dta_remove_column drops the column from the id order", {
   fn <- app_fn("dta_remove_column")
   ids_fn <- app_fn("dta_column_ids")

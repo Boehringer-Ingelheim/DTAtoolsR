@@ -813,3 +813,120 @@ test_that("a missing column still collapses the summary, as it always has", {
   expect_equal(summarised$keyword, "required")
   expect_false("maxLength" %in% summarised$keyword)
 })
+
+
+# ---- a column with no @structure (no type/format/length) --------------------
+#
+# The defect: `DTAColumnSpec(values = ..., nullable = ...)` with no `type` has
+# `@structure = NULL`. `as_json_schema()` dispatched into
+# `as_json_schema_type(NULL)`, which had no method and aborted; that abort was
+# swallowed by the `tryCatch()` in `dta_compile_columnspec_schemas()`, so the
+# column's schema silently compiled to `NULL` and EVERY value check
+# (enum/pattern/nullable) on it vanished -- in both the materialising and the
+# streaming engine, since both compile schemas through that one function.
+
+tc_specs <- function() {
+  DTAColumnSpecCollection(
+    columns = list(
+      SEX = DTAColumnSpec(id = "SEX", nullable = FALSE, values = c("M", "F")),
+      CODE = DTAColumnSpec(id = "CODE", nullable = FALSE, pattern = "^[A-Z]{3}$")
+    )
+  )
+}
+
+tc_table <- function() {
+  data.frame(
+    SEX = c("M", "F", "X", NA),
+    CODE = c("ABC", "abc", "AB1", "XYZ"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("a typeless column with values reports an enum error and a missing-value error", {
+  errs <- dta_columnspec_errors(tc_specs(), tc_table())$full_error
+
+  sex_errs <- errs[errs$column == "SEX", , drop = FALSE]
+  expect_true("enum" %in% sex_errs$keyword)
+  expect_equal(sort(sex_errs$row[sex_errs$keyword == "enum"]), c(3L, 4L))
+  # A missing value under `nullable = FALSE` fails, exactly as it would for a
+  # typed column with the same nullable setting -- here via the "type" check,
+  # since "null" is not among the types a typeless spec admits.
+  expect_true(4L %in% sex_errs$row[sex_errs$keyword == "type"])
+})
+
+test_that("a typeless, pattern-only column reports pattern violations", {
+  errs <- dta_columnspec_errors(tc_specs(), tc_table())$full_error
+
+  code_errs <- errs[errs$column == "CODE", , drop = FALSE]
+  expect_true(all(code_errs$keyword == "pattern"))
+  expect_equal(sort(code_errs$row), c(2L, 3L))
+})
+
+test_that("as_json_schema() no longer errors when compiling a typeless spec's schema", {
+  schemas <- dta_compile_columnspec_schemas(tc_specs())
+
+  by_name <- stats::setNames(lapply(schemas, `[[`, "schema"), vapply(schemas, `[[`, character(1), "name"))
+  expect_false(is.null(by_name$SEX))
+  expect_false(is.null(by_name$CODE))
+})
+
+test_that("validate_table() reports failure for a typeless column, where it reported ok before", {
+  details <- validate_table_detailed(tc_specs(), tc_table(), verbose = FALSE)
+  expect_false(details$columnspec_valid)
+})
+
+test_that("check() reports a typeless column's enum and pattern checks as failed", {
+  ds <- DTADataSetTabular(
+    name = "tc",
+    specs = tc_specs(),
+    tables = list(tab = tc_table())
+  )
+
+  ds <- suppressMessages(check(ds, persist = FALSE, quiet = TRUE))
+  expect_equal(results(ds)$status, "failed")
+
+  stored <- validation_errors(ds, table = "tab", source = "memory")
+  expect_equal(cc_status(stored$columnspec_checks, "enum"), "failed")
+  expect_equal(cc_status(stored$columnspec_checks, "pattern"), "failed")
+})
+
+test_that("the streaming engine reports the same typeless-column errors as the materialising path", {
+  specs <- tc_specs()
+  table <- tc_table()
+  expected <- dta_columnspec_errors(specs, table)
+
+  for (batch_rows in c(1L, 2L)) {
+    reader <- dta_as_batch_reader(arrow::as_arrow_table(table), batch_rows = batch_rows)
+    streamed <- dta_validate_table_stream(specs, reader, verbose = FALSE, coerce = FALSE)
+
+    expect_equal(
+      streamed$columnspec_errors$full_error,
+      expected$full_error,
+      info = paste0("batch_rows = ", batch_rows)
+    )
+  }
+})
+
+test_that("a failed schema derivation warns once, naming the column, rather than erroring silently", {
+  # `as_json_schema_type(DTAColumnSpecStructure)` (the base class) aborts --
+  # "not implemented at this level" -- because only backend subclasses like
+  # `DTAColumnSpecStructureSAS` know how to answer. No public constructor
+  # reaches a bare `DTAColumnSpecStructure` as a column's `@structure` (the
+  # factory always builds a backend subclass), so it is assigned directly here
+  # to reach that error path deliberately, standing in for "as_json_schema()
+  # errors for some reason" in general. The point under test is that
+  # dta_compile_columnspec_schemas() warns instead of swallowing it, and warns
+  # only ONCE per compile call -- which is once per scan on the streaming path
+  # (see R/streamingValidation.R), not once per batch.
+  spec <- DTAColumnSpec(id = "BAD", type = "SAS Char")
+  spec@structure <- DTAColumnSpecStructure(backend = "SAS")
+  bad <- DTAColumnSpecCollection(columns = list(BAD = spec))
+
+  warnings <- testthat::capture_warnings(
+    schemas <- dta_compile_columnspec_schemas(bad)
+  )
+
+  expect_length(warnings, 1)
+  expect_match(warnings, "BAD", fixed = TRUE)
+  expect_null(schemas[[1]]$schema)
+})

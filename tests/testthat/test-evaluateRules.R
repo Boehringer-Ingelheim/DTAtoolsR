@@ -1073,6 +1073,59 @@ test_that("validate_rules passes clean tables and aborts on rule violations", {
   )
 })
 
+test_that("validate_rules never evaluates YAML/data-derived text as a cli format string", {
+  # A rule id (or, via dta_unique_violation_message(), any message text built
+  # from user/YAML/data) reaches cli_abort() as BULLET CONTENT, not as the
+  # format string. Before the fix, `bullets` was built with the "!"/"x" names
+  # swapped onto the wrong side (c("Rule violations:" = "!", ...) instead of
+  # c("!" = "Rule violations:", ...)) and without .cli_escape(), so a `{`/`}`
+  # in the id was glue-evaluated in the validating session.
+  specs <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)
+    ),
+    rules = list(
+      DTARuleColUnique(id = "u{stop('evaluated')}", columns = "ID")
+    )
+  )
+
+  err <- tryCatch(
+    suppressMessages(
+      validate_rules(specs, data.frame(ID = c("A001", "A001"), stringsAsFactors = FALSE))
+    ),
+    error = function(e) e
+  )
+  expect_s3_class(err, "rlang_error")
+  # Evaluated, the payload would raise "evaluated" from stop() instead of
+  # reaching this point at all -- so surviving to a literal, unevaluated
+  # match is itself proof the id was never handed to glue as code.
+  expect_true(grepl("u{stop('evaluated')}", conditionMessage(err), fixed = TRUE))
+  expect_true(grepl("^!\\s*Rule violations:", conditionMessage(err)))
+})
+
+test_that("apply_rules never evaluates an unknown rule type as a cli format string (verbose)", {
+  df <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
+  rule <- DTARule(id = "r1", type = "bogus_{stop('evaluated')}", description = "")
+
+  msgs <- testthat::capture_messages(
+    results <- apply_rules(list(rule), df, verbose = TRUE)
+  )
+
+  expect_true(any(grepl("Unknown rule type: bogus_{stop('evaluated')}", msgs, fixed = TRUE)))
+  expect_false(results[[1]]$valid)
+})
+
+test_that("apply_rules never evaluates a YAML rule id as a cli format string (verbose)", {
+  df <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
+  rule <- DTARuleColUnique(id = "id{no_such_object_xyz}", columns = "ID")
+
+  results <- testthat::capture_messages(apply_rules(list(rule), df, verbose = TRUE))
+  # The rule passes (no duplicates), so the only interpolation exercised here
+  # is the "Rule '{result$id}' passed" verbose line -- a safe pattern already,
+  # pinned so a future edit does not turn it into a format-string call.
+  expect_true(any(grepl("id{no_such_object_xyz}", results, fixed = TRUE)))
+})
+
 test_that("validate_rules returns an empty result when the collection has no rules", {
   specs <- DTAColumnSpecCollection(
     columns = list(

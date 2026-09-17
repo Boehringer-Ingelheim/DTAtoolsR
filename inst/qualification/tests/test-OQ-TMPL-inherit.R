@@ -97,6 +97,22 @@ test_that("OQ-TMPL-038 | a sealed path matching nothing is reported, not silentl
   )
 })
 
+test_that("OQ-TMPL-061 | a child adding an option that writes a sealed field is a sealed violation too | REQ-TMPL-021", {
+  # Unlike OQ-TMPL-037, nothing in the merged DEFINITION TREE changes here:
+  # the child adds no base: section at all. The field is only reached once
+  # create_dta_from_template() applies the new option's effect -- the seal
+  # has to be checked against what an option WOULD write, not only against
+  # base:'s own resolved value.
+  result <- validate_template(tmpl_fixture("codes", "sealed_violation_option"))
+  qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_violation"))
+  qa_step("and also error, on instantiate_failed", "error", tmpl_severity(result, "instantiate_failed"))
+  qa_check(
+    "naming the sealed field and the child that added the option",
+    grepl("so_c", tmpl_message(result, "sealed_violation"), fixed = TRUE) &&
+      grepl("base.metadata.title", tmpl_message(result, "sealed_violation"), fixed = TRUE)
+  )
+})
+
 # ---- REQ-TMPL-022: the four value states -----------------------------------
 
 test_that("OQ-TMPL-039 | an absent section inherits the parent's, and the build succeeds | REQ-TMPL-022", {

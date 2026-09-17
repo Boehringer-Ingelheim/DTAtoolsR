@@ -207,7 +207,7 @@ deviations:
 
   - id: DEV-009
     title: A transfer date given as free text is discarded without a record
-    status: open
+    status: closed
     severity: major
     affects: [REQ-META-009]
     observed: >
@@ -224,7 +224,7 @@ deviations:
     workaround: Supply the top-level date as an ISO date, and put any qualifying text elsewhere.
     reference: R/DTAMetaData-class.R:67 with :258
     opened: 2026-09-09
-    closed: null
+    closed: 2026-09-16
 
   - id: DEV-010
     title: A metadata import issue is lost after one write and read

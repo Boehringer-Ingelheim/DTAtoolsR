@@ -28,20 +28,31 @@
 #' @details
 #' Date-valued metadata fields (\code{date}, \code{transmission$date_first_transfer}
 #' and \code{transmission$date_last_transfer}) may be supplied as strings. A string
-#' that is exactly an ISO date becomes a \code{Date}. A string that has no ISO date
-#' at its start (\code{"after approval"}, \code{"2 weeks after approval"},
+#' that is exactly an ISO date becomes a \code{Date}.
+#'
+#' \code{transmission$date_first_transfer} and \code{transmission$date_last_transfer}
+#' are untyped list elements, so a string that has no ISO date at its start
+#' (\code{"after approval"}, \code{"2 weeks after approval"},
 #' \code{"final transfer by 2026-12-31"}) is a legitimate free-text phrase and is
 #' kept verbatim as character.
 #'
+#' \code{date}, in contrast, is declared \code{Date}-typed (see the \code{date}
+#' property) and cannot hold a phrase: a string with no ISO date at its start
+#' cannot be represented and becomes \code{NA}, the same coercion \code{as.Date()}
+#' would perform. Unlike the transmission fields, that loss is recorded as an
+#' import issue in \code{@import_issues}, carrying the original string verbatim, so
+#' \code{check()} on the enclosing \code{DTA} still fails rather than reporting
+#' \code{metadata_ok = TRUE} over a top-level date that was silently discarded.
+#'
 #' A string that *starts* with an ISO date but carries trailing text
-#' (\code{"2026-12-31 at the earliest"}) is the dangerous case: \code{as.Date()}
-#' silently discards the trailing words, turning a qualified statement in a data
-#' transfer agreement into a committed date. Such a value is still converted to the
-#' \code{Date} - \code{validate_transmission_dates()} and the exported documents
-#' need a real \code{Date} - but the loss is recorded as an import issue in
-#' \code{@import_issues}, carrying the original string verbatim. Import issues make
-#' \code{check()} on the enclosing \code{DTA} fail, so the discarded qualification
-#' can never pass silently.
+#' (\code{"2026-12-31 at the earliest"}) is the dangerous case for any of the three
+#' fields: \code{as.Date()} silently discards the trailing words, turning a
+#' qualified statement in a data transfer agreement into a committed date. Such a
+#' value is still converted to the \code{Date} - \code{validate_transmission_dates()}
+#' and the exported documents need a real \code{Date} - but the loss is recorded as
+#' an import issue in \code{@import_issues}, carrying the original string verbatim.
+#' Import issues make \code{check()} on the enclosing \code{DTA} fail, so the
+#' discarded qualification can never pass silently.
 #'
 #' @examples
 #'
@@ -251,7 +262,10 @@ DTAMetaData <- S7::new_class(
 #' @param field Character. Field path used in the import issue record.
 #' @param require_date Logical. When \code{TRUE} the field is typed \code{Date}
 #'   and a phrase cannot be stored, so an unparseable string is coerced the way
-#'   \code{as.Date()} would coerce it (to \code{NA}).
+#'   \code{as.Date()} would coerce it (to \code{NA}) - and, unlike the
+#'   \code{FALSE} case where a phrase is legitimate free text, that \code{NA}
+#'   is recorded as an import issue, since a Date-typed field silently losing
+#'   its value is exactly the discard \code{@import_issues} exists to catch.
 #' @return A list with \code{value} (the value to store) and \code{issues} (a
 #'   possibly empty list of import issue records).
 #' @keywords internal
@@ -265,15 +279,20 @@ DTAMetaData <- S7::new_class(
   split <- .split_date_prefix(value)
 
   if (is.na(split$date)) {
-    # A phrase with no parseable date prefix ("after approval", "2 weeks after
-    # approval", "final transfer by 2026-12-31"). Documented, legitimate input:
-    # keep it verbatim and do NOT report an import issue.
     if (isTRUE(require_date)) {
+      # The field is Date-typed, so a phrase cannot be stored: it becomes NA,
+      # exactly as as.Date() would coerce it. Unlike the free-text case below,
+      # that NA is a real loss -- nothing about it is legitimate the way a
+      # transmission-date phrase is -- so it is recorded as an import issue
+      # rather than passing silently.
       return(list(
         value = suppressWarnings(as.Date(value, format = "%Y-%m-%d")),
-        issues = list()
+        issues = list(.metadata_import_issue(field, value, "not_convertible"))
       ))
     }
+    # A phrase with no parseable date prefix ("after approval", "2 weeks after
+    # approval", "final transfer by 2026-12-31"). Documented, legitimate input
+    # for a free-text field: keep it verbatim and do NOT report an import issue.
     return(none)
   }
 

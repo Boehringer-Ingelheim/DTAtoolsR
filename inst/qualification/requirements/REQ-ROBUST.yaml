@@ -170,3 +170,32 @@ requirements:
       A base R error message is rendered in the system language, so a caller
       cannot match it portably. Matching on a condition class is the only way a
       wrapper can tell one failure from another.
+
+  # ---- specification-derived text is data, never code -----------------------
+
+  - id: REQ-ROBUST-016
+    text: >
+      Text that originates in a specification or a delivery -- a rule id, a
+      rule or constraint message, a column name, a template file name or path
+      -- shall be reproduced literally wherever it reaches a condition message
+      or a printed summary, and shall never be evaluated as a cli format
+      string. validate_rules(), validate_table() and
+      validate_template(strict = TRUE) shall each abort with the offending
+      text intact rather than interpreted, and summary() of a qualification
+      result shall print a failure message the same way.
+    risk: high
+    category: security
+    covers: [validate_rules, validate_table, validate_template, run_qualification]
+    source: >
+      R/exportDocuments.R (.cli_escape); R/validationFunctions.R;
+      R/evaluateRules.R (validate_rules); R/validateTemplate.R
+      (.dta_template_strict_check); R/qualification.R (summary.dta_qualification)
+    notes: >
+      Before the fix, a rule id or message containing "{" was handed to cli as
+      part of the format string itself, not as content -- cli::cli_abort(c("Rule
+      violations:", rule_messages)) treats every element of that vector as
+      something to interpolate. A rule id or a sealed template path is
+      attacker- or supplier-controlled text arriving from a YAML file or a
+      delivered column name, so an unescaped "{Sys.getenv('HOME')}" (or worse)
+      inside it was evaluated rather than shown, on the caller's machine, the
+      moment the offending rule or template was validated.

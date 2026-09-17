@@ -89,6 +89,22 @@ test_that("summary.dta_qualification() returns the per-stage summary and lists f
   expect_match(out, "OQ-003 [skip]", fixed = TRUE)
 })
 
+test_that("summary.dta_qualification() prints a brace-bearing expectation message literally", {
+  # A failing expectation's message is developer- or data-derived text, not a
+  # cli format string. Unescaped, "{DTA_TITLE}" would be read as glue
+  # interpolation and abort summary() instead of reporting the failure.
+  braced <- qual_mock
+  braced$expectations$message[[1]] <- "template used {DTA_TITLE} but none was defined"
+  msgs <- character()
+  invisible(capture.output(
+    msgs <- capture.output(summary(braced), type = "message"),
+    type = "output"
+  ))
+  out <- paste(msgs, collapse = "\n")
+
+  expect_match(out, "template used {DTA_TITLE} but none was defined", fixed = TRUE)
+})
+
 test_that("summary.dta_qualification() omits the failing-cases section when everything passed", {
   clean <- qual_mock
   clean$tests$status <- "pass"

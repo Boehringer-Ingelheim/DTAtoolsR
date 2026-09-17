@@ -5,7 +5,9 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param datasets A named list of DTADataSet objects.
+#' @param datasets A named list of DTADataSet objects. Names must be
+#'   non-empty and unique -- \code{check()} looks datasets up by name, so a
+#'   repeated name would validate one entry twice and the other never.
 #' @param metadata A DTAMetaData object.
 #' @param ... If metadata is not set, additional arguments are passed to
 #'   DTAMetaData(...).
@@ -59,7 +61,41 @@ DTA <- S7::new_class(
   properties = list(
     datasets = class_list,
     metadata = class_DTAMetaData
-  )
+  ),
+  validator = function(self) {
+    ds <- self@datasets
+    # An empty or NULL @datasets is a legitimate DTA with nothing bound yet
+    # (see dta_from_list() and the Shiny app's "remove last dataset" flow) --
+    # there is nothing to name, so there is nothing to check here.
+    if (length(ds) == 0) {
+      return(NULL)
+    }
+
+    nms <- names(ds)
+    # `is.null(nms)` is checked before `is.na()`/`nzchar()` run over it: both
+    # return a zero-length result on NULL rather than erroring, which would
+    # silently skip the very case -- a datasets list assembled with no names
+    # at all -- this exists to catch.
+    if (is.null(nms) || any(is.na(nms) | !nzchar(nms))) {
+      cli_abort(
+        "Every entry in @datasets must have a non-empty name; check() reads and
+        writes @datasets[[name]], so an unnamed, empty or NA name is
+        indistinguishable from one that collides with another entry."
+      )
+    }
+
+    dupes <- unique(nms[duplicated(nms)])
+    if (length(dupes) > 0) {
+      # Interpolated, not pasted: a dataset name is arbitrary text, and a
+      # literal "{" in it would otherwise be parsed as a cli expression -- see
+      # the same reasoning in print(DTA) and method(datasets, DTA) above.
+      cli_abort(
+        "@datasets has duplicate name{?s}: {.val {dupes}}. check() reads and
+        writes @datasets[[name]], so a repeated name is validated twice under
+        one entry and never under the other."
+      )
+    }
+  }
 )
 
 

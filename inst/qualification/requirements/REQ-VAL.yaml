@@ -318,3 +318,21 @@ requirements:
       nothing in the package may choose which of two the constraints describe.
       Reported on as a finding it would have to name a verdict for constraints
       that were never evaluated against one of the columns.
+
+  - id: REQ-VAL-029
+    text: >
+      A column specification that declares values, a pattern or nullability
+      but no type, format or length shall still have every one of those
+      declared constraints checked, exactly as a typed column's are: an
+      out-of-codelist value, a value that does not match the pattern, and a
+      non-nullable column's missing value shall each be reported.
+    risk: high
+    category: functional
+    covers: [check, DTAColumnSpec]
+    source: R/DTAColumnSpec-class.R (as_json_schema, as_json_schema_type)
+    notes: >
+      Before the fix, as_json_schema() built no schema at all for such a
+      column, so dta_compile_columnspec_schemas() recorded schema = NULL for
+      it and dta_columnspec_errors() then skipped every one of its value
+      checks -- a column declared with a codelist but no type validated any
+      value at all, including ones outside that codelist.

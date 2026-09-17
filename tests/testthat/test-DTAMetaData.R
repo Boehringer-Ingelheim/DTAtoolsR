@@ -145,6 +145,49 @@ test_that("a qualified top-level date is converted and recorded as an import err
   )
 })
 
+test_that("a top-level date with no leading ISO date is NA and recorded as an import error", {
+  # @date is Date-typed (unlike the transmission dates, which are untyped list
+  # elements and may legitimately stay free text): a phrase with no ISO date at
+  # its start cannot be represented, so it becomes NA -- but, before this fix,
+  # that NA was stored with no import issue at all, so check() on the enclosing
+  # DTA reported metadata_ok = TRUE over a discarded top-level date. DEV-009.
+  md <- DTAMetaData(title = "T", date = "after approval")
+
+  expect_s3_class(md@date, "Date")
+  expect_true(is.na(md@date))
+
+  issues <- metadata_import_errors(md)
+  expect_equal(nrow(issues), 1)
+  expect_true(is.na(issues$row))
+  expect_identical(issues$column, "date")
+  expect_identical(issues$raw, "after approval")
+  expect_identical(issues$declared_type, "Date")
+  expect_identical(issues$reason, "not_convertible")
+})
+
+test_that("a DTA whose top-level date is an unparseable phrase fails check() on the metadata axis", {
+  md <- DTAMetaData(title = "T", date = "after approval")
+  dta <- DTA(datasets = list(create_example_DTADataSetTabular(2)), metadata = md)
+
+  out <- capture.output(dta <- check(dta, persist = FALSE, quiet = TRUE), type = "message")
+  expect_length(out, 0)
+
+  metadata_summary <- attr(dta, "last_metadata_summary")
+  expect_identical(metadata_summary$status, "failed")
+  expect_false(metadata_summary$ok)
+  expect_false(metadata_summary$import_valid)
+  expect_identical(metadata_summary$n_import_errors, 1L)
+  expect_identical(metadata_summary$fields, "date")
+  expect_false(attr(dta, "last_validation_ok"))
+
+  msgs <- messages(metadata(dta), as_tibble = FALSE)
+  expect_equal(nrow(msgs), 1)
+  expect_identical(msgs$source, "import")
+  expect_identical(msgs$target, "metadata")
+  expect_identical(msgs$keyword, "not_convertible")
+  expect_true(grepl("after approval", msgs$message, fixed = TRUE))
+})
+
 test_that("metadata import errors surface through messages()", {
   md <- DTAMetaData(
     title = "Qualified Date",
