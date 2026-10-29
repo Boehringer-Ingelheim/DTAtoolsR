@@ -1,3 +1,5 @@
+// Validates the templates in templates/ (auto-detected; a template file left
+// at the root fails the build).
 // -----------------------------------------------------------------------------
 // CI for a PRIVATE DTAtools template repository -- Jenkins declarative
 // pipeline.

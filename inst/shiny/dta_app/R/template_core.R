@@ -35,7 +35,8 @@ dta_creation_template_dirs <- function() {
     dta_creation_templates_dir()
   )
   dirs <- dirs[nzchar(dirs)]
-  dirs[dir.exists(dirs)]
+  dirs <- dirs[dir.exists(dirs)]
+  unique(vapply(dirs, dta_template_library_dir, character(1), USE.NAMES = FALSE))
 }
 
 # List available creation-template files by basename, across every search
@@ -333,6 +334,8 @@ dta_template_list_fields <- function() {
 # Resolution order:
 # 1) relative to template file directory, and still inside it
 # 2) package extdata root, by basename only
+# source: is relative to the template file's folder, inside templates/ for a
+# conventional library; supporting files must stay inside that folder too.
 resolve_template_dataset_path <- function(ref, template_path) {
   if (is.null(ref) || !nzchar(ref)) {
     return("")

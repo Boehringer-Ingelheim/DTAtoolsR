@@ -1,3 +1,4 @@
+# DTATOOLS_LOCAL_LIBRARY accepts a repository root or its templates/ folder.
 # Opt-in coverage for a template library kept OUTSIDE this repository, on the
 # developer's own machine. Everything else in the suite tests the template
 # engine against fixtures it writes itself; this file tests it against a real,

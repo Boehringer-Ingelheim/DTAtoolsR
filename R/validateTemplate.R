@@ -2,6 +2,9 @@
 # validate_template(): CI-friendly linting for DTA templates, WITHOUT starting
 # the Shiny app.
 #
+# A repository with template files directly in templates/ uses that library
+# directory; otherwise the root-layout convention remains supported.
+#
 # The template engine (reading/normalising a template, merging an `extends:`
 # chain, resolving a metadata/dataset target, applying a dataset patch,
 # building a whole DTA from a creation template) lives entirely in
@@ -43,6 +46,10 @@
 # result, the result/index data frames) -- those names are ours, so the hazard
 # does not apply.
 # -----------------------------------------------------------------------------
+
+# Keep equal to the engine's dta_template_library_subdir(). Shared with the
+# scaffold without loading the app engine just to copy the starter files.
+.dta_template_library_subdir <- "templates"
 
 # ---- Engine access -----------------------------------------------------
 
@@ -1124,7 +1131,7 @@
   .dta_template_bind_rows(list(.dta_template_row(
     path, NA_character_, NA_character_, NA_character_, "error", "no_templates",
     sprintf(
-      "No template files found in %s: looked for *.dta-template.yaml, *.dta-dataset-template.yaml, *.dta-party.yaml and *.dta-vocabulary.yaml (and their .yml spellings), non-recursively. A typo'd path, a stale working directory, and templates kept one level down in a subdirectory all look exactly like this.",
+      "No template files found in %s: looked for *.dta-template.yaml, *.dta-dataset-template.yaml, *.dta-party.yaml and *.dta-vocabulary.yaml (and their .yml spellings), with a non-recursive scan; templates are read from a 'templates/' sub-folder when one holds template files, otherwise from the directory itself.",
       path
     )
   )))
@@ -1142,7 +1149,7 @@
 #
 # Warning, not error: keeping an archived or work-in-progress file below the
 # root is a legitimate choice, and this must not turn CI red on its own.
-.dta_template_check_nested <- function(path, is_dir, all_files, all_kinds) {
+.dta_template_check_nested <- function(path, lib, is_dir, all_files, all_kinds) {
   if (!is_dir) {
     return(.dta_template_validation_empty())
   }
@@ -1151,7 +1158,9 @@
   # own reasoning: whether a file is missed by the flat scan does not depend
   # on which kinds the caller asked for a report row on.
   nested <- .dta_template_list_nested(path, all_kinds)
-  nested <- nested[!(nested$file %in% all_files), , drop = FALSE]
+  excluded <- all_files
+  if (lib != path) excluded <- c(excluded, .dta_template_list_dir(path, all_kinds))
+  nested <- nested[!(nested$file %in% excluded), , drop = FALSE]
   if (nrow(nested) == 0) {
     return(.dta_template_validation_empty())
   }
@@ -1162,8 +1171,28 @@
       nested$file[[i]], nested$kind[[i]], NA_character_, NA_character_,
       "warning", "template_in_subdirectory",
       sprintf(
-        "%s is not validated (the scan is non-recursive) and the Shiny app's template loader will not see it either -- move it to the top level of the template directory.",
-        nested$file[[i]]
+        "Template file is in a sub-folder of the library, so it is not validated and the template loader will not see it (the scan is non-recursive) -- move it to the top level of '%s/'.",
+        if (lib != path) .dta_template_library_subdir else "."
+      )
+    )
+  })
+  .dta_template_bind_rows(rows)
+}
+
+# Root files in a mixed layout are invisible to the loader, not candidates
+# for parsing, cross-file resolution or duplicate checks.
+.dta_template_check_outside_library <- function(path, lib) {
+  if (lib == path) {
+    return(.dta_template_validation_empty())
+  }
+  files <- .dta_template_list_dir(path, .dta_template_engine_get("dta_template_all_kinds")())
+  rows <- lapply(files, function(file) {
+    raw <- .dta_template_read_raw(file)
+    .dta_template_row(
+      file, raw$kind, raw$id, raw$version, "error", "template_outside_library_dir",
+      sprintf(
+        "Template file sits at the repository root, but this library keeps its templates in '%s/'; the template loader reads only that folder, so this file is invisible. Move it into '%s/' (or delete it).",
+        .dta_template_library_subdir, .dta_template_library_subdir
       )
     )
   })
@@ -1215,6 +1244,13 @@
 #' package = "DTAtools")` for a ready-to-copy GitHub Actions workflow.
 #'
 #' @details
+#' A directory uses its `templates/` sub-folder when that folder holds at least
+#' one template file, otherwise the directory itself. The library scan is
+#' non-recursive. In a mixed layout, only `templates/` is loaded; template
+#' files left at the repository root are errors (code
+#' `template_outside_library_dir`). Other nested templates are warnings (code
+#' `template_in_subdirectory`), naming the library directory to move them to.
+#'
 #' An otherwise-empty directory is reported as an `"error"` (code
 #' `"no_templates"`), not accepted silently: the packaged
 #' `validate-templates.yml` workflow's entire CI job is
@@ -1224,18 +1260,16 @@
 #' this check, the job goes green having validated nothing: exactly the
 #' failure a repository linter exists to catch.
 #'
-#' @param path A single template file, or a directory. A directory is scanned
-#'   NON-RECURSIVELY for `*.dta-template.yaml`, `*.dta-dataset-template.yaml`,
-#'   `*.dta-party.yaml` and `*.dta-vocabulary.yaml` files (and their `.yml`
-#'   spellings) -- the same
-#'   filename convention the template engine itself uses
-#'   (`dta_template_kind_pattern()`). `kinds`, below, only narrows which of
-#'   those files get a report row of their OWN; it never changes how many
-#'   files are considered when resolving a cross-file reference (an
-#'   `extends:`, a `datasets[].template`, a party slot's profile allow-list).
-#'   A template found below the scanned directory's top level is not read at
-#'   all -- it is reported as `template_in_subdirectory` rather than silently
-#'   ignored.
+#' @param path A template file, a library directory, or a repository root. For a
+#'   directory, templates are read from its `templates/` sub-folder when that
+#'   holds at least one template file, otherwise from the directory itself;
+#'   the scan is non-recursive. Files match `*.dta-template.yaml`,
+#'   `*.dta-dataset-template.yaml`, `*.dta-party.yaml` or
+#'   `*.dta-vocabulary.yaml` (and their `.yml` spellings). `kinds` only narrows
+#'   which files get their own report rows, never cross-file resolution.
+#'   Nested files outside the library's top level are reported as
+#'   `template_in_subdirectory`, not loaded. Root-level leftovers when
+#'   `templates/` is active are reported as `template_outside_library_dir`.
 #' @param strict A single `TRUE`/`FALSE`. When `TRUE`, `validate_template()`
 #'   raises an error via [cli::cli_abort()] summarising every row of severity
 #'   `"error"` (and stays silent when there are none), instead of just
@@ -1280,8 +1314,9 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
     cli::cli_abort("{.arg path} does not exist: {.file {path}}")
   }
 
-  all_files <- if (is_dir) .dta_template_list_dir(path, all_kinds) else path
-  report_files <- if (is_dir && !is.null(kinds)) .dta_template_list_dir(path, kinds) else all_files
+  lib <- if (is_dir) .dta_template_engine_get("dta_template_library_dir")(path) else path
+  all_files <- if (is_dir) .dta_template_list_dir(lib, all_kinds) else path
+  report_files <- if (is_dir && !is.null(kinds)) .dta_template_list_dir(lib, kinds) else all_files
 
   records <- stats::setNames(lapply(all_files, .dta_template_read_raw), all_files)
   index_df <- .dta_template_build_index_df(records)
@@ -1292,11 +1327,12 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
   })
   dup_rows <- .dta_template_check_duplicates(records[report_files])
   no_templates_rows <- .dta_template_check_no_templates(path, is_dir, all_files)
-  nested_rows <- .dta_template_check_nested(path, is_dir, all_files, all_kinds)
+  nested_rows <- .dta_template_check_nested(path, lib, is_dir, all_files, all_kinds)
+  outside_rows <- if (is_dir) .dta_template_check_outside_library(path, lib) else .dta_template_validation_empty()
 
   result <- do.call(rbind, c(
     list(.dta_template_validation_empty()), file_rows,
-    list(dup_rows, no_templates_rows, nested_rows)
+    list(dup_rows, no_templates_rows, nested_rows, outside_rows)
   ))
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation

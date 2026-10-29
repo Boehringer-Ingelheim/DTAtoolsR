@@ -13,8 +13,8 @@ Aborts via \code{\link[cli:cli_abort]{cli::cli_abort()}} if \code{path} names an
 than a directory.}
 
 \item{examples}{A single \code{TRUE}/\code{FALSE} (default \code{TRUE}). When \code{TRUE},
-copies the four starter template YAML files into \code{path}, alongside
-\code{README.md}. When \code{FALSE}, only \code{README.md}, \code{.gitignore} and (if \code{ci}
+writes the four starter templates into \verb{templates/} beneath \code{path}.
+\code{README.md} stays at the repository root. When \code{FALSE}, only \code{README.md}, \code{.gitignore} and (if \code{ci}
 asks for any provider) its CI file(s) are written -- no template files,
 for a caller who wants the scaffolding without the worked example.}
 
@@ -47,12 +47,31 @@ Invisibly, the normalised absolute path to \code{path} (see
 Creates a directory laid out the way a private DTAtools template
 repository is meant to be: a small, self-consistent worked example of the
 four template kinds (a creation template, a dataset template, a party
-profile, a controlled vocabulary), a \code{README.md} explaining them, a
+profile, a controlled vocabulary) under \verb{templates/}, a root-level
+\code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
 \code{\link[=validate_template]{validate_template()}} against the repository on every push and pull
 request. The result already passes \code{validate_template(path, strict = TRUE)} unmodified, so it is a starting point to edit rather than a stub to
 fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
 creates.
+}
+\details{
+The scaffold mirrors the bundled skeleton, with the full authoring guide
+at the root and the starter templates under \verb{templates/}:
+
+\if{html}{\out{<div class="sourceCode text">}}\preformatted{<path>/README.md
+<path>/.gitignore
+<path>/templates/starter.dta-template.yaml
+<path>/templates/starter_dataset.dta-dataset-template.yaml
+<path>/templates/starter_supplier.dta-party.yaml
+<path>/templates/starter_terms.dta-vocabulary.yaml
+<path>/.github/workflows/validate-templates.yml  (ci = "github", default)
+<path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
+<path>/Jenkinsfile                             (ci = "jenkins")
+}\if{html}{\out{</div>}}
+
+Only the selected CI files are written. \code{\link[=validate_template]{validate_template()}} automatically
+detects \verb{templates/} when called on the repository root.
 }
 \examples{
 dir <- file.path(tempdir(), "my-templates")

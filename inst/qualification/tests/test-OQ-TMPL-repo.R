@@ -9,13 +9,8 @@
 
 tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
 
-# The four skeleton template files, discovered the same way
-# .dta_create_repo_example_files() itself does -- so this list can never
-# silently drift from what the function under test actually copies.
-tmpl_skeleton_example_files <- function() {
-  skeleton_dir <- system.file("extdata", "template-repo-skeleton", package = "DTAtools")
-  list.files(skeleton_dir, pattern = "[.]ya?ml$")
-}
+# Expected scaffold paths below are written from REQ-TMPL-026, not discovered
+# from the installed skeleton or the function under qualification.
 
 # ---- REQ-TMPL-026: the default write set, and examples = FALSE ------------
 
@@ -25,7 +20,11 @@ test_that("OQ-TMPL-049 | the defaults write the scaffolding, the four skeleton t
 
   written <- sort(list.files(dir, recursive = TRUE, all.files = TRUE, no.. = TRUE))
   expected <- sort(c(
-    ".gitignore", "README.md", tmpl_skeleton_example_files(),
+    ".gitignore", "README.md",
+    "templates/starter.dta-template.yaml",
+    "templates/starter_dataset.dta-dataset-template.yaml",
+    "templates/starter_supplier.dta-party.yaml",
+    "templates/starter_terms.dta-vocabulary.yaml",
     ".github/workflows/validate-templates.yml"
   ))
   qa_step("exactly the documented default file set is written", expected, written)
@@ -105,9 +104,8 @@ test_that("OQ-TMPL-055 | overwrite = TRUE replaces every conflicting file | REQ-
 })
 
 test_that("OQ-TMPL-056 | a path naming an existing file, not a directory, is rejected outright | REQ-TMPL-028", {
-  file <- tempfile()
+  file <- file.path(qa_tempdir(), "existing-file")
   writeLines("x", file)
-  withr::defer(unlink(file))
 
   err <- tryCatch(create_template_repo(file, overwrite = TRUE), error = function(e) e)
   qa_check("rejected even with overwrite = TRUE", inherits(err, "condition"))
@@ -149,6 +147,7 @@ test_that("OQ-TMPL-060 | the bundled skeleton itself validates cleanly under str
   outcome <- tryCatch(
     {
       validate_template(skeleton_dir, strict = TRUE)
+      validate_template(file.path(skeleton_dir, "templates"), strict = TRUE)
       "no condition"
     },
     error = function(e) conditionMessage(e)

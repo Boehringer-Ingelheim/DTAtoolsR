@@ -1,5 +1,5 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
-# REQ-TMPL-001 .. REQ-TMPL-018.
+# REQ-TMPL-001 .. REQ-TMPL-018 and REQ-TMPL-031.
 #
 # Every fixture below lives under fixtures/tpl/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
@@ -59,7 +59,7 @@ test_that("OQ-TMPL-002 | a template kept one level down is reported, not silentl
   )
   qa_check(
     "naming the non-recursive scan as the reason",
-    grepl("is not validated (the scan is non-recursive)", tmpl_message(result, "template_in_subdirectory"), fixed = TRUE)
+    grepl("the template loader will not see it (the scan is non-recursive)", tmpl_message(result, "template_in_subdirectory"), fixed = TRUE)
   )
 })
 
@@ -388,4 +388,74 @@ test_that("OQ-TMPL-032 | include naming a code the vocabulary lacks is an error 
     "naming the unknown code",
     grepl("NOPE", tmpl_message(result, "values_from_terms_invalid"), fixed = TRUE)
   )
+})
+
+
+# ---- REQ-TMPL-031: conventional library folder -------------------------------
+# Fixture contents and expected findings are specified independently of the
+# engine: one clean abstract creation template per layout; mixed adds an
+# identical id/version at root to prove that file is excluded from resolution.
+
+test_that("OQ-TMPL-062 | repository roots validate populated templates/ and direct folder paths identically | REQ-TMPL-031", {
+  root <- tmpl_fixture("layout", "folder")
+  result <- validate_template(root)
+  qa_step("the conventional library has no findings", 0L, nrow(result))
+  qa_step(
+    "the explicit templates/ folder has no findings", 0L,
+    nrow(validate_template(file.path(root, "templates")))
+  )
+  strict <- tryCatch(
+    {
+      validate_template(root, strict = TRUE)
+      "no condition"
+    },
+    error = function(e) conditionMessage(e)
+  )
+  qa_step("strict validation accepts the repository root", "no condition", strict)
+})
+
+test_that("OQ-TMPL-063 | root leftovers are errors and never duplicate candidates | REQ-TMPL-031", {
+  root <- tmpl_fixture("layout", "mixed")
+  result <- validate_template(root)
+  qa_step("exactly one finding, not a duplicate or nested warning", 1L, nrow(result))
+  qa_step("the code identifies a root leftover", "template_outside_library_dir", result$code)
+  qa_step("the severity fails CI", "error", result$severity)
+  qa_step("the finding names the root file", file.path(root, "leftover.dta-template.yaml"), result$file)
+  qa_step("the readable kind is retained", "dta_creation_template", result$kind)
+  qa_step("the readable id is retained", "layout_example", result$id)
+  qa_step("the readable version is retained", "1.0", result$version)
+  qa_check(
+    "the message names the live folder and explains invisibility",
+    grepl("templates/", result$message, fixed = TRUE) &&
+      grepl("this file is invisible", result$message, fixed = TRUE)
+  )
+  err <- tryCatch(validate_template(root, strict = TRUE), error = function(e) e)
+  qa_check("strict validation raises a package-authored condition", inherits(err, "rlang_error"))
+  qa_check(
+    "the condition names the root-leftover code",
+    grepl("template_outside_library_dir", conditionMessage(err), fixed = TRUE)
+  )
+})
+
+test_that("OQ-TMPL-064 | legacy root-layout libraries still validate cleanly | REQ-TMPL-031", {
+  root <- tmpl_fixture("layout", "root")
+  qa_step("a root-layout library has no findings", 0L, nrow(validate_template(root)))
+  strict <- tryCatch(
+    {
+      validate_template(root, strict = TRUE)
+      "no condition"
+    },
+    error = function(e) conditionMessage(e)
+  )
+  qa_step("strict validation accepts the legacy layout", "no condition", strict)
+})
+
+test_that("OQ-TMPL-065 | empty or unrelated templates/ folders do not hide root templates | REQ-TMPL-031", {
+  root <- qa_tempdir()
+  file.copy(file.path(tmpl_fixture("layout", "root"), "example.dta-template.yaml"), root)
+  lib <- file.path(root, "templates")
+  dir.create(lib)
+  qa_step("an empty templates/ folder preserves root validation", 0L, nrow(validate_template(root)))
+  writeLines("Supporting notes, not a template.", file.path(lib, "notes.txt"))
+  qa_step("a folder holding only notes preserves root validation", 0L, nrow(validate_template(root)))
 })

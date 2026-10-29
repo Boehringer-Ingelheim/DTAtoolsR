@@ -25,15 +25,18 @@ requirements:
 
   - id: REQ-TMPL-002
     text: >
-      A directory shall be scanned non-recursively for the four template
-      kinds (and their .yml spellings); a template file kept below the
-      scanned directory's top level shall be reported with the code
-      template_in_subdirectory rather than silently ignored, because it is
-      invisible to the app's own picker for the identical reason.
+      A directory shall be read from its templates/ sub-folder when that
+      holds template files, otherwise from the directory itself. That library
+      directory shall be scanned non-recursively for the four template kinds
+      (and their .yml spellings). A template file below the library's top
+      level shall be reported as template_in_subdirectory at severity warning,
+      naming the library folder to move it to, because it is invisible to the
+      app's picker. Root leftovers in a templates/ layout are instead errors
+      as specified by REQ-TMPL-031.
     risk: medium
     category: functional
     covers: [validate_template]
-    source: R/validateTemplate.R:169-183, 1133-1171 (.dta_template_list_dir, .dta_template_check_nested)
+    source: R/validateTemplate.R (.dta_template_list_dir, .dta_template_check_nested, validate_template); inst/shiny/dta_app/R/template_index.R (dta_template_library_dir)
 
   - id: REQ-TMPL-003
     text: >
@@ -436,16 +439,16 @@ requirements:
   - id: REQ-TMPL-026
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
-      FALSE) shall write .gitignore, README.md, and -- when examples is
-      TRUE -- the four bundled skeleton template files (one of each kind),
-      discovered from the skeleton directory's actual *.yaml contents rather
-      than a hard-coded list. examples = FALSE shall omit those four files
-      while still writing the scaffolding (.gitignore, README.md, and any CI
-      file ci asks for).
+      FALSE) shall write .gitignore and README.md at the repository root,
+      and -- when examples is TRUE -- the four bundled skeleton template
+      files (one of each kind) directly under templates/, discovered from
+      inst/extdata/template-repo-skeleton/templates/ rather than a hard-coded
+      list. examples = FALSE shall write only the scaffolding (.gitignore,
+      README.md, and any CI file ci asks for), with no templates/ entries.
     risk: medium
     category: functional
     covers: [create_template_repo]
-    source: R/createTemplateRepo.R:70-151, 201-256
+    source: R/createTemplateRepo.R (.dta_create_repo_example_files, .dta_create_repo_targets, create_template_repo); inst/extdata/template-repo-skeleton/templates/
 
   - id: REQ-TMPL-027
     text: >
@@ -460,13 +463,14 @@ requirements:
     risk: medium
     category: interface
     covers: [create_template_repo]
-    source: R/createTemplateRepo.R:86-122 (.dta_create_repo_ci_asset_targets, .dta_create_repo_validate_ci)
+    source: R/createTemplateRepo.R (.dta_create_repo_ci_asset_targets, .dta_create_repo_validate_ci)
 
   - id: REQ-TMPL-028
     text: >
       Without overwrite = TRUE, create_template_repo() shall raise a
       condition naming every file it would have written that already exists
-      at path, and shall write nothing at all in that case -- not even the
+      at path (including templates/ destinations), and shall write nothing
+      at all in that case -- not even the
       files that did not conflict -- because a partially-written repository
       of cross-referencing templates would leave a caller unable to tell
       which half they are looking at. overwrite = TRUE shall replace every
@@ -476,7 +480,7 @@ requirements:
     risk: high
     category: integrity
     covers: [create_template_repo]
-    source: R/createTemplateRepo.R:212-256
+    source: R/createTemplateRepo.R (create_template_repo pre-write collision check and writer loop)
 
   - id: REQ-TMPL-029
     text: >
@@ -485,14 +489,15 @@ requirements:
     risk: low
     category: interface
     covers: [create_template_repo]
-    source: R/createTemplateRepo.R:258, 264
+    source: R/createTemplateRepo.R (create_template_repo path_out and invisible return)
 
   - id: REQ-TMPL-030
     text: >
       Every template file bundled under inst/extdata/templates/ shall
       validate with zero errors and zero warnings, and the bundled
-      template-repository skeleton (inst/extdata/template-repo-skeleton/),
-      including a repository freshly created from it by
+      template-repository skeleton (templates under
+      inst/extdata/template-repo-skeleton/templates/, README.md at its parent
+      root), including a repository freshly created from it by
       create_template_repo(), shall validate with zero errors under strict =
       TRUE -- because a broken shipped example is copied, unmodified, into
       every repository a user creates from it.
@@ -500,5 +505,27 @@ requirements:
     category: integrity
     covers: [validate_template, create_template_repo]
     source: >
-      inst/extdata/templates/; inst/extdata/template-repo-skeleton/;
-      R/createTemplateRepo.R:160-165 (documented as passing validate_template(path, strict = TRUE) unmodified)
+      inst/extdata/templates/; inst/extdata/template-repo-skeleton/templates/;
+      R/createTemplateRepo.R (create_template_repo documentation);
+      R/validateTemplate.R (validate_template library-directory resolution)
+
+
+  - id: REQ-TMPL-031
+    text: >
+      validate_template() given a repository root whose templates/ sub-folder
+      directly holds at least one template file shall validate that folder,
+      with the same findings as validating templates/ directly. Every template
+      file left at the repository root alongside it shall be reported exactly
+      once as template_outside_library_dir at severity error, with its path,
+      kind, id and version when readable, and shall not enter cross-file or
+      duplicate-id resolution; strict = TRUE shall reject that mixed layout.
+      If templates/ is absent, empty, or contains no template files, the
+      directory itself shall remain the library, preserving root-layout
+      compatibility without template_outside_library_dir findings.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (validate_template, .dta_template_check_outside_library);
+      inst/shiny/dta_app/R/template_index.R (dta_template_library_dir);
+      vignettes/private-templates.Rmd (Where templates live)

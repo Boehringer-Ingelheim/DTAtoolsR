@@ -8,7 +8,8 @@
 # newcomer reverse-engineering the four file kinds from the vignette alone.
 #
 # The worked example it copies from -- inst/extdata/template-repo-skeleton/ --
-# is deliberately its own directory, not a subset of inst/extdata/templates/
+# mirrors the output layout: README.md at root, starter YAML in templates/.
+# It is deliberately its own directory, not a subset of inst/extdata/templates/
 # (the packaged biomarker_gf family used in examples and tests elsewhere).
 # Those two serve different audiences: inst/extdata/templates/ demonstrates
 # every feature the template engine has, at the cost of being a fairly
@@ -74,7 +75,10 @@
 # starter file, adding a fifth) cannot silently drift out of sync with what
 # this function copies.
 .dta_create_repo_example_files <- function(skeleton_dir) {
-  list.files(skeleton_dir, pattern = "[.]ya?ml$", full.names = FALSE)
+  files <- list.files(file.path(skeleton_dir, .dta_template_library_subdir),
+    pattern = "[.]ya?ml$", full.names = FALSE
+  )
+  file.path(.dta_template_library_subdir, files)
 }
 
 # Where each CI provider's bundled asset is written inside the created
@@ -155,7 +159,8 @@
 #' Creates a directory laid out the way a private DTAtools template
 #' repository is meant to be: a small, self-consistent worked example of the
 #' four template kinds (a creation template, a dataset template, a party
-#' profile, a controlled vocabulary), a `README.md` explaining them, a
+#' profile, a controlled vocabulary) under `templates/`, a root-level
+#' `README.md` with the full authoring guide, a
 #' `.gitignore`, and -- by default -- a GitHub Actions workflow that runs
 #' [validate_template()] against the repository on every push and pull
 #' request. The result already passes `validate_template(path, strict =
@@ -163,13 +168,31 @@
 #' fill in from nothing. See `vignette("private-templates", package =
 #' "DTAtools")` for how to point the bundled Shiny app at the directory this
 #' creates.
+#' @details
+#' The scaffold mirrors the bundled skeleton, with the full authoring guide
+#' at the root and the starter templates under `templates/`:
+#'
+#' ```text
+#' <path>/README.md
+#' <path>/.gitignore
+#' <path>/templates/starter.dta-template.yaml
+#' <path>/templates/starter_dataset.dta-dataset-template.yaml
+#' <path>/templates/starter_supplier.dta-party.yaml
+#' <path>/templates/starter_terms.dta-vocabulary.yaml
+#' <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
+#' <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
+#' <path>/Jenkinsfile                             (ci = "jenkins")
+#' ```
+#'
+#' Only the selected CI files are written. [validate_template()] automatically
+#' detects `templates/` when called on the repository root.
 #' @param path A single non-empty character string: the directory to create
 #'   the repository in. Created recursively when it does not already exist.
 #'   Aborts via [cli::cli_abort()] if `path` names an existing file rather
 #'   than a directory.
 #' @param examples A single `TRUE`/`FALSE` (default `TRUE`). When `TRUE`,
-#'   copies the four starter template YAML files into `path`, alongside
-#'   `README.md`. When `FALSE`, only `README.md`, `.gitignore` and (if `ci`
+#'   writes the four starter templates into `templates/` beneath `path`.
+#'   `README.md` stays at the repository root. When `FALSE`, only `README.md`, `.gitignore` and (if `ci`
 #'   asks for any provider) its CI file(s) are written -- no template files,
 #'   for a caller who wants the scaffolding without the worked example.
 #' @param ci Either a single `TRUE`/`FALSE` (default `TRUE`), or a character
@@ -240,7 +263,7 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   for (i in seq_along(targets)) {
     dest <- dest_paths[[i]]
     src <- targets[[i]]
-    # Needed for the workflow's nested .github/workflows/ destination; a
+    # Needed for templates/ and the workflow's .github/workflows/ destination; a
     # no-op everywhere else, since `path` itself was already created above.
     dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
 
@@ -257,7 +280,7 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
 
   path_out <- normalizePath(path, winslash = "/", mustWork = TRUE)
   cli::cli_inform(c(
-    "v" = "Created a template repository at {.file {path_out}}.",
+    "v" = "Created a template repository at {.file {path_out}} (starter templates go in {.file templates/}).",
     "*" = "Wrote {.file {names(targets)}}.",
     "i" = "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
   ))
