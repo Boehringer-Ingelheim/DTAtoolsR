@@ -319,10 +319,19 @@ requirements:
       can never be built regardless of what else might be true about it. A
       template marked abstract: true shall be exempt from this and from the
       dry-run build entirely, whether or not its own extends chain resolves.
+      An abstract base may omit datasets and provide shared metadata only;
+      it must still provide a base mapping unless inherited. A concrete child
+      that supplies or inherits at least one valid dataset shall be buildable
+      from that base. A concrete template with no datasets after inheritance
+      resolves shall be reported instantiate_failed at severity "error",
+      including when it declares extends.
     risk: high
     category: functional
     covers: [validate_template]
-    source: R/validateTemplate.R:644-723
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_core.R (read_dta_creation_template,
+      dta_template_finalize_def)
     notes: >
       Verified directly that abstract exemption applies even when the SAME
       template's own extends is unresolvable: an abstract creation template
@@ -368,6 +377,8 @@ requirements:
       result; an empty mapping or sequence shall replace it with nothing;
       and a non-empty value shall be merged in, with any new content it
       introduces checked exactly as if it had been authored standalone.
+      Dropping or emptying datasets on a concrete child shall fail the
+      resolved dataset requirement in REQ-TMPL-020.
     risk: high
     category: functional
     covers: [validate_template]
@@ -386,9 +397,9 @@ requirements:
       want a reviewer to see that I did" (null) is therefore indistinguishable
       from one that means the same thing less explicitly ({}/[]) in every
       place this package currently looks -- including validate_template()'s
-      own report. Only the fourth state (a genuine value) is reliably visible,
-      because it is the one state whose content validate_template() actually
-      re-examines.
+      own report. For datasets, both outcomes fail the concrete dataset
+      requirement in REQ-TMPL-020; neither is an exception just because the
+      child declares extends.
 
   - id: REQ-TMPL-023
     text: >

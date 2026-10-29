@@ -114,7 +114,9 @@ read_dta_creation_template <- function(template_path) {
     if (!("datasets" %in% names(def)) && !is.null(def$base$datasets)) {
       def$datasets <- def$base$datasets
     }
-    if (length(def$datasets %||% list()) == 0 && !inherits_from) {
+    # Abstract bases may provide only shared metadata. A concrete descendant
+    # must still supply or inherit a dataset, checked after resolution below.
+    if (length(def$datasets %||% list()) == 0 && !inherits_from && !isTRUE(def$abstract)) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
     # `id` is the one field that is never inherited -- every template file must
@@ -137,6 +139,9 @@ read_dta_creation_template <- function(template_path) {
 # key is how a child says "inherit", and a default written in ahead of the
 # merge turns that into an override with the default.
 dta_template_finalize_def <- function(def) {
+  if (length(def$datasets %||% list()) == 0 && !isTRUE(def$abstract)) {
+    cli::cli_abort("Template must define at least one dataset in datasets or base.datasets.")
+  }
   def$label <- as.character(def$label %||% def$id %||% "")
   def$description <- as.character(def$description %||% "")
   def$datasets <- def$datasets %||% list()

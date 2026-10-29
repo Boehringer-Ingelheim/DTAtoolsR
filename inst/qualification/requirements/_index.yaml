@@ -41,7 +41,7 @@ areas:
     min_tests: 18
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 65
+    min_tests: 66
   - area: EXPORT
     title: Document and data export
     min_tests: 44

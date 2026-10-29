@@ -224,6 +224,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- metadata-only `abstract: true` creation templates can serve as shared bases
+  without dummy datasets; concrete descendants must still supply or inherit
+  at least one dataset. Empty resolved concrete templates now fail loading
+  and are reported as `instantiate_failed` by `validate_template()`.
+
 - **`run_qualification()` now rejects a bad `scale` or `include_unit_tests` the
   same way it rejects its other arguments.** Both went through `match.arg()`,
   whose failure is a base R error: no condition class a caller can match, and a

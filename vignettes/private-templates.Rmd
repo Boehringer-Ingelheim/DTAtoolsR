@@ -550,6 +550,14 @@ under; those descendants are concrete unless they write `abstract: true`
 themselves, because the flag describes the file that carries it and is not
 inherited.
 
+A base marked `abstract: true` may contain only shared metadata, with no
+`datasets:` section. It still needs a `base:` mapping unless it inherits one
+through `extends:`. A concrete child must supply or inherit at least one
+dataset (inline or reusable); `extends:` alone does not satisfy that
+requirement. Loading a concrete template whose resolved dataset list is
+empty fails, and `validate_template()` reports `instantiate_failed`.
+Abstract bases remain unavailable for direct creation.
+
 Typing in the search box matches the start of any word in the label, id,
 description, and every ancestor's label and id — so "biomarker" finds every
 variant in the family, "acme" finds only the vendor ones, and "one" does not

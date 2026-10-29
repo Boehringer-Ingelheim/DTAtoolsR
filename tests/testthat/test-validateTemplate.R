@@ -282,10 +282,8 @@ test_that("extends_unresolved fires when 'extends:' names a template not in this
       "abstract: true",
       "extends: nonexistent_parent",
       "base: {metadata: {}}",
-      # A non-empty (if bare) `datasets:` list: read_dta_creation_template()
-      # requires at least one entry regardless of `abstract:`, and this file
-      # is never actually built (abstract templates skip the instantiate
-      # dry-run), so the entry's own content never has to be valid.
+      # Abstract templates skip the instantiate dry-run, so this entry need
+      # not be buildable; resolution must still diagnose the missing parent.
       "datasets:",
       "  - name: placeholder"
     ),

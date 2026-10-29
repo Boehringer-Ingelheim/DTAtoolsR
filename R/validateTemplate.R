@@ -705,7 +705,15 @@
       # file as read: an absent key is how a child says "inherit", so filling
       # one in ahead of the merge would turn that into an override. See
       # dta_template_finalize_def() in template_core.R.
-      resolved$def <- .dta_template_engine_get("dta_template_finalize_def")(resolved$def)
+      finalized <- tryCatch(
+        .dta_template_engine_get("dta_template_finalize_def")(resolved$def),
+        error = function(e) e
+      )
+      if (inherits(finalized, "error")) {
+        add("error", "instantiate_failed", conditionMessage(finalized))
+        return(rows)
+      }
+      resolved$def <- finalized
       # `index = index_df`: without it, create_dta_from_template() takes its
       # ORIGINAL dataset-building path, under which a `datasets[].template`
       # entry is simply unreachable (template_core.R's own docstring) and

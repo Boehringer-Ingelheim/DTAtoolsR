@@ -75,6 +75,40 @@ test_that("OQ-TMPL-036 | an abstract template is exempt from the dry-run, even w
   )
 })
 
+test_that("OQ-TMPL-066 | metadata-only abstract bases require concrete children to provide datasets | REQ-TMPL-020", {
+  root <- qa_tempdir()
+  yaml::write_yaml(list(
+    kind = "dta_creation_template", id = "shared_metadata", version = "1.0",
+    abstract = TRUE, base = list(metadata = list(title = "Shared transfer title"))
+  ), file.path(root, "base.dta-template.yaml"))
+  child <- list(
+    kind = "dta_creation_template", id = "child", version = "1.0",
+    extends = "shared_metadata@1.0",
+    datasets = list(list(
+      name = "observations", type = "tabular",
+      files = list(filename = "observations.tsv", type = "tsv"),
+      columns = list(list(id = "SUBJECT", label = "Subject", type = "SAS Char"))
+    ))
+  )
+  path <- file.path(root, "child.dta-template.yaml")
+  yaml::write_yaml(child, path)
+
+  valid <- validate_template(root, strict = TRUE)
+  qa_step("abstract base and concrete child both pass strict lint", 0L, nrow(valid))
+
+  child$datasets <- NULL
+  yaml::write_yaml(child, path)
+  invalid <- validate_template(root)
+  rows <- tmpl_rows_for(invalid, "child.dta-template.yaml")
+  qa_step("a metadata-only concrete child fails the build", "instantiate_failed", rows$code)
+  qa_step("the missing dataset is an error", "error", rows$severity)
+  qa_check("the diagnostic identifies the missing dataset requirement", grepl(
+    "at least one dataset", rows$message,
+    fixed = TRUE
+  ))
+  qa_step("the abstract parent remains valid", 0L, nrow(tmpl_rows_for(invalid, "base.dta-template.yaml")))
+})
+
 # ---- REQ-TMPL-021: sealed_violation / sealed_path_unknown ------------------
 
 test_that("OQ-TMPL-037 | overriding a sealed path is reported, and fails the build | REQ-TMPL-021", {
@@ -121,7 +155,7 @@ test_that("OQ-TMPL-039 | an absent section inherits the parent's, and the build 
   qa_step("zero issues -- fs_parent's own dataset carried the build", 0L, nrow(absent_rows))
 })
 
-test_that("OQ-TMPL-040 | an explicit null and an empty collection both wipe the section identically | REQ-TMPL-022", {
+test_that("OQ-TMPL-040 | an explicit null and an empty collection both wipe the section identically | REQ-TMPL-022 REQ-TMPL-020", {
   # PINNED (REQ-TMPL-022 notes): validate_template() cannot currently tell
   # these two states apart for a collection section, because every consumer
   # reads the merged value through `%||% list()`. Demonstrated on two
@@ -131,7 +165,11 @@ test_that("OQ-TMPL-040 | an explicit null and an empty collection both wipe the 
 
   drop_rows <- tmpl_rows_for(result, "child_drop.dta-template.yaml")
   empty_rows <- tmpl_rows_for(result, "child_empty.dta-template.yaml")
-  qa_step("datasets: null and datasets: [] both leave zero issues", c(0L, 0L), c(nrow(drop_rows), nrow(empty_rows)))
+  qa_step(
+    "datasets: null and datasets: [] both fail the concrete dataset requirement",
+    c("instantiate_failed", "instantiate_failed"), c(drop_rows$code, empty_rows$code)
+  )
+  qa_step("both missing-dataset diagnostics are errors", c("error", "error"), c(drop_rows$severity, empty_rows$severity))
 
   base_drop_rows <- tmpl_rows_for(result, "child_base_drop.dta-template.yaml")
   base_empty_rows <- tmpl_rows_for(result, "child_base_empty.dta-template.yaml")
@@ -143,7 +181,7 @@ test_that("OQ-TMPL-041 | a value state's own new content is checked as if author
   value_rows <- tmpl_rows_for(result, "child_value.dta-template.yaml")
 
   qa_step(
-    "unlike absent/empty/null, a genuinely new (and broken) reference is caught",
+    "a new unresolved dataset reference is identified specifically",
     "warning", tmpl_severity(value_rows, "dataset_template_unresolved")
   )
   qa_step("and the build fails as a consequence", "error", tmpl_severity(value_rows, "instantiate_failed"))
