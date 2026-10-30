@@ -35,7 +35,8 @@ dta_creation_template_dirs <- function() {
     dta_creation_templates_dir()
   )
   dirs <- dirs[nzchar(dirs)]
-  dirs[dir.exists(dirs)]
+  dirs <- dirs[dir.exists(dirs)]
+  unique(vapply(dirs, dta_template_library_dir, character(1), USE.NAMES = FALSE))
 }
 
 # List available creation-template files by basename, across every search
@@ -113,7 +114,9 @@ read_dta_creation_template <- function(template_path) {
     if (!("datasets" %in% names(def)) && !is.null(def$base$datasets)) {
       def$datasets <- def$base$datasets
     }
-    if (length(def$datasets %||% list()) == 0 && !inherits_from) {
+    # Abstract bases may provide only shared metadata. A concrete descendant
+    # must still supply or inherit a dataset, checked after resolution below.
+    if (length(def$datasets %||% list()) == 0 && !inherits_from && !isTRUE(def$abstract)) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
     # `id` is the one field that is never inherited -- every template file must
@@ -136,6 +139,9 @@ read_dta_creation_template <- function(template_path) {
 # key is how a child says "inherit", and a default written in ahead of the
 # merge turns that into an override with the default.
 dta_template_finalize_def <- function(def) {
+  if (length(def$datasets %||% list()) == 0 && !isTRUE(def$abstract)) {
+    cli::cli_abort("Template must define at least one dataset in datasets or base.datasets.")
+  }
   def$label <- as.character(def$label %||% def$id %||% "")
   def$description <- as.character(def$description %||% "")
   def$datasets <- def$datasets %||% list()
@@ -333,6 +339,8 @@ dta_template_list_fields <- function() {
 # Resolution order:
 # 1) relative to template file directory, and still inside it
 # 2) package extdata root, by basename only
+# source: is relative to the template file's folder, inside templates/ for a
+# conventional library; supporting files must stay inside that folder too.
 resolve_template_dataset_path <- function(ref, template_path) {
   if (is.null(ref) || !nzchar(ref)) {
     return("")

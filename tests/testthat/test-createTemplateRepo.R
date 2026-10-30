@@ -28,6 +28,7 @@ md5_snapshot <- function(dir) {
 # project's house rule that a file-producing function is verified by reading
 # the file back.
 template_kinds <- function(dir) {
+  dir <- file.path(dir, "templates")
   files <- list.files(dir, pattern = "[.]dta-.*[.]ya?ml$", full.names = FALSE)
   stats::setNames(
     vapply(files, function(f) yaml::read_yaml(file.path(dir, f))$kind, character(1)),
@@ -70,7 +71,7 @@ test_that("the starter dataset template's STATUS column is bound via values_from
   dir <- withr::local_tempdir()
   create_template_repo(dir)
 
-  ds_files <- list.files(dir, pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
+  ds_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
   expect_length(ds_files, 1)
   ds_def <- yaml::read_yaml(ds_files[[1]])
 
@@ -83,11 +84,11 @@ test_that("the starter creation template imports the starter dataset template by
   dir <- withr::local_tempdir()
   create_template_repo(dir)
 
-  tpl_files <- list.files(dir, pattern = "[.]dta-template[.]ya?ml$", full.names = TRUE)
+  tpl_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-template[.]ya?ml$", full.names = TRUE)
   expect_length(tpl_files, 1)
   tpl_def <- yaml::read_yaml(tpl_files[[1]])
 
-  ds_files <- list.files(dir, pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
+  ds_files <- list.files(file.path(dir, "templates"), pattern = "[.]dta-dataset-template[.]ya?ml$", full.names = TRUE)
   ds_id <- yaml::read_yaml(ds_files[[1]])$id
 
   refs <- vapply(tpl_def$datasets, function(entry) as.character(entry$template %||% ""), character(1))
@@ -205,7 +206,7 @@ test_that("examples = FALSE writes no template files, and validate_template() re
   dir <- withr::local_tempdir()
   create_template_repo(dir, examples = FALSE)
 
-  expect_length(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), 0)
+  expect_setequal(list_all_files(dir), c(".gitignore", "README.md", ".github/workflows/validate-templates.yml"))
 
   result <- validate_template(dir)
   rows <- result[result$code == "no_templates", , drop = FALSE]
@@ -292,4 +293,45 @@ test_that("the bundled template-repo-skeleton directory is itself clean", {
 
   result <- validate_template(dir)
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
+})
+
+
+test_that("the scaffold keeps README at root and all four templates in templates/", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  expect_true(file.exists(file.path(dir, "README.md")))
+  expect_setequal(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), character(0))
+  expect_setequal(list.files(file.path(dir, "templates")), c(
+    "starter.dta-template.yaml", "starter_dataset.dta-dataset-template.yaml",
+    "starter_supplier.dta-party.yaml", "starter_terms.dta-vocabulary.yaml"
+  ))
+})
+
+test_that("the scaffold README is byte-identical to the complete skeleton README", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  skeleton <- system.file("extdata", "template-repo-skeleton", "README.md", package = "DTAtools")
+  readme <- file.path(dir, "README.md")
+  expect_identical(unname(tools::md5sum(readme)), unname(tools::md5sum(skeleton)))
+  headings <- grep("^## ", readLines(readme, warn = FALSE), value = TRUE)
+  expect_true(all(c(
+    "## Folder layout", "## Connecting the DTAtools app",
+    "## Validating", "## Troubleshooting"
+  ) %in% headings))
+})
+
+test_that("the package and engine agree on the conventional library subdirectory", {
+  expect_identical(
+    DTAtools:::.dta_template_library_subdir,
+    DTAtools:::.dta_template_engine_get("dta_template_library_subdir")()
+  )
+})
+
+test_that("a templates/ collision aborts before writing any scaffold file", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  writeLines("existing template", file.path(dir, "templates", "starter.dta-template.yaml"))
+  before <- md5_snapshot(dir)
+  expect_error(create_template_repo(dir), "starter.dta-template.yaml", fixed = TRUE)
+  expect_identical(md5_snapshot(dir), before)
 })

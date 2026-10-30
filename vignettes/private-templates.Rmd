@@ -98,6 +98,14 @@ is an easy way to get silently mangled in transit. The grammar is:
 [name=]scheme:locator[#ref]; [name=]scheme:locator[#ref]; ...
 ```
 
+Each source resolves a library directory independently: if its root contains
+`templates/` with at least one template-kind file directly inside it, that
+folder is read; otherwise the root itself is read. This applies to `dir:`,
+the installed `dta-templates` directory of a `pkg:` source, and the checkout
+of a `git:` source. No source syntax or subpath argument is needed. A git
+refresh that brings in a migration to `templates/` uses it on the next
+resolution; Git commit and refresh operations still use the checkout root.
+
 ### `dir:` — a local directory
 
 ```r
@@ -107,7 +115,8 @@ DTATOOLS_TEMPLATE_SOURCES = "site=dir:/srv/dta-templates"
 The locator is a path that must already exist and be readable; `dir:` sources
 are resolved with no network or credential involved at all. Useful for a
 template family kept on the same host as the app, or mounted into the
-container.
+container. The path may name the repository root or its `templates/` folder
+directly; both select the same files for a conventional library.
 
 ### `pkg:` — a companion R package
 
@@ -174,16 +183,28 @@ DTAtools::create_template_repo("path/to/my-templates")
 This creates `path/to/my-templates` (recursively, if it does not already
 exist) and writes:
 
-- `README.md` — explains the four files below, and how to point
-  `DTATOOLS_TEMPLATE_SOURCES` at the directory.
+```text
+my-templates/
+  README.md
+  .gitignore
+  templates/
+    starter.dta-template.yaml
+    starter_dataset.dta-dataset-template.yaml
+    starter_supplier.dta-party.yaml
+    starter_terms.dta-vocabulary.yaml
+  .github/workflows/validate-templates.yml
+```
+
+- `README.md` — the comprehensive authoring guide: all template features,
+  app configuration, validation codes, troubleshooting and migration.
 - `.gitignore`
-- `starter.dta-template.yaml` — a creation template (`kind:
+- `templates/starter.dta-template.yaml` — a creation template (`kind:
   dta_creation_template`).
-- `starter_dataset.dta-dataset-template.yaml` — the dataset it imports
+- `templates/starter_dataset.dta-dataset-template.yaml` — the dataset it imports
   (`kind: dta_dataset_template`).
-- `starter_supplier.dta-party.yaml` — a party profile (`kind:
+- `templates/starter_supplier.dta-party.yaml` — a party profile (`kind:
   dta_party_profile`) offered by one of the creation template's party slots.
-- `starter_terms.dta-vocabulary.yaml` — a controlled vocabulary (`kind:
+- `templates/starter_terms.dta-vocabulary.yaml` — a controlled vocabulary (`kind:
   dta_vocabulary`) that one of the dataset's columns binds to with
   `values_from:`.
 - CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
@@ -210,22 +231,55 @@ all, rather than leave a repository half-written from two different calls
 whose halves a caller cannot tell apart. Pass `overwrite = TRUE` to replace
 them.
 
-### The directory must be flat
+### Where templates live
 
-Both `validate_template()` and the app's own template loader scan a
-repository **non-recursively**: they list the files directly inside the
-configured directory and go no further. A template file placed in a
-subdirectory is simply invisible to both — not rejected, not warned about by
-the loader, just absent. Organising a growing repository into `by-study/` or
-`by-supplier/` folders is the obvious thing to reach for, and it silently
-empties the picker.
+Keep template files directly inside `templates/` at the repository root.
+The app and `validate_template()` automatically select that folder when it
+holds at least one template file; their library scan is **non-recursive**.
+The same auto-detection applies to `options(DTAtools.template_dir = ...)`
+and the local `./dta-templates` directory. Root-layout libraries remain
+supported: when `templates/` is absent, empty or holds only unrelated files,
+the root itself is scanned. Passing `templates/` directly also works.
 
-`validate_template()` is the one place that will tell you. It lists the
-directory a second time, recursively, purely to catch what the flat scan
-missed, and reports every hit as `template_in_subdirectory` — severity
-`"warning"`, because keeping an archived or work-in-progress file below the
-root is a legitimate choice and should not fail CI on its own. Keep every
-`.dta-*.yaml` file directly in the directory you point DTAtools at.
+In a mixed layout, `templates/` wins: root-level template files are ignored
+by the app, not merged into the library. `validate_template()` reports each
+as `template_outside_library_dir` at severity `"error"`, so strict validation
+fails CI instead of silently overlooking a migration leftover.
+
+Other nested template files, such as `templates/by-study/example.dta-template.yaml`,
+remain invisible to the loader. The validator reports them as
+`template_in_subdirectory` at severity `"warning"` and names the library
+folder to move them to. Archives and work-in-progress sub-folders do not
+fail CI on their own. An unrelated Helm `chart/templates/` folder does not
+become a template library just because it has the same folder name.
+
+A dataset entry's `source:` is relative to the creation-template file's
+folder and cannot escape it. Move supporting files referenced by `source:`
+inside `templates/` too, preserving their relative paths.
+
+### Migrating an existing repository
+
+First deploy a DTAtools release with this auto-detection: **the first release
+after 0.25.0**. Then migrate the library and merge its migration branch:
+
+```sh
+mkdir templates
+git mv *.dta-*.yaml templates/
+# Move any .yml templates and source: supporting files too.
+Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+```
+
+Update scripts and tests that name individual template paths. Remove all
+root-level template leftovers; only the files under `templates/` will be live.
+
+**Deployment order matters:** release and deploy DTAtools with auto-detection
+**before** merging or serving the migrated repository. An older app pointed
+at the repository root sees no templates and, with private sources configured,
+will not substitute the packaged demo. As an interim workaround, `dir:` can
+point directly at `<checkout>/templates`; `git:` cannot express a subpath,
+so it requires the app upgrade first. Library validation scripts pinned to
+DTAtools 0.25.0 can use `validate_template("templates", strict = TRUE)` during
+the transition.
 
 ### The four file kinds
 
@@ -495,6 +549,14 @@ its own, but it still names and anchors the family its descendants are shown
 under; those descendants are concrete unless they write `abstract: true`
 themselves, because the flag describes the file that carries it and is not
 inherited.
+
+A base marked `abstract: true` may contain only shared metadata, with no
+`datasets:` section. It still needs a `base:` mapping unless it inherits one
+through `extends:`. A concrete child must supply or inherit at least one
+dataset (inline or reusable); `extends:` alone does not satisfy that
+requirement. Loading a concrete template whose resolved dataset list is
+empty fails, and `validate_template()` reports `instantiate_failed`.
+Abstract bases remain unavailable for direct creation.
 
 Typing in the search box matches the start of any word in the label, id,
 description, and every ancestor's label and id — so "biomarker" finds every
@@ -1019,13 +1081,21 @@ that will not read or whose `extends:` chain cycles, a `values_from:` naming a
 vocabulary that is not there or an `include:` code that is not in it — and, as a
 final and most comprehensive check, actually builds a DTA from every
 non-abstract creation template using its own default selections. `path` may
-be a single file or a directory, scanned non-recursively for
+be a single file, a library directory, or a repository root. A directory
+uses its populated `templates/` folder when present, otherwise the directory
+itself, scanned non-recursively for
 `*.dta-template.yaml`, `*.dta-dataset-template.yaml`, `*.dta-party.yaml`, and
 `*.dta-vocabulary.yaml` (and their `.yml` spellings).
 
 ```r
 DTAtools::validate_template(".", strict = TRUE)
 ```
+
+Run from the repository root, this validates `templates/` automatically and
+rejects root-level template leftovers with `template_outside_library_dir`.
+The shipped CI assets use this same root command; pointing directly at
+`templates/` validates that folder but cannot diagnose files left at its
+parent root.
 
 With `strict = TRUE`, `validate_template()` raises a single error naming every
 row of severity `"error"` and stays silent when there are none — the one line
@@ -1035,7 +1105,7 @@ for a human to inspect interactively.
 
 This is also why an otherwise-empty directory is an `"error"` (code
 `no_templates`), not silence. A workflow pointed at the wrong path — a typo, a
-stale working directory, a checkout that put the templates one level down —
+stale working directory, or templates kept in an unrecognised sub-folder —
 used to return zero rows and pass `strict = TRUE` cleanly, which is the worst
 outcome a linter can produce: green, having validated nothing. It now fails,
 naming the directory it found nothing in.

@@ -270,6 +270,130 @@ test_that("an abstract template cannot be instantiated directly", {
   expect_match(flat_message(res$error), "abstract")
 })
 
+test_that("a metadata-only abstract base supports a concrete child's own dataset", {
+  for (reusable in c(FALSE, TRUE)) {
+    root <- withr::local_tempdir()
+    parent_path <- file.path(root, "metadata_base.dta-template.yaml")
+    child_path <- file.path(root, "metadata_child.dta-template.yaml")
+    metadata <- list(title = "Shared transfer title", header = "Shared header")
+    yaml::write_yaml(list(
+      kind = "dta_creation_template", id = "metadata_base", version = "1.0",
+      abstract = TRUE, base = list(metadata = metadata)
+    ), parent_path)
+    dataset <- list(
+      name = "child_data", type = "tabular",
+      files = list(filename = "child.tsv", type = "tsv"),
+      columns = list(list(id = "SUBJECT", label = "Subject", type = "SAS Char"))
+    )
+    if (reusable) {
+      yaml::write_yaml(list(
+        kind = "dta_dataset_template", id = "child_dataset", version = "1.0",
+        dataset = dataset
+      ), file.path(root, "child.dta-dataset-template.yaml"))
+    }
+    entry <- if (reusable) list(template = "child_dataset@1.0") else dataset
+    yaml::write_yaml(list(
+      kind = "dta_creation_template", id = "metadata_child", version = "1.0",
+      extends = "metadata_base@1.0", datasets = list(entry)
+    ), child_path)
+    idx <- index_over(root)
+
+    parent <- app_fn("read_dta_creation_template")(parent_path)
+    expect_true(parent$ok)
+    expect_identical(parent$value$base$metadata, metadata)
+    expect_false("datasets" %in% names(parent$value))
+    expect_true(app_fn("read_dta_creation_template")(child_path)$ok)
+
+    loaded <- app_fn("load_template_definition")("metadata_child", index = idx)
+    expect_true(loaded$ok, info = loaded$error)
+    expect_identical(loaded$value$def$base$metadata, metadata)
+    expect_length(loaded$value$def$datasets, 1L)
+    expect_identical(loaded$value$lineage, "metadata_base@1.0")
+    expect_false(isTRUE(loaded$value$def$abstract))
+    built <- app_fn("create_dta_from_template")(
+      loaded$value$def, child_path, index = idx
+    )
+    expect_true(built$ok, info = built$error)
+    expect_identical(built$value@metadata@title, metadata$title)
+    expect_identical(built$value@metadata@header, metadata$header)
+    expect_identical(names(built$value@datasets), "child_data")
+    expect_identical(names(built$value@datasets[[1]]@specs@columns), "SUBJECT")
+    expect_identical(built$value@datasets[[1]]@files[[1]]@filename, "child.tsv")
+
+    lint <- validate_template(root, strict = TRUE)
+    expect_identical(nrow(lint), 0L)
+    expect_identical(app_fn("template_picker_entries")(idx)$id, "metadata_child")
+    abstract <- app_fn("load_template_definition")("metadata_base", index = idx)
+    expect_false(abstract$ok)
+    expect_match(abstract$error, "abstract")
+  }
+})
+
+test_that("a concrete child must have a dataset after inheritance resolves", {
+  root <- withr::local_tempdir()
+  parent <- list(
+    kind = "dta_creation_template", id = "metadata_base", version = "1.0",
+    abstract = TRUE, base = list(metadata = list(title = "Shared title"))
+  )
+  yaml::write_yaml(parent, file.path(root, "metadata_base.dta-template.yaml"))
+  # Also check that explicitly clearing a dataset-bearing parent cannot evade
+  # the concrete dataset requirement.
+  parent$id <- "dataset_base"
+  parent$datasets <- list(mini_dataset_entry())
+  yaml::write_yaml(parent, file.path(root, "dataset_base.dta-template.yaml"))
+  children <- list(
+    absent = list(extends = "metadata_base"),
+    empty = list(extends = "metadata_base", datasets = list()),
+    removed = list(extends = "metadata_base", datasets = NULL),
+    cleared = list(extends = "dataset_base", datasets = list())
+  )
+  for (id in names(children)) {
+    path <- file.path(root, paste0(id, ".dta-template.yaml"))
+    yaml::write_yaml(c(list(
+      kind = "dta_creation_template", id = id, version = "1.0"
+    ), children[[id]]), path)
+    # The reader must defer this decision until the chain has resolved.
+    expect_true(app_fn("read_dta_creation_template")(path)$ok)
+  }
+  idx <- index_over(root)
+  for (id in names(children)) {
+    loaded <- app_fn("load_template_definition")(id, index = idx)
+    expect_false(loaded$ok)
+    expect_match(loaded$error, "at least one dataset")
+  }
+  expect_error(validate_template(root, strict = TRUE), "instantiate_failed")
+  lint <- validate_template(root)
+  for (id in names(children)) {
+    rows <- lint[lint$id == id, , drop = FALSE]
+    expect_identical(rows$code, "instantiate_failed")
+    expect_identical(rows$severity, "error")
+    expect_match(rows$message, "at least one dataset")
+  }
+})
+
+test_that("dataset-free abstract bases still need a base mapping and concrete roots need datasets", {
+  root <- withr::local_tempdir()
+  path <- file.path(root, "root.dta-template.yaml")
+  def <- list(kind = "dta_creation_template", id = "root", abstract = TRUE)
+  yaml::write_yaml(def, path)
+  expect_match(app_fn("read_dta_creation_template")(path)$error, "'base' section")
+  def$base <- "not a mapping"
+  yaml::write_yaml(def, path)
+  expect_false(app_fn("read_dta_creation_template")(path)$ok)
+  def$base <- list(metadata = list(title = "Title"))
+  def$abstract <- FALSE
+  yaml::write_yaml(def, path)
+  expect_match(app_fn("read_dta_creation_template")(path)$error, "at least one dataset")
+  def$abstract <- NULL
+  yaml::write_yaml(def, path)
+  expect_match(app_fn("read_dta_creation_template")(path)$error, "at least one dataset")
+  expect_error(
+    app_fn("dta_template_finalize_def")(def),
+    "at least one dataset",
+    class = "rlang_error"
+  )
+})
+
 test_that("a child of an abstract template is concrete unless it says otherwise", {
   # THE BUG THIS GUARDS: `abstract` used to merge like any other scalar, so a
   # child that did not write `abstract: false` inherited its parent's `true`

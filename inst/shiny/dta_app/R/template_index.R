@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Versioned template index over every root returned by
+# Versioned template index over every library directory returned by
 # dta_template_source_roots() (template_sources.R).
 #
 # Four kinds of file live side by side in the same directories:
@@ -49,6 +49,28 @@ dta_template_kind_pattern <- function(kind) {
     cli::cli_abort("Unknown template kind {.val {kind}}.")
   )
   paste0("\\.", suffix, "\\.ya?ml$")
+}
+
+# The conventional sub-folder for a template library's authored files.
+dta_template_library_subdir <- function() "templates"
+
+# Prefer a populated conventional folder, otherwise preserve root-layout
+# libraries. Keep paths byte-identical to source metadata (no normalisation).
+dta_template_library_dir <- function(root) {
+  if (!is.character(root) || length(root) != 1L || is.na(root) || !nzchar(root)) {
+    return(root)
+  }
+  sub <- file.path(root, dta_template_library_subdir())
+  if (!dir.exists(sub)) {
+    return(root)
+  }
+  patterns <- vapply(dta_template_all_kinds(), dta_template_kind_pattern, character(1))
+  hits <- list.files(sub,
+    pattern = paste(patterns, collapse = "|"),
+    ignore.case = TRUE, full.names = TRUE, recursive = FALSE
+  )
+  hits <- hits[!dir.exists(hits)]
+  if (length(hits)) sub else root
 }
 
 # ---- Header reading ------------------------------------------------------
@@ -163,7 +185,8 @@ dta_template_index_empty <- function() {
   df
 }
 
-# The resolved-source metadata (name/scheme/resolved_commit) for one root
+# Roots are library directories, not necessarily repository checkouts.
+# The resolved-source metadata (name/scheme/resolved_commit) for one library
 # directory, looked up by exact path match against the `sources` list
 # dta_template_source_roots() returns alongside `roots`.
 #
@@ -184,7 +207,7 @@ dta_template_source_for_root <- function(sources, root) {
 }
 
 # Build the full template index by scanning every root, in precedence order,
-# for all three kinds.
+# for all four kinds.
 #
 # Collision policy: the same kind + id + version found under two different
 # roots keeps the file from the EARLIER root and drops the later one, with a

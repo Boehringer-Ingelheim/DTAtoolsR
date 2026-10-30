@@ -7,18 +7,16 @@
 validate_template(path, strict = FALSE, kinds = NULL)
 }
 \arguments{
-\item{path}{A single template file, or a directory. A directory is scanned
-NON-RECURSIVELY for \verb{*.dta-template.yaml}, \verb{*.dta-dataset-template.yaml},
-\verb{*.dta-party.yaml} and \verb{*.dta-vocabulary.yaml} files (and their \code{.yml}
-spellings) -- the same
-filename convention the template engine itself uses
-(\code{dta_template_kind_pattern()}). \code{kinds}, below, only narrows which of
-those files get a report row of their OWN; it never changes how many
-files are considered when resolving a cross-file reference (an
-\verb{extends:}, a \verb{datasets[].template}, a party slot's profile allow-list).
-A template found below the scanned directory's top level is not read at
-all -- it is reported as \code{template_in_subdirectory} rather than silently
-ignored.}
+\item{path}{A template file, a library directory, or a repository root. For a
+directory, templates are read from its \verb{templates/} sub-folder when that
+holds at least one template file, otherwise from the directory itself;
+the scan is non-recursive. Files match \verb{*.dta-template.yaml},
+\verb{*.dta-dataset-template.yaml}, \verb{*.dta-party.yaml} or
+\verb{*.dta-vocabulary.yaml} (and their \code{.yml} spellings). \code{kinds} only narrows
+which files get their own report rows, never cross-file resolution.
+Nested files outside the library's top level are reported as
+\code{template_in_subdirectory}, not loaded. Root-level leftovers when
+\verb{templates/} is active are reported as \code{template_outside_library_dir}.}
 
 \item{strict}{A single \code{TRUE}/\code{FALSE}. When \code{TRUE}, \code{validate_template()}
 raises an error via \code{\link[cli:cli_abort]{cli::cli_abort()}} summarising every row of severity
@@ -55,6 +53,13 @@ the templates it authors, with nothing more than an R installation of
 DTAtools. See \code{system.file("extdata", "templates", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
 }
 \details{
+A directory uses its \verb{templates/} sub-folder when that folder holds at least
+one template file, otherwise the directory itself. The library scan is
+non-recursive. In a mixed layout, only \verb{templates/} is loaded; template
+files left at the repository root are errors (code
+\code{template_outside_library_dir}). Other nested templates are warnings (code
+\code{template_in_subdirectory}), naming the library directory to move them to.
+
 An otherwise-empty directory is reported as an \code{"error"} (code
 \code{"no_templates"}), not accepted silently: the packaged
 \code{validate-templates.yml} workflow's entire CI job is

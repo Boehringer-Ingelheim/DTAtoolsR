@@ -1,3 +1,5 @@
+# A source root containing a templates/ folder holding template files is read
+# from that folder (see dta_template_library_dir()); otherwise it is read flat.
 # -----------------------------------------------------------------------------
 # Private/remote template sources for "Create new from template".
 #
@@ -94,6 +96,8 @@ dta_template_refresh_seconds <- function() {
 # `git:`, whose locator is itself a URL containing `://`: `git:https://
 # host/x.git` must yield scheme "git" and locator "https://host/x.git", not
 # split again on the colon inside "https://".
+# Source grammar is unchanged: a populated templates/ folder inside any source
+# root is used automatically (see dta_template_library_dir()).
 parse_template_sources <- function(spec) {
   spec <- trimws(spec %||% "")
   if (!nzchar(spec)) {
@@ -524,13 +528,14 @@ resolve_git_source <- function(src, refresh = FALSE) {
 resolve_template_source <- function(src, refresh = FALSE) {
   base <- list(
     name = src$name, scheme = src$scheme, origin = src$locator, ref = src$ref,
-    root = NA_character_, ok = FALSE, stale = FALSE, stale_age = NA_real_,
+    root = NA_character_, checkout = NA_character_, ok = FALSE, stale = FALSE, stale_age = NA_real_,
     resolved_commit = NA_character_, error = NA_character_
   )
 
   if (src$scheme == "dir") {
     if (dir.exists(src$locator)) {
-      base$root <- normalizePath(src$locator, winslash = "/", mustWork = TRUE)
+      base$checkout <- normalizePath(src$locator, winslash = "/", mustWork = TRUE)
+      base$root <- dta_template_library_dir(base$checkout)
       base$ok <- TRUE
     } else {
       base$error <- paste0("Template directory does not exist: ", src$locator)
@@ -548,14 +553,16 @@ resolve_template_source <- function(src, refresh = FALSE) {
       base$error <- paste0("Package ", src$locator, " has no dta-templates directory.")
       return(base)
     }
-    base$root <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+    base$checkout <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+    base$root <- dta_template_library_dir(base$checkout)
     base$ok <- TRUE
     return(base)
   }
 
   # scheme == "git"
   git_result <- resolve_git_source(src, refresh = refresh)
-  base$root <- if (nzchar(git_result$root %||% "")) git_result$root else NA_character_
+  base$checkout <- if (nzchar(git_result$root %||% "")) git_result$root else NA_character_
+  base$root <- dta_template_library_dir(base$checkout)
   base$ok <- isTRUE(git_result$ok)
   base$stale <- isTRUE(git_result$stale)
   base$stale_age <- git_result$stale_age %||% NA_real_

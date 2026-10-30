@@ -43,7 +43,7 @@ dta-templates/
 *.dta-party.yaml
 # ...except the packaged, anonymised worked examples under
 # inst/extdata/templates/ and the starter set create_template_repo() copies
-# from inst/extdata/template-repo-skeleton/, which are shipped package data,
+# from inst/extdata/template-repo-skeleton/templates/, which are shipped package data,
 # not private information -- keep them trackable.
 #
 # Forgetting the second of these is not a cosmetic mistake: the file stays on
@@ -52,7 +52,7 @@ dta-templates/
 # a party profile that is not there. That reached CI as a party_slot_invalid
 # failure on all five platforms and nothing before it.
 !inst/extdata/templates/*.dta-party.yaml
-!inst/extdata/template-repo-skeleton/*.dta-party.yaml
+!inst/extdata/template-repo-skeleton/templates/*.dta-party.yaml
 
 # `R CMD check` writes <pkg>.Rcheck/ beside the package and `R CMD build`
 # leaves a <pkg>_<version>.tar.gz. Both are regenerated on demand and must

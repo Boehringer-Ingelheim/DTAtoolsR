@@ -282,10 +282,8 @@ test_that("extends_unresolved fires when 'extends:' names a template not in this
       "abstract: true",
       "extends: nonexistent_parent",
       "base: {metadata: {}}",
-      # A non-empty (if bare) `datasets:` list: read_dta_creation_template()
-      # requires at least one entry regardless of `abstract:`, and this file
-      # is never actually built (abstract templates skip the instantiate
-      # dry-run), so the entry's own content never has to be valid.
+      # Abstract templates skip the instantiate dry-run, so this entry need
+      # not be buildable; resolution must still diagnose the missing parent.
       "datasets:",
       "  - name: placeholder"
     ),
@@ -938,7 +936,8 @@ test_that("no_templates fires for an empty directory, naming the suffixes and th
   expect_match(rows$message, "dta-dataset-template.yaml", fixed = TRUE)
   expect_match(rows$message, "dta-party.yaml", fixed = TRUE)
   expect_match(rows$message, "dta-vocabulary.yaml", fixed = TRUE)
-  expect_match(rows$message, "non-recursively", fixed = TRUE)
+  expect_match(rows$message, "non-recursive", fixed = TRUE)
+  expect_match(rows$message, "templates are read from a 'templates/' sub-folder", fixed = TRUE)
 })
 
 test_that("strict = TRUE aborts on an empty directory instead of passing silently", {
@@ -1106,4 +1105,87 @@ test_that(".dta_template_version_plain_is_exact() still tells quoted from unquot
   unquoted <- file.path(dir, "unquoted.yaml")
   writeLines(c("kind: dta_creation_template", "id: u", "version: 1.10"), unquoted)
   expect_false(.dta_template_version_plain_is_exact(unquoted))
+})
+
+
+# ---- Conventional library folder -------------------------------------------
+
+test_that("repository roots and explicit templates/ paths validate the same library", {
+  dir <- withr::local_tempdir()
+  lib <- file.path(dir, "templates")
+  dir.create(lib)
+  write_clean_template(lib)
+  expect_equal(nrow(validate_template(dir)), 0)
+  expect_silent(validate_template(dir, strict = TRUE))
+  expect_identical(validate_template(dir), validate_template(lib))
+})
+
+test_that("root-layout libraries remain valid with absent, empty or unrelated templates/", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  expect_equal(nrow(validate_template(dir)), 0)
+  lib <- file.path(dir, "templates")
+  dir.create(lib)
+  expect_equal(nrow(validate_template(dir)), 0)
+  writeLines("not a template", file.path(lib, "notes.txt"))
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("root leftovers are errors, never scanned or checked for duplicate ids", {
+  dir <- withr::local_tempdir()
+  lib <- file.path(dir, "templates")
+  dir.create(lib)
+  write_clean_template(lib)
+  for (id in c("root_only", "clean_tpl")) {
+    write_clean_template(dir, id = id)
+    result <- validate_template(dir)
+    expect_equal(nrow(result), 1)
+    expect_identical(result$code, "template_outside_library_dir")
+    expect_identical(result$severity, "error")
+    expect_identical(result$file, file.path(dir, "clean.dta-template.yaml"))
+    expect_identical(result$id, id)
+    expect_match(result$message, "'templates/'", fixed = TRUE)
+    expect_error(validate_template(dir, strict = TRUE), "template_outside_library_dir")
+  }
+})
+
+test_that("nested templates warn and name the active library directory", {
+  dir <- withr::local_tempdir()
+  lib <- file.path(dir, "templates")
+  dir.create(file.path(lib, "sub"), recursive = TRUE)
+  write_clean_template(lib)
+  write_clean_template(file.path(lib, "sub"))
+  result <- validate_template(dir)
+  expect_equal(nrow(result), 1)
+  expect_identical(result$code, "template_in_subdirectory")
+  expect_identical(result$severity, "warning")
+  expect_match(result$message, "the scan is non-recursive", fixed = TRUE)
+  expect_match(result$message, "top level of 'templates/'", fixed = TRUE)
+})
+
+test_that("unrelated chart/templates files do not count as templates", {
+  dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "templates"))
+  write_clean_template(file.path(dir, "templates"))
+  dir.create(file.path(dir, "chart", "templates"), recursive = TRUE)
+  writeLines("chart: value", file.path(dir, "chart", "templates", "foo.yaml"))
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("all four starter kinds resolve across files within templates/", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  expect_equal(nrow(validate_template(dir)), 0)
+  expect_equal(nrow(validate_template(file.path(dir, "templates"))), 0)
+})
+
+test_that("outside-library diagnostics tolerate malformed YAML and literal cli braces", {
+  dir <- file.path(withr::local_tempdir(), "repo-{stop('not evaluated')}")
+  create_template_repo(dir, ci = FALSE)
+  file <- file.path(dir, "broken.dta-template.yaml")
+  writeLines("bad: [", file)
+  result <- validate_template(dir)
+  expect_identical(result$code, "template_outside_library_dir")
+  expect_true(is.na(result$id))
+  expect_error(validate_template(dir, strict = TRUE), "template_outside_library_dir")
 })

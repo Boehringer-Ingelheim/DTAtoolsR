@@ -1618,7 +1618,9 @@ server <- function(input, output, session) {
           paste(
             "No templates are available: every configured private template",
             "source failed to load, and the packaged demo template is not",
-            "used as a fallback while a private source is configured."
+            "used as a fallback while a private source is configured.",
+            "(templates are read from <root>/templates/ when that folder holds",
+            "template files, otherwise from <root> itself)"
           )
         )
       } else {
@@ -1703,7 +1705,7 @@ server <- function(input, output, session) {
         paste(
           "No creation templates found. Add *.dta-template.yaml files to a",
           "./dta-templates folder, or point options(DTAtools.template_dir=) at",
-          "a directory of your own."
+          "a directory of your own (a templates/ sub-folder inside it is used automatically)."
         ),
         type = "warning", duration = 8
       )

@@ -694,13 +694,32 @@ through environment variables. On Posit Connect, one content variable is
 enough to switch the app to your own private templates:
 
 ```r
+# The repository keeps its template files directly under templates/ (auto-detected).
 DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
 ```
 
 `create_template_repo()` scaffolds a new private template repository to point
 that variable at — a small, cross-referencing worked example of the four
-template kinds plus a ready-to-run validation CI workflow, not a blank
-directory to fill in from nothing.
+template kinds under `templates/`, a comprehensive authoring `README.md` at
+the root, and a ready-to-run validation CI workflow, not a blank directory
+to fill in from nothing:
+
+```text
+my-templates/
+  README.md
+  .gitignore
+  templates/
+    starter.dta-template.yaml
+    starter_dataset.dta-dataset-template.yaml
+    starter_supplier.dta-party.yaml
+    starter_terms.dta-vocabulary.yaml
+  .github/workflows/validate-templates.yml
+```
+
+`validate_template(".", strict = TRUE)` at the repository root validates
+`templates/` automatically and rejects template files left at the root.
+The app's `dir:`/`pkg:`/`git:` sources and `DTAtools.template_dir` use the same
+auto-detection; legacy root-layout libraries remain readable.
 
 See the [private templates vignette](vignettes/private-templates.Rmd)
 (`vignette("private-templates")`) for the full variable reference, the

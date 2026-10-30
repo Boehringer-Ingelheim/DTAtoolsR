@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- template libraries can keep their templates in a `templates/` folder;
+  `validate_template()`, the Shiny app's `dir:`/`pkg:`/`git:` sources and
+  `DTAtools.template_dir` read it automatically. New `validate_template()`
+  error `template_outside_library_dir` rejects template files left at the
+  root of such a library.
+
 - **A qualification suite that produces audit-grade evidence for an installed
   copy of the package.** `run_qualification()` runs an installation,
   operational and performance qualification against the *installed* namespace
@@ -132,6 +138,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- `create_template_repo()` writes starter templates to `templates/` and ships
+  a comprehensive README documenting every template feature, app configuration
+  and validation codes.
+- `template_in_subdirectory` messages name the library folder to move files to.
+
 - **Choosing a template is now a search, not a dropdown.** "Create new from
   template" used to list every template in one flat dropdown, grouped only by
   source. The picker now groups templates into families derived from
@@ -212,6 +223,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   manifest-only change — still runs on every pull request.
 
 ### Fixed
+
+- metadata-only `abstract: true` creation templates can serve as shared bases
+  without dummy datasets; concrete descendants must still supply or inherit
+  at least one dataset. Empty resolved concrete templates now fail loading
+  and are reported as `instantiate_failed` by `validate_template()`.
 
 - **`run_qualification()` now rejects a bad `scale` or `include_unit_tests` the
   same way it rejects its other arguments.** Both went through `match.arg()`,
