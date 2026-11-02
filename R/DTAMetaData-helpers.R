@@ -1,3 +1,82 @@
+# A mapping is an ordinary named list, not a data frame or a list array.
+# Empty lists are the absent representation for study and sections.
+.dta_metadata_is_mapping <- function(value) {
+  if (!is.list(value) || is.object(value) || !is.null(dim(value))) {
+    return(FALSE)
+  }
+  nms <- names(value)
+  length(value) == 0 ||
+    (!is.null(nms) && !anyNA(nms) && all(nzchar(nms)) && !anyDuplicated(nms))
+}
+
+# Validate without trimming or otherwise changing the author's stored text.
+.dta_metadata_is_text <- function(value, blank = TRUE) {
+  is.character(value) && length(value) == 1L && is.null(dim(value)) &&
+    !is.na(value) && (blank || nzchar(trimws(value, whitespace = "[\\h\\v]")))
+}
+
+.dta_metadata_validate_study <- function(study) {
+  if (!.dta_metadata_is_mapping(study)) {
+    return("study must be a named list with unique, non-empty field names.")
+  }
+  errors <- character()
+  unknown <- setdiff(names(study), c("id", "protocol_id"))
+  if (length(unknown) > 0) {
+    errors <- c(errors, paste0("study has unknown fields: ", paste(unknown, collapse = ", "), "."))
+  }
+  for (field in intersect(names(study), c("id", "protocol_id"))) {
+    if (!.dta_metadata_is_text(study[[field]], blank = FALSE)) {
+      errors <- c(errors, paste0("study$", field, " must be a single non-NA, nonblank character string."))
+    }
+  }
+  errors
+}
+
+.dta_metadata_validate_sections <- function(sections) {
+  if (!.dta_metadata_is_mapping(sections)) {
+    return("sections must be a named list with unique, non-empty identifiers.")
+  }
+  errors <- character()
+  for (id in names(sections)) {
+    # \z anchors to the actual end, so a final newline is not a valid ID.
+    if (!grepl("^[A-Za-z][A-Za-z0-9_]*\\z", id, perl = TRUE)) {
+      errors <- c(errors, paste0("sections identifier '", id, "' must match ^[A-Za-z][A-Za-z0-9_]*$."))
+    }
+    section <- sections[[id]]
+    path <- paste0("sections$", id)
+    if (!.dta_metadata_is_mapping(section) || !setequal(names(section), c("title", "text"))) {
+      errors <- c(errors, paste0(path, " must be a record with exactly 'title' and 'text' fields."))
+      next
+    }
+    if (!.dta_metadata_is_text(section$title, blank = FALSE)) {
+      errors <- c(errors, paste0(path, "$title must be a single non-NA, nonblank character string."))
+    }
+    if (!.dta_metadata_is_text(section$text)) {
+      errors <- c(errors, paste0(path, "$text must be a single non-NA character string (blank is allowed)."))
+    }
+  }
+  errors
+}
+
+.dta_metadata_validate_transmission_text <- function(transmission) {
+  fields <- c(
+    "extent", "scope", "packaging", "security", "checksum",
+    "test_requirements", "blinding_requirements"
+  )
+  errors <- character()
+  # Index occurrences, not unique names: an invalid duplicate must not escape
+  # validation. Do not impose a closed schema on existing extension fields.
+  for (i in which(names(transmission) %in% fields)) {
+    if (!.dta_metadata_is_text(transmission[[i]])) {
+      errors <- c(errors, paste0(
+        "transmission$", names(transmission)[[i]],
+        " must be a single non-NA character string (blank is allowed)."
+      ))
+    }
+  }
+  errors
+}
+
 #' @title Render Date Values as ISO Strings
 #' @description
 #' \code{yaml::write_yaml()} has no date type: it writes a \code{Date} as its
@@ -43,7 +122,9 @@ method(as.list, DTAMetaData) <- function(x, ...) {
     authorized_for_corrections = x@authorized_for_corrections,
     # Machine-owned provenance. Unlike import_issues this MUST round-trip: it
     # is what the rebase feature will trust.
-    template = x@template
+    template = x@template,
+    study = x@study,
+    sections = x@sections
   )
 
   keep <- vapply(
@@ -63,7 +144,8 @@ method(as.list, DTAMetaData) <- function(x, ...) {
 # state `""` expresses for a scalar. Dropping it would erase a distinction the
 # class can actually represent.
 .dta_metadata_empty_list_is_absent <- c(
-  "version_history", "receiver", "supplier", "transmission", "template"
+  "version_history", "receiver", "supplier", "transmission", "template",
+  "study", "sections"
 )
 
 # Whether one metadata field is absent, and so not written at all.

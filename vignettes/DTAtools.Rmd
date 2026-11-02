@@ -1503,7 +1503,8 @@ results(dta_mixed) # one row per dataset
 ### `DTAMetaData`
 
 `DTAMetaData` captures all the administrative information about a DTA:
-title, version, contacts (receiver and supplier), and transmission details.
+title, version, study identity, contacts (receiver and supplier), transmission
+details and ordered narrative agreement sections.
 
 ```{r metadata}
 # Minimal metadata
@@ -1516,6 +1517,17 @@ meta_full <- DTAMetaData(
   version = "2.0",
   date = as.Date("2026-01-15"),
   header = "Boehringer Ingelheim",
+  study = list(id = "DEMO-001", protocol_id = "PROTOCOL-01"),
+  sections = list(
+    responsibilities = list(
+      title = "Responsibilities",
+      text = paste(
+        "The receiver reviews delivered files.",
+        "Discrepancies are reported to the supplier.",
+        sep = "\n\n"
+      )
+    )
+  ),
   receiver = list(
     affiliation = list(name = "External CRO", country = "Germany"),
     contacts = list(
@@ -1543,11 +1555,33 @@ meta_full <- DTAMetaData(
     frequency           = "One-time",
     notification        = "Email",
     date_first_transfer = as.Date("2026-02-01"),
-    date_last_transfer  = as.Date("2026-03-31")
+    date_last_transfer  = as.Date("2026-03-31"),
+    extent              = "cumulative",
+    scope               = "All completed records at the agreed cut-off.",
+    packaging           = "One tab-delimited file per dataset."
   )
 )
 print(meta_full)
 ```
+
+Study identifiers are optional, nonblank strings named `id` and `protocol_id`.
+They do not replace the document `header` or restrict any dataset column.
+`sections` is a named mapping in document order: stable keys begin with a
+letter and contain only letters, digits and underscores; each value contains
+a nonblank `title` and scalar `text`. Empty text is allowed during drafting.
+Unknown or malformed new metadata fields fail validation instead of being
+silently dropped. Empty `study` and `sections` are omitted during YAML export.
+
+The metadata editor exposes study fields, section add/edit/delete/reorder and
+additional transmission text fields: `extent`, `scope`, `packaging`, `security`,
+`checksum`, `test_requirements`, and `blinding_requirements`. Existing custom
+transmission entries are retained. These fields describe agreed procedures;
+they do not execute transfers, security checks, redaction or approvals.
+
+Default Word and Markdown layouts include study and narrative sections.
+Custom Word templates can place `{STUDY_ID}` / `{PROTOCOL_ID}` inline and
+`{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` as standalone block paragraphs.
+Absent fields do not add empty sections to legacy exports.
 
 ### Constructing a `DTA` Object
 

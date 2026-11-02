@@ -4,11 +4,12 @@
 \alias{.format_scalar_value}
 \title{Format a single scalar value for display (shared by DOCX tables and Markdown)}
 \usage{
-.format_scalar_value(val)
+.format_scalar_value(val, truncate = TRUE)
 }
 \description{
 Always returns a \code{character(1)}. Missing values -- \code{NULL}, \code{NA} of any type,
 and the empty string -- all render as \code{MISSING_VALUE_DISPLAY}
-(\code{"(not specified)"}).
+(\code{"(not specified)"}). Set \code{truncate = FALSE} for complete agreement text
+instead of the default 80-character display summary.
 }
 \keyword{internal}

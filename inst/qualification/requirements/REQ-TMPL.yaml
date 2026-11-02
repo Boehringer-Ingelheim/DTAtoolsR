@@ -540,3 +540,24 @@ requirements:
       R/validateTemplate.R (validate_template, .dta_template_check_outside_library);
       inst/shiny/dta_app/R/template_index.R (dta_template_library_dir);
       vignettes/private-templates.Rmd (Where templates live)
+
+  - id: REQ-TMPL-032
+    text: >
+      Creation templates shall accept study and ordered sections in base
+      metadata and as nested option targets. Inheritance shall override a
+      named clause without dropping unrelated clauses. When creating a
+      revision, study shall be included in the default metadata carry-over
+      fields, while sections shall require explicit opt-in to avoid
+      overwriting revised template clauses with old wording. Machine-owned
+      provenance shall remain excluded. Rebase shall compare and apply
+      sections as one atomic ordered collection, including complete
+      additions, removals and order-only changes. A section conflict shall
+      require an explicit choice of the current or target collection,
+      without implicit clause merging or invalid partial records.
+    risk: high
+    category: integrity
+    covers: [validate_template, run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/template_core.R;
+      inst/shiny/dta_app/R/template_create.R;
+      inst/shiny/dta_app/R/template_diff.R

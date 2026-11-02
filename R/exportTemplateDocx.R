@@ -21,6 +21,7 @@
 #'
 #' \describe{
 #'   \item{Agreement}{`{DTA_TITLE}`, `{DTA_VERSION}`, `{DTA_DATE}`, `{DTA_HEADER}`}
+#'   \item{Study}{`{STUDY_ID}`, `{PROTOCOL_ID}`}
 #'   \item{Supplier}{`{SUPPLIER_NAME}`, `{SUPPLIER_COUNTRY}`, `{SUPPLIER_ADDRESS}`,
 #'     `{SUPPLIER_EMAIL}`, `{SUPPLIER_PHONE}`, `{SUPPLIER_CONTACTS}`}
 #'   \item{Receiver}{`{RECEIVER_NAME}`, `{RECEIVER_COUNTRY}`, `{RECEIVER_ADDRESS}`,
@@ -37,7 +38,8 @@
 #'     `{FILE_SPECS}`, `{DATASETS}` (each also takes a `:DATASET` argument, e.g.
 #'     `{COLUMN_SPECS:ADSL}`, to render one dataset instead of all of them),
 #'     `{SUPPLIER_CONTACTS_TABLE}`, `{RECEIVER_CONTACTS_TABLE}`,
-#'     `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}`,
+#'     `{SIGNATURES_TABLE}`, `{VERSION_HISTORY_TABLE}`, `{STUDY_TABLE}`,
+#'     `{AGREEMENT_SECTIONS}`,
 #'     `{AUTHORIZED_CORRECTIONS_LIST}`. Unlike the placeholders above, a block
 #'     placeholder is replaced by rendered Word content -- a table, a heading, a
 #'     list -- so it must be the only text in its paragraph, and only in the
@@ -73,6 +75,10 @@
 #' be given with or without the surrounding braces (`"DTA_TITLE"` and
 #' `"{DTA_TITLE}"` are equivalent). User-supplied values take precedence over the
 #' automatically extracted ones and may introduce entirely new placeholders.
+#' Study and agreement sections appear only where their placeholders occur;
+#' user-owned templates are never extended automatically. The new blocks
+#' render nothing when the corresponding metadata is empty. Agreement sections
+#' preserve their stored order and paragraph breaks as plain text.
 #'
 #' @param dta A [DTA] object.
 #' @param template Character. Path to the template `.docx` file.
@@ -186,6 +192,8 @@ export_with_template <- function(
     "{DTA_VERSION}" = "Agreement version",
     "{DTA_DATE}" = "Agreement date (ISO 8601)",
     "{DTA_HEADER}" = "Document header line",
+    "{STUDY_ID}" = "Study identifier",
+    "{PROTOCOL_ID}" = "Protocol identifier",
     "{SUPPLIER_NAME}" = "Supplier organisation name",
     "{SUPPLIER_COUNTRY}" = "Supplier country",
     "{SUPPLIER_ADDRESS}" = "Supplier address",
@@ -203,8 +211,8 @@ export_with_template <- function(
     "{TRANSMISSION_NOTIFICATION}" = "How a transfer is notified",
     "{TRANSMISSION_FIRST_TRANSFER}" = "Date or phrase for the first transfer",
     "{TRANSMISSION_LAST_TRANSFER}" = "Date or phrase for the last transfer",
-    "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No)",
-    "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No)",
+    "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No; blank if unspecified)",
+    "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No; blank if unspecified)",
     "{DATASET_COUNT}" = "Number of datasets",
     "{DATASET_NAMES}" = "Names of all datasets",
     "{DATASET_TYPES}" = "Types of all datasets",
@@ -311,7 +319,8 @@ dta_template_placeholders <- function(dta = NULL) {
 #' Extract template placeholder values from a DTA object
 #'
 #' Builds the named list of `{PLACEHOLDER}` values consumed by
-#' [export_with_template()]. All values are single-line character scalars.
+#' [export_with_template()]. All values are character scalars; stored line
+#' breaks are retained.
 #'
 #' @param dta A [DTA] object.
 #' @return A named list keyed by brace-delimited placeholder tokens.
@@ -369,6 +378,8 @@ dta_template_placeholders <- function(dta = NULL) {
     "{DTA_VERSION}" = .tv_scalar(meta@version),
     "{DTA_DATE}" = .tv_scalar(meta@date),
     "{DTA_HEADER}" = .tv_scalar(meta@header),
+    "{STUDY_ID}" = .tv_scalar(meta@study$id),
+    "{PROTOCOL_ID}" = .tv_scalar(meta@study$protocol_id),
     "{SUPPLIER_NAME}" = .tv_scalar(.tv_get(supplier, "affiliation", "name")),
     "{SUPPLIER_COUNTRY}" = .tv_scalar(.tv_get(supplier, "affiliation", "country")),
     "{SUPPLIER_ADDRESS}" = .tv_scalar(.tv_get(supplier, "affiliation", "address")),
@@ -386,8 +397,8 @@ dta_template_placeholders <- function(dta = NULL) {
     "{TRANSMISSION_NOTIFICATION}" = .tv_scalar(.tv_get(trans, "notification")),
     "{TRANSMISSION_FIRST_TRANSFER}" = .tv_scalar(.tv_get(trans, "date_first_transfer")),
     "{TRANSMISSION_LAST_TRANSFER}" = .tv_scalar(.tv_get(trans, "date_last_transfer")),
-    "{TEST_UPLOAD}" = if (isTRUE(.tv_get(trans, "test_upload"))) "Yes" else "No",
-    "{BLINDED_TRANSFER}" = if (isTRUE(.tv_get(trans, "blinded_transfer"))) "Yes" else "No",
+    "{TEST_UPLOAD}" = .tv_scalar(.tv_get(trans, "test_upload")),
+    "{BLINDED_TRANSFER}" = .tv_scalar(.tv_get(trans, "blinded_transfer")),
     "{DATASET_COUNT}" = as.character(length(datasets)),
     "{DATASET_NAMES}" = dataset_names,
     "{DATASET_TYPES}" = dataset_types,
@@ -403,10 +414,11 @@ dta_template_placeholders <- function(dta = NULL) {
 }
 
 
-#' Coerce a metadata value to a single-line display string
+#' Coerce a metadata value to a scalar display string
 #'
 #' Dates render in ISO 8601 (`YYYY-MM-DD`) so a template filled on a German
 #' workstation and one filled on an English CI runner produce identical text.
+#' Only explicit logical TRUE/FALSE values render Yes/No; NA stays unspecified.
 #' @keywords internal
 .tv_scalar <- function(x, default = "") {
   if (is.null(x) || length(x) == 0) {
@@ -417,7 +429,7 @@ dta_template_placeholders <- function(dta = NULL) {
     return(if (nzchar(out)) out else default)
   }
   if (is.logical(x)) {
-    return(if (isTRUE(x)) "Yes" else "No")
+    return(if (isTRUE(x)) "Yes" else if (isFALSE(x)) "No" else default)
   }
   x <- as.character(x)
   x <- x[!is.na(x) & nzchar(x)]
@@ -541,6 +553,16 @@ dta_template_placeholders <- function(dta = NULL) {
     if (!is.null(trans$date_last_transfer) && nzchar(as.character(trans$date_last_transfer))) {
       lines <- c(lines, paste0("  - Last transfer: ", as.character(trans$date_last_transfer)))
     }
+    extra_fields <- setdiff(
+      names(trans),
+      c("type", "frequency", "notification", "date_first_transfer", "date_last_transfer")
+    )
+    for (key in extra_fields) {
+      value <- .tv_scalar(trans[[key]])
+      if (nzchar(value)) {
+        lines <- c(lines, paste0("  - ", .title_case_field(key), ": ", value))
+      }
+    }
   }
   if (!is.null(meta@error_handling) && nzchar(as.character(meta@error_handling))) {
     lines <- c(lines, "- Error handling", paste0("  - ", as.character(meta@error_handling)))
@@ -614,7 +636,7 @@ dta_template_placeholders <- function(dta = NULL) {
     return(if (nzchar(out)) out else default)
   }
   if (is.logical(x)) {
-    return(if (isTRUE(x)) "Yes" else "No")
+    return(.tv_scalar(x, default = default))
   }
   vals <- as.character(x)
   vals <- vals[!is.na(vals)]

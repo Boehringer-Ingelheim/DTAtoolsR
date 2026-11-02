@@ -4,7 +4,7 @@
 \alias{.kv_bullets_md}
 \title{Render a named list of key-value pairs as Markdown bullet lines.}
 \usage{
-.kv_bullets_md(pairs_list)
+.kv_bullets_md(pairs_list, truncate = TRUE)
 }
 \description{
 Render a named list of key-value pairs as Markdown bullet lines.

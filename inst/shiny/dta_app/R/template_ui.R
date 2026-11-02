@@ -813,9 +813,13 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
         ),
         checkboxGroupInput(
           "tmpl_carry_fields", "Fields to carry over",
-          choices = stats::setNames(
-            dta_template_metadata_fields(), dta_template_metadata_fields()
-          ),
+          choices = {
+            fields <- dta_template_metadata_fields()
+            labels <- fields
+            labels[fields == "study"] <- "Study identity"
+            labels[fields == "sections"] <- "Agreement sections (replace template clauses)"
+            stats::setNames(fields, labels)
+          },
           selected = carry_over_default_fields()
         )
       )

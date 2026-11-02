@@ -386,6 +386,61 @@ field — `base.metadata`'s own keys are validated the same way, so a typo'd
 field name aborts template creation immediately rather than silently being
 dropped.
 
+### Study identity, agreement clauses and transmission requirements
+
+Keep agreement identity separate from dataset columns and from the document
+header. `study` is a mapping with optional scalar strings `id` and `protocol_id`.
+`sections` is an ordered mapping whose stable keys identify narrative clauses:
+
+```yaml
+base:
+  metadata:
+    study:
+      id: DEMO-001
+    sections:
+      responsibilities:
+        title: Responsibilities
+        text: |
+          The receiver reviews delivered files.
+
+          Discrepancies are reported to the supplier.
+    transmission:
+      extent: cumulative
+      scope: All completed records at the agreed cut-off.
+
+options:
+  - id: study_id
+    label: Study identifier
+    type: text
+    target: metadata.study.id
+  - id: responsibilities
+    label: Responsibilities
+    type: textarea
+    target: metadata.sections.responsibilities.text
+```
+
+Section keys must start with a letter and contain only letters, digits and
+underscores. Each section requires a nonblank `title` and a scalar `text`;
+empty text is permitted for an unfinished draft. Existing nested mapping
+inheritance lets a child override one clause without copying the others.
+Their stored mapping order determines document order; the app can reorder,
+add, edit and remove sections. Plain text is not executable HTML.
+
+Alongside the established transmission fields, optional text entries
+`extent`, `scope`, `packaging`, `security`, `checksum`, `test_requirements`
+and `blinding_requirements` describe the agreed procedures. They do not
+implement those procedures. Unknown existing transmission extensions remain
+supported and are preserved during editing.
+
+No metadata selection implicitly restricts dataset `STUDYID` or laboratory
+values, redacts results, sends files or records an electronic signature.
+Keep such dataset constraints and operational controls explicit.
+
+Default document exports include study identity and sections. A custom Word
+layout can use inline `{STUDY_ID}` and `{PROTOCOL_ID}`, plus standalone
+`{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs. An existing
+Word template without those tokens is not automatically modified.
+
 ### How options are asked for
 
 Every entry in `options:` becomes one control in the "Create new from
@@ -848,7 +903,7 @@ states its own list:
 
 ```r
 c("receiver", "supplier", "transmission", "error_handling",
-  "authorized_for_corrections")
+  "authorized_for_corrections", "study")
 ```
 
 `title`, `version`, `date`, and `version_history` are *default-off* —
@@ -856,6 +911,17 @@ deliberately excluded from that default set. They are the ancestor document's
 own identity and revision history, not properties of the supplier/receiver
 relationship; a new document must state its own title and start its own
 version history rather than impersonating the one it came from.
+
+`study` carries over by default because the revision normally concerns the
+same study. `sections` is available as an explicit carry-over choice but is
+not selected by default: old clauses must not silently replace a newer
+template's agreement wording.
+
+During three-way rebase, `sections` is compared and applied as one ordered
+collection. This detects ordering changes and avoids temporarily invalid
+half-written clauses. If both versions changed it, explicitly choose the
+current or target collection; review the clauses before applying that choice.
+This does not change ordinary template inheritance of named section mappings.
 
 Carry-over, party slots, and options are applied in a fixed **precedence
 order** — `base` metadata, then carry-over, then the chosen party profile,

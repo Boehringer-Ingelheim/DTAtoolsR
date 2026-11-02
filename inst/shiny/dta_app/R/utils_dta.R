@@ -464,6 +464,84 @@ dta_set_metadata_field <- function(dta, field, value) {
   })
 }
 
+# ---- Study identity and ordered agreement sections ------------------------
+
+dta_set_study_field <- function(dta, field, value) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    if (is.null(value) ||
+      (is.character(value) && length(value) == 1L && !is.na(value) && !nzchar(trimws(value)))) {
+      value <- NULL
+    }
+    md@study <- list_set_path(md@study, field, value)
+    dta@metadata <- md
+    dta
+  })
+}
+
+# Replacing a section keeps its position, including an explicit ID change.
+# The S7 property validates the complete candidate before it replaces metadata.
+dta_save_agreement_section <- function(dta, id, title, text, previous_id = NULL) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    sections <- md@sections
+    if (!is.character(id) || length(id) != 1L || is.na(id) ||
+      !grepl("^[A-Za-z][A-Za-z0-9_]*$", id)) {
+      cli::cli_abort("A section ID must start with a letter and contain only letters, digits or underscores.")
+    }
+    if (!is.null(previous_id) && !(previous_id %in% names(sections))) {
+      cli::cli_abort("The section being edited no longer exists.")
+    }
+    if (id %in% names(sections) && !identical(id, previous_id)) {
+      cli::cli_abort("A section with ID {.val {id}} already exists.")
+    }
+    section <- list(title = title, text = text)
+    if (is.null(previous_id)) {
+      sections <- list_set_path(sections, id, section)
+    } else {
+      sections <- list_set_path(sections, previous_id, section)
+      names(sections)[match(previous_id, names(sections))] <- id
+    }
+    md@sections <- sections
+    dta@metadata <- md
+    dta
+  })
+}
+
+dta_remove_agreement_section <- function(dta, id) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    if (length(id) != 1L || is.na(id) || !(id %in% names(md@sections))) {
+      cli::cli_abort("The section to remove no longer exists.")
+    }
+    md@sections <- list_set_path(md@sections, id, NULL)
+    dta@metadata <- md
+    dta
+  })
+}
+
+dta_move_agreement_section <- function(dta, id, direction) {
+  dta_try({
+    md <- DTAtools::metadata(dta)
+    sections <- md@sections
+    if (length(id) != 1L || is.na(id) || !(id %in% names(sections))) {
+      cli::cli_abort("The section to move no longer exists.")
+    }
+    if (length(direction) != 1L || is.na(direction) || !(direction %in% c("up", "down"))) {
+      cli::cli_abort("Choose either up or down when moving a section.")
+    }
+    from <- match(id, names(sections))
+    to <- from + if (identical(direction, "up")) -1L else 1L
+    if (to >= 1L && to <= length(sections)) {
+      order <- seq_along(sections)
+      order[c(from, to)] <- c(to, from)
+      md@sections <- sections[order]
+      dta@metadata <- md
+    }
+    dta
+  })
+}
+
 # ---- People / contacts ---------------------------------------------------
 # Contacts live under metadata receiver/supplier as `$contacts` (a list of
 # person lists). Roles are free text; multiple roles are comma-joined so the
@@ -3096,7 +3174,7 @@ dta_set_transmission_field <- function(dta, field, value) {
     md <- DTAtools::metadata(dta)
     tr <- tryCatch(S7::prop(md, "transmission"), error = function(e) NULL) %||% list()
     drop <- is.null(value) ||
-      (is.character(value) && (length(value) == 0 || !any(nzchar(value))))
+      (is.character(value) && (length(value) == 0 || !any(nzchar(trimws(value)))))
     if (drop) tr[[field]] <- NULL else tr[[field]] <- value
     S7::prop(md, "transmission") <- tr
     dta@metadata <- md
@@ -3206,6 +3284,7 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
     if (isTRUE(keep_validation)) {
       new_ds@validation_index <- tryCatch(old_ds@validation_index, error = function(e) list()) %||% list()
       new_ds@validation_store <- tryCatch(old_ds@validation_store, error = function(e) list()) %||% list()
+      attr(new_ds, "last_validation_summary") <- attr(old_ds, "last_validation_summary")
     } else {
       new_ds@validation_index <- list()
       new_ds@validation_store <- list()

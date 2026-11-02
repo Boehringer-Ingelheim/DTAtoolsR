@@ -493,9 +493,10 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 #'
 #' Always returns a `character(1)`. Missing values -- `NULL`, `NA` of any type,
 #' and the empty string -- all render as `MISSING_VALUE_DISPLAY`
-#' (`"(not specified)"`).
+#' (`"(not specified)"`). Set `truncate = FALSE` for complete agreement text
+#' instead of the default 80-character display summary.
 #' @keywords internal
-.format_scalar_value <- function(val) {
+.format_scalar_value <- function(val, truncate = TRUE) {
   if (is.null(val) || length(val) == 0) {
     return(MISSING_VALUE_DISPLAY)
   }
@@ -526,7 +527,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   if (is.na(val) || !nzchar(val)) {
     return(MISSING_VALUE_DISPLAY)
   }
-  if (nchar(val) > 80) {
+  if (isTRUE(truncate) && nchar(val) > 80) {
     val <- paste0(substr(val, 1, 77), "...")
   }
   val
@@ -534,7 +535,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 
 #' Format metadata as key-value pairs for display
 #' @keywords internal
-.format_metadata_pairs <- function(metadata_list) {
+.format_metadata_pairs <- function(metadata_list, truncate = TRUE) {
   # Convert list to named vector of display strings
   pairs <- data.frame(
     key = character(),
@@ -544,7 +545,7 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 
   for (name in names(metadata_list)) {
     val <- metadata_list[[name]]
-    value_str <- .format_scalar_value(val)
+    value_str <- .format_scalar_value(val, truncate = truncate)
 
     pairs <- rbind(pairs, data.frame(
       key = name,
@@ -554,6 +555,46 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   }
 
   pairs
+}
+
+#' Study identity rows shared by Word and Markdown exports
+#' @keywords internal
+.study_to_df <- function(study) {
+  labels <- c(id = "Study ID", protocol_id = "Protocol ID")
+  keys <- names(labels)[names(labels) %in% names(study)]
+  data.frame(
+    Item = unname(labels[keys]),
+    Details = vapply(keys, function(key) study[[key]], character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Escape narrative text rather than interpreting it as Markdown or HTML
+#' @keywords internal
+.plain_text_to_md <- function(text, table = FALSE) {
+  text <- gsub("&", "&amp;", text, fixed = TRUE)
+  text <- gsub("<", "&lt;", text, fixed = TRUE)
+  text <- gsub(">", "&gt;", text, fixed = TRUE)
+  marks <- c("\\", "`", "*", "_", "{", "}", "[", "]", "#", "!", "~", "=")
+  if (!isTRUE(table)) marks <- c(marks, "|")
+  for (mark in marks) {
+    text <- gsub(mark, paste0("\\", mark), text, fixed = TRUE)
+  }
+  text <- gsub("(?m)^([ \t]*)([-+])", "\\1\\\\\\2", text, perl = TRUE)
+  text <- gsub("(?m)^([ \t]*[0-9]+)([.)])(?=[ \t])", "\\1\\\\\\2", text, perl = TRUE)
+
+  # Visible indentation must not activate Markdown's indented-code syntax.
+  indents <- gregexpr("(?m)^[ \t]+(?=\\S)", text, perl = TRUE)
+  regmatches(text, indents) <- lapply(regmatches(text, indents), function(matches) {
+    vapply(matches, function(indent) {
+      width <- 0L
+      for (char in strsplit(indent, "", fixed = TRUE)[[1]]) {
+        width <- if (char == "\t") (width %/% 4L + 1L) * 4L else width + 1L
+      }
+      strrep("\u00a0", width)
+    }, character(1))
+  })
+  text
 }
 
 #' Simple title-casing for arbitrary field names (e.g. "date_first_transfer")
@@ -822,12 +863,12 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
 
 #' Render a named list of key-value pairs as Markdown bullet lines.
 #' @keywords internal
-.kv_bullets_md <- function(pairs_list) {
+.kv_bullets_md <- function(pairs_list, truncate = TRUE) {
   if (length(pairs_list) == 0) {
     return(character(0))
   }
   vapply(names(pairs_list), function(nm) {
-    paste0("- **", nm, ":** ", .format_scalar_value(pairs_list[[nm]]))
+    paste0("- **", nm, ":** ", .format_scalar_value(pairs_list[[nm]], truncate = truncate))
   }, character(1), USE.NAMES = FALSE)
 }
 

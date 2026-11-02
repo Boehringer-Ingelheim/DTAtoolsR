@@ -127,10 +127,22 @@
 # a document's OWN @template is rewritten by rebase_apply() itself (see
 # below), never diffed as if it were a fact about the document's subject
 # matter.
+#
+# Sections are ONE ordered collection value. Flattening their title/text
+# records would miss order-only changes and create invalid intermediate
+# records when a rebase adds or removes a section. Comparing the whole list
+# preserves order and requires an explicit current/target collection choice
+# on conflict; ordinary template inheritance still merges named clauses.
 dta_metadata_leaves <- function(md) {
   lst <- as.list(md)
   lst <- lst[!(names(lst) %in% dta_metadata_machine_fields())]
-  .dta_leaf_flatten(lst)
+  sections <- lst$sections
+  lst$sections <- NULL
+  leaves <- .dta_leaf_flatten(lst)
+  if (length(sections) > 0) {
+    leaves$sections <- sections
+  }
+  leaves
 }
 
 # Flatten every dataset of a DTA to dotted-path leaves.
@@ -191,10 +203,8 @@ dta_dataset_leaves <- function(dta) {
 # contract), but a column's `values`/`examples` fields are exactly the kind
 # of atomic vector of length > 1 that reaches here in practice (e.g. a
 # column's declared value set); a bare Date needs ISO formatting rather than
-# its internal numeric-days representation; and a list is handled
-# defensively even though the flattener should never hand one to this
-# function, so a future change to what counts as a "leaf" fails loudly with a
-# readable string instead of an opaque one.
+# its internal numeric-days representation. A list-valued leaf (the ordered
+# sections collection) is displayed as YAML in its declared order.
 dta_diff_display_value <- function(x) {
   if (is.null(x) || length(x) == 0) {
     return(NA_character_)
@@ -736,7 +746,14 @@ rebase_apply <- function(current, plan, resolutions = list()) {
     # under the SAME top-level property (e.g. a different key.path under
     # "supplier" than the one being resolved) survives untouched.
     apply_from_target <- function(dta, key) {
-      apply_template_metadata_path(dta, paste0("metadata.", key), target_leaves[[key]])
+      value <- target_leaves[[key]]
+      # An absent sections leaf means remove the optional collection. Its S7
+      # property represents absence as list(), not NULL. Leave all other
+      # scalar/list removal semantics unchanged.
+      if (identical(key, "sections") && is.null(value)) {
+        value <- list()
+      }
+      apply_template_metadata_path(dta, paste0("metadata.", key), value)
     }
 
     result <- current

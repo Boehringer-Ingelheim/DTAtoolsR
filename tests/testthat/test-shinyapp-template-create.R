@@ -595,7 +595,8 @@ test_that("carry_over_default_fields() returns exactly the documented default se
   fn <- app_fn("carry_over_default_fields")
   fields <- fn()
 
-  expect_setequal(fields, c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections"))
+  expect_setequal(fields, c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections", "study"))
+  expect_false("sections" %in% fields)
   # title/version/date/version_history are deliberately OFF: a new document
   # must not inherit the old document's own identity or revision history.
   expect_false("title" %in% fields)

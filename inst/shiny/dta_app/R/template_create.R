@@ -342,9 +342,12 @@ template_party_profiles <- function(index) {
 # The metadata fields carried over from an ancestor document BY DEFAULT when a
 # caller does not state its own list.
 #
-# receiver/supplier/transmission/error_handling/authorized_for_corrections
+# receiver/supplier/transmission/error_handling/authorized_for_corrections/study
 # describe the RELATIONSHIP the document is about, which does not change just
 # because a new version is being drafted from a template.
+#
+# sections are available explicitly, but NOT selected by default: old clauses
+# must not silently overwrite a revised template's agreement text.
 #
 # title/version/date/version_history are DELIBERATELY excluded: they are the
 # ancestor document's own identity and revision history, not properties of
@@ -352,7 +355,7 @@ template_party_profiles <- function(index) {
 # version_history -- carrying the old one's forward would make the new
 # document impersonate the old one instead of superseding it.
 carry_over_default_fields <- function() {
-  c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections")
+  c("receiver", "supplier", "transmission", "error_handling", "authorized_for_corrections", "study")
 }
 
 # Copy `fields` of `source_meta` (a DTAMetaData) onto `dta`.

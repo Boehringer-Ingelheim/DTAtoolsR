@@ -314,3 +314,28 @@ requirements:
       save path iterated every index up to the row count rather than the
       rows still present, so a removed-but-once-filled row was written back
       into the saved rule as if it had never been removed.
+
+  - id: REQ-APP-022
+    text: >
+      In edit mode, the metadata editor shall update study identifiers and
+      the documented additional transmission text fields. Empty input shall
+      remove a field. Other metadata, custom transmission extensions,
+      datasets and loaded data shall be retained. Read-only mode shall reject
+      mutation events, not merely hide their controls.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R; inst/shiny/dta_app/R/utils_dta.R
+
+  - id: REQ-APP-023
+    text: >
+      The metadata editor shall add, edit, delete with confirmation and
+      reorder agreement sections by stable identifier. Edits shall preserve
+      unchanged sections and paragraph breaks. Invalid section identifiers,
+      duplicates or malformed records shall report an error and leave the
+      existing document unchanged. Read-only mode shall prevent section
+      mutation, and displayed section text shall not execute HTML.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R; inst/shiny/dta_app/R/utils_dta.R

@@ -441,3 +441,39 @@ requirements:
       Unlike REQ-EXPORT-025, which the compression = "none" branch used to
       violate (see DEV-013, closed), no open deviation is recorded against
       this requirement.
+
+  - id: REQ-EXPORT-033
+    text: >
+      Default write_dta Word and Markdown documents shall include supplied
+      study and protocol identifiers and each agreement section's title and
+      plain text in stored order before the datasets, preserving paragraph
+      boundaries. Empty study or sections shall not add empty headings to
+      legacy documents. Transmission statements for extent, scope, packaging,
+      security, checksum, test_requirements and blinding_requirements, and
+      unknown legacy extension fields, shall be retained in full without
+      truncating text longer than 150 characters. Absent test_upload and
+      blinded_transfer decisions shall not be rendered as No; explicitly
+      supplied FALSE decisions shall render as No.
+    risk: high
+    category: integrity
+    covers: [write_dta]
+    source: R/exportDocuments.R; R/documentBuilders.R
+
+  - id: REQ-EXPORT-034
+    text: >
+      Custom Word exports shall recognize inline STUDY_ID and PROTOCOL_ID
+      placeholders and standalone STUDY_TABLE and AGREEMENT_SECTIONS block
+      placeholders. Blocks shall render the supplied study information and
+      ordered narrative sections, retaining literal text and paragraph
+      boundaries. Placeholder discovery shall list the new tokens. An
+      existing custom layout without these tokens shall not receive
+      automatically injected sections. PROCESS_INFORMATION shall retain
+      complete transmission statements for extent, scope, packaging, security,
+      checksum, test_requirements and blinding_requirements, and unknown legacy
+      extension fields, without truncating text longer than 150 characters.
+      TEST_UPLOAD and BLINDED_TRANSFER shall render blank for absent decisions
+      and No for explicitly supplied FALSE decisions.
+    risk: high
+    category: functional
+    covers: [export_with_template, dta_template_placeholders]
+    source: R/exportTemplateDocx.R; R/exportTemplateBlocks.R

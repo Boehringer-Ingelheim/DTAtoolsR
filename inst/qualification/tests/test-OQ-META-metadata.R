@@ -51,7 +51,11 @@ qmeta_full <- function() {
     ),
     error_handling = "Critical errors must be reported within 24 hours.",
     authorized_for_corrections = c("Alice Smith"),
-    template = list(id = "clinical-transfer", version = "1.0")
+    template = list(id = "clinical-transfer", version = "1.0"),
+    study = list(id = "DEMO-001", protocol_id = "PROTOCOL-01"),
+    sections = list(
+      responsibilities = list(title = "Responsibilities", text = "Review files.\n\nReport discrepancies.")
+    )
   )
 }
 
@@ -376,7 +380,7 @@ test_that("OQ-META-017 | a full metadata document survives a YAML round trip | R
 
   expected_keys <- c(
     "authorized_for_corrections", "date", "error_handling", "header", "receiver",
-    "supplier", "template", "title", "transmission", "version", "version_history"
+    "sections", "study", "supplier", "template", "title", "transmission", "version", "version_history"
   )
   qa_step("every accepted key the fixture set is written", expected_keys, sort(names(as_list)))
 
@@ -390,6 +394,8 @@ test_that("OQ-META-017 | a full metadata document survives a YAML round trip | R
   qa_step("version survives", original@version, restored@version)
   qa_step("date survives", original@date, restored@date)
   qa_step("header survives", original@header, restored@header)
+  qa_step("study identifiers survive", list(id = "DEMO-001", protocol_id = "PROTOCOL-01"), restored@study)
+  qa_step("section paragraphs survive", "Review files.\n\nReport discrepancies.", restored@sections$responsibilities$text)
   qa_step("error_handling survives", original@error_handling, restored@error_handling)
   qa_step(
     "authorized_for_corrections survives",

@@ -484,6 +484,9 @@ server <- function(input, output, session) {
     is_example = FALSE, # TRUE when the bundled example DTA is loaded (enables example-file pickers)
     md_token = 0, # bump to re-render metadata editor
     contacts_token = 0, # bump to re-render contacts list
+    agreement_sections_token = 0,
+    editing_section = NULL, # list(id) while adding or editing an agreement section
+    removing_section = NULL, # stable ID named in the delete confirmation
     doc_token = 0, # bump ONLY on load/reset/restore -> re-render the main layout
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
@@ -5580,6 +5583,7 @@ server <- function(input, output, session) {
     provenance_ui <- template_provenance_block(tryCatch(S7::prop(md, "template"), error = function(e) NULL))
     date_val <- tryCatch(S7::prop(md, "date"), error = function(e) NULL)
     tr <- dta_transmission(dta)
+    study <- S7::prop(md, "study")
     trf <- function(k) {
       v <- tr[[k]]
       if (is.null(v)) "" else if (inherits(v, "Date")) format(v, "%Y-%m-%d") else as.character(v)[1]
@@ -5629,6 +5633,13 @@ server <- function(input, output, session) {
           ))
         },
         f_text("md_header", "Header / organization", getf("header"), width = "100%")
+      ),
+      tags$hr(),
+      div(class = "md-section-title", "Study"),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_text("md_study_id", "Study ID", study[["id"]] %||% "", width = "100%"),
+        f_text("md_protocol_id", "Protocol ID", study[["protocol_id"]] %||% "", width = "100%")
       ),
       tags$hr(),
       div(class = "md-section-title", "Parties"),
@@ -5718,6 +5729,35 @@ server <- function(input, output, session) {
           )
         }
       ),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_extent", "Transfer extent", trf("extent"), width = "100%", rows = 2),
+        f_area("tr_scope", "Transfer scope", trf("scope"), width = "100%", rows = 2)
+      ),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_packaging", "Packaging", trf("packaging"), width = "100%", rows = 2),
+        f_area("tr_security", "Security", trf("security"), width = "100%", rows = 2)
+      ),
+      f_text("tr_checksum", "Checksum requirements", trf("checksum"), width = "100%"),
+      layout_columns(
+        col_widths = c(6, 6),
+        f_area("tr_test_requirements", "Test transfer requirements",
+          trf("test_requirements"),
+          width = "100%", rows = 3
+        ),
+        f_area("tr_blinding_requirements", "Blinding requirements",
+          trf("blinding_requirements"),
+          width = "100%", rows = 3
+        )
+      ),
+      tags$hr(),
+      div(
+        class = "md-section-title d-flex justify-content-between align-items-center",
+        tags$span("Agreement sections"),
+        if (!ro) actionButton("agreement_add", "Add section", class = "btn btn-sm btn-outline-primary")
+      ),
+      uiOutput("agreement_sections"),
       tags$hr(),
       div(class = "md-section-title", "Error handling & corrections"),
       f_area("md_error_handling", "Error handling",
@@ -5781,6 +5821,24 @@ server <- function(input, output, session) {
       )
     }
   }
+  save_study <- function(field, value) {
+    req(editing(), rv$dta)
+    r <- dta_set_study_field(rv$dta, field, value)
+    if (r$ok) {
+      rv$dta <- r$value
+      sync_yaml_text()
+    } else {
+      showNotification(paste("Could not update study", field, "\u2014", r$error), type = "error")
+    }
+  }
+  for (.field in c("id", "protocol_id")) {
+    local({
+      FIELD <- .field
+      inid <- if (FIELD == "id") "md_study_id" else "md_protocol_id"
+      d <- debounce(reactive(input[[inid]]), 700)
+      observeEvent(d(), save_study(FIELD, d()), ignoreInit = TRUE)
+    })
+  }
   title_d <- debounce(reactive(input$md_title), 700)
   version_d <- debounce(reactive(input$md_version), 700)
   header_d <- debounce(reactive(input$md_header), 700)
@@ -5830,6 +5888,160 @@ server <- function(input, output, session) {
   observeEvent(tr_last_d(), save_tr("date_last_transfer", tr_last_d()), ignoreInit = TRUE)
   observeEvent(input$tr_test_upload, save_tr("test_upload", dta_choice_to_flag(input$tr_test_upload)), ignoreInit = TRUE)
   observeEvent(input$tr_blinded, save_tr("blinded_transfer", dta_choice_to_flag(input$tr_blinded)), ignoreInit = TRUE)
+  for (.field in c("extent", "scope", "packaging", "security", "checksum", "test_requirements", "blinding_requirements")) {
+    local({
+      FIELD <- .field
+      inid <- paste0("tr_", FIELD)
+      d <- debounce(reactive(input[[inid]]), 700)
+      observeEvent(d(), save_tr(FIELD, d()), ignoreInit = TRUE)
+    })
+  }
+
+  # --- ordered agreement sections -----------------------------------------
+  output$agreement_sections <- renderUI({
+    rv$md_token
+    rv$agreement_sections_token
+    req(isolate(rv$dta))
+    sections <- DTAtools::metadata(isolate(rv$dta))@sections
+    ro <- !editing()
+    if (length(sections) == 0L) {
+      return(div(class = "msg-hint", "No agreement sections."))
+    }
+    tags$ol(
+      class = "list-group",
+      lapply(seq_along(sections), function(i) {
+        id <- names(sections)[[i]]
+        section <- sections[[id]]
+        tags$li(
+          class = "list-group-item",
+          div(
+            class = "d-flex justify-content-between align-items-center",
+            tags$strong(section[["title"]]),
+            if (!ro) {
+              div(
+                class = "d-flex gap-2",
+                actionButton(paste0("agreement_edit_", id), "Edit", class = "btn btn-sm btn-outline-primary"),
+                if (i > 1L) actionButton(paste0("agreement_up_", id), "Move up", class = "btn btn-sm btn-outline-secondary"),
+                if (i < length(sections)) actionButton(paste0("agreement_down_", id), "Move down", class = "btn btn-sm btn-outline-secondary"),
+                actionButton(paste0("agreement_remove_", id), "Remove", class = "btn btn-sm btn-outline-danger")
+              )
+            }
+          ),
+          div(class = "msg-hint", id),
+          div(style = "white-space:pre-wrap;", section[["text"]])
+        )
+      })
+    )
+  })
+
+  save_section_result <- function(r) {
+    req(editing(), rv$dta)
+    if (!r$ok) {
+      showNotification(paste("Could not update agreement sections \u2014", r$error), type = "error")
+      return(FALSE)
+    }
+    rv$dta <- r$value
+    rv$agreement_sections_token <- rv$agreement_sections_token + 1
+    sync_yaml_text()
+    TRUE
+  }
+
+  agreement_edit_flow <- function(id = NULL) {
+    req(editing(), rv$dta)
+    section <- if (is.null(id)) list() else DTAtools::metadata(rv$dta)@sections[[id]]
+    if (is.null(section)) {
+      showNotification("The section being edited no longer exists.", type = "error")
+      return()
+    }
+    rv$editing_section <- list(id = id)
+    showModal(modalDialog(
+      title = if (is.null(id)) "Add agreement section" else "Edit agreement section",
+      textInput("agreement_id", "Stable ID",
+        value = id %||% "",
+        placeholder = "e.g. transfer_scope"
+      ),
+      div(class = "msg-hint", "Start with a letter; use only letters, digits and underscores."),
+      textInput("agreement_title", "Title", value = section[["title"]] %||% ""),
+      textAreaInput("agreement_text", "Text", value = section[["text"]] %||% "", rows = 8, width = "100%"),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("agreement_save", "Save section", class = "btn btn-primary")
+      ),
+      easyClose = TRUE
+    ))
+  }
+  observeEvent(input$agreement_add, agreement_edit_flow())
+  observeEvent(input$agreement_save, {
+    req(editing(), rv$dta, rv$editing_section)
+    r <- dta_save_agreement_section(
+      rv$dta, input$agreement_id, input$agreement_title, input$agreement_text,
+      previous_id = rv$editing_section$id
+    )
+    if (save_section_result(r)) {
+      rv$editing_section <- NULL
+      removeModal()
+    }
+  })
+  observeEvent(input$agreement_remove_confirm, {
+    req(editing(), rv$dta, rv$removing_section)
+    if (save_section_result(dta_remove_agreement_section(rv$dta, rv$removing_section))) {
+      rv$removing_section <- NULL
+      removeModal()
+    }
+  })
+  observeEvent(rv$doc_token,
+    {
+      rv$editing_section <- NULL
+      rv$removing_section <- NULL
+    },
+    ignoreInit = TRUE
+  )
+
+  agreement_registry <- new.env(parent = emptyenv())
+  observe({
+    rv$md_token
+    rv$agreement_sections_token
+    req(isolate(rv$dta))
+    for (id in names(DTAtools::metadata(isolate(rv$dta))@sections)) {
+      for (action in c("edit", "remove", "up", "down")) {
+        inid <- paste0("agreement_", action, "_", id)
+        if (!is.null(agreement_registry[[inid]])) next
+        agreement_registry[[inid]] <- TRUE
+        local({
+          ID <- id
+          ACTION <- action
+          INID <- inid
+          observeEvent(input[[INID]],
+            {
+              req(editing(), rv$dta)
+              if (ACTION == "edit") {
+                agreement_edit_flow(ID)
+              } else if (ACTION == "remove") {
+                section <- DTAtools::metadata(rv$dta)@sections[[ID]]
+                if (is.null(section)) {
+                  showNotification("The section to remove no longer exists.", type = "error")
+                  return()
+                }
+                rv$removing_section <- ID
+                showModal(modalDialog(
+                  title = "Remove agreement section?",
+                  tagList("Remove ", tags$b(section[["title"]]), " (", ID, ")?"),
+                  footer = tagList(
+                    modalButton("Cancel"),
+                    actionButton("agreement_remove_confirm", "Remove", class = "btn btn-danger")
+                  ),
+                  easyClose = TRUE
+                ))
+              } else {
+                save_section_result(dta_move_agreement_section(rv$dta, ID, ACTION))
+              }
+            },
+            ignoreInit = TRUE
+          )
+        })
+      }
+    }
+  })
 
   # --- people / contacts --------------------------------------------------
   # Shared field set so the Add and Edit person modals capture the SAME details

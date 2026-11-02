@@ -56,6 +56,7 @@ and reported via a warning.
 
 \describe{
 \item{Agreement}{\code{{DTA_TITLE}}, \code{{DTA_VERSION}}, \code{{DTA_DATE}}, \code{{DTA_HEADER}}}
+\item{Study}{\code{{STUDY_ID}}, \code{{PROTOCOL_ID}}}
 \item{Supplier}{\code{{SUPPLIER_NAME}}, \code{{SUPPLIER_COUNTRY}}, \code{{SUPPLIER_ADDRESS}},
 \code{{SUPPLIER_EMAIL}}, \code{{SUPPLIER_PHONE}}, \code{{SUPPLIER_CONTACTS}}}
 \item{Receiver}{\code{{RECEIVER_NAME}}, \code{{RECEIVER_COUNTRY}}, \code{{RECEIVER_ADDRESS}},
@@ -72,7 +73,8 @@ and reported via a warning.
 \code{{FILE_SPECS}}, \code{{DATASETS}} (each also takes a \verb{:DATASET} argument, e.g.
 \code{{COLUMN_SPECS:ADSL}}, to render one dataset instead of all of them),
 \code{{SUPPLIER_CONTACTS_TABLE}}, \code{{RECEIVER_CONTACTS_TABLE}},
-\code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}},
+\code{{SIGNATURES_TABLE}}, \code{{VERSION_HISTORY_TABLE}}, \code{{STUDY_TABLE}},
+\code{{AGREEMENT_SECTIONS}},
 \code{{AUTHORIZED_CORRECTIONS_LIST}}. Unlike the placeholders above, a block
 placeholder is replaced by rendered Word content -- a table, a heading, a
 list -- so it must be the only text in its paragraph, and only in the
@@ -108,6 +110,10 @@ Additional or overriding values can be supplied through \code{variables}; names 
 be given with or without the surrounding braces (\code{"DTA_TITLE"} and
 \code{"{DTA_TITLE}"} are equivalent). User-supplied values take precedence over the
 automatically extracted ones and may introduce entirely new placeholders.
+Study and agreement sections appear only where their placeholders occur;
+user-owned templates are never extended automatically. The new blocks
+render nothing when the corresponding metadata is empty. Agreement sections
+preserve their stored order and paragraph breaks as plain text.
 }
 \examples{
 # Build a minimal template with officer, then fill it from a DTA.

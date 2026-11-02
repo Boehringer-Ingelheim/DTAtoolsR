@@ -14,6 +14,7 @@ A named list keyed by brace-delimited placeholder tokens.
 }
 \description{
 Builds the named list of \code{{PLACEHOLDER}} values consumed by
-\code{\link[=export_with_template]{export_with_template()}}. All values are single-line character scalars.
+\code{\link[=export_with_template]{export_with_template()}}. All values are character scalars; stored line
+breaks are retained.
 }
 \keyword{internal}
