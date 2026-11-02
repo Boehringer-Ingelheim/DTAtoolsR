@@ -526,6 +526,24 @@ test_that("boolean is a checkbox, textarea spans the grid, and help is rendered"
   expect_false(grepl("tmpl-opt-wide", plain, fixed = TRUE))
 })
 
+test_that("a textarea suggestion is selectable without losing multiline editing", {
+  html <- html_of(app_fn("render_template_option_input")(list(
+    id = "scope", label = "Delivery scope", type = "textarea",
+    allow_custom = TRUE,
+    choices = c("Complete data", "Incremental data"),
+    default = "Complete data"
+  )))
+
+  expect_match(html, 'id="tmpl_opt_scope"', fixed = TRUE)
+  expect_match(html, "<textarea", fixed = TRUE)
+  expect_match(html, 'id="tmpl_opt_scope_suggestion"', fixed = TRUE)
+  expect_match(html, "Complete data", fixed = TRUE)
+  expect_match(html, "Incremental data", fixed = TRUE)
+  expect_match(html, "(leave blank)", fixed = TRUE)
+  expect_match(html, "dispatchEvent", fixed = TRUE)
+  expect_match(html, 'rows="3"', fixed = TRUE)
+})
+
 test_that("an option with no id builds nothing", {
   expect_null(app_fn("render_template_option_input")(list(label = "Nameless")))
 })

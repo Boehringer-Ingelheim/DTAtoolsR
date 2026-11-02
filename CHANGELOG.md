@@ -6,7 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The bundled Biomarker GF creation template now uses the latest source DTS
+  version, 5.0 (2025-11-28), with a single matching version-history entry.
+
 ### Added
+
+- Creation-template narrative options with source suggestions now retain an
+  editable multiline input; choosing a suggestion or `(leave blank)` updates
+  the value collected by the existing template creation flow.
 
 - **Structured study identity and ordered agreement clauses.** `DTAMetaData`
   accepts optional `study` identifiers and named `sections` with titles and

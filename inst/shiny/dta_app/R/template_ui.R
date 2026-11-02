@@ -498,10 +498,41 @@ render_template_option_input <- function(opt, base_metadata = list()) {
 
   ctl <- switch(typ,
     boolean = checkboxInput(iid, label, value = identical(def, TRUE) || identical(def, "yes")),
-    textarea = textAreaInput(
-      iid, label,
-      value = as.character(def %||% ""), rows = 3, width = "100%"
-    ),
+    textarea = {
+      ch <- dta_template_choices(opt)
+      def_chr <- as.character(def %||% "")[[1]]
+      value <- textAreaInput(
+        iid, label,
+        value = def_chr, rows = 3, width = "100%"
+      )
+      if (length(ch) == 0) {
+        value
+      } else {
+        suggestion_id <- paste0(iid, "_suggestion")
+        selected <- if (def_chr %in% unname(ch)) def_chr else blank_val
+        on_change <- sprintf(
+          paste0(
+            "function(value) {",
+            "var target = document.getElementById(%s);",
+            "if (target) {",
+            "target.value = value === %s ? '' : (value || '');",
+            "target.dispatchEvent(new Event('input', { bubbles: true }));",
+            "}"
+          ),
+          jsonlite::toJSON(iid, auto_unbox = TRUE),
+          jsonlite::toJSON(blank_val, auto_unbox = TRUE)
+        )
+        tagList(
+          selectizeInput(
+            suggestion_id, "Choose a suggestion",
+            choices = c(stats::setNames(blank_val, "(leave blank)"), ch),
+            selected = selected, multiple = FALSE, width = "100%",
+            options = list(create = FALSE, onChange = I(on_change))
+          ),
+          value
+        )
+      }
+    },
     number = numericInput(
       iid, label,
       value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
