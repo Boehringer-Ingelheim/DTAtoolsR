@@ -206,7 +206,7 @@ requirements:
     text: >
       Every metadata key the specification accepts (title, version, date,
       header, version_history, receiver, supplier, transmission,
-      error_handling, authorized_for_corrections, template) shall survive
+      error_handling, authorized_for_corrections, template, study, sections) shall survive
       being written to YAML and read back into an equivalent DTAMetaData
       object. A Date-valued field shall be written as an ISO date string, not
       as its underlying numeric day count. import_issues is derived, not
@@ -243,3 +243,54 @@ requirements:
       "2026-12-31 at the earliest")))$transmission$date_last_transfer is the
       clean string "2026-12-31", and reconstructing DTAMetaData from that
       list reports metadata_import_errors() with 0 rows.
+
+  - id: REQ-META-019
+    text: >
+      DTAMetaData shall accept optional study metadata as a named list with
+      id and protocol_id. Supplied identifiers shall be scalar, non-missing,
+      nonblank character strings. Unknown, duplicate or unnamed fields and
+      invalid identifier types shall be rejected. Study metadata shall not
+      change the document header or a dataset's STUDYID constraints.
+    risk: high
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R
+
+  - id: REQ-META-020
+    text: >
+      DTAMetaData shall accept sections as an ordered named list with unique
+      identifiers matching ^[A-Za-z][A-Za-z0-9_]*$. Each section shall contain
+      exactly a scalar nonblank character title and scalar non-missing
+      character text; empty text is permitted while drafting. Malformed
+      section records and unknown fields shall be rejected. Stored order and
+      paragraph breaks shall be retained.
+    risk: high
+    category: integrity
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R
+
+  - id: REQ-META-021
+    text: >
+      The optional transmission fields extent, scope, packaging, security,
+      checksum, test_requirements and blinding_requirements shall accept
+      scalar non-missing character values, including empty draft text, and
+      reject invalid types or lengths. Previously supported transmission
+      fields and unknown extensions shall remain supported. These metadata
+      statements shall not execute transfers, encryption, checksums or
+      redaction.
+    risk: medium
+    category: functional
+    covers: [DTAMetaData]
+    source: R/DTAMetaData-class.R
+
+  - id: REQ-META-022
+    text: >
+      Empty study and sections shall default to empty lists and be omitted
+      from as.list and YAML output. Legacy constructor arguments shall
+      retain their positional meanings. Nonempty study and sections shall
+      survive serialization and reconstruction with their values, section
+      order and multiline text unchanged.
+    risk: high
+    category: integrity
+    covers: [DTAMetaData, read_dta_from_yaml]
+    source: R/DTAMetaData-class.R; R/DTAMetaData-helpers.R

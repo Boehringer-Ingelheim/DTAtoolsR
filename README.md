@@ -601,6 +601,8 @@ by the same renderers the built-in layout uses:
 | `{SIGNATURES_TABLE}` | the approval and signature table |
 | `{VERSION_HISTORY_TABLE}` | version history as a table |
 | `{AUTHORIZED_CORRECTIONS_LIST}` | the authorized-for-corrections names |
+| `{STUDY_TABLE}` | structured study and protocol identifiers |
+| `{AGREEMENT_SECTIONS}` | titled narrative sections in their stored order |
 
 The first four take an optional dataset argument — `{COLUMN_SPECS:ADSL}` renders
 one dataset, the bare form renders every applicable one under its own heading.
@@ -970,7 +972,8 @@ rules:
 ## YAML Metadata
 
 `metadata:` captures the administrative information of a DTA/DTS: title,
-version, receiver/supplier contacts, and the transmission schedule.
+version, study identity, receiver/supplier contacts, the transmission schedule
+and ordered agreement clauses.
 
 ```yaml
 metadata:
@@ -978,6 +981,18 @@ metadata:
   version: "1.0"
   date: 2026-01-15
   header: Boehringer Ingelheim
+
+  study:
+    id: DEMO-001
+    protocol_id: PROTOCOL-01
+
+  sections:
+    responsibilities:
+      title: Responsibilities
+      text: |
+        The receiver reviews each delivered file.
+
+        Discrepancies are reported to the supplier for correction.
 
   receiver:
     affiliation:
@@ -1006,7 +1021,36 @@ metadata:
     notification: email
     date_first_transfer: 2026-02-01
     date_last_transfer: 2026-03-31
+    extent: cumulative
+    scope: All completed records available at the agreed cut-off.
+    packaging: One tab-delimited file per dataset.
+    security: Use the approved secure transfer channel.
+    checksum: Verify the agreed checksum before processing.
+    test_requirements: Review a test transfer before the first scheduled delivery.
+    blinding_requirements: Follow the trial-approved list of fields to withhold.
 ```
+
+`study` is optional and accepts `id` and `protocol_id` as nonblank strings.
+It is separate from the presentation-oriented `header` and never changes a
+dataset's `STUDYID` constraint.
+
+`sections` is an optional **ordered mapping**, not an unnamed sequence. Each
+unique key starts with a letter and contains only letters, digits and
+underscores. Its `title` is a nonblank string and `text` is plain text with
+paragraph breaks; empty text is allowed while drafting. The app supports
+adding, editing, deleting and reordering sections. Empty `study` and `sections`
+are omitted from YAML, so legacy documents need no migration.
+
+The extra transmission entries above are optional text, not executed services.
+They do not implement encryption, delivery, checksum verification, blinding
+or approval. Existing transmission extensions are retained when editing.
+The Metadata tab exposes these fields alongside the existing tri-state
+test-upload and blinded-transfer flags.
+
+Default Word/Markdown exports include study identity and the ordered sections.
+Custom Word templates must place `{STUDY_ID}` / `{PROTOCOL_ID}` for inline text,
+or standalone `{STUDY_TABLE}` / `{AGREEMENT_SECTIONS}` paragraphs for structured
+content. User-supplied Word templates are not silently rewritten.
 
 ## Qualification
 

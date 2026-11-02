@@ -113,14 +113,14 @@ NULL
 
 #' Add metadata section with key-value pairs
 #' @keywords internal
-.add_metadata_section <- function(doc, title, metadata_list) {
+.add_metadata_section <- function(doc, title, metadata_list, truncate = TRUE) {
   if (!is.null(title) && nzchar(title)) {
     doc <- .add_heading(doc, title, level = 2)
   }
 
   # Create a two-column table for metadata
   if (length(metadata_list) > 0) {
-    pairs <- .format_metadata_pairs(metadata_list)
+    pairs <- .format_metadata_pairs(metadata_list, truncate = truncate)
 
     # Create flextable
     ft <- flextable::flextable(pairs)
@@ -134,6 +134,47 @@ NULL
   }
 
   doc <- .add_spacer(doc)
+  doc
+}
+
+#' Add study identity, sharing the built-in and template-block layout
+#' @keywords internal
+.add_study_section <- function(doc, study, heading = .add_heading) {
+  if (length(study) == 0) {
+    return(doc)
+  }
+  doc <- heading(doc, "Study", level = 2)
+  ft <- .style_table(flextable::flextable(.study_to_df(study)))
+  ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
+  ft <- flextable::set_table_properties(ft, layout = "autofit", width = 1)
+  .add_spacer(flextable::body_add_flextable(doc, ft))
+}
+
+#' Add ordered agreement clauses as literal headings and narrative paragraphs
+#' @keywords internal
+.add_agreement_sections <- function(doc, sections, heading = .add_heading) {
+  if (length(sections) == 0) {
+    return(doc)
+  }
+  doc <- heading(doc, "Agreement Sections", level = 2)
+  for (section in sections) {
+    doc <- heading(doc, section$title, level = 3)
+    text <- gsub("\r\n|\r", "\n", section$text)
+    paragraphs <- strsplit(paste0(text, "\n\n"), "\n\n", fixed = TRUE)[[1]]
+    for (paragraph in paragraphs) {
+      lines <- strsplit(paste0(paragraph, "\n"), "\n", fixed = TRUE)[[1]]
+      chunks <- list()
+      for (i in seq_along(lines)) {
+        if (i > 1L) chunks <- c(chunks, list(officer::run_linebreak()))
+        chunks <- c(chunks, list(officer::ftext(lines[[i]], .house_fp_text())))
+      }
+      doc <- officer::body_add_fpar(
+        doc,
+        do.call(officer::fpar, c(chunks, list(fp_p = officer::fp_par(padding.bottom = 2))))
+      )
+    }
+    doc <- .add_spacer(doc)
+  }
   doc
 }
 

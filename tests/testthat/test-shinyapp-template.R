@@ -180,7 +180,7 @@ test_that("dta_template_metadata_fields() lists the exact allowed DTAMetaData fi
     c(
       "title", "version", "date", "header",
       "version_history", "receiver", "supplier", "transmission",
-      "error_handling", "authorized_for_corrections"
+      "error_handling", "authorized_for_corrections", "study", "sections"
     )
   )
 })
@@ -214,7 +214,7 @@ test_that("dta_template_list_fields() names the container metadata fields", {
   list_fields <- app_fn("dta_template_list_fields")
   expect_setequal(
     list_fields(),
-    c("version_history", "receiver", "supplier", "transmission")
+    c("version_history", "receiver", "supplier", "transmission", "study", "sections")
   )
   # authorized_for_corrections is a union of character, list and NULL, and
   # defaults to NULL, so it must stay a scalar field. Getting this wrong turns a

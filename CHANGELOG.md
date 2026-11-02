@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Structured study identity and ordered agreement clauses.** `DTAMetaData`
+  accepts optional `study` identifiers and named `sections` with titles and
+  plain-text paragraphs. They round-trip through YAML and template inheritance
+  without changing dataset constraints. The app provides study editing,
+  section editing/reordering and additional transmission fields for delivery
+  scope, packaging, security, checksums, test transfers and blinding requirements.
+  Default document exports include the new metadata; custom Word templates
+  can use `{STUDY_ID}`, `{PROTOCOL_ID}`, `{STUDY_TABLE}` and
+  `{AGREEMENT_SECTIONS}`. Legacy metadata remains valid, with empty new
+  properties omitted. Study identity carries over by default when drafting a
+  revision; agreement sections require explicit opt-in.
+
 - template libraries can keep their templates in a `templates/` folder;
   `validate_template()`, the Shiny app's `dir:`/`pkg:`/`git:` sources and
   `DTAtools.template_dir` read it automatically. New `validate_template()`
@@ -223,6 +235,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   manifest-only change — still runs on every pull request.
 
 ### Fixed
+
+- Custom Word exports retain complete transmission statements and additional
+  transmission fields rather than truncating or omitting them. Unspecified
+  test-upload and blinding decisions are no longer rendered as an explicit
+  "No"; a supplied `FALSE` still renders as "No".
 
 - metadata-only `abstract: true` creation templates can serve as shared bases
   without dummy datasets; concrete descendants must still supply or inherit

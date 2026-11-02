@@ -185,8 +185,10 @@ party_slots:
     profiles: [starter_supplier]
 ```
 
-A non-inheriting creation template needs a `base:` mapping and at least one dataset entry. A child template that has `extends:` may omit either
-section to inherit it. Do not write an empty replacement section unless the intent is to replace the inherited section with an empty one.
+A non-inheriting creation template needs a `base:` mapping. A concrete template
+must have at least one dataset after inheritance; an abstract base may provide
+metadata only. A child with `extends:` may omit sections to inherit them, but
+must supply datasets if its parent has none.
 
 ### `base:` metadata
 
@@ -202,9 +204,81 @@ section to inherit it. Do not write an empty replacement section unless the inte
 - `transmission`
 - `error_handling`
 - `authorized_for_corrections`
+- `study`
+- `sections`
 
 Nested mapping values such as `receiver`, `supplier`, and `transmission` can contain their own fields. Use the same structure as metadata in an
 ordinary DTA definition. The template engine checks the top-level names; a misspelled metadata name is not a new extension point.
+
+### Study identity and agreement sections
+
+`study` is an optional mapping with `id` and `protocol_id`. Supplied identifiers
+must be nonblank strings. They describe the agreement; setting them does not
+change a dataset's `STUDYID` values. `header` remains a presentation field.
+
+`sections` is an ordered mapping with stable identifiers as keys, not an
+unnamed sequence. Keys start with a letter and contain only letters, digits
+and underscores. Each section contains exactly `title` (a nonblank string)
+and `text` (plain text; an empty string is permitted for drafts).
+
+```yaml
+base:
+  metadata:
+    study:
+      id: DEMO-001
+      protocol_id: PROTOCOL-01
+    sections:
+      responsibilities:
+        title: Responsibilities
+        text: |
+          The receiver reviews delivered files.
+
+          Discrepancies are reported to the supplier.
+      exceptions:
+        title: Exceptions
+        text: Agreed exceptions are documented before the affected transfer.
+```
+
+The stored order is the document order. Inheritance can override
+`base.metadata.sections.exceptions.text` without copying unrelated clauses.
+An option can target `metadata.study.id` or
+`metadata.sections.exceptions.text`; use `type: textarea` for narrative text.
+The app's Metadata tab supports section creation, editing, deletion and
+reordering. Section content is text, not an HTML execution surface.
+
+Both properties default to empty mappings and are omitted from exported YAML
+when empty. Old specifications continue to work unchanged. When drafting a
+revision, `study` is carried over by default; `sections` requires explicit
+opt-in so a newer template's clauses are not silently replaced.
+
+Three-way rebase treats the ordered section collection as one value. Conflicts
+require choosing the current or target collection; it does not merge half of
+one clause with half of another. Ordinary template inheritance still supports
+overriding individual named clauses.
+
+### Additional transmission requirements
+
+The existing `transmission` mapping accepts these optional text fields:
+
+| Field | Meaning |
+| --- | --- |
+| `extent` | Cumulative, incremental or another agreed transfer extent |
+| `scope` | Records/data covered by the transfer |
+| `packaging` | File grouping or archive requirements |
+| `security` | Agreed secure handling and transfer requirements |
+| `checksum` | Checksum algorithm or verification procedure |
+| `test_requirements` | Test-transfer content and acceptance procedure |
+| `blinding_requirements` | Which information must be withheld and under what conditions |
+
+These fields are editable in the Metadata tab. Empty editor input removes a
+field; existing custom transmission fields survive unrelated edits.
+Statements describe the agreement: they do not send, encrypt, checksum or
+redact data. Unspecified test-upload/blinding flags remain unspecified.
+
+Default Word/Markdown exports include study information and ordered sections.
+For a custom Word layout, use inline `{STUDY_ID}` and `{PROTOCOL_ID}` or
+standalone `{STUDY_TABLE}` and `{AGREEMENT_SECTIONS}` block paragraphs.
+The library does not alter user-supplied Word templates automatically.
 
 The machine-owned fields `template` and `import_issues` cannot be set by a template. The validator reports a template attempting to target either
 with `target_machine_owned` when the field is reached through an option target.

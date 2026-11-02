@@ -59,7 +59,9 @@ file path when a \code{template} is used.
 }
 \description{
 Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA object,
-including metadata, version history, transmission details, and approval signatures.
+including study identity, ordered agreement sections, version history,
+transmission details, and approval signatures. Study and agreement sections
+are omitted when absent. Agreement text is rendered as plain narrative.
 }
 \examples{
 dta <- create_example_DTA()

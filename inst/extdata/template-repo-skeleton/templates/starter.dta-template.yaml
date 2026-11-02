@@ -20,6 +20,14 @@ base:
     # packaged examples for the same pattern.
     date: "${today}"
     header: Starter Organisation
+    study:
+      id: DEMO-001
+    sections:
+      responsibilities:
+        title: Responsibilities
+        text: >-
+          The receiver reviews transferred files and reports discrepancies
+          to the supplier.
     version_history:
       - version: "${version}"
         date: "${today}"
@@ -57,6 +65,18 @@ options:
     type: text
     target: metadata.header
     help: Organisation shown in the document header.
+
+  - id: study_id
+    label: Study identifier
+    type: text
+    target: metadata.study.id
+    help: Agreement identity only; does not constrain any dataset column.
+
+  - id: protocol_id
+    label: Protocol identifier
+    type: text
+    target: metadata.study.protocol_id
+    help: Optional protocol identifier for this agreement.
 
 datasets:
   # {template:, as:} imports a reusable dataset template rather than

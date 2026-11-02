@@ -3118,13 +3118,13 @@
       "checksum": "55eaad81a9ac5be1ad97c852e44eba16"
     },
     "R/template_core.R": {
-      "checksum": "fd0a514d2ddb64755d4acb13529aff2d"
+      "checksum": "f0341471cdc200c6b0ea1d96ef4770c5"
     },
     "R/template_create.R": {
-      "checksum": "c006fcf49d62c81a4d14052492044a8c"
+      "checksum": "07e2b1b6e33f5c79859a4c4f44409112"
     },
     "R/template_diff.R": {
-      "checksum": "2be3277be3b9ca763a18937c3a29c533"
+      "checksum": "772357b46f651972b9e9dd9c9e23e7da"
     },
     "R/template_index.R": {
       "checksum": "4d46c600e5d986d7aadb50c1bf425f77"
@@ -3136,7 +3136,7 @@
       "checksum": "567e1a78e9728987c8cd4b348da0560c"
     },
     "R/template_ui.R": {
-      "checksum": "9655b939d0bf8cadb0c845281ca357a6"
+      "checksum": "a937265ecc22d00239a7c766f375cc1f"
     },
     "R/theme.R": {
       "checksum": "384fbd16ebfc000adceddd36d8fde3de"
@@ -3145,7 +3145,7 @@
       "checksum": "93d843db3234a27298b5d60fcd05e1cf"
     },
     "R/utils_dta.R": {
-      "checksum": "a0f8c3cc5eff1c5c86fae18479a33a26"
+      "checksum": "183910f8ec1165631922678bb72d0d58"
     },
     "R/utils_export.R": {
       "checksum": "92089890cb9586311997d654a71bf4ca"
@@ -3160,7 +3160,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "eb01d954866970e65c5b97dc36ab8486"
+      "checksum": "35968a72a9a5718b18f2d1c059101aa0"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

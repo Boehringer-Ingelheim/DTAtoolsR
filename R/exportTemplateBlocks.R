@@ -14,6 +14,8 @@
     "{RECEIVER_CONTACTS_TABLE}" = "Receiver contacts as a table",
     "{SIGNATURES_TABLE}" = "Approval and signatures table",
     "{VERSION_HISTORY_TABLE}" = "Version history as a table",
+    "{STUDY_TABLE}" = "Study and protocol identity as a table; omitted when empty",
+    "{AGREEMENT_SECTIONS}" = "Ordered agreement headings and plain narrative paragraphs; omitted when empty",
     "{AUTHORIZED_CORRECTIONS_LIST}" = "Authorized-for-corrections names as a bulleted list"
   )
 }
@@ -467,6 +469,8 @@
     "{RECEIVER_CONTACTS_TABLE}" = .tv_block_render_contacts(doc, dta, spec$arg, side = "receiver"),
     "{SIGNATURES_TABLE}" = .tv_block_render_signatures(doc, dta, spec$arg),
     "{VERSION_HISTORY_TABLE}" = .tv_block_render_version_history(doc, dta, spec$arg),
+    "{STUDY_TABLE}" = .add_study_section(doc, dta@metadata@study, heading = .tv_block_heading),
+    "{AGREEMENT_SECTIONS}" = .add_agreement_sections(doc, dta@metadata@sections, heading = .tv_block_heading),
     "{AUTHORIZED_CORRECTIONS_LIST}" = .tv_block_render_authorized_corrections(doc, dta, spec$arg),
     doc
   )

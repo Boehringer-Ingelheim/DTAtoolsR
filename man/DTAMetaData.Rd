@@ -15,7 +15,9 @@ DTAMetaData(
   transmission = list(),
   error_handling = NULL,
   authorized_for_corrections = NULL,
-  template = list()
+  template = list(),
+  study = list(),
+  sections = list()
 )
 }
 \arguments{
@@ -38,7 +40,12 @@ DTAMetaData(
 
 \item{supplier}{list with affiliation and contacts}
 
-\item{transmission}{list with type, frequency, notification, dates (first/last transfer), and flags}
+\item{transmission}{list with type, frequency, notification, dates (first/last
+transfer), and flags. Optional text fields \code{extent}, \code{scope},
+\code{packaging}, \code{security}, \code{checksum}, \code{test_requirements},
+and \code{blinding_requirements} must each be a single non-\code{NA}
+character string; blank strings are allowed for drafts. Existing fields
+and other extensions, including structured values, retain their semantics.}
 
 \item{error_handling}{character description of error handling procedures}
 
@@ -48,13 +55,29 @@ DTAMetaData(
 engine that generated this document, e.g. \code{list(id = "...", version = "...")}.
 Never set by a specification author. When non-empty, \code{id} and
 \code{version} are each required to be a single non-empty character.}
+
+\item{study}{Optional named list containing \code{id} and/or
+\code{protocol_id}. Each supplied value must be a single non-\code{NA},
+nonblank character string. Unknown, duplicate, or unnamed fields are
+rejected. Study identity is independent of \code{header} and imposes no
+dataset constraints.}
+
+\item{sections}{Ordered named list of agreement section records, serialized
+as a YAML mapping. Names must be unique identifiers matching
+\code{^[A-Za-z][A-Za-z0-9_]*$}. Each record contains exactly \code{title}
+(a single non-\code{NA}, nonblank character string) and \code{text}
+(a single non-\code{NA} character string, which may be blank for a draft).
+Section order and text are preserved, without an executable Markdown or
+HTML contract. Empty \code{study} and \code{sections} lists are omitted
+from list and YAML serialization.}
 }
 \value{
 An object of class DTAMetaData.
 }
 \description{
 This class holds comprehensive metadata information for Data Transfer Agreements,
-including version history, transmission details, error handling, and contact information.
+including study identity, ordered agreement sections, version history,
+transmission details, error handling, and contact information.
 }
 \details{
 Date-valued metadata fields (\code{date}, \code{transmission$date_first_transfer}
@@ -88,4 +111,10 @@ discarded qualification can never pass silently.
 \examples{
 
 DTAMetaData(title = "Clinical Data Transfer", version = "1.0")
+DTAMetaData(
+  title = "Clinical Data Transfer", version = "1.0",
+  study = list(id = "ST-001", protocol_id = "P-001"),
+  sections = list(scope = list(title = "Scope", text = "First line\nSecond line")),
+  transmission = list(packaging = "One archive per transfer", security = "")
+)
 }

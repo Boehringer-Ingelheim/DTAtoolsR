@@ -4,7 +4,7 @@
 \alias{.add_metadata_section}
 \title{Add metadata section with key-value pairs}
 \usage{
-.add_metadata_section(doc, title, metadata_list)
+.add_metadata_section(doc, title, metadata_list, truncate = TRUE)
 }
 \description{
 Add metadata section with key-value pairs

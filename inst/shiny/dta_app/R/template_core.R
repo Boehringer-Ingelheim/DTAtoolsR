@@ -596,6 +596,17 @@ apply_template_metadata_path <- function(dta, path, value) {
         top, path
       ))
     }
+    # An optional identity option left blank means "not supplied", not a
+    # supplied invalid ID. Only these leaf effects interpret blank as removal;
+    # base.metadata.study and direct constructor/YAML input stay strict.
+    if (
+      identical(top, "study") && length(tail_keys) == 1L &&
+        tail_keys %in% c("id", "protocol_id") &&
+        is.character(value) && length(value) == 1L && is.null(dim(value)) &&
+        !is.na(value) && !nzchar(trimws(value, whitespace = "[\\h\\v]"))
+    ) {
+      value <- NULL
+    }
     current <- tryCatch(S7::prop(md, top), error = function(e) NULL) %||% list()
     S7::prop(md, top) <- list_set_path(current, tail_keys, value)
   } else {

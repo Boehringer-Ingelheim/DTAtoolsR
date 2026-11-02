@@ -1,7 +1,9 @@
 #' @title Export DTA Metadata as Professional Document
 #' @description
 #' Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA object,
-#' including metadata, version history, transmission details, and approval signatures.
+#' including study identity, ordered agreement sections, version history,
+#' transmission details, and approval signatures. Study and agreement sections
+#' are omitted when absent. Agreement text is rendered as plain narrative.
 #'
 #' @import S7
 #' @importFrom officer read_docx body_add_par body_add_break
@@ -239,6 +241,7 @@ write_dta <- function(
   if (!is.null(meta@date)) metadata[["Date"]] <- as.character(meta@date)
 
   doc <- .add_metadata_section(doc, "Document Information", metadata)
+  doc <- .add_study_section(doc, meta@study)
 
   # Version history
   ft_history <- .build_version_history_table(meta@version_history)
@@ -259,7 +262,7 @@ write_dta <- function(
     doc <- .add_organization_section(doc, "Receiver Information", meta@receiver)
   }
 
-  # Process Information: keep this chapter immediately before Datasets.
+  # Process Information precedes the agreement clauses and dataset details.
   # Signatures are no longer part of it (they open the document), so this
   # chapter appears only when there is genuine process content to show.
   has_process_information <- length(meta@transmission) > 0 ||
@@ -272,7 +275,7 @@ write_dta <- function(
     if (length(meta@transmission) > 0) {
       doc <- .add_heading(doc, "Transmission Details", level = 3)
       trans_meta <- as.list(meta@transmission)
-      doc <- .add_metadata_section(doc, "", trans_meta)
+      doc <- .add_metadata_section(doc, "", trans_meta, truncate = FALSE)
     }
 
     if (!is.null(meta@error_handling)) {
@@ -283,6 +286,8 @@ write_dta <- function(
 
     doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections)
   }
+
+  doc <- .add_agreement_sections(doc, meta@sections)
 
   # Datasets: file specifications, column specifications, and validation rules per dataset
   if (length(dta@datasets) > 0) {
@@ -360,6 +365,12 @@ write_dta <- function(
     lines <- c(lines, .df_to_md_table(doc_info_df), "")
   }
 
+  if (length(meta@study) > 0) {
+    study_df <- .study_to_df(meta@study)
+    study_df$Details <- .plain_text_to_md(study_df$Details, table = TRUE)
+    lines <- c(lines, "## Study", "", .df_to_md_table(study_df), "")
+  }
+
   if (length(meta@version_history) > 0) {
     lines <- c(lines, "## Version History", "")
     vh_df <- get_version_history_df(meta)
@@ -371,7 +382,7 @@ write_dta <- function(
   if (length(meta@transmission) > 0) {
     lines <- c(lines, "## Transmission Details", "")
     trans_pairs <- as.list(meta@transmission)
-    lines <- c(lines, .kv_bullets_md(trans_pairs), "")
+    lines <- c(lines, .kv_bullets_md(trans_pairs, truncate = FALSE), "")
   }
 
   if (!is.null(meta@error_handling)) {
@@ -394,6 +405,16 @@ write_dta <- function(
   # Approval & Signatures section is intentionally omitted from write_dta():
   # individual contacts already carry inline signature lines in the
   # Receiver / Supplier sections above. Datasets section follows.
+
+  if (length(meta@sections) > 0) {
+    lines <- c(lines, "## Agreement Sections", "")
+    for (section in meta@sections) {
+      lines <- c(
+        lines, paste("###", .plain_text_to_md(section$title)), "",
+        .plain_text_to_md(section$text), ""
+      )
+    }
+  }
 
   # Datasets: file specifications, column specifications, and validation rules per dataset
   if (length(dta@datasets) > 0) {
