@@ -3127,7 +3127,7 @@
       "checksum": "772357b46f651972b9e9dd9c9e23e7da"
     },
     "R/template_index.R": {
-      "checksum": "4d46c600e5d986d7aadb50c1bf425f77"
+      "checksum": "e6f088862b9ee7c1694ec1d4dab255ef"
     },
     "R/template_inherit.R": {
       "checksum": "df2cfe3cd9154c8771a7af2bbfe33a3d"
@@ -3136,13 +3136,13 @@
       "checksum": "567e1a78e9728987c8cd4b348da0560c"
     },
     "R/template_ui.R": {
-      "checksum": "a937265ecc22d00239a7c766f375cc1f"
+      "checksum": "32fcfd3c2c8ea1baacc42b116bc5642a"
     },
     "R/theme.R": {
-      "checksum": "384fbd16ebfc000adceddd36d8fde3de"
+      "checksum": "e45ac15e1fdda62f66264a5feea17444"
     },
     "R/ui_components.R": {
-      "checksum": "93d843db3234a27298b5d60fcd05e1cf"
+      "checksum": "17ce1b17b065e49c02351d703b5b89e9"
     },
     "R/utils_dta.R": {
       "checksum": "183910f8ec1165631922678bb72d0d58"
@@ -3160,7 +3160,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "35968a72a9a5718b18f2d1c059101aa0"
+      "checksum": "55d3adf5647de066750a2468996aa37f"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
