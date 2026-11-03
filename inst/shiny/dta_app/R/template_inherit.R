@@ -923,7 +923,7 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
 
   # The scalars read the same four states, so `label: ""` (blank but present)
   # and `label: null` (gone) stop being the same instruction.
-  for (field in c("label", "description", "kind")) {
+  for (field in c("label", "description", "kind", "variants")) {
     state <- dta_template_section_state(def, field)
     if (identical(state, "absent")) {
       next
@@ -954,6 +954,26 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # seals -- the child's own are unioned in below, and binding a template to its
   # own seal would forbid it from writing the field it is sealing.
   dta_template_check_sealed(parent_def, merged, as.character(def$id %||% "<unknown>"))
+  if (length(parent_def$sealed %||% character(0)) > 0 && !is.null(merged$variants)) {
+    dta_template_validate_variants(merged)
+    for (choice in merged$variants$choices) {
+      selection <- stats::setNames(list(choice$value), merged$variants$id)
+      parent_effective <- parent_def
+      # An ancestor may vary its own sealed fields. Preserve that exemption
+      # only for the same selector/value, comparing fully effective definitions
+      # so shared child options cannot change an inherited choice indirectly.
+      if (identical(parent_def$variants$id, merged$variants$id) &&
+        any(vapply(parent_def$variants$choices, function(it) {
+          identical(it$value, choice$value)
+        }, logical(1)))) {
+        parent_effective <- resolve_template_variant(parent_def, selection)
+      }
+      dta_template_check_sealed(
+        parent_effective, resolve_template_variant(merged, selection),
+        as.character(def$id %||% "<unknown>")
+      )
+    }
+  }
   merged$sealed <- dta_template_union_paths(parent_def$sealed, def$sealed)
   merged$required <- dta_template_union_paths(parent_def$required, def$required)
 

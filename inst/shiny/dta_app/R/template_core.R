@@ -116,7 +116,8 @@ read_dta_creation_template <- function(template_path) {
     }
     # Abstract bases may provide only shared metadata. A concrete descendant
     # must still supply or inherit a dataset, checked after resolution below.
-    if (length(def$datasets %||% list()) == 0 && !inherits_from && !isTRUE(def$abstract)) {
+    if (length(def$datasets %||% list()) == 0 && is.null(def$variants) &&
+      !inherits_from && !isTRUE(def$abstract)) {
       stop("Template must define at least one dataset in datasets or base.datasets.")
     }
     # `id` is the one field that is never inherited -- every template file must
@@ -139,7 +140,8 @@ read_dta_creation_template <- function(template_path) {
 # key is how a child says "inherit", and a default written in ahead of the
 # merge turns that into an override with the default.
 dta_template_finalize_def <- function(def) {
-  if (length(def$datasets %||% list()) == 0 && !isTRUE(def$abstract)) {
+  dta_template_validate_variants(def)
+  if (length(def$datasets %||% list()) == 0 && is.null(def$variants) && !isTRUE(def$abstract)) {
     cli::cli_abort("Template must define at least one dataset in datasets or base.datasets.")
   }
   def$label <- as.character(def$label %||% def$id %||% "")
@@ -147,6 +149,84 @@ dta_template_finalize_def <- function(def) {
   def$datasets <- def$datasets %||% list()
   def$options <- def$options %||% list()
   def
+}
+
+# A structural choice is deliberately separate from editable metadata options.
+# Every choice supplies a complete dataset list; there is no implicit platform.
+dta_template_validate_variants <- function(def) {
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(invisible(NULL))
+  }
+  scalar <- function(x) is.character(x) && length(x) == 1L && !is.na(x) && nzchar(x)
+  if (!dta_template_is_mapping(spec) ||
+    length(setdiff(names(spec), c("id", "label", "choices"))) > 0 ||
+    !scalar(spec$id) || is.null(spec$choices) ||
+    !is.list(spec$choices) || length(spec$choices) == 0 || !is.null(names(spec$choices))) {
+    cli::cli_abort("Template variants must declare an id and a sequence of choices.")
+  }
+  if (!is.null(spec$label) && !scalar(spec$label)) {
+    cli::cli_abort("Template variant {.val {spec$id}} must have a nonempty label.")
+  }
+  option_ids <- vapply(def$options %||% list(), function(opt) as.character(opt$id %||% ""), character(1))
+  if (spec$id %in% option_ids) {
+    cli::cli_abort("Template variant {.val {spec$id}} conflicts with a metadata option id.")
+  }
+  values <- character(0)
+  for (choice in spec$choices) {
+    if (!dta_template_is_mapping(choice) || !scalar(choice$value) ||
+      choice$value %in% c("__blank__", "__custom__") ||
+      length(setdiff(names(choice), c("value", "label", "source", "base", "options", "datasets"))) > 0) {
+      cli::cli_abort("Template variant {.val {spec$id}} contains an invalid choice.")
+    }
+    if ((!is.null(choice$label) && !scalar(choice$label)) ||
+      !is.list(choice$datasets) || length(choice$datasets) == 0 ||
+      !is.null(names(choice$datasets)) ||
+      (!is.null(choice$base) && !is.list(choice$base)) ||
+      (!is.null(choice$options) && !is.list(choice$options)) ||
+      (!is.null(choice$source) && !dta_template_is_mapping(choice$source))) {
+      cli::cli_abort("Template variant {.val {spec$id}} choice {.val {choice$value}} must supply datasets and valid metadata/options.")
+    }
+    if (choice$value %in% values) {
+      cli::cli_abort("Template variant {.val {spec$id}} repeats choice {.val {choice$value}}.")
+    }
+    values <- c(values, choice$value)
+    merged_options <- dta_template_merge_options(def$options %||% list(), choice$options %||% list())
+    if (spec$id %in% vapply(merged_options, function(opt) as.character(opt$id %||% ""), character(1))) {
+      cli::cli_abort("Template variant {.val {spec$id}} conflicts with a metadata option id.")
+    }
+  }
+  invisible(NULL)
+}
+
+resolve_template_variant <- function(def, selections = list()) {
+  def <- attr(def, "variant_definition") %||% def
+  dta_template_validate_variants(def)
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(def)
+  }
+  value <- selections[[spec$id]]
+  values <- vapply(spec$choices, function(choice) choice$value, character(1))
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !(value %in% values)) {
+    cli::cli_abort(
+      "Choose a supported value for template variant {.val {spec$id}}: {paste(values, collapse = ', ')}."
+    )
+  }
+  choice <- spec$choices[[match(value, values)]]
+  resolved <- def
+  resolved$base <- if ("base" %in% names(choice)) {
+    dta_template_merge_value(def$base %||% list(), choice$base)
+  } else {
+    def$base
+  }
+  resolved$options <- dta_template_merge_options(def$options %||% list(), choice$options %||% list())
+  resolved$datasets <- choice$datasets
+  attr(resolved, "variant_definition") <- def
+  attr(resolved, "variant_selection") <- list(
+    id = spec$id, value = value, source = choice$source
+  )
+  resolved
 }
 
 # yaml handlers that keep every scalar number as the text the author wrote.
@@ -806,6 +886,7 @@ create_dta_from_template <- function(template_def, template_path, selections = l
                                      vocab_selections = NULL) {
   dta_try({
     if (!is.list(template_def)) stop("Template definition is invalid.")
+    template_def <- resolve_template_variant(template_def, selections)
     # ${today} is known upfront and has to be resolved BEFORE base metadata is
     # applied: metadata.date is a Date property, so an unresolved token would be
     # rejected as an invalid date long before any post-pass could see it.
@@ -1016,6 +1097,8 @@ create_dta_from_template <- function(template_def, template_path, selections = l
     # `base.metadata` or an option effect, and routing the ENGINE's own write
     # through the same gate would defeat the very check it exists to enforce.
     if (!is.null(provenance)) {
+      variant <- attr(template_def, "variant_selection")
+      if (!is.null(variant)) provenance$variant <- variant
       # The caller assembles the provenance record BEFORE calling this
       # function, which means its `datasets` section was computed from a
       # separate build. Overwrite it with what step 1 actually produced.

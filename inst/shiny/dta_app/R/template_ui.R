@@ -443,6 +443,24 @@ template_picker_detail_ui <- function(loaded, versions, selected_version, index)
 
 # ---- Options dialog: one control per option --------------------------------
 
+template_variant_input <- function(def) {
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(NULL)
+  }
+  dta_template_validate_variants(def)
+  label <- as.character(spec$label %||% spec$id)
+  choices <- stats::setNames(
+    vapply(spec$choices, function(choice) choice$value, character(1)),
+    vapply(spec$choices, function(choice) choice$label %||% choice$value, character(1))
+  )
+  selectInput(
+    paste0("tmpl_variant_", spec$id), label,
+    choices = c(stats::setNames("", paste("Choose", label)), choices),
+    selected = "", selectize = FALSE, width = "100%"
+  )
+}
+
 # Build one input control for a creation-template option.
 #
 # An option with `choices:` is ONE combobox rather than a dropdown padded with

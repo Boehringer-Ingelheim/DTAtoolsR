@@ -358,3 +358,17 @@ requirements:
       blank mapping, and bubbling input event are checked structurally; the
       developer suite separately verifies the rendered control's source
       suggestions and editable multiline input.
+
+  - id: REQ-APP-025
+    text: >
+      A creation template with structural variants shall require an explicit
+      declared choice before building datasets or showing variant-specific
+      agreement controls. Its choice shall replace the dataset list and merge
+      metadata defaults and options over the inherited definition, without
+      leaking another variant's suggestions. Missing or unsupported choices
+      shall fail without creating a document. Provenance shall record the
+      selected variant and source revision and retain them through YAML.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, validate_template]
+    source: inst/shiny/dta_app/R/template_core.R; inst/shiny/dta_app/app.R

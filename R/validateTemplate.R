@@ -542,12 +542,29 @@
   add <- function(severity, code, message) {
     rows[[length(rows) + 1L]] <<- .dta_template_row(path, "dta_creation_template", id, version, severity, code, message)
   }
+  variants_valid <- tryCatch(
+    {
+      .dta_template_engine_get("dta_template_validate_variants")(def)
+      TRUE
+    },
+    error = function(e) e
+  )
+  if (inherits(variants_valid, "condition")) {
+    add("error", "variant_invalid", conditionMessage(variants_valid))
+    return(rows)
+  }
 
   allowed_fields <- .dta_template_engine_get("dta_template_metadata_fields")()
   machine_fields <- .dta_template_engine_get("dta_metadata_machine_fields")()
 
   # ---- target_invalid / target_machine_owned ------------------------------
   opts <- def[["options"]] %||% list()
+  variant_choices <- def[["variants"]][["choices"]] %||% list()
+  if (is.list(variant_choices)) {
+    opts <- c(opts, unlist(lapply(variant_choices, function(choice) {
+      if (is.list(choice)) choice[["options"]] %||% list() else list()
+    }), recursive = FALSE))
+  }
   if (is.list(opts)) {
     for (opt in opts) {
       for (p in .dta_template_option_targets(opt)) {
@@ -589,6 +606,11 @@
 
   # ---- dataset_template_unresolved / patch_incoherent ---------------------
   ds_entries <- def[["datasets"]] %||% def[["base"]][["datasets"]] %||% list()
+  if (is.list(variant_choices)) {
+    ds_entries <- c(ds_entries, unlist(lapply(variant_choices, function(choice) {
+      if (is.list(choice)) choice[["datasets"]] %||% list() else list()
+    }), recursive = FALSE))
+  }
   if (is.list(ds_entries)) {
     for (entry in ds_entries) {
       if (!is.list(entry)) next
@@ -724,15 +746,25 @@
       # instantiation would, and patch_incoherent/dataset_template_unresolved
       # stay genuinely distinct signals from a build failure, not a
       # foregone conclusion for every template using this feature.
-      build_res <- .dta_template_engine_get("create_dta_from_template")(
-        resolved$def, path,
-        index = index_df,
-        # Slots are read off the RESOLVED definition, so a slot a child
-        # inherited through `extends:` is driven here too.
-        vocab_selections = .dta_template_vocab_dry_selections(resolved$def, index_df)
-      )
-      if (!isTRUE(build_res$ok)) {
-        add("error", "instantiate_failed", build_res$error)
+      spec <- resolved$def[["variants"]]
+      selections <- if (is.null(spec)) {
+        list(list())
+      } else {
+        lapply(spec[["choices"]], function(choice) {
+          stats::setNames(list(choice[["value"]]), spec[["id"]])
+        })
+      }
+      for (selection in selections) {
+        selected_def <- .dta_template_engine_get("resolve_template_variant")(resolved$def, selection)
+        build_res <- .dta_template_engine_get("create_dta_from_template")(
+          selected_def, path, selections = selection,
+          index = index_df,
+          vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df)
+        )
+        if (!isTRUE(build_res$ok)) {
+          prefix <- if (is.null(spec)) "" else paste0("[", selection[[spec[["id"]]]], "] ")
+          add("error", "instantiate_failed", paste0(prefix, build_res$error))
+        }
       }
     }
   }

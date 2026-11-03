@@ -6,12 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Child creation-template variants can no longer bypass ancestor seals through
+  metadata defaults, option effects or dataset replacement. Unchanged
+  ancestor-authored choices retain their existing seal exemption.
+
 ### Changed
 
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
 ### Added
+
+- Creation templates can offer an explicit structural platform choice before
+  agreement editing. Each choice selects its own datasets, metadata defaults
+  and source suggestions; missing or unsupported choices are rejected.
+  Template validation checks every variant, and document provenance records
+  the selected platform and source revision.
 
 - Creation-template narrative options with source suggestions now retain an
   editable multiline input; choosing a suggestion or `(leave blank)` updates
