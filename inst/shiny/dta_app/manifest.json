@@ -3139,7 +3139,7 @@
       "checksum": "a937265ecc22d00239a7c766f375cc1f"
     },
     "R/theme.R": {
-      "checksum": "384fbd16ebfc000adceddd36d8fde3de"
+      "checksum": "a4b1b42eaba266a71e52ec1c185cad62"
     },
     "R/ui_components.R": {
       "checksum": "93d843db3234a27298b5d60fcd05e1cf"
@@ -3160,7 +3160,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "35968a72a9a5718b18f2d1c059101aa0"
+      "checksum": "80b5405ff01c0085c906b1e87fbc358d"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"
