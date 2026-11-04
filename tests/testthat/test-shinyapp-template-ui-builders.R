@@ -440,6 +440,25 @@ test_that("the summary sentence pluralises datasets, options, parties and vocabu
   expect_match(html_two, "Asks for 2 options, 2 parties and 2 vocabularies.", fixed = TRUE)
 })
 
+test_that("the summary sentence names an inline dataset by its id, not by its label", {
+  detail_ui <- app_fn("template_picker_detail_ui")
+  versions <- stats::setNames("1.0", "1.0")
+
+  # `as:` outranks `id:`; an inline entry's `name` is only its label, so it is
+  # never what the sentence prints when an id (or `as:`) is there.
+  def <- demo_def(datasets = list(
+    list(id = "dm", name = "Demographics", type = "tabular"),
+    list(as = "vs_copy", id = "vs", name = "Vital signs"),
+    # Written before datasets had an `id`: its identifier is in `name`.
+    list(name = "legacy_ds", type = "file")
+  ))
+  html <- html_of(detail_ui(demo_loaded(def), versions, "1.0", NULL))
+
+  expect_match(html, "Builds 3 datasets, dm, vs_copy, legacy_ds.", fixed = TRUE)
+  expect_false(grepl("Demographics", html, fixed = TRUE))
+  expect_false(grepl("Vital signs", html, fixed = TRUE))
+})
+
 test_that("an unusable template reports why and STILL offers the version control", {
   versions <- stats::setNames(c("1.1", "1.0"), c("1.1", "1.0"))
   html <- html_of(app_fn("template_picker_detail_ui")(

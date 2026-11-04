@@ -27,7 +27,7 @@ qagreement_export_dta <- function() {
       transmission = qagreement_export_transmission()
     ),
     datasets = list(DTADataSetTabular(
-      name = "probe_data",
+      id = "probe_data",
       specs = DTAColumnSpecCollection(columns = list(
         ROW = DTAColumnSpec(id = "ROW", type = "SAS Char")
       ))

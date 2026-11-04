@@ -34,7 +34,7 @@ fr_specs <- function() {
 
 fr_verdict <- function(path, filename = basename(path), specs = fr_specs(), stream = "never") {
   ds <- DTADataSetTabular(
-    name = "r", specs = specs,
+    id = "r", specs = specs,
     files = list(DTAFileCSV(filename = filename))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
@@ -320,7 +320,7 @@ test_that("OQ-FILE-036 | handler_index routes a delivered file to the handler it
   fr_write_raw(c("ID\tAGE", "A0000002\t40"), p_tsv, sep = "\n")
 
   ds <- DTADataSetTabular(
-    name = "multi", specs = fr_specs(),
+    id = "multi", specs = fr_specs(),
     files = list(DTAFileCSV(filename = "a.csv"), DTAFileTSV(filename = "b.tsv"))
   )
   ds <- load_file(ds, file = p_csv, handler_index = 1, stream = "never")

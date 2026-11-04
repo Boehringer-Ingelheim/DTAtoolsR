@@ -20,8 +20,8 @@ et_table_frame <- function() {
   data.frame(ID = c("B02", "A01", "C03"), AGE = c(30, NA, 25), stringsAsFactors = FALSE)
 }
 
-et_dataset <- function(frame = et_table_frame(), name = "et") {
-  DTADataSetTabular(name = name, specs = et_table_specs(), tables = list(t1 = frame))
+et_dataset <- function(frame = et_table_frame(), id = "et") {
+  DTADataSetTabular(id = id, specs = et_table_specs(), tables = list(t1 = frame))
 }
 
 # A delimited round trip does not promise to preserve R's storage mode (an
@@ -48,7 +48,7 @@ et_poison_dataset <- function(env = parent.frame()) {
 
   frame <- data.frame(ID = 1:5, EXTRA = structure(1:5, class = cls))
   DTADataSetTabular(
-    name = "et_poison",
+    id = "et_poison",
     specs = DTAColumnSpecCollection(columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Num", nullable = FALSE)
     )),
@@ -125,7 +125,7 @@ test_that("OQ-EXPORT-029 | arrange_by with named columns sorts by those columns 
   # sorting by every column sorts GROUP first. The two results below can only
   # coincide if arrange_by is actually restricting the sort to ID.
   frame <- data.frame(GROUP = c("B", "A", "B"), ID = c("2", "2", "1"), stringsAsFactors = FALSE)
-  ds <- DTADataSetTabular(name = "et_arrange", specs = specs, tables = list(t1 = frame))
+  ds <- DTADataSetTabular(id = "et_arrange", specs = specs, tables = list(t1 = frame))
   dir <- qa_tempdir()
 
   by_id <- file.path(dir, "by_id.csv")
@@ -295,7 +295,7 @@ test_that("OQ-EXPORT-035 | the written file re-read reaches the same validation 
   write_table_to_file(et_dataset(), table = "t1", filename = out, sep = ",", na = "", overwrite = TRUE, quiet = TRUE, arrange_by = NULL)
 
   ds2 <- DTADataSetTabular(
-    name = "et2", specs = et_table_specs(),
+    id = "et2", specs = et_table_specs(),
     files = list(DTAFileCSV(filename = basename(out)))
   )
   ds2 <- load_file(ds2, file = out, handler_index = 1, stream = "never")

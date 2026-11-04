@@ -2,19 +2,17 @@
 % Please edit documentation in R/exportTemplateRegions.R
 \name{.tv_dataset_variables}
 \alias{.tv_dataset_variables}
-\title{Resolve the six per-dataset placeholders for one dataset}
+\title{Resolve the seven per-dataset placeholders for one dataset}
 \usage{
-.tv_dataset_variables(ds, name)
+.tv_dataset_variables(ds)
 }
 \arguments{
 \item{ds}{A \code{DTADataSet} (or subclass) object.}
-
-\item{name}{Character. The dataset's name -- its key in \code{dta@datasets}.}
 }
 \value{
 A named list keyed exactly like \code{\link[=.tv_dataset_catalog]{.tv_dataset_catalog()}}.
 }
 \description{
-Resolve the six per-dataset placeholders for one dataset
+Resolve the seven per-dataset placeholders for one dataset
 }
 \keyword{internal}

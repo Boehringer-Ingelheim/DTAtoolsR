@@ -30,7 +30,7 @@ template's \code{word/document.xml}. A region is opened by a top-level body
 paragraph whose whole (trimmed) text is \verb{\{#DATASETS\}} and closed by the
 next top-level body paragraph whose whole text is \verb{\{/DATASETS\}}; every body
 child strictly between the two -- paragraph or table -- is copied once per
-dataset in \code{names(dta@datasets)}, in document order, with the six
+dataset in \code{names(dta@datasets)}, in document order, with the seven
 per-dataset placeholders (\code{\link[=.tv_dataset_variables]{.tv_dataset_variables()}}) resolved inside each
 copy and a bare dataset block bound to that dataset
 (\code{\link[=.tv_bind_region_block]{.tv_bind_region_block()}}). The two marker paragraphs and the original

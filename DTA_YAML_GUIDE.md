@@ -20,7 +20,7 @@ the information you have allows.
 metadata:   # agreement-level information (document header, parties, transfer)
   ...
 datasets:   # one or more deliverables; each is validated independently
-  - name: ...
+  - id: ...
     ...
 ```
 
@@ -115,14 +115,20 @@ A list. Each dataset:
 
 | Key | Notes |
 | --- | --- |
-| `name` | **required**, unique, no spaces (`lab_results`). |
+| `id` | **required**, unique, no spaces (`lab_results`). The key every validation message, `load_file()` call and `{COLUMN_SPECS:<id>}` placeholder uses. |
 | `type` | **required**: `tabular` (parsed and validated) or `file` (only checked to exist, be readable and non-empty: PDFs, archives, images). |
-| `description` | What the deliverable contains and why. Always write it. |
+| `name` | Short human-readable name (`Laboratory results`), shown in the app and as the heading in exported documents. Always write it. |
+| `description` | Longer free text: what the deliverable contains and why. Write it whenever there is more to say than the name. |
 | `files` | One file handler (mapping) or a list of handlers. |
 | `columns` | `tabular` only. |
 | `rules` | `tabular` only. |
 
 No other keys (`template_source/version/date` are machine-written).
+
+A file written before `id` existed carried the identifier in `name` and the
+short label in `description`. Such an entry (`name` but no `id`) is still
+read: `name` becomes the `id` and `description` the `name`. Write the
+current shape in new files.
 
 ### `files` — handler keys
 
@@ -390,8 +396,9 @@ metadata:
       text: Subjects are identified by USUBJID only; no direct identifiers are transferred.
 
 datasets:
-  - name: lab_results
+  - id: lab_results
     type: tabular
+    name: Laboratory results
     description: Central laboratory results, one row per subject, visit and test.
     files:
       type: csv
@@ -508,8 +515,9 @@ datasets:
             if_scope: any
             then_scope: any
 
-  - name: lab_manual
+  - id: lab_manual
     type: file
+    name: Laboratory manual
     description: Laboratory manual describing methods and reference ranges.
     files:
       type: any
@@ -530,7 +538,7 @@ datasets:
       `sections` filled from the available information. Do not invent facts —
       if something is unknown, leave it out (or use a blank text section as a
       visible draft placeholder) rather than guessing.
-- [ ] Every dataset has a `description`; every file pattern is anchored and has a `pattern_description`.
+- [ ] Every dataset has an `id` and a `name` (and a `description` where there is more to say); every file pattern is anchored and has a `pattern_description`.
 - [ ] Every delivered column is declared, with `label`, `type`, explicit `nullable`, `description`.
 - [ ] Every column carries `values`, an anchored `pattern`, or a `length`; dates have a pattern.
 - [ ] `values` and `pattern` never on the same column; text codes quoted.

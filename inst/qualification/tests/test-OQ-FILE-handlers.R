@@ -231,7 +231,7 @@ test_that("OQ-FILE-011 | min_number_of_files and max_number_of_files sum across 
   f_range <- DTAFileAny(filename = "^scan_.*", pattern = TRUE, min_number_of_files = 2, max_number_of_files = 4)
   qa_step("a handler's own bounds are returned unchanged", list(min = 2, max = 4), list(min = min_number_of_files(f_range), max = max_number_of_files(f_range)))
 
-  ds <- DTADataSetFile(name = "d", files = list(f_exact, f_range))
+  ds <- DTADataSetFile(id = "d", files = list(f_exact, f_range))
   qa_step(
     "a dataset's bounds are the sum of every handler's own bounds (1+2, 1+4)",
     list(min = 3, max = 5),
@@ -283,7 +283,7 @@ test_that("OQ-FILE-054 | check() reports every declared pattern with no delivere
   # One handler declaring two patterns. Only the "a_" pattern is delivered;
   # the "b_" pattern never arrives.
   h <- DTAFileAny(filename = c("^a_.*\\.pdf$", "^b_.*\\.pdf$"), pattern = TRUE, number_of_files = 2)
-  ds <- DTADataSetFile(name = "d", files = list(h))
+  ds <- DTADataSetFile(id = "d", files = list(h))
   ds <- load_file(ds, file = path_a, handler_index = 1)
   ds <- check(ds, quiet = TRUE, persist = FALSE)
 

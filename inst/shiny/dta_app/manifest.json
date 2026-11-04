@@ -3112,7 +3112,7 @@
   },
   "files": {
     "R/dataset_template.R": {
-      "checksum": "a3416a9585ea3d04de7d59d0a01ce802"
+      "checksum": "2ec3638616d3f2f2c5bdd3498bb09413"
     },
     "R/party_profiles.R": {
       "checksum": "55eaad81a9ac5be1ad97c852e44eba16"
@@ -3121,7 +3121,7 @@
       "checksum": "f0341471cdc200c6b0ea1d96ef4770c5"
     },
     "R/template_create.R": {
-      "checksum": "07e2b1b6e33f5c79859a4c4f44409112"
+      "checksum": "f928c22b8303724aff84e5cff041b569"
     },
     "R/template_diff.R": {
       "checksum": "772357b46f651972b9e9dd9c9e23e7da"
@@ -3130,22 +3130,22 @@
       "checksum": "4d46c600e5d986d7aadb50c1bf425f77"
     },
     "R/template_inherit.R": {
-      "checksum": "df2cfe3cd9154c8771a7af2bbfe33a3d"
+      "checksum": "503b89dca65d2a9e435cf8f7bbcc1d93"
     },
     "R/template_sources.R": {
       "checksum": "567e1a78e9728987c8cd4b348da0560c"
     },
     "R/template_ui.R": {
-      "checksum": "a937265ecc22d00239a7c766f375cc1f"
+      "checksum": "396ddc256f347aeda4898b4d5be5fa1b"
     },
     "R/theme.R": {
-      "checksum": "a4b1b42eaba266a71e52ec1c185cad62"
+      "checksum": "087a3bf3e76b1b8e8e3bb84593726103"
     },
     "R/ui_components.R": {
-      "checksum": "93d843db3234a27298b5d60fcd05e1cf"
+      "checksum": "2f64d3919b568f6800a8733a8a1a73c2"
     },
     "R/utils_dta.R": {
-      "checksum": "183910f8ec1165631922678bb72d0d58"
+      "checksum": "040cccfd1505b46fb89b1a57fd237a26"
     },
     "R/utils_export.R": {
       "checksum": "92089890cb9586311997d654a71bf4ca"
@@ -3154,13 +3154,13 @@
       "checksum": "14395df11bfe7b9c920e1d89d18ac7e3"
     },
     "R/vocabulary.R": {
-      "checksum": "bc7120fb72d6e9be2720991f8bd3010b"
+      "checksum": "fc5e45a05c9630334de419cbb51926f3"
     },
     "VERSION": {
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "80b5405ff01c0085c906b1e87fbc358d"
+      "checksum": "4686eb545b45f76a9a8c8b82da04cc82"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

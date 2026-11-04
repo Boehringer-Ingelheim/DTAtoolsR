@@ -23,8 +23,9 @@ options:
     help: Name of the organisation supplying this dataset.
 
 dataset:
-  name: starter_data
+  id: starter_data
   type: tabular
+  name: Starter dataset
   description: Example tabular dataset for a new template repository.
 
   files:

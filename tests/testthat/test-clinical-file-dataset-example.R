@@ -28,12 +28,22 @@ test_that("the example declares a tabular dataset and a file dataset side by sid
 
   expect_length(dta@datasets, 2)
   expect_equal(
-    unname(vapply(dta@datasets, function(ds) ds@name, character(1))),
+    unname(vapply(dta@datasets, function(ds) ds@id, character(1))),
     c("clinical_data", "raw_export")
   )
 
   tabular <- dta[["clinical_data"]]
   file_ds <- dta[["raw_export"]]
+
+  # Each carries a human-readable name; the file dataset also has a long
+  # description, the tabular one none.
+  expect_equal(tabular@name, "Clinical data table")
+  expect_null(tabular@description)
+  expect_equal(file_ds@name, "Raw export archive")
+  expect_match(
+    file_ds@description,
+    "^Compressed raw export delivered alongside the clinical data table\\."
+  )
 
   expect_s3_class(tabular, "DTAtools::DTADataSetTabular")
   expect_s3_class(file_ds, "DTAtools::DTADataSetFile")

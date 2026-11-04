@@ -64,8 +64,9 @@ and reported via a warning.
 \item{Transmission}{\code{{TRANSMISSION_TYPE}}, \code{{TRANSMISSION_FREQUENCY}},
 \code{{TRANSMISSION_NOTIFICATION}}, \code{{TRANSMISSION_FIRST_TRANSFER}},
 \code{{TRANSMISSION_LAST_TRANSFER}}, \code{{TEST_UPLOAD}}, \code{{BLINDED_TRANSFER}}}
-\item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_NAMES}}, \code{{DATASET_TYPES}},
-\code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
+\item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_IDS}}, \code{{DATASET_NAMES}}
+(each dataset's name, or its id where no name is set),
+\code{{DATASET_TYPES}}, \code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
 \item{Process}{\code{{ERROR_HANDLING}}, \code{{AUTHORIZED_CORRECTIONS}},
 \code{{SIGNATORIES}}, \code{{PROCESS_INFORMATION}}, \code{{VERSION_HISTORY}},
 \code{{GENERATED_DATE}}}
@@ -84,11 +85,11 @@ of the same name still wins and renders as plain text instead.}
 \verb{\{#DATASETS\}} opens a region, repeated once per dataset in \code{dta}, that
 ends at the next body paragraph whose whole text is \verb{\{/DATASETS\}}; both
 markers must be alone in their paragraph, and a region does not nest.
-Inside each repetition, six placeholders resolve to that dataset's
-values: \code{{DATASET_NAME}}, \code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}},
-\code{{DATASET_FILE_COUNT}}, \code{{DATASET_COLUMN_COUNT}} and
-\code{{DATASET_RULE_COUNT}} (the last two are \code{0} for a non-tabular
-dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
+Inside each repetition, seven placeholders resolve to that dataset's
+values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set),
+\code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}}, \code{{DATASET_FILE_COUNT}},
+\code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
+\code{0} for a non-tabular dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
 \code{{FILE_SPECS}}, \code{{DATASETS}}) alone in a paragraph of the region is
 bound to the repetition's dataset and rendered without its generated
 heading; an explicit \code{{COLUMN_SPECS:NAME}} is left as written. A

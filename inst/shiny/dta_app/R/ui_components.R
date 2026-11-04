@@ -303,7 +303,7 @@ ds_edit_menu <- function(type = "tabular") {
       )),
       tags$li(ds_edit_menu_item(
         "edit_meta", "&#x1F4CB;", "Details",
-        "Name, description and template info"
+        "ID, name, description and template info"
       )),
       tags$li(tags$hr(class = "dropdown-divider")),
       tags$li(ds_edit_menu_item(
@@ -725,7 +725,8 @@ template_provenance_block <- function(prov) {
     lapply(ds_prov, function(d) {
       ndev <- length(d$deviations %||% list())
       meta_field_text(
-        as.character(d$name %||% ""),
+        # `name` is what a document saved before datasets had an `id` recorded.
+        as.character(d$id %||% d$name %||% ""),
         sprintf(
           "%s@%s — %d deviation%s",
           as.character(d$template %||% ""), as.character(d$version %||% ""),

@@ -203,7 +203,7 @@ test_that("with edit mode off, adding a dataset does nothing", {
     load_fixture(session)
     before <- names(DTAtools::datasets(rv$dta))
 
-    session$setInputs(add_ds_name = "sneaky", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "sneaky", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     expect_equal(names(DTAtools::datasets(rv$dta)), before)
@@ -333,7 +333,7 @@ test_that("adding a dataset selects it and marks it as having no data", {
     load_fixture(session)
     unlock_editing(session)
 
-    session$setInputs(add_ds_name = "demographics", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "demographics", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     expect_true("demographics" %in% names(DTAtools::datasets(rv$dta)))
@@ -351,11 +351,11 @@ test_that("several datasets can be added in a row, each of either type", {
     load_fixture(session)
     unlock_editing(session)
 
-    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
-    session$setInputs(add_ds_name = "beta", add_ds_type = "file")
+    session$setInputs(add_ds_id = "beta", add_ds_type = "file")
     session$setInputs(add_ds_save = 2)
-    session$setInputs(add_ds_name = "gamma", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "gamma", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 3)
 
     # Appended in order, after the dataset the fixture came with.
@@ -371,18 +371,26 @@ test_that("several datasets can be added in a row, each of either type", {
   })
 })
 
-test_that("a duplicate name is refused and leaves the document alone", {
+test_that("a duplicate id is refused and leaves the document alone", {
   clean_session_file()
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
     unlock_editing(session)
 
-    session$setInputs(add_ds_name = "clinical_data", add_ds_type = "tabular")
+    # A name alone does not make a dataset distinct: the id is what collides.
+    session$setInputs(
+      add_ds_id = "clinical_data", add_ds_name = "A different label",
+      add_ds_type = "tabular"
+    )
     session$setInputs(add_ds_save = 1)
 
     expect_equal(names(DTAtools::datasets(rv$dta)), "clinical_data")
     expect_false(isTRUE(rv$add_ds_msg$ok))
-    expect_match(rv$add_ds_msg$error, "already exists", fixed = TRUE)
+    expect_match(
+      rv$add_ds_msg$error,
+      "A dataset with ID 'clinical_data' already exists.",
+      fixed = TRUE
+    )
   })
 })
 
@@ -391,12 +399,12 @@ test_that("removing the active dataset moves the selection to a remaining one", 
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
     unlock_editing(session)
-    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(rv$active, "alpha")
 
     # Drive the real flow: opening the modal (remove_dataset) is what stashes
-    # the name the confirm handler acts on -- see rv$removing_dataset.
+    # the id the confirm handler acts on -- see rv$removing_dataset.
     session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
@@ -414,7 +422,7 @@ test_that("removing the last dataset leaves an empty but usable workspace", {
     unlock_editing(session)
 
     # Drive the real flow: opening the modal (remove_dataset) is what stashes
-    # the name the confirm handler acts on -- see rv$removing_dataset.
+    # the id the confirm handler acts on -- see rv$removing_dataset.
     session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
@@ -437,7 +445,7 @@ test_that("removing a dataset unloads the files bound to it", {
     expect_true(any(startsWith(names(rv$uploads), "clinical_data||")))
 
     # Drive the real flow: opening the modal (remove_dataset) is what stashes
-    # the name the confirm handler acts on -- see rv$removing_dataset.
+    # the id the confirm handler acts on -- see rv$removing_dataset.
     session$setInputs(remove_dataset = 1)
     session$setInputs(remove_dataset_confirm = 1)
 
@@ -458,7 +466,7 @@ test_that("remove_dataset_confirm removes the dataset the modal named, not whate
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
     unlock_editing(session)
-    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_equal(rv$active, "alpha")
 
@@ -485,7 +493,7 @@ test_that("cancelling the remove-dataset modal clears the stash", {
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
     unlock_editing(session)
-    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     session$setInputs(remove_dataset = 1)
@@ -599,16 +607,19 @@ test_that("a rejected Add dataset keeps what the user typed", {
     session$setInputs(add_dataset_open = 1)
     token_before <- rv$add_ds_token
 
-    # A name that collides with the dataset the fixture already has.
-    session$setInputs(add_ds_name = "clinical_data", add_ds_type = "file")
+    # An id that collides with the dataset the fixture already has.
+    session$setInputs(
+      add_ds_id = "clinical_data", add_ds_name = "Typed label",
+      add_ds_description = "Typed description", add_ds_type = "file"
+    )
     session$setInputs(add_ds_save = 1)
 
     expect_match(rv$add_ds_msg$error, "already exists", fixed = TRUE)
     # rv$add_ds_token is the observable here. It is output$add_ds_body's ONLY
-    # reactive dependency, and the body it renders hardcodes value = "" and
-    # selected = "tabular" -- so bumping it is exactly what would wipe the
-    # form in the browser. Leaving it alone means no re-render is pushed and
-    # what the user typed stays on screen.
+    # reactive dependency, and the body it renders hardcodes value = "" for the
+    # id, name and description and selected = "tabular" -- so bumping it is
+    # exactly what would wipe the form in the browser. Leaving it alone means
+    # no re-render is pushed and what the user typed stays on screen.
     #
     # The rendered HTML cannot show this: reading output$add_ds_body here
     # forces a fresh render regardless, which always emits the blank defaults.
@@ -663,7 +674,7 @@ test_that("a dataset added in the app survives the YAML the app writes for it", 
   shiny::testServer(app_server_dir(), {
     load_fixture(session)
     unlock_editing(session)
-    session$setInputs(add_ds_name = "alpha", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "alpha", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     round_tripped <- app_fn("dta_read_yaml_text")(rv$yaml_text)

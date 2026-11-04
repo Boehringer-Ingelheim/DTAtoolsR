@@ -27,7 +27,7 @@ rs_checked <- function(dir, name = "iso.csv") {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = "iso", specs = rs_specs(),
+    id = "iso", specs = rs_specs(),
     files = list(DTAFileCSV(filename = basename(path)))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")

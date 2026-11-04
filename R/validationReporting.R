@@ -91,7 +91,7 @@ dta_results_from_status <- function(status_df, dataset_name = NA_character_) {
 #' @export
 S7::method(results, DTADataSetTabular) <- function(x, tables = NULL) {
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -107,7 +107,7 @@ S7::method(results, DTADataSet) <- function(x, tables = NULL) {
   }
 
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -368,7 +368,7 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
     details <- validation_errors(x, table = table_name, source = source)
 
-    dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+    dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
 
     schema_df <- dta_columnspec_messages_to_df(dataset_name, table_name, details)
     rule_df <- dta_rule_messages_to_df(dataset_name, table_name, details)

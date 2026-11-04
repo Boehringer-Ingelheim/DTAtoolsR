@@ -385,7 +385,7 @@ datasets:
 ```
 
 - `template` names a dataset template by ID, optionally pinned to a version.
-- `as` supplies the name for the dataset in the created DTA.
+- `as` supplies the id for the dataset in the created DTA.
 - `options` supplies values for the dataset template's options; these are static values for that dataset build, not additional creation-dialog
   controls.
 - `patch` modifies the dataset template's result.
@@ -437,7 +437,7 @@ vocabulary_slots:
     min: 1
 ```
 
-The supported target form is `datasets.<dataset name>.columns.<column id>.values`. The `dataset` and column names must refer to objects the
+The supported target form is `datasets.<dataset id>.columns.<column id>.values`. The dataset and column ids must refer to objects the
 template actually builds.
 
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
@@ -464,8 +464,9 @@ version: "1.0"
 description: A small reusable tabular dataset.
 
 dataset:
-  name: starter_data
+  id: starter_data
   type: tabular
+  name: Starter dataset
   description: Example dataset for a new template library.
   files:
     filename: starter_data.tsv
@@ -547,7 +548,7 @@ used.
 
 ```yaml
 dataset:
-  name: supporting_documents
+  id: supporting_documents
   type: file
   files:
     - type: any
@@ -681,7 +682,7 @@ datasets:
         description: Starter dataset with site identifiers.
 ```
 
-`set` paths are relative to the dataset body. Examples include `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
+`set` paths are relative to the dataset body. Examples include `name`, `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
 paths are addressed by ID. Do not use a positional index in a patch path.
 
 The generic collection form is also accepted under `patch.columns:`. It supports the collection verbs `inherit`, `remove`, `add`, `modify`, and

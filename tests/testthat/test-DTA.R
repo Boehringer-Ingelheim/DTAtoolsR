@@ -58,7 +58,7 @@ test_that("datasets() does not enforce a single 'name' argument (documented gap)
 
   # (2) A non-integer numeric index is silently truncated by `[[` rather than
   #     rejected, so a caller asking for dataset 1.9 quietly receives dataset 1.
-  expect_identical(datasets(dta, 1.9)@name, "demographics")
+  expect_identical(datasets(dta, 1.9)@id, "demographics")
 
   # Deferred: asserting a "single value" error for all four calls above
   # requires fixing the guard in R/DTA-class.R.
@@ -67,24 +67,30 @@ test_that("datasets() does not enforce a single 'name' argument (documented gap)
 
 test_that("DTA() names datasets from the DTADataSet it is given", {
   ds <- DTADataSetTabular(
-    name = "demographics",
+    id = "demographics",
     specs = create_example_DTAColumnSpecCollection(1),
     tables = list(t1 = data.frame(STUDYID = "1234", VISIT = "V03"))
   )
 
-  # A bare DTADataSet is wrapped in a list and named from its @name slot.
+  # A bare DTADataSet is wrapped in a list and keyed by its @id.
   dta_bare <- DTA(datasets = ds, metadata = create_example_DTAMetaData())
   expect_named(dta_bare@datasets, "demographics")
   expect_length(dta_bare@datasets, 1)
   expect_equal(dta_bare@datasets[["demographics"]], ds)
 
-  # An unnamed list takes the same path via vapply() over @name.
+  # An unnamed list takes the same path via vapply() over @id.
   dta_list <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
   expect_named(dta_list@datasets, "demographics")
 
-  # Explicit names are kept as given, even when they differ from @name.
-  dta_named <- DTA(datasets = list(other = ds), metadata = create_example_DTAMetaData())
-  expect_named(dta_named@datasets, "other")
+  # A name that matches the id is accepted as given ...
+  dta_named <- DTA(datasets = list(demographics = ds), metadata = create_example_DTAMetaData())
+  expect_named(dta_named@datasets, "demographics")
+
+  # ... but one that differs from the id is not: the key IS the id.
+  expect_error(
+    DTA(datasets = list(other = ds), metadata = create_example_DTAMetaData()),
+    regexp = "keyed by its dataset"
+  )
 })
 
 test_that("DTA() rejects a datasets list with a repeated name", {
@@ -92,12 +98,12 @@ test_that("DTA() rejects a datasets list with a repeated name", {
   # so a repeated name validates the first entry twice and the second never --
   # and the run can still report "Validation PASSED". F4.
   ds1 <- DTADataSetTabular(
-    name = "same",
+    id = "same",
     specs = create_example_DTAColumnSpecCollection(1),
     tables = list(t1 = data.frame(STUDYID = "1234", VISIT = "V03"))
   )
   ds2 <- DTADataSetTabular(
-    name = "same",
+    id = "same",
     specs = create_example_DTAColumnSpecCollection(1),
     tables = list(t2 = data.frame(STUDYID = "5678", VISIT = "V05"))
   )
@@ -112,10 +118,59 @@ test_that("DTA() rejects a datasets list with a repeated name", {
   )
 })
 
+test_that("DTA() rejects a datasets key that differs from the dataset's id", {
+  # The key IS the id: results() reports a dataset under its @id while
+  # messages(), check() and the exports report it under its key, so a key that
+  # differs would split one dataset into two names across the reports.
+  md <- create_example_DTAMetaData()
+  demographics <- create_example_DTADataSetTabular(2)
+  vitals <- create_example_DTADataSetTabular(3)
+
+  expect_error(
+    DTA(datasets = list(other = demographics), metadata = md),
+    regexp = "keyed by its dataset"
+  )
+  # One correctly keyed entry does not excuse a second, wrongly keyed one.
+  expect_error(
+    DTA(datasets = list(demographics = demographics, other = vitals), metadata = md),
+    regexp = "keyed by its dataset"
+  )
+  # Keys swapped between two datasets: every key is a valid id, none is its own.
+  expect_error(
+    DTA(datasets = list(vitals = demographics, demographics = vitals), metadata = md),
+    regexp = "keyed by its dataset"
+  )
+
+  # The rule holds for a DTA that already exists, too: re-keying an entry by
+  # assigning the property is rejected rather than half-applied.
+  dta <- create_example_DTA()
+  expect_error(
+    {
+      dta@datasets <- stats::setNames(dta@datasets, c("renamed", "vitals"))
+    },
+    regexp = "keyed by its dataset"
+  )
+  expect_named(dta@datasets, c("demographics", "vitals"))
+})
+
+test_that("an unnamed datasets list is keyed by each dataset's id", {
+  dta <- DTA(
+    datasets = list(
+      create_example_DTADataSetTabular(3),
+      create_example_DTADataSetTabular(2)
+    ),
+    metadata = create_example_DTAMetaData()
+  )
+
+  expect_named(dta@datasets, c("vitals", "demographics"))
+  ids <- vapply(dta@datasets, function(d) d@id, character(1), USE.NAMES = FALSE)
+  expect_identical(ids, names(dta@datasets))
+})
+
 test_that("DTA() rejects an unnamed, empty-named or NA-named datasets list", {
   ds <- create_example_DTADataSetTabular(2)
 
-  # An unnamed list reaching the constructor is auto-named from @name (see the
+  # An unnamed list reaching the constructor is auto-named from @id (see the
   # dedicated test above), so a totally unnamed @datasets can only be produced
   # by assigning the property directly, bypassing that constructor logic.
   dta <- create_example_DTA()
@@ -511,6 +566,36 @@ test_that("load_file() aborts for missing dataset name", {
   )
 })
 
+test_that("load_file() writes a dataset back under the key it read it from", {
+  # The write-back used to be keyed on the returned object's own name. It is
+  # now keyed on the `dataset` argument, so a load can only ever replace the
+  # entry it came from -- never add a second one beside it.
+  demographics <- DTADataSetTabular(
+    id = "demographics",
+    name = "Demographics",
+    specs = create_example_DTAColumnSpecCollection(1),
+    files = list(DTAFileCSV(filename = "clinical_data.csv"))
+  )
+  dta <- DTA(
+    datasets = list(demographics, create_example_DTADataSetTabular(3)),
+    metadata = create_example_DTAMetaData()
+  )
+  file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
+
+  by_key <- load_file(dta, dataset = "demographics", file = file)
+  expect_length(by_key@datasets, 2)
+  expect_named(by_key@datasets, c("demographics", "vitals"))
+  expect_named(tables(by_key@datasets[["demographics"]]), "clinical_data")
+  expect_identical(by_key@datasets[["demographics"]]@id, "demographics")
+  # The other dataset is left exactly as it was.
+  expect_identical(by_key@datasets[["vitals"]], dta@datasets[["vitals"]])
+
+  by_index <- load_file(dta, dataset = 1, file = file)
+  expect_length(by_index@datasets, 2)
+  expect_named(by_index@datasets, c("demographics", "vitals"))
+  expect_named(tables(by_index@datasets[["demographics"]]), "clinical_data")
+})
+
 test_that("messages(dta) folds in metadata import errors", {
   md <- DTAMetaData(
     title = "Qualified",
@@ -549,7 +634,8 @@ test_that("messages(dta) is unchanged when metadata has no import errors", {
 # dta_from_list() with no datasets -- section P12 of the code review fixes
 # ---------------------------------------------------------------------------
 # dta_dataset_from_list() tells "one dataset" from "several" apart by
-# inspecting `x[[1]]$name`, and `x[[1]]` on a zero-length list used to abort
+# inspecting `x[[1]]` for an `id` (or a legacy `name`), and `x[[1]]` on a
+# zero-length list used to abort
 # with a raw base "subscript out of bounds" instead of the intended "no
 # datasets" outcome. This is exactly the document produced by removing a
 # DTA's last dataset and serialising it back to YAML.
@@ -587,7 +673,7 @@ test_that("check() reports INCOMPLETE rather than certifying unchecked targets",
   # all-unspecified DTA printed "Validation PASSED: All datasets are valid"
   # with last_validation_ok = TRUE: a certificate covering zero checks.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "clinical_data.csv"))
   )
@@ -627,7 +713,7 @@ test_that("a dataset with no tables makes the DTA INCOMPLETE, never PASSED", {
   # would print "Validation PASSED: All datasets are valid" over a check that
   # read no file at all.
   dta <- DTA(
-    datasets = list(empty = create_example_DTADataSetTabular(1)),
+    datasets = list(create_example_DTADataSetTabular(1)),
     metadata = create_example_DTAMetaData()
   )
 
@@ -649,14 +735,14 @@ test_that("a dataset with no tables makes the DTA INCOMPLETE, never PASSED", {
 
 test_that("an undelivered dataset does not hide a delivered one's result", {
   delivered <- DTADataSetTabular(
-    name = "delivered",
+    id = "delivered",
     specs = DTAColumnSpecCollection(columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
     )),
     tables = list(tab = data.frame(ID = "A001", stringsAsFactors = FALSE))
   )
   dta <- DTA(
-    datasets = list(delivered = delivered, empty = create_example_DTADataSetTabular(1)),
+    datasets = list(delivered, create_example_DTADataSetTabular(1)),
     metadata = create_example_DTAMetaData()
   )
 
@@ -685,7 +771,7 @@ test_that("check(DTA) forwards on_missing_column to its datasets", {
   writeLines(c("ID", "A001"), path)
 
   ds <- DTADataSetTabular(
-    name = "m",
+    id = "m",
     specs = DTAColumnSpecCollection(columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
       ABSENT = DTAColumnSpec(id = "ABSENT", type = "SAS Char", length = 4, nullable = FALSE)
@@ -718,8 +804,8 @@ test_that("check(DTA) accepts fail_fast and use_threads for every dataset type",
 
   dta <- DTA(
     datasets = list(
-      tab = create_example_DTADataSetTabular(2),
-      files = DTADataSetFile(name = "files", paths = path)
+      demographics = create_example_DTADataSetTabular(2),
+      files = DTADataSetFile(id = "files", paths = path)
     ),
     metadata = create_example_DTAMetaData()
   )
@@ -733,7 +819,7 @@ test_that("check(DTA) accepts fail_fast and use_threads for every dataset type",
   )
 
   expect_true(validation_status(datasets(dta, "files"))$ok)
-  expect_equal(nrow(validation_status(datasets(dta, "tab"))), 1)
+  expect_equal(nrow(validation_status(datasets(dta, "demographics"))), 1)
 })
 
 test_that("check(DTA) rejects an unknown on_missing_column before checking anything", {
@@ -771,16 +857,16 @@ test_that("check() aborts on a non-DTADataSet entry regardless of quiet", {
 
 
 # ---------------------------------------------------------------------------
-# A dataset name containing braces is data, not cli syntax
+# A dataset id containing braces is data, not cli syntax
 # ---------------------------------------------------------------------------
 
-test_that("print(DTA) survives braces in a dataset name", {
-  # print(DTA) used to paste every dataset name into `{.field ...}` markup
+test_that("print(DTA) survives braces in a dataset id", {
+  # print(DTA) used to paste every dataset id into `{.field ...}` markup
   # with paste0() and hand the assembled string to cli_alert_info(), so a
   # dataset called `a{b}` took it down with "Could not evaluate cli `{}`
   # expression" -- the same defect already fixed for print(DTADataSetTabular).
   ds <- DTADataSet(
-    name = "a{b}",
+    id = "a{b}",
     type = "file",
     files = list(create_example_DTAFileCSV())
   )

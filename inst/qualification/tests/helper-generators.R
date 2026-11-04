@@ -268,9 +268,9 @@ qa_write_large_csv <- function(n_rows, path, seed = 1L, n_filler = 7L,
 
 # ---- assembling a dataset ---------------------------------------------------
 
-qa_dta <- function(path, specs = qa_specs(), name = "ds", stream = "never") {
+qa_dta <- function(path, specs = qa_specs(), id = "ds", stream = "never") {
   ds <- DTADataSetTabular(
-    name = name, specs = specs,
+    id = id, specs = specs,
     files = list(DTAFileCSV(filename = basename(path)))
   )
   load_file(ds, file = path, handler_index = 1, stream = stream)

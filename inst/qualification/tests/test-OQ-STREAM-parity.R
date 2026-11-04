@@ -349,7 +349,7 @@ test_that("OQ-STREAM-031 | inspect() reports the same row context for a streamed
 
   ip_run <- function(stream) {
     ds <- DTADataSetTabular(
-      name = "parity", specs = specs,
+      id = "parity", specs = specs,
       files = list(DTAFileCSV(filename = basename(path)))
     )
     ds <- load_file(ds, file = path, handler_index = 1, stream = stream)

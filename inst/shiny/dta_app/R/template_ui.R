@@ -361,7 +361,9 @@ tmpl_dataset_names <- function(def) {
     if (!is.list(e)) {
       return("")
     }
-    as.character(e[["as"]] %||% e[["name"]] %||% e[["template"]] %||% "")
+    # `name` after `id`: an inline entry written before datasets had an `id`
+    # carries its identifier in `name`, a current one its label.
+    as.character(e[["as"]] %||% e[["id"]] %||% e[["name"]] %||% e[["template"]] %||% "")
   }, character(1), USE.NAMES = FALSE)
   out[nzchar(out)]
 }

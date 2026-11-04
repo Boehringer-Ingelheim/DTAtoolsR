@@ -178,7 +178,8 @@ tracked elsewhere — read the dataset definition directly with
 `DTAtools`, right after `read_dta_from_yaml()`.
 
 A standalone dataset YAML has exactly the same shape as one entry under a
-DTA's `datasets:` list — `name`, `type`, `files`, `columns`, `rules` — just
+DTA's `datasets:` list — `id`, `type`, `name`, `description`, `files`,
+`columns`, `rules` — just
 without the surrounding `metadata:`/`datasets:` wrapper. The package ships a
 real example of this shape at `inst/extdata/gf_dataset.yaml`; here we build an
 equivalent one by extracting the `clinical_data` entry from `clinical_dta.yaml`
@@ -412,7 +413,7 @@ raw_data <- read.csv(csv_path)
 
 # Create the DTADataSetTabular with specs + data, then validate
 ds <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = clinical_specs,
   tables = list(clinical_data = raw_data)
 )
@@ -446,7 +447,7 @@ inline_data <- data.frame(
 
 # Combine into a DTADataSetTabular
 inline_ds <- DTADataSetTabular(
-  name   = "inline_example",
+  id     = "inline_example",
   specs  = inline_specs,
   tables = list(my_table = inline_data)
 )
@@ -620,7 +621,7 @@ err_file <- system.file("extdata", "clinical_data_error_columnspec.csv", package
 raw_err <- read.csv(err_file)
 
 ds_err <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_e, "clinical_data")),
   tables = list(clinical_data = raw_err)
 )
@@ -652,7 +653,7 @@ rule_file <- system.file("extdata", "clinical_data_error_rules.csv", package = "
 raw_rule <- read.csv(rule_file)
 
 ds_rule <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_r, "clinical_data")),
   tables = list(clinical_data = raw_rule)
 )
@@ -701,7 +702,7 @@ import_data <- data.frame(
 )
 
 ds_import <- DTADataSetTabular(
-  name   = "import_demo",
+  id     = "import_demo",
   specs  = import_specs2,
   tables = list(demo = import_data)
 )
@@ -1055,7 +1056,7 @@ bad_data <- data.frame(
 )
 
 ds_bad <- DTADataSetTabular(
-  name   = "demo_rules",
+  id     = "demo_rules",
   specs  = specs_with_rules,
   tables = list(demo = bad_data)
 )
@@ -1342,7 +1343,7 @@ simple_specs <- DTAColumnSpecCollection(columns = list(
 
 # Use the Arrow Table directly in the constructor
 ds_from_file <- DTADataSetTabular(
-  name   = "clinical_from_file",
+  id     = "clinical_from_file",
   specs  = simple_specs,
   files  = list(file_handler), # document the expected file
   tables = list(clinical_data = tbl) # provide the loaded data
@@ -1399,7 +1400,7 @@ delivered_csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools
 delivered_tsv <- system.file("extdata", "gf_data_small_smirna.tsv", package = "DTAtools")
 
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   paths = c(delivered_csv, delivered_tsv)
 )
 ds_file <- check(ds_file)
@@ -1409,7 +1410,7 @@ results(ds_file) # both files pass
 ```{r dataset_file_missing}
 # Introduce a missing file to trigger a failure
 ds_missing <- DTADataSetFile(
-  name  = "delivery_check_fail",
+  id    = "delivery_check_fail",
   paths = c(delivered_csv, "/nonexistent/path/report.pdf")
 )
 ds_missing <- check(ds_missing)
@@ -1438,7 +1439,7 @@ validation time.
 
 ```{r dataset_file_load}
 ds_declared <- DTADataSetFile(
-  name = "declared_delivery",
+  id = "declared_delivery",
   files = list(
     DTAFileAny(filename = "clinical_data.csv", extensions = c("csv", "tsv"))
   )
@@ -1474,7 +1475,7 @@ the full delivery — column-level content *and* file presence — in one `check
 ```{r dta_mixed_types, eval=FALSE}
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
-  name = "clinical_data",
+  id = "clinical_data",
   specs = import_specs_from_yaml(
     system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
   ),
@@ -1483,7 +1484,7 @@ ds_tab <- DTADataSetTabular(
 
 # File dataset (presence check)
 ds_fi <- DTADataSetFile(
-  name  = "delivery_manifest",
+  id    = "delivery_manifest",
   paths = c(delivered_csv, delivered_tsv)
 )
 
@@ -1598,7 +1599,7 @@ dta_obj <- DTA(
 )
 print(dta_obj)
 
-# Access datasets by name or index
+# Access datasets by id or index
 datasets(dta_obj, "demographics")
 dta_obj[["vitals"]]
 dta_obj[c(1, 2)] # returns a list of both datasets
@@ -1634,7 +1635,7 @@ raw_full <- read.csv(csv_path_full)
 
 # Create DTADataSetTabular with specs + data
 ds_full <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = clinical_sps,
   tables = list(clinical_data = raw_full)
 )
@@ -1660,7 +1661,7 @@ dta_obj_w <- read_dta_from_yaml(
   system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
 )
 ds_w <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs(datasets(dta_obj_w, "clinical_data")),
   tables = list(clinical_data = read.csv(csv_path_w))
 )
@@ -1811,7 +1812,7 @@ appear in the output. A DTA with no datasets produces no region at all.
 
 ```
 {#DATASETS}
-Dataset {DATASET_NAME}          <- the author's own Heading 2
+{DATASET_NAME} ({DATASET_ID})    <- the author's own Heading 2
 {DATASET_DESCRIPTION}
 {FILE_SPECS}
 {COLUMN_SPECS}
@@ -1819,14 +1820,15 @@ Dataset {DATASET_NAME}          <- the author's own Heading 2
 {/DATASETS}
 ```
 
-Six placeholders resolve inside a repetition to that one dataset's own
-values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
-`{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
-(the last two are `0` for a non-tabular dataset). A dataset block marker
+Seven placeholders resolve inside a repetition to that one dataset's own
+values: `{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no
+name), `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+`{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
+for a non-tabular dataset). A dataset block marker
 written bare inside the region, as `{COLUMN_SPECS}` is above, binds to the
 current dataset and contributes only its table, without the heading it would
 generate outside a region — the region's own paragraphs are what supply the
-heading, as `Dataset {DATASET_NAME}` does here. An explicit
+heading, as `{DATASET_NAME} ({DATASET_ID})` does here. An explicit
 `{COLUMN_SPECS:clinical_data}` inside a region is unaffected and renders
 exactly as it does anywhere else.
 
@@ -2135,9 +2137,10 @@ metadata:
     date_last_transfer: 2026-03-31
 
 datasets:
-  - name: clinical_data
+  - id: clinical_data
     type: tabular
-    description: Clinical subject-level data
+    name: Clinical data
+    description: Subject-level clinical data, one row per subject and visit.
 
     files:
       filename: "clinical_data.*.csv$"

@@ -69,9 +69,9 @@ metadata:
     date_last_transfer: 2026-01-15
 
 datasets:
-  - name: clinical_data
+  - id: clinical_data
     type: tabular
-    description: Clinical data table
+    name: Clinical data table
 
     files:
       filename: "clinical_data.*.csv$"
@@ -271,8 +271,9 @@ datasets:
   # arrived, is readable and is not empty -- no columns, no rules, no import.
   # Its handler is `type: any` (a DTAFileAny): the reader-less handler. A `csv`
   # handler here would claim the file gets parsed, which it never is.
-  - name: raw_export
+  - id: raw_export
     type: file
+    name: Raw export archive
     description: >-
       Compressed raw export delivered alongside the clinical data table. It is
       archived, not analysed, so the transfer only confirms that it arrived,

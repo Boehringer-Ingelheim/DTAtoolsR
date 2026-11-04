@@ -922,6 +922,13 @@ server <- function(input, output, session) {
   }
 
   # --- helpers ------------------------------------------------------------
+  # The label a modal title or notification shows for dataset `id`: its name,
+  # else the id itself (also when the dataset is already gone).
+  ds_title <- function(id) {
+    label <- dta_dataset_label(dta_get_dataset(isolate(rv$dta), id))
+    if (length(label) == 1 && nzchar(label)) label else id
+  }
+
   build_structure <- function(dta) {
     names_ds <- dta_dataset_names(dta)
     if (length(names_ds) == 0) {
@@ -941,7 +948,9 @@ server <- function(input, output, session) {
       })
       list(
         index = i,
-        name = names_ds[i],
+        # What the nav shows. Carried here, not read from rv$dta, so the nav
+        # re-renders only when a label actually changes -- see meta_save.
+        label = dta_dataset_label(ds),
         type = tryCatch(ds@type, error = function(e) NA_character_),
         handlers = handlers
       )
@@ -1837,6 +1846,9 @@ server <- function(input, output, session) {
         class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
+          # A structure restored from a session saved before labels existed
+          # has none; the id is the right fallback, as everywhere else.
+          label <- rv$structure[[i]]$label %||% nm
           st <- dta_lookup(st_map, nm, "pending")
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
@@ -1875,14 +1887,20 @@ server <- function(input, output, session) {
               class = "nav-select",
               label = tagList(
                 span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
-                span(class = "nav-name", nm)
+                span(
+                  class = "nav-text",
+                  span(class = "nav-name", label),
+                  # The id stays visible under a name: it is what every
+                  # validation message and download refers to.
+                  if (!identical(label, nm)) span(class = "nav-id", nm)
+                )
               )
             ),
             actionButton(
               paste0("checkds_", i),
               label = HTML("&#x25B6;"),
               class = "btn btn-sm nav-check",
-              title = sprintf("Check '%s'", nm)
+              title = sprintf("Check '%s'", label)
             )
           )
         })
@@ -1958,9 +1976,21 @@ server <- function(input, output, session) {
   output$add_ds_body <- renderUI({
     rv$add_ds_token
     tagList(
-      textInput("add_ds_name", "Name",
+      textInput("add_ds_id", "ID",
         value = "", width = "100%",
-        placeholder = "e.g. demographics"
+        placeholder = "e.g. dm"
+      ),
+      div(
+        class = "msg-hint", style = "margin:-8px 0 12px;",
+        "Identifies the dataset in the specification, in every validation message and in load_file()."
+      ),
+      textInput("add_ds_name", "Name (optional)",
+        value = "", width = "100%",
+        placeholder = "e.g. Demographics"
+      ),
+      textAreaInput("add_ds_description", "Description (optional)",
+        value = "", width = "100%", rows = 3,
+        placeholder = "What this dataset contains, in words"
       ),
       radioButtons("add_ds_type", "Type",
         choices = c("Tabular" = "tabular", "Files" = "file"),
@@ -1986,21 +2016,23 @@ server <- function(input, output, session) {
     req(editing())
     r <- dta_add_dataset(
       isolate(rv$dta),
+      id = input$add_ds_id,
+      type = input$add_ds_type %||% "tabular",
       name = input$add_ds_name,
-      type = input$add_ds_type %||% "tabular"
+      description = input$add_ds_description
     )
     if (!isTRUE(r$ok)) {
       # The modal stays open with everything the user typed still in it, and
       # nothing in rv changes -- the same contract as meta_save() below.
       # Deliberately NOT bumping rv$add_ds_token here: that is add_ds_body's
-      # only dependency, and re-rendering would reset the name field to "" and
-      # the type back to "tabular", making the user retype a name they can see
+      # only dependency, and re-rendering would reset every field to "" and
+      # the type back to "tabular", making the user retype an ID they can see
       # is wrong rather than correct it in place. output$add_ds_msg reacts to
       # rv$add_ds_msg on its own, so the error still appears.
       rv$add_ds_msg <- list(ok = FALSE, error = r$error)
       return()
     }
-    nm <- trimws(as.character(input$add_ds_name)[1])
+    nm <- trimws(as.character(input$add_ds_id)[1])
     rv$dta <- r$value
     # build_structure() is what registers the new dataset's nav and upload
     # observers, so it has to run before anything can address the new slot.
@@ -2012,7 +2044,10 @@ server <- function(input, output, session) {
     rv$add_ds_msg <- NULL
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' added.", nm), type = "message")
+    showNotification(
+      sprintf("Dataset '%s' added.", ds_title(nm)),
+      type = "message"
+    )
   })
 
   observeEvent(input$remove_dataset, {
@@ -2034,7 +2069,7 @@ server <- function(input, output, session) {
         # tags$b() rather than HTML(sprintf(...)): the name is user-supplied and
         # htmltools escapes a plain string, so a dataset called "<b>x" cannot
         # inject markup here.
-        tags$p("Dataset ", tags$b(ed), " and its specification will be removed from the document."),
+        tags$p("Dataset ", tags$b(ds_title(ed)), " and its specification will be removed from the document."),
         if (n_files > 0) {
           div(class = "msg-hint", sprintf(
             "%d loaded file%s will be unloaded with it.",
@@ -2063,6 +2098,7 @@ server <- function(input, output, session) {
     ed <- isolate(rv$removing_dataset)
     req(ed)
     rv$removing_dataset <- NULL
+    ed_title <- ds_title(ed) # read while the dataset still exists
     r <- dta_remove_dataset(isolate(rv$dta), ed)
     if (!isTRUE(r$ok)) {
       showNotification(paste("Could not remove dataset —", r$error),
@@ -2093,7 +2129,7 @@ server <- function(input, output, session) {
 
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' removed.", ed), type = "message")
+    showNotification(sprintf("Dataset '%s' removed.", ed_title), type = "message")
   })
 
   # --- upload observers (registered once per handler) ---------------------
@@ -2790,7 +2826,7 @@ server <- function(input, output, session) {
 
   show_file_editor_modal <- function(ed) {
     showModal(modalDialog(
-      title = paste("Edit files —", ed),
+      title = paste("Edit files —", ds_title(ed)),
       size = "xl", easyClose = FALSE,
       uiOutput("file_modal_body"),
       footer = NULL
@@ -3314,7 +3350,7 @@ server <- function(input, output, session) {
     rv$col_search <- ""
     rv$col_token <- rv$col_token + 1
     showModal(modalDialog(
-      title = paste("Edit columns \u2014", rv$active),
+      title = paste("Edit columns \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("col_modal_body"),
       footer = NULL
@@ -4228,7 +4264,7 @@ server <- function(input, output, session) {
     rv$gconstr_removed <- integer(0)
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
-      title = paste("Edit rules \u2014", rv$active),
+      title = paste("Edit rules \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("rule_modal_body"),
       footer = NULL
@@ -4811,7 +4847,7 @@ server <- function(input, output, session) {
       # of ds_edit_menu() opens (ui_components.R), and its title should read
       # like the label the user just clicked, not the internal name the
       # server-side code still uses for the concept (edit_meta, rv$meta_*).
-      title = paste("Edit details —", ed),
+      title = paste("Edit details —", ds_title(ed)),
       size = "l", easyClose = FALSE,
       uiOutput("meta_modal_body"),
       footer = NULL
@@ -4837,26 +4873,34 @@ server <- function(input, output, session) {
     tagList(
       div(
         class = "spec-form",
-        textInput("meta_name", "Dataset name",
-          value = g("name"), width = "100%",
-          placeholder = "vitals"
+        textInput("meta_id", "Dataset ID",
+          value = g("id"), width = "100%",
+          placeholder = "vs"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
           paste(
-            "The name identifies the dataset in the specification, in every",
-            "validation message and in the exported documents. Renaming it",
+            "The ID identifies the dataset in the specification, in every",
+            "validation message and in the exported documents. Changing it",
             "clears this dataset's validation, because results recorded under",
-            "the old name no longer describe it."
+            "the old ID no longer describe it."
           )
         ),
+        textInput("meta_name", "Name",
+          value = g("name"), width = "100%",
+          placeholder = "Vital signs"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Shown as the heading of this dataset's page and in the dataset list; the ID is shown when it is empty."
+        ),
         textAreaInput("meta_description", "Description",
-          value = g("description"), width = "100%", rows = 2,
+          value = g("description"), width = "100%", rows = 4,
           placeholder = "What this dataset contains, in words"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
-          "Shown as the heading of this dataset's page when set."
+          "Shown under the heading of this dataset's page."
         ),
         tags$h6("Template", style = "margin-top:4px;"),
         div(
@@ -4905,6 +4949,7 @@ server <- function(input, output, session) {
     req(ed)
     r <- dta_set_dataset_meta(
       isolate(rv$dta), ed,
+      id = input$meta_id,
       name = input$meta_name,
       description = input$meta_description,
       template_source = input$meta_template_source,
@@ -4918,30 +4963,32 @@ server <- function(input, output, session) {
       return()
     }
 
-    new_name <- trimws(as.character(input$meta_name %||% "")[1])
-    renamed <- !identical(new_name, ed)
+    new_id <- trimws(as.character(input$meta_id %||% "")[1])
+    renamed <- !identical(new_id, ed)
     rv$dta <- r$value
 
     # ORDER MATTERS: the state migration has to land before anything reads the
-    # dataset by name again -- invalidate_dataset() looks its status up by name,
+    # dataset by id again -- invalidate_dataset() looks its status up by id,
     # and every output keyed off rv$active re-renders as soon as it changes.
     if (renamed) {
-      rename_dataset_state(ed, new_name)
-      # A rename does not change what the data IS, but every stored validation
-      # record carries the dataset name it was checked under, so results left
-      # in place would report a dataset that no longer exists. The description
-      # and template fields take no part in validation, so editing only those
-      # deliberately leaves a passed check passed.
-      invalidate_dataset(new_name)
-      # Only a rename touches rv$structure -- it is keyed by name and caches
-      # each dataset's name, so the nav list would otherwise keep showing the
-      # old one. Assigning it re-renders every structure-dependent output
-      # (dataset nav, detail panel and its file inputs), which is why the
-      # column and rule editors never touch it and why a description-only edit
-      # here must not either. It does NOT rebuild the whole workspace:
-      # output$main depends only on rv$doc_token (load/reset/restore).
-      rv$structure <- build_structure(rv$dta)
+      rename_dataset_state(ed, new_id)
+      # A new id does not change what the data IS, but every stored validation
+      # record carries the dataset id it was checked under, so results left in
+      # place would report a dataset that no longer exists. The name,
+      # description and template fields take no part in validation, so editing
+      # only those deliberately leaves a passed check passed.
+      invalidate_dataset(new_id)
     }
+    # rv$structure is keyed by id and caches each dataset's label, so an id or
+    # name change must reach it or the nav keeps showing the old one. Assigning
+    # it re-renders every structure-dependent output (dataset nav, detail panel
+    # and its file inputs), which is why the column and rule editors never touch
+    # it. Here it is assigned unconditionally on purpose: reactiveValues drops an
+    # assignment identical to the stored value, so a description- or
+    # template-only edit -- which leaves the structure identical -- still
+    # re-renders nothing. It does NOT rebuild the whole workspace: output$main
+    # depends only on rv$doc_token (load/reset/restore).
+    rv$structure <- build_structure(rv$dta)
 
     rv$meta_msg <- NULL
     sync_yaml_text()
@@ -7098,7 +7145,8 @@ server <- function(input, output, session) {
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
     desc <- tryCatch(ds@description, error = function(e) NULL) %||% ""
-    heading <- if (nzchar(desc)) desc else rv$active
+    heading <- dta_dataset_label(ds)
+    if (!nzchar(heading)) heading <- rv$active
     div(
       class = paste0("ds-head-block ds-st-", st),
       div(
@@ -7107,12 +7155,14 @@ server <- function(input, output, session) {
       ),
       div(
         style = "display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;",
-        # Every dataset carries a tag with its name (alongside the type tag),
-        # so the dataset is always clearly identified on the Datasets page.
-        tags$span(class = "dta-name-chip", rv$active),
+        # Every dataset carries a tag with its id (alongside the type tag), so
+        # the dataset is always clearly identified on the Datasets page --
+        # also when the heading above is its name.
+        tags$span(class = "dta-name-chip", title = "Dataset ID", rv$active),
         if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
         status_chip(st)
-      )
+      ),
+      if (nzchar(desc)) tags$p(class = "ds-long-desc", desc)
     )
   })
 

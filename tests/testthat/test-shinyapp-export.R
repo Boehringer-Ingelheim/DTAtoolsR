@@ -36,10 +36,12 @@ test_that("embed_yaml_markdown appends the DTA's YAML to the original markdown t
   expect_match(out, "# My Export", fixed = TRUE)
   expect_match(out, "Some narrative text.", fixed = TRUE)
   # The embedded block is a machine-readable YAML rendering of the DTA,
-  # fenced in an HTML comment; a dataset name from the fixture must appear
-  # inside it.
+  # fenced in an HTML comment; the fixture dataset must appear inside it, as a
+  # list entry that opens with its id. (Not "name: clinical_data": that is a
+  # substring of the file pattern's `filename: clinical_data...` and would
+  # pass whatever the dataset is called.)
   expect_match(out, "EMBEDDED DTA YAML", fixed = TRUE)
-  expect_match(out, "name: clinical_data", fixed = TRUE)
+  expect_match(out, "- id: clinical_data", fixed = TRUE)
   expect_match(out, "END EMBEDDED DTA YAML", fixed = TRUE)
 })
 
@@ -48,7 +50,7 @@ test_that("embed_yaml_markdown still embeds the YAML when the markdown text is e
   out <- app_fn("embed_yaml_markdown")("", dta)
 
   expect_match(out, "EMBEDDED DTA YAML", fixed = TRUE)
-  expect_match(out, "name: clinical_data", fixed = TRUE)
+  expect_match(out, "- id: clinical_data", fixed = TRUE)
 })
 
 test_that("list_available_templates finds the real bundled .docx template", {

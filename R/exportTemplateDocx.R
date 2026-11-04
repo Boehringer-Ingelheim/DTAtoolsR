@@ -29,8 +29,9 @@
 #'   \item{Transmission}{`{TRANSMISSION_TYPE}`, `{TRANSMISSION_FREQUENCY}`,
 #'     `{TRANSMISSION_NOTIFICATION}`, `{TRANSMISSION_FIRST_TRANSFER}`,
 #'     `{TRANSMISSION_LAST_TRANSFER}`, `{TEST_UPLOAD}`, `{BLINDED_TRANSFER}`}
-#'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_NAMES}`, `{DATASET_TYPES}`,
-#'     `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
+#'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_IDS}`, `{DATASET_NAMES}`
+#'     (each dataset's name, or its id where no name is set),
+#'     `{DATASET_TYPES}`, `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
 #'   \item{Process}{`{ERROR_HANDLING}`, `{AUTHORIZED_CORRECTIONS}`,
 #'     `{SIGNATORIES}`, `{PROCESS_INFORMATION}`, `{VERSION_HISTORY}`,
 #'     `{GENERATED_DATE}`}
@@ -49,11 +50,11 @@
 #'     `{#DATASETS}` opens a region, repeated once per dataset in `dta`, that
 #'     ends at the next body paragraph whose whole text is `{/DATASETS}`; both
 #'     markers must be alone in their paragraph, and a region does not nest.
-#'     Inside each repetition, six placeholders resolve to that dataset's
-#'     values: `{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
-#'     `{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and
-#'     `{DATASET_RULE_COUNT}` (the last two are `0` for a non-tabular
-#'     dataset). A bare dataset block (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
+#'     Inside each repetition, seven placeholders resolve to that dataset's
+#'     values: `{DATASET_ID}`, `{DATASET_NAME}` (its id where no name is set),
+#'     `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+#'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
+#'     `0` for a non-tabular dataset). A bare dataset block (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
 #'     `{FILE_SPECS}`, `{DATASETS}`) alone in a paragraph of the region is
 #'     bound to the repetition's dataset and rendered without its generated
 #'     heading; an explicit `{COLUMN_SPECS:NAME}` is left as written. A
@@ -214,7 +215,8 @@ export_with_template <- function(
     "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No; blank if unspecified)",
     "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No; blank if unspecified)",
     "{DATASET_COUNT}" = "Number of datasets",
-    "{DATASET_NAMES}" = "Names of all datasets",
+    "{DATASET_IDS}" = "Identifiers of all datasets",
+    "{DATASET_NAMES}" = "Names of all datasets (the identifier where no name is set)",
     "{DATASET_TYPES}" = "Types of all datasets",
     "{TOTAL_COLUMNS}" = "Total column count across tabular datasets",
     "{TOTAL_RULES}" = "Total validation-rule count across tabular datasets",
@@ -362,11 +364,8 @@ dta_template_placeholders <- function(dta = NULL) {
   auth <- .format_authorized_for_corrections_lines(meta@authorized_for_corrections)
   auth_str <- if (length(auth) > 0) paste(auth, collapse = ", ") else ""
 
-  dataset_names <- if (length(datasets) > 0) {
-    paste(names(datasets), collapse = ", ")
-  } else {
-    ""
-  }
+  dataset_ids <- paste(names(datasets), collapse = ", ")
+  dataset_names <- paste(vapply(datasets, dta_dataset_label, character(1)), collapse = ", ")
   dataset_types <- if (length(datasets) > 0) {
     paste(vapply(datasets, function(ds) ds@type, character(1)), collapse = ", ")
   } else {
@@ -400,6 +399,7 @@ dta_template_placeholders <- function(dta = NULL) {
     "{TEST_UPLOAD}" = .tv_scalar(.tv_get(trans, "test_upload")),
     "{BLINDED_TRANSFER}" = .tv_scalar(.tv_get(trans, "blinded_transfer")),
     "{DATASET_COUNT}" = as.character(length(datasets)),
+    "{DATASET_IDS}" = dataset_ids,
     "{DATASET_NAMES}" = dataset_names,
     "{DATASET_TYPES}" = dataset_types,
     "{TOTAL_COLUMNS}" = as.character(total_columns),
