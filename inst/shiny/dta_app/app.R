@@ -1629,7 +1629,12 @@ server <- function(input, output, session) {
     # re-insert, and every open re-renders them fresh from the inputs Shiny is
     # still holding. The tick covers an open while already "open" -- a close
     # whose report never arrived.
+    #
+    # The search box is the one input that must NOT come back. The server
+    # owns the search text (tmpl_search_text) so that an open starts it empty
+    # no matter what the browser last reported, and no close report is needed.
     tmpl_picker_open(TRUE)
+    tmpl_search_text("")
     tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
     showModal(modalDialog(
       title = "Create new from template",
@@ -1672,6 +1677,25 @@ server <- function(input, output, session) {
   tmpl_picker_open <- reactiveVal(FALSE)
   observeEvent(input$template_picker_closed, tmpl_picker_open(FALSE))
 
+  # What the picker filters by. input$template_search keeps its last value
+  # after the dialog closes, so it is only copied in while the box is typing;
+  # an open resets this to "" and the freshly rendered, empty box then
+  # reports "" itself. Priority: the Enter key sends the text just before it
+  # clicks "Use this template", and that click must see it.
+  tmpl_search_text <- reactiveVal("")
+  observeEvent(input$template_search, tmpl_search_text(input$template_search %||% ""),
+    ignoreNULL = FALSE, priority = 10
+  )
+
+  # The template "Back to templates" must land on: the one whose options were
+  # just open. With the search gone, an implied selection (search + Enter, no
+  # click) would otherwise fall back to the first row. Dropped as soon as the
+  # list reports a selection, and on every fresh open.
+  tmpl_back_id <- reactiveVal(NULL)
+  observeEvent(input$template_select_name, tmpl_back_id(NULL),
+    ignoreInit = TRUE, priority = 10
+  )
+
   # One row per distinct, non-abstract creation-template id (template_picker_
   # entries(), template_index.R), plus the family/depth/lineage/search columns
   # that make a deviation template visible AS a deviation of its base
@@ -1695,7 +1719,7 @@ server <- function(input, output, session) {
   })
 
   template_picker_visible <- reactive({
-    template_picker_filter(template_picker_scoped(), input$template_search %||% "")
+    template_picker_filter(template_picker_scoped(), tmpl_search_text())
   })
 
   # The user's own choice for as long as it names a row that is still visible,
@@ -1708,7 +1732,7 @@ server <- function(input, output, session) {
     if (nrow(vis) == 0) {
       return(NULL)
     }
-    chosen <- as.character(input$template_select_name %||% "")
+    chosen <- as.character(tmpl_back_id() %||% input$template_select_name %||% "")
     if (nzchar(chosen) && chosen %in% vis$id) chosen else vis$id[[1]]
   })
 
@@ -1795,7 +1819,7 @@ server <- function(input, output, session) {
       diagnostics,
       div(
         class = "tmpl-search-row",
-        template_picker_search_ui(isolate(input$template_search %||% "")),
+        template_picker_search_ui(isolate(tmpl_search_text())),
         template_picker_source_ui(
           sort(unique(rows$source_name), method = "radix"),
           isolate(input$template_select_source),
@@ -1822,10 +1846,10 @@ server <- function(input, output, session) {
     }
     rows <- template_picker_rows()
     vis <- template_picker_visible()
-    tokens <- template_picker_tokens(input$template_search %||% "")
+    tokens <- template_picker_tokens(tmpl_search_text())
     template_picker_list_ui(
       vis,
-      selected = isolate(input$template_select_name),
+      selected = isolate(tmpl_back_id() %||% input$template_select_name),
       show_source = length(unique(rows$source_name)) > 1,
       # A search result is a flat list: the matches rarely form whole
       # families, and indenting a child under a parent that was filtered out
@@ -1875,6 +1899,7 @@ server <- function(input, output, session) {
       )
       return()
     }
+    tmpl_back_id(NULL)
     show_template_picker_modal()
   })
 
@@ -1916,12 +1941,15 @@ server <- function(input, output, session) {
   outputOptions(output, "template_picker_detail", suspendWhenHidden = FALSE)
 
   # Back to step 1. show_template_picker_modal() re-renders the picker's three
-  # outputs from the inputs Shiny is still holding, so the search text and the
-  # selection come back with them -- dismissing a modal removes controls from
-  # the DOM, it does not clear their input values.
+  # outputs from the inputs Shiny is still holding, so the selection comes
+  # back with them -- dismissing a modal removes controls from the DOM, it
+  # does not clear their input values. The search text is the exception: every
+  # open starts it empty (tmpl_search_text), so the selection is pinned to the
+  # template whose options were open instead.
   observeEvent(input$template_options_back, {
     removeModal()
     show_template_picker_modal()
+    tmpl_back_id(sub("@.*$", "", rv$template_ref %||% ""))
   })
 
   observeEvent(input$template_variant_back, {

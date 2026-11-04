@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The template picker's search box is now empty whenever the picker opens,
+  including after Cancel and after "Back to templates". Previously the old
+  search text came back and silently narrowed the list. "Back to templates"
+  still returns to the template whose options were open.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain
