@@ -213,7 +213,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   but `validate_template()` used to pass it. An `id`, `name` or `description`
   written as a list or as a missing value is reported as
   `dataset_field_invalid`, naming the key as written. A dataset in the old
-  shape (`name:` with no `id:`) passes as before.
+  shape (`name:` with no `id:`) has no id and is reported the same way.
 
 - **Datasets now have an `id`, a `name` and a `description`.** The identifier
   a dataset used to carry in `name` is its `id` (the key in a DTA, in every
@@ -221,12 +221,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   is now the human-readable label that `description` used to hold; and
   `description` is a new long free-text field. `DTADataSet()`,
   `DTADataSetTabular()` and `DTADataSetFile()` take `id` as their first
-  argument and abort with a hint when called the old way. YAML written in the
-  old shape -- a dataset with `name:` but no `id:`, including dataset
-  templates and inline template datasets -- still loads: its `name` becomes
-  the `id` and its `description` the `name`, through the new exported
-  `dta_dataset_list_upgrade()`. Everything the package and the app write uses
-  the new shape. A DTA's dataset list must now be keyed by each dataset's
+  argument and abort when called without one. **Breaking:** there is no
+  backwards compatibility. YAML written in the old shape -- a dataset with
+  `name:` but no `id:`, including dataset templates and inline template
+  datasets -- is refused with "A dataset needs an `id`" rather than
+  reinterpreted; rename the identifier key to `id:`. (A reinterpretation
+  would also silently turn a new-shape entry that merely forgot `id:` into a
+  different dataset.) A DTA's dataset list must now be keyed by each dataset's
   `id`. In the app, the sidebar and the dataset heading show the name with the
   id beneath it, the long description appears under the heading, and the
   add-dataset and Details dialogs edit all three. Exported documents head a
@@ -341,6 +342,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   manifest-only change — still runs on every pull request.
 
 ### Fixed
+
+- A creation-template option that has both `target:` and `effects_all:`, and no
+  `effects:`, now writes the selected value to its target. Before, the
+  `effects_all:` block took the place of the missing `effects:`, so the value
+  was silently dropped and the option lost its default inherited from
+  `base.metadata`.
+
+- In a `{#DATASETS}` region, a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}`
+  now renders nothing for a file dataset, instead of a "No tabular datasets."
+  note that was false for a document that has tabular datasets.
+
+- The app's contact editor no longer loses its open dialog when a "closed"
+  report from an earlier dialog reaches the server late. Before, Save in the
+  freshly opened editor could then silently do nothing.
+
+- `inspect()` on a streamed table reads the row context in the same order the
+  validation scan numbered its rows, so the row shown is the row the message
+  names also when the file is read in several batches.
+
+- The Markdown exports escape a dataset's name, description and template
+  fields, as they already did for agreement sections, so a `#` or `*` in them
+  no longer restructures the document.
 
 - Custom Word exports retain complete transmission statements and additional
   transmission fields rather than truncating or omitting them. Unspecified
@@ -553,6 +576,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   silently empty.
 
 ### Security
+
+- The app's headless-browser PDF route now blocks scripts with a
+  Content-Security-Policy in the printed page. The `--disable-javascript` flag
+  it passed before is not a Chromium switch and blocked nothing; the switch
+  that does block scripts also stops the browser from printing.
 
 - **The PDF export no longer lets a document's own text act as markup.** A DTA
   is a file that arrives from outside -- a supplier, a partner lab -- and its

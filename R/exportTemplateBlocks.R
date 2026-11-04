@@ -515,6 +515,19 @@
         next
       }
 
+      # A region binds a bare block to EVERY dataset it repeats over. For a
+      # file dataset a tabular-only block has nothing to show, and the
+      # renderer's "No tabular datasets." note would be false for the
+      # document: drop the placeholder paragraph instead.
+      if (
+        sentinel %in% bare &&
+          spec$name %in% c("{COLUMN_SPECS}", "{VALIDATION_RULES}") &&
+          length(.tv_block_datasets(dta, spec$arg, tabular_only = TRUE)) == 0
+      ) {
+        doc <- officer::body_remove(doc)
+        next
+      }
+
       # Consume the placeholder paragraph, then let the renderer append after it.
       doc <- officer::body_add_par(doc, "", pos = "on")
       doc <- .tv_block_render(doc, spec, dta, heading = !sentinel %in% bare)

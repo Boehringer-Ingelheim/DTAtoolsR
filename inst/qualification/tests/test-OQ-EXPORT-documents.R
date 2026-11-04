@@ -273,10 +273,11 @@ test_that("OQ-EXPORT-010 | format = \"md\" writes a markdown file with the same 
   qa_step("the title line is present", TRUE, grepl("**Title:** Clinical Data Specification", text, fixed = TRUE))
   qa_step("the version line is present", TRUE, grepl("**Version:** 0.1", text, fixed = TRUE))
   # The fixture gives the dataset the label "Clinical data table", so its
-  # heading carries the label with the id kept visible beside it.
+  # heading carries the label with the id kept visible beside it -- escaped
+  # Markdown, so the id's `_` cannot start emphasis.
   qa_step(
     "the dataset heading is present, naming the dataset by its label and its id",
-    TRUE, grepl("### Clinical data table (clinical_data)", text, fixed = TRUE)
+    TRUE, grepl("### Clinical data table (clinical\\_data)", text, fixed = TRUE)
   )
 })
 

@@ -423,9 +423,11 @@ write_dta <- function(
     for (ds_name in names(dta@datasets)) {
       dataset <- dta@datasets[[ds_name]]
 
-      lines <- c(lines, paste("###", dta_dataset_heading(dataset)), "")
+      # Escaped like the section text above: name and description are author
+      # text, and a `#` or `*` in them must not restructure the document.
+      lines <- c(lines, paste("###", .plain_text_to_md(dta_dataset_heading(dataset))), "")
       if (!is.null(dataset@description) && nzchar(dataset@description)) {
-        lines <- c(lines, dataset@description, "")
+        lines <- c(lines, .plain_text_to_md(dataset@description), "")
       }
 
       lines <- c(lines, .file_specs_to_md_lines(dataset@files, heading = "#### File Specifications"))
@@ -1014,14 +1016,14 @@ write_dataset_metadata <- function(
 .write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL) {
   lines <- c(
     "# Dataset Specification",
-    paste("## ", dta_dataset_heading(dataset)),
+    paste("## ", .plain_text_to_md(dta_dataset_heading(dataset))),
     "",
     "### Overview",
-    paste("**ID:**", dataset@id),
-    if (!is.null(dataset@name)) paste("**Name:**", dataset@name) else "",
-    if (!is.null(dataset@description)) paste("**Description:**", dataset@description) else "",
-    if (!is.null(dataset@template_source)) paste("**Template Source:**", dataset@template_source) else "",
-    if (!is.null(dataset@template_version)) paste("**Template Version:**", dataset@template_version) else "",
+    paste("**ID:**", .plain_text_to_md(dataset@id)),
+    if (!is.null(dataset@name)) paste("**Name:**", .plain_text_to_md(dataset@name)) else "",
+    if (!is.null(dataset@description)) paste("**Description:**", .plain_text_to_md(dataset@description)) else "",
+    if (!is.null(dataset@template_source)) paste("**Template Source:**", .plain_text_to_md(dataset@template_source)) else "",
+    if (!is.null(dataset@template_version)) paste("**Template Version:**", .plain_text_to_md(dataset@template_version)) else "",
     ""
   )
 

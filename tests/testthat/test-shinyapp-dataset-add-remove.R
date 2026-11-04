@@ -206,7 +206,7 @@ test_that("an added dataset of each type survives a YAML round trip", {
   expect_true(inherits(tab, "DTAtools::DTADataSetTabular"))
   expect_equal(tab@type, "tabular")
   # id, name and description each come back as themselves -- none is read as
-  # another (the legacy `name:`-is-the-identifier upgrade must not fire on an
+  # another (`name:` is a label and must not be taken for the identifier of an
   # entry that already carries an `id:`).
   expect_equal(tab@id, "new_tabular")
   expect_equal(tab@name, "New tabular")

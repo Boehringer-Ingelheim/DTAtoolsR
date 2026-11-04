@@ -279,9 +279,6 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # DTAColumnSpec objects, which know nothing of `values_from` -- an
       # unexpanded binding would reach do.call(DTAColumnSpec, x) and fail
       # there, naming an "unused argument" rather than the template.
-      # An inline entry written before datasets had an `id` names itself in
-      # `name:`; upgraded first so the slot targets below match it by id.
-      ref <- DTAtools::dta_dataset_list_upgrade(ref)
       ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$id)
       ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
       built_names <- c(built_names, as.character(ref$id %||% ""))

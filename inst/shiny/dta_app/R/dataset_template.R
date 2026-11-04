@@ -96,10 +96,6 @@ read_dataset_template <- function(path) {
     if (!is.list(def[["dataset"]])) {
       stop(.dataset_template_missing_dataset_msg(def))
     }
-    # A template written before datasets had an `id` names its dataset in
-    # `name:`; upgraded HERE, before anything below reads or rewrites the body,
-    # so as_name, the patch and the provenance all see one shape.
-    def[["dataset"]] <- DTAtools::dta_dataset_list_upgrade(def[["dataset"]])
     if (is.null(def[["dataset"]][["id"]]) || !nzchar(as.character(def[["dataset"]][["id"]]))) {
       stop("Dataset template's 'dataset' section must contain an 'id'.")
     }
@@ -435,7 +431,7 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
     # still held a raw token, and there is no later pass here to catch one
     # that survived unresolved into the final dataset.
     today_env <- dta_template_today_env()
-    ds <- resolve_template_expressions(DTAtools::dta_dataset_list_upgrade(def[["dataset"]]), today_env)
+    ds <- resolve_template_expressions(def[["dataset"]], today_env)
     opts <- resolve_template_expressions(def$options %||% list(), today_env)
 
     # 2) Option-driven effects. dataset_template_selection_values() decides

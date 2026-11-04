@@ -351,6 +351,7 @@ $(document).on('shown.bs.modal hidden.bs.modal', '#shiny-modal', function (ev) {
   Shiny.setInputValue('dta_modal_state', {
     event: ev.type,
     kind: this.getAttribute('data-dta-modal') || '',
+    id: this.getAttribute('data-dta-modal-id') || '',
     at: Date.now()
   }, {priority: 'event'});
 });
@@ -534,6 +535,7 @@ server <- function(input, output, session) {
     doc_token = 0, # bump ONLY on load/reset/restore -> re-render the main layout
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
+    editing_contact_nonce = NULL, # data-dta-modal-id of that open contact dialog
     editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
     file_view = "list", # file-handler editor view: "list" | "form"
     file_token = 0, # bump to re-render the file-handler editor body
@@ -6405,7 +6407,9 @@ server <- function(input, output, session) {
   # way a dialog can leave the screen that the server never sees itself:
   # Cancel, Esc, the backdrop, or another dialog taking its place. The
   # data-dta-modal stamp is what lets that report tell this dialog from any
-  # other.
+  # other, and the per-open data-dta-modal-id nonce is what lets it tell THIS
+  # opening from an earlier one whose 'hidden' report arrives late.
+  contact_modal_seq <- 0L
   edit_contact_flow <- function(side, index) {
     req(editing())
     target <- list(side = side, index = index)
@@ -6417,6 +6421,9 @@ server <- function(input, output, session) {
       return()
     }
     rv$editing_contact <- target
+    contact_modal_seq <<- contact_modal_seq + 1L
+    nonce <- paste0("contact-", contact_modal_seq)
+    rv$editing_contact_nonce <- nonce
     showModal(tagAppendAttributes(
       modalDialog(
         title = paste("Edit", side, "contact"),
@@ -6431,21 +6438,28 @@ server <- function(input, output, session) {
         ),
         easyClose = TRUE
       ),
-      `data-dta-modal` = "edit_contact"
+      `data-dta-modal` = "edit_contact",
+      `data-dta-modal-id` = nonce
     ))
   }
 
   # The browser's report of a modal arriving or leaving (modal_state_js, top
-  # of this file). Anything other than the contact editor itself being shown
-  # -- that editor closing, or any other dialog appearing -- means the contact
-  # editor is no longer on screen, so the next request for it must open it
-  # again rather than be dropped as a repeat. A Save has already cleared the
-  # record by the time its removeModal() reports 'hidden'; clearing twice is
-  # harmless.
+  # of this file). The record is cleared only by news about the dialog it
+  # describes: that very opening going away ('hidden' with its nonce), or a
+  # dialog of another kind being shown in its place. A 'hidden' from any
+  # earlier dialog -- including an earlier contact dialog -- can arrive after
+  # the server has already opened the next one, and clearing on it would
+  # leave Save with no record and nothing to do. A Save clears the record
+  # itself; its removeModal()'s 'hidden' then finds nothing to clear.
   observeEvent(input$dta_modal_state, {
     st <- input$dta_modal_state
-    if (!identical(st$event, "shown") || !identical(st$kind, "edit_contact")) {
+    closed <- identical(st$event, "hidden") &&
+      !is.null(rv$editing_contact_nonce) &&
+      identical(as.character(st$id %||% ""), rv$editing_contact_nonce)
+    replaced <- identical(st$event, "shown") && !identical(st$kind, "edit_contact")
+    if (closed || replaced) {
       rv$editing_contact <- NULL
+      rv$editing_contact_nonce <- NULL
     }
   })
 
@@ -6471,6 +6485,7 @@ server <- function(input, output, session) {
     if (r$ok) {
       rv$dta <- r$value
       rv$editing_contact <- NULL
+      rv$editing_contact_nonce <- NULL
       rv$contacts_token <- rv$contacts_token + 1
       sync_yaml_text()
       removeModal()

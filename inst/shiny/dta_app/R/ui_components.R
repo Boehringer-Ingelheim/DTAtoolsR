@@ -721,8 +721,7 @@ template_provenance_block <- function(prov) {
     lapply(ds_prov, function(d) {
       ndev <- length(d$deviations %||% list())
       meta_field_text(
-        # `name` is what a document saved before datasets had an `id` recorded.
-        as.character(d$id %||% d$name %||% ""),
+        as.character(d$id %||% ""),
         sprintf(
           "%s@%s — %d deviation%s",
           as.character(d$template %||% ""), as.character(d$version %||% ""),

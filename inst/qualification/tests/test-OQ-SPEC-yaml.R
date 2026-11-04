@@ -311,7 +311,7 @@ test_that("OQ-SPEC-022 | a column renders as a JSON Schema fragment | REQ-SPEC-0
   )
 })
 
-test_that("OQ-SPEC-046 | a dataset entry written before datasets had an id is read with its old name as the id | REQ-SPEC-025", {
+test_that("OQ-SPEC-046 | a dataset entry without an id is refused | REQ-SPEC-025", {
   dir <- qa_tempdir()
   column <- c(
     "    columns:",
@@ -320,82 +320,71 @@ test_that("OQ-SPEC-046 | a dataset entry written before datasets had an id is re
     "        length: 8",
     "        nullable: false"
   )
+  refusal <- function(expr) {
+    err <- tryCatch(expr, error = function(e) e)
+    if (!inherits(err, "error")) {
+      return(NA_character_)
+    }
+    gsub("[[:space:]]+", " ", conditionMessage(err))
+  }
 
-  # Half one: the old shape. `name` was the identifier and `description` the
-  # short label. A reader that took `name` for a label would mint no id at all
-  # and leave the dataset unreachable under the name the agreement gave it.
-  legacy <- file.path(dir, "legacy_dataset.yaml")
+  # `name` is the human-readable label, never the identifier: an entry that
+  # carries only a name must not be keyed by its label.
+  qa_check(
+    "a list with a name and a type but no id is refused, naming the missing id",
+    grepl("needs an `id`", refusal(dta_dataset_from_list(list(name = "dm", type = "tabular"))), fixed = TRUE)
+  )
+
+  single <- file.path(dir, "no_id_dataset.yaml")
   writeLines(
-    c(
-      "name: dm_legacy",
-      "type: tabular",
-      "description: Demographics label",
-      "columns:",
-      "  - id: ID",
-      "    type: SAS Char",
-      "    length: 8",
-      "    nullable: false"
-    ),
-    legacy
+    c("name: Demographics", "type: tabular", "columns:", "  - id: ID", "    type: SAS Char", "    length: 8", "    nullable: false"),
+    single
   )
-  ds <- read_dataset_from_yaml(legacy)
-  qa_step(
-    "a legacy single dataset takes its old name as the id and its old description as the name",
-    list(id = "dm_legacy", name = "Demographics label", has_description = FALSE),
-    list(id = ds@id, name = ds@name, has_description = !is.null(ds@description))
+  qa_check(
+    "a single dataset file without an id is refused",
+    grepl("needs an `id`", refusal(read_dataset_from_yaml(single)), fixed = TRUE)
   )
 
-  # An old entry that never had a description has no label to carry over, and
-  # must not be given an empty one.
-  bare <- file.path(dir, "legacy_bare.yaml")
-  writeLines(
-    c("name: dm_bare", "type: tabular", "columns:", "  - id: ID", "    type: SAS Char", "    length: 8", "    nullable: false"),
-    bare
-  )
-  ds_bare <- read_dataset_from_yaml(bare)
-  qa_step(
-    "a legacy entry without a description reads with its id and no name",
-    list(id = "dm_bare", has_name = FALSE),
-    list(id = ds_bare@id, has_name = !is.null(ds_bare@name))
-  )
-
-  # Half two, in one transfer: the old shape beside the current one. The
-  # current entry must come through untouched -- in particular its `name` must
-  # stay a label and not be taken for an identifier a second time.
   mixed <- file.path(dir, "mixed.yaml")
   writeLines(
     c(
       "metadata:",
-      "  title: Mixed shapes",
+      "  title: One entry lacks an id",
       '  version: "1"',
       "datasets:",
-      "  - name: dm_legacy",
+      "  - id: lb_current",
       "    type: tabular",
-      "    description: Demographics label",
+      "    name: Laboratory results",
       column,
+      "  - name: Demographics",
+      "    type: tabular",
+      column
+    ),
+    mixed
+  )
+  qa_check(
+    "a specification with one id-less entry among valid ones is refused as a whole",
+    grepl("needs an `id`", refusal(read_dta_from_yaml(mixed)), fixed = TRUE)
+  )
+
+  current <- file.path(dir, "current.yaml")
+  writeLines(
+    c(
+      "metadata:",
+      "  title: Current shape",
+      '  version: "1"',
+      "datasets:",
       "  - id: lb_current",
       "    type: tabular",
       "    name: Laboratory results",
       "    description: Long free text about the laboratory results.",
       column
     ),
-    mixed
+    current
   )
-  dta <- read_dta_from_yaml(mixed)
+  dta <- read_dta_from_yaml(current)
   qa_step(
-    "both entries are keyed by their ids",
-    c("dm_legacy", "lb_current"), names(datasets(dta))
-  )
-  qa_step(
-    "the legacy entry is upgraded",
-    list(id = "dm_legacy", name = "Demographics label", has_description = FALSE),
-    list(
-      id = dta[["dm_legacy"]]@id, name = dta[["dm_legacy"]]@name,
-      has_description = !is.null(dta[["dm_legacy"]]@description)
-    )
-  )
-  qa_step(
-    "the entry that has an id keeps its id, name and description unchanged",
+    "an entry that has an id keeps its id, name and description unchanged",
     list(
       id = "lb_current", name = "Laboratory results",
       description = "Long free text about the laboratory results."
@@ -404,20 +393,5 @@ test_that("OQ-SPEC-046 | a dataset entry written before datasets had an id is re
       id = dta[["lb_current"]]@id, name = dta[["lb_current"]]@name,
       description = dta[["lb_current"]]@description
     )
-  )
-
-  # The exported converter is the same rule on a bare list, and repeating it
-  # changes nothing.
-  entry <- list(name = "dm", type = "tabular", description = "Demographics")
-  upgraded <- dta_dataset_list_upgrade(entry)
-  qa_step(
-    "dta_dataset_list_upgrade() moves name to id and description to name",
-    list(id = "dm", name = "Demographics", type = "tabular"),
-    upgraded[c("id", "name", "type")]
-  )
-  qa_check("and leaves no description behind", is.null(upgraded[["description"]]))
-  qa_step(
-    "and applying it again changes nothing",
-    upgraded, dta_dataset_list_upgrade(upgraded)
   )
 })

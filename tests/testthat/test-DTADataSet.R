@@ -213,7 +213,7 @@ test_that("labels() is exported, not left to base::labels' silent fallback", {
 
 test_that("a files: sequence builds one handler per entry, in order", {
   ds <- dta_dataset_from_list(list(
-    name = "two_handlers",
+    id = "two_handlers",
     type = "tabular",
     files = list(
       list(type = "csv", filename = "a.csv"),
@@ -234,7 +234,7 @@ test_that("a one-element files: sequence is a sequence, not a mapping", {
   # because the failure was in how `files` was passed on, not in how many
   # handlers were asked for.
   ds <- dta_dataset_from_list(list(
-    name = "one_in_a_sequence",
+    id = "one_in_a_sequence",
     type = "tabular",
     files = list(list(type = "csv", filename = "a.csv")),
     columns = list(list(id = "STUDYID", type = "SAS Char"))
@@ -261,7 +261,7 @@ test_that("a dataset without a files: block has no handlers", {
   # Removing the last file handler is reachable from the app's file editor, and
   # the resulting document must round-trip rather than abort in do.call().
   ds <- dta_dataset_from_list(list(
-    name = "no_handlers",
+    id = "no_handlers",
     type = "tabular",
     columns = list(list(id = "STUDYID", type = "SAS Char"))
   ))
@@ -284,7 +284,7 @@ test_that("dta_file_handlers_from_list() rejects a malformed sequence entry", {
 
 test_that("min/max number of files sum across several handlers", {
   ds <- dta_dataset_from_list(list(
-    name = "counts",
+    id = "counts",
     type = "tabular",
     files = list(
       list(type = "csv", filename = "a.csv"),
@@ -489,59 +489,8 @@ test_that("print_short_info() survives braces in the dataset id", {
 # ---------------------------------------------------------------------------
 # id / name / description
 # ---------------------------------------------------------------------------
-# A dataset used to carry its identifier in `name` and a short label in
-# `description`. It now has `id` (the identifier), `name` (the label) and
-# `description` (long free text). Specifications written in the old shape keep
-# loading, because every reader upgrades them first.
-
-test_that("dta_dataset_list_upgrade() moves name to id and description to name", {
-  upgraded <- dta_dataset_list_upgrade(
-    list(name = "dm", type = "tabular", description = "Demographics")
-  )
-
-  expect_identical(upgraded[["id"]], "dm")
-  expect_identical(upgraded[["name"]], "Demographics")
-  expect_identical(upgraded[["type"]], "tabular")
-  # The old short label is the new name; there is no long description to carry.
-  expect_false("description" %in% names(upgraded))
-})
-
-test_that("dta_dataset_list_upgrade() gives an entry without a description no name", {
-  upgraded <- dta_dataset_list_upgrade(list(name = "dm", type = "tabular"))
-
-  expect_identical(upgraded[["id"]], "dm")
-  # No `name` element at all, rather than an empty or NA one.
-  expect_false("name" %in% names(upgraded))
-  expect_false("description" %in% names(upgraded))
-  expect_identical(upgraded[["type"]], "tabular")
-})
-
-test_that("dta_dataset_list_upgrade() returns anything else untouched", {
-  current <- list(
-    id = "dm", type = "tabular", name = "Demographics", description = "Long text."
-  )
-  expect_identical(dta_dataset_list_upgrade(current), current)
-
-  # An id wins: a `name` beside it is a label, not an identifier to promote.
-  id_only <- list(id = "dm", type = "file")
-  expect_identical(dta_dataset_list_upgrade(id_only), id_only)
-
-  import <- list(template = "x@1", as = "y")
-  expect_identical(dta_dataset_list_upgrade(import), import)
-
-  expect_identical(dta_dataset_list_upgrade("dm"), "dm")
-  expect_null(dta_dataset_list_upgrade(NULL))
-})
-
-test_that("dta_dataset_list_upgrade() is idempotent", {
-  for (legacy in list(
-    list(name = "dm", type = "tabular", description = "Demographics"),
-    list(name = "dm", type = "tabular")
-  )) {
-    once <- dta_dataset_list_upgrade(legacy)
-    expect_identical(dta_dataset_list_upgrade(once), once)
-  }
-})
+# A dataset has `id` (the identifier), `name` (the label) and
+# `description` (long free text). An entry without `id` is refused.
 
 # Written to disk so the whole read path is exercised, not only the helper.
 write_yaml_lines <- function(lines, env = parent.frame()) {
@@ -550,41 +499,19 @@ write_yaml_lines <- function(lines, env = parent.frame()) {
   path
 }
 
-test_that("read_dta_from_yaml() upgrades a legacy dataset entry", {
+test_that("read_dta_from_yaml() refuses a dataset entry without an id", {
   path <- write_yaml_lines(c(
     "metadata:",
-    "  title: Legacy specification",
+    "  title: Specification without ids",
     "  version: '1.0'",
     "datasets:",
     "  - name: dm",
-    "    type: tabular",
-    "    description: Demographics",
-    "    files:",
-    "      filename: dm.csv",
-    "      type: csv",
-    "    columns:",
-    "      - id: STUDYID",
-    "        type: SAS Char",
-    "  - name: ae",
     "    type: tabular",
     "    columns:",
     "      - id: STUDYID",
     "        type: SAS Char"
   ))
-  dta <- read_dta_from_yaml(path)
-
-  expect_named(dta@datasets, c("dm", "ae"))
-
-  dm <- dta@datasets[["dm"]]
-  expect_identical(dm@id, "dm")
-  expect_identical(dm@name, "Demographics")
-  expect_null(dm@description)
-
-  # No description in the old shape means no label in the new one.
-  ae <- dta@datasets[["ae"]]
-  expect_identical(ae@id, "ae")
-  expect_null(ae@name)
-  expect_null(ae@description)
+  expect_error(read_dta_from_yaml(path), regexp = "needs an .*id")
 })
 
 test_that("read_dta_from_yaml() reads id, name and description as written", {
@@ -613,22 +540,15 @@ test_that("read_dta_from_yaml() reads id, name and description as written", {
   expect_identical(dm@description, "One row per subject, as delivered by the CRO.")
 })
 
-test_that("read_dataset_from_yaml() upgrades a legacy dataset and reads a current one", {
-  legacy <- write_yaml_lines(c(
+test_that("read_dataset_from_yaml() reads id, name and description as written, and refuses a missing id", {
+  noid <- write_yaml_lines(c(
     "name: dm",
     "type: tabular",
-    "description: Demographics",
-    "files:",
-    "  filename: dm.csv",
-    "  type: csv",
     "columns:",
     "  - id: STUDYID",
     "    type: SAS Char"
   ))
-  ds <- read_dataset_from_yaml(legacy)
-  expect_identical(ds@id, "dm")
-  expect_identical(ds@name, "Demographics")
-  expect_null(ds@description)
+  expect_error(read_dataset_from_yaml(noid), regexp = "needs an .*id")
 
   current <- write_yaml_lines(c(
     "id: dm",
@@ -650,17 +570,33 @@ test_that("read_dataset_from_yaml() upgrades a legacy dataset and reads a curren
 
 test_that("dta_dataset_from_list() names what is wrong with an entry", {
   expect_error(
-    dta_dataset_from_list(list(type = "tabular")),
+    dta_dataset_from_list(list(description = "no identifying key at all")),
     regexp = "List must contain an .*id.* field or be a list of datasets"
   )
   expect_error(
     dta_dataset_from_list(list(id = "dm")),
     regexp = "Dataset .*dm.* must contain a .*type"
   )
-  # A legacy entry reaches the same check under the id it was upgraded to.
+})
+
+test_that("dta_dataset_from_list() refuses an entry without an id", {
+  # `name` is the label now; it is never promoted to the identifier.
   expect_error(
-    dta_dataset_from_list(list(name = "dm", description = "Demographics")),
-    regexp = "Dataset .*dm.* must contain a .*type"
+    dta_dataset_from_list(list(name = "dm", type = "tabular")),
+    regexp = "needs an .*id"
+  )
+  expect_error(
+    dta_dataset_from_list(list(type = "tabular")),
+    regexp = "needs an .*id"
+  )
+  # The first of several entries decides that they are datasets; each one is
+  # then checked on its own.
+  expect_error(
+    dta_dataset_from_list(list(
+      list(id = "ae", type = "file"),
+      list(name = "dm", type = "tabular")
+    )),
+    regexp = "needs an .*id"
   )
 })
 
@@ -685,32 +621,19 @@ test_that("DTADataSetFactory() forwards id, name and description", {
   expect_identical(file@description, "PDF reports.")
 })
 
-test_that("a dataset constructor called without `id` aborts and says where the id went", {
+test_that("a dataset constructor called without `id` aborts, name or no name", {
   specs <- create_example_DTAColumnSpecCollection(1)
 
-  # A call written against the old signature: `name` was the identifier.
-  expect_error(
-    DTADataSetTabular(name = "dm", specs = specs),
-    regexp = "needs an"
-  )
-  expect_error(
-    DTADataSetTabular(name = "dm", specs = specs),
-    regexp = "moved from"
-  )
-  expect_error(DTADataSetFile(name = "dm"), regexp = "needs an")
-  expect_error(DTADataSetFile(name = "dm"), regexp = "moved from")
-  expect_error(DTADataSet(name = "dm", type = "file"), regexp = "needs an")
-  expect_error(DTADataSet(name = "dm", type = "file"), regexp = "moved from")
-
-  # Without a name there is nothing to be a leftover of the old signature, so
-  # the hint is not offered.
+  # `name` is the label; it is never read as the identifier.
   for (msg in list(
+    tryCatch(DTADataSetTabular(name = "dm", specs = specs), error = conditionMessage),
+    tryCatch(DTADataSetFile(name = "dm"), error = conditionMessage),
+    tryCatch(DTADataSet(name = "dm", type = "file"), error = conditionMessage),
     tryCatch(DTADataSetTabular(specs = specs), error = conditionMessage),
     tryCatch(DTADataSetFile(), error = conditionMessage),
     tryCatch(DTADataSet(type = "file"), error = conditionMessage)
   )) {
-    expect_match(cli::ansi_strip(msg), "needs an")
-    expect_false(grepl("moved from", msg, fixed = TRUE))
+    expect_match(cli::ansi_strip(msg), "needs an .*id")
   }
 })
 

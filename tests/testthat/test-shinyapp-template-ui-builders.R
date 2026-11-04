@@ -517,13 +517,11 @@ test_that("the summary sentence names an inline dataset by its id, not by its la
   # never what the sentence prints when an id (or `as:`) is there.
   def <- demo_def(datasets = list(
     list(id = "dm", name = "Demographics", type = "tabular"),
-    list(as = "vs_copy", id = "vs", name = "Vital signs"),
-    # Written before datasets had an `id`: its identifier is in `name`.
-    list(name = "legacy_ds", type = "file")
+    list(as = "vs_copy", id = "vs", name = "Vital signs")
   ))
   html <- html_of(detail_ui(demo_loaded(def), versions, "1.0", NULL))
 
-  expect_match(html, "Builds 3 datasets, dm, vs_copy, legacy_ds.", fixed = TRUE)
+  expect_match(html, "Builds 2 datasets, dm, vs_copy.", fixed = TRUE)
   expect_false(grepl("Demographics", html, fixed = TRUE))
   expect_false(grepl("Vital signs", html, fixed = TRUE))
 })

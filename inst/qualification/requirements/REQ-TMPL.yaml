@@ -571,8 +571,8 @@ requirements:
       or description, as written, is anything but a single non-missing
       scalar (a YAML sequence or mapping, or a missing value) shall be
       reported dataset_field_invalid at severity "error", with a message
-      naming that key. A dataset in the pre-id shape (name: with no id:)
-      shall raise neither.
+      naming that key. A dataset with name: but no id: shall be reported
+      dataset_id_missing like any other dataset without an id.
     risk: medium
     category: functional
     covers: [validate_template]

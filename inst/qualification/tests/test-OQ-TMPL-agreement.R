@@ -23,7 +23,7 @@ test_that("OQ-TMPL-067 | structured metadata inherits and carries over without r
       target = "metadata.study.protocol_id", default = "P-001"
     )),
     datasets = list(list(
-      name = "records", type = "tabular",
+      id = "records", type = "tabular",
       columns = list(list(id = "SUBJECT", type = "SAS Char"))
     ))
   )

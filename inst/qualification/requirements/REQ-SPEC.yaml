@@ -279,18 +279,16 @@ requirements:
   - id: REQ-SPEC-025
     text: >
       dta_dataset_from_list(), and with it read_dta_from_yaml() and
-      read_dataset_from_yaml(), shall read a dataset entry that has a name but
-      no id -- the shape written before datasets had an id -- as a dataset
-      whose @id is that name and whose @name is the entry's description, and
-      shall read an entry that has an id with its id, name and description
+      read_dataset_from_yaml(), shall refuse a dataset entry that has no id,
+      and shall read an entry that has an id with its id, name and description
       unchanged.
     risk: high
     category: integrity
-    covers: [dta_dataset_from_list, dta_dataset_list_upgrade, read_dta_from_yaml, read_dataset_from_yaml]
+    covers: [dta_dataset_from_list, read_dta_from_yaml, read_dataset_from_yaml]
     source: R/DTADataSet-class.R
     notes: >
-      Specifications, template libraries and qualification fixtures written in
-      the old shape exist outside this repository. Reading one with the old
-      identifier in the wrong field would key every dataset by its label, so
-      every load_file() and every report would address a dataset that is not
-      there.
+      The id is the dataset's identifier; the name is only its label. An entry
+      that omits the id must not be keyed by its label, because every
+      load_file() and every report would then address a dataset that is not
+      there. Specifications written before datasets had an id are refused,
+      not rewritten.

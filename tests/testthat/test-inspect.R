@@ -299,6 +299,33 @@ test_that("dta_inspect_table_frame reads only the requested columns and row boun
   expect_equal(dta_inspect_table_frame(ds), expected)
 })
 
+test_that("dta_inspect_table_frame keeps row k as row k across several read batches", {
+  # A 1 MiB read block over a ~4 MiB file gives several record batches; the
+  # row context must still be the row the scan numbered, i.e. the file's own.
+  withr::local_options(DTAtools.stream_block_size = 1024L^2)
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, "batches.csv")
+  n <- 200000L
+  utils::write.csv(
+    data.frame(ID = seq_len(n), PAD = strrep("x", 12)),
+    path,
+    row.names = FALSE
+  )
+
+  ds <- dta_open_normalized_dataset(path, delim = ",", quote = '"', has_header = TRUE)
+  batches <- 0L
+  reader <- arrow::Scanner$create(ds)$ToRecordBatchReader()
+  while (!is.null(reader$read_next_batch())) batches <- batches + 1L
+  expect_gt(batches, 1L)
+
+  for (k in c(1L, 150000L, n)) {
+    frame <- dta_inspect_table_frame(ds, columns = "ID", max_row = k)
+    expect_equal(nrow(frame), k)
+    expect_identical(as.character(frame$ID[[k]]), as.character(k))
+  }
+  expect_identical(as.character(dta_inspect_table_frame(ds, columns = "ID")$ID), as.character(seq_len(n)))
+})
+
 test_that("dta_inspect_table_frame refuses to re-read a RecordBatchReader", {
   dir <- withr::local_tempdir()
   path <- file.path(dir, "reader.csv")

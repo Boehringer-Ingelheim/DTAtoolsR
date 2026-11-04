@@ -154,7 +154,7 @@ test_that("create_dta_from_template() rejects a template definition whose base.m
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml")

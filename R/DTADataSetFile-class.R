@@ -40,7 +40,7 @@ DTADataSetFile <- S7::new_class(
     template_version = NULL,
     template_date = NULL
   ) {
-    if (missing(id)) dta_abort_missing_dataset_id(name)
+    if (missing(id)) dta_abort_missing_dataset_id()
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }

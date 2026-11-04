@@ -658,7 +658,7 @@ test_that("the two parse settings survive the factory and a YAML round trip", {
   # DTAFileFactory. A key that never reaches the constructor is a key a user
   # can write and never see honoured.
   parsed <- yaml::yaml.load(paste(
-    "name: encoded",
+    "id: encoded",
     "type: tabular",
     "files:",
     "  type: tsv",
@@ -1142,7 +1142,7 @@ test_that("a pattern description survives the factory and a YAML round trip", {
   expect_equal(f@pattern_description, "one file per batch")
 
   ds <- dta_dataset_from_list(list(
-    name = "described",
+    id = "described",
     type = "tabular",
     files = list(
       type = "tsv", filename = "gf_.*[.]tsv$", pattern = TRUE,
@@ -1281,7 +1281,7 @@ test_that("a handler can carry several file names", {
 
 test_that("a filename sequence from YAML becomes a character vector", {
   ds <- dta_dataset_from_list(list(
-    name = "multi_name",
+    id = "multi_name",
     type = "tabular",
     files = list(
       type = "csv", filename = list("site_a.csv", "site_b.csv"),

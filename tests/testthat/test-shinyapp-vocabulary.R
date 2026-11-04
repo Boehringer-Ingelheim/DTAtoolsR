@@ -1176,37 +1176,6 @@ test_that("a vocabulary slot narrows the bound column at creation time", {
   expect_identical(chosen$value@datasets[[1]]@specs@columns[[1]]@values, "EOT")
 })
 
-test_that("a slot still finds a dataset template written with the legacy `name:` identifier", {
-  # The slot targets the dataset by the id it ends up with. A dataset template
-  # from before datasets had an `id` names it in `name:`; reading it upgrades
-  # that to the id, so the same `datasets.ds1...` target keeps working.
-  dir <- vocab_slot_source_dir(
-    c(
-      "vocabulary_slots:",
-      "  - id: visit_choice",
-      "    target: datasets.ds1.columns.VISIT.values",
-      "    vocabulary: visit@1.0",
-      "    default: [SCR]"
-    ),
-    dataset_id_line = "  name: ds1"
-  )
-
-  withr::local_envvar(c(
-    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
-    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
-  ))
-  app_fn("dta_template_index_invalidate")()
-  idx <- app_fn("build_template_index")(refresh = TRUE)
-
-  loaded <- app_fn("load_template_definition")("with_slot@1.0", index = idx)
-  built <- app_fn("create_dta_from_template")(loaded$value$def, loaded$value$path, index = idx)
-
-  expect_true(isTRUE(built$ok), info = built$error)
-  ds <- built$value@datasets[[1]]
-  expect_equal(ds@id, "ds1")
-  expect_identical(ds@specs@columns[[1]]@values, "SCR")
-})
-
 test_that("without a slot, the column binding alone still reaches the built DTA", {
   dir <- vocab_slot_source_dir(character(0))
 

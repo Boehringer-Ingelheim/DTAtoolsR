@@ -229,7 +229,16 @@ test_that("find_chrome_binary ignores an override pointing at a missing file", {
 # markdown_to_pdf_via_chrome() is intentionally NOT tested here: it shells
 # out to a real Chrome/Edge binary via system2() to print a PDF, which is an
 # external-process integration concern outside the scope of these unit
-# tests (and not reliably available/deterministic in CI).
+# tests (and not reliably available/deterministic in CI). What it hands the
+# browser is pinned instead: scripts are blocked by a CSP in the page itself,
+# because the Chromium flags that claim to do it either do nothing
+# (--disable-javascript) or also break --print-to-pdf (--blink-settings).
+test_that("the Chrome PDF route blocks scripts with a CSP, not with a browser flag", {
+  src <- app_source(file.path("R", "utils_export.R"))
+  expect_match(src, "Content-Security-Policy\\\" content=\\\"script-src 'none'", fixed = TRUE)
+  expect_no_match(src, "\"--disable-javascript\"", fixed = TRUE)
+  expect_no_match(src, "\"--blink-settings", fixed = TRUE)
+})
 
 test_that("the export modal defaults to Word with the YAML specification embedded", {
   # Deliberate defaults: Word is the format users actually hand over, and the
