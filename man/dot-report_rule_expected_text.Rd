@@ -4,10 +4,12 @@
 \alias{.report_rule_expected_text}
 \title{Human-Readable "Should Be" Text for a (Non-Group) Rule Violation}
 \usage{
-.report_rule_expected_text(rule_def)
+.report_rule_expected_text(rule_def, html = TRUE)
 }
 \arguments{
 \item{rule_def}{An S7 rule object, or \code{NULL} when it could not be resolved.}
+
+\item{html}{If \code{FALSE}, return plain text instead of HTML-escaped text.}
 }
 \value{
 A length-1 character string, HTML-escaped where it embeds data.

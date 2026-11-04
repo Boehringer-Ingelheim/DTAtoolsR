@@ -4,11 +4,13 @@
 \alias{.report_columnspec_actual_text}
 \title{The Actual Offending Value for a Column Spec Violation}
 \usage{
-.report_columnspec_actual_text(row1)
+.report_columnspec_actual_text(row1, html = TRUE)
 }
 \arguments{
 \item{row1}{A one-row data.frame: the first row of one message's
 \code{inspect()} output.}
+
+\item{html}{If \code{FALSE}, return plain text instead of HTML-escaped text.}
 }
 \value{
 A length-1 character string, HTML-escaped.

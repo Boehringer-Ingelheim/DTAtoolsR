@@ -517,6 +517,7 @@ S7::method(messages, DTA) <- function(
 #' @return A tibble/data.frame with one or more rows per requested id.
 #'   Detail fields are appended as flat columns prefixed with
 #'   \code{schema_}, \code{context_}, and \code{failing_}.
+#' @seealso \code{\link{explain_messages}} for the same findings in plain language.
 #' @usage inspect(x, ...)
 #' @examples
 #' ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
@@ -527,6 +528,258 @@ S7::method(messages, DTA) <- function(
 #' @name inspect
 #' @export
 inspect <- S7::new_generic("inspect", "x")
+
+# Set while check(<DTA>) runs its datasets, so they do not each repeat the
+# explain_messages() hint that the DTA summary prints once.
+dta_check_state <- new.env(parent = emptyenv())
+
+#' @keywords internal
+#' @title Find the Rule Definition Behind a Rule Message
+#' @param x A `DTA` (the rule is looked up in `x@datasets[[dataset_name]]`) or a
+#'   `DTADataSet` (used as is).
+#' @param dataset_name Dataset name as reported by `messages()`.
+#' @param rule_id The rule's `id`.
+#' @return The rule object, or `NULL` when it cannot be resolved.
+dta_find_rule_def <- function(x, dataset_name, rule_id) {
+  tryCatch(
+    {
+      ds <- if (inherits(x, "DTAtools::DTA")) x@datasets[[dataset_name]] else x
+      if (!is.null(ds) && !is.null(ds@specs) && !is.null(ds@specs@rules)) {
+        for (r in ds@specs@rules) {
+          if (!is.null(r@id) && identical(r@id, rule_id)) {
+            return(r)
+          }
+        }
+      }
+      NULL
+    },
+    error = function(e) NULL
+  )
+}
+
+#' @title Explain Validation Messages in Plain Language
+#' @description
+#' Prints, for every validation message, what was checked, what the value
+#' should have been and what it actually was, in the same words the HTML report
+#' from \code{\link{write_validation_report}} uses. Where \code{\link{messages}}
+#' gives the validator's generic wording ("must be equal to one of the allowed
+#' values") and \code{\link{inspect}} a wide technical table, this names the
+#' allowed values and shows the offending one.
+#' @param x A checked \code{DTA} or \code{DTADataSet} (anything
+#'   \code{messages()} and \code{inspect()} accept).
+#' @param id Optional integer message id(s) as shown by \code{messages()}.
+#'   Default: all messages.
+#' @param n Maximum number of messages to print. Use \code{Inf} for all.
+#' @return Invisibly, a data.frame with one row per explained message and the
+#'   columns \code{id}, \code{dataset}, \code{target}, \code{source},
+#'   \code{row}, \code{column}, \code{problem}, \code{should_be} and
+#'   \code{actual}.
+#' @seealso \code{\link{messages}}, \code{\link{inspect}},
+#'   \code{\link{write_validation_report}}
+#' @examples
+#' ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
+#' explain_messages(ds, n = 3)
+#' @export
+explain_messages <- function(x, id = NULL, n = 20) {
+  if (!is.numeric(n) || length(n) != 1 || is.na(n) || n < 1) {
+    cli::cli_abort("'n' must be a single number >= 1 (use Inf for all messages).")
+  }
+
+  msgs <- messages(x, as_tibble = FALSE)
+  if (!is.null(id)) {
+    msgs <- dta_get_message_rows_by_id(msgs, id)
+  }
+  out <- dta_explain_empty()
+  if (nrow(msgs) == 0) {
+    cli::cli_alert_success("No validation messages.")
+    return(invisible(out))
+  }
+
+  n_more <- max(nrow(msgs) - n, 0)
+  msgs <- msgs[seq_len(min(nrow(msgs), n)), , drop = FALSE]
+
+  # One batched call, as the report does: inspect() re-collects every message
+  # on each invocation. Failure falls back to the plain messages() row.
+  inspected <- tryCatch(
+    inspect(x, id = msgs$id, as_tibble = FALSE),
+    error = function(e) NULL
+  )
+  by_id <- if (!is.null(inspected) && nrow(inspected) > 0) {
+    split(seq_len(nrow(inspected)), inspected$id)
+  }
+
+  rows <- lapply(seq_len(nrow(msgs)), function(i) {
+    msg_row <- msgs[i, , drop = FALSE]
+    idx <- by_id[[as.character(msg_row$id)]]
+    detail <- if (is.null(idx)) msg_row else inspected[idx, , drop = FALSE]
+    rule_def <- NULL
+    if (identical(as.character(msg_row$source), "rule") && !is.na(msg_row$rule_id)) {
+      rule_def <- dta_find_rule_def(x, as.character(msg_row$dataset), as.character(msg_row$rule_id))
+    }
+    dta_explain_one(msg_row, detail, rule_def)
+  })
+
+  if (n_more > 0) {
+    cli::cli_alert_info("... and {n_more} more message{?s}; use {.code n = Inf} to show all.")
+  }
+
+  invisible(do.call(rbind, rows))
+}
+
+#' @keywords internal
+dta_explain_empty <- function() {
+  data.frame(
+    id = integer(0), dataset = character(0), target = character(0),
+    source = character(0), row = numeric(0), column = character(0),
+    problem = character(0), should_be = character(0), actual = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+#' @title Offending Rows as Printed Lines
+#' @param detail `inspect()` rows of one message.
+#' @param prefix_pattern Regex selecting the columns to show (`^failing_`,
+#'   `^context_` or `^group_violation_`).
+#' @param max_rows Maximum number of rows to print.
+#' @return Character vector of printed lines, or `NULL` when nothing was captured.
+dta_explain_rows_lines <- function(detail, prefix_pattern, max_rows = 5) {
+  cols <- grep(prefix_pattern, names(detail), value = TRUE)
+  if (length(cols) == 0) {
+    return(NULL)
+  }
+  sub <- unique(detail[, cols, drop = FALSE])
+  names(sub) <- sub(prefix_pattern, "", names(sub))
+  names(sub)[names(sub) == ".row"] <- "Row"
+  sub <- sub[rowSums(!is.na(sub)) > 0, , drop = FALSE]
+  if (nrow(sub) == 0) {
+    return(NULL)
+  }
+  if ("Row" %in% names(sub)) {
+    sub <- sub[, c("Row", setdiff(names(sub), "Row")), drop = FALSE]
+  }
+  shown <- utils::head(sub, max_rows)
+  lines <- utils::capture.output(print(shown, row.names = FALSE))
+  if (nrow(sub) > nrow(shown)) {
+    lines <- c(lines, paste0("... ", nrow(sub) - nrow(shown), " more row(s)"))
+  }
+  lines
+}
+
+#' @keywords internal
+#' @title Print and Return the Explanation of One Message
+#' @description
+#' Mirrors the type branching of `.report_inspect_panel_html()`, with
+#' `html = FALSE`. Message text is only ever interpolated through local
+#' variables: cli parses `{}` in the format string it is handed, so pasting a
+#' data or spec value into it would evaluate that value as code.
+#' @param msg_row One row of `messages()`.
+#' @param detail `inspect()` rows for the same id (or `msg_row` as fallback).
+#' @param rule_def Rule object or `NULL`.
+#' @return A one-row data.frame as described in `explain_messages()`.
+dta_explain_one <- function(msg_row, detail, rule_def) {
+  row1 <- detail[1, , drop = FALSE]
+  type <- if ("type" %in% names(row1) && !is.na(row1[["type"]])) {
+    as.character(row1[["type"]])
+  } else {
+    as.character(msg_row$source)
+  }
+  label <- switch(type,
+    rule = "Rule failure",
+    columnspec = "Column spec violation",
+    import = "Import error",
+    "Message"
+  )
+  if (identical(type, "rule") && !is.na(msg_row$rule_id)) {
+    label <- paste0(label, " (", msg_row$rule_id, ")")
+  }
+
+  row_no <- suppressWarnings(as.numeric(msg_row$row))
+  col_nm <- as.character(msg_row$column)
+  where <- c(
+    if (!is.na(row_no)) paste0("Row ", format(row_no, scientific = FALSE)),
+    if (!is.na(col_nm)) paste0("column ", col_nm)
+  )
+  problem <- as.character(msg_row$message)
+  problem_line <- if (length(where) > 0) {
+    paste0(paste(where, collapse = ", "), ": ", problem)
+  } else {
+    problem
+  }
+
+  info <- character(0)
+  table_lines <- NULL
+  if (identical(type, "columnspec")) {
+    # inspect() carries no columnspec_* detail for an undeclared column; the
+    # messages() row still knows the keyword, and the sentences key off it.
+    if (!"columnspec_keyword" %in% names(row1) || is.na(row1[["columnspec_keyword"]])) {
+      row1[["columnspec_keyword"]] <- as.character(msg_row$keyword)
+    }
+    should_be <- .report_columnspec_expected_text(row1, html = FALSE)
+    actual <- .report_columnspec_actual_text(row1, html = FALSE)
+  } else if (identical(type, "import")) {
+    should_be <- .report_import_expected_text(row1, html = FALSE)
+    actual <- .report_import_actual_text(row1, html = FALSE)
+  } else if (identical(type, "rule")) {
+    desc <- tryCatch(rule_def@description, error = function(e) NULL)
+    if (!is.null(desc) && length(desc) == 1 && !is.na(desc) && nzchar(desc)) {
+      info <- paste0("What this rule checks: ", desc)
+    }
+    if (inherits(rule_def, "DTAtools::DTARuleGroupCondition")) {
+      should_be <- .report_group_condition_expected_text(rule_def, html = FALSE)
+      info <- c(info, vapply(
+        rule_def@constraints,
+        function(cn) .report_group_constraint_desc(cn, html = FALSE),
+        character(1)
+      ))
+      table_lines <- c(
+        dta_explain_rows_lines(detail, "^group_violation_"),
+        dta_explain_rows_lines(detail, "^failing_")
+      )
+    } else {
+      should_be <- .report_rule_expected_text(rule_def, html = FALSE)
+      pattern <- if (any(grepl("^failing_", names(detail)))) "^failing_" else "^context_"
+      table_lines <- dta_explain_rows_lines(detail, pattern)
+    }
+    actual <- if (is.null(table_lines)) {
+      "No offending rows were captured."
+    } else {
+      paste(table_lines, collapse = "\n")
+    }
+  } else {
+    should_be <- problem
+    actual <- "(see technical detail via inspect())"
+  }
+
+  header <- paste0(
+    "#", msg_row$id, " | ", msg_row$dataset, " / ", msg_row$target, " | ", label
+  )
+  cli::cli_rule(left = "{header}")
+  cli::cli_text("{problem_line}")
+  for (line in info) {
+    cli::cli_alert_info("{line}")
+  }
+  cli::cli_alert_success("Should be: {should_be}")
+  if (is.null(table_lines)) {
+    cli::cli_alert_danger("Actual: {actual}")
+  } else {
+    cli::cli_alert_danger("Actual:")
+    cli::cli_verbatim(table_lines)
+  }
+
+  data.frame(
+    id = as.integer(msg_row$id),
+    dataset = as.character(msg_row$dataset),
+    target = as.character(msg_row$target),
+    source = as.character(msg_row$source),
+    row = row_no,
+    column = col_nm,
+    problem = problem,
+    should_be = should_be,
+    actual = actual,
+    stringsAsFactors = FALSE
+  )
+}
 
 #' @keywords internal
 dta_validate_inspect_ids <- function(id) {

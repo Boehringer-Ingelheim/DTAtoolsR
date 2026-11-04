@@ -786,6 +786,11 @@ method(check, DTA) <- function(
     cli_abort("DTA object has no datasets to check.")
   }
 
+  # The datasets print their own "run explain_messages()" hint; inside a DTA
+  # check only the final summary should.
+  dta_check_state$nested <- TRUE
+  on.exit(dta_check_state$nested <- FALSE, add = TRUE)
+
   state <- dta_benchmark_begin(benchmark)
   # The reset cannot live only inside dta_benchmark_end(): several branches
   # below (a bad `datasets` index, an unknown dataset name, ...) cli_abort()
@@ -992,6 +997,9 @@ method(check, DTA) <- function(
       total_unchecked = total_unchecked,
       total_undelivered = total_undelivered
     ))
+    if (total_invalid > 0 || total_import_errors > 0) {
+      cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+    }
   }
 
   attr(x, "last_validation_summary") <- summary_df
