@@ -75,6 +75,32 @@ test_that("a bare {COLUMN_SPECS} block inside a region binds to each dataset and
   expect_false(grepl("{DATASET_ID}", txt, fixed = TRUE))
 })
 
+test_that("a bare {COLUMN_SPECS} in a region renders nothing for a file dataset", {
+  # The region binds the bare block to every dataset. A file dataset has no
+  # columns, and the "No tabular datasets." note it used to get was false for
+  # a document that has two.
+  dta <- create_example_DTA()
+  dta@datasets$delivery <- DTADataSetFile(
+    id = "delivery", files = list(DTAFileAny(filename = "report.pdf"))
+  )
+  template <- .make_template(c("{#DATASETS}", "{DATASET_ID}", "{COLUMN_SPECS}", "{VALIDATION_RULES}", "{/DATASETS}"))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  summary <- .region_docx_summary(out)
+  paras <- summary$text[summary$content_type == "paragraph"]
+  expect_false(any(grepl("No tabular datasets", paras, fixed = TRUE)))
+  # The file dataset's repetition is its id and nothing else: both block
+  # paragraphs are gone, not left behind empty.
+  delivery_at <- which(paras == "delivery")
+  expect_length(delivery_at, 1)
+  expect_identical(paras[delivery_at:length(paras)], "delivery")
+  expect_gt(sum(.region_table_cells(summary) == "AGE"), 0)
+})
+
 test_that("a table inside a region is repeated once per dataset with its cells substituted", {
   dta <- create_example_DTA()
   template <- tempfile(fileext = ".docx")

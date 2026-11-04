@@ -462,7 +462,7 @@ test_that("OQ-TMPL-065 | empty or unrelated templates/ folders do not hide root 
 
 # ---- REQ-TMPL-033: dataset_id_missing / dataset_field_invalid --------------
 
-test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reported; the pre-id shape is not | REQ-TMPL-033", {
+test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reported, the pre-id shape included | REQ-TMPL-033", {
   tpl <- validate_template(tmpl_fixture("codes", "dataset_id_missing"))
   qa_step("dataset template without id: exactly one row", 1L, nrow(tpl))
   qa_step("dataset template without id: severity is error", "error", tmpl_severity(tpl, "dataset_id_missing"))
@@ -481,6 +481,6 @@ test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reporte
   )
 
   legacy <- validate_template(tmpl_fixture("codes", "dataset_legacy_shape"))
-  qa_step("pre-id shape: no dataset_id_missing", NA_character_, tmpl_severity(legacy, "dataset_id_missing"))
-  qa_step("pre-id shape: no dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
+  qa_step("pre-id shape (name: with no id:): dataset_id_missing is an error", "error", tmpl_severity(legacy, "dataset_id_missing"))
+  qa_step("pre-id shape: its scalar fields are not dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
 })

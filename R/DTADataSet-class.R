@@ -41,7 +41,7 @@ DTADataSet <- S7::new_class(
     template_version = NULL,
     template_date = NULL
   ) {
-    if (missing(id)) dta_abort_missing_dataset_id(name)
+    if (missing(id)) dta_abort_missing_dataset_id()
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
@@ -293,10 +293,11 @@ read_dataset_from_yaml <- function(file) {
 #' dataset <- dta_dataset_from_list(yaml_dataset)
 #' @export
 dta_dataset_from_list <- function(x, recursive = TRUE) {
-  # `[[`, not `$`: `$` partial-matches, so a list holding only `identifier:`
-  # would pass for one holding `id:`. A legacy entry (`name:` but no `id:`) is
-  # still a dataset entry -- dta_dataset_list_upgrade() below converts it.
-  is_entry <- function(e) is.list(e) && (!is.null(e[["id"]]) || !is.null(e[["name"]]))
+  # `[[`/names, not `$`: `$` partial-matches, so a list holding only
+  # `identifier:` would pass for one holding `id:`.
+  is_entry <- function(e) {
+    is.list(e) && any(c("id", "name", "type") %in% names(e))
+  }
   if (!is_entry(x)) {
     if (length(x) > 0 && is_entry(x[[1]])) {
       # there are multiple datasets which need to be processed separately
@@ -306,8 +307,8 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
     }
   }
 
-  x <- dta_dataset_list_upgrade(x)
   id <- x[["id"]]
+  if (is.null(id)) dta_abort_missing_dataset_id()
   if (is.null(x[["type"]])) {
     cli_abort("Dataset {.val {id}} must contain a {.field type}.")
   }
@@ -316,52 +317,13 @@ dta_dataset_from_list <- function(x, recursive = TRUE) {
 }
 
 
-#' @title Upgrade a dataset list from the pre-\code{id} schema
-#' @description
-#' Before the dataset \code{id} field existed, a dataset entry carried its
-#' identifier in \code{name} and its short label in \code{description}. An
-#' entry with no \code{id} but a \code{name} is that old shape and is
-#' rewritten to the current one: \code{id} takes the old \code{name},
-#' \code{name} takes the old \code{description}, and \code{description} is
-#' dropped. Any other value -- an entry that already has an \code{id}, one
-#' with no \code{name} (such as a template import written as
-#' \code{template:}/\code{as:}), a non-list -- is returned unchanged, so the
-#' call is safe to repeat. An entry is judged by its keys alone: one that
-#' means to use the current shape but omits \code{id} is read as the old one.
-#'
-#' Every reader of dataset YAML in this package goes through it, which is why
-#' specifications written before the change keep loading.
-#' @param x A single dataset entry, as parsed from YAML.
-#' @return \code{x}, in the current shape.
-#' @examples
-#' dta_dataset_list_upgrade(list(name = "dm", type = "tabular", description = "Demographics"))
-#' @export
-dta_dataset_list_upgrade <- function(x) {
-  if (!is.list(x) || !is.null(x[["id"]]) || is.null(x[["name"]])) {
-    return(x)
-  }
-  label <- x[["description"]]
-  x[["id"]] <- x[["name"]]
-  x[["description"]] <- NULL
-  # Assigning NULL drops the element: an old entry without a description gets
-  # no name, rather than an empty one.
-  x[["name"]] <- label
-  x
-}
-
-# The constructors' `id` has no default, so a call written against the old
-# signature -- `DTADataSet(name = "dm", ...)` -- would otherwise fail with
-# base R's bare "argument "id" is missing". `name` is still a formal (it is
-# now the label), so it cannot be guessed back into an id without making
-# `DTADataSet(name = "Demographics")` silently mint one.
+# The constructors' `id` has no default, so a call that omits it would
+# otherwise fail with base R's bare "argument "id" is missing".
 #' @keywords internal
-dta_abort_missing_dataset_id <- function(name = NULL) {
-  cli::cli_abort(c(
-    "A dataset needs an {.arg id}.",
-    i = if (!is.null(name)) {
-      "The identifier moved from {.arg name} to {.arg id}; {.arg name} is now the human-readable label."
-    }
-  ))
+dta_abort_missing_dataset_id <- function() {
+  cli::cli_abort(
+    "A dataset needs an {.arg id}, its identifier; {.arg name} is only the human-readable label."
+  )
 }
 
 # What to call a dataset where a person reads it: its name, else its id.

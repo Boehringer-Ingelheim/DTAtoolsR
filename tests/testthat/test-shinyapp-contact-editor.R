@@ -73,7 +73,14 @@ test_that("a repeat request for the open contact dialog is dropped, and a closed
     expect_equal(shown, 1L)
 
     # The browser reports the dialog closed (Cancel, Esc, backdrop) ...
-    session$setInputs(dta_modal_state = list(event = "hidden", kind = "edit_contact", at = 1))
+    expect_match(
+      paste(as.character(last_ui), collapse = "\n"),
+      paste0('data-dta-modal-id="', rv$editing_contact_nonce, '"'),
+      fixed = TRUE
+    )
+    session$setInputs(dta_modal_state = list(
+      event = "hidden", kind = "edit_contact", id = rv$editing_contact_nonce, at = 1
+    ))
     expect_null(rv$editing_contact)
     # ... so the next click opens it again.
     session$setInputs(editc_receiver_1 = 3)
@@ -88,6 +95,41 @@ test_that("a repeat request for the open contact dialog is dropped, and a closed
     expect_null(rv$editing_contact)
     session$setInputs(editc_receiver_1 = 4)
     expect_equal(shown, 3L)
+  })
+})
+
+test_that("a late 'hidden' report from an earlier dialog does not disarm the open contact editor", {
+  # removeModal() of one dialog followed at once by opening the contact
+  # editor: the earlier dialog's 'hidden' can reach the server AFTER the
+  # editor's record was set. Clearing on it left Save with no record, so Save
+  # silently did nothing.
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    load_fixture(session)
+    unlock_editing(session)
+    testthat::local_mocked_bindings(
+      showModal = function(ui, session = NULL) invisible(NULL),
+      .package = "shiny"
+    )
+
+    session$setInputs(editc_receiver_1 = 1)
+    first <- rv$editing_contact_nonce
+    session$setInputs(dta_modal_state = list(event = "hidden", kind = "edit_contact", id = first, at = 1))
+    session$setInputs(editc_receiver_1 = 2)
+    expect_false(identical(rv$editing_contact_nonce, first))
+
+    # Stale reports: another kind of dialog, and the earlier contact dialog.
+    session$setInputs(dta_modal_state = list(event = "hidden", kind = "", id = "", at = 2))
+    session$setInputs(dta_modal_state = list(event = "hidden", kind = "edit_contact", id = first, at = 3))
+    expect_equal(rv$editing_contact, list(side = "receiver", index = 1L))
+
+    session$setInputs(
+      edit_contact_name = "Alice Late-Report", edit_contact_roles = "Lead Data Manager",
+      edit_contact_email = "", edit_contact_department = "",
+      edit_contact_phone = "", edit_contact_address = ""
+    )
+    session$setInputs(confirm_edit_contact = 1)
+    expect_equal(app_fn("dta_contacts")(rv$dta, "receiver")[[1]]$name, "Alice Late-Report")
   })
 })
 
@@ -152,5 +194,6 @@ test_that("the browser reports both modal events and the UI loads the reporter",
   src <- app_source("app.R")
   expect_match(src, "$(document).on('shown.bs.modal hidden.bs.modal', '#shiny-modal'", fixed = TRUE)
   expect_match(src, "Shiny.setInputValue('dta_modal_state'", fixed = TRUE)
+  expect_match(src, "id: this.getAttribute('data-dta-modal-id')", fixed = TRUE)
   expect_match(src, "tags$script(shiny::HTML(modal_state_js))", fixed = TRUE)
 })

@@ -47,7 +47,7 @@ flat_message <- function(x) gsub("\\s+", " ", x)
 # dta_template_merge_datasets() (template_inherit.R) merges them into ONE
 # entry instead of appending a second -- see the comment on
 # dta_template_dataset_key() for why `as:` has to match for that to happen.
-# Plus one party profile (supplier_acme) and two legacy standalone dataset
+# Plus one party profile (supplier_acme) and two standalone dataset
 # YAMLs, all written into ONE root so every test in this file can share a
 # single call to build_template_index() over it.
 write_gf_dataset_template <- function(root) {
@@ -156,14 +156,14 @@ write_supplier_profile <- function(root) {
   )
 }
 
-write_legacy_dataset_files <- function(root) {
+write_standalone_dataset_files <- function(root) {
   writeLines(
-    c("name: legacy_path_ds", "type: file", "files: { filename: a.csv, type: csv }"),
-    file.path(root, "legacy_path_ds.yaml")
+    c("id: plain_path_ds", "type: file", "files: { filename: a.csv, type: csv }"),
+    file.path(root, "plain_path_ds.yaml")
   )
   writeLines(
-    c("name: legacy_source_ds", "type: file", "files: { filename: b.csv, type: csv }"),
-    file.path(root, "legacy_source_ds.yaml")
+    c("id: plain_source_ds", "type: file", "files: { filename: b.csv, type: csv }"),
+    file.path(root, "plain_source_ds.yaml")
   )
 }
 
@@ -172,7 +172,7 @@ setup_fixture <- function(root) {
   write_base_ct(root)
   write_child_ct(root)
   write_supplier_profile(root)
-  write_legacy_dataset_files(root)
+  write_standalone_dataset_files(root)
   invisible(root)
 }
 
@@ -203,9 +203,6 @@ test_that("template_dataset_entry_kind() classifies all four accepted shapes", {
   expect_equal(fn(list(source = "gf_dataset.yaml")), "source")
   expect_equal(fn(list(template = "gf@3.0")), "template")
   expect_equal(fn(list(id = "inline_ds", type = "file")), "inline")
-  # An entry written before datasets had an `id` names itself in `name:`; it is
-  # still an inline dataset.
-  expect_equal(fn(list(name = "legacy_inline_ds", type = "file")), "inline")
   # An (currently hypothetical) entry naming both is resolved as "template",
   # checked first.
   expect_equal(fn(list(template = "gf@3.0", source = "x.yaml")), "template")
@@ -285,7 +282,7 @@ test_that("a metadata-only abstract base supports a concrete child's own dataset
       abstract = TRUE, base = list(metadata = metadata)
     ), parent_path)
     dataset <- list(
-      name = "child_data", type = "tabular",
+      id = "child_data", type = "tabular",
       files = list(filename = "child.tsv", type = "tsv"),
       columns = list(list(id = "SUBJECT", label = "Subject", type = "SAS Char"))
     )
@@ -527,7 +524,7 @@ test_that("an unresolvable template: dataset ref errors naming the ref and the r
   expect_match(flat, "bad_ref_ct", fixed = TRUE)
 })
 
-test_that("build_template_datasets() reproduces the ORIGINAL 'could not resolve dataset source' text for a bad legacy path", {
+test_that("build_template_datasets() reproduces the ORIGINAL 'could not resolve dataset source' text for a bad plain-string path", {
   root <- withr::local_tempdir()
   setup_fixture(root)
   idx <- index_over(root)
@@ -560,40 +557,61 @@ test_that("build_template_datasets() surfaces a malformed inline dataset definit
   )
 })
 
-# ---- All three legacy `datasets:` forms are unaffected ----------------------
-
-test_that("all three legacy datasets: forms build the identical DTA whether or not an index is supplied", {
+test_that("build_template_datasets() refuses an inline dataset entry without an id", {
   root <- withr::local_tempdir()
   setup_fixture(root)
   idx <- index_over(root)
 
-  def_legacy <- list(
-    base = list(metadata = list(title = "Legacy", version = "1.0")),
-    label = "legacy",
+  fn <- app_fn("build_template_datasets")
+  # `name` is the label; it cannot stand in for the identifier.
+  def <- list(
+    label = "z",
+    datasets = list(list(
+      name = "No identifier", type = "file",
+      files = list(filename = "inline.csv", type = "csv")
+    ))
+  )
+
+  expect_error(
+    fn(def, idx, list(), template_path = file.path(root, "whatever.yaml")),
+    regexp = "needs an .*id"
+  )
+})
+
+# ---- All three `datasets:` forms build the same DTA --------------------------
+
+test_that("all three datasets: forms build the identical DTA whether or not an index is supplied", {
+  root <- withr::local_tempdir()
+  setup_fixture(root)
+  idx <- index_over(root)
+
+  def_forms <- list(
+    base = list(metadata = list(title = "Forms", version = "1.0")),
+    label = "forms",
     datasets = list(
-      "legacy_path_ds.yaml",
-      list(source = "legacy_source_ds.yaml"),
-      list(name = "legacy_inline_ds", type = "file", files = list(filename = "inline.csv", type = "csv"))
+      "plain_path_ds.yaml",
+      list(source = "plain_source_ds.yaml"),
+      list(id = "plain_inline_ds", type = "file", files = list(filename = "inline.csv", type = "csv"))
     )
   )
-  template_path <- file.path(root, "legacy_ct.dta-template.yaml") # need not exist on disk
+  template_path <- file.path(root, "forms_ct.dta-template.yaml") # need not exist on disk
 
   create_fn <- app_fn("create_dta_from_template")
-  res_no_index <- create_fn(def_legacy, template_path, selections = list())
-  res_with_index <- create_fn(def_legacy, template_path, selections = list(), index = idx)
+  res_no_index <- create_fn(def_forms, template_path, selections = list())
+  res_with_index <- create_fn(def_forms, template_path, selections = list(), index = idx)
 
   expect_true(res_no_index$ok)
   expect_true(res_with_index$ok)
   expect_setequal(
     names(res_no_index$value@datasets),
-    c("legacy_path_ds", "legacy_source_ds", "legacy_inline_ds")
+    c("plain_path_ds", "plain_source_ds", "plain_inline_ds")
   )
   expect_equal(
     sort(names(res_with_index$value@datasets)),
     sort(names(res_no_index$value@datasets))
   )
-  # All three entries were written with `name:` as the identifier; each is read
-  # as an id, and none had a label to carry over as a name.
+  # Each entry carries its identifier in `id:`, and none had a label to carry
+  # over as a name.
   built <- res_no_index$value@datasets
   for (nm in names(built)) {
     expect_equal(built[[nm]]@id, nm)

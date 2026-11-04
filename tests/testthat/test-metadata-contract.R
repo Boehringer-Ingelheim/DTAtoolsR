@@ -17,7 +17,7 @@ agreement_template <- function() {
       sections = agreement_sections()
     )),
     datasets = list(list(
-      name = "deliverable", type = "file",
+      id = "deliverable", type = "file",
       files = list(filename = "deliverable.pdf", type = "any")
     )),
     options = list()

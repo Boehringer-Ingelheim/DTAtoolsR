@@ -56,7 +56,9 @@
 #'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
 #'     `0` for a non-tabular dataset). A bare dataset block (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
 #'     `{FILE_SPECS}`, `{DATASETS}`) alone in a paragraph of the region is
-#'     bound to the repetition's dataset and rendered without its generated
+#'     bound to the repetition's dataset (a bare `{COLUMN_SPECS}` or
+#'     `{VALIDATION_RULES}` renders nothing for a non-tabular dataset) and
+#'     rendered without its generated
 #'     heading; an explicit `{COLUMN_SPECS:NAME}` is left as written. A
 #'     malformed marker -- unclosed, unopened, or not alone in its paragraph
 #'     -- is left in place and reported alongside unrendered blocks. A dataset

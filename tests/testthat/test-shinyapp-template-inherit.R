@@ -205,10 +205,10 @@ test_that("dta_template_merge_datasets() keys on `template`, ahead of a conflict
   expect_equal(result[[1]]$template, "gf@2.0")
 })
 
-test_that("dta_template_merge_datasets() keys on `source`, ahead of a conflicting `id` or legacy `name`", {
+test_that("dta_template_merge_datasets() keys on `source`, ahead of a conflicting `id`", {
   fn <- app_fn("dta_template_merge_datasets")
 
-  for (field in c("id", "name")) {
+  for (field in "id") {
     parent_ds <- list(list(source = "shared.yaml", val = "p"))
     child_ds <- list(list(source = "shared.yaml", val = "c"))
     parent_ds[[1]][[field]] <- "parent_ident"
@@ -258,80 +258,20 @@ test_that("dta_template_merge_datasets() drops an inherited entry when the child
   expect_equal(result[[1]]$id, "n2")
 })
 
-test_that("dta_template_merge_datasets() drops a legacy `name:` entry the same way, upgraded to an id", {
-  fn <- app_fn("dta_template_merge_datasets")
-  parent_ds <- list(list(name = "n1"), list(name = "n2"))
-  child_ds <- list(list(name = "n1", remove = TRUE))
-
-  result <- fn(parent_ds, child_ds)
-
-  expect_length(result, 1)
-  # The surviving entry is upgraded on the way through: `name:` was the
-  # identifier, so it is `id:` now and there is no `name` left.
-  expect_equal(result[[1]]$id, "n2")
-  expect_null(result[[1]]$name)
-})
-
-test_that("a legacy parent's inline dataset merges with a current child's into ONE entry, without keeping the old label as a description", {
-  fn <- app_fn("dta_template_merge_datasets")
-  # Written before datasets had an id: `name` is the identifier and
-  # `description` the short label.
-  parent_ds <- list(list(name = "d", type = "tabular", description = "Old label"))
-  # Written now: `id` is the identifier, `name` the label.
-  child_ds <- list(list(id = "d", name = "New label"))
-
-  result <- fn(parent_ds, child_ds)
-
-  expect_length(result, 1)
-  expect_equal(result[[1]]$id, "d")
-  expect_equal(result[[1]]$name, "New label")
-  expect_equal(result[[1]]$type, "tabular") # inherited from the parent
-  # Merged field by field WITHOUT the upgrade, the parent's `description` would
-  # survive here and the old short label would read as the new long text.
-  expect_null(result[[1]]$description)
-})
-
-test_that("a legacy parent merges with a current child that modifies it through the verb form too", {
-  fn <- app_fn("dta_template_merge_datasets")
-  parent_ds <- list(list(name = "d", type = "tabular", description = "Old label"))
-  child_ds <- list(modify = list(list(id = "d", name = "New label")))
-
-  result <- fn(parent_ds, child_ds)
-
-  expect_length(result, 1)
-  expect_equal(result[[1]]$id, "d")
-  expect_equal(result[[1]]$name, "New label")
-  expect_null(result[[1]]$description)
-})
-
-test_that("a current parent merges with a legacy child entry: the child's old label becomes its name", {
-  fn <- app_fn("dta_template_merge_datasets")
-  parent_ds <- list(list(id = "d", name = "Current label", description = "Long text"))
-  child_ds <- list(list(name = "d", description = "Child's old label"))
-
-  result <- fn(parent_ds, child_ds)
-
-  expect_length(result, 1)
-  expect_equal(result[[1]]$id, "d")
-  expect_equal(result[[1]]$name, "Child's old label")
-  # The parent's long description is not clobbered by the child's old label.
-  expect_equal(result[[1]]$description, "Long text")
-})
-
-test_that("dta_template_dataset_key() keys on as, template, source, id, then name", {
+test_that("dta_template_dataset_key() keys on as, template, source, then id", {
   key_of <- app_fn("dta_template_dataset_key")
 
   expect_equal(key_of(list(as = "z", template = "t@1.0", source = "s", id = "i", name = "n")), "z")
   expect_equal(key_of(list(template = "t@1.0", source = "s", id = "i", name = "n")), "t")
   expect_equal(key_of(list(source = "s", id = "i", name = "n")), "s")
   expect_equal(key_of(list(id = "i", name = "n")), "i")
-  expect_equal(key_of(list(name = "n")), "n")
+  # `name` is a label, not an identifier, so it never keys an entry.
   expect_true(is.na(key_of(list(type = "tabular"))))
 })
 
 test_that("dta_template_merge_datasets() appends an unkeyable entry as-is, never merging it", {
   fn <- app_fn("dta_template_merge_datasets")
-  # Neither entry has as/template/source/id/name, and neither is a bare
+  # Neither entry has as/template/source/id, and neither is a bare
   # character -- dta_template_dataset_key() has nothing to key either one on.
   parent_ds <- list(list(inline = "parent-only-field"))
   child_ds <- list(list(inline = "child-only-field"))
@@ -718,7 +658,7 @@ test_that("the verb form and the bare form agree wherever both can say the thing
 
 test_that("datasets: verbs key on the dataset identity, not on a generic id field", {
   # A `datasets:` entry is keyed by `as:`/`template:`/`source:` or, for an
-  # inline dataset, by its own `id:` (a legacy `name:` before that) -- never by
+  # inline dataset, by its own `id:` -- never by
   # a bare `id` field the way `options:` entries are -- so the verbs have to run
   # off the same identity function the bare form uses, or they would silently
   # match nothing.
@@ -1071,7 +1011,7 @@ test_that("validate_template() reports sealed_violation, and fails instantiation
       "  metadata:",
       "    title: Standard Title",
       "datasets:",
-      "  - name: placeholder"
+      "  - id: placeholder"
     ),
     file.path(dir, "parent.dta-template.yaml")
   )
@@ -1167,95 +1107,4 @@ test_that("a required list field is unfilled when everything inside it is blank"
   # A logical or numeric value is a real answer, including the falsy ones.
   expect_true(fn(FALSE))
   expect_true(fn(0))
-})
-
-# ---- legacy dataset shape across inheritance -----------------------------------
-
-# A parent written before datasets had an `id`: its inline dataset names itself
-# in `name:` and carries its label in `description:`, and it seals and requires
-# that label by the paths that were right at the time.
-legacy_sealing_parent <- function(sealed = "datasets.dm.description", required = NULL) {
-  list(
-    id = "base", version = "1.0", kind = "dta_creation_template", label = "Base",
-    sealed = sealed, required = required,
-    datasets = list(list(name = "dm", type = "file", description = "Demographics"))
-  )
-}
-
-legacy_child <- function(...) {
-  c(list(
-    id = "child", version = "1.0", kind = "dta_creation_template",
-    label = "Child", extends = "base"
-  ), list(...))
-}
-
-test_that("a child of a legacy parent does not trip the parent's dataset seals", {
-  resolve <- app_fn("resolve_template_inheritance")
-  for (sealed in c("datasets.dm.description", "datasets.dm.name", "datasets.dm")) {
-    parent <- legacy_sealing_parent(sealed = sealed)
-    resolver <- make_resolver(list(base = parent))
-
-    # A child that never mentions `datasets:` ...
-    untouched <- resolve(legacy_child(), resolver)$def
-    expect_length(untouched$datasets, 1)
-    expect_mapequal(untouched$datasets[[1]], list(id = "dm", type = "file", name = "Demographics"))
-
-    # ... and one that only adds an unrelated dataset.
-    added <- resolve(legacy_child(datasets = list(list(id = "extra", type = "file"))), resolver)$def
-    expect_identical(
-      vapply(added$datasets, function(d) d$id, character(1)),
-      c("dm", "extra")
-    )
-  }
-})
-
-test_that("a legacy seal keeps protecting the field it meant: the label, then the id", {
-  resolve <- app_fn("resolve_template_inheritance")
-
-  # The legacy label seal now guards `name`, so a child relabelling fails.
-  resolver <- make_resolver(list(base = legacy_sealing_parent("datasets.dm.description")))
-  expect_error_message_contains(
-    resolve(legacy_child(datasets = list(list(id = "dm", name = "Relabelled"))), resolver),
-    "datasets.dm.name"
-  )
-  expect_identical(
-    resolve(legacy_child(), resolver)$def$sealed,
-    "datasets.dm.name"
-  )
-
-  # The legacy identifier seal now guards `id`.
-  resolver <- make_resolver(list(base = legacy_sealing_parent("datasets.dm.name")))
-  expect_identical(resolve(legacy_child(), resolver)$def$sealed, "datasets.dm.id")
-})
-
-test_that("a legacy required: path is remapped with the field it named", {
-  resolve <- app_fn("resolve_template_inheritance")
-  check_required <- app_fn("dta_template_check_required")
-  parent <- legacy_sealing_parent(sealed = NULL, required = "datasets.dm.description")
-
-  # The parent on its own, as a creation template is resolved before use.
-  alone <- resolve(parent, make_resolver(list()))$def
-  expect_identical(alone$required, "datasets.dm.name")
-  expect_no_error(check_required(NULL, alone))
-
-  # And through a child that never mentions `datasets:`.
-  child <- resolve(legacy_child(), make_resolver(list(base = parent)))$def
-  expect_identical(child$required, "datasets.dm.name")
-  expect_no_error(check_required(NULL, child))
-})
-
-test_that("dta_template_upgrade_datasets() leaves a current-shape template untouched", {
-  upgrade <- app_fn("dta_template_upgrade_datasets")
-  def <- list(
-    id = "t", version = "1.0", sealed = c("datasets.dm.description", "datasets.dm.name"),
-    datasets = list(list(id = "dm", type = "file", name = "Demographics", description = "Long"))
-  )
-  expect_identical(upgrade(def), def)
-  # Paths into a dataset the template did NOT write in the legacy shape are kept,
-  # even when another of its datasets is legacy.
-  mixed <- def
-  mixed$datasets[[2]] <- list(name = "vs", type = "file", description = "Vitals")
-  out <- upgrade(mixed)
-  expect_identical(out$sealed, c("datasets.dm.description", "datasets.dm.name"))
-  expect_mapequal(out$datasets[[2]], list(type = "file", id = "vs", name = "Vitals"))
 })

@@ -395,7 +395,9 @@ dta_template_choices <- function(opt) {
 # Returns "" for an option that fans out to several paths -- there is no one
 # value for such an option to inherit.
 dta_template_option_path <- function(opt) {
-  eff <- opt$effects %||% list()
+  # `[[`, not `$`: `$effects` partially matches `effects_all`, which would
+  # stand in for a missing `effects:` and hide the option's `target:`.
+  eff <- opt[["effects"]] %||% list()
   if (length(eff) > 0) {
     # An explicit effects block wins over `target:` in collect_option_effects(),
     # so the inherited default has to follow the same precedence -- otherwise an
@@ -661,7 +663,8 @@ effect_key_candidates <- function(selected_value) {
 collect_option_effects <- function(opt, selected_value) {
   out <- list()
 
-  eff <- opt$effects %||% list()
+  # `[[`, not `$`: see dta_template_option_path() above.
+  eff <- opt[["effects"]] %||% list()
   target <- as.character(opt[["target"]] %||% "")
   if (length(eff) == 0 && nzchar(target)) {
     # `target:` is shorthand for what almost every option actually wants --

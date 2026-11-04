@@ -2,7 +2,7 @@ kind: dta_dataset_template
 id: vec_ds_ok
 version: "1.0"
 dataset:
-  name: ds1
+  id: ds1
   columns:
     - id: COL1
       values_from:

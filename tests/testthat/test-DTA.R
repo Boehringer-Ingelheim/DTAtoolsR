@@ -634,7 +634,7 @@ test_that("messages(dta) is unchanged when metadata has no import errors", {
 # dta_from_list() with no datasets -- section P12 of the code review fixes
 # ---------------------------------------------------------------------------
 # dta_dataset_from_list() tells "one dataset" from "several" apart by
-# inspecting `x[[1]]` for an `id` (or a legacy `name`), and `x[[1]]` on a
+# inspecting `x[[1]]` for an `id` (or `name`, or `type`), and `x[[1]]` on a
 # zero-length list used to abort
 # with a raw base "subscript out of bounds" instead of the intended "no
 # datasets" outcome. This is exactly the document produced by removing a

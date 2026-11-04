@@ -78,7 +78,7 @@ write_min_template <- function(root, id, version, label = id, filename = NULL,
       "    title: Test Title",
       "    version: \"1.0\"",
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []",
@@ -120,7 +120,7 @@ write_template_with_party_slot <- function(root, id = "party_tpl") {
       "    target: metadata.supplier",
       "    label: Supplier",
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
@@ -538,7 +538,7 @@ test_that("a creation failure leaves the modal open instead of losing the user's
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
   withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
-  # A template whose lone dataset entry cannot be built (no such legacy
+  # A template whose lone dataset entry cannot be built (no such
   # file) -- create_dta_from_template() must fail cleanly.
   writeLines(
     c(
@@ -665,7 +665,7 @@ test_that("carry-over 'From a file' reads the uploaded DTA's metadata", {
       "    affiliation:",
       "      name: File Supplier",
       "datasets:",
-      "  - name: anc_ds",
+      "  - id: anc_ds",
       "    type: file",
       "    files: { filename: a.csv, type: csv }"
     ),
@@ -879,7 +879,7 @@ write_vocab_slot_fixture <- function(root) {
       "    vocabulary: visit@1.0",
       "    default: [TERM_A, TERM_B]",
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"

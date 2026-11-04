@@ -789,7 +789,7 @@ test_that("a handler with every field set survives YAML -> app -> YAML", {
     "  title: Reader settings",
     "  version: \"0.1\"",
     "datasets:",
-    "  - name: raw",
+    "  - id: raw",
     "    type: tabular",
     "    files:",
     "      filename: site_.*[.]tsv$",

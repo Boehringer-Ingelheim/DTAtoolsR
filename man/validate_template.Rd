@@ -47,8 +47,8 @@ no \code{id} (code \code{"dataset_id_missing"}, an error, for an inline dataset 
 for a dataset template alike: an import's \verb{as:} renames a dataset but
 cannot stand in for a missing id) or with a list
 where its \code{id}, \code{name} or \code{description} should be (code
-\code{"dataset_field_invalid"}; the pre-\code{id} shape, \verb{name:} with no \verb{id:}, is
-read as before and passes), a scanned
+\code{"dataset_field_invalid"}; a dataset with \verb{name:} but no \verb{id:} has no id,
+since \code{name} is only its label), a scanned
 directory with no template files in it at all, a template kept below the
 scanned directory's top level, and (as a final, comprehensive check)
 actually building a DTA from every non-abstract creation template with its

@@ -1041,12 +1041,10 @@
 
 # A dataset body's identity fields. `id` is the dataset's key in the DTA and in
 # every validation message; `name` (label) and `description` (long text) are
-# optional. A body in the pre-`id` shape (`name:` but no `id:`) is upgraded
-# first, exactly as every reader does, so it passes. Returns NULL or
+# optional. A body with `name:` but no `id:` has no id: `name` is only the
+# label, exactly as every reader treats it. Returns NULL or
 # list(code =, message =).
 .dta_template_dataset_identity_issue <- function(body) {
-  # Field shapes are checked on the body as authored, before the upgrade moves
-  # a legacy `name:` to `id`, so the message names the key that was written.
   is_text <- function(v) is.atomic(v) && length(v) == 1L && !is.na(v)
   for (field in c("id", "name", "description")) {
     v <- body[[field]]
@@ -1057,7 +1055,7 @@
       ))
     }
   }
-  id <- dta_dataset_list_upgrade(body)[["id"]]
+  id <- body[["id"]]
   if (is.null(id) || !nzchar(as.character(id))) {
     return(list(code = "dataset_id_missing", message = "dataset has no 'id'."))
   }
@@ -1283,8 +1281,8 @@
 #' for a dataset template alike: an import's `as:` renames a dataset but
 #' cannot stand in for a missing id) or with a list
 #' where its `id`, `name` or `description` should be (code
-#' `"dataset_field_invalid"`; the pre-`id` shape, `name:` with no `id:`, is
-#' read as before and passes), a scanned
+#' `"dataset_field_invalid"`; a dataset with `name:` but no `id:` has no id,
+#' since `name` is only its label), a scanned
 #' directory with no template files in it at all, a template kept below the
 #' scanned directory's top level, and (as a final, comprehensive check)
 #' actually building a DTA from every non-abstract creation template with its

@@ -1183,8 +1183,9 @@ dta_filter_import_matches <- function(import_errors, msg_row) {
 #' before. A `RecordBatchReader` cannot be safely re-read -- it is one-shot,
 #' and the scan `check()` ran may already have consumed it -- so this returns
 #' `NULL` rather than reading (and thereby destroying) whatever is left of it.
-#' Any other lazy source (`Dataset`, `arrow_dplyr_query`) is scanned fresh via
-#' `dplyr`, which is safe to repeat.
+#' Any other lazy source (`Dataset`, `arrow_dplyr_query`) is scanned fresh,
+#' which is safe to repeat, through the same ordered record-batch reader the
+#' validation scan numbers its rows from.
 #' @param tbl A table representation, as held in `x@tables[[table_name]]`.
 #' @param columns Character, or `NULL` for every column.
 #' @param max_row Numeric, or `NULL`/non-finite for no row bound. When finite
@@ -1212,11 +1213,34 @@ dta_inspect_table_frame <- function(tbl, columns = NULL, max_row = NULL) {
     }
     query <- dplyr::select(query, dplyr::any_of(columns))
   }
-  if (!is.null(max_row) && is.finite(max_row) && max_row > 0) {
-    query <- utils::head(query, max_row)
+  # Read through the same ordered Scanner -> RecordBatchReader the validation
+  # engine numbers its rows from (dta_validate_table_stream()), so row `k`
+  # here is the row `k` a message reports. `head()` on a Dataset promises no
+  # order across batches, so it was a different reader that merely agreed
+  # on small inputs. The bounded case stops at the first `max_row` rows.
+  reader <- arrow::Scanner$create(query)$ToRecordBatchReader()
+  if (is.null(max_row) || !is.finite(max_row) || max_row <= 0) {
+    return(as.data.frame(as.data.frame(reader$read_table())))
   }
 
-  as.data.frame(dplyr::collect(query))
+  batches <- list()
+  n <- 0
+  while (n < max_row) {
+    batch <- reader$read_next_batch()
+    if (is.null(batch)) {
+      break
+    }
+    batches[[length(batches) + 1L]] <- as.data.frame(batch)
+    n <- n + nrow(batches[[length(batches)]])
+  }
+  if (length(batches) == 0) {
+    # Nothing to read: the empty table still carries the columns.
+    return(as.data.frame(as.data.frame(reader$read_table())))
+  }
+  out <- as.data.frame(do.call(rbind, batches))
+  out <- out[seq_len(min(nrow(out), max_row)), , drop = FALSE]
+  rownames(out) <- NULL
+  out
 }
 
 #' @title Columns a Rule's Inspection Needs

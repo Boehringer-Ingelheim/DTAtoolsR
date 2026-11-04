@@ -85,7 +85,7 @@ test_that("OQ-TMPL-066 | metadata-only abstract bases require concrete children 
     kind = "dta_creation_template", id = "child", version = "1.0",
     extends = "shared_metadata@1.0",
     datasets = list(list(
-      name = "observations", type = "tabular",
+      id = "observations", type = "tabular",
       files = list(filename = "observations.tsv", type = "tsv"),
       columns = list(list(id = "SUBJECT", label = "Subject", type = "SAS Char"))
     ))
