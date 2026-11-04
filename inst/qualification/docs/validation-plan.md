@@ -125,7 +125,10 @@ the report states which of them did not.
 4. Every open deviation still reproduces.
 5. Any requirement left unverified — because an optional dependency was absent,
    or a scale tier was not selected — is listed, and the reviewer accepts each
-   one as immaterial to the intended use of this installation.
+   one as immaterial to the intended use of this installation. A requirement
+   reported as verified with a deviation — its tests passed, but a registered
+   defect that is not closed affects it — is judged the same way, together
+   with that defect's impact statement and workaround.
 
 A verdict of `PASS WITH NOT-EXECUTED TESTS` requires the reviewer's judgement
 on point 5. A verdict marked `(PARTIAL)` cannot support a complete claim about

@@ -396,7 +396,7 @@ test_that("OQ-EXPORT-039 | import_specs_from_json reads back the file write_colu
   )
 })
 
-test_that("OQ-EXPORT-048 | a JSON round trip keeps a rule and an empty rules array | REQ-EXPORT-029 REQ-SPEC-015", {
+test_that("OQ-EXPORT-049 | a JSON round trip keeps a rule and an empty rules array | REQ-EXPORT-029 REQ-SPEC-015", {
   dir <- qa_tempdir()
   with_rule <- DTAColumnSpecCollection(
     columns = list(

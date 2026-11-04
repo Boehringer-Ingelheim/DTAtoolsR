@@ -14,7 +14,7 @@ package_version: 0.25.0
 areas:
   - area: CORE
     title: The qualification runner itself
-    min_tests: 10
+    min_tests: 11
   - area: ENV
     title: Installed system and environment
     min_tests: 24
@@ -26,7 +26,7 @@ areas:
     min_tests: 31
   - area: VAL
     title: Validation engine and result accessors
-    min_tests: 32
+    min_tests: 33
   - area: RULE
     title: Cross-column and grouped rules
     min_tests: 40
@@ -44,7 +44,7 @@ areas:
     min_tests: 68
   - area: EXPORT
     title: Document and data export
-    min_tests: 48
+    min_tests: 49
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 16
