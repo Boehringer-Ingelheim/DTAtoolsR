@@ -576,6 +576,33 @@ dta_contacts <- function(dta, side) {
   if (is.null(cs)) list() else cs
 }
 
+# "Authorized for corrections" is a list of names, not links to contacts: a
+# renamed or removed contact's stored string stays selected and simply lands
+# under "Entered manually" in the picker.
+dta_authorized_values <- function(dta) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  v <- if (is.null(md)) NULL else tryCatch(S7::prop(md, "authorized_for_corrections"), error = function(e) NULL)
+  v <- trimws(as.character(unlist(v)))
+  unique(v[!is.na(v) & nzchar(v)])
+}
+
+dta_authorized_choices <- function(dta) {
+  names_of <- function(side) {
+    n <- vapply(dta_contacts(dta, side), function(cx) as.character(cx$name %||% "")[1], character(1))
+    n <- trimws(n)
+    n[!is.na(n) & nzchar(n)]
+  }
+  receiver <- unique(names_of("receiver"))
+  supplier <- setdiff(unique(names_of("supplier")), receiver)
+  manual <- setdiff(dta_authorized_values(dta), c(receiver, supplier))
+  groups <- list(Receiver = receiver, Supplier = supplier, "Entered manually" = manual)
+  groups <- groups[lengths(groups) > 0L]
+  if (length(groups) == 0L) {
+    return(list())
+  }
+  lapply(groups, function(x) stats::setNames(x, x))
+}
+
 dta_add_contact <- function(dta, side, name, roles = "", email = "",
                             department = "", phone = "", address = "") {
   dta_try({
