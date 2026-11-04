@@ -42,7 +42,7 @@ em_dataset <- function(sex = c("M", "F"), age = c("30", "12"), extra = NULL) {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = "em", specs = em_specs(),
+    id = "em", specs = em_specs(),
     files = list(DTAFileCSV(filename = basename(path)))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
