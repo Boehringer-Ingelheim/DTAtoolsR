@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A computed version history for every creation template.** The app's
+  template picker now shows what changed in the selected version and, behind
+  "Full history", every version of the template since the first. Nothing is
+  written by hand: each version is built exactly as "Create new from
+  template" would build it and compared with its predecessor, covering the
+  template's options and slots, the document metadata and every dataset
+  column. A new release of a template that another one follows (`extends:`,
+  dataset imports or vocabularies referenced bare or as `@latest`) is listed
+  in the follower's history too, because it changes what the follower builds
+  without changing its version number. Pinned references produce no such
+  entry.
+
 - `explain_messages()` prints each validation message in plain language: the
   violated constraint (for example "Must be one of: 1234, 5678.") next to the
   offending value, using the same wording as the HTML report. `check()` now
