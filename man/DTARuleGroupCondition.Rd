@@ -21,11 +21,18 @@ DTARuleGroupCondition(
 
 \item{conditions}{Named list of named conditions. Each entry maps a
 condition name to a column-condition mapping in the same shape used by
-\code{DTARuleColCondition}.}
+\code{DTARuleColCondition}. Required: at least one uniquely named condition.}
 
-\item{constraints}{List of constraint specifications. Supported constraint
-\code{type} values are \code{mutually_exclusive} (alias: \code{not_both}) and
-\code{requires} (alias: \code{implies}).}
+\item{constraints}{List of constraint specifications; required and
+non-empty. Supported constraint \code{type} values are \code{mutually_exclusive}
+(alias: \code{not_both}) and \code{requires} (alias: \code{implies}). Every constraint
+may carry an \code{id} (default \verb{constraint_<i>}, \code{i} being its position, and
+unique across the rule) and a \code{message}. A \code{mutually_exclusive} constraint
+names two conditions in \code{left} and \code{right}, with optional \code{left_scope} and
+\code{right_scope}. A \code{requires} constraint names \code{if} and \code{then} conditions,
+with optional \code{if_scope} and \code{then_scope}. Each scope is \code{"any"} or
+\code{"all"} and defaults to \code{"any"}. All condition names must be defined in
+\code{conditions}.}
 }
 \value{
 An object of class \code{DTARuleGroupCondition}.

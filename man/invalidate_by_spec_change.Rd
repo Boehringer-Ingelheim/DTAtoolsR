@@ -17,6 +17,7 @@ Invisibly returns \'x\'.
 }
 \description{
 Marks validation as outdated for specified tables when specs are changed.
-This is a helper function called automatically when specs are updated.
+It is not called automatically: call it yourself after changing \code{@specs}
+so the next \code{check()} revalidates.
 }
 \keyword{internal}

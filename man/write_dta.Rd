@@ -28,9 +28,14 @@ If NULL, inferred from file extension.}
 
 \item{overwrite}{Logical. Whether to overwrite existing files. Default: FALSE.}
 
-\item{include_signatures}{Logical. Whether to include signature approval section. Default: TRUE.}
+\item{include_signatures}{Logical. Whether to include signature approval
+section. Default: TRUE. Ignored for \code{format = "md"} (no signature section
+is written) and when a \code{template} is supplied.}
 
-\item{signature_list}{List of signatories with name and role fields.}
+\item{signature_list}{List of signatories, each a list with \code{name}, \code{role}
+and optionally \code{organization} (or \code{org}) fields; or a data.frame with
+columns \code{Organization}, \code{Name}, \code{Role}. Used only by the built-in
+DOCX/PDF layout; ignored for \code{format = "md"} and with a \code{template}.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 
@@ -54,8 +59,9 @@ placeholder values passed to \code{\link[=export_with_template]{export_with_temp
 supplied. Default: \code{NULL}.}
 }
 \value{
-Invisibly returns the document object (for chaining), or the output
-file path when a \code{template} is used.
+Invisibly. For \code{format = "docx"} or \code{"pdf"} with the built-in layout,
+the \code{officer} \code{rdocx} document object; when a \code{template} is used, the
+output file path; for \code{format = "md"}, \code{NULL}.
 }
 \description{
 Creates a professionally formatted DOCX, PDF, or Markdown document from a DTA object,

@@ -15,7 +15,8 @@ DTAColumnSpecCollection(columns, rules = NULL)
 An object of class DTAColumnSpecCollection.
 }
 \description{
-This class represents a collection of DTAColumnSpec objects with optional template.
+This class represents a collection of DTAColumnSpec objects with optional
+rules.
 }
 \examples{
 col1 <- DTAColumnSpec(id = "STUDYID", type = "SAS Char", nullable = TRUE)

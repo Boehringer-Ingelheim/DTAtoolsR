@@ -28,7 +28,10 @@ Table before storage. A lazy entry (Arrow Dataset, \code{arrow_dplyr_query}, or
 RecordBatchReader) is stored exactly as given -- it is typed and checked
 for import issues later, at scan time, in \code{check()}.}
 
-\item{files}{A list of DTAFile objects specifying input file information.}
+\item{files}{A list of DTAFile objects specifying input file information.
+Every handler must inherit \code{DTAFileTabular} (for example
+\code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
+its files; a reader-less handler is rejected.}
 
 \item{name}{Character or NULL. Human-readable name of the dataset, e.g.
 \code{"Demographics"}; shown in place of the \code{id} where one is set.}
@@ -36,12 +39,12 @@ for import issues later, at scan time, in \code{check()}.}
 \item{description}{Character or NULL. Long free-text description of the
 dataset.}
 
-\item{template_source}{Character or NA. Source of the template used to
+\item{template_source}{Character or NULL. Source of the template used to
 generate the dataset specification.}
 
-\item{template_version}{Character or NA. Version of the template used.}
+\item{template_version}{Character or NULL. Version of the template used.}
 
-\item{template_date}{Character or NA. Date of the template used.}
+\item{template_date}{Character or NULL. Date of the template used.}
 }
 \value{
 An object of class DTADataSetTabular

@@ -7,11 +7,11 @@
 DTAColumnSpecStructureSAS(type = NULL, format = NULL, length = NULL)
 }
 \arguments{
-\item{type}{Character or NA. The type of the column.}
+\item{type}{Character or NULL. The type of the column.}
 
-\item{format}{Character or NA. The format of the column.}
+\item{format}{Character or NULL. The format of the column.}
 
-\item{length}{Numeric or NA. The max character length.}
+\item{length}{Numeric or NULL. The max character length.}
 }
 \value{
 An object of class \code{DTAColumnSpecStructureSAS}.
@@ -20,6 +20,17 @@ An object of class \code{DTAColumnSpecStructureSAS}.
 Class for column types for SAS structures.
 
 This class defines the structure of a column in a DTA dataset.
+
+The accepted types are \code{Char}, \code{Num}, \code{Int}, \code{Date},
+\code{Time} and \code{DateTime}; they are matched case-insensitively and
+stored in that spelling. The accepted formats are \code{$w.}, \code{w.},
+\code{w.d}, \code{BESTw.}, \code{DATEw.}, \code{TIMEw.} (optionally
+\code{TIMEw.d}) and \code{DATETIMEw.}, and a format must be compatible with
+the type. When \code{type} is omitted it is inferred from the format
+(\code{$w.} gives \code{Char}, \code{w.d} gives \code{Num}, \code{w.} and
+\code{BESTw.} give \code{Int}, and the date and time formats give their
+namesakes). A character format written \code{$w} is normalised to
+\code{$w.}.
 }
 \examples{
 DTAColumnSpecStructureSAS(type = "Char", format = "$12.", length = 12)

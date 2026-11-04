@@ -196,7 +196,9 @@ get_authorized_for_corrections <- function(x) {
 #' @param x A DTAMetaData object
 #' @param name_only Logical. If TRUE, return only names; if FALSE, return full contact objects
 #'
-#' @return A character vector of reviewer names or list of reviewer contact objects
+#' @return A character vector of reviewer names or list of reviewer contact
+#'   objects; \code{NULL} when there is no receiver or the receiver has no
+#'   contacts.
 #'
 #' @examples
 #' md <- create_example_DTAMetaData(2)
@@ -328,7 +330,10 @@ get_version_history_df <- function(x) {
 
 
 #' @title Validate Transmission Dates
-#' @description Check that transmission dates are valid (either Date objects or non-empty character phrases)
+#' @description Check that transmission dates are valid (either Date objects or
+#' non-empty character phrases).
+#' The check also fails when both dates are Date objects and the first transfer
+#' date is after the last.
 #'
 #' @param x A DTAMetaData object
 #'

@@ -45,9 +45,11 @@ document body once per dataset in \code{dta}.
 The template is treated as an Open Packaging Conventions (OPC) archive: it is
 unzipped, the WordprocessingML text of each paragraph is substituted at the
 XML level (which transparently escapes any special characters such as \code{&},
-\code{<} and \code{>}), and the parts are repackaged into a new \code{.docx}. Because
-substitution operates on the concatenated text of a whole paragraph, it is
-robust to Word splitting a single placeholder across multiple runs.
+\code{<} and \code{>}), and the parts are repackaged into a new \code{.docx}. Placeholders
+are substituted run by run, which preserves each run's formatting. Only when
+Word has split a placeholder across several runs is the paragraph's text
+joined and written into its first run (the other runs are emptied, so
+that paragraph's per-run formatting is lost).
 }
 \details{
 The following placeholders are populated automatically from the DTA metadata
@@ -89,12 +91,12 @@ Inside each repetition, seven placeholders resolve to that dataset's
 values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set),
 \code{{DATASET_TYPE}}, \code{{DATASET_DESCRIPTION}}, \code{{DATASET_FILE_COUNT}},
 \code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
-\code{0} for a non-tabular dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
-\code{{FILE_SPECS}}, \code{{DATASETS}}) alone in a paragraph of the region is
-bound to the repetition's dataset (a bare \code{{COLUMN_SPECS}} or
-\code{{VALIDATION_RULES}} renders nothing for a non-tabular dataset) and
-rendered without its generated
-heading; an explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
+\code{0} for a non-tabular dataset). A bare dataset block
+(\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}}, \code{{FILE_SPECS}}, \code{{DATASETS}})
+alone in a paragraph of the region is bound to the repetition's dataset
+(a bare \code{{COLUMN_SPECS}} or \code{{VALIDATION_RULES}} renders nothing for a
+non-tabular dataset) and rendered without its generated heading; an
+explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
 malformed marker -- unclosed, unopened, or not alone in its paragraph
 -- is left in place and reported alongside unrendered blocks. A dataset
 value that happens to spell a \emph{block} placeholder renders as the text it
@@ -109,10 +111,10 @@ survives that, which identifies a block paragraph but not an inline
 placeholder inside a sentence.}
 }
 
-Additional or overriding values can be supplied through \code{variables}; names may
-be given with or without the surrounding braces (\code{"DTA_TITLE"} and
-\code{"{DTA_TITLE}"} are equivalent). User-supplied values take precedence over the
-automatically extracted ones and may introduce entirely new placeholders.
+Additional or overriding values can be supplied through \code{variables}; names
+may be given with or without the surrounding braces (\code{"DTA_TITLE"} and
+\code{"{DTA_TITLE}"} are equivalent). User-supplied values take precedence over
+the automatically extracted ones and may introduce entirely new placeholders.
 Study and agreement sections appear only where their placeholders occur;
 user-owned templates are never extended automatically. The new blocks
 render nothing when the corresponding metadata is empty. Agreement sections

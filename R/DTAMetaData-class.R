@@ -12,7 +12,8 @@
 #' @param version_history list of version records; each record must be a list with:
 #'   \itemize{
 #'     \item \code{version}: version string (e.g. "1.0")
-#'     \item \code{date}: Date object for this version
+#'     \item \code{date}: Date object for this version; a character string
+#'       \code{"YYYY-MM-DD"}, as loaded from YAML, is also read as a date
 #'     \item \code{changes}: character description of what was changed in this version
 #'   }
 #' @param receiver list with affiliation and contacts (authorized to request corrections)

@@ -44,9 +44,11 @@ call. \code{arrow_pool_peak_mb} reports that absolute, honest, per-process peak.
 process to a new high-water mark; when it is \code{FALSE}, \code{arrow_call_mb} is a
 lower bound on what this call allocated, not a measurement of it -- an
 earlier, larger call in the same session may be why nothing "new" showed up
-here. If the pool could not be read at all, both \code{arrow_pool_peak_mb} and
-\code{arrow_call_mb} are \code{NA} rather than \code{0}, so an unreadable pool is never
-mistaken for an idle one.
+here (in that case \code{arrow_call_mb} is \code{0}). A failed read of the pool gives
+\code{NA} rather than \code{0}, so an unreadable pool is never mistaken for an idle
+one: \code{arrow_pool_peak_mb} is \code{NA} when the read at the end of the call
+failed, and \code{arrow_call_mb} is \code{NA} when either the read at the start or the
+one at the end failed.
 }
 
 \section{Side effect of \code{benchmark = TRUE}}{

@@ -7,7 +7,7 @@
 DTAFileFactory(type, ...)
 }
 \arguments{
-\item{type}{Character. The type specification, potentially prefixed with a backend identifier.}
+\item{type}{Character. File type, \code{"csv"}, \code{"tsv"} or \code{"any"}.}
 
 \item{...}{Additional arguments passed to the specific backend constructor.
 For \code{type = "any"} this includes the optional \code{extensions} restriction; see

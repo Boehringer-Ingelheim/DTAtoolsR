@@ -7,9 +7,9 @@
 #' @return An object of class \code{DTAColumnSpecStructure}.
 #' @export
 #'
-#' @param type Character or NA. The type of the column.
-#' @param format Character or NA. The format of the column.
-#' @param length Numeric or NA. The max character length.
+#' @param type Character or NULL. The type of the column.
+#' @param format Character, numeric or NULL. The format of the column.
+#' @param length Numeric or NULL. The max character length.
 #' @param backend Character. The backend system defining the type/format (e.g. \code{"SAS"}).
 #' @examples
 #' DTAColumnSpecStructure(type = "Char", format = "$12.", length = 12, backend = "SAS")

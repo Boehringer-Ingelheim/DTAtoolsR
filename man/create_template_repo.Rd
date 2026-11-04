@@ -14,11 +14,12 @@ than a directory.}
 
 \item{examples}{A single \code{TRUE}/\code{FALSE} (default \code{TRUE}). When \code{TRUE},
 writes the four starter templates into \verb{templates/} beneath \code{path}.
-\code{README.md} stays at the repository root. When \code{FALSE}, only \code{README.md}, \code{.gitignore} and (if \code{ci}
-asks for any provider) its CI file(s) are written -- no template files,
-for a caller who wants the scaffolding without the worked example. Such
-a repository fails \code{validate_template(path, strict = TRUE)} (code
-\code{no_templates}), and so does its CI, until the first template is added.}
+\code{README.md} stays at the repository root. When \code{FALSE}, only \code{README.md},
+\code{.gitignore} and (if \code{ci} asks for any provider) its CI file(s) are
+written -- no template files, for a caller who wants the scaffolding
+without the worked example. Such a repository has no templates yet, so
+\code{\link[=validate_template]{validate_template()}} reports the error \code{no_templates} and the generated
+CI workflow fails until a template is added.}
 
 \item{ci}{Either a single \code{TRUE}/\code{FALSE} (default \code{TRUE}), or a character
 vector naming one or more of \code{"github"}, \code{"bitbucket"}, \code{"jenkins"}

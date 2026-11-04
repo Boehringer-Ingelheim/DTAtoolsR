@@ -608,19 +608,20 @@ yet.
 
 A supplier-specific deviation does not need to restate a whole template family
 just to change a handful of fields. `biomarker_gf_acme.dta-template.yaml`, in
-full, `extends:` the base template above:
+full apart from its explanatory comments, `extends:` the base template above:
 
 ```yaml
 kind: dta_creation_template
 id: biomarker_gf_acme
 label: Biomarker GF DTS (ACME Labs)
 version: "1.0"
-extends: biomarker_gf@1.0
+extends: biomarker_gf@latest
 description: >-
   ACME Labs supplier deviation of biomarker_gf: names ACME as the vendor,
   clarifies GFNAM for ACME, and adds ACME's own internal sample identifier
   column. Everything else -- base metadata, the other 11 options, the party
-  slots -- is inherited unchanged from the parent.
+  slots -- is inherited unchanged from the parent, at whatever version of
+  biomarker_gf is current.
 
 options:
   - id: header
@@ -882,7 +883,7 @@ Pin an exact version instead when a deviation has been agreed against one
 specific release of the standard and must not move until it is re-agreed:
 
 ```yaml
-extends: biomarker_gf@1.0
+extends: biomarker_gf@latest
 ```
 
 The same choice applies to a `datasets:` import. There the default leans the

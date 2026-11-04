@@ -9,10 +9,14 @@
 #' @param DTAColumnSpecCollection A DTAColumnSpecCollection object containing
 #'   column specifications.
 #' @param file Character. The name of the output Word file in which the DTA Spec Table shall be written. Default is "dta_spec_table.docx".
-#' @param overwrite Logical. whether to overwrite the file.
-#' @param colnames Vector. Vector containing column names of the DTA table. Default: c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")
+#' @param overwrite Logical. Whether to overwrite an existing `file`; if
+#'   `FALSE` (the default) an existing file is an error.
+#' @param colnames Character vector of column names for the table. Only two
+#'   values are accepted, otherwise the function aborts: the default
+#'   `c("Variable Name", "Variable Label", "Type", "Length", "Format",
+#'   "Nullable", "Description")`, or the same without `"Length"`.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return Flextable object that is saved.
+#' @return Invisibly, the flextable that was saved to `file`.
 #' @export
 #' @examples
 #' specs <- create_example_DTAColumnSpecCollection()
@@ -208,7 +212,8 @@ export_specs_table <- function(
 
 #' @title Generate table containing all potential values of a column
 #' @description
-#' This function takes all values defined in a column and prints a word table containing those values. Can be copied into the DTA
+#' This function takes all values defined in a column and writes a Word table
+#' containing those values. Can be copied into the DTA
 #' @importFrom yaml read_yaml
 #' @importFrom magrittr %>%
 #' @importFrom cli cli_alert_success cli_abort
@@ -218,7 +223,7 @@ export_specs_table <- function(
 #' @param file Character. The name of the word file, to which the table shall be written. Default is "column_value_table.docx".
 #' @param id Character. The id of the column for which a table with all its values shall be generated.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
-#' @return None. The function creates a Word document.
+#' @return Invisibly, the data.frame of values that was written to `file`.
 #' @export
 #' @examples
 #' specs <- create_example_DTAColumnSpecCollection()

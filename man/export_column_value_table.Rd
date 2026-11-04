@@ -22,10 +22,11 @@ column specifications.}
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-None. The function creates a Word document.
+Invisibly, the data.frame of values that was written to \code{file}.
 }
 \description{
-This function takes all values defined in a column and prints a word table containing those values. Can be copied into the DTA
+This function takes all values defined in a column and writes a Word table
+containing those values. Can be copied into the DTA
 }
 \examples{
 specs <- create_example_DTAColumnSpecCollection()

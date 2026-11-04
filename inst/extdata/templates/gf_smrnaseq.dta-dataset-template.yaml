@@ -294,14 +294,14 @@ dataset:
           not_equals: DF
     - id: unique_check
       type: col_unique
-      column:
+      columns:
         - SUBJIDN
         - VISIT
         - GFSEQID
     - id: GFORRES must have a range
       description: GFORRES must be between 1 and 10M
       type: col_range
-      column: GFORRES
+      columns: GFORRES
       min: 0
       max: 100000000
     - id: dependency_check

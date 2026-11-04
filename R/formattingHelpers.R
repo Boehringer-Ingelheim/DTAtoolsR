@@ -611,8 +611,10 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   paste(words, collapse = " ")
 }
 
-#' Extract affiliation fields (name/country/address/...) as ordered key-value pairs.
-#' Deliberately excludes the "contacts" element, which is rendered separately as a table.
+#' Extract affiliation fields (name/country/address/...) as ordered key-value
+#' pairs. Deliberately excludes the "contacts" element, which is rendered
+#' separately: as per-contact blocks in the built-in layout, as a table in the
+#' template block.
 #' @keywords internal
 .affiliation_pairs <- function(affiliation) {
   if (is.null(affiliation) || length(affiliation) == 0) {

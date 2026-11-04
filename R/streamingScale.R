@@ -34,15 +34,15 @@
 #'   when the rule's type is not recognised.
 #' @keywords internal
 dta_rule_all_columns <- function(rule) {
-  type <- tryCatch(normalize_rule_type(rule@type), error = function(e) NULL)
+  type <- tryCatch(rule@type, error = function(e) NULL)
   if (is.null(type)) {
     return(NULL)
   }
 
   switch(type,
-    check_range = as.character(dta_rule_target_columns(rule)),
-    check_unique = as.character(dta_unique_columns(rule)),
-    check_col_condition = {
+    col_range = as.character(dta_rule_target_columns(rule)),
+    col_unique = as.character(dta_unique_columns(rule)),
+    col_condition = {
       # A malformed clause degrades to "no columns" rather than erroring at
       # scan setup -- the clause itself will still be reported, properly,
       # once the rule is actually evaluated against a batch.
@@ -56,7 +56,7 @@ dta_rule_all_columns <- function(rule) {
       )
       as.character(union(cond_cols, then_cols))
     },
-    check_group_condition = {
+    group_condition = {
       conditions <- rule_get_slot(rule, "conditions")
       cond_cols <- character(0)
       for (cond_name in names(conditions)) {

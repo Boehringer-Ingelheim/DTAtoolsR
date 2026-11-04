@@ -114,18 +114,24 @@ Nothing in the scan aborts on a resource budget any more (the old
 discarded multi-hour scans at exactly the per-row-unique-key scale streaming
 exists for). What bounds memory instead:
 \itemize{
-\item \code{check_unique} rules whose key columns are text are answered by Arrow's
-own grouped aggregation over the dataset, in one extra streaming pass over
-just the key columns -- the distinct keys live compactly in the C++
-engine, not as R strings. \code{options(DTAtools.stream_arrow_unique = FALSE)}
-restores the per-batch accumulator.
-\item A uniqueness rule that cannot take that path (non-text keys, or a
-consumable reader as the source) falls back to an R-side key set whose
-memory grows with the number of distinct keys (roughly 100 bytes per
-key). Grouped rules likewise hold state per distinct group.
-\item Columns nothing reads are projected out of the scan entirely, and every
-scanned column is read as text and typed in R, so a malformed value can
-never abort the scan mid-file.
+\item \code{col_unique} rules are answered by Arrow's own grouped aggregation over
+the dataset, in one extra streaming pass over just the key columns -- the
+distinct keys live compactly in the C++ engine, not as R strings. Key
+columns the specs declare numeric are cast to numbers first, so they are
+eligible too. \code{options(DTAtools.stream_arrow_unique = FALSE)} restores the
+per-batch accumulator.
+\item A uniqueness rule that cannot take that path falls back to an R-side key
+set whose memory grows with the number of distinct keys (roughly 100 bytes
+per key). That happens when the source is not a text-typed dataset (for
+example Parquet, which carries its own types), when the source is a
+consumable reader rather than a re-scannable dataset, or when Arrow
+refuses the cast of a declared-numeric key. Grouped rules likewise hold
+state per distinct group.
+\item Columns nothing reads are projected out of the scan entirely. A delimited
+file is scanned with every column as text, so a malformed value can never
+abort the scan mid-file; each batch is then typed by the specs, in Arrow
+where Arrow's parser provably agrees with R's and in R otherwise.
+Parquet is not read as text; its stored types are used.
 }
 }
 

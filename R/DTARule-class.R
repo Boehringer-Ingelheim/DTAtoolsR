@@ -1,13 +1,14 @@
 #' @title DTARule Class
 #' @description
-#' Represents a single rule for validating data tables. The rule can be of various types,
-#' such as `check_range`, `check_unique`, or `check_col_condition`
+#' Represents a single rule for validating data tables, of type
+#' `col_condition`, `col_range`, `col_unique` or `group_condition`.
 #'
 #' @import S7
 #' @importFrom cli cli_abort
 #'
 #' @param id Character. A unique identifier for the rule.
-#' @param type Character. The type of the rule (e.g., "check_range", "check_unique").
+#' @param type Character. The type of the rule (e.g., "col_range",
+#'   "col_unique").
 #' @param description Character or NULL. Free-text description of the rule.
 #' @return An object of class `DTARule`.
 #'
@@ -119,37 +120,32 @@ DTARuleFactory <- function(id, type, ...) {
     id
   }
 
-  type <- switch(as.character(type),
-    check_col_condition = "col_condition",
-    check_range = "col_range",
-    check_unique = "col_unique",
-    check_group_condition = "group_condition",
-    as.character(type)
+  type <- as.character(type)
+
+  ctor <- switch(type,
+    col_condition = DTAtools::DTARuleColCondition,
+    col_range = DTAtools::DTARuleColRange,
+    col_unique = DTAtools::DTARuleColUnique,
+    group_condition = DTAtools::DTARuleGroupCondition,
+    cli::cli_abort("Unknown rule type: {type}")
   )
 
-  switch(type,
-    col_condition = DTAtools::DTARuleColCondition(
-      id = id,
-      ...
-    ),
-    col_range = DTAtools::DTARuleColRange(
-      id = id,
-      ...
-    ),
-    col_unique = DTAtools::DTARuleColUnique(
-      id = id,
-      ...
-    ),
-    group_condition = DTAtools::DTARuleGroupCondition(
-      id = id,
-      ...
-    ),
-    {
-      cli::cli_abort("Unknown rule type: {type}")
-    }
-  )
+  # Exact names only: R would otherwise partially match an abbreviation such as
+  # `column` onto `columns` and let it through unnoticed. Unnamed elements fail
+  # too -- rules come from named YAML keys.
+  dots <- list(...)
+  given <- names(dots) %||% rep("", length(dots))
+  accepted <- setdiff(names(formals(ctor)), c("id", "type"))
+  bad <- given[!given %in% accepted]
+  if (length(bad) > 0) {
+    cli::cli_abort(c(
+      "Unknown argument(s) for a {.val {type}} rule: {.val {bad}}.",
+      i = "Accepted: {.val {accepted}}."
+    ))
+  }
+
+  ctor(id = id, ...)
 }
-
 
 #' @export
 #' @name as.list

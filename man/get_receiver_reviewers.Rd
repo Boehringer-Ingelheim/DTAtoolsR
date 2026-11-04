@@ -12,7 +12,9 @@ get_receiver_reviewers(x, name_only = TRUE)
 \item{name_only}{Logical. If TRUE, return only names; if FALSE, return full contact objects}
 }
 \value{
-A character vector of reviewer names or list of reviewer contact objects
+A character vector of reviewer names or list of reviewer contact
+objects; \code{NULL} when there is no receiver or the receiver has no
+contacts.
 }
 \description{
 Retrieve receiver contacts who have the reviewer role (authorized to request corrections)

@@ -43,7 +43,8 @@ expected.}
 \item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected.}
 
-\item{info}{Character or \code{NULL}; free-text description of the file.}
+\item{info}{Character, list or \code{NULL}; free-text description of the
+file.}
 
 \item{sep}{Character. Single-character field separator used in the file.
 Defaults to tab (\code{"\\t"}).}
