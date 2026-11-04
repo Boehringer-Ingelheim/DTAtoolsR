@@ -1287,28 +1287,45 @@ server <- function(input, output, session) {
       })
     }
 
-    showModal(modalDialog(
-      title = paste0("Create from template: ", as.character(def$label %||% def$id %||% "template")),
-      if (!is.null(def$variants)) {
-        tagList(
-          p(paste0(def$variants$label %||% def$variants$id, ": ", variant_selections[[def$variants$id]])),
-          actionButton("template_variant_back", "Change platform (resets agreement options)")
-        )
-      },
+    # The platform chosen in the step before is context for the whole form, so
+    # it sits in the sidebar with the template it refines.
+    variant_ui <- if (!is.null(def$variants)) {
+      div(
+        class = "tmpl-aside-block",
+        div(class = "section-label", as.character(def$variants$label %||% def$variants$id)),
+        p(class = "tmpl-aside-variant", as.character(variant_selections[[def$variants$id]] %||% "")),
+        actionButton("template_variant_back", "Change platform",
+          class = "btn btn-sm btn-outline-secondary"
+        ),
+        div(class = "msg-hint", "Changing it resets the agreement options.")
+      )
+    }
+    dlg <- modalDialog(
+      title = tagList(
+        span(class = "tmpl-eyebrow", "New DTA from template"),
+        as.character(def$label %||% def$id %||% "template")
+      ),
       template_options_modal_body(
         def, loaded, index, vocab_specs,
-        has_open_doc = !is.null(rv$dta)
+        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui
       ),
       footer = tagList(
-        actionButton("template_options_back", "Back to templates",
-          class = "btn btn-outline-secondary"
+        actionButton("template_options_back", "← Back to templates",
+          class = "btn btn-link tmpl-back"
         ),
         modalButton("Cancel"),
         actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
       ),
-      size = "l",
+      size = "xl",
       easyClose = FALSE
-    ))
+    )
+    # Bootstrap's scrollable dialog keeps the title and the buttons in view
+    # while the form scrolls; modalDialog() has no argument for it.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-options-dialog"
+      )$allTags()
+    )
   }
 
   # --- landing: load a DTA YAML ------------------------------------------
@@ -6089,11 +6106,28 @@ server <- function(input, output, session) {
         width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
-      f_text("md_authorized", "Authorized for corrections",
-        getf("authorized_for_corrections"),
-        width = "100%",
-        placeholder = "Contact(s) authorized to request corrections"
-      ),
+      if (ro) {
+        meta_field_text("Authorized for corrections", paste(dta_authorized_values(dta), collapse = ", "))
+      } else {
+        tagList(
+          selectizeInput("md_authorized", "Authorized for corrections",
+            choices = dta_authorized_choices(dta),
+            selected = dta_authorized_values(dta),
+            multiple = TRUE, width = "100%",
+            # delimiter: selectize splits typed and pasted text on its
+            # delimiter, which defaults to ",", so "Lastname, Firstname" would
+            # become two people. Names do not contain ";".
+            options = list(
+              create = TRUE, delimiter = ";", plugins = list("remove_button"),
+              placeholder = "Pick contacts or type a name"
+            )
+          ),
+          div(
+            class = "msg-hint", style = "margin:-8px 0 10px;",
+            "Choose Receiver or Supplier contacts, type any other name and press Enter (separate several with ;), or leave empty when nobody is named."
+          )
+        )
+      },
       # Only true while editing; in read-only there is nothing to save.
       if (!ro) {
         div(
@@ -6167,7 +6201,6 @@ server <- function(input, output, session) {
   version_d <- debounce(reactive(input$md_version), 700)
   header_d <- debounce(reactive(input$md_header), 700)
   errh_d <- debounce(reactive(input$md_error_handling), 700)
-  auth_d <- debounce(reactive(input$md_authorized), 700)
   # title and version are REQUIRED (non-nullable); block saves of empty/blank values
   observeEvent(title_d(),
     {
@@ -6187,7 +6220,36 @@ server <- function(input, output, session) {
   )
   observeEvent(header_d(), save_md("header", header_d()), ignoreInit = TRUE)
   observeEvent(errh_d(), save_md("error_handling", errh_d()), ignoreInit = TRUE)
-  observeEvent(auth_d(), save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
+  # ignoreNULL = FALSE: a multiple selectize emptied by the user sends NULL,
+  # which must unset the field. The guard makes a re-render (document load,
+  # edit toggle) a no-op instead of a spurious edit that would show in the
+  # version-history change summary. It compares as SETS on purpose: selectize
+  # reports its initial selection in option (DOM) order -- Receiver, Supplier,
+  # then manual entries -- not in the stored order, so identical() would
+  # rewrite a document just by opening it. The picker has no drag-to-reorder,
+  # so a set comparison cannot miss a real edit. No debounce: selectize emits
+  # on discrete picks, not per keystroke.
+  observeEvent(input$md_authorized,
+    {
+      req(rv$dta)
+      v <- trimws(as.character(input$md_authorized %||% character(0)))
+      v <- unique(v[!is.na(v) & nzchar(v)])
+      if (!setequal(v, dta_authorized_values(rv$dta))) save_md("authorized_for_corrections", v)
+    },
+    ignoreInit = TRUE,
+    ignoreNULL = FALSE
+  )
+  # Contacts feed the picker's options; keep them current while editing.
+  observeEvent(rv$contacts_token,
+    {
+      req(editing(), rv$dta)
+      updateSelectizeInput(session, "md_authorized",
+        choices = dta_authorized_choices(rv$dta),
+        selected = dta_authorized_values(rv$dta)
+      )
+    },
+    ignoreInit = TRUE
+  )
   observeEvent(input$md_date,
     {
       v <- input$md_date

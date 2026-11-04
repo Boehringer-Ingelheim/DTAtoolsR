@@ -89,6 +89,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `write_columns_to_json()`, rules included, so JSON is no longer a
   write-only format.
 
+- **"Authorized for corrections" is now a picker in the app.** The Metadata
+  tab offers the Receiver and Supplier contacts to choose from, accepts any
+  other name typed in, and allows several people or none (empty leaves the
+  field unset). A document whose `authorized_for_corrections` is a list is now
+  shown in full instead of only its first entry, in edit and read-only mode
+  alike. A single comma-separated string stays one entry.
+
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind
   "Full history", every version of the template since the first. Nothing is
@@ -297,6 +304,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The "Create new from template" options dialog is redesigned.** It is now a
+  wide dialog whose title and buttons stay in view while the form scrolls. A
+  sidebar names the template (id, version, library, lineage, description),
+  lists the datasets it creates and links to each part of the form,
+  highlighting the one being read. Every field is one row, label and help on
+  the left and the control on the right, so the controls line up in a single
+  column. Options are grouped by the metadata block they fill (for example
+  "Transmission"), yes/no options are switches that read "Yes" or "No",
+  required parties and vocabularies carry a "Required" tag, and carry-over is
+  a visible section whose field list only appears once a source is chosen.
+  "Back to templates" moved to the left of the footer.
+
 - **The app's "Export DTA YAML" file name now carries the document version.**
   The download is named `<title>_v<version>_<date>.yaml`, with the dots of the
   version removed (version `1.2.0` gives `Title_v120_2026-11-04.yaml`; any
@@ -440,6 +459,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The CI files `create_template_repo()` writes now work once their DTAtools
+  install placeholder is filled in. The GitHub workflow passed
+  `packages: none` to `setup-r-dependencies`, which asks for a package called
+  `none` and failed the job before validation ran; it now installs `remotes`,
+  which the install examples in all three files call and none of them used to
+  install. The Jenkinsfile now installs into a library of its own (set through
+  `R_LIBS`), since Jenkins runs the container as a user who cannot write to
+  the image's site library.
+  The files' header comments no longer describe DTAtools' own deployment as
+  if it were the user's repository, and they list `*.dta-vocabulary.yaml`.
+- The authoring guide `create_template_repo()` writes as `README.md` now
+  covers creation-template `variants:` and lists the `variant_invalid`
+  validator code.
+- `create_template_repo(examples = FALSE)` no longer ends by suggesting
+  `validate_template(path, strict = TRUE)`, which always fails with
+  `no_templates` on a repository with no templates; it says to add templates
+  first.
 - A creation-template option that has both `target:` and `effects_all:`, and no
   `effects:`, now writes the selected value to its target. Before, the
   `effects_all:` block took the place of the missing `effects:`, so the value

@@ -163,9 +163,9 @@
 #' `README.md` with the full authoring guide, a
 #' `.gitignore`, and -- by default -- a GitHub Actions workflow that runs
 #' [validate_template()] against the repository on every push and pull
-#' request. The result already passes `validate_template(path, strict =
-#' TRUE)` unmodified, so it is a starting point to edit rather than a stub to
-#' fill in from nothing. See `vignette("private-templates", package =
+#' request. With the default `examples = TRUE`, the result already passes
+#' `validate_template(path, strict = TRUE)` unmodified, so it is a starting
+#' point to edit rather than a stub to fill in from nothing. See `vignette("private-templates", package =
 #' "DTAtools")` for how to point the bundled Shiny app at the directory this
 #' creates.
 #' @details
@@ -194,7 +194,9 @@
 #'   writes the four starter templates into `templates/` beneath `path`.
 #'   `README.md` stays at the repository root. When `FALSE`, only `README.md`, `.gitignore` and (if `ci`
 #'   asks for any provider) its CI file(s) are written -- no template files,
-#'   for a caller who wants the scaffolding without the worked example.
+#'   for a caller who wants the scaffolding without the worked example. Such
+#'   a repository fails `validate_template(path, strict = TRUE)` (code
+#'   `no_templates`), and so does its CI, until the first template is added.
 #' @param ci Either a single `TRUE`/`FALSE` (default `TRUE`), or a character
 #'   vector naming one or more of `"github"`, `"bitbucket"`, `"jenkins"`
 #'   (duplicates are silently dropped). `TRUE` is shorthand for `"github"`
@@ -279,10 +281,18 @@ create_template_repo <- function(path, examples = TRUE, ci = TRUE, overwrite = F
   }
 
   path_out <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  # Without the starter files there is nothing to validate yet: the suggested
+  # command would only fail with `no_templates`, and so would any CI just
+  # written, until the first template is added.
+  next_step <- if (isTRUE(examples)) {
+    "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
+  } else {
+    "Next: add your template files to {.file templates/}; until then {.fn validate_template} (and any CI written) fails with {.code no_templates}."
+  }
   cli::cli_inform(c(
-    "v" = "Created a template repository at {.file {path_out}} (starter templates go in {.file templates/}).",
+    "v" = "Created a template repository at {.file {path_out}} (templates go in {.file templates/}).",
     "*" = "Wrote {.file {names(targets)}}.",
-    "i" = "Next: {.code validate_template(\"{path_out}\", strict = TRUE)}"
+    "i" = next_step
   ))
   invisible(path_out)
 }

@@ -107,6 +107,64 @@ test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming val
   expect_match(content, "validate_template", fixed = TRUE)
 })
 
+test_that("the GitHub workflow installs remotes, which its placeholder install examples call", {
+  # setup-r-dependencies hands `packages` straight to pak::lockfile_create(),
+  # so every entry must be a resolvable package reference: the earlier
+  # `packages: none` named a CRAN package that does not exist and failed the
+  # job before validation ever ran.
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE)
+
+  workflow <- yaml::read_yaml(file.path(dir, ".github", "workflows", "validate-templates.yml"))
+  steps <- workflow$jobs[["validate-templates"]]$steps
+  uses <- vapply(steps, function(s) s$uses %||% "", character(1))
+  deps <- steps[[grep("setup-r-dependencies", uses, fixed = TRUE)]]$with$packages
+  expect_identical(deps, "any::remotes")
+
+  runs <- vapply(steps, function(s) s$run %||% "", character(1))
+  expect_true(any(grepl("validate_template(\".\", strict = TRUE)", runs, fixed = TRUE)))
+})
+
+test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a writable user library", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+
+  pipeline <- yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))
+  script <- unlist(pipeline$definitions$steps[[1]]$step$script)
+  expect_true(any(grepl("install.packages(\"remotes\")", script, fixed = TRUE)))
+
+  jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
+  expect_match(jenkinsfile, "install.packages(\"remotes\")", fixed = TRUE)
+  # R_LIBS, not R_LIBS_USER: rocker's Renviron.site fills R_LIBS with the
+  # unwritable site library unless it is already set, and R_LIBS is searched
+  # first.
+  expect_match(jenkinsfile, "R_LIBS = '/tmp/R-library'", fixed = TRUE)
+  expect_match(jenkinsfile, "mkdir -p \"$R_LIBS\"", fixed = TRUE)
+})
+
+test_that("examples = FALSE does not suggest a validate_template() call that must fail", {
+  # Whitespace (including cli's wrapping and non-breaking spaces) is squeezed
+  # out so the assertions do not depend on where cli breaks the line.
+  scaffold_message <- function(...) {
+    msgs <- character()
+    withCallingHandlers(
+      create_template_repo(withr::local_tempdir(), ...),
+      message = function(m) {
+        msgs <<- c(msgs, conditionMessage(m))
+        invokeRestart("muffleMessage")
+      }
+    )
+    gsub("[[:space:] ]+", "", paste(msgs, collapse = ""))
+  }
+
+  # Positive control: the default scaffold does suggest the strict call.
+  expect_match(scaffold_message(), "strict=TRUE", fixed = TRUE)
+
+  bare <- scaffold_message(examples = FALSE)
+  expect_match(bare, "no_templates", fixed = TRUE)
+  expect_no_match(bare, "strict=TRUE", fixed = TRUE)
+})
+
 test_that("ci = FALSE creates no .github directory at all", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = FALSE)

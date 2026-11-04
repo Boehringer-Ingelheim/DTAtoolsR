@@ -5,16 +5,13 @@
 // pipeline.
 //
 // This is the one to use for Bitbucket SERVER / DATA CENTER (or any other
-// Bitbucket deployment with no Pipelines feature) -- see the
-// bitbucket-pipelines.yml shipped alongside this file for Bitbucket CLOUD
-// instead. This repository's own production is Bitbucket Data Center, so
-// this Jenkinsfile is the one that actually mirrors what runs there; see the
-// GitHub Actions workflow for the CI running against the GitHub-hosted
-// mirror.
+// Bitbucket deployment with no Pipelines feature). For Bitbucket CLOUD, use
+// bitbucket-pipelines.yml instead (`create_template_repo(path, ci =
+// "bitbucket")` writes it).
 //
-// Copy this file to `Jenkinsfile` at the root of the repository that holds
-// your own `*.dta-template.yaml` / `*.dta-dataset-template.yaml` /
-// `*.dta-party.yaml` files.
+// Lives at `Jenkinsfile` in the root of the repository that holds your
+// `*.dta-template.yaml` / `*.dta-dataset-template.yaml` / `*.dta-party.yaml`
+// / `*.dta-vocabulary.yaml` files.
 //
 // Unlike a GitHub Actions workflow, this file has no `on:` block -- Jenkins
 // does not read triggers from a Jenkinsfile. On Bitbucket Data Center, the
@@ -33,10 +30,27 @@ pipeline {
         docker { image 'rocker/r-ver:4.4' }
     }
 
+    // Jenkins runs the container as its own uid, which cannot write to the
+    // image's site library, so packages go to a library of their own. It is
+    // set through R_LIBS, not R_LIBS_USER: rocker's Renviron.site puts the
+    // site library in R_LIBS unless R_LIBS is already set, and R searches
+    // R_LIBS first, so install.packages() would still pick the unwritable
+    // site library. It sits outside the workspace because an installed
+    // DTAtools carries template files of its own, which validate_template(".")
+    // would otherwise find below the repository root and report.
+    environment {
+        R_LIBS = '/tmp/R-library'
+    }
+
     stages {
         stage('Install dependencies') {
             steps {
-                sh 'Rscript -e \'install.packages(c("yaml", "cli"))\'' // skip if already baked into the image
+                // R drops a library directory from its path if it does not exist.
+                sh 'mkdir -p "$R_LIBS"'
+
+                // `remotes` is only for the install examples below; DTAtools'
+                // own Imports come with DTAtools itself.
+                sh 'Rscript -e \'install.packages("remotes")\'' // skip if already baked into the image
 
                 /* -----------------------------------------------------------
                  * PLACEHOLDER: install DTAtools from your internal package
