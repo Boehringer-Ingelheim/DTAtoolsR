@@ -161,6 +161,14 @@ parse_template_sources <- function(spec) {
 
     if (scheme == "git") {
       ref <- if (has_hash && nzchar(ref)) ref else "HEAD"
+      # Both reach git as positional arguments, where a leading "-" is read
+      # as an option instead: `#--upload-pack=<cmd>` would have git fetch run
+      # <cmd>. No real repository URL, path or ref name starts with one.
+      if (startsWith(locator, "-") || startsWith(ref, "-")) {
+        cli::cli_abort(
+          "Template source {.val {entry}} has a locator or {.code #ref} starting with {.code -}, which git would read as an option."
+        )
+      }
     } else {
       if (has_hash) {
         cli::cli_warn(
@@ -481,7 +489,7 @@ resolve_git_source <- function(src, refresh = FALSE) {
     if (!identical(src$ref, "HEAD")) {
       args <- c(args, "--branch", src$ref)
     }
-    args <- c(args, src$locator, root)
+    args <- c(args, "--", src$locator, root)
     run_result <- dta_template_git_run(args, token = token)
   } else {
     run_result <- dta_template_git_run(
