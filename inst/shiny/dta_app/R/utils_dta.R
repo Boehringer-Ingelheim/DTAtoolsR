@@ -576,6 +576,33 @@ dta_contacts <- function(dta, side) {
   if (is.null(cs)) list() else cs
 }
 
+# "Authorized for corrections" is a list of names, not links to contacts: a
+# renamed or removed contact's stored string stays selected and simply lands
+# under "Entered manually" in the picker.
+dta_authorized_values <- function(dta) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  v <- if (is.null(md)) NULL else tryCatch(S7::prop(md, "authorized_for_corrections"), error = function(e) NULL)
+  v <- trimws(as.character(unlist(v)))
+  unique(v[!is.na(v) & nzchar(v)])
+}
+
+dta_authorized_choices <- function(dta) {
+  names_of <- function(side) {
+    n <- vapply(dta_contacts(dta, side), function(cx) as.character(cx$name %||% "")[1], character(1))
+    n <- trimws(n)
+    n[!is.na(n) & nzchar(n)]
+  }
+  receiver <- unique(names_of("receiver"))
+  supplier <- setdiff(unique(names_of("supplier")), receiver)
+  manual <- setdiff(dta_authorized_values(dta), c(receiver, supplier))
+  groups <- list(Receiver = receiver, Supplier = supplier, "Entered manually" = manual)
+  groups <- groups[lengths(groups) > 0L]
+  if (length(groups) == 0L) {
+    return(list())
+  }
+  lapply(groups, function(x) stats::setNames(x, x))
+}
+
 dta_add_contact <- function(dta, side, name, roles = "", email = "",
                             department = "", phone = "", address = "") {
   dta_try({
@@ -2264,6 +2291,21 @@ dta_to_list <- function(dta) {
     }))
   }
   out
+}
+
+# File name of the "Export DTA YAML" download: <title>_v<version>_<date>.yaml.
+# The version has its dots removed ("1.2.0" -> "v120") and the segment is
+# left out when the document has no version.
+dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  field <- function(name) {
+    x <- tryCatch(as.character(S7::prop(md, name))[1], error = function(e) NULL)
+    if (is.null(x) || is.na(x)) "" else x
+  }
+  ttl <- field("title")
+  base <- if (nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+  ver <- gsub("[^A-Za-z0-9]+", "", field("version"))
+  paste0(base, if (nzchar(ver)) paste0("_v", ver), "_", date, ".yaml")
 }
 
 # Serialize a whole DTA to a YAML string. Returns dta_try() (value = character).

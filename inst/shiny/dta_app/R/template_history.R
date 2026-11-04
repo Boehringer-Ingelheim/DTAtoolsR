@@ -38,8 +38,8 @@
 # ${today} and ${version} resolve identically and never show up as changes.
 # -----------------------------------------------------------------------------
 
-# Build one creation-template ref the way a user accepting every default
-# would, returning what the history compares -- or the error, never a throw.
+# Build every structural choice explicitly, or the ordinary template with its
+# defaults, returning what the history compares -- or the error, never a throw.
 template_history_build <- function(ref, index) {
   dta_try({
     loaded <- load_template_definition(ref, index = index)
@@ -47,15 +47,40 @@ template_history_build <- function(ref, index) {
       stop(loaded$error)
     }
     def <- loaded$value$def
-    built <- create_dta_from_template(
-      def, loaded$value$path,
-      index = index,
-      vocab_selections = template_history_vocab_selections(def, index)
-    )
-    if (!isTRUE(built$ok)) {
-      stop(built$error)
+    build <- function(def, selections = list()) {
+      built <- create_dta_from_template(
+        def, loaded$value$path,
+        selections = selections, index = index,
+        vocab_selections = template_history_vocab_selections(def, index)
+      )
+      if (!isTRUE(built$ok)) {
+        stop(built$error)
+      }
+      list(def = def, lineage = loaded$value$lineage, dta = built$value)
     }
-    list(def = def, lineage = loaded$value$lineage, dta = built$value)
+    if (is.null(def$variants)) {
+      build(def)
+    } else {
+      spec <- def$variants
+      variants <- list()
+      for (choice in spec$choices) {
+        selections <- stats::setNames(list(choice$value), spec$id)
+        built <- dta_try({
+          resolved <- resolve_template_variant(def, selections)
+          # Creation takes option defaults from this choice's merged options/base.
+          value <- build(resolved, selections)
+          value$variant <- list(
+            id = spec$id, value = choice$value, label = choice$label %||% choice$value
+          )
+          value
+        })
+        if (!isTRUE(built$ok)) {
+          stop(sprintf("Variant '%s=%s': %s", spec$id, choice$value, built$error))
+        }
+        variants[[paste(spec$id, choice$value, sep = "\n")]] <- built$value
+      }
+      list(def = def, lineage = loaded$value$lineage, variants = variants)
+    }
   })
 }
 
@@ -169,6 +194,9 @@ template_history_label <- function(area, key) {
 # Compare two builds. Returns a data frame with one row per change:
 # area, what (human-readable), change (added/removed/changed), from, to.
 template_history_compare <- function(a, b) {
+  if (!is.null(a$variants) || !is.null(b$variants)) {
+    return(template_history_compare_variants(a, b))
+  }
   la <- template_history_leaves(a)
   lb <- template_history_leaves(b)
   ea_all <- template_history_entities(a)
@@ -214,6 +242,45 @@ template_history_compare <- function(a, b) {
   }
   out <- do.call(rbind, rows)
   out <- out[order(match(out$area, names(la)), out$what, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+# Match choices by selector/value, never their position or display label.
+# At an ordinary/variant boundary, compare each choice with the ordinary build
+# as well as reporting the choice's arrival/removal.
+template_history_compare_variants <- function(a, b) {
+  av <- a$variants %||% list()
+  bv <- b$variants %||% list()
+  rows <- list()
+  for (key in union(names(av), names(bv))) {
+    old <- av[[key]]
+    new <- bv[[key]]
+    variant <- (new %||% old)$variant
+    label <- sprintf(
+      "Variant '%s', choice '%s' (%s)", variant$id, variant$value, variant$label
+    )
+    if (is.null(old) || is.null(new)) {
+      rows[[length(rows) + 1L]] <- data.frame(
+        area = "Template", what = label,
+        change = if (is.null(old)) "added" else "removed",
+        from = NA_character_, to = NA_character_, stringsAsFactors = FALSE
+      )
+    }
+    if (is.null(a$variants)) old <- a
+    if (is.null(b$variants)) new <- b
+    if (!is.null(old) && !is.null(new)) {
+      changes <- template_history_compare(old, new)
+      if (nrow(changes) > 0) {
+        changes$what <- paste0(label, ": ", changes$what)
+      }
+      rows[[length(rows) + 1L]] <- changes
+    }
+  }
+  out <- do.call(rbind, rows)
+  out <- out[order(match(out$area, c("Template", "Metadata", "Datasets")), out$what,
+    method = "radix"
+  ), , drop = FALSE]
   rownames(out) <- NULL
   out
 }

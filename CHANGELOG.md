@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Platform templates now work with explicit dataset identities. The picker
+  describes the required platform choice rather than reporting no datasets,
+  and multiline suggestion callbacks close correctly so suggestions remain
+  selectable. Computed histories compare every platform explicitly, including
+  changes to followed dependencies, without choosing an implicit default.
+
+- Child creation-template variants can no longer bypass ancestor seals through
+  metadata defaults, option effects or dataset replacement. Unchanged
+  ancestor-authored choices retain their existing seal exemption.
+
+### Changed
+
+- The bundled Biomarker GF creation template now uses the latest source DTS
+  version, 5.0 (2025-11-28), with a single matching version-history entry.
+
 ### Added
+
+- **"Authorized for corrections" is now a picker in the app.** The Metadata
+  tab offers the Receiver and Supplier contacts to choose from, accepts any
+  other name typed in, and allows several people or none (empty leaves the
+  field unset). A document whose `authorized_for_corrections` is a list is now
+  shown in full instead of only its first entry, in edit and read-only mode
+  alike. A single comma-separated string stays one entry.
 
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind
@@ -48,6 +72,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `gf_tstdtl` and `starter_terms` vocabularies declare their columns.
   `validate_template()` reports a malformed `columns:` entry as
   `vocabulary_invalid`.
+
+- Creation templates can offer an explicit structural platform choice before
+  agreement editing. Each choice selects its own datasets, metadata defaults
+  and source suggestions; missing or unsupported choices are rejected.
+  Template validation checks every variant, and document provenance records
+  the selected platform and source revision.
+
+- Creation-template narrative options with source suggestions now retain an
+  editable multiline input; choosing a suggestion or `(leave blank)` updates
+  the value collected by the existing template creation flow.
 
 - **Structured study identity and ordered agreement clauses.** `DTAMetaData`
   accepts optional `study` identifiers and named `sections` with titles and
@@ -205,6 +239,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   does.
 
 ### Changed
+
+- **The "Create new from template" options dialog is redesigned.** It is now a
+  wide dialog whose title and buttons stay in view while the form scrolls. A
+  sidebar names the template (id, version, library, lineage, description),
+  lists the datasets it creates and links to each part of the form,
+  highlighting the one being read. Every field is one row, label and help on
+  the left and the control on the right, so the controls line up in a single
+  column. Options are grouped by the metadata block they fill (for example
+  "Transmission"), yes/no options are switches that read "Yes" or "No",
+  required parties and vocabularies carry a "Required" tag, and carry-over is
+  a visible section whose field list only appears once a source is chosen.
+  "Back to templates" moved to the left of the footer.
+
+- **The app's "Export DTA YAML" file name now carries the document version.**
+  The download is named `<title>_v<version>_<date>.yaml`, with the dots of the
+  version removed (version `1.2.0` gives `Title_v120_2026-11-04.yaml`; any
+  other non-alphanumeric character goes too, so `1.2.0-beta` gives `v120beta`).
+  A document without a version keeps the old `<title>_<date>.yaml`.
 
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
   template or an inline template dataset whose `id` is absent, null or empty
