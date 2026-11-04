@@ -260,3 +260,59 @@ test_that("template_picker_filter() matches at the start of a word only", {
   expect_identical(filter_fn(lin, "(acme)")$id, "gf_acme")
   expect_identical(filter_fn(lin, "s.a")$id, character(0))
 })
+
+# ---- template_picker_restrict_sources() ------------------------------------
+
+# Three libraries: a base in `core`, two deviations of it in `onc` (one with a
+# deviation of its own), and an unrelated template in `lab`.
+three_library_index <- function() {
+  idx_of(
+    mk_index("base", label = "Base", source_name = "core"),
+    mk_index("onc_a", label = "Onc A", extends = "base", source_name = "onc"),
+    mk_index("onc_a_vendor", label = "Onc A Vendor", extends = "onc_a", source_name = "onc"),
+    mk_index("onc_b", label = "Onc B", extends = "base", source_name = "onc"),
+    mk_index("lab_x", label = "Lab X", source_name = "lab")
+  )
+}
+
+test_that("restricting to several libraries keeps exactly the union of their rows", {
+  idx <- three_library_index()
+  lin <- app_fn("template_picker_lineage")(idx, app_fn("template_picker_entries")(idx))
+  restrict <- app_fn("template_picker_restrict_sources")
+
+  expect_setequal(restrict(idx, lin, c("core", "lab"))$id, c("base", "lab_x"))
+  expect_setequal(restrict(idx, lin, "lab")$id, "lab_x")
+  expect_setequal(
+    restrict(idx, lin, c("core", "onc", "lab"))$id,
+    c("base", "onc_a", "onc_a_vendor", "onc_b", "lab_x")
+  )
+})
+
+test_that("no library chosen, or only vanished ones, restricts nothing", {
+  # Shiny reports an unchecked group and an unbound one alike as NULL, and
+  # keeps the last value of a control a refresh has taken away -- none of
+  # those may leave the list empty.
+  idx <- three_library_index()
+  lin <- app_fn("template_picker_lineage")(idx, app_fn("template_picker_entries")(idx))
+  restrict <- app_fn("template_picker_restrict_sources")
+
+  expect_identical(restrict(idx, lin, NULL), lin)
+  expect_identical(restrict(idx, lin, character(0)), lin)
+  expect_identical(restrict(idx, lin, "gone"), lin)
+  # A vanished name next to a live one is dropped, not fatal.
+  expect_setequal(restrict(idx, lin, c("gone", "lab"))$id, "lab_x")
+})
+
+test_that("a template whose parent is filtered out becomes a top row, still naming the parent", {
+  idx <- three_library_index()
+  lin <- app_fn("template_picker_lineage")(idx, app_fn("template_picker_entries")(idx))
+  expect_identical(lin$indent[lin$id == "onc_a"], 1L)
+
+  onc <- app_fn("template_picker_restrict_sources")(idx, lin, "onc")
+
+  # base is in `core`, so onc_a and onc_b no longer hang under anything
+  # visible -- but onc_a_vendor still hangs under onc_a, which is.
+  expect_identical(onc$id, c("onc_a", "onc_a_vendor", "onc_b"))
+  expect_identical(onc$indent, c(0L, 1L, 0L))
+  expect_identical(onc$lineage[onc$id == "onc_a"], "Base")
+})

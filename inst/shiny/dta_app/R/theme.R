@@ -1060,21 +1060,51 @@ bi_css <- function() {
        that is not a family head and whose family is not open is simply not
        displayed. Search results set .flat on the list, which shows every row
        and drops the indentation, because a filtered tree is not a tree. */
+    /* Shiny gives every non-inline .shiny-input-container a fixed 300px. In
+       the picker each control takes the column it sits in -- left alone, the
+       template rows (one radio group) filled under half of their own box. */
+    .tmpl-picker .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
+    /* Wide enough for list and detail side by side, but not the full 92vw of
+       other xl dialogs: on a large monitor rows would run to 1700px. */
+    .modal-xl:has(.tmpl-picker-modal) { max-width: min(92vw, 1240px); }
+    /* List and selected template side by side, each scrolling on its own, so
+       the choice and what it means are both in view; stacked when the dialog
+       is too narrow for two readable columns. */
+    .tmpl-picker-body {
+      display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      gap: 20px; align-items: start;
+    }
+    /* Tall enough for several rows, short enough that the dialog footer with
+       its Use this template button stays on screen on a laptop. */
+    .tmpl-picker-list, .tmpl-picker-side {
+      height: clamp(260px, calc(100vh - 470px), 560px); overflow-y: auto;
+    }
+    @media (max-width: 991.98px) {
+      .tmpl-picker-body { grid-template-columns: minmax(0, 1fr); }
+      .tmpl-picker-list { height: 45vh; }
+      .tmpl-picker-side { height: auto; }
+    }
     .tmpl-picker-list {
       border: 1px solid var(--bi-pending-border); border-radius: 8px;
-      max-height: 45vh; overflow-y: auto; padding: 0; background: #fff;
+      padding: 0; background: #fff;
+    }
+    .tmpl-picker-list > p.msg-hint:not(.tmpl-count) { padding: 16px; margin: 0; }
+    .tmpl-picker-side {
+      border: 1px solid var(--bi-pending-border); border-radius: 8px;
+      padding: 16px 18px; background: var(--bi-grey-light);
     }
     .tmpl-row { border-top: 1px solid var(--bi-pending-border); }
     .tmpl-row:first-child { border-top: none; }
     .tmpl-row > label {
       display: flex; gap: 10px; align-items: flex-start;
-      padding: 8px 12px; margin: 0; cursor: pointer; width: 100%;
+      padding: 10px 14px; margin: 0; cursor: pointer; width: 100%;
     }
-    .tmpl-row input[type=radio] { margin-top: 4px; }
+    .tmpl-row:hover { background: rgba(0,98,91,.03); }
+    .tmpl-row input[type=radio] { margin-top: 5px; accent-color: var(--bi-green); }
     .tmpl-row:not([data-top]):not(.open) { display: none; }
     .tmpl-picker-list.flat .tmpl-row { display: block; }
     .tmpl-row.selected {
-      box-shadow: inset 3px 0 0 var(--bi-green); background: rgba(0,98,91,.04);
+      box-shadow: inset 3px 0 0 var(--bi-green); background: rgba(0,98,91,.06);
     }
     /* The whole row takes focus, not just the 13px radio dot. */
     .tmpl-row:focus-within { outline: 2px solid var(--bi-green); outline-offset: -2px; }
@@ -1082,34 +1112,92 @@ bi_css <- function() {
     .tmpl-picker-list:not(.flat) .tmpl-row:not([data-top]) .tmpl-entry {
       border-left: 2px solid rgba(0,98,91,.35); padding-left: 10px;
     }
-    .tmpl-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+    .tmpl-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .tmpl-label { font-weight: 600; }
+    .tmpl-meta {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px;
+      margin-top: 1px;
+    }
     /* Muted, but in the normal face: a monospace id reads as machine output
        and pulls more weight than the template's own name. */
     .tmpl-id { color: var(--bi-grey); font-size: .82rem; }
-    .tmpl-version { color: var(--bi-grey); font-size: .82rem; }
-    .tmpl-variants { margin-left: auto; font-size: .82rem; color: var(--bi-green); }
+    .tmpl-version { color: var(--bi-grey); font-size: .82rem; margin-left: auto; white-space: nowrap; }
+    .tmpl-meta .tmpl-lineage { color: var(--bi-grey); font-size: .82rem; }
+    .tmpl-variants { margin-left: auto; font-size: .82rem; color: var(--bi-green); white-space: nowrap; }
+    /* A library name is a label, not a status: an outline chip like the
+       others in the app. Bootstrap's .badge is white text with no fill of its
+       own, which made it invisible on the selected row's light wash. */
+    .badge.tmpl-source {
+      background: #fff; color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
+      font-weight: 500; font-size: .72rem; padding: 2px 8px; border-radius: 999px;
+    }
+    /* Library filter: each library is a pill with its template count; a
+       checked pill takes the green outline and wash. Nothing checked means
+       every library, so the pills only ever narrow. The .shiny-options-group
+       step in each selector outranks bslib's own inline-checkbox rule, which
+       reserves 1.9em on the left for a box that is not drawn here. */
+    .tmpl-source-filter .shiny-input-container-inline .shiny-options-group { gap: 6px; }
+    .tmpl-source-filter .shiny-options-group label.checkbox-inline {
+      position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 0;
+      min-height: calc(1.5em + .75rem + 2px); padding: 0 14px;
+      border: 1px solid var(--bi-pending-border); border-radius: 999px;
+      background: #fff; cursor: pointer; line-height: 1.3;
+    }
+    .tmpl-source-filter label.checkbox-inline:hover { border-color: var(--bi-green); }
+    .tmpl-source-filter label.checkbox-inline:has(input:checked) {
+      border-color: var(--bi-green); background: var(--bi-green-light); color: var(--bi-green-dark);
+    }
+    .tmpl-source-filter label.checkbox-inline:focus-within { outline: 2px solid var(--bi-accent); outline-offset: 1px; }
+    /* The pill is the control: the native box is kept for the keyboard and
+       screen readers but drawn as a tick inside the pill instead. The tick
+       hangs off the input itself, not :has(), so a browser without :has()
+       still shows which libraries are checked; only the wash is lost. */
+    .tmpl-source-filter .shiny-options-group input[type=checkbox] {
+      position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none;
+    }
+    .tmpl-source-filter .shiny-options-group input:checked + span {
+      color: var(--bi-green-dark); font-weight: 500;
+    }
+    .tmpl-source-filter .shiny-options-group input:checked + span::before {
+      content: '\\2713\\00a0'; font-weight: 600;
+    }
+    .tmpl-chip-count { margin-left: 6px; color: var(--bi-grey); font-size: .78rem; }
+    .tmpl-source-status { color: #B26A00; margin-bottom: 6px; }
     /* A CSS hex escape swallows one following space, so the gap after the
        caret has to be a non-breaking space of its own. */
     .tmpl-variants::before { content: '\\25B8\\00a0'; }
     .tmpl-row.open .tmpl-variants::before { content: '\\25BE\\00a0'; }
     /* A match is a quiet green wash, not the browser's marker yellow. */
     .tmpl-picker-list mark { background: rgba(0,98,91,.14); color: inherit; padding: 0; }
-    /* Two lines in the list; the detail panel below shows the full text. */
+    /* Two lines in the list; the detail pane beside it shows the full text. */
     .tmpl-desc {
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .tmpl-count { margin: 6px 0; }
-    /* Search box and source filter share one line where the width allows;
-       the box takes whatever the filter leaves. */
+    .tmpl-count {
+      position: sticky; top: 0; z-index: 1; margin: 0; padding: 7px 14px;
+      background: var(--bi-grey-light); border-bottom: 1px solid var(--bi-pending-border);
+    }
+    /* Search box, library filter and refresh share one toolbar line where the
+       width allows; the box takes whatever the other two leave. */
     .tmpl-search-row { display: flex; flex-wrap: wrap; gap: 0 18px; align-items: flex-end; }
-    .tmpl-search-row > .tmpl-search { flex: 1 1 280px; }
-    .tmpl-search-row > .shiny-input-container:not(.tmpl-search) { flex: 0 0 auto; }
+    .tmpl-search-row > .tmpl-search { flex: 1 1 300px; }
+    .tmpl-search-row > .tmpl-source-filter { flex: 0 1 auto; }
+    .tmpl-search-row > .shiny-input-container:not(.tmpl-search) { flex: 0 1 320px; }
+    .modal-footer .tmpl-refresh { color: var(--bi-green); text-decoration: none; padding-left: 0; }
+    .modal-footer .tmpl-refresh:hover { text-decoration: underline; }
+    /* The version picker is a setting of the selected template, not a field
+       of the form: a quiet label, as the drop zones use. */
+    .tmpl-detail .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
     /* The carry-over section's own summary line is its heading. */
     .tmpl-options-body details { margin-top: 18px; }
     .tmpl-options-body details > summary { font-weight: 600; cursor: pointer; }
-    .tmpl-detail { margin-top: 12px; }
-    .tmpl-detail-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+    .tmpl-detail-head { margin-bottom: 12px; }
+    .tmpl-detail .tmpl-detail-title { font-size: 1.125rem; margin: 0 0 4px; color: var(--bi-ink); }
+    .tmpl-detail-sub { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+    .tmpl-detail-desc { font-size: .875rem; line-height: 1.5; }
+    .tmpl-detail .section-label { margin-top: 14px; }
+    .tmpl-summary { font-size: .875rem; margin: 0; }
     /* Two columns where the width allows, one where it does not; a textarea
        option spans the whole width whatever the count. */
     .tmpl-opts-grid {
