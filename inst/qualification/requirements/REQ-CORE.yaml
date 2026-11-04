@@ -123,3 +123,23 @@ requirements:
       failure and continuing is not enough on its own: a PASS verdict sitting
       next to a bundle missing one of its own CSVs would tell a reviewer
       everything was fine when the evidence to show that is incomplete.
+
+  - id: REQ-CORE-011
+    text: >
+      A requirement that a deviation not yet closed affects shall be reported
+      as "verified_with_deviation" rather than "verified" when every test case
+      tracing to it passed, and the traceability matrix shall name the
+      deviations against it. A requirement affected only by closed deviations
+      shall be reported as its test cases alone decide, and a requirement with
+      a failing test case shall be reported as failed whatever the register
+      says.
+    risk: high
+    category: integrity
+    covers: [run_qualification]
+    source: inst/qualification/docs/validation-plan.md
+    notes: >
+      A reproduced defect's binding step succeeds, so on test results alone
+      the very requirement the defect contradicts reads as verified, and the
+      traceability matrix would contradict the deviation section of the same
+      report. A reviewer who signs off from the matrix must see the defect
+      where the requirement is listed.

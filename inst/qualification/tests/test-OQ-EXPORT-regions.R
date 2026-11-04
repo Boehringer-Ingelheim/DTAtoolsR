@@ -1,4 +1,4 @@
-# Repeating regions in a Word template: {#DATASETS} .. {/DATASETS}. REQ-EXPORT-031.
+# Repeating regions in a Word template: {#DATASETS} .. {/DATASETS}. REQ-EXPORT-031; DEV-016.
 #
 # A region is a body paragraph holding only {#DATASETS}, paired with a later
 # body paragraph holding only {/DATASETS}. Everything between the two markers
@@ -160,5 +160,33 @@ test_that("OQ-EXPORT-047 | inside a region {DATASET_ID} is the dataset's id and 
       "ID=ADAE", "NAME=ADAE", "DESCRIPTION=Adverse events, one record each."
     ),
     paras[nzchar(paras)]
+  )
+})
+
+test_that("OQ-EXPORT-048 | a dataset value that spells an inline placeholder renders inside a region as the text it is | REQ-EXPORT-031", {
+  dir <- qa_tempdir()
+  dta <- er_dta()
+  dta@datasets[[1]]@description <- "Title is {DTA_TITLE}"
+  dta@datasets[[2]]@description <- "An ordinary description."
+  template <- er_write_template(c("{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}"), dir)
+  out <- file.path(dir, "inline.docx")
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  s <- qa_docx_summary(out)
+  paras <- s$text[s$content_type == "paragraph"]
+  qa_check("an ordinary value is substituted as written", "An ordinary description." %in% paras)
+
+  # The value is substituted into the copy, and the document-wide inline pass
+  # then reads the copy again and resolves the token the value happens to
+  # spell. When that is fixed the paragraph reads "Title is {DTA_TITLE}"
+  # verbatim, and this binding fails on purpose. Bound on the resolved text
+  # being present -- the title taken from the DTA that went in, not from the
+  # document -- so an unrelated loss of the paragraph does not count as the
+  # defect still reproducing.
+  title <- dta@metadata@title
+  qa_check("the input DTA carries a title to resolve to", length(title) == 1 && nzchar(title))
+  qa_known_deviation(
+    "DEV-016",
+    paste("Title is", title) %in% paras && !("Title is {DTA_TITLE}" %in% paras)
   )
 })
