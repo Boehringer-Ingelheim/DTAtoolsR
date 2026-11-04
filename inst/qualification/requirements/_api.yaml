@@ -58,6 +58,7 @@ exports:
   - DTARuleColUnique
   - DTARuleFactory
   - DTARuleGroupCondition
+  - explain_messages
   - export_column_value_table
   - export_specs_table
   - export_with_template

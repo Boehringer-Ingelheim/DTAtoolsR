@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- `explain_messages()` prints each validation message in plain language: the
+  violated constraint (for example "Must be one of: 1234, 5678.") next to the
+  offending value, using the same wording as the HTML report. `check()` now
+  points to it when a run finds errors.
+
 - **The column editor opens its vocabulary picker on the right vocabulary.**
   A vocabulary can name the columns it is for with a new optional `columns:`
   field: a bare id gets the codes, and `{id: GFTEST, field: label}` gets the

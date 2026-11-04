@@ -4,12 +4,14 @@
 \alias{.report_condition_operator_text}
 \title{Human-Readable Text for One Condition Operator}
 \usage{
-.report_condition_operator_text(op, value)
+.report_condition_operator_text(op, value, html = TRUE)
 }
 \arguments{
 \item{op}{Character scalar operator name.}
 
 \item{value}{The operator's right-hand side.}
+
+\item{html}{If \code{FALSE}, return plain text: no escaping, operators as \code{!=}, \code{>} etc.}
 }
 \value{
 A length-1 character string, HTML-escaped where it embeds data.
