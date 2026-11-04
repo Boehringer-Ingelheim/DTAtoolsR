@@ -42,7 +42,7 @@ once installed).
   `col_unique`, `group_condition`)
 - File-presence validation (`DTADataSetFile`) for non-tabular deliverables
 - Detailed, queryable validation results (`results()`, `messages()`,
-  `inspect()`)
+  `inspect()`, `explain_messages()`)
 - Export validated tables to disk with optional compression and MD5
   checksums
 - Generate Word documentation tables directly from specifications, or the
@@ -216,6 +216,8 @@ DTA                              ← top-level agreement container
 4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule,
    message, `id`)
 5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
+6. `explain_messages(x)` — the same findings in plain language: what each value
+   should have been and what it was
 
 📖 See the [vignette's Package Architecture section](vignettes/DTAtools.Rmd) for the fully annotated diagram plus a node-by-node explanation.
 
@@ -1116,6 +1118,7 @@ row-level validation.
 | `results(x)`                   | Summary table: status and per-axis error counts per table   |
 | `messages(x)`                  | Detailed error table: id, source, row, column, rule, message |
 | `inspect(x, id)`               | Deep detail for a specific error: row context, failing rows, original imported text |
+| `explain_messages(x, id, n)`   | Print each error in plain language (should be vs. actual); returns the rows invisibly |
 | `validation_status(x)`         | Compact status data frame, one row per table                |
 | `validation_errors(x, table)`  | Full raw error output for one table                          |
 | `clear_validation(x)`          | Discard stored validation state for one or all tables        |
