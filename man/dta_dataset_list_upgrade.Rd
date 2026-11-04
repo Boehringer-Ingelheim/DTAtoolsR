@@ -18,9 +18,11 @@ identifier in \code{name} and its short label in \code{description}. An
 entry with no \code{id} but a \code{name} is that old shape and is
 rewritten to the current one: \code{id} takes the old \code{name},
 \code{name} takes the old \code{description}, and \code{description} is
-dropped. Any other value -- an entry that already has an \code{id}, a
-template import (\code{template:}/\code{as:}), a non-list -- is returned
-unchanged, so the call is safe to repeat.
+dropped. Any other value -- an entry that already has an \code{id}, one
+with no \code{name} (such as a template import written as
+\code{template:}/\code{as:}), a non-list -- is returned unchanged, so the
+call is safe to repeat. An entry is judged by its keys alone: one that
+means to use the current shape but omits \code{id} is read as the old one.
 
 Every reader of dataset YAML in this package goes through it, which is why
 specifications written before the change keep loading.
