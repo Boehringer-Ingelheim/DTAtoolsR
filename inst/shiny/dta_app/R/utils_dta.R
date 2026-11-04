@@ -2266,6 +2266,21 @@ dta_to_list <- function(dta) {
   out
 }
 
+# File name of the "Export DTA YAML" download: <title>_v<version>_<date>.yaml.
+# The version has its dots removed ("1.2.0" -> "v120") and the segment is
+# left out when the document has no version.
+dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
+  md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
+  field <- function(name) {
+    x <- tryCatch(as.character(S7::prop(md, name))[1], error = function(e) NULL)
+    if (is.null(x) || is.na(x)) "" else x
+  }
+  ttl <- field("title")
+  base <- if (nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
+  ver <- gsub("[^A-Za-z0-9]+", "", field("version"))
+  paste0(base, if (nzchar(ver)) paste0("_v", ver), "_", date, ".yaml")
+}
+
 # Serialize a whole DTA to a YAML string. Returns dta_try() (value = character).
 dta_to_yaml_text <- function(dta) {
   dta_try({
