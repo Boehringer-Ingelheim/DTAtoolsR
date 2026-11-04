@@ -1082,25 +1082,41 @@ bi_css <- function() {
        the picker each control takes the column it sits in -- left alone, the
        template rows (one radio group) filled under half of their own box. */
     .tmpl-picker .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
+    /* Both template dialogs (the picker, then the options) are scrollable
+       dialogs that fill the window height, so the two steps open at the same
+       size and the buttons are always in view. The margin is set here because
+       bslib's Shiny preset makes it 10%, and a percentage margin resolves
+       against the window WIDTH: 190px above the dialog on a 1920px screen,
+       while the dialog's height took 80% of the window's height -- the dialog
+       hung low and gave a fifth of the screen away. */
+    .tmpl-picker-dialog, .tmpl-options-dialog { --bs-modal-margin: 1.5rem; }
+    .tmpl-picker-dialog .modal-content, .tmpl-options-dialog .modal-content { height: 100%; }
     /* Wide enough for list and detail side by side, but not the full 92vw of
        other xl dialogs: on a large monitor rows would run to 1700px. */
-    .modal-xl:has(.tmpl-picker-modal) { max-width: min(92vw, 1240px); }
+    .tmpl-picker-dialog { max-width: min(92vw, 1240px); }
+    /* A flex column from the dialog body down to the list, so the list and the
+       detail take whatever height the search row and any source notices leave
+       -- no reserve to guess. Below 260px the body scrolls instead. */
+    .tmpl-picker-dialog .modal-body, .tmpl-picker-modal,
+    .tmpl-picker-modal > .shiny-html-output, .tmpl-picker,
+    .tmpl-picker-main, .tmpl-picker-main > .shiny-html-output {
+      display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    }
     /* List and selected template side by side, each scrolling on its own, so
        the choice and what it means are both in view; stacked when the dialog
        is too narrow for two readable columns. */
     .tmpl-picker-body {
       display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-      gap: 20px; align-items: start;
+      grid-template-rows: minmax(0, 1fr); gap: 20px;
+      flex: 1 1 auto; min-height: 260px;
     }
-    /* Tall enough for several rows, short enough that the dialog footer with
-       its Use this template button stays on screen on a laptop. */
-    .tmpl-picker-list, .tmpl-picker-side {
-      height: clamp(260px, calc(100vh - 470px), 560px); overflow-y: auto;
-    }
+    .tmpl-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .tmpl-picker-side { min-height: 0; overflow-y: auto; }
     @media (max-width: 991.98px) {
-      .tmpl-picker-body { grid-template-columns: minmax(0, 1fr); }
-      .tmpl-picker-list { height: 45vh; }
-      .tmpl-picker-side { height: auto; }
+      .tmpl-picker-dialog .modal-body, .tmpl-picker-modal,
+      .tmpl-picker-modal > .shiny-html-output, .tmpl-picker { display: block; }
+      .tmpl-picker-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+      .tmpl-picker-list { flex: none; height: 45vh; }
     }
     .tmpl-picker-list {
       border: 1px solid var(--bi-pending-border); border-radius: 8px;
