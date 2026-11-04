@@ -200,6 +200,38 @@ test_that("a DTARuleGroupCondition renders its grouping column and constraints v
   expect_identical(unname(cell_text), translate_rule_to_human(rule))
 })
 
+test_that("dataset block headings carry the name and keep the id visible beside it", {
+  # A named dataset is headed "<name> (<id>)", an unnamed one by its bare id.
+  # The id stays in view because {COLUMN_SPECS:<id>} and every validation
+  # message refer to the dataset by it.
+  unnamed <- create_example_DTADataSetTabular(3)
+  unnamed@name <- NULL
+  dta <- DTA(
+    datasets = list(create_example_DTADataSetTabular(2), unnamed),
+    metadata = create_example_DTAMetaData()
+  )
+  template <- .make_template(c(
+    "{COLUMN_SPECS}", "{VALIDATION_RULES}", "{FILE_SPECS}", "{DATASETS}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  headings <- .docx_paragraphs(out)
+  expect_true("Column Specifications — Demographics (demographics)" %in% headings)
+  expect_true("Column Specifications — vitals" %in% headings)
+  expect_true("Validation Rules — Demographics (demographics)" %in% headings)
+  expect_true("Validation Rules — vitals" %in% headings)
+  expect_true("Files — Demographics (demographics)" %in% headings)
+  expect_true("Files — vitals" %in% headings)
+  # {DATASETS} heads each dataset with the heading alone.
+  expect_true("Demographics (demographics)" %in% headings)
+  expect_true("vitals" %in% headings)
+  expect_false(any(grepl("Vital signs", headings, fixed = TRUE)))
+})
+
 test_that("{COLUMN_SPECS:NAME} renders only the named dataset", {
   # create_example_DTA() bundles "demographics" (has AGE) and "vitals" (has
   # AVAL instead) -- verified in R/DTADataSetTabular-class.R and
@@ -488,10 +520,12 @@ test_that("a template that defines no heading styles at all still exports, via t
   }
   expect_no_error(export_without_heading_styles())
 
-  nm <- names(dta@datasets)[[1]]
+  # create_example_DTA()'s first dataset is "demographics", named "Demographics":
+  # the heading carries the name and keeps the id visible beside it.
   summary <- .block_docx_summary(out)
   expect_true(
-    paste0("Column Specifications \u2014 ", nm) %in% summary$text[summary$content_type == "paragraph"]
+    "Column Specifications \u2014 Demographics (demographics)" %in%
+      summary$text[summary$content_type == "paragraph"]
   )
   expect_gt(sum(summary$content_type == "table cell"), 0)
 })

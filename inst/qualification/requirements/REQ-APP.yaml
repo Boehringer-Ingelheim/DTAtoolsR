@@ -108,7 +108,7 @@ requirements:
   - id: REQ-APP-009
     text: >
       Binding a data file to a dataset's file handler shall register the
-      upload keyed by dataset name and handler index and shall leave the
+      upload keyed by dataset id and handler index and shall leave the
       dataset's status at "pending" rather than validating it; binding a file
       that would replace an already-bound table shall require the caller to
       confirm the overwrite before it takes effect.

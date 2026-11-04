@@ -33,7 +33,7 @@ requirements:
     text: >
       write_dta() shall produce a document whose text names the transfer's
       title, version, supplier organisation, receiver organisation and the
-      name of every dataset it declares.
+      id of every dataset it declares.
     risk: high
     category: functional
     covers: [write_dta]
@@ -117,8 +117,9 @@ requirements:
 
   - id: REQ-EXPORT-010
     text: >
-      write_dataset_metadata() shall produce a document naming the dataset,
-      its declared file specifications and its declared column specifications;
+      write_dataset_metadata() shall produce a document naming the dataset by
+      its id and, where one is set, its name, together with its declared file
+      specifications and its declared column specifications;
       write_file_specification() shall produce the identical document, being
       an alias that forwards every argument unchanged.
     risk: high
@@ -399,7 +400,7 @@ requirements:
       {/DATASETS} as a repeating region: the content between the two shall
       appear in the output once per dataset of the DTA, in the DTA's dataset
       order, and neither marker paragraph shall appear. Within each repetition
-      {DATASET_NAME}, {DATASET_TYPE}, {DATASET_DESCRIPTION},
+      {DATASET_ID}, {DATASET_NAME}, {DATASET_TYPE}, {DATASET_DESCRIPTION},
       {DATASET_FILE_COUNT}, {DATASET_COLUMN_COUNT} and {DATASET_RULE_COUNT}
       shall resolve to that dataset's values, and a dataset block placeholder
       written without a dataset argument shall render that dataset alone,

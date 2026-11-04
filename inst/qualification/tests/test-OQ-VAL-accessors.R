@@ -39,7 +39,7 @@ va_dataset <- function(dir) {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = "acc", specs = va_specs(),
+    id = "acc", specs = va_specs(),
     files = list(DTAFileCSV(filename = "accessors.csv"))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
@@ -224,7 +224,7 @@ test_that("OQ-VAL-034 | validation_errors carries the full detail and its scan r
     row.names = FALSE, na = ""
   )
   streamed <- DTADataSetTabular(
-    name = "acc", specs = va_specs(),
+    id = "acc", specs = va_specs(),
     files = list(DTAFileCSV(filename = "scanned.csv"))
   )
   streamed <- check(

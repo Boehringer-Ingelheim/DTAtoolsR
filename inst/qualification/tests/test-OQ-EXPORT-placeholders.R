@@ -10,7 +10,7 @@
 # Four kinds share the one token grammar and are told apart by the "kind"
 # attribute: "inline" (plain text, anywhere), "block" (document structure,
 # alone in a body paragraph), "region" (the {#DATASETS}/{/DATASETS} markers
-# that bound a repeat -- REQ-EXPORT-031) and "dataset" (the six placeholders
+# that bound a repeat -- REQ-EXPORT-031) and "dataset" (the seven placeholders
 # that only resolve inside a region). Region and dataset entries have no
 # single value to report, so they keep their description even when a transfer
 # is passed in, exactly as a block entry does.
@@ -43,8 +43,18 @@ test_that("OQ-EXPORT-040 | the placeholder vocabulary is reported with a descrip
   )
   qa_step(
     "region markers and dataset placeholders are tagged by kind",
-    c("region", "region", "dataset"),
-    unname(attr(described, "kind")[c("{#DATASETS}", "{/DATASETS}", "{DATASET_NAME}")])
+    c("region", "region", "dataset", "dataset"),
+    unname(attr(described, "kind")[c("{#DATASETS}", "{/DATASETS}", "{DATASET_ID}", "{DATASET_NAME}")])
+  )
+  # A dataset has an identifier, a label and a long description, and a
+  # template author needs all three to be addressable separately.
+  qa_step(
+    "the per-dataset placeholders are the seven a dataset can fill",
+    sort(c(
+      "{DATASET_ID}", "{DATASET_NAME}", "{DATASET_TYPE}", "{DATASET_DESCRIPTION}",
+      "{DATASET_FILE_COUNT}", "{DATASET_COLUMN_COUNT}", "{DATASET_RULE_COUNT}"
+    ), method = "radix"),
+    sort(names(described)[attr(described, "kind") == "dataset"], method = "radix")
   )
 })
 
@@ -87,5 +97,18 @@ test_that("OQ-EXPORT-041 | the same vocabulary carries a transfer's values | REQ
     "a dataset placeholder has no single value, so it keeps its description",
     described[["{DATASET_NAME}"]],
     filled[["{DATASET_NAME}"]]
+  )
+  qa_step(
+    "and so does the dataset identifier placeholder",
+    described[["{DATASET_ID}"]],
+    filled[["{DATASET_ID}"]]
+  )
+
+  # The transfer-level lists are the ones that do carry values: the ids the
+  # specification declares, and the names (the id where a dataset has none).
+  qa_step(
+    "the transfer lists its datasets' ids and names",
+    c(ids = "clinical_data", names = "Clinical data table"),
+    c(ids = unname(filled[["{DATASET_IDS}"]]), names = unname(filled[["{DATASET_NAMES}"]]))
   )
 })

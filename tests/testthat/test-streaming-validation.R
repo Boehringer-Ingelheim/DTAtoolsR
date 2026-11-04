@@ -1110,7 +1110,7 @@ test_that("check() scans a lazy table held in a DTADataSetTabular", {
   on.exit(unlink(path), add = TRUE)
 
   ds <- DTADataSetTabular(
-    name = "lazy_demo",
+    id = "lazy_demo",
     specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
@@ -1138,7 +1138,7 @@ test_that("last_validation_details is usable however the table was held", {
   on.exit(unlink(path), add = TRUE)
 
   materialised <- DTADataSetTabular(
-    name = "eager", specs = specs,
+    id = "eager", specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
   # `tab =` is what puts check() in single-table mode; the attribute is only
@@ -1147,7 +1147,7 @@ test_that("last_validation_details is usable however the table was held", {
   materialised <- check(materialised, tab = "demo", quiet = TRUE)
 
   lazy <- DTADataSetTabular(
-    name = "lazy", specs = specs,
+    id = "lazy", specs = specs,
     tables = list(demo = arrow::as_arrow_table(frame))
   )
   lazy@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")
@@ -1168,7 +1168,7 @@ test_that("a lazy table is accepted by the tables property contract", {
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
   ))
   ds <- DTADataSetTabular(
-    name = "lazy_ok",
+    id = "lazy_ok",
     specs = specs,
     tables = list(demo = arrow::as_arrow_table(data.frame(ID = "A001")))
   )
@@ -2799,7 +2799,7 @@ test_that("check() forwards on_missing_column to the structural gate", {
 
   build <- function() {
     DTADataSetTabular(
-      name = "gate", specs = specs,
+      id = "gate", specs = specs,
       tables = list(demo = arrow::as_arrow_table(frame))
     )
   }
@@ -2836,7 +2836,7 @@ test_that("check() forwards fail_fast and use_threads without changing defaults"
 
   build <- function() {
     ds <- DTADataSetTabular(
-      name = "ff", specs = specs,
+      id = "ff", specs = specs,
       tables = list(demo = arrow::as_arrow_table(frame))
     )
     ds@tables[["demo"]] <- arrow::open_delim_dataset(path, delim = ",")

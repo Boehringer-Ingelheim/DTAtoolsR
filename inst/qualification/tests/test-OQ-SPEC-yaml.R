@@ -1,5 +1,5 @@
-# Reading and writing a specification. REQ-SPEC-001 .. REQ-SPEC-006 and
-# REQ-SPEC-014 .. REQ-SPEC-017.
+# Reading and writing a specification. REQ-SPEC-001 .. REQ-SPEC-006,
+# REQ-SPEC-014 .. REQ-SPEC-017 and REQ-SPEC-025.
 #
 # The specification is the agreement between the two parties to a transfer.
 # Everything the package later decides follows from how it was read, so a
@@ -25,6 +25,14 @@ test_that("OQ-SPEC-001 | the shipped specification reads into a complete transfe
 
   ds <- dta[["clinical_data"]]
   qa_check("the dataset is tabular", inherits(ds, "DTAtools::DTADataSetTabular"))
+  # The three descriptive fields are separate: the id keys the dataset, the
+  # name is the label a reader sees, and the description is the long text.
+  lead <- "Subject-level clinical observations for the study,"
+  qa_step(
+    "it carries the id, the label and the long description the specification gives",
+    list(id = "clinical_data", name = "Clinical data table", description_starts = lead),
+    list(id = ds@id, name = ds@name, description_starts = substr(ds@description, 1, nchar(lead)))
+  )
   qa_check("it declares at least one file handler", length(files(ds)) >= 1)
   qa_check("it declares column specifications", length(columns(ds)) > 0)
   qa_check("it declares rules", length(rules(specs(ds))) > 0)
@@ -35,7 +43,8 @@ test_that("OQ-SPEC-002 | a single-dataset specification reads on its own | REQ-S
   ds <- read_dataset_from_yaml(sy_example("gf_dataset.yaml"))
 
   qa_check("a dataset is built", inherits(ds, "DTAtools::DTADataSet"))
-  qa_check("with a name", nzchar(ds@name))
+  qa_step("with the id the specification gives", "gf_data_specs_pattern", ds@id)
+  qa_step("and the label the specification gives", "Genomic Findings data table", ds@name)
   qa_check("and with column specifications", length(names(specs(ds))) > 0)
 })
 
@@ -299,5 +308,116 @@ test_that("OQ-SPEC-022 | a column renders as a JSON Schema fragment | REQ-SPEC-0
   qa_step(
     "a codelist reaches the schema as its permitted values",
     c("M", "F"), as.character(unlist(as_json_schema(coded)$enum))
+  )
+})
+
+test_that("OQ-SPEC-046 | a dataset entry written before datasets had an id is read with its old name as the id | REQ-SPEC-025", {
+  dir <- qa_tempdir()
+  column <- c(
+    "    columns:",
+    "      - id: ID",
+    "        type: SAS Char",
+    "        length: 8",
+    "        nullable: false"
+  )
+
+  # Half one: the old shape. `name` was the identifier and `description` the
+  # short label. A reader that took `name` for a label would mint no id at all
+  # and leave the dataset unreachable under the name the agreement gave it.
+  legacy <- file.path(dir, "legacy_dataset.yaml")
+  writeLines(
+    c(
+      "name: dm_legacy",
+      "type: tabular",
+      "description: Demographics label",
+      "columns:",
+      "  - id: ID",
+      "    type: SAS Char",
+      "    length: 8",
+      "    nullable: false"
+    ),
+    legacy
+  )
+  ds <- read_dataset_from_yaml(legacy)
+  qa_step(
+    "a legacy single dataset takes its old name as the id and its old description as the name",
+    list(id = "dm_legacy", name = "Demographics label", has_description = FALSE),
+    list(id = ds@id, name = ds@name, has_description = !is.null(ds@description))
+  )
+
+  # An old entry that never had a description has no label to carry over, and
+  # must not be given an empty one.
+  bare <- file.path(dir, "legacy_bare.yaml")
+  writeLines(
+    c("name: dm_bare", "type: tabular", "columns:", "  - id: ID", "    type: SAS Char", "    length: 8", "    nullable: false"),
+    bare
+  )
+  ds_bare <- read_dataset_from_yaml(bare)
+  qa_step(
+    "a legacy entry without a description reads with its id and no name",
+    list(id = "dm_bare", has_name = FALSE),
+    list(id = ds_bare@id, has_name = !is.null(ds_bare@name))
+  )
+
+  # Half two, in one transfer: the old shape beside the current one. The
+  # current entry must come through untouched -- in particular its `name` must
+  # stay a label and not be taken for an identifier a second time.
+  mixed <- file.path(dir, "mixed.yaml")
+  writeLines(
+    c(
+      "metadata:",
+      "  title: Mixed shapes",
+      '  version: "1"',
+      "datasets:",
+      "  - name: dm_legacy",
+      "    type: tabular",
+      "    description: Demographics label",
+      column,
+      "  - id: lb_current",
+      "    type: tabular",
+      "    name: Laboratory results",
+      "    description: Long free text about the laboratory results.",
+      column
+    ),
+    mixed
+  )
+  dta <- read_dta_from_yaml(mixed)
+  qa_step(
+    "both entries are keyed by their ids",
+    c("dm_legacy", "lb_current"), names(datasets(dta))
+  )
+  qa_step(
+    "the legacy entry is upgraded",
+    list(id = "dm_legacy", name = "Demographics label", has_description = FALSE),
+    list(
+      id = dta[["dm_legacy"]]@id, name = dta[["dm_legacy"]]@name,
+      has_description = !is.null(dta[["dm_legacy"]]@description)
+    )
+  )
+  qa_step(
+    "the entry that has an id keeps its id, name and description unchanged",
+    list(
+      id = "lb_current", name = "Laboratory results",
+      description = "Long free text about the laboratory results."
+    ),
+    list(
+      id = dta[["lb_current"]]@id, name = dta[["lb_current"]]@name,
+      description = dta[["lb_current"]]@description
+    )
+  )
+
+  # The exported converter is the same rule on a bare list, and repeating it
+  # changes nothing.
+  entry <- list(name = "dm", type = "tabular", description = "Demographics")
+  upgraded <- dta_dataset_list_upgrade(entry)
+  qa_step(
+    "dta_dataset_list_upgrade() moves name to id and description to name",
+    list(id = "dm", name = "Demographics", type = "tabular"),
+    upgraded[c("id", "name", "type")]
+  )
+  qa_check("and leaves no description behind", is.null(upgraded[["description"]]))
+  qa_step(
+    "and applying it again changes nothing",
+    upgraded, dta_dataset_list_upgrade(upgraded)
   )
 })

@@ -334,7 +334,7 @@ test_that("DTADataSetFile check() records the import axis", {
   writeLines("hello world", path)
   on.exit(unlink(path), add = TRUE)
 
-  ds <- check(DTADataSetFile(name = "notes", paths = path), quiet = TRUE)
+  ds <- check(DTADataSetFile(id = "notes", paths = path), quiet = TRUE)
   key <- basename(path)
 
   entry <- ds@validation_index[[key]]
@@ -351,7 +351,7 @@ test_that("DTADataSetFile check() records the import axis", {
   expect_true("n_import_errors" %in% names(results(ds)))
 
   # The not_validated stub of validation_status(DTADataSetFile).
-  fresh <- DTADataSetFile(name = "notes", paths = path)
+  fresh <- DTADataSetFile(id = "notes", paths = path)
   fresh@validation_index[[key]] <- NULL
   fresh@validation_index[key] <- list(NULL)
   stub <- validation_status(fresh, tables = key)
@@ -366,7 +366,7 @@ test_that("failing DTADataSetFile details also carry the import axis", {
     unlink(path)
   }
 
-  ds <- check(DTADataSetFile(name = "missing_file", paths = path), quiet = TRUE)
+  ds <- check(DTADataSetFile(id = "missing_file", paths = path), quiet = TRUE)
   details <- ds@validation_store[[basename(path)]]
 
   expect_false(details$ok)
@@ -391,7 +391,7 @@ test_that("inspect() surfaces the import axis of a details list", {
     unlink(path)
   }
 
-  ds <- check(DTADataSetFile(name = "missing_file", paths = path), quiet = TRUE)
+  ds <- check(DTADataSetFile(id = "missing_file", paths = path), quiet = TRUE)
   ins <- inspect(ds, id = 1, as_tibble = FALSE)
 
   expect_true(all(
@@ -596,7 +596,7 @@ test_that("an unconvertible value is reported on BOTH axes, never moved between 
 
 test_that("import errors reach messages() as source 'import' carrying the raw value", {
   ds <- DTADataSetTabular(
-    name = "imports",
+    id = "imports",
     specs = range_import_specs(),
     tables = list(tab = arrow::arrow_table(
       data.frame(AGE = c("30", "ninety", "700"), stringsAsFactors = FALSE)
@@ -681,7 +681,7 @@ test_that("check() console output states the import failure instead of only clai
     )
   )
   ds <- DTADataSetTabular(
-    name = "imports",
+    id = "imports",
     specs = specs,
     tables = list(tab1 = data.frame(BMI = c("20.5", "heavy"), stringsAsFactors = FALSE))
   )

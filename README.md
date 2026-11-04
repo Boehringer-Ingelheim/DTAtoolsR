@@ -84,11 +84,11 @@ results(dta)
 Not every delivery needs a full DTA with metadata. When you only need to
 validate *one* dataset, read the dataset definition directly with
 `read_dataset_from_yaml()` — a standalone dataset YAML has the same shape as
-one entry under a DTA's `datasets:` list (`name`, `type`, `files`, `columns`,
-`rules`), just without the surrounding `metadata:` wrapper:
+one entry under a DTA's `datasets:` list (`id`, `type`, `name`,
+`description`, `files`, `columns`, `rules`), just without the surrounding `metadata:` wrapper:
 
 ```r
-# dataset.yaml has: name, type, files, columns, rules — no top-level metadata
+# dataset.yaml has: id, type, name, description, files, columns, rules — no top-level metadata
 ds <- read_dataset_from_yaml("dataset.yaml")
 
 ds <- load_file(ds, file = csv_path, handler_index = 1)
@@ -123,7 +123,7 @@ specs_imp <- DTAColumnSpecCollection(columns = list(
 ))
 
 ds_imp <- DTADataSetTabular(
-  name   = "import_demo",
+  id     = "import_demo",
   specs  = specs_imp,
   tables = list(demo = data.frame(SUBJECT_ID = c("SUBJ0001", "SUBJ0002"),
                                   AGE        = c("34", "unknown")))
@@ -240,12 +240,12 @@ common:
 1. **A full DTA/DTS document** (`metadata:` + one or more `datasets:`) —
    `read_dta_from_yaml()`. The recommended entry point for production use;
    see the [Quickstart](#quickstart) above.
-2. **A single, self-contained dataset definition** (`name`, `type`, `files`,
+2. **A single, self-contained dataset definition** (`id`, `type`, `files`,
    `columns`, `rules` — no top-level `metadata:`) — `read_dataset_from_yaml()`.
    Ideal when you only need to validate one dataset, e.g. while iterating on
    a spec. Also shown in the [Quickstart](#quickstart) above.
 3. **A bare list of column specs** (just `columns:` plus optional `rules:`,
-   no `name`/`type`/`files`) — `import_specs_from_yaml()`. The most manual
+   no `id`/`type`/`files`) — `import_specs_from_yaml()`. The most manual
    option: you build the `DTADataSetTabular` wrapper yourself.
 
 ```r
@@ -265,7 +265,7 @@ col2  <- DTAColumnSpec(id = "VISIT",   type = "SAS Char", nullable = TRUE)
 specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 
 table <- data.frame(STUDYID = c("1234", "1234"), VISIT = c("V01", "V02"))
-data_obj <- DTADataSetTabular(name = "my_dataset", specs = specs,
+data_obj <- DTADataSetTabular(id = "my_dataset", specs = specs,
                               tables = list(my_table = table))
 data_obj <- check(data_obj)
 
@@ -448,7 +448,7 @@ are readable — without validating their internal structure.
 
 ```r
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   paths = c("clinical_data.csv", "study_report.pdf")
 )
 ds_file <- check(ds_file)
@@ -462,7 +462,7 @@ endings you will accept:
 
 ```r
 ds_file <- DTADataSetFile(
-  name  = "delivery_check",
+  id    = "delivery_check",
   files = list(
     DTAFileAny(
       filename    = "^report_.*",
@@ -492,14 +492,14 @@ under the hood when loading a full DTA YAML.
 ```r
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
-  name   = "clinical_data",
+  id     = "clinical_data",
   specs  = specs,
   tables = list(clinical_data = read.csv("clinical_data.csv"))
 )
 
 # File dataset (presence check)
 ds_fi <- DTADataSetFile(
-  name  = "delivery_manifest",
+  id    = "delivery_manifest",
   paths = c("clinical_data.csv", "study_report.pdf")
 )
 
@@ -604,7 +604,7 @@ by the same renderers the built-in layout uses:
 | `{STUDY_TABLE}` | structured study and protocol identifiers |
 | `{AGREEMENT_SECTIONS}` | titled narrative sections in their stored order |
 
-The first four take an optional dataset argument — `{COLUMN_SPECS:ADSL}` renders
+The first four take an optional dataset id — `{COLUMN_SPECS:ADSL}` renders
 one dataset, the bare form renders every applicable one under its own heading.
 
 A block marker must be **the only text in its paragraph**, and must sit in the
@@ -623,7 +623,7 @@ region at all.
 
 ```
 {#DATASETS}
-Dataset {DATASET_NAME}          <- the author's own Heading 2
+{DATASET_NAME} ({DATASET_ID})    <- the author's own Heading 2
 {DATASET_DESCRIPTION}
 {FILE_SPECS}
 {COLUMN_SPECS}
@@ -631,10 +631,11 @@ Dataset {DATASET_NAME}          <- the author's own Heading 2
 {/DATASETS}
 ```
 
-Six placeholders resolve inside a repetition to that one dataset's own values:
-`{DATASET_NAME}`, `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`,
-`{DATASET_FILE_COUNT}`, `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}`
-(the last two are `0` for a non-tabular dataset). A dataset block marker
+Seven placeholders resolve inside a repetition to that one dataset's own values:
+`{DATASET_ID}`, `{DATASET_NAME}` (the id when the dataset has no name),
+`{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
+`{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are `0`
+for a non-tabular dataset). A dataset block marker
 written bare inside a region binds to the current dataset and contributes only
 its table, without the heading it would generate outside a region — the
 region's own paragraphs are what supply the heading. An explicit

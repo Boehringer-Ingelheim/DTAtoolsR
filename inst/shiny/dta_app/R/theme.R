@@ -597,6 +597,17 @@ bi_css <- function() {
     .dataset-nav-row .nav-select:hover { text-decoration: none; }
     .dataset-nav-row .nav-name { word-break: break-word; color: var(--bi-ink); font-weight: 500; }
     .dataset-nav-row.active .nav-name { color: var(--bi-green-dark); font-weight: 600; }
+    /* Name over id: the id (what every message and download says) stays
+       readable under a name without competing with it. */
+    /* Shiny wraps an actionLink's label in span.action-label; that wrapper,
+       not the link, has to be the row, or the block-level .nav-text below
+       drops onto a line of its own under the status icon. */
+    .dataset-nav-row .nav-select .action-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .dataset-nav-row .nav-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .dataset-nav-row .nav-id {
+      font-family: var(--bs-font-monospace); font-size: .75rem; font-weight: 400;
+      color: var(--bi-grey); word-break: break-all;
+    }
     .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 600; font-size: .95rem; }
     .nav-ic-pass    { color: var(--bi-pass); }
     .nav-ic-fail    { color: var(--bi-fail); }
@@ -654,12 +665,19 @@ bi_css <- function() {
     .ds-head-block.ds-st-pass { border-left-color: var(--bi-pass); }
     .ds-head-block.ds-st-fail { border-left-color: var(--bi-fail); }
     .ds-head-block.ds-st-nodata { border-left-color: #C77700; }
-    /* Dataset detail header: dataset DESCRIPTION as the heading, name smaller. */
+    /* Dataset detail header: dataset NAME as the heading (its id when unnamed),
+       the id as a chip below, the long description under both. */
     .ds-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
     .ds-head .ds-desc { margin: 0; font-weight: 600; color: var(--bi-green-dark); line-height: 1.2; font-size: 1.375rem; }
     .ds-head .ds-name {
       font-size: .82rem; color: var(--bi-grey);
       font-family: var(--bs-font-monospace);
+    }
+    /* pre-line keeps the paragraphs an author typed; the measure keeps a long
+       description readable on a wide screen. */
+    .ds-long-desc {
+      margin: 8px 0 2px; max-width: 72ch; white-space: pre-line;
+      color: var(--bi-ink); font-size: .9375rem; line-height: 1.5;
     }
     .ds-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 

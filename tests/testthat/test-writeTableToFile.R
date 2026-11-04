@@ -8,7 +8,7 @@ test_that("write_table_to_file() preserves non-syntactic column names", {
   # ("Subject ID" -> "Subject.ID"), so an exported file no longer matched the
   # specs its dataset validated against.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(
@@ -32,7 +32,7 @@ test_that("write_table_to_file() refuses to overwrite unless told to", {
   # file.exists guard never fired and existing exports were silently
   # clobbered. FALSE -- the documented, safe default -- now wins.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(A = c("x", "y")))
@@ -67,7 +67,7 @@ test_that("write_table_to_file() writes a genuinely gzip-compressed file", {
   # compressed, then decompress and re-read the table to confirm compression
   # didn't corrupt the content.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(A = c("x", "y"), B = c(1, 2)))
@@ -106,7 +106,7 @@ test_that("write_table_to_file() leaves what is already there untouched when the
   # test. What is already at the destination is then the directory's
   # contents, and they must survive byte for byte.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(A = c("new1", "new2")))
@@ -151,7 +151,7 @@ test_that("write_table_to_file() aborts with a clear message when the rename fai
   # pass silently, and the message must tell the caller their old file is
   # safe, not just that something went wrong.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(A = c("new1", "new2")))
@@ -189,7 +189,7 @@ test_that("a destination another process holds open is not replaced (Windows)", 
   )
 
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "x.csv")),
     tables = list(t1 = data.frame(A = c("new1", "new2")))

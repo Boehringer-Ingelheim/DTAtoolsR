@@ -30,6 +30,7 @@ exports:
   - datasets
   - DTA
   - dta_dataset_from_list
+  - dta_dataset_list_upgrade
   - dta_file_handlers_from_list
   - dta_from_list
   - dta_pdf_backend

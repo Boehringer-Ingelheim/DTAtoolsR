@@ -5,10 +5,14 @@
 #' @importFrom cli cli_abort
 #' @include validationReporting.R
 #' @include DTAFileAny-class.R
-#' @param name Character. Name of the container.
+#' @param id Character. Identifier of the dataset: its key in a DTA's
+#'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
-#' @param description Character or NULL. Optional description.
+#' @param name Character or NULL. Human-readable name of the dataset, e.g.
+#'   \code{"Delivery reports"}; shown in place of the \code{id} where one is set.
+#' @param description Character or NULL. Long free-text description of the
+#'   dataset.
 #' @param template_source Character or NA. Source of the template used to
 #'   generate the dataset specification.
 #' @param template_version Character or NA. Version of the template used.
@@ -18,7 +22,7 @@
 #' path <- tempfile(fileext = ".pdf")
 #' writeLines("a delivered report", path)
 #'
-#' ds <- DTADataSetFile(name = "delivery", paths = path)
+#' ds <- DTADataSetFile(id = "delivery", paths = path, name = "Delivery reports")
 #' validation_status(check(ds, quiet = TRUE))
 #'
 #' unlink(path)
@@ -27,14 +31,16 @@ DTADataSetFile <- S7::new_class(
   "DTADataSetFile",
   parent = DTADataSet,
   constructor = function(
-    name,
+    id,
     paths = character(),
     files = list(),
+    name = NULL,
     description = NULL,
     template_source = NULL,
     template_version = NULL,
     template_date = NULL
   ) {
+    if (missing(id)) dta_abort_missing_dataset_id(name)
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
@@ -76,9 +82,10 @@ DTADataSetFile <- S7::new_class(
 
     new_object(
       .parent = DTADataSet(
-        name = name,
+        id = id,
         type = "file",
         files = files,
+        name = name,
         template_source = template_source,
         template_version = template_version,
         template_date = template_date,
@@ -439,7 +446,7 @@ dta_resolve_file_handler_index <- function(handler_index, files_list) {
 #' @return The updated \code{DTADataSetFile} object.
 #' @examples
 #' handler <- DTAFileAny(filename = "clinical_data.csv")
-#' ds <- DTADataSetFile(name = "delivery", files = list(handler))
+#' ds <- DTADataSetFile(id = "delivery", files = list(handler))
 #'
 #' file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 #' ds <- load_file(ds, file = file, handler_index = 1)
@@ -532,7 +539,7 @@ method(load_file, DTADataSetFile) <- function(
 #' @examples
 #' path <- tempfile(fileext = ".txt")
 #' writeLines("content", path)
-#' ds <- check(DTADataSetFile(name = "delivery", paths = path), quiet = TRUE)
+#' ds <- check(DTADataSetFile(id = "delivery", paths = path), quiet = TRUE)
 #' nrow(validation_status(clear_validation(ds)))
 #' @usage clear_validation(x, ...)
 #' @rdname clear_validation
@@ -838,7 +845,7 @@ S7::method(validation_errors, DTADataSetFile) <- function(
 #' @export
 S7::method(results, DTADataSetFile) <- function(x, tables = NULL) {
   status_df <- validation_status(x, tables = tables)
-  dataset_name <- if (!is.null(x@name) && nzchar(x@name)) x@name else NA_character_
+  dataset_name <- if (!is.null(x@id) && nzchar(x@id)) x@id else NA_character_
   dta_results_from_status(status_df, dataset_name = dataset_name)
 }
 
@@ -883,7 +890,7 @@ S7::method(messages, DTADataSetFile) <- function(
 
     do.call(rbind, lapply(rule_errors, function(err) {
       data.frame(
-        dataset = x@name,
+        dataset = x@id,
         target = table_name,
         severity = "error",
         source = "rule",

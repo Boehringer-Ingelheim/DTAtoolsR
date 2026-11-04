@@ -5,10 +5,11 @@
 \title{DTADataSetTabular Class}
 \usage{
 DTADataSetTabular(
-  name,
+  id,
   specs,
   tables = list(),
   files = list(),
+  name = NULL,
   description = NULL,
   template_source = NULL,
   template_version = NULL,
@@ -16,7 +17,8 @@ DTADataSetTabular(
 )
 }
 \arguments{
-\item{name}{Character. Name of the container.}
+\item{id}{Character. Identifier of the dataset: its key in a DTA's
+\code{datasets}, in every validation message and in \code{load_file()}.}
 
 \item{specs}{A DTAColumnSpecCollection object specifying the column specs.}
 
@@ -28,7 +30,11 @@ for import issues later, at scan time, in \code{check()}.}
 
 \item{files}{A list of DTAFile objects specifying input file information.}
 
-\item{description}{Character or NA. Free-text description of the dataset.}
+\item{name}{Character or NULL. Human-readable name of the dataset, e.g.
+\code{"Demographics"}; shown in place of the \code{id} where one is set.}
+
+\item{description}{Character or NULL. Long free-text description of the
+dataset.}
 
 \item{template_source}{Character or NA. Source of the template used to
 generate the dataset specification.}
@@ -65,8 +71,9 @@ tables <- list(table1 = table1, table2 = table2)
 
 # Create the DTADataSetTabular object
 data_obj <- DTADataSetTabular(
-  name = "example",
+  id = "example",
   specs = create_example_DTAColumnSpecCollection(1),
-  tables = tables
+  tables = tables,
+  name = "Example visits"
 )
 }

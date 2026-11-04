@@ -15,7 +15,7 @@ extdata_file <- function(filename) {
 # A dataset wired to one CSV handler, built fresh so each load starts clean.
 tabular_fixture <- function(filename = "clinical_data.csv") {
   DTADataSetTabular(
-    name = "demo",
+    id = "demo",
     specs = create_example_DTAColumnSpecCollection(1),
     files = list(DTAFileCSV(filename = filename))
   )
@@ -590,7 +590,7 @@ test_that("a declared quoted line break survives a check on both paths", {
 
   verdict <- function(stream) {
     ds <- DTADataSetTabular(
-      name = "nl",
+      id = "nl",
       specs = specs,
       files = list(DTAFileCSV(filename = basename(path), newlines_in_values = TRUE))
     )
@@ -812,7 +812,7 @@ test_that("a latin1 file gets the same verdict streamed as in memory", {
 
   run <- function(stream) {
     ds <- DTADataSetTabular(
-      name = "enc",
+      id = "enc",
       specs = specs,
       files = list(DTAFileCSV(filename = basename(path), encoding = "latin1"))
     )
@@ -874,7 +874,7 @@ test_that("a second load reuses the transcoded copy, and a changed file does not
   # time it is called, so without the cache each call would reconvert.
   loaded <- function() {
     ds <- DTADataSetTabular(
-      name = "cache",
+      id = "cache",
       specs = DTAColumnSpecCollection(
         columns = list(
           NAME = DTAColumnSpec(id = "NAME", type = "SAS Char", length = 6),
@@ -1037,7 +1037,7 @@ test_that("a lazily held latin1 table follows a delivery that changes under it",
     close(con)
 
     ds <- DTADataSetTabular(
-      name = "follow",
+      id = "follow",
       specs = specs,
       files = list(DTAFileCSV(filename = basename(path), encoding = encoding))
     )

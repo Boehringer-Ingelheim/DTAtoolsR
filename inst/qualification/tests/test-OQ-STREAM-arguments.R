@@ -563,7 +563,7 @@ test_that("OQ-STREAM-019 | DTAtools.use_arrow_compute reaches an identical verdi
     list(DTARuleColUnique(id = "id_unique", columns = "ID"))
   )
   frame <- data.frame(ID = c("A001", "A002", "A002", "A003", "A004"), stringsAsFactors = FALSE)
-  ds <- DTADataSetTabular(name = "dup", specs = specs, tables = list(t = frame))
+  ds <- DTADataSetTabular(id = "dup", specs = specs, tables = list(t = frame))
 
   old <- options(DTAtools.arrow_min_rows = 1L, DTAtools.use_arrow_compute = TRUE)
   arrow_checked <- check(ds, quiet = TRUE, persist = FALSE)

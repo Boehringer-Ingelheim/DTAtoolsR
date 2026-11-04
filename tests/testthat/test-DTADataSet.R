@@ -58,7 +58,7 @@ test_that("read_dataset_from_yaml aborts for non-existent yaml file", {
 
 test_that("DTADataSetTabular can be created with empty tables", {
   ds <- DTADataSetTabular(
-    name = "empty_tables",
+    id = "empty_tables",
     specs = create_example_DTAColumnSpecCollection(1),
     tables = list()
   )
@@ -68,19 +68,22 @@ test_that("DTADataSetTabular can be created with empty tables", {
   expect_length(tables(ds), 0)
 })
 
-test_that("DTADataSet keeps description and template metadata", {
-  # The constructor accepted these four arguments and then dropped them on the
-  # floor: new_object() forwarded only name, type and files.
+test_that("DTADataSet keeps name, description and template metadata", {
+  # The constructor accepted these arguments and then dropped them on the
+  # floor: new_object() forwarded only id, type and files.
   ds <- DTADataSet(
-    name = "metadata_dataset",
+    id = "metadata_dataset",
     type = "file",
     files = list(create_example_DTAFileCSV()),
+    name = "Metadata dataset",
     description = "a described dataset",
     template_source = "unit test template",
     template_version = "9.9",
     template_date = "2024-12-17"
   )
 
+  expect_equal(ds@id, "metadata_dataset")
+  expect_equal(ds@name, "Metadata dataset")
   expect_equal(ds@description, "a described dataset")
   expect_equal(ds@template_source, "unit test template")
   expect_equal(ds@template_version, "9.9")
@@ -94,7 +97,12 @@ test_that("template metadata from YAML reaches the DTADataSet", {
   expect_equal(ds@template_version, "3.0")
   expect_equal(ds@template_source, "GF domain smrnaseq")
   expect_equal(ds@template_date, "2024-12-17")
-  expect_match(ds@description, "Genomic Findings")
+  expect_equal(ds@id, "gf_data_specs_pattern")
+  expect_equal(ds@name, "Genomic Findings data table")
+  expect_equal(
+    ds@description,
+    "Genomic Findings data, delivered as tab-separated files matched by a filename pattern."
+  )
 })
 
 test_that("print_info renders the dataset template metadata", {
@@ -102,21 +110,44 @@ test_that("print_info renders the dataset template metadata", {
   ds <- read_dataset_from_yaml(path)
 
   out <- paste(cli::cli_fmt(print_info(ds)), collapse = "\n")
+  # cli wraps to the terminal width; match on whitespace-normalised text.
+  flat <- gsub("[[:space:]]+", " ", out)
 
-  expect_match(out, "Genomic Findings")
+  expect_match(flat, "- Name: Genomic Findings data table", fixed = TRUE)
+  expect_match(flat, "- Description: Genomic Findings data, delivered as", fixed = TRUE)
   expect_match(out, "GF domain smrnaseq")
   expect_match(out, "3.0", fixed = TRUE)
   expect_match(out, "2024-12-17", fixed = TRUE)
 })
 
-test_that("print_short_info includes the dataset name", {
+test_that("print_info lists a name and description only when they are set", {
   ds <- DTADataSet(
-    name = "short_info_dataset",
+    id = "bare_dataset",
+    type = "file",
+    files = list(create_example_DTAFileCSV())
+  )
+  out <- paste(cli::cli_fmt(print_info(ds)), collapse = "\n")
+  expect_false(grepl("Name:", out, fixed = TRUE))
+  expect_false(grepl("Description:", out, fixed = TRUE))
+
+  # The id is the heading of print(), not a line of print_info().
+  header <- paste(cli::cli_fmt(print(ds)), collapse = "\n")
+  expect_match(header, "bare_dataset", fixed = TRUE)
+
+  ds@name <- "Labelled"
+  out <- paste(cli::cli_fmt(print_info(ds)), collapse = "\n")
+  expect_match(out, "- Name: Labelled", fixed = TRUE)
+  expect_false(grepl("Description:", out, fixed = TRUE))
+})
+
+test_that("print_short_info includes the dataset id", {
+  ds <- DTADataSet(
+    id = "short_info_dataset",
     type = "file",
     files = list(create_example_DTAFileCSV())
   )
 
-  # Interpolated names(x@name) -- always NULL -- so the name was missing and
+  # Interpolated names(x@id) -- always NULL -- so the id was missing and
   # the line read "Files:  (1 file, file)".
   out <- paste(cli::cli_fmt(print_short_info(ds)), collapse = "\n")
 
@@ -288,7 +319,7 @@ test_that("dta_file_handlers_from_list rejects a half-named files: block", {
 test_that("DTADataSetTabular rejects a DTAFileAny handler", {
   expect_error(
     DTADataSetTabular(
-      name = "bad_tabular",
+      id = "bad_tabular",
       specs = create_example_DTAColumnSpecCollection(1),
       files = list(DTAFileAny(filename = "audit.log"))
     ),
@@ -299,7 +330,7 @@ test_that("DTADataSetTabular rejects a DTAFileAny handler", {
 test_that("DTADataSetTabular rejects a bare DTAFile handler", {
   expect_error(
     DTADataSetTabular(
-      name = "bad_tabular2",
+      id = "bad_tabular2",
       specs = create_example_DTAColumnSpecCollection(1),
       files = list(DTAFile(filename = "data.txt"))
     ),
@@ -310,7 +341,7 @@ test_that("DTADataSetTabular rejects a bare DTAFile handler", {
 test_that("DTADataSetTabular accepts DTAFileCSV and DTAFileTSV handlers", {
   expect_s3_class(
     DTADataSetTabular(
-      name = "ok_csv",
+      id = "ok_csv",
       specs = create_example_DTAColumnSpecCollection(1),
       files = list(DTAFileCSV(filename = "data.csv"))
     ),
@@ -318,7 +349,7 @@ test_that("DTADataSetTabular accepts DTAFileCSV and DTAFileTSV handlers", {
   )
   expect_s3_class(
     DTADataSetTabular(
-      name = "ok_tsv",
+      id = "ok_tsv",
       specs = create_example_DTAColumnSpecCollection(1),
       files = list(DTAFileTSV(filename = "data.tsv"))
     ),
@@ -328,7 +359,7 @@ test_that("DTADataSetTabular accepts DTAFileCSV and DTAFileTSV handlers", {
 
 test_that("DTADataSetFile may hold a DTAFileAny handler", {
   h <- DTAFileAny(filename = "audit.log")
-  ds <- DTADataSetFile(name = "file_ds", files = list(h))
+  ds <- DTADataSetFile(id = "file_ds", files = list(h))
 
   expect_s3_class(ds, "DTAtools::DTADataSetFile")
   expect_s3_class(ds@files[[1]], "DTAtools::DTAFileAny")
@@ -340,7 +371,7 @@ test_that("DTADataSetFile may hold a DTAFileAny handler", {
 
 ds_tabular_with_handler <- function(filename) {
   DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = create_example_DTAColumnSpecCollection(1),
     files = list(DTAFileCSV(filename = filename))
   )
@@ -425,18 +456,18 @@ test_that("the app's bound-item key agrees with the table load_file() creates", 
 
 
 # ---------------------------------------------------------------------------
-# A dataset name containing braces is data, not cli syntax
+# A dataset id containing braces is data, not cli syntax
 # ---------------------------------------------------------------------------
 
-test_that("print_short_info() survives braces in the dataset name", {
+test_that("print_short_info() survives braces in the dataset id", {
   # print_short_info(DTADataSet) built its message with str_c()/paste0(),
-  # splicing x@name's raw text next to literal "{.field " / "}" markup before
-  # handing the whole assembled string to cli_alert(). A name such as "d{x}"
+  # splicing x@id's raw text next to literal "{.field " / "}" markup before
+  # handing the whole assembled string to cli_alert(). An id such as "d{x}"
   # made cli try to evaluate the stray `{x}` as the function argument `x`
   # itself, aborting with "cannot coerce type 'object' to vector of type
   # 'character'" instead of printing.
   ds <- DTADataSet(
-    name = "d{x}",
+    id = "d{x}",
     type = "file",
     files = list(create_example_DTAFileCSV())
   )
@@ -444,12 +475,298 @@ test_that("print_short_info() survives braces in the dataset name", {
   short <- capture.output(print_short_info(ds), type = "message")
   expect_true(any(grepl("d{x}", short, fixed = TRUE)))
 
-  # The zero-files branch never mentions the name, but must still not abort.
-  ds_empty <- DTADataSet(name = "e{y}", type = "file", files = list())
+  # The zero-files branch never mentions the id, but must still not abort.
+  ds_empty <- DTADataSet(id = "e{y}", type = "file", files = list())
   expect_no_error(capture.output(print_short_info(ds_empty), type = "message"))
 
-  # print()/print_info() route the name through direct interpolation already
+  # print()/print_info() route the id through direct interpolation already
   # and must keep doing so.
   full <- capture.output(print(ds), type = "message")
   expect_true(any(grepl("d{x}", full, fixed = TRUE)))
+})
+
+
+# ---------------------------------------------------------------------------
+# id / name / description
+# ---------------------------------------------------------------------------
+# A dataset used to carry its identifier in `name` and a short label in
+# `description`. It now has `id` (the identifier), `name` (the label) and
+# `description` (long free text). Specifications written in the old shape keep
+# loading, because every reader upgrades them first.
+
+test_that("dta_dataset_list_upgrade() moves name to id and description to name", {
+  upgraded <- dta_dataset_list_upgrade(
+    list(name = "dm", type = "tabular", description = "Demographics")
+  )
+
+  expect_identical(upgraded[["id"]], "dm")
+  expect_identical(upgraded[["name"]], "Demographics")
+  expect_identical(upgraded[["type"]], "tabular")
+  # The old short label is the new name; there is no long description to carry.
+  expect_false("description" %in% names(upgraded))
+})
+
+test_that("dta_dataset_list_upgrade() gives an entry without a description no name", {
+  upgraded <- dta_dataset_list_upgrade(list(name = "dm", type = "tabular"))
+
+  expect_identical(upgraded[["id"]], "dm")
+  # No `name` element at all, rather than an empty or NA one.
+  expect_false("name" %in% names(upgraded))
+  expect_false("description" %in% names(upgraded))
+  expect_identical(upgraded[["type"]], "tabular")
+})
+
+test_that("dta_dataset_list_upgrade() returns anything else untouched", {
+  current <- list(
+    id = "dm", type = "tabular", name = "Demographics", description = "Long text."
+  )
+  expect_identical(dta_dataset_list_upgrade(current), current)
+
+  # An id wins: a `name` beside it is a label, not an identifier to promote.
+  id_only <- list(id = "dm", type = "file")
+  expect_identical(dta_dataset_list_upgrade(id_only), id_only)
+
+  import <- list(template = "x@1", as = "y")
+  expect_identical(dta_dataset_list_upgrade(import), import)
+
+  expect_identical(dta_dataset_list_upgrade("dm"), "dm")
+  expect_null(dta_dataset_list_upgrade(NULL))
+})
+
+test_that("dta_dataset_list_upgrade() is idempotent", {
+  for (legacy in list(
+    list(name = "dm", type = "tabular", description = "Demographics"),
+    list(name = "dm", type = "tabular")
+  )) {
+    once <- dta_dataset_list_upgrade(legacy)
+    expect_identical(dta_dataset_list_upgrade(once), once)
+  }
+})
+
+# Written to disk so the whole read path is exercised, not only the helper.
+write_yaml_lines <- function(lines, env = parent.frame()) {
+  path <- withr::local_tempfile(fileext = ".yaml", .local_envir = env)
+  writeLines(lines, path)
+  path
+}
+
+test_that("read_dta_from_yaml() upgrades a legacy dataset entry", {
+  path <- write_yaml_lines(c(
+    "metadata:",
+    "  title: Legacy specification",
+    "  version: '1.0'",
+    "datasets:",
+    "  - name: dm",
+    "    type: tabular",
+    "    description: Demographics",
+    "    files:",
+    "      filename: dm.csv",
+    "      type: csv",
+    "    columns:",
+    "      - id: STUDYID",
+    "        type: SAS Char",
+    "  - name: ae",
+    "    type: tabular",
+    "    columns:",
+    "      - id: STUDYID",
+    "        type: SAS Char"
+  ))
+  dta <- read_dta_from_yaml(path)
+
+  expect_named(dta@datasets, c("dm", "ae"))
+
+  dm <- dta@datasets[["dm"]]
+  expect_identical(dm@id, "dm")
+  expect_identical(dm@name, "Demographics")
+  expect_null(dm@description)
+
+  # No description in the old shape means no label in the new one.
+  ae <- dta@datasets[["ae"]]
+  expect_identical(ae@id, "ae")
+  expect_null(ae@name)
+  expect_null(ae@description)
+})
+
+test_that("read_dta_from_yaml() reads id, name and description as written", {
+  path <- write_yaml_lines(c(
+    "metadata:",
+    "  title: Current specification",
+    "  version: '1.0'",
+    "datasets:",
+    "  - id: dm",
+    "    type: tabular",
+    "    name: Demographics",
+    "    description: One row per subject, as delivered by the CRO.",
+    "    files:",
+    "      filename: dm.csv",
+    "      type: csv",
+    "    columns:",
+    "      - id: STUDYID",
+    "        type: SAS Char"
+  ))
+  dta <- read_dta_from_yaml(path)
+
+  expect_named(dta@datasets, "dm")
+  dm <- dta@datasets[["dm"]]
+  expect_identical(dm@id, "dm")
+  expect_identical(dm@name, "Demographics")
+  expect_identical(dm@description, "One row per subject, as delivered by the CRO.")
+})
+
+test_that("read_dataset_from_yaml() upgrades a legacy dataset and reads a current one", {
+  legacy <- write_yaml_lines(c(
+    "name: dm",
+    "type: tabular",
+    "description: Demographics",
+    "files:",
+    "  filename: dm.csv",
+    "  type: csv",
+    "columns:",
+    "  - id: STUDYID",
+    "    type: SAS Char"
+  ))
+  ds <- read_dataset_from_yaml(legacy)
+  expect_identical(ds@id, "dm")
+  expect_identical(ds@name, "Demographics")
+  expect_null(ds@description)
+
+  current <- write_yaml_lines(c(
+    "id: dm",
+    "type: tabular",
+    "name: Demographics",
+    "description: One row per subject.",
+    "files:",
+    "  filename: dm.csv",
+    "  type: csv",
+    "columns:",
+    "  - id: STUDYID",
+    "    type: SAS Char"
+  ))
+  ds <- read_dataset_from_yaml(current)
+  expect_identical(ds@id, "dm")
+  expect_identical(ds@name, "Demographics")
+  expect_identical(ds@description, "One row per subject.")
+})
+
+test_that("dta_dataset_from_list() names what is wrong with an entry", {
+  expect_error(
+    dta_dataset_from_list(list(type = "tabular")),
+    regexp = "List must contain an .*id.* field or be a list of datasets"
+  )
+  expect_error(
+    dta_dataset_from_list(list(id = "dm")),
+    regexp = "Dataset .*dm.* must contain a .*type"
+  )
+  # A legacy entry reaches the same check under the id it was upgraded to.
+  expect_error(
+    dta_dataset_from_list(list(name = "dm", description = "Demographics")),
+    regexp = "Dataset .*dm.* must contain a .*type"
+  )
+})
+
+test_that("DTADataSetFactory() forwards id, name and description", {
+  tabular <- DTADataSetFactory(
+    type = "tabular",
+    columns = list(list(id = "STUDYID", type = "SAS Char")),
+    id = "dm", name = "Demographics", description = "One row per subject."
+  )
+  expect_s3_class(tabular, "DTAtools::DTADataSetTabular")
+  expect_identical(tabular@id, "dm")
+  expect_identical(tabular@name, "Demographics")
+  expect_identical(tabular@description, "One row per subject.")
+
+  file <- DTADataSetFactory(
+    type = "file",
+    id = "reports", name = "Delivery reports", description = "PDF reports."
+  )
+  expect_s3_class(file, "DTAtools::DTADataSetFile")
+  expect_identical(file@id, "reports")
+  expect_identical(file@name, "Delivery reports")
+  expect_identical(file@description, "PDF reports.")
+})
+
+test_that("a dataset constructor called without `id` aborts and says where the id went", {
+  specs <- create_example_DTAColumnSpecCollection(1)
+
+  # A call written against the old signature: `name` was the identifier.
+  expect_error(
+    DTADataSetTabular(name = "dm", specs = specs),
+    regexp = "needs an"
+  )
+  expect_error(
+    DTADataSetTabular(name = "dm", specs = specs),
+    regexp = "moved from"
+  )
+  expect_error(DTADataSetFile(name = "dm"), regexp = "needs an")
+  expect_error(DTADataSetFile(name = "dm"), regexp = "moved from")
+  expect_error(DTADataSet(name = "dm", type = "file"), regexp = "needs an")
+  expect_error(DTADataSet(name = "dm", type = "file"), regexp = "moved from")
+
+  # Without a name there is nothing to be a leftover of the old signature, so
+  # the hint is not offered.
+  for (msg in list(
+    tryCatch(DTADataSetTabular(specs = specs), error = conditionMessage),
+    tryCatch(DTADataSetFile(), error = conditionMessage),
+    tryCatch(DTADataSet(type = "file"), error = conditionMessage)
+  )) {
+    expect_match(cli::ansi_strip(msg), "needs an")
+    expect_false(grepl("moved from", msg, fixed = TRUE))
+  }
+})
+
+test_that("the dataset validator rejects a malformed id, name or description", {
+  new_ds <- function(...) {
+    DTADataSet(id = "dm", type = "file", files = list(create_example_DTAFileCSV()), ...)
+  }
+  expect_s3_class(new_ds(), "DTAtools::DTADataSet")
+
+  # name and description are each one string or NULL ...
+  expect_error(new_ds(name = c("a", "b")), regexp = "single string or NULL")
+  expect_error(new_ds(name = NA_character_), regexp = "single string or NULL")
+  expect_error(new_ds(description = c("a", "b")), regexp = "single string or NULL")
+  expect_error(new_ds(description = NA_character_), regexp = "single string or NULL")
+
+  # ... and the id is one non-empty string.
+  expect_error(
+    DTADataSet(id = "", type = "file"),
+    regexp = "single non-empty string"
+  )
+  expect_error(
+    DTADataSet(id = NA_character_, type = "file"),
+    regexp = "single non-empty string"
+  )
+  expect_error(
+    DTADataSet(id = c("a", "b"), type = "file"),
+    regexp = "single non-empty string"
+  )
+  expect_error(
+    DTADataSetTabular(id = "", specs = create_example_DTAColumnSpecCollection(1)),
+    regexp = "single non-empty string"
+  )
+
+  # The same validator runs on assignment.
+  ds <- new_ds()
+  expect_error(
+    {
+      ds@id <- ""
+    },
+    regexp = "single non-empty string"
+  )
+  expect_error(
+    {
+      ds@description <- NA_character_
+    },
+    regexp = "single string or NULL"
+  )
+})
+
+test_that("the bundled examples carry an id and, where meaningful, a name", {
+  expect_identical(create_example_DTADataSetTabular(2)@id, "demographics")
+  expect_identical(create_example_DTADataSetTabular(2)@name, "Demographics")
+  expect_identical(create_example_DTADataSetTabular(3)@id, "vitals")
+  expect_identical(create_example_DTADataSetTabular(3)@name, "Vital signs")
+
+  bare <- create_example_DTADataSetTabular(1)
+  expect_identical(bare@id, "example_container_specs_without_data")
+  expect_null(bare@name)
 })

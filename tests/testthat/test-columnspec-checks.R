@@ -444,7 +444,7 @@ test_that("stopping on a missing column still says what was not checked", {
 
 test_that("check() names the failing column spec checks for a whole dataset", {
   ds <- DTADataSetTabular(
-    name = "cc",
+    id = "cc",
     specs = cc_specs(),
     tables = list(tab = cc_table())
   )
@@ -547,7 +547,7 @@ test_that("a table whose columns match exactly passes the extra-columns check", 
 
 test_that("an undeclared column reaches messages() as a columnspec error", {
   ds <- DTADataSetTabular(
-    name = "cc",
+    id = "cc",
     specs = cc_specs(),
     tables = list(tab = cc_table_extra()[1, ])
   )
@@ -877,7 +877,7 @@ test_that("validate_table() reports failure for a typeless column, where it repo
 
 test_that("check() reports a typeless column's enum and pattern checks as failed", {
   ds <- DTADataSetTabular(
-    name = "tc",
+    id = "tc",
     specs = tc_specs(),
     tables = list(tab = tc_table())
   )

@@ -4,7 +4,7 @@
 # body paragraph holding only {/DATASETS}. Everything between the two markers
 # -- paragraphs and tables alike -- is emitted once per dataset the DTA
 # declares, in the DTA's own dataset order, and the marker paragraphs
-# themselves never appear in the output. Six placeholders resolve inside a
+# themselves never appear in the output. Seven placeholders resolve inside a
 # repetition to that one dataset's own values, and a dataset block
 # placeholder written bare inside the region (no `:NAME` argument) contributes
 # only its table, because the region's own paragraphs are what supply the
@@ -15,14 +15,15 @@
 # ---- fixtures ---------------------------------------------------------------
 
 # Two tabular datasets, built here rather than borrowed from the shipped
-# clinical_dta.yaml fixture, so that every expected name below ("ADSL",
+# clinical_dta.yaml fixture, so that every expected id below ("ADSL",
 # "ADAE", their column ids) is this test's own literal rather than something
-# read out of a YAML file elsewhere.
+# read out of a YAML file elsewhere. Neither dataset has a name, so
+# {DATASET_NAME} falls back to the id here; OQ-EXPORT-047 gives them names.
 er_dta <- function() {
   DTA(
     datasets = list(
-      DTADataSetTabular(name = "ADSL", specs = create_example_DTAColumnSpecCollection(1)),
-      DTADataSetTabular(name = "ADAE", specs = create_example_DTAColumnSpecCollection(2))
+      DTADataSetTabular(id = "ADSL", specs = create_example_DTAColumnSpecCollection(1)),
+      DTADataSetTabular(id = "ADAE", specs = create_example_DTAColumnSpecCollection(2))
     ),
     metadata = create_example_DTAMetaData()
   )
@@ -124,4 +125,40 @@ test_that("OQ-EXPORT-043 | a region marker that is not alone in a body paragraph
   # (b) The region is opened but never closed.
   dir_b <- qa_tempdir()
   er_check_left_as_written(dta, c("BEFORE", "{#DATASETS}", "middle"), dir_b)
+})
+
+test_that("OQ-EXPORT-047 | inside a region {DATASET_ID} is the dataset's id and {DATASET_NAME} its name, or its id when it has none | REQ-EXPORT-031", {
+  dir <- qa_tempdir()
+  spec1 <- create_example_DTAColumnSpecCollection(1)
+  spec2 <- create_example_DTAColumnSpecCollection(2)
+  dta <- DTA(
+    datasets = list(
+      DTADataSetTabular(
+        id = "ADSL", name = "Subject-Level Analysis", description = "One record per subject.",
+        specs = spec1
+      ),
+      DTADataSetTabular(id = "ADAE", description = "Adverse events, one record each.", specs = spec2)
+    ),
+    metadata = create_example_DTAMetaData()
+  )
+  template <- er_write_template(
+    c(
+      "{#DATASETS}", "ID={DATASET_ID}", "NAME={DATASET_NAME}", "DESCRIPTION={DATASET_DESCRIPTION}",
+      "{/DATASETS}"
+    ),
+    dir
+  )
+  out <- file.path(dir, "ids.docx")
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  s <- qa_docx_summary(out)
+  paras <- s$text[s$content_type == "paragraph"]
+  qa_step(
+    "each repetition gives the id, then the name or the id standing in for it, then the description",
+    c(
+      "ID=ADSL", "NAME=Subject-Level Analysis", "DESCRIPTION=One record per subject.",
+      "ID=ADAE", "NAME=ADAE", "DESCRIPTION=Adverse events, one record each."
+    ),
+    paras[nzchar(paras)]
+  )
 })

@@ -77,7 +77,7 @@ test_that("the Details row carries both bindings and names what it edits", {
 
   expect_match(html, "id=\"edit_meta\"", fixed = TRUE)
   expect_match(html, "Details", fixed = TRUE)
-  expect_match(html, "Name, description and template info", fixed = TRUE)
+  expect_match(html, "ID, name, description and template info", fixed = TRUE)
 })
 
 test_that("the Edit menu offers no control for a dataset's type", {

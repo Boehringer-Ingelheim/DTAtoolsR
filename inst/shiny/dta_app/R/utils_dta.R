@@ -175,6 +175,25 @@ dta_get_dataset <- function(dta, name) {
   tryCatch(DTAtools::datasets(dta, name), error = function(e) NULL)
 }
 
+# What a person reads for a dataset: its name, else its id. Mirrors the
+# package's internal dta_dataset_label(), which the app cannot reach.
+dta_dataset_label <- function(ds) {
+  nm <- tryCatch(ds@name, error = function(e) NULL)
+  if (is.null(nm) || !length(nm) || is.na(nm[1]) || !nzchar(nm[1])) {
+    return(tryCatch(ds@id, error = function(e) ""))
+  }
+  nm[1]
+}
+
+# A form value -> NULL when blank (unset), else the trimmed string.
+dta_blank_to_null <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return(NULL)
+  }
+  v <- trimws(as.character(x)[1])
+  if (is.na(v) || !nzchar(v)) NULL else v
+}
+
 # File handlers (DTAFile objects) of a dataset.
 dta_handlers <- function(ds) {
   h <- tryCatch(ds@files, error = function(e) list())
@@ -1592,8 +1611,9 @@ dta_build_validation_report <- function(dta, status = NULL) {
     # so the invariant is enforced rather than merely true.
     s <- dta_lookup(st, nm, "pending")
     cls <- if (identical(s, "pass")) "ok" else if (identical(s, "fail")) "bad" else "muted"
+    label <- tryCatch(dta_get_dataset(dta, nm)@name, error = function(e) NULL) %||% ""
     paste0(
-      "<tr><td>", esc(nm), "</td><td class='", cls, "'>",
+      "<tr><td>", esc(nm), "</td><td>", esc(label), "</td><td class='", cls, "'>",
       esc(status_label(s)), "</td></tr>"
     )
   }, character(1)), collapse = "")
@@ -1693,7 +1713,7 @@ dta_build_validation_report <- function(dta, status = NULL) {
     "<div class='meta'>Generated ", esc(ts), "</div>",
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,
-    "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Status</th></tr>",
+    "<h2>Datasets</h2><table><thead><tr><th>Dataset</th><th>Name</th><th>Status</th></tr>",
     "</thead><tbody>", ds_rows, "</tbody></table>", detail_html,
     "</body></html>"
   )
@@ -2176,8 +2196,10 @@ dta_dataset_to_list <- function(ds) {
     return(list())
   }
   out <- list()
-  out$name <- tryCatch(ds@name, error = function(e) NULL)
+  out$id <- tryCatch(ds@id, error = function(e) NULL)
   out$type <- tryCatch(ds@type, error = function(e) NULL) %||% "tabular"
+  label <- tryCatch(ds@name, error = function(e) NULL)
+  if (!is.null(label) && length(label) && nzchar(label)) out$name <- label
   desc <- tryCatch(ds@description, error = function(e) NULL)
   if (!is.null(desc) && length(desc) && nzchar(desc)) out$description <- desc
   ts <- tryCatch(ds@template_source, error = function(e) NULL)
@@ -2248,8 +2270,8 @@ dta_dataset_to_yaml_text <- function(dta, dataset) {
 }
 
 # ---- Dataset metadata editing --------------------------------------------
-# The DTADataSet-level properties -- name, description and the three template_*
-# fields -- as opposed to the DOCUMENT-level DTAMetaData handled by
+# The DTADataSet-level properties -- id, name, description and the three
+# template_* fields -- as opposed to the DOCUMENT-level DTAMetaData handled by
 # dta_set_metadata_field() above. Both are called "metadata"; they are different
 # objects, and only these belong to a single dataset.
 #
@@ -2281,6 +2303,7 @@ dta_dataset_meta_fields <- function(dta, dataset) {
     as.character(v)[1]
   }
   list(
+    id = g("id"),
     name = g("name"),
     type = g("type"),
     description = g("description"),
@@ -2296,22 +2319,22 @@ dta_dataset_meta_fields <- function(dta, dataset) {
 # A blank optional field UNSETS the property (NULL) rather than storing "",
 # matching dta_set_metadata_field()'s rule for the document-level fields: an
 # empty field means "not set at all", and .dta_compact() then omits it from the
-# serialized YAML entirely. `name` is not optional -- the DTADataSet validator
+# serialized YAML entirely. `id` is not optional -- the DTADataSet validator
 # rejects an empty one -- so it is required here.
 #
-# RENAMING RE-KEYS THE DATASET LIST IN PLACE. `dta@datasets` is a named list and
-# datasets(dta, name) looks up by name, so the entry has to move; but every
+# CHANGING THE ID RE-KEYS THE DATASET LIST IN PLACE. `dta@datasets` is keyed by
+# id and datasets(dta, id) looks up by it, so the entry has to move; but every
 # upload slot, example picker and nav button in the app is keyed by the
-# dataset's POSITION and resolves its name only at click time. The obvious
+# dataset's POSITION and resolves its id only at click time. The obvious
 # `datasets[[old]] <- NULL; datasets[[new]] <- ds` moves the dataset to the end
 # of the list, after which those controls silently address the wrong dataset.
 # The replace-in-place below is what keeps them correct.
-dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
+dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NULL,
                                  template_source = NULL, template_version = NULL,
                                  template_date = NULL) {
   dta_try({
-    nm <- trimws(as.character(name %||% "")[1])
-    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+    nm <- trimws(as.character(id %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
 
     # Resolved by position rather than through datasets(dta, dataset): the
     # position is needed anyway for the in-place replacement below, and this
@@ -2325,22 +2348,15 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
     # Without this the named-list assignment below would overwrite the other
     # dataset outright, destroying it with no error and no warning.
     if (nm %in% all_names[-pos]) {
-      stop(sprintf("A dataset named '%s' already exists.", nm))
+      stop(sprintf("A dataset with ID '%s' already exists.", nm))
     }
 
-    blank_to_null <- function(x) {
-      if (is.null(x) || length(x) == 0) {
-        return(NULL)
-      }
-      v <- trimws(as.character(x)[1])
-      if (is.na(v) || !nzchar(v)) NULL else v
-    }
-
-    ds@name <- nm
-    ds@description <- blank_to_null(description)
-    ds@template_source <- blank_to_null(template_source)
-    ds@template_version <- blank_to_null(template_version)
-    ds@template_date <- blank_to_null(template_date)
+    ds@id <- nm
+    ds@name <- dta_blank_to_null(name)
+    ds@description <- dta_blank_to_null(description)
+    ds@template_source <- dta_blank_to_null(template_source)
+    ds@template_version <- dta_blank_to_null(template_version)
+    ds@template_date <- dta_blank_to_null(template_date)
 
     dsets <- dta@datasets
     dsets[[pos]] <- ds
@@ -2375,14 +2391,14 @@ dta_set_dataset_meta <- function(dta, dataset, name, description = NULL,
 # reasoning as the in-place re-key in dta_set_dataset_meta() above; there it
 # holds ONE index steady across a rename, here it holds every OTHER index
 # steady across the list's growth.
-dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
+dta_add_dataset <- function(dta, id, type = "tabular", name = NULL, description = NULL) {
   dta_try({
-    nm <- trimws(as.character(name %||% "")[1])
-    if (is.na(nm) || !nzchar(nm)) stop("A dataset name is required.")
+    nm <- trimws(as.character(id %||% "")[1])
+    if (is.na(nm) || !nzchar(nm)) stop("A dataset ID is required.")
 
     all_names <- names(dta@datasets) %||% character(0)
     if (nm %in% all_names) {
-      stop(sprintf("A dataset named '%s' already exists.", nm))
+      stop(sprintf("A dataset with ID '%s' already exists.", nm))
     }
 
     type <- tolower(trimws(as.character(type %||% "")[1]))
@@ -2393,23 +2409,18 @@ dta_add_dataset <- function(dta, name, type = "tabular", description = NULL) {
       ))
     }
 
-    blank_to_null <- function(x) {
-      if (is.null(x) || length(x) == 0) {
-        return(NULL)
-      }
-      v <- trimws(as.character(x)[1])
-      if (is.na(v) || !nzchar(v)) NULL else v
-    }
-    desc <- blank_to_null(description)
+    label <- dta_blank_to_null(name)
+    desc <- dta_blank_to_null(description)
 
     ds <- if (identical(type, "tabular")) {
       DTAtools::DTADataSetTabular(
-        name = nm,
+        id = nm,
         specs = DTAtools::DTAColumnSpecCollection(columns = list()),
+        name = label,
         description = desc
       )
     } else {
-      DTAtools::DTADataSetFile(name = nm, description = desc)
+      DTAtools::DTADataSetFile(id = nm, name = label, description = desc)
     }
 
     dsets <- dta@datasets

@@ -14,9 +14,9 @@ options:
     help: Name or identifier of the data supplier who provides the test results.
 
 dataset:
-  name: gf_data_specs_pattern
+  id: gf_data_specs_pattern
   type: tabular
-  description: Genomic Findings data table with pattern for filename
+  name: Genomic Findings data table with pattern for filename
 
   files:
     filename: gf_data_small_smirna.tsv

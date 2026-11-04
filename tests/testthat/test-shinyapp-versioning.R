@@ -106,6 +106,40 @@ test_that("dta_version_change_summary() excludes version and version_history row
   expect_no_match(result, "1.1", fixed = TRUE)
 })
 
+test_that("a real dta_diff() tells a changed dataset name from a changed description", {
+  # The hand-built frames above use `clinical_data.description` as a plausible
+  # dataset key; this one runs the real diff, to pin which property each edit
+  # lands on now that the short label is `name` and `description` is long text.
+  diff_fn <- app_fn("dta_diff")
+  summary_fn <- app_fn("dta_version_change_summary")
+  set <- app_fn("dta_set_dataset_meta")
+
+  base <- app_fixture_dta()
+  ds <- DTAtools::datasets(base, "clinical_data")
+  expect_equal(ds@name, "Clinical data table")
+
+  relabelled <- set(base, "clinical_data",
+    id = "clinical_data", name = "New label", description = ds@description
+  )$value
+  by_name <- diff_fn(base, relabelled)
+  expect_equal(by_name$datasets$key, "clinical_data.name")
+  expect_equal(by_name$datasets$change, "changed")
+  expect_equal(by_name$datasets$from, "Clinical data table")
+  expect_equal(by_name$datasets$to, "New label")
+  expect_match(
+    summary_fn(by_name),
+    "changed clinical_data.name ('Clinical data table' -> 'New label')",
+    fixed = TRUE
+  )
+
+  redescribed <- set(base, "clinical_data",
+    id = "clinical_data", name = ds@name, description = "Rewritten long text"
+  )$value
+  by_description <- diff_fn(base, redescribed)
+  expect_equal(by_description$datasets$key, "clinical_data.description")
+  expect_equal(by_description$datasets$to, "Rewritten long text")
+})
+
 test_that("dta_version_change_summary() prefixes metadata keys but leaves dataset keys bare", {
   summary_fn <- app_fn("dta_version_change_summary")
 

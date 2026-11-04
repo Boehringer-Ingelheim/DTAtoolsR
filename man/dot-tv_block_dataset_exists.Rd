@@ -2,11 +2,11 @@
 % Please edit documentation in R/exportTemplateBlocks.R
 \name{.tv_block_dataset_exists}
 \alias{.tv_block_dataset_exists}
-\title{Does the DTA contain a dataset by this name (any kind)?}
+\title{Does the DTA contain a dataset with this id (any kind)?}
 \usage{
 .tv_block_dataset_exists(dta, name)
 }
 \description{
-Does the DTA contain a dataset by this name (any kind)?
+Does the DTA contain a dataset with this id (any kind)?
 }
 \keyword{internal}

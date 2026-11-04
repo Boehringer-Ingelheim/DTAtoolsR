@@ -204,7 +204,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
   # column.
   resolve_vocab <- vocabulary_resolver(index)
 
-  # Names of the datasets a vocabulary slot could actually have reached. Only
+  # Ids of the datasets a vocabulary slot could actually have reached. Only
   # the two branches that hold a PLAIN dataset list contribute: a `path:`/
   # `source:` entry reads a finished DTA spec straight into S7 objects, and a
   # slot cannot write into one of those. Checked after the loop so a slot whose
@@ -245,7 +245,7 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
 
       ds_plain <- apply_vocabulary_slot_overrides(built$value$dataset, vocab_overrides)
       ds <- DTAtools::dta_dataset_from_list(ds_plain)
-      built_names <- c(built_names, as.character(ds_plain$name %||% ""))
+      built_names <- c(built_names, as.character(ds_plain$id %||% ""))
       provenance[[length(provenance) + 1L]] <- built$value$provenance
     } else if (identical(entry_kind, "path")) {
       # Verbatim from create_dta_from_template()'s original character branch.
@@ -279,9 +279,12 @@ build_template_datasets <- function(def, index, selections, source_label = NULL,
       # DTAColumnSpec objects, which know nothing of `values_from` -- an
       # unexpanded binding would reach do.call(DTAColumnSpec, x) and fail
       # there, naming an "unused argument" rather than the template.
-      ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$name)
+      # An inline entry written before datasets had an `id` names itself in
+      # `name:`; upgraded first so the slot targets below match it by id.
+      ref <- DTAtools::dta_dataset_list_upgrade(ref)
+      ref <- expand_column_vocabularies(ref, resolve_vocab, dataset_name = ref$id)
       ref <- apply_vocabulary_slot_overrides(ref, vocab_overrides)
-      built_names <- c(built_names, as.character(ref$name %||% ""))
+      built_names <- c(built_names, as.character(ref$id %||% ""))
       tf <- tempfile(fileext = ".yaml")
       yaml_txt <- yaml::as.yaml(ref, indent = 2, line.sep = "\n")
       writeLines(yaml_txt, tf, useBytes = TRUE)
