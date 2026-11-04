@@ -332,3 +332,23 @@ requirements:
     category: interface
     covers: [validate_rules]
     source: R/evaluateRules.R
+
+  - id: REQ-RULE-033
+    text: >
+      A conditional rule shall be rejected when it is constructed if any
+      operator in its condition or consequent is given the wrong number of
+      values: exactly one for equals, not_equals, greater, less,
+      greater_equal, less_equal, min, max and pattern (and their aliases),
+      exactly two for range, at least one for in and not_in, and a single
+      TRUE or FALSE for empty. A missing value does not count as a value for
+      the single-value operators or range; a missing member of in or not_in
+      is allowed, and matches missing values.
+    risk: high
+    category: functional
+    covers: [DTARuleColCondition, DTARuleGroupCondition]
+    source: R/evaluateRules.R
+    notes: >
+      The comparisons are element-wise in R, so a wrongly sized value was never
+      an error at evaluation time but a silently wrong verdict: equals with two
+      values compared row by row with recycling, making the result depend on
+      row order, and range with three values dropped the third bound.

@@ -506,10 +506,9 @@ test_that("a block token written by the template still renders inside a region",
 })
 
 test_that("a block token outside a region still renders", {
-  # Guards against the `literal` hand-off leaking into the ordinary
-  # (non-region) path: with no region at all, .tv_expand_regions() must
-  # produce an empty `literal`, and an unrelated {SIGNATURES_TABLE} block
-  # placeholder must render exactly as it always did.
+  # Guards against the region pass's brace protection leaking into the
+  # ordinary (non-region) path: with no region at all, an unrelated
+  # {SIGNATURES_TABLE} block placeholder must render exactly as it always did.
   dta <- DTA(datasets = create_example_DTA()@datasets, metadata = create_example_DTAMetaData(2))
   template <- .make_template("{SIGNATURES_TABLE}")
   on.exit(unlink(template, force = TRUE), add = TRUE)
@@ -523,24 +522,14 @@ test_that("a block token outside a region still renders", {
   expect_false(grepl("{SIGNATURES_TABLE}", txt, fixed = TRUE))
 })
 
-test_that("KNOWN DEFECT: a dataset value that spells an INLINE placeholder is substituted", {
-  # KNOWN DEFECT, pinned rather than endorsed -- DEV-016.
-  #
-  # The block half of this is fixed above: a value spelling {SIGNATURES_TABLE}
-  # renders as that text. The inline half is not. The pass that substitutes
-  # {DTA_TITLE} and friends runs over every paragraph of the document, the
-  # region copies included, so a value written by the region pass is read once
-  # more and resolved. Fixing it needs paragraph identity carried across the
-  # two passes, which a write and a re-read of word/document.xml destroys --
-  # only a token's spelling survives, and that is enough to recognise a block
-  # paragraph but not an inline placeholder sitting inside a sentence.
-  #
-  # When that lands, this test is meant to fail. Switch the two assertions to
-  # their opposites: the paragraph must then read "Title is {DTA_TITLE}"
-  # verbatim, and must NOT contain the resolved title.
+test_that("a dataset value that spells an INLINE placeholder renders as text inside a region", {
+  # DEV-016, closed. The inline pass runs over every paragraph of the document,
+  # region copies included, and used to resolve a placeholder a dataset VALUE
+  # spelled. The region pass now writes a value's braces as protected
+  # stand-ins, restored only after both later passes have run.
   dta <- create_example_DTA()
   dta@datasets[[1]]@description <- "Title is {DTA_TITLE}"
-  dta@datasets[[2]]@description <- "An ordinary description."
+  dta@datasets[[2]]@description <- "{YAML_EMBEDDED}"
   template <- .make_template(c("{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}"))
   on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
@@ -548,7 +537,38 @@ test_that("KNOWN DEFECT: a dataset value that spells an INLINE placeholder is su
 
   export_with_template(dta, template, out, quiet = TRUE)
 
-  paras <- .docx_paragraphs(out)
-  expect_true("Title is Example DTA" %in% paras)
-  expect_false("Title is {DTA_TITLE}" %in% paras)
+  expect_identical(.docx_paragraphs(out), c("Title is {DTA_TITLE}", "{YAML_EMBEDDED}"))
+  txt <- .docx_text(out)
+  expect_false(grepl("Example DTA", txt, fixed = TRUE))
+  # No protected stand-in survives into the document.
+  expect_false((grepl(intToUtf8(0xE000), txt, fixed = TRUE) | grepl(intToUtf8(0xE001), txt, fixed = TRUE)))
+})
+
+test_that("a template block with the same spelling as a region value still renders", {
+  # The spelling-based hand-off this replaced left a REAL {SIGNATURES_TABLE}
+  # elsewhere in the template unrendered whenever a dataset value inside a
+  # region happened to spell the same token. Protected braces do not touch the
+  # template's own text, so both now come out right: the value as text, the
+  # template's block as the table.
+  dta <- DTA(datasets = create_example_DTA()@datasets, metadata = create_example_DTAMetaData(2))
+  dta@datasets[[1]]@description <- "{SIGNATURES_TABLE}"
+  template <- .make_template(c(
+    "{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}", "{SIGNATURES_TABLE}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  expect_true("{SIGNATURES_TABLE}" %in% .docx_paragraphs(out))
+  expect_match(.docx_text(out), "Emily Turner", fixed = TRUE)
+})
+
+test_that("brace protection round-trips and leaves non-text values alone", {
+  x <- c("{A}", "no braces", "}{", "")
+  expect_identical(.tv_restore_braces(.tv_protect_braces(x)), x)
+  expect_false(any(grepl("[{}]", .tv_protect_braces(x))))
+  expect_identical(.tv_protect_braces(3L), 3L)
+  expect_null(.tv_protect_braces(NULL))
 })

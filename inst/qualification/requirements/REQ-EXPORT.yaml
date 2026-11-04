@@ -214,7 +214,9 @@ requirements:
       columns_specs_from_word() shall reconstruct a DTAColumnSpecCollection
       from a Word table whose id, type, length, nullable and description
       cells match the collection it is given, arriving at the same column
-      identifiers and types.
+      identifiers and types, and shall read the permitted values and the
+      pattern written on #@values: and #@pattern: lines of a Description
+      cell, each up to the end of its own line.
     risk: high
     category: functional
     covers: [columns_specs_from_word]
@@ -230,15 +232,12 @@ requirements:
     covers: [columns_specs_from_word, export_specs_table]
     source: R/DTAColumnSpecCollection-class.R
     notes: >
-      Pinned as observed, not endorsed: the two functions do not currently
-      pair up. export_specs_table()'s "Format" column drops the "SAS " backend
-      prefix columns_specs_from_word() requires to rebuild a structure (it
-      writes structure@format, which the factory already stripped of its
-      prefix on the way in), and a column declaring no format at all writes a
-      blank cell that makes the reconstruction abort with a low-level "No
-      prefix could be extracted from ''" error rather than treating an absent
-      format as unset. Every column in the shipped clinical_dta.yaml example
-      has no explicit format, so this is the common case, not an edge one.
+      Until DEV-014 was closed the two functions did not pair up:
+      export_specs_table()'s Format column drops the "SAS " backend prefix
+      (it writes structure@format, which the factory stripped on the way in),
+      and a column with no format writes a blank cell, which made the read
+      abort. The reader now restores the prefix from the Type cell and treats
+      a blank cell as unset.
 
   # ---- write_table_to_file() --------------------------------------------------
 

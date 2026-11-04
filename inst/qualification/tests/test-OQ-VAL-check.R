@@ -365,3 +365,33 @@ test_that("OQ-VAL-029 | a repeated column name is refused, not validated | REQ-V
     class(validate_table(specs = specs, table = distinct, verbose = FALSE))[[1]]
   )
 })
+
+test_that("OQ-VAL-038 | a timestamp column with no named timezone still validates, and a re-check of the same object is skipped | REQ-VAL-001 | tags: white-box", {
+  # DEV-002, open. Arrow does not round-trip `tzone = ""` stably, so a table
+  # whose stored copy had to be typed hashes differently from a rebuild of its
+  # own contents and is rescanned every time it is rebuilt. That is a cost,
+  # never a wrong answer -- which is what this case pins alongside the defect.
+  frame <- data.frame(
+    ID = c("A001", "A002"), VAL = c("1", "2"),
+    W = as.POSIXct(c("2026-01-01 10:00:00", "2026-01-02 11:00:00")),
+    stringsAsFactors = FALSE
+  )
+  specs <- DTAColumnSpecCollection(columns = list(
+    ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    VAL = DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  ))
+  ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(t = frame))
+  summary_of <- function(x) attr(x, "last_validation_summary")
+
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  qa_step("the first check validates the table", "validated", summary_of(ds)$status)
+  qa_step("it finds no import errors", 0L, as.integer(summary_of(ds)$n_import_errors))
+  ds <- check(ds, persist = FALSE, quiet = TRUE)
+  qa_step("a second check of the same object is skipped", "skipped", summary_of(ds)$status)
+
+  stored <- ds@tables[["t"]]
+  qa_known_deviation(
+    "DEV-002",
+    !identical(dta_table_change_signal(stored), dta_table_content_hash(as.data.frame(stored)))
+  )
+})

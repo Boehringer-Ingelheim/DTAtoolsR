@@ -162,3 +162,21 @@ test_that("OQ-EXPORT-047 | inside a region {DATASET_ID} is the dataset's id and 
     paras[nzchar(paras)]
   )
 })
+
+test_that("OQ-EXPORT-048 | a dataset value that spells a placeholder renders inside a region as the text it is | REQ-EXPORT-031", {
+  dir <- qa_tempdir()
+  dta <- er_dta()
+  dta@datasets[[1]]@description <- "Title is {DTA_TITLE}"
+  dta@datasets[[2]]@description <- "{SIGNATURES_TABLE}"
+  template <- er_write_template(c("{#DATASETS}", "{DATASET_DESCRIPTION}", "{/DATASETS}"), dir)
+  out <- file.path(dir, "out.docx")
+  suppressWarnings(export_with_template(dta, template, out, quiet = TRUE))
+
+  s <- qa_docx_summary(out)
+  paras <- s$text[s$content_type == "paragraph"]
+  qa_step(
+    "each repetition reads the dataset's description verbatim, inline and block spellings alike",
+    c("Title is {DTA_TITLE}", "{SIGNATURES_TABLE}"), paras[nzchar(paras)]
+  )
+  qa_check("no table was rendered for the value that spells a block", !any(s$content_type == "table cell"))
+})

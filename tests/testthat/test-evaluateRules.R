@@ -2134,3 +2134,113 @@ test_that("print() on the other rule classes already survives braces in id/colum
   expect_true(any(grepl("grp{r}", out_group, fixed = TRUE)))
   expect_true(any(grepl("G{1}, G2", out_group, fixed = TRUE)))
 })
+
+test_that("a condition operator given the wrong number of values is rejected when the rule is built", {
+  # Each of these used to construct, then produce a verdict silently decided by
+  # R's element-wise recycling instead of by the specification.
+  bad_then <- list(
+    equals_vector = list(ARM = list(equals = c("A", "B"))),
+    not_equals_vector = list(ARM = list(not_equals = c("A", "B"))),
+    pattern_vector = list(ARM = list(pattern = c("^A$", "^B$"))),
+    greater_vector = list(AGE = list(greater = c(1, 2))),
+    min_missing = list(AGE = list(min = NA)),
+    range_one = list(AGE = list(range = 25)),
+    range_three = list(AGE = list(range = c(0, 100, 5))),
+    range_missing = list(AGE = list(range = c(0, NA))),
+    in_empty = list(ARM = list(`in` = character(0))),
+    empty_not_logical = list(ARM = list(empty = "yes"))
+  )
+  for (case in names(bad_then)) {
+    expect_error(
+      DTARuleColCondition(
+        id = "r1",
+        condition = list(ARM = list(not_equals = "zzz")),
+        then = bad_then[[case]]
+      ),
+      class = "dta_condition_arity_error",
+      info = case
+    )
+  }
+
+  # The IF side is checked by the same path.
+  expect_error(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(ARM = list(equals = c("A", "B"))),
+      then = list(AGE = list(greater = 0))
+    ),
+    class = "dta_condition_arity_error"
+  )
+})
+
+test_that("the arity error names the operator and column, and points equals at in:", {
+  err <- tryCatch(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(VISIT = list(equals = "V1")),
+      then = list(ARM = list(equals = c("A", "B")))
+    ),
+    dta_condition_arity_error = function(e) e
+  )
+  expect_s3_class(err, "dta_condition_arity_error")
+  msg <- conditionMessage(err)
+  expect_match(msg, "equals", fixed = TRUE)
+  expect_match(msg, "ARM", fixed = TRUE)
+  expect_match(msg, "2 values", fixed = TRUE)
+  expect_match(msg, "in:", fixed = TRUE)
+})
+
+test_that("the YAML sequence form and group conditions are checked too", {
+  expect_error(
+    DTARuleColCondition(
+      id = "r1",
+      condition = list(list(VISIT = list(equals = "V1"))),
+      then = list(list(AGE = list(range = 5)))
+    ),
+    class = "dta_condition_arity_error"
+  )
+  expect_error(
+    DTARuleGroupCondition(
+      id = "g1",
+      group_by = "SUBJID",
+      conditions = list(c1 = list(ARM = list(equals = c("A", "B")))),
+      constraints = list(list(type = "requires", `if` = "c1", then = "c1"))
+    ),
+    class = "dta_condition_arity_error"
+  )
+})
+
+test_that("well-formed operator values are unaffected by the arity check", {
+  df <- data.frame(
+    ARM = c("A", "B", "A", "B"), AGE = c(10, 20, 30, 40),
+    D = as.Date(c("2020-01-01", "2020-06-01", "2020-07-01", "2020-12-01")),
+    stringsAsFactors = FALSE
+  )
+  check <- function(then) {
+    rule_check_col_condition(
+      DTARuleColCondition(id = "ok", condition = list(ARM = list(not_equals = "zzz")), then = then),
+      df
+    )$valid
+  }
+  expect_true(check(list(ARM = list(`in` = c("A", "B")))))
+  expect_true(check(list(ARM = list(not_in = "C"))))
+  expect_true(check(list(AGE = list(range = c(10, 40)))))
+  expect_true(check(list(AGE = list(min = 10, max = 40))))
+  expect_true(check(list(AGE = list(greater_equal = 10, less = 41))))
+  expect_true(check(list(ARM = list(pattern = "^[AB]$", empty = FALSE))))
+  # A missing member of `in` is a deliberate idiom -- "A or missing" -- and is
+  # not an arity error.
+  df_na <- df
+  df_na$ARM[2] <- NA
+  ok_na <- rule_check_col_condition(
+    DTARuleColCondition(id = "na_ok", condition = list(AGE = list(greater = 0)), then = list(ARM = list(`in` = c("A", NA)))),
+    df_na
+  )
+  # A, missing and A pass; only the B row fails.
+  expect_false(ok_na$valid)
+  expect_match(ok_na$message, "violated: 1 row")
+  # Date bounds are written as text and parsed against a Date column, so the
+  # range check must not insist on numbers.
+  expect_true(check(list(D = list(range = c("2020-01-01", "2020-12-31")))))
+  expect_false(check(list(AGE = list(range = c(15, 40)))))
+})

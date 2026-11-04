@@ -7,6 +7,14 @@
 #' dataset/target/source/rule/column/keyword/message, differing only by row)
 #' are capped at `max_repeats` in the default view with a "show more" toggle
 #' in the resulting HTML.
+#'
+#' So that a filed report can be tied back to what it describes, its header
+#' records the generation time with its UTC offset, the DTAtools and R
+#' versions, and the specification's version (`metadata(x)@version`), and an
+#' Inputs section lists every table and file the verdict rests on: the source
+#' file(s) of a streamed dataset or a file dataset with their size and
+#' modification time, and the content-hash stamp of a table held in memory.
+#' Nothing is re-read to produce it.
 #' @import S7
 #' @importFrom cli cli_abort cli_alert_success
 #' @importFrom glue glue
@@ -161,9 +169,20 @@ write_validation_report <- function(
   # Build HTML document
   summary_html <- .report_summary_html(res)
   messages_html <- .report_messages_table_html(msgs, max_repeats = max_repeats)
-  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  # The offset makes the moment unambiguous to a reader in another timezone.
+  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")
   pkg_version <- as.character(utils::packageVersion("DTAtools"))
+  r_version <- as.character(getRversion())
   escaped_title <- .report_html_escape(title)
+  # The specification version the verdict was reached against -- the report is
+  # a statement about this version of the agreement, not about the agreement.
+  spec_version <- tryCatch(DTAtools::metadata(x)@version, error = function(e) NULL)
+  spec_version <- if (is.character(spec_version) && length(spec_version) == 1 && !is.na(spec_version) && nzchar(spec_version)) {
+    .report_html_escape(spec_version)
+  } else {
+    "not set"
+  }
+  inputs_html <- .report_inputs_html(x)
 
   html_doc <- glue::glue(
     '<!DOCTYPE html>
@@ -178,9 +197,11 @@ write_validation_report <- function(
 <body>
 <header class="report-header">
   <h1>{escaped_title}</h1>
-  <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version}</div>
+  <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version} &middot; R {r_version}</div>
+  <div class="report-meta report-meta-spec">Specification version {spec_version}</div>
 </header>
 {summary_html}
+{inputs_html}
 {messages_html}
 <div id="inspect-panels" hidden>
 {inspect_panels_html}

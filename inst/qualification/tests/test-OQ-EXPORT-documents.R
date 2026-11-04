@@ -588,35 +588,71 @@ test_that("OQ-EXPORT-025 | columns_specs_from_word reconstructs id, type, length
     c(type = "Num", nullable = "TRUE"),
     c(type = back@columns$AGE@structure@type, nullable = as.character(back@columns$AGE@nullable))
   )
+
+  # Values and a pattern travel in the Description cell, one tag per line. A
+  # pattern containing the letter n is the case the original regex cut short:
+  # its character class `[^\\n]` excluded "n", not the line break.
+  tagged <- fixture
+  tagged$description <- c(
+    "Unique study ID\n#@values: \"S-01\"; \"S-02\"",
+    "Age in years\n#@pattern: ^(Screening|Baseline)$\nnot part of the pattern"
+  )
+  tagged_path <- file.path(dir, "specs_table_tagged.docx")
+  print(
+    flextable::body_add_flextable(officer::read_docx(), flextable::flextable(tagged)),
+    target = tagged_path
+  )
+  tagged_back <- columns_specs_from_word(tagged_path)
+  qa_step(
+    "#@values is split on the separator and unquoted",
+    c("S-01", "S-02"), unlist(tagged_back@columns$STUDYID@values, use.names = FALSE)
+  )
+  qa_step(
+    "#@pattern is read whole, up to the end of its own line",
+    "^(Screening|Baseline)$", tagged_back@columns$AGE@pattern
+  )
+  qa_step(
+    "the tag lines are removed from the description",
+    c("Unique study ID", "Age in years\nnot part of the pattern"),
+    c(tagged_back@columns$STUDYID@description, tagged_back@columns$AGE@description)
+  )
 })
 
-test_that("OQ-EXPORT-026 | columns_specs_from_word cannot read the table export_specs_table just wrote | REQ-EXPORT-019", {
+test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_specs_table just wrote | REQ-EXPORT-019", {
   dir <- qa_tempdir()
 
-  # The common case: no column declares an explicit format, exactly as in the
-  # shipped clinical_dta.yaml fixture.
+  # The common case first: no column declares an explicit format, exactly as
+  # in the shipped clinical_dta.yaml fixture. That blank Format cell used to
+  # abort the read (DEV-014, closed). Alongside it, a column with a format --
+  # which export_specs_table() writes without its "SAS " prefix -- and one
+  # carrying permitted values and a pattern in its Description cell.
   coll <- DTAColumnSpecCollection(columns = list(
-    STUDYID = DTAColumnSpec(id = "STUDYID", label = "Study Identifier", type = "SAS Char", length = 10, nullable = FALSE)
+    STUDYID = DTAColumnSpec(id = "STUDYID", label = "Study Identifier", type = "SAS Char", length = 10, nullable = FALSE),
+    VISIT = DTAColumnSpec(
+      id = "VISIT", label = "Visit", type = "SAS Char", format = "SAS $20.", length = 20,
+      nullable = TRUE, pattern = "^(Screening|Baseline|Week [0-9]+)$"
+    ),
+    ARM = DTAColumnSpec(id = "ARM", label = "Arm", type = "SAS Char", length = 8, values = c("Placebo", "Active"))
   ))
   path <- file.path(dir, "roundtrip.docx")
   export_specs_table(coll, file = path, quiet = TRUE)
 
-  cond <- tryCatch(
-    columns_specs_from_word(
-      path,
-      colnames = c("id", "label", "type", "length", "format", "nullable", "description")
-    ),
-    error = function(e) e
-  )
-  qa_check(
-    "reading export_specs_table's own output back aborts rather than reconstructing the collection",
-    inherits(cond, "condition")
-  )
+  back <- tryCatch(columns_specs_from_word(path), error = function(e) e)
+  qa_check("the table is read back without error", !inherits(back, "condition"))
+  qa_step("the same column identifiers come back, in order", names(coll@columns), names(back@columns))
+  facts <- function(x) {
+    vapply(x@columns, function(s) {
+      paste(
+        s@structure@backend, s@structure@type, s@structure@format %||% "-",
+        s@structure@length %||% "-", s@nullable %||% "-",
+        paste(unlist(s@values), collapse = ";"), s@pattern %||% "-"
+      )
+    }, character(1))
+  }
   qa_step(
-    "the abort is the low-level prefix-extraction error, not a caller-facing one",
-    TRUE, grepl("prefix", conditionMessage(cond), fixed = TRUE)
+    "every column's type, format, length, nullability, values and pattern survive the round trip",
+    facts(coll), facts(back)
   )
-  qa_known_deviation("DEV-014", inherits(cond, "condition"))
 })
 
 # ---- document exports write atomically ---------------------------------------

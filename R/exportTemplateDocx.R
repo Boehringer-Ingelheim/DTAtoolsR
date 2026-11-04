@@ -805,7 +805,7 @@ dta_template_placeholders <- function(dta = NULL) {
   if (file.exists(main)) {
     regions <- .tv_expand_regions(main, dta, nonce, variables)
     region_blocks <- regions$blocks
-    blocks <- .tv_mark_block_paragraphs(main, nonce, variables, literal = regions$literal)
+    blocks <- .tv_mark_block_paragraphs(main, nonce, variables)
   }
 
   unresolved <- character(0)
@@ -813,6 +813,11 @@ dta_template_placeholders <- function(dta = NULL) {
     unresolved <- c(unresolved, .replace_placeholders_in_xml(part, variables))
   }
   unresolved <- unique(unresolved)
+  # Pass 0 wrote the braces of every dataset value as stand-ins so neither
+  # pass above could read a value as a placeholder; both have run now.
+  if (file.exists(main)) {
+    .tv_restore_braces_in_xml(main)
+  }
   if (length(unresolved) > 0) {
     # Double braces so cli/glue renders the tokens literally instead of trying
     # to interpolate e.g. `{NOT_A_FIELD}` as an R expression.
