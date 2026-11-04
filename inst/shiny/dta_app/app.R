@@ -210,6 +210,50 @@ function DTA_vocabSet(link, what){
   else s.setValue((link.dataset.vals || '').split('\\u001f').filter(Boolean));
   return false;
 }
+
+// The column editor's term checklist (vocab_term_checklist(), R/template_ui.R).
+// While a filter is typed the count also says how many rows are shown, which
+// is what All/None act on.
+function DTA_vocabCount(el){
+  var box = el && el.closest ? el.closest('.vocab-pick') : null;
+  var c = box ? box.querySelector('.vocab-pick-count') : null;
+  if (!c) return;
+  var f = box.querySelector('.vocab-pick-filter');
+  var shown = [].filter.call(box.querySelectorAll('.checkbox'), function(r){ return r.style.display !== 'none'; }).length;
+  c.textContent = box.querySelectorAll('input[type=checkbox]:checked').length + ' of ' +
+    box.querySelectorAll('input[type=checkbox]').length + ' selected' +
+    (f && f.value.trim() ? ' · ' + shown + ' shown' : '');
+}
+function DTA_vocabFilter(input){
+  var box = input.closest('.vocab-pick');
+  if (!box) return;
+  var q = input.value.trim().toLowerCase(), shown = 0;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var hit = !q || row.textContent.toLowerCase().indexOf(q) >= 0;
+    row.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  var empty = box.querySelector('.vocab-pick-empty');
+  if (empty) empty.style.display = shown ? 'none' : '';
+  DTA_vocabCount(input);
+}
+// Acts on the rows the filter shows, and fires ONE change event: Shiny reads
+// the whole group on any change, so one is enough for every box flipped.
+function DTA_vocabCheck(link, on){
+  var box = link.closest('.vocab-pick');
+  if (!box) return false;
+  var last = null;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var cb = row.querySelector('input[type=checkbox]');
+    if (row.style.display !== 'none' && cb && cb.checked !== on) { cb.checked = on; last = cb; }
+  });
+  if (last) last.dispatchEvent(new Event('change', {bubbles: true}));
+  DTA_vocabCount(link);
+  return false;
+}
+document.addEventListener('change', function(e){
+  if (e.target && e.target.closest && e.target.closest('.vocab-pick')) DTA_vocabCount(e.target);
+});
 "
 
 # Programmatic trigger for the hidden export download button. shinyjs::click()
@@ -499,6 +543,7 @@ server <- function(input, output, session) {
     pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
     col_view = "list", # column editor view: "list" | "form" | "vocab"
     col_vocab_ref = NULL, # last vocabulary picked, so the picker reopens on it
+    col_vocab_sug = NULL, # vocabulary_suggestion() for the column the picker was opened on
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
     col_prefill = NULL, # list() of the column fields loaded in the form
@@ -1440,11 +1485,11 @@ server <- function(input, output, session) {
   #
   # Step 1 is THREE outputs rather than one, and that split is the design:
   #
-  #   template_picker_ui      the frame -- source status rows, diagnostics,
-  #                           the search box, the source filter, the refresh
-  #                           button. It depends on the index and the refresh
-  #                           tick ONLY, and reads the search text and the
-  #                           current selection through isolate(), so typing
+  #   template_picker_ui      the frame -- stale-source lines, diagnostics,
+  #                           the search box, the library filter and the
+  #                           two-pane body. It depends on the index and the
+  #                           refresh tick ONLY, and reads the search text and
+  #                           the library choice through isolate(), so typing
   #                           never re-renders the box being typed into (which
   #                           would move the caret) and clicking a row never
   #                           re-renders the list under the pointer.
@@ -1488,13 +1533,24 @@ server <- function(input, output, session) {
     tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
     showModal(modalDialog(
       title = "Create new from template",
-      p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
-      uiOutput("template_picker_ui"),
+      # Static, so the dialog has its picker width (theme.R) from the first
+      # frame instead of jumping once the output arrives.
+      div(
+        class = "tmpl-picker-modal",
+        p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
+        uiOutput("template_picker_ui")
+      ),
+      # Refresh is housekeeping, not a step: it sits apart on the left, where
+      # it is there on every state of the picker, the empty one included.
       footer = tagList(
+        actionButton(
+          "tmpl_refresh_templates", "Refresh templates",
+          class = "btn btn-link tmpl-refresh me-auto"
+        ),
         modalButton("Cancel"),
         actionButton("template_select_next", "Use this template", class = "btn btn-primary")
       ),
-      size = "l",
+      size = "xl",
       easyClose = TRUE
     ))
   }
@@ -1526,19 +1582,20 @@ server <- function(input, output, session) {
     template_picker_lineage(idx, template_picker_entries(idx))
   })
 
-  # The source filter is honoured only while it names a source that still has
-  # templates. Its control exists only when there are two or more of those
-  # (template_picker_source_ui()), so a refresh that leaves one source would
-  # take the control away while Shiny kept holding its last value -- and every
-  # row would stay filtered out behind a message asking the user to pick a
-  # source they can no longer see.
+  # The library filter is a multi-select, and only the names in it that still
+  # have templates count -- template_picker_restrict_sources() (template_
+  # index.R) says why, and why the tree is rebuilt rather than filtered. Its
+  # own reactive, so a keystroke in the search box re-filters without
+  # rebuilding the tree.
+  template_picker_scoped <- reactive({
+    template_picker_restrict_sources(
+      dta_template_index_cached(), template_picker_rows(),
+      input$template_select_source
+    )
+  })
+
   template_picker_visible <- reactive({
-    rows <- template_picker_rows()
-    source <- as.character(input$template_select_source %||% "")
-    if (!(source %in% unique(rows$source_name))) {
-      source <- ""
-    }
-    template_picker_filter(rows, input$template_search %||% "", source)
+    template_picker_filter(template_picker_scoped(), input$template_search %||% "")
   })
 
   # The user's own choice for as long as it names a row that is still visible,
@@ -1606,10 +1663,6 @@ server <- function(input, output, session) {
     rows <- template_picker_rows()
 
     diagnostics <- template_source_diagnostics_ui(sources)
-    refresh_btn <- actionButton(
-      "tmpl_refresh_templates", "Refresh templates",
-      class = "btn btn-sm btn-outline-secondary"
-    )
 
     if (nrow(rows) == 0) {
       # Private-replaces-public (template_sources.R): with a private source
@@ -1630,23 +1683,30 @@ server <- function(input, output, session) {
       } else {
         p("No creation templates found.")
       }
-      return(tagList(diagnostics, msg, refresh_btn))
+      return(tagList(diagnostics, msg))
     }
 
-    tagList(
+    # Search and libraries on one toolbar; under it the list and the
+    # selected template side by side (stacked on a narrow screen, theme.R), so
+    # what was picked is in view the moment it is picked.
+    div(
+      class = "tmpl-picker",
       tagList(lapply(sources, template_source_status_row)),
       diagnostics,
       div(
         class = "tmpl-search-row",
         template_picker_search_ui(isolate(input$template_search %||% "")),
         template_picker_source_ui(
-          unique(rows$source_name),
-          isolate(input$template_select_source %||% "")
+          sort(unique(rows$source_name), method = "radix"),
+          isolate(input$template_select_source),
+          counts = c(table(rows$source_name))
         )
       ),
-      uiOutput("template_picker_list"),
-      uiOutput("template_picker_detail"),
-      refresh_btn,
+      div(
+        class = "tmpl-picker-body",
+        div(class = "tmpl-picker-main", uiOutput("template_picker_list")),
+        div(class = "tmpl-picker-side", uiOutput("template_picker_detail"))
+      ),
       template_picker_scripts()
     )
   })
@@ -3369,14 +3429,29 @@ server <- function(input, output, session) {
             class = "msg-hint"
           )
         } else {
+          refs <- paste0(vocabs$id, "@", vocabs$version)
+          # Open on the vocabulary meant for THIS column; only when nothing
+          # points at one, on the last one used (if it is still offered).
+          sug <- isolate(rv$col_vocab_sug)
+          last <- isolate(rv$col_vocab_ref)
           tagList(
             selectInput("col_vocab_ref", "Vocabulary",
-              choices = stats::setNames(
-                paste0(vocabs$id, "@", vocabs$version),
-                paste0(vocabs$label, " (", vocabs$id, "@", vocabs$version, ")")
-              ),
-              selected = isolate(rv$col_vocab_ref), width = "100%"
+              choices = stats::setNames(refs, paste0(vocabs$label, " (", refs, ")")),
+              selected = sug$ref %||% (if (isTRUE(last %in% refs)) last), width = "100%"
             ),
+            if (!is.null(sug)) {
+              p(
+                paste0(
+                  "Suggested: ", sug$ref, " — ",
+                  if (identical(sug$reason, "declared")) {
+                    paste0("it lists column ", trimws(pf$id %||% ""), ".")
+                  } else {
+                    "it holds every value this column already lists."
+                  }
+                ),
+                class = "msg-hint"
+              )
+            },
             uiOutput("col_vocab_terms"),
             p(
               paste(
@@ -3564,9 +3639,25 @@ server <- function(input, output, session) {
     )
   }
 
+  # The column's current permitted values, as the form holds them: one per line.
+  col_prefill_values <- function() {
+    v <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
+    v[nzchar(v)]
+  }
+
   observeEvent(input$col_vocab_open, {
     req(editing())
     rv$col_prefill <- snapshot_col_form()
+    # Once per open, not per render: the body names it and the terms below
+    # take its Codes/Labels choice from it.
+    idx <- dta_template_index_cached()
+    vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+    rv$col_vocab_sug <- if (NROW(vocabs) > 0) {
+      vocabulary_suggestion(
+        rv$col_prefill$id, col_prefill_values(),
+        paste0(vocabs$id, "@", vocabs$version), vocabulary_resolver(idx)
+      )
+    }
     rv$col_msg <- NULL
     rv$col_view <- "vocab"
     rv$col_token <- rv$col_token + 1
@@ -3578,11 +3669,20 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
   })
 
-  # The terms of whichever vocabulary is selected, pre-ticked with any of them
-  # the column already lists -- so re-opening the picker on a column that was
-  # built from this vocabulary shows the current selection rather than a blank
-  # form.
+  # The Codes/Labels choice and the terms of whichever vocabulary is selected,
+  # pre-ticked with any of them the column already lists, by code or by label
+  # -- so re-opening the picker on a column that was built from this vocabulary
+  # (its code or its decode half) shows the current selection. When the column
+  # lists none of them -- a new column, or a different vocabulary -- every term
+  # is ticked, because the whole vocabulary is what a column usually wants.
+  #
+  # Deliberately not dependent on input$col_vocab_field: flipping codes/labels
+  # must not throw away terms the user has already picked. It IS dependent on
+  # rv$col_token, which every open of the picker bumps: the suggestion often
+  # selects the same vocabulary as last time, so input$col_vocab_ref alone
+  # would leave the previous column's ticks on screen.
   output$col_vocab_terms <- renderUI({
+    rv$col_token
     ref <- input$col_vocab_ref
     req(ref)
     resolve <- vocabulary_resolver(dta_template_index_cached())
@@ -3592,22 +3692,45 @@ server <- function(input, output, session) {
       return(p(paste("Vocabulary", ref, msg), class = "msg-hint"))
     }
 
-    codes <- vapply(vocab$terms, function(t) as.character(t$code), character(1))
-    labels <- vapply(vocab$terms, function(t) {
-      lb <- as.character(t$label %||% "")
-      if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
-    }, character(1))
+    codes <- vapply(vocab$terms %||% list(), function(t) as.character(t$code), character(1))
+    if (length(codes) == 0) {
+      return(p(paste("Vocabulary", ref, "has no terms."), class = "msg-hint"))
+    }
+    decodes <- vocabulary_values(vocab, field = "label")
+    current <- col_prefill_values()
+    hit <- codes %in% current | decodes %in% current
+    extras <- setdiff(current, c(codes, decodes))
 
-    current <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
-    selectizeInput("col_vocab_terms_sel", "Terms",
-      choices = stats::setNames(codes, labels),
-      selected = intersect(codes, current[nzchar(current)]),
-      multiple = TRUE, width = "100%",
-      # `create = TRUE`: the column editor is the free-form surface of the app,
-      # so a value the vocabulary does not have is allowed here by default --
-      # "pick from the vocabulary, or use your own". A template's slot is where
-      # a closed list is enforced.
-      options = list(create = TRUE)
+    # The suggestion's field for the suggested vocabulary; for any other, labels
+    # only when the column already holds labels and no codes of it.
+    sug <- isolate(rv$col_vocab_sug)
+    field <- if (identical(sug$ref, ref)) {
+      sug$field
+    } else if (any(decodes %in% current) && !any(codes %in% current)) {
+      "label"
+    } else {
+      "code"
+    }
+
+    tagList(
+      # A vocabulary without labels has nothing to choose between.
+      if (!identical(codes, decodes)) {
+        radioButtons("col_vocab_field", "Write as",
+          choiceNames = list(
+            paste0("Codes (e.g. ", codes[[1]], ")"),
+            paste0("Labels (e.g. ", decodes[[1]], ")")
+          ),
+          choiceValues = list("code", "label"),
+          selected = field, inline = TRUE
+        )
+      },
+      vocab_term_checklist(
+        "col_vocab_terms_sel", vocab$terms,
+        # The column's own values stay ticked beside its terms; a column that
+        # shares nothing with this vocabulary gets all of it instead.
+        selected = if (any(hit)) c(extras, codes[hit]) else codes,
+        extras = extras
+      )
     )
   })
 
@@ -3617,6 +3740,24 @@ server <- function(input, output, session) {
     if (length(sel) == 0) {
       rv$col_msg <- list(ok = FALSE, error = "Select at least one term, or go back without applying.")
       return()
+    }
+    vocab <- tryCatch(
+      vocabulary_resolver(dta_template_index_cached())(input$col_vocab_ref),
+      error = function(e) NULL
+    )
+    codes <- vapply(vocab$terms %||% list(), function(t) t$code, character(1))
+    # A vocabulary with no terms renders no checklist, but Shiny keeps the last
+    # one's selection: never write that stale selection under this vocabulary.
+    if (length(codes) == 0) {
+      rv$col_msg <- list(ok = FALSE, error = "This vocabulary has no terms to use.")
+      return()
+    }
+    # The decode half of a code/decode pair (GFTEST beside GFTESTCD) wants the
+    # labels. A value the vocabulary does not have stays as it is.
+    if (identical(input$col_vocab_field, "label")) {
+      hit <- match(sel, codes)
+      ok <- !is.na(hit)
+      sel[ok] <- as.character(vocabulary_values(vocab, field = "label"))[hit[ok]]
     }
     rv$col_vocab_ref <- input$col_vocab_ref
     pf <- isolate(rv$col_prefill) %||% list()

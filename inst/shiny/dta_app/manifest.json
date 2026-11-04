@@ -64,11 +64,11 @@
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
         "RemoteRef": "dev",
-        "RemoteSha": "d865701739794f19a0c415496583d47b250f9086",
+        "RemoteSha": "06c8e426411108ae31cc140dba2db69337ac126f",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
         "GithubRef": "dev",
-        "GithubSHA1": "d865701739794f19a0c415496583d47b250f9086",
+        "GithubSHA1": "06c8e426411108ae31cc140dba2db69337ac126f",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3127,7 +3127,7 @@
       "checksum": "772357b46f651972b9e9dd9c9e23e7da"
     },
     "R/template_index.R": {
-      "checksum": "4d46c600e5d986d7aadb50c1bf425f77"
+      "checksum": "e6f088862b9ee7c1694ec1d4dab255ef"
     },
     "R/template_inherit.R": {
       "checksum": "df2cfe3cd9154c8771a7af2bbfe33a3d"
@@ -3136,13 +3136,13 @@
       "checksum": "567e1a78e9728987c8cd4b348da0560c"
     },
     "R/template_ui.R": {
-      "checksum": "a937265ecc22d00239a7c766f375cc1f"
+      "checksum": "4003a16f22e81f4962187df376e53351"
     },
     "R/theme.R": {
-      "checksum": "a4b1b42eaba266a71e52ec1c185cad62"
+      "checksum": "91d4fa321b27cd03a5ca4429b6968dc3"
     },
     "R/ui_components.R": {
-      "checksum": "93d843db3234a27298b5d60fcd05e1cf"
+      "checksum": "17ce1b17b065e49c02351d703b5b89e9"
     },
     "R/utils_dta.R": {
       "checksum": "183910f8ec1165631922678bb72d0d58"
@@ -3154,13 +3154,13 @@
       "checksum": "14395df11bfe7b9c920e1d89d18ac7e3"
     },
     "R/vocabulary.R": {
-      "checksum": "bc7120fb72d6e9be2720991f8bd3010b"
+      "checksum": "33fd54387bb3af60a0b74d5ae0a18892"
     },
     "VERSION": {
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "80b5405ff01c0085c906b1e87fbc358d"
+      "checksum": "c8298038586998048473271f39b99b93"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

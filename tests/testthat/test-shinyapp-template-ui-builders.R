@@ -218,26 +218,53 @@ test_that("the search field is a type=search input carrying autofocus and its va
 
 # ---- Source filter ---------------------------------------------------------
 
-test_that("the source filter appears only with a choice to make, and scales past four", {
+test_that("the library filter appears only with a choice to make, and lets several be chosen", {
   source_ui <- app_fn("template_picker_source_ui")
 
   expect_null(source_ui(character(0)))
   expect_null(source_ui("lab"))
 
-  two <- html_of(source_ui(c("lab", "packaged")))
-  expect_match(two, 'name="template_select_source"', fixed = TRUE)
-  expect_match(two, "All sources", fixed = TRUE)
-  expect_match(two, 'type="radio"', fixed = TRUE)
-  # "All sources" is always the first row, and always the empty value that
-  # template_picker_filter() reads as "do not restrict".
-  expect_lt(
-    regexpr("All sources", two, fixed = TRUE),
-    regexpr("packaged", two, fixed = TRUE)
-  )
+  two <- html_of(source_ui(c("lab", "packaged"), counts = c(lab = 3L, packaged = 12L)))
+  # Checkboxes, one per library: a radio group could only ever say one or
+  # all. There is no "All" row -- nothing checked means every library.
+  expect_equal(count_occurrences(two, 'type="checkbox"'), 2)
+  expect_equal(count_occurrences(two, 'name="template_select_source"'), 2)
+  expect_false(grepl('type="radio"', two, fixed = TRUE))
+  expect_false(grepl("checked", two, fixed = TRUE))
+  expect_match(two, '<span class="tmpl-chip-count">12</span>', fixed = TRUE)
 
-  five <- html_of(source_ui(c("a", "b", "c", "d", "e")))
-  expect_match(five, "<select", fixed = TRUE)
-  expect_false(grepl('type="radio"', five, fixed = TRUE))
+  # A selection is restored on re-render, and a name that is no longer a
+  # library is dropped rather than rendered as a phantom choice.
+  chosen <- html_of(source_ui(c("a", "b", "c"), selected = c("a", "c", "gone")))
+  expect_equal(count_occurrences(chosen, 'checked="checked"'), 2)
+  expect_match(chosen, 'value="a" checked', fixed = TRUE)
+  expect_match(chosen, 'value="c" checked', fixed = TRUE)
+  expect_false(grepl("gone", chosen, fixed = TRUE))
+})
+
+test_that("a source status line appears only for a source served from a stale cache", {
+  status_row <- app_fn("template_source_status_row")
+
+  # Healthy: the library filter and each row's badge already name it.
+  expect_null(status_row(list(name = "lib", scheme = "git", ok = TRUE, stale = FALSE)))
+  # Failed outright: that is the diagnostics block's job, with the error.
+  expect_null(status_row(list(name = "lib", scheme = "git", ok = FALSE, stale = FALSE)))
+
+  stale <- html_of(status_row(
+    list(name = "lib", scheme = "git", ok = TRUE, stale = TRUE, stale_age = 7200)
+  ))
+  expect_match(stale, "<strong>lib</strong>", fixed = TRUE)
+  expect_match(stale, "could not be refreshed", fixed = TRUE)
+  expect_match(stale, "last fetched 2 hours ago", fixed = TRUE)
+})
+
+test_that("past six libraries the filter becomes a multi-select dropdown", {
+  seven <- html_of(app_fn("template_picker_source_ui")(letters[1:7], selected = "b"))
+
+  expect_match(seven, "<select", fixed = TRUE)
+  expect_match(seven, "multiple", fixed = TRUE)
+  expect_match(seven, '<option value="b" selected>', fixed = TRUE)
+  expect_false(grepl('type="checkbox"', seven, fixed = TRUE))
 })
 
 # ---- Token highlighting ----------------------------------------------------
@@ -344,7 +371,7 @@ test_that("an empty result gives direction and renders NO radio group", {
   html <- html_of(app_fn("template_picker_list_ui")(empty, total = 5))
 
   expect_match(html, "No templates match.", fixed = TRUE)
-  expect_match(html, "Clear the search or pick another source.", fixed = TRUE)
+  expect_match(html, "Clear the search or choose other libraries.", fixed = TRUE)
   expect_false(grepl("shiny-input-radiogroup", html, fixed = TRUE))
   expect_equal(count_occurrences(html, 'class="tmpl-entry'), 0)
 })
@@ -355,6 +382,48 @@ test_that("matched tokens are highlighted in the label, id and description", {
 
   # "Other template" (label), "other" (id) and "Other description".
   expect_equal(count_occurrences(html, "<mark>"), 3)
+})
+
+test_that("a highlight adds no whitespace around the matched text", {
+  # htmltools breaks the line around a child tag by default, which the browser
+  # shows as a space: "(LabCorp)" came out as "( LabCorp )".
+  html <- html_of(htmltools::tags$strong(
+    app_fn("template_picker_highlight")("Oncology (LabCorp)", "labcorp")
+  ))
+
+  expect_match(html, "Oncology (<mark>LabCorp</mark>)", fixed = TRUE)
+})
+
+test_that("siblings under a hidden root are separate families, each with its own variants", {
+  # a and b both extend an abstract (never listed) root, so the `family`
+  # column names that root for both; a has one child of its own. Grouping by
+  # that column made a AND b each claim "1 variant" and open together.
+  entries <- make_entries(
+    id = c("a", "a_child", "b"),
+    label = c("A", "A child", "B"),
+    family = c("root", "root", "root"),
+    depth = c(1, 2, 1),
+    indent = c(0, 1, 0),
+    lineage = c("Root", "Root › A", "Root")
+  )
+  html <- html_of(app_fn("template_picker_list_ui")(entries))
+
+  expect_equal(count_occurrences(html, "tmpl-variants"), 1)
+  expect_match(html, 'data-family="a" data-id="a_child"', fixed = TRUE)
+  expect_match(html, 'data-family="b" data-id="b"', fixed = TRUE)
+  # Only a's family is open: a and its child, not b.
+  expect_equal(count_occurrences(html, 'class="tmpl-row open'), 2)
+})
+
+test_that("a child whose parent is not listed is shown as a top row, not hidden", {
+  entries <- make_entries(
+    id = c("orphan_child"), label = "Orphan child", family = "gone",
+    depth = 1, indent = 1, lineage = "Gone"
+  )
+  html <- html_of(app_fn("template_picker_list_ui")(entries))
+
+  expect_match(html, 'data-top=""', fixed = TRUE)
+  expect_false(grepl("margin-left", html, fixed = TRUE))
 })
 
 # ---- The client-side script ------------------------------------------------
@@ -723,4 +792,46 @@ test_that("carry-over offers the open document only when one is open", {
   ))
   expect_match(open, "From the open document", fixed = TRUE)
   expect_match(open, 'id="tmpl_carry_fields"', fixed = TRUE)
+})
+
+# ---- The column editor's term checklist ------------------------------------
+
+checklist_terms <- function(n) {
+  lapply(seq_len(n), function(i) {
+    list(code = sprintf("T%03d", i), label = sprintf("Term %d", i), description = sprintf("About term %d.", i))
+  })
+}
+
+test_that("a small vocabulary is a plain checklist: every term visible, no filter", {
+  html <- html_of(app_fn("vocab_term_checklist")("pick", checklist_terms(3), selected = c("T001", "T003")))
+
+  expect_match(html, 'value="T001" checked', fixed = TRUE)
+  expect_false(grepl('value="T002" checked', html, fixed = TRUE))
+  # htmltools puts a newline between a tag and the text after it.
+  expect_match(html, "T002</span>\\s+— Term 2")
+  expect_match(html, "About term 2.", fixed = TRUE)
+  expect_match(html, "2 of 3 selected", fixed = TRUE)
+  expect_false(grepl("vocab-pick-filter", html, fixed = TRUE))
+  # The script text is constant: nothing vocabulary-authored is spliced into it.
+  expect_match(html, 'onclick="return DTA_vocabCheck(this, false)"', fixed = TRUE)
+})
+
+test_that("a large vocabulary gets a filter naming its size", {
+  html <- html_of(app_fn("vocab_term_checklist")("pick", checklist_terms(300), selected = "T001"))
+
+  expect_match(html, "Filter 300 terms by code, label or description", fixed = TRUE)
+  expect_match(html, "1 of 300 selected", fixed = TRUE)
+  expect_equal(count_occurrences(html, 'type="checkbox"'), 300L)
+})
+
+test_that("values the vocabulary does not have are listed first and counted", {
+  html <- html_of(app_fn("vocab_term_checklist")(
+    "pick", checklist_terms(2),
+    selected = c("OWN", "T001"), extras = "OWN"
+  ))
+
+  expect_match(html, 'value="OWN" checked', fixed = TRUE)
+  expect_match(html, "Not in this vocabulary", fixed = TRUE)
+  expect_lt(regexpr('value="OWN"', html, fixed = TRUE), regexpr('value="T001"', html, fixed = TRUE))
+  expect_match(html, "2 of 3 selected", fixed = TRUE)
 })
