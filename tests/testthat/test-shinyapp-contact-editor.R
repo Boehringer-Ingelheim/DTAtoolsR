@@ -154,3 +154,37 @@ test_that("the browser reports both modal events and the UI loads the reporter",
   expect_match(src, "Shiny.setInputValue('dta_modal_state'", fixed = TRUE)
   expect_match(src, "tags$script(shiny::HTML(modal_state_js))", fixed = TRUE)
 })
+
+test_that("the move buttons reorder a side's contacts, and the ends are disabled", {
+  clean_session_file()
+  shiny::testServer(app_server_dir(), {
+    load_fixture(session)
+    unlock_editing(session)
+    session$setInputs(md_token = 1, contacts_token = 1)
+    names_of <- function() {
+      vapply(app_fn("dta_contacts")(rv$dta, "receiver"), function(p) p$name, character(1))
+    }
+    original <- names_of()
+    expect_gte(length(original), 3L)
+
+    # The first row cannot move up and the last cannot move down; middle rows can.
+    html <- as.character(output$receiver_contacts$html)
+    tag_of <- function(id) regmatches(html, regexpr(sprintf("<button[^>]*id=\"%s\"[^>]*>", id), html))
+    expect_match(tag_of("mvup_receiver_1"), "disabled", fixed = TRUE)
+    expect_false(grepl("disabled", tag_of("mvup_receiver_2"), fixed = TRUE))
+    expect_match(tag_of(paste0("mvdn_receiver_", length(original))), "disabled", fixed = TRUE)
+    expect_false(grepl("disabled", tag_of("mvdn_receiver_1"), fixed = TRUE))
+
+    session$setInputs(mvdn_receiver_1 = 1)
+    expect_equal(names_of(), original[c(2, 1, seq_along(original)[-(1:2)])])
+    # The raw YAML follows the move: the second person is now written first.
+    pos <- function(nm) regexpr(nm, rv$yaml_text, fixed = TRUE)
+    expect_lt(pos(original[[2]]), pos(original[[1]]))
+
+    session$setInputs(mvup_receiver_2 = 1)
+    expect_equal(names_of(), original)
+
+    leave_edit_mode(session)
+    expect_false(grepl("mvup_", as.character(output$receiver_contacts$html), fixed = TRUE))
+  })
+})
