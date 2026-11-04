@@ -509,6 +509,15 @@ test_that("the summary sentence pluralises datasets, options, parties and vocabu
   expect_match(html_two, "Asks for 2 options, 2 parties and 2 vocabularies.", fixed = TRUE)
 })
 
+test_that("a variant-only summary explains the required platform choice", {
+  def <- demo_def(datasets = list())
+  def$variants <- list(id = "trial_platform", label = "Trial platform")
+  expect_identical(
+    app_fn("tmpl_detail_summary")(def),
+    "Choose Trial platform first. The selected platform determines the datasets and agreement options."
+  )
+})
+
 test_that("the summary sentence names an inline dataset by its id, not by its label", {
   detail_ui <- app_fn("template_picker_detail_ui")
   versions <- stats::setNames("1.0", "1.0")
@@ -610,6 +619,36 @@ test_that("boolean is a checkbox, textarea spans the grid, and help is rendered"
   plain <- html_of(render(list(id = "free", type = "text")))
   expect_match(plain, 'placeholder="Type a value"', fixed = TRUE)
   expect_false(grepl("tmpl-opt-wide", plain, fixed = TRUE))
+})
+
+test_that("a textarea suggestion is selectable without losing multiline editing", {
+  html <- html_of(app_fn("render_template_option_input")(list(
+    id = "scope", label = "Delivery scope", type = "textarea",
+    allow_custom = TRUE,
+    choices = c("Complete data", "Incremental data"),
+    default = "Complete data"
+  )))
+
+  expect_match(html, 'id="tmpl_opt_scope"', fixed = TRUE)
+  expect_match(html, "<textarea", fixed = TRUE)
+  expect_match(html, 'id="tmpl_opt_scope_suggestion"', fixed = TRUE)
+  expect_match(html, "Complete data", fixed = TRUE)
+  expect_match(html, "Incremental data", fixed = TRUE)
+  expect_match(html, "(leave blank)", fixed = TRUE)
+  expect_match(html, "dispatchEvent", fixed = TRUE)
+  expect_match(html, 'rows="3"', fixed = TRUE)
+  config <- xml2::xml_text(xml2::xml_find_first(
+    xml2::read_html(html), "//script[@data-for='tmpl_opt_scope_suggestion']"
+  ))
+  callback <- jsonlite::fromJSON(config)$onChange
+  expect_identical(callback, paste0(
+    "function(value) {",
+    'var target = document.getElementById("tmpl_opt_scope");',
+    "if (target) {",
+    "target.value = value === \"__blank__\" ? '' : (value || '');",
+    "target.dispatchEvent(new Event('input', { bubbles: true }));",
+    "}}"
+  ))
 })
 
 test_that("an option with no id builds nothing", {

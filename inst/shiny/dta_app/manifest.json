@@ -64,11 +64,11 @@
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
         "RemoteRef": "dev",
-        "RemoteSha": "8b61150156b28d6c32f744dfbb1a837e2e70e1e7",
+        "RemoteSha": "6e319953db3ff9079c1d53d717f3d7fab0171086",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
         "GithubRef": "dev",
-        "GithubSHA1": "8b61150156b28d6c32f744dfbb1a837e2e70e1e7",
+        "GithubSHA1": "6e319953db3ff9079c1d53d717f3d7fab0171086",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3118,28 +3118,28 @@
       "checksum": "55eaad81a9ac5be1ad97c852e44eba16"
     },
     "R/template_core.R": {
-      "checksum": "725d00411c7fc73802664e05bbd30ab5"
+      "checksum": "95b709ca224ef036f8debaf64e9f93e9"
     },
     "R/template_create.R": {
-      "checksum": "24c5df89c5b43656dcc6ea39fd158e32"
+      "checksum": "414f8d0dd80635b888a1a712fcb094a6"
     },
     "R/template_diff.R": {
       "checksum": "772357b46f651972b9e9dd9c9e23e7da"
     },
     "R/template_history.R": {
-      "checksum": "aee0d1b448f4cbdd2da5106d6909c98d"
+      "checksum": "eb4afc6ed26f202aefdfcedd0d2a67ef"
     },
     "R/template_index.R": {
       "checksum": "e6f088862b9ee7c1694ec1d4dab255ef"
     },
     "R/template_inherit.R": {
-      "checksum": "19009972afe8203311af850ca6be0f92"
+      "checksum": "2172c7af77a459414030f192dbf97d24"
     },
     "R/template_sources.R": {
       "checksum": "64b279d44ede4fa71824c3565a619246"
     },
     "R/template_ui.R": {
-      "checksum": "343e7d64ab8e338c5d93e5f89730befb"
+      "checksum": "b801856b0a9de3d97c9df628ff643582"
     },
     "R/theme.R": {
       "checksum": "c30bb43ba7482aacfefbd4bfba20bfd2"
@@ -3148,7 +3148,7 @@
       "checksum": "3124c3601de002c67c9d85d93cfbf93e"
     },
     "R/utils_dta.R": {
-      "checksum": "2900862d9e9c2779f5468bd62db9e160"
+      "checksum": "421f05c6350c3071af7fdd40d9b32ccb"
     },
     "R/utils_export.R": {
       "checksum": "c3888c2fce76134e6ddc7f46613139a7"
@@ -3163,7 +3163,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "923ddee23aa1723f549541d7c6e1080f"
+      "checksum": "27e45ad8030fca9677cb6b1e4ba5f427"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

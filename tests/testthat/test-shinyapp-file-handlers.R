@@ -303,6 +303,41 @@ test_that("a handler change is visible in the handlers signature", {
   ))
 })
 
+# ---- Export file name -------------------------------------------------------
+
+test_that("the YAML export file name carries the version without dots", {
+  fn <- app_fn("dta_yaml_export_filename")
+  date <- as.Date("2026-11-04")
+
+  # The bundled spec is titled "Clinical Data Specification", version "0.1".
+  expect_identical(
+    fn(app_fixture_dta(), date),
+    "Clinical_Data_Specification_v01_2026-11-04.yaml"
+  )
+
+  # A multi-part version loses every dot.
+  lines <- readLines(app_fixture_path("clinical_dta.yaml"), warn = FALSE)
+  lines <- sub('version: "0.1"', 'version: "1.2.10"', lines, fixed = TRUE)
+  dta <- app_fn("dta_read_yaml_text")(paste(lines, collapse = "\n"))$value
+  expect_identical(
+    fn(dta, date),
+    "Clinical_Data_Specification_v1210_2026-11-04.yaml"
+  )
+})
+
+test_that("the YAML export file name omits the version segment without one", {
+  fn <- app_fn("dta_yaml_export_filename")
+  dta <- app_fixture_dta()
+  md <- DTAtools::metadata(dta)
+  S7::prop(md, "version") <- NULL
+  S7::prop(dta, "metadata") <- md
+  expect_null(S7::prop(DTAtools::metadata(dta), "version"))
+  expect_identical(
+    fn(dta, as.Date("2026-11-04")),
+    "Clinical_Data_Specification_2026-11-04.yaml"
+  )
+})
+
 # ---- Round trips ------------------------------------------------------------
 
 test_that("a dataset edited to two handlers survives a YAML round trip", {
