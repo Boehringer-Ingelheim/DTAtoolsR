@@ -797,6 +797,11 @@ bi_css <- function() {
     /* Column / rule spec editors (inside the Edit modals). */
     .spec-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
     .spec-hint { font-size: .82rem; color: var(--bi-grey); }
+    /* Column list searched or sorted: no move arrows (visibility keeps the
+       edit / remove buttons where they were), and a hint to get them back. */
+    .reorder-off-hint { display: none; margin-bottom: 6px; }
+    .dta-reorder-off .reorder-off-hint { display: block; }
+    .dta-reorder-off .dta-move-btn { visibility: hidden; }
     .spec-form { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 12px; background: #fff; margin-top: 10px; }
     .spec-form .form-group { margin-bottom: 8px; }
     .cond-builder { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 10px; margin-bottom: 10px; background: var(--bi-grey-light); }
