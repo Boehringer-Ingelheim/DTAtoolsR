@@ -374,3 +374,17 @@ requirements:
     category: integrity
     covers: [run_dta_app, validate_template]
     source: inst/shiny/dta_app/R/template_core.R; inst/shiny/dta_app/app.R
+
+  - id: REQ-APP-026
+    text: >
+      An IF or THEN condition row of a conditional (col_condition) rule removed
+      with the rule editor's own remove control shall be excluded from the rule
+      that results from Save, even when the row was filled in before it was
+      removed; only the rows still present shall be saved.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (cond_remove_/then_remove_ observers)
+    notes: >
+      Before this change the IF and THEN lists could grow but offered no way
+      to remove a row.

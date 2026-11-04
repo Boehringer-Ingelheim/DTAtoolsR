@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- IF and THEN condition rows in the app's rule editor can now be removed, like
+  grouped-condition rows. Removing the only row empties it instead.
+
 - **"Authorized for corrections" is now a picker in the app.** The Metadata
   tab offers the Receiver and Supplier contacts to choose from, accepts any
   other name typed in, and allows several people or none (empty leaves the

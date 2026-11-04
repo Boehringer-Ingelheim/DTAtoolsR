@@ -548,3 +548,52 @@ test_that("OQ-APP-028 | a group-condition row removed with the rule editor's own
     )
   })
 })
+
+test_that("OQ-APP-033 | an IF or THEN row removed with the rule editor's own control stays out of the saved rule | REQ-APP-026", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("h", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(
+      rule_id = "oq_app_033_removed_row",
+      rule_desc = "IF row 1 and THEN row 2 are removed before Save"
+    )
+
+    # Row 1 of each list, then a second row added to each. Every row uses a
+    # different column because the saved condition is keyed by column.
+    session$setInputs(
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F",
+      then_col_1 = "AGE", then_op_1 = "equals", then_val_1 = "12"
+    )
+    session$setInputs(cond_add = 1, then_add = 1)
+    session$setInputs(
+      cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED",
+      then_col_2 = "HEIGHT", then_op_2 = "equals", then_val_2 = "170"
+    )
+
+    # Filled in, then removed via the real remove-button inputs before Save.
+    session$setInputs(cond_remove_1 = 1)
+    session$setInputs(then_remove_2 = 1)
+
+    session$setInputs(rule_save = 1)
+
+    qa_check("the save reports no error", is.null(rv$rule_msg))
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    qa_step(
+      "the saved rule carries only the IF row never removed",
+      "STATUS", names(new_rule@condition)
+    )
+    qa_step(
+      "and only the THEN row never removed",
+      "AGE", names(new_rule@then)
+    )
+  })
+})
