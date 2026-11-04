@@ -258,6 +258,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   other non-alphanumeric character goes too, so `1.2.0-beta` gives `v120beta`).
   A document without a version keeps the old `<title>_<date>.yaml`.
 
+- **The qualification report no longer calls a requirement with a known
+  defect against it "verified".** A requirement whose test cases all passed
+  but that an open or pending deviation affects is now reported as
+  `verified_with_deviation`, and the traceability matrix names the deviations
+  against it in a new column. SUMMARY.txt, the report and
+  `results/requirements.csv` count these separately from clean verifications.
+  Previously a reproduced defect's binding step passed like any other, so the
+  requirement it contradicts read as verified in section 7 while section 8
+  listed the defect. The verdict rules are unchanged (REQ-CORE-011).
+
+- **The qualification suite now reproduces DEV-002 and DEV-016 itself.** Both
+  were registered as `pending`, so no run checked that they still occur.
+  OQ-VAL-038 binds DEV-002 (an unchanged table with an unnamed-timezone
+  timestamp is revalidated after a rebuild; its `affects` is corrected to
+  REQ-VAL-015, the skip requirement), and OQ-EXPORT-048 binds DEV-016 (an
+  inline placeholder spelled by a dataset value is resolved inside a region).
+
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
   template or an inline template dataset whose `id` is absent, null or empty
   is reported as `dataset_id_missing`, an error. The app already refused to
