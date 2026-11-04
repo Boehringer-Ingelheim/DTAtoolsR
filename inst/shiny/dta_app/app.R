@@ -1287,28 +1287,45 @@ server <- function(input, output, session) {
       })
     }
 
-    showModal(modalDialog(
-      title = paste0("Create from template: ", as.character(def$label %||% def$id %||% "template")),
-      if (!is.null(def$variants)) {
-        tagList(
-          p(paste0(def$variants$label %||% def$variants$id, ": ", variant_selections[[def$variants$id]])),
-          actionButton("template_variant_back", "Change platform (resets agreement options)")
-        )
-      },
+    # The platform chosen in the step before is context for the whole form, so
+    # it sits in the sidebar with the template it refines.
+    variant_ui <- if (!is.null(def$variants)) {
+      div(
+        class = "tmpl-aside-block",
+        div(class = "section-label", as.character(def$variants$label %||% def$variants$id)),
+        p(class = "tmpl-aside-variant", as.character(variant_selections[[def$variants$id]] %||% "")),
+        actionButton("template_variant_back", "Change platform",
+          class = "btn btn-sm btn-outline-secondary"
+        ),
+        div(class = "msg-hint", "Changing it resets the agreement options.")
+      )
+    }
+    dlg <- modalDialog(
+      title = tagList(
+        span(class = "tmpl-eyebrow", "New DTA from template"),
+        as.character(def$label %||% def$id %||% "template")
+      ),
       template_options_modal_body(
         def, loaded, index, vocab_specs,
-        has_open_doc = !is.null(rv$dta)
+        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui
       ),
       footer = tagList(
-        actionButton("template_options_back", "Back to templates",
-          class = "btn btn-outline-secondary"
+        actionButton("template_options_back", "← Back to templates",
+          class = "btn btn-link tmpl-back"
         ),
         modalButton("Cancel"),
         actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
       ),
-      size = "l",
+      size = "xl",
       easyClose = FALSE
-    ))
+    )
+    # Bootstrap's scrollable dialog keeps the title and the buttons in view
+    # while the form scrolls; modalDialog() has no argument for it.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-options-dialog"
+      )$allTags()
+    )
   }
 
   # --- landing: load a DTA YAML ------------------------------------------

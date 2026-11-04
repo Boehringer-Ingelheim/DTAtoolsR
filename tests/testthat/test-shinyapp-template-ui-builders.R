@@ -746,7 +746,9 @@ test_that("a closed vocabulary slot renders arrays, quick actions and its min hi
   expect_match(html, "All (1)", fixed = TRUE)
   expect_match(html, ">None<", fixed = TRUE)
   expect_match(html, "Default (1)", fixed = TRUE)
-  expect_match(html, "Choose at least 1.", fixed = TRUE)
+  # min: 1 is said by the badge alone; only a higher floor gets a sentence.
+  expect_match(html, '<span class="tmpl-req">Required</span>', fixed = TRUE)
+  expect_false(grepl("Choose at least", html, fixed = TRUE))
   # The typing hint belongs to open mode only.
   expect_false(grepl("press Enter", html, fixed = TRUE))
 })
@@ -796,7 +798,7 @@ test_that("a party slot names the template's own default and marks required slot
     html, '<option value="" selected>(template default: External Supplier)</option>',
     fixed = TRUE
   )
-  expect_match(html, "Supplier *", fixed = TRUE)
+  expect_match(html, '<span class="tmpl-req">Required</span>', fixed = TRUE)
   # The eligible profile from the index is offered alongside it.
   expect_match(html, '<option value="supplier_acme">ACME Labs</option>', fixed = TRUE)
 })
@@ -821,6 +823,46 @@ test_that("the header names id, version, source and lineage, and options land in
   expect_match(html, "tmpl-opt-wide", fixed = TRUE)
 })
 
+test_that("options are grouped by the metadata block they target, and the sidebar links each section", {
+  idx <- local_modal_index()
+  def <- demo_def(
+    options = list(
+      list(id = "title", label = "Document title", type = "text", target = "metadata.title"),
+      list(id = "freq", label = "Frequency", type = "text", target = "metadata.transmission.frequency"),
+      list(id = "blind", label = "Blinded?", type = "boolean", target = "metadata.transmission.blinded_transfer")
+    ),
+    party_slots = list(list(id = "supplier", target = "metadata.supplier", label = "Supplier"))
+  )
+  html <- html_of(app_fn("template_options_modal_body")(
+    def, demo_loaded(def), idx, list(slots = list(), error = NULL)
+  ))
+
+  expect_match(html, '<h4 class="tmpl-group-title">General</h4>', fixed = TRUE)
+  expect_match(html, '<h4 class="tmpl-group-title">Transmission</h4>', fixed = TRUE)
+  # Grouping keeps each option's own control id -- the collectors read them.
+  expect_lt(regexpr('id="tmpl_opt_title"', html), regexpr("Transmission</h4>", html))
+  expect_gt(regexpr('id="tmpl_opt_blind"', html), regexpr("Transmission</h4>", html))
+  # The label sits in the row's left column and points at its control.
+  expect_match(html, '<label class="tmpl-field-label" for="tmpl_opt_freq">Frequency', fixed = TRUE)
+  expect_match(html, 'class="tmpl-switch"', fixed = TRUE)
+
+  # One link per section present, with its count; no vocabulary section here.
+  expect_match(html, 'class="tmpl-toc-link active" data-sec="options"', fixed = TRUE)
+  expect_match(html, 'data-sec="parties"', fixed = TRUE)
+  expect_match(html, 'data-sec="carry"', fixed = TRUE)
+  expect_false(grepl('data-sec="vocab"', html, fixed = TRUE))
+  expect_match(html, '<span class="tmpl-toc-count">3</span>', fixed = TRUE)
+})
+
+test_that("a single group gets no group heading", {
+  idx <- local_modal_index()
+  def <- demo_def(options = list(list(id = "title", type = "text", target = "metadata.title")))
+  html <- html_of(app_fn("template_options_modal_body")(
+    def, demo_loaded(def), idx, list(slots = list(), error = NULL)
+  ))
+  expect_false(grepl("tmpl-group-title", html, fixed = TRUE))
+})
+
 test_that("a template with no options says so rather than showing an empty grid", {
   idx <- local_modal_index()
   def <- demo_def()
@@ -839,14 +881,14 @@ test_that("carry-over offers the open document only when one is open", {
 
   closed <- html_of(body(def, demo_loaded(def), idx, list(slots = list(), error = NULL)))
   expect_match(closed, "Carry over metadata", fixed = TRUE)
-  expect_match(closed, "Don't carry anything over", fixed = TRUE)
-  expect_false(grepl("From the open document", closed, fixed = TRUE))
+  expect_match(closed, "<span>Nothing</span>", fixed = TRUE)
+  expect_false(grepl("The open document", closed, fixed = TRUE))
 
   open <- html_of(body(
     def, demo_loaded(def), idx, list(slots = list(), error = NULL),
     has_open_doc = TRUE
   ))
-  expect_match(open, "From the open document", fixed = TRUE)
+  expect_match(open, "The open document", fixed = TRUE)
   expect_match(open, 'id="tmpl_carry_fields"', fixed = TRUE)
 })
 
