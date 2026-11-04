@@ -195,12 +195,12 @@ test_that("OQ-EXPORT-032 | the md5 sidecar names the checksum, column count and 
   disk_checksum <- unname(tools::md5sum(out))
   qa_step(
     "the recorded checksum is the checksum of the file actually on disk",
-    disk_checksum, as.character(written$md5sum[[1]])
+    disk_checksum, written$md5sum
   )
   qa_step(
     "the recorded dimensions are the table's",
     c(rows = 3L, columns = 2L),
-    c(rows = as.integer(written$md5sum[[2]]), columns = as.integer(written$md5sum[[3]]))
+    c(rows = as.integer(written$n_rows), columns = as.integer(written$n_cols))
   )
   qa_step(
     "the sidecar file names the same three facts in the documented format",
@@ -218,7 +218,7 @@ test_that("OQ-EXPORT-033 | get_md5sum = FALSE returns no checksum and writes no 
     overwrite = TRUE, quiet = TRUE, arrange_by = NULL, get_md5sum = FALSE
   )
 
-  qa_check("the checksum is reported as NA", is.na(written$md5sum))
+  qa_step("the checksum is reported as NA_character_", NA_character_, written$md5sum)
   qa_check("no sidecar file was written", !file.exists(paste0(out, ".md5")))
 })
 
@@ -366,36 +366,55 @@ test_that("OQ-EXPORT-038 | write_columns_to_json writes the declared id, type, l
   )
 })
 
-test_that("OQ-EXPORT-039 | write_columns_to_json cannot round trip a column that leaves any property unset | REQ-EXPORT-029", {
-  # Mirrors the commented-out import_specs_from_json() left in
-  # R/DTAColumnSpecCollection-class.R -- the same specs_from_list()
-  # construction import_specs_from_yaml() uses for YAML, applied to the
-  # parsed JSON instead. There is no package-provided JSON reader to call.
-  et_specs_from_json <- function(file) {
-    parsed <- jsonlite::fromJSON(file, simplifyVector = FALSE)
-    specs_from_list(parsed$columns, parsed$rules)
-  }
-
+test_that("OQ-EXPORT-039 | import_specs_from_json reads back the file write_columns_to_json wrote | REQ-EXPORT-029", {
   dir <- qa_tempdir()
   out <- file.path(dir, "specs.json")
   write_columns_to_json(et_yaml_specs(), out)
 
-  cond <- tryCatch(et_specs_from_json(out), error = function(e) e)
-  # PINNED: CODE leaves colclass unset (never declared) and, because values is
-  # set, examples and pattern unset too (the two are mutually exclusive on one
-  # column); every one of the three is written as "{}" rather than null, and
-  # jsonlite reads "{}" back as an empty list rather than NULL. NOTE leaves
-  # label, description, colclass and values unset the same way. No column,
-  # however fully specified, currently avoids leaving at least one property
-  # unset, so this reconstruction fails for every collection, not a
-  # cherry-picked one.
-  qa_check(
-    "PINNED: reconstructing the collection from write_columns_to_json's own output fails",
-    inherits(cond, "condition")
+  back <- import_specs_from_json(out)
+
+  # CODE leaves colclass, examples and pattern unset; NOTE leaves label,
+  # description, colclass and values unset. Both must come back.
+  qa_step("the same column identifiers come back, in order", c("CODE", "NOTE"), names(back@columns))
+  qa_step(
+    "CODE keeps its type, length, nullability and permitted values",
+    list(type = "Char", length = 5, nullable = FALSE, values = c("007", "008", "Y", "N", "01")),
+    list(
+      type = back@columns$CODE@structure@type, length = as.numeric(back@columns$CODE@structure@length),
+      nullable = back@columns$CODE@nullable, values = back@columns$CODE@values
+    )
   )
   qa_step(
-    "PINNED: the failure is the property-type mismatch an unset field written as {} leaves behind",
-    TRUE, grepl("<list>", conditionMessage(cond), fixed = TRUE)
+    "NOTE keeps its pattern and has no values",
+    list(pattern = "^[A-Z]{3}$", values = NULL),
+    list(pattern = back@columns$NOTE@pattern, values = back@columns$NOTE@values)
   )
-  qa_known_deviation("DEV-015", inherits(cond, "condition"))
+  qa_step(
+    "an unset optional property comes back as unset, not as an empty list",
+    list(NULL, NULL, NULL),
+    list(back@columns$CODE@colclass, back@columns$CODE@pattern, back@columns$NOTE@label)
+  )
+})
+
+test_that("OQ-EXPORT-048 | a JSON round trip keeps a rule and an empty rules array | REQ-EXPORT-029 REQ-SPEC-015", {
+  dir <- qa_tempdir()
+  with_rule <- DTAColumnSpecCollection(
+    columns = list(
+      ID = DTAColumnSpec(id = "ID", type = "SAS Char", nullable = FALSE),
+      VISIT = DTAColumnSpec(id = "VISIT", type = "SAS Char", nullable = FALSE)
+    ),
+    rules = list(DTARuleColUnique(id = "id_visit_unique", columns = c("ID", "VISIT")))
+  )
+  p1 <- file.path(dir, "with_rule.json")
+  write_columns_to_json(with_rule, p1)
+  back <- import_specs_from_json(p1)
+  qa_step(
+    "the rule survives with its id and its columns", list(1L, "id_visit_unique", c("ID", "VISIT")),
+    list(length(back@rules), back@rules[[1]]@id, back@rules[[1]]@columns)
+  )
+
+  no_rules <- DTAColumnSpecCollection(columns = list(ID = DTAColumnSpec(id = "ID", type = "SAS Char")), rules = list())
+  p2 <- file.path(dir, "no_rules.json")
+  write_columns_to_json(no_rules, p2)
+  qa_step("an empty rules array reads back as no rules", 0L, length(import_specs_from_json(p2)@rules))
 })

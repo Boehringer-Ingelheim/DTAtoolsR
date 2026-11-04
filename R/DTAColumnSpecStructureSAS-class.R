@@ -47,7 +47,11 @@
   if (grepl("^[0-9]+\\.[0-9]+$", format_trimmed)) {
     return("Num")
   }
-  if (grepl("^(?:BEST[0-9]+\\.|[0-9]+\\.)$", format_upper)) {
+  # BESTw. is SAS's general numeric format: it shows decimals and exponents.
+  if (grepl("^BEST[0-9]+\\.$", format_upper)) {
+    return("Num")
+  }
+  if (grepl("^[0-9]+\\.$", format_trimmed)) {
     return("Int")
   }
 

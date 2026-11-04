@@ -151,7 +151,7 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
       integer(0)
     } else {
       ok <- if (elementwise) {
-        is.finite(x) & x == trunc(x)
+        is.finite(x) & x == trunc(x) & abs(x) <= .Machine$integer.max
       } else {
         rep(type_ok, n)
       }

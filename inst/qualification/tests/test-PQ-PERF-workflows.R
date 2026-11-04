@@ -226,12 +226,12 @@ test_that("PQ-PERF-008 | a validated delivery carries through the whole reportin
   # table rather than a truncated one.
   qa_step(
     "the recorded checksum is the checksum of the file on disk",
-    unname(tools::md5sum(out)), as.character(written$md5sum[[1]])
+    unname(tools::md5sum(out)), written$md5sum
   )
   qa_step(
     "and the recorded dimensions are the table's",
     c(rows = 500L, columns = 14L),
-    c(rows = as.integer(written$md5sum[[2]]), columns = as.integer(written$md5sum[[3]]))
+    c(rows = as.integer(written$n_rows), columns = as.integer(written$n_cols))
   )
 })
 

@@ -448,9 +448,10 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param ... Additional arguments passed to write.table.
 #' @return Invisibly, a list with \code{tables} (the data as written),
-#'   \code{table} (the table's name) and \code{md5sum} (the checksum, or
-#'   \code{NA} when \code{get_md5sum = FALSE}). Called mainly for the side
-#'   effect of writing the file.
+#'   \code{table} (the table's name), \code{md5sum} (the checksum as a
+#'   single string, or \code{NA_character_} when \code{get_md5sum = FALSE}),
+#'   and \code{n_rows} and \code{n_cols} (the dimensions of the table
+#'   written). Called mainly for the side effect of writing the file.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
 #' out_file <- tempfile(fileext = ".tsv")
@@ -596,22 +597,30 @@ write_table_to_file <- function(
     cli::cli_alert_success("File {filename} written successfully.")
   }
 
-  # Calculate md5sum
+  # Calculate md5sum. write_metadata() returns a list (checksum, rows, cols);
+  # only the checksum string is exposed as `md5sum`.
   if (get_md5sum) {
-    md5sum <- write_metadata(
+    meta <- write_metadata(
       filename,
       table_data,
       write_to_file = write_md5sum_to_file,
       quiet = quiet
     )
+    md5sum <- meta$md5sum
+    n_rows <- meta$n_rows
+    n_cols <- meta$n_cols
   } else {
-    md5sum <- NA
+    md5sum <- NA_character_
+    n_rows <- nrow(table_data)
+    n_cols <- ncol(table_data)
   }
 
   invisible(list(
     tables = table_data,
     table = table,
-    md5sum = md5sum
+    md5sum = md5sum,
+    n_rows = n_rows,
+    n_cols = n_cols
   ))
 }
 

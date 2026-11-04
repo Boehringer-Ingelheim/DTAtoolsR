@@ -254,15 +254,53 @@ test_that("OQ-CORE-005 | a file that errors outside a test case is reported, not
 })
 
 test_that("OQ-CORE-006 | a registered deviation is reported as reproduced while it still occurs | REQ-CORE-006", {
-  # The defect itself: BESTw. is SAS's general numeric output format, so
-  # inferring "Int" from it makes the generated schema reject a legitimate
-  # decimal. This binds DEV-001 to the run. When the inference is fixed, this
-  # step FAILS on purpose and the register must be updated.
-  qa_known_deviation(
-    "DEV-001",
-    identical(
-      DTAColumnSpecStructureSAS(format = "BEST12.", length = 12)@type,
-      "Int"
+  # The mechanism is exercised against a fixture register holding two
+  # synthetic open entries, so the test never depends on a real defect staying
+  # open. The nested run reads the register named by the `root` option.
+  fixture_root <- qa_tempdir()
+  writeLines(
+    c(
+      "deviations:",
+      "  - id: DEV-901",
+      "    status: open",
+      "  - id: DEV-902",
+      "    status: open"
+    ),
+    file.path(fixture_root, "deviations.yaml")
+  )
+  dir <- qa_core_fixture(qa_tempdir())
+  writeLines(
+    c(
+      "test_that(\"OQ-XX-004 | a reproduced deviation | REQ-XX-004\", {",
+      "  qa_known_deviation(\"DEV-901\", TRUE)",
+      "})",
+      "",
+      "test_that(\"OQ-XX-005 | a deviation that no longer reproduces | REQ-XX-005\", {",
+      "  qa_known_deviation(\"DEV-902\", FALSE)",
+      "})"
+    ),
+    file.path(dir, "test-OQ-XX-deviation.R")
+  )
+  results <- withr::with_options(
+    list(DTAtools.qualification = utils::modifyList(qa_config(), list(root = fixture_root))),
+    qa_core_run(dir)
+  )
+  exps <- qual_expectations_df(results, "OQ")
+
+  qa_step(
+    "a deviation whose condition holds is recorded as reproduced",
+    c(type = "success", reproduced = TRUE),
+    c(
+      type = exps$type[exps$tc_id == "OQ-XX-004"][[1]],
+      reproduced = grepl("DEV-901 reproduced", exps$message[exps$tc_id == "OQ-XX-004"][[1]], fixed = TRUE)
+    )
+  )
+  qa_step(
+    "a deviation whose condition no longer holds is recorded as a failure",
+    c(type = "failure", names_it = TRUE),
+    c(
+      type = exps$type[exps$tc_id == "OQ-XX-005"][[1]],
+      names_it = grepl("DEV-902 no longer reproduces", exps$message[exps$tc_id == "OQ-XX-005"][[1]], fixed = TRUE)
     )
   )
 

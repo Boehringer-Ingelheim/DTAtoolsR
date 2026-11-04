@@ -60,6 +60,11 @@ export_specs_table <- function(
     if (is.null(structure) || is.null(structure@format)) {
       return(NA_character_)
     }
+    # Carry the backend prefix, mirroring get_spec_type(), so the cell reads
+    # back through DTAColumnSpecStructureFactory().
+    if (!is.null(structure@backend) && nzchar(structure@backend)) {
+      return(paste(structure@backend, structure@format))
+    }
     as.character(structure@format)
   }
 
@@ -232,6 +237,10 @@ export_column_value_table <- function(
   id,
   quiet = FALSE
 ) {
+  if (!inherits(DTAColumnSpecCollection, "DTAtools::DTAColumnSpecCollection")) {
+    cli::cli_abort("'DTAColumnSpecCollection' must be a DTAColumnSpecCollection object.")
+  }
+
   # get values from column within DTAColumnSpecCollection
   specs <- DTAColumnSpecCollection@columns[[id]]
 

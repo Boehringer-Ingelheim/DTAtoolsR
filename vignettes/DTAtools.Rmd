@@ -378,6 +378,10 @@ unlink(yaml_out)
 json_out <- tempfile(fileext = ".json")
 write_columns_to_json(gf_specs, json_out)
 cat(paste(readLines(json_out, n = 25), collapse = "\n"))
+
+# Read it back with import_specs_from_json()
+gf_specs_json <- import_specs_from_json(json_out)
+length(gf_specs_json@columns) == length(gf_specs@columns)
 unlink(json_out)
 ```
 
@@ -756,12 +760,18 @@ The stored table holds `NA` in that cell, and the column is numeric as declared:
 as.data.frame(get_table(ds_import, "demo"))
 ```
 
-Two reasons are reported:
+Four reasons are reported:
 
 | `reason` / `keyword` | Meaning                                                                 |
 |----------------------|-------------------------------------------------------------------------|
 | `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
 | `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` as a date |
+| `not_whole`          | A number in a declared integer column is fractional or not finite, e.g. `"8.5"` |
+| `out_of_range`       | A whole number in a declared integer column lies outside the 32-bit integer range, e.g. `"5000000000"` |
+
+A declared integer column is always stored as an R `integer`, so a value that
+cannot be stored that way becomes `NA` and is reported here rather than
+changing the type of the whole column.
 
 ### Import errors in metadata
 
