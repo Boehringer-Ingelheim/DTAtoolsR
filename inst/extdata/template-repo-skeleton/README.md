@@ -454,7 +454,8 @@ an existing DTA.
 
 The body key is singular: `dataset:`. It contains the dataset definition accepted by the package's dataset reader. A top-level `datasets:` list
 is not an equivalent spelling; it belongs to a creation template. A dataset template without the `dataset:` body is reported as
-`dataset_missing`.
+`dataset_missing`. The body needs an `id`, even when every import renames the dataset with `as:`; without one it is reported as
+`dataset_id_missing`.
 
 ```yaml
 kind: dta_dataset_template
@@ -1098,6 +1099,8 @@ literal severity reported in the result. A concrete template can receive `instan
 | `dataset_template_unresolved` | warning | A `datasets[].template` reference does not resolve to a dataset template. | Correct the ID/version or add the referenced file. |
 | `patch_incoherent` | warning | A dataset patch cannot be applied to the referenced dataset template. | Check operation order, IDs, and patch fields. |
 | `dataset_missing` | error | A dataset template lacks its required singular `dataset:` body. | Add a dataset body; do not use creation-template `datasets:` here. |
+| `dataset_id_missing` | error | A dataset template's body, or an inline dataset in a creation template, has no `id` (absent, null or empty). | Add an `id`; `as:` on an import does not replace it. |
+| `dataset_field_invalid` | error | A dataset's `id`, `name` or `description` is a list, a sequence or a missing value. | Write a single text value. |
 | `values_and_values_from` | warning | One column defines both literal values and a vocabulary binding. | Remove one; the vocabulary binding takes precedence. |
 | `values_from_pattern` | error | A column combines `values_from` and `pattern`. | Choose a vocabulary-backed permitted-value list or a pattern. |
 | `values_from_invalid` | error | The vocabulary binding is malformed or cannot be read. | Use a valid reference or mapping and a supported field. |

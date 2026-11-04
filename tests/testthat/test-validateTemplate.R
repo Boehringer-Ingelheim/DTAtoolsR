@@ -448,6 +448,121 @@ test_that("dataset_missing fires, as an error, when a dta_dataset_template carri
   expect_match(rows$message, "datasets:", fixed = TRUE)
 })
 
+# ---- dataset identity: id / name / description --------------------------
+
+write_dataset_tpl <- function(dir, identity_lines) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: ident",
+      "version: \"1.0\"",
+      "dataset:",
+      paste0("  ", identity_lines),
+      "  type: tabular",
+      "  files: {filename: one.tsv}",
+      "  columns:",
+      "    - {id: C1, type: SAS Char}"
+    ),
+    file.path(dir, "ident.dta-dataset-template.yaml")
+  )
+}
+
+test_that("a dataset template with no id is a dataset_id_missing error, matching the engine's reader", {
+  dir <- withr::local_tempdir()
+  write_dataset_tpl(dir, "description: Only a long text")
+  expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  # The engine refuses the same file, so the error is not stricter than the app.
+  read <- app_env()$read_dataset_template(file.path(dir, "ident.dta-dataset-template.yaml"))
+  expect_false(isTRUE(read$ok))
+})
+
+test_that("a dataset template in the new and in the pre-id shape both pass the identity check", {
+  for (lines in list(
+    c("id: ds1", "name: Dataset one", "description: Long text."),
+    c("name: ds1", "description: Dataset one")
+  )) {
+    dir <- withr::local_tempdir()
+    write_dataset_tpl(dir, lines)
+    result <- validate_template(dir)
+    expect_no_code_row(result, "dataset_id_missing")
+    expect_no_code_row(result, "dataset_field_invalid")
+  }
+})
+
+test_that("a non-scalar or missing id, name or description is dataset_field_invalid, naming the key as written", {
+  cases <- list(
+    list(lines = c("id: [a, b]"), key = "'id'"),
+    list(lines = c("id: ds1", "name: [a, b]"), key = "'name'"),
+    list(lines = c("id: ds1", "description: {x: 1}"), key = "'description'"),
+    # Legacy shape: the upgrade would move this list to `id`; the author wrote `name`.
+    list(lines = c("name: [a, b]"), key = "'name'"),
+    list(lines = c("id: .na"), key = "'id'")
+  )
+  for (case in cases) {
+    dir <- withr::local_tempdir()
+    write_dataset_tpl(dir, case$lines)
+    rows <- expect_code_row(validate_template(dir), "dataset_field_invalid", "error")
+    expect_match(rows$message, case$key, fixed = TRUE)
+  }
+})
+
+test_that("an empty or null dataset id is dataset_id_missing", {
+  for (line in c("id: \"\"", "id: ~")) {
+    dir <- withr::local_tempdir()
+    write_dataset_tpl(dir, line)
+    expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  }
+})
+
+test_that("an inline dataset with a list for its name is dataset_field_invalid", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_tpl",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Inline",
+      "datasets:",
+      "  - id: ds1",
+      "    name: [a, b]",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    file.path(dir, "inline.dta-template.yaml")
+  )
+  rows <- expect_code_row(validate_template(dir), "dataset_field_invalid", "error")
+  expect_match(rows$message, "Inline dataset", fixed = TRUE)
+})
+
+test_that("an inline dataset with no id is a dataset_id_missing error, even in an abstract template", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: abs_tpl",
+      "version: \"1.0\"",
+      "abstract: true",
+      "base:",
+      "  metadata:",
+      "    title: Abstract",
+      "datasets:",
+      "  - type: tabular",
+      "    description: No identifier at all",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}"
+    ),
+    file.path(dir, "abs.dta-template.yaml")
+  )
+  rows <- expect_code_row(validate_template(dir), "dataset_id_missing", "error")
+  expect_match(rows$message, "Inline dataset", fixed = TRUE)
+})
+
 test_that("a well-formed dta_dataset_template with a proper 'dataset:' body validates clean", {
   # The positive control for the guard above: dataset_missing must not fire
   # (or anything else) for a template that correctly uses the singular key,

@@ -1,0 +1,10 @@
+kind: dta_dataset_template
+id: listname
+version: "1.0"
+dataset:
+  id: ds1
+  name: [Dataset, one]
+  type: tabular
+  files: {filename: one.tsv}
+  columns:
+    - {id: C1, type: SAS Char}
