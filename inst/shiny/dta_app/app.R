@@ -1449,11 +1449,11 @@ server <- function(input, output, session) {
   #
   # Step 1 is THREE outputs rather than one, and that split is the design:
   #
-  #   template_picker_ui      the frame -- source status rows, diagnostics,
-  #                           the search box, the source filter, the refresh
-  #                           button. It depends on the index and the refresh
-  #                           tick ONLY, and reads the search text and the
-  #                           current selection through isolate(), so typing
+  #   template_picker_ui      the frame -- stale-source lines, diagnostics,
+  #                           the search box, the library filter and the
+  #                           two-pane body. It depends on the index and the
+  #                           refresh tick ONLY, and reads the search text and
+  #                           the library choice through isolate(), so typing
   #                           never re-renders the box being typed into (which
   #                           would move the caret) and clicking a row never
   #                           re-renders the list under the pointer.
@@ -1497,13 +1497,24 @@ server <- function(input, output, session) {
     tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
     showModal(modalDialog(
       title = "Create new from template",
-      p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
-      uiOutput("template_picker_ui"),
+      # Static, so the dialog has its picker width (theme.R) from the first
+      # frame instead of jumping once the output arrives.
+      div(
+        class = "tmpl-picker-modal",
+        p("Pick a template, then fill in its options in the next step.", class = "msg-hint"),
+        uiOutput("template_picker_ui")
+      ),
+      # Refresh is housekeeping, not a step: it sits apart on the left, where
+      # it is there on every state of the picker, the empty one included.
       footer = tagList(
+        actionButton(
+          "tmpl_refresh_templates", "Refresh templates",
+          class = "btn btn-link tmpl-refresh me-auto"
+        ),
         modalButton("Cancel"),
         actionButton("template_select_next", "Use this template", class = "btn btn-primary")
       ),
-      size = "l",
+      size = "xl",
       easyClose = TRUE
     ))
   }
@@ -1535,19 +1546,20 @@ server <- function(input, output, session) {
     template_picker_lineage(idx, template_picker_entries(idx))
   })
 
-  # The source filter is honoured only while it names a source that still has
-  # templates. Its control exists only when there are two or more of those
-  # (template_picker_source_ui()), so a refresh that leaves one source would
-  # take the control away while Shiny kept holding its last value -- and every
-  # row would stay filtered out behind a message asking the user to pick a
-  # source they can no longer see.
+  # The library filter is a multi-select, and only the names in it that still
+  # have templates count -- template_picker_restrict_sources() (template_
+  # index.R) says why, and why the tree is rebuilt rather than filtered. Its
+  # own reactive, so a keystroke in the search box re-filters without
+  # rebuilding the tree.
+  template_picker_scoped <- reactive({
+    template_picker_restrict_sources(
+      dta_template_index_cached(), template_picker_rows(),
+      input$template_select_source
+    )
+  })
+
   template_picker_visible <- reactive({
-    rows <- template_picker_rows()
-    source <- as.character(input$template_select_source %||% "")
-    if (!(source %in% unique(rows$source_name))) {
-      source <- ""
-    }
-    template_picker_filter(rows, input$template_search %||% "", source)
+    template_picker_filter(template_picker_scoped(), input$template_search %||% "")
   })
 
   # The user's own choice for as long as it names a row that is still visible,
@@ -1615,10 +1627,6 @@ server <- function(input, output, session) {
     rows <- template_picker_rows()
 
     diagnostics <- template_source_diagnostics_ui(sources)
-    refresh_btn <- actionButton(
-      "tmpl_refresh_templates", "Refresh templates",
-      class = "btn btn-sm btn-outline-secondary"
-    )
 
     if (nrow(rows) == 0) {
       # Private-replaces-public (template_sources.R): with a private source
@@ -1639,23 +1647,30 @@ server <- function(input, output, session) {
       } else {
         p("No creation templates found.")
       }
-      return(tagList(diagnostics, msg, refresh_btn))
+      return(tagList(diagnostics, msg))
     }
 
-    tagList(
+    # Search and libraries on one toolbar; under it the list and the
+    # selected template side by side (stacked on a narrow screen, theme.R), so
+    # what was picked is in view the moment it is picked.
+    div(
+      class = "tmpl-picker",
       tagList(lapply(sources, template_source_status_row)),
       diagnostics,
       div(
         class = "tmpl-search-row",
         template_picker_search_ui(isolate(input$template_search %||% "")),
         template_picker_source_ui(
-          unique(rows$source_name),
-          isolate(input$template_select_source %||% "")
+          sort(unique(rows$source_name), method = "radix"),
+          isolate(input$template_select_source),
+          counts = c(table(rows$source_name))
         )
       ),
-      uiOutput("template_picker_list"),
-      uiOutput("template_picker_detail"),
-      refresh_btn,
+      div(
+        class = "tmpl-picker-body",
+        div(class = "tmpl-picker-main", uiOutput("template_picker_list")),
+        div(class = "tmpl-picker-side", uiOutput("template_picker_detail"))
+      ),
       template_picker_scripts()
     )
   })

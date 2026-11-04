@@ -656,28 +656,24 @@ format_stale_age <- function(seconds) {
   sprintf("%d day%s ago", days, if (days == 1) "" else "s")
 }
 
-# One resolved source's status line: its name and a scheme badge, plus --
-# only when it is CURRENTLY being served from a stale cache (a failed git
-# refresh that fell back to the last good checkout, see resolve_git_source())
-# -- a warning naming how old that cache is. A source that failed outright
-# (ok == FALSE) has no status of its own to show here; template_source_
-# diagnostics_ui() below is where that belongs, because a failed source's
-# only useful fact is its error.
+# One resolved source's status line, shown only while it is being served from
+# a stale cache (a failed git refresh that fell back to the last good checkout,
+# see resolve_git_source()): its name, its scheme and how old that cache is. A
+# healthy source has nothing to report -- the picker's library filter and each
+# template's own badge already name it -- and a source that failed outright
+# (ok == FALSE) belongs to template_source_diagnostics_ui() below, because a
+# failed source's only useful fact is its error.
 template_source_status_row <- function(source) {
-  if (!isTRUE(source$ok)) {
+  if (!isTRUE(source$ok) || !isTRUE(source$stale)) {
     return(NULL)
   }
   div(
-    class = "tmpl-source-status",
+    class = "tmpl-source-status msg-hint",
     tags$strong(as.character(source$name %||% "")),
-    " ",
-    tags$span(class = "badge bg-secondary", as.character(source$scheme %||% "")),
-    if (isTRUE(source$stale)) {
-      tags$span(
-        class = "msg-hint", style = "color:#b45309;",
-        sprintf(" — serving a stale cache (%s)", format_stale_age(source$stale_age))
-      )
-    }
+    sprintf(
+      " (%s) could not be refreshed and is serving its cached copy, last fetched %s.",
+      as.character(source$scheme %||% ""), format_stale_age(source$stale_age)
+    )
   )
 }
 
