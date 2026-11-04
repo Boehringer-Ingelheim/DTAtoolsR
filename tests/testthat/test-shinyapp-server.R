@@ -467,6 +467,52 @@ test_that("the column editor's search pauses reordering and survives re-renders"
   })
 })
 
+test_that("the rule editor's search pauses reordering and survives re-renders", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    ids <- function() {
+      vapply(
+        DTAtools::datasets(rv$dta, "clinical_data")@specs@rules,
+        function(r) r@id, character(1)
+      )
+    }
+    original <- ids()
+    expect_gt(length(original), 2)
+
+    session$setInputs(edit_rules = 1)
+    out <- unclass(output$rule_tbl)
+    expect_match(out, '"dom":"ftp"', fixed = TRUE)
+    expect_match(out, '"searchable":false', fixed = TRUE)
+    expect_match(out, "rule_tbl_search", fixed = TRUE)
+
+    # A move driven over the websocket under a search must not happen.
+    session$setInputs(rule_tbl_search = original[[2]])
+    expect_equal(rv$rule_search, original[[2]])
+    session$setInputs(rule_up_click = 2, rule_down_click = 1)
+    expect_equal(ids(), original)
+
+    # The term is handed back to DT on every re-render (form -> back here).
+    session$setInputs(rule_add = 1, rule_back = 1)
+    expect_match(
+      unclass(output$rule_tbl),
+      sprintf('"search":{"search":"%s"}', original[[2]]),
+      fixed = TRUE
+    )
+
+    # Re-opening the editor starts unfiltered, and the arrows move again.
+    session$setInputs(edit_rules = 2)
+    expect_equal(rv$rule_search, "")
+    session$setInputs(rule_tbl_search = "")
+    session$setInputs(rule_up_click = 2)
+    expect_equal(ids()[1:2], original[2:1])
+    session$setInputs(rule_down_click = 1)
+    expect_equal(ids(), original)
+  })
+})
+
 test_that("saving a new column updates the spec, the YAML view and clears validation", {
   clean_session_file()
 
