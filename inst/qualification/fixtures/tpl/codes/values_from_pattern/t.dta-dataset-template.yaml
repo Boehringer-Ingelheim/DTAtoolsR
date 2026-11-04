@@ -2,6 +2,7 @@ kind: dta_dataset_template
 id: vfp1
 version: "1.0"
 dataset:
+  id: ds1
   columns:
     - id: COL1
       pattern: "^[A-Z]+$"

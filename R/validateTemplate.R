@@ -597,6 +597,12 @@
         # An INLINE dataset body, authored in the creation template itself. Its
         # columns can carry a vocabulary binding exactly as a dataset
         # template's can, and nothing else in this function would look at them.
+        # Nothing but the body itself can supply its id, so a missing one is
+        # an error -- and an abstract template never reaches the dry-run below.
+        identity <- .dta_template_dataset_identity_issue(entry)
+        if (!is.null(identity)) {
+          add("error", identity$code, paste0("Inline dataset: ", identity$message))
+        }
         rows <- c(rows, .dta_template_check_bindings(
           path, id, version, entry, index_df,
           kind = "dta_creation_template"
@@ -992,6 +998,13 @@
     add("error", "dataset_missing", paste0("Template is missing a 'dataset' body.", hint))
     return(rows)
   }
+  # An error even though an import's `as:` would rename it: the engine's
+  # read_dataset_template() refuses an id-less body outright, so the app's
+  # picker cannot load this template at all.
+  identity <- .dta_template_dataset_identity_issue(ds_body)
+  if (!is.null(identity)) {
+    add("error", identity$code, identity$message)
+  }
   rows <- c(rows, .dta_template_check_bindings(path, id, version, ds_body, index_df))
   opts <- def[["options"]] %||% list()
   if (is.list(opts)) {
@@ -1024,6 +1037,29 @@
   }
 
   rows
+}
+
+# A dataset body's identity fields. `id` is the dataset's key in the DTA and in
+# every validation message; `name` (label) and `description` (long text) are
+# optional. A body with `name:` but no `id:` has no id: `name` is only the
+# label, exactly as every reader treats it. Returns NULL or
+# list(code =, message =).
+.dta_template_dataset_identity_issue <- function(body) {
+  is_text <- function(v) is.atomic(v) && length(v) == 1L && !is.na(v)
+  for (field in c("id", "name", "description")) {
+    v <- body[[field]]
+    if (!is.null(v) && !is_text(v)) {
+      return(list(
+        code = "dataset_field_invalid",
+        message = sprintf("dataset field '%s' must be a single, non-missing value.", field)
+      ))
+    }
+  }
+  id <- body[["id"]]
+  if (is.null(id) || !nzchar(as.character(id))) {
+    return(list(code = "dataset_id_missing", message = "dataset has no 'id'."))
+  }
+  NULL
 }
 
 # Structural checks specific to a controlled vocabulary.
@@ -1240,7 +1276,13 @@
 #' that does not resolve to a real metadata field, a party slot naming a
 #' profile that does not exist, a dataset patch naming an absent column, a
 #' `dta_dataset_template` with no `dataset:` body (code `"dataset_missing"`,
-#' also caught when a `datasets:` array was authored instead), a scanned
+#' also caught when a `datasets:` array was authored instead), a dataset with
+#' no `id` (code `"dataset_id_missing"`, an error, for an inline dataset and
+#' for a dataset template alike: an import's `as:` renames a dataset but
+#' cannot stand in for a missing id) or with a list
+#' where its `id`, `name` or `description` should be (code
+#' `"dataset_field_invalid"`; a dataset with `name:` but no `id:` has no id,
+#' since `name` is only its label), a scanned
 #' directory with no template files in it at all, a template kept below the
 #' scanned directory's top level, and (as a final, comprehensive check)
 #' actually building a DTA from every non-abstract creation template with its

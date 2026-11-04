@@ -51,7 +51,8 @@ checks, docs) says it's done.
 - Central entry points to know: `read_dta_from_yaml()`,
   `read_dataset_from_yaml()`, `import_specs_from_yaml()`, `load_file()`,
   `check()` (always returns the updated object — callers must reassign,
-  e.g. `x <- check(x)`), `results()`, `messages()`, `inspect()`,
+  e.g. `x <- check(x)`), `results()`, `messages()`, `explain_messages()`,
+  `inspect()`,
   `write_table_to_file()`, `export_specs_table()`,
   `export_column_value_table()`. Keep new functionality consistent with this
   "immutable object, explicit reassignment" idiom used throughout.

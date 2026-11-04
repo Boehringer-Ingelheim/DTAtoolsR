@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **A computed version history for every creation template.** The app's
+  template picker now shows what changed in the selected version and, behind
+  "Full history", every version of the template since the first. Nothing is
+  written by hand: each version is built exactly as "Create new from
+  template" would build it and compared with its predecessor, covering the
+  template's options and slots, the document metadata and every dataset
+  column. A new release of a template that another one follows (`extends:`,
+  dataset imports or vocabularies referenced bare or as `@latest`) is listed
+  in the follower's history too, because it changes what the follower builds
+  without changing its version number. Pinned references produce no such
+  entry.
+
 - `explain_messages()` prints each validation message in plain language: the
   violated constraint (for example "Must be one of: 1234, 5678.") next to the
   offending value, using the same wording as the HTML report. `check()` now
@@ -185,6 +197,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   remove keep working on the filtered list.
 
 ### Changed
+
+- **`validate_template()` now rejects a dataset without an `id`.** A dataset
+  template or an inline template dataset whose `id` is absent, null or empty
+  is reported as `dataset_id_missing`, an error. The app already refused to
+  load such a dataset template, even when every import names it with `as:`,
+  but `validate_template()` used to pass it. An `id`, `name` or `description`
+  written as a list or as a missing value is reported as
+  `dataset_field_invalid`, naming the key as written. A dataset in the old
+  shape (`name:` with no `id:`) has no id and is reported the same way.
 
 - **Datasets now have an `id`, a `name` and a `description`.** The identifier
   a dataset used to carry in `name` is its `id` (the key in a DTA, in every

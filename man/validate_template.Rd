@@ -42,7 +42,13 @@ template" picker relies on -- unresolvable \verb{extends:}, an option target
 that does not resolve to a real metadata field, a party slot naming a
 profile that does not exist, a dataset patch naming an absent column, a
 \code{dta_dataset_template} with no \verb{dataset:} body (code \code{"dataset_missing"},
-also caught when a \verb{datasets:} array was authored instead), a scanned
+also caught when a \verb{datasets:} array was authored instead), a dataset with
+no \code{id} (code \code{"dataset_id_missing"}, an error, for an inline dataset and
+for a dataset template alike: an import's \verb{as:} renames a dataset but
+cannot stand in for a missing id) or with a list
+where its \code{id}, \code{name} or \code{description} should be (code
+\code{"dataset_field_invalid"}; a dataset with \verb{name:} but no \verb{id:} has no id,
+since \code{name} is only its label), a scanned
 directory with no template files in it at all, a template kept below the
 scanned directory's top level, and (as a final, comprehensive check)
 actually building a DTA from every non-abstract creation template with its
