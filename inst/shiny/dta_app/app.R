@@ -1233,8 +1233,26 @@ server <- function(input, output, session) {
   # assigning to output[[id]] REPLACES the previous render rather than adding
   # a second one, so the set never grows, and a slot belonging to a template
   # the author has since backed out of simply stops being rendered.
-  show_template_options_modal <- function(loaded, index) {
+  show_template_options_modal <- function(loaded, index, variant_selections = NULL) {
     def <- loaded$value$def
+    rv$template_variant_selections <- variant_selections %||% list()
+    if (!is.null(def$variants)) {
+      if (is.null(variant_selections)) {
+        showModal(modalDialog(
+          title = paste0("Create from template: ", def$label),
+          p("Choose the platform before configuring the agreement. It determines the record schema and applicable suggestions."),
+          template_variant_input(def),
+          footer = tagList(
+            actionButton("template_options_back", "Back to templates"),
+            modalButton("Cancel"),
+            actionButton("template_variant_confirm", "Continue", class = "btn btn-primary")
+          ),
+          easyClose = FALSE
+        ))
+        return(invisible(NULL))
+      }
+      def <- resolve_template_variant(def, variant_selections)
+    }
     vocab_specs <- template_vocab_slot_specs(def, index)
     # Kept for collect_vocab_selections(): which slots have a control to read.
     rv$template_vocab_specs <- vocab_specs
@@ -1269,6 +1287,19 @@ server <- function(input, output, session) {
       })
     }
 
+    # The platform chosen in the step before is context for the whole form, so
+    # it sits in the sidebar with the template it refines.
+    variant_ui <- if (!is.null(def$variants)) {
+      div(
+        class = "tmpl-aside-block",
+        div(class = "section-label", as.character(def$variants$label %||% def$variants$id)),
+        p(class = "tmpl-aside-variant", as.character(variant_selections[[def$variants$id]] %||% "")),
+        actionButton("template_variant_back", "Change platform",
+          class = "btn btn-sm btn-outline-secondary"
+        ),
+        div(class = "msg-hint", "Changing it resets the agreement options.")
+      )
+    }
     dlg <- modalDialog(
       title = tagList(
         span(class = "tmpl-eyebrow", "New DTA from template"),
@@ -1276,7 +1307,7 @@ server <- function(input, output, session) {
       ),
       template_options_modal_body(
         def, loaded, index, vocab_specs,
-        has_open_doc = !is.null(rv$dta)
+        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui
       ),
       footer = tagList(
         actionButton("template_options_back", "← Back to templates",
@@ -1846,6 +1877,36 @@ server <- function(input, output, session) {
     show_template_picker_modal()
   })
 
+  observeEvent(input$template_variant_back, {
+    req(rv$template_ref)
+    loaded <- load_template_definition(rv$template_ref, index = rv$template_index)
+    if (!isTRUE(loaded$ok)) {
+      showNotification(loaded$error, type = "error", duration = 10)
+      return()
+    }
+    show_template_options_modal(loaded, rv$template_index)
+  })
+
+  observeEvent(input$template_variant_confirm, {
+    req(rv$template_ref)
+    loaded <- load_template_definition(rv$template_ref, index = rv$template_index)
+    if (!isTRUE(loaded$ok)) {
+      showNotification(loaded$error, type = "error", duration = 10)
+      return()
+    }
+    spec <- loaded$value$def$variants
+    if (is.null(spec)) {
+      return()
+    }
+    selections <- stats::setNames(list(input[[paste0("tmpl_variant_", spec$id)]]), spec$id)
+    checked <- dta_try(resolve_template_variant(loaded$value$def, selections))
+    if (!isTRUE(checked$ok)) {
+      showNotification(checked$error, type = "error", duration = 10)
+      return()
+    }
+    show_template_options_modal(loaded, rv$template_index, selections)
+  })
+
   observeEvent(input$template_create_confirm, {
     req(rv$template_ref)
     idx <- rv$template_index
@@ -1856,8 +1917,14 @@ server <- function(input, output, session) {
       return() # modal stays open
     }
     def <- loaded$value$def
+    resolved <- dta_try(resolve_template_variant(def, rv$template_variant_selections %||% list()))
+    if (!isTRUE(resolved$ok)) {
+      showNotification(resolved$error, type = "error", duration = 10)
+      return()
+    }
+    def <- resolved$value
 
-    sels <- collect_template_selections(def)
+    sels <- c(rv$template_variant_selections %||% list(), collect_template_selections(def))
     party_sel <- collect_party_selections(def)
     vocab_sel <- collect_vocab_selections()
 
@@ -1868,7 +1935,7 @@ server <- function(input, output, session) {
     }
 
     prov <- template_provenance(
-      def, loaded$value, sels,
+      loaded$value$def, loaded$value, sels,
       lineage = loaded$value$lineage,
       carried_over_from = co$carried_over_from,
       vocab_selections = vocab_sel

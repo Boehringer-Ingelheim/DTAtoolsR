@@ -339,3 +339,38 @@ requirements:
     category: integrity
     covers: [run_dta_app]
     source: inst/shiny/dta_app/app.R; inst/shiny/dta_app/R/utils_dta.R
+
+  - id: REQ-APP-024
+    text: >
+      A creation-template textarea option with source suggestions shall remain
+      editable as multiline text and render a separate suggestion selector
+      including "(leave blank)". Selecting a suggestion or blank shall update
+      the original option input and dispatch its bubbling input event so the
+      existing option-collection path receives the selected text or empty
+      value, never the UI sentinel.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/template_ui.R render_template_option_input()
+    notes: >
+      PINNED AS STRUCTURAL, NOT BROWSER-DRIVEN: the application test harness
+      has no JavaScript engine. The rendered selector, original textarea ID,
+      blank mapping, and bubbling input event are checked structurally; the
+      developer suite separately verifies the rendered control's source
+      suggestions and editable multiline input.
+
+  - id: REQ-APP-025
+    text: >
+      A creation template with structural variants shall require an explicit
+      declared choice before building datasets or showing variant-specific
+      agreement controls. Its choice shall replace the dataset list and merge
+      metadata defaults and options over the inherited definition, without
+      leaking another variant's suggestions. Missing or unsupported choices
+      shall fail without creating a document. Provenance shall record the
+      selected variant and source revision and retain them through YAML.
+      Each selected dataset shall retain its explicit identifier separately
+      from its human-readable name.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, validate_template]
+    source: inst/shiny/dta_app/R/template_core.R; inst/shiny/dta_app/app.R

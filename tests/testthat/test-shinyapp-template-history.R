@@ -51,6 +51,7 @@ write_ct <- function(root, id, version, header = "Header A",
       '      - { version: "${version}", date: "${today}", changes: Initial }',
       "datasets:",
       "  - id: ds1",
+      "    name: ds1",
       "    type: tabular",
       "    files: { filename: a.csv, type: csv }",
       "    columns:",
@@ -162,6 +163,7 @@ test_that("a release of a dataset template imported via @latest appears, as one 
         sprintf('version: "%s"', version),
         "dataset:",
         "  id: shared",
+        "  name: shared",
         "  type: tabular",
         "  files: { filename: s.tsv, type: tsv }",
         "  columns:",
@@ -233,4 +235,271 @@ test_that("the detail panel shows the selected version's changes and the full hi
   expect_match(html, "Header A → Header B", fixed = TRUE)
   expect_match(html, "Full history (2 entries)", fixed = TRUE)
   expect_match(html, "First version of this template.", fixed = TRUE)
+})
+
+history_variant_dataset <- function(columns = "COL_A") {
+  list(
+    id = "ds1", name = "ds1", type = "tabular",
+    files = list(filename = "a.csv", type = "csv"),
+    columns = lapply(columns, function(id) list(id = id, label = id, type = "SAS Char"))
+  )
+}
+
+history_variant_definition <- function(version = "1.0") {
+  list(
+    kind = "dta_creation_template", id = "platforms", version = version,
+    base = list(metadata = list(title = "Demo", transmission = list(method = "EDT"))),
+    options = list(list(
+      id = "medium", type = "text", target = "metadata.transmission.method",
+      choices = list("EDT")
+    )),
+    variants = list(
+      id = "trial_platform", label = "Trial platform",
+      choices = list(
+        list(value = "brave", label = "BRAVE", datasets = list(history_variant_dataset())),
+        list(
+          value = "veeva", label = "Veeva",
+          base = list(metadata = list(transmission = list(method = "CDB"))),
+          options = list(list(id = "medium", choices = list("EDT", "CDB"))),
+          datasets = list(history_variant_dataset())
+        )
+      )
+    )
+  )
+}
+
+write_history_definition <- function(root, def, suffix = ".dta-template.yaml") {
+  yaml::write_yaml(def, file.path(root, paste0(def$id, "_", def$version, suffix)))
+}
+
+test_that("variant history builds every choice and reports only the changed realization", {
+  for (change in c("column", "options", "default")) {
+    root <- withr::local_tempdir()
+    before <- history_variant_definition()
+    after <- history_variant_definition("2.0")
+    if (change == "column") {
+      after$variants$choices[[2]]$datasets <- list(history_variant_dataset(c("COL_A", "COL_NEW")))
+    } else if (change == "options") {
+      after$variants$choices[[2]]$options[[1]]$choices <- list("EDT", "CDB", "Portal")
+    } else {
+      after$variants$choices[[2]]$options[[1]]$default <- "EDT"
+    }
+    write_history_definition(root, before)
+    write_history_definition(root, after)
+    idx <- index_over(root)
+
+    builds <- lapply(c("1.0", "2.0"), function(version) {
+      app_fn("template_history_build")(paste0("platforms@", version), idx)
+    })
+    expect_true(all(vapply(builds, function(b) isTRUE(b$ok), logical(1))))
+    expect_null(builds[[1]]$error)
+    expect_null(builds[[2]]$error)
+    expect_setequal(names(builds[[1]]$value$variants), paste("trial_platform", c("brave", "veeva"), sep = "\n"))
+    expect_identical(
+      metadata(builds[[1]]$value$variants[["trial_platform\nbrave"]]$dta)@transmission$method,
+      "EDT"
+    )
+    expect_identical(
+      metadata(builds[[1]]$value$variants[["trial_platform\nveeva"]]$dta)@transmission$method,
+      "CDB"
+    )
+    e <- entry_for(app_fn("template_history")(idx, "platforms"), "version", "2.0")
+    expect_null(e$error)
+    ch <- e$changes
+    expect_gt(nrow(ch), 0)
+    expect_identical(names(ch), c("area", "what", "change", "from", "to"))
+    expect_true(all(startsWith(ch$what, "Variant 'trial_platform', choice 'veeva' (Veeva): ")))
+    expect_false(any(grepl("BRAVE|brave", ch$what)))
+    if (change == "column") {
+      expect_equal(ch$what, "Variant 'trial_platform', choice 'veeva' (Veeva): Dataset 'ds1', column 'COL_NEW'")
+      expect_equal(ch$change, "added")
+    } else if (change == "options") {
+      expect_true(all(ch$area == "Template"))
+      expect_true(all(grepl("Option 'medium'", ch$what, fixed = TRUE)))
+      expect_equal(ch$from, "EDT, CDB")
+      expect_equal(ch$to, "EDT, CDB, Portal")
+    } else {
+      md <- ch[ch$area == "Metadata", , drop = FALSE]
+      expect_equal(c(md$from, md$to), c("CDB", "EDT"))
+    }
+  }
+})
+
+test_that("variant history is unchanged when choices are reordered", {
+  root <- withr::local_tempdir()
+  before <- history_variant_definition()
+  after <- history_variant_definition("2.0")
+  after$variants$choices <- rev(after$variants$choices)
+  write_history_definition(root, before)
+  write_history_definition(root, after)
+  idx <- index_over(root)
+
+  e <- entry_for(app_fn("template_history")(idx, "platforms"), "version", "2.0")
+  expect_null(e$error)
+  expect_equal(nrow(e$changes), 0)
+  expect_identical(names(e$changes), c("area", "what", "change", "from", "to"))
+})
+
+test_that("variant history tops up vocabulary defaults for every realization", {
+  root <- withr::local_tempdir()
+  def <- history_variant_definition()
+  def$vocabulary_slots <- list(list(
+    id = "visits", target = "datasets.ds1.columns.COL_A.values",
+    vocabulary = "visit", default = list("SCR"), min = 2
+  ))
+  write_history_definition(root, def)
+  write_history_definition(root, list(
+    kind = "dta_vocabulary", id = "visit", version = "1.0", type = "text",
+    terms = list(list(code = "SCR", label = "Screening"), list(code = "EOT", label = "End"))
+  ), ".dta-vocabulary.yaml")
+  idx <- index_over(root)
+
+  built <- app_fn("template_history_build")("platforms@1.0", idx)
+  expect_true(built$ok, info = built$error)
+  expect_null(built$error)
+  expect_length(built$value$variants, 2)
+  for (branch in built$value$variants) {
+    expect_identical(branch$dta@datasets[[1]]@specs@columns[[1]]@values, c("SCR", "EOT"))
+  }
+})
+
+test_that("followed dataset releases inside one variant appear only for that branch", {
+  root <- withr::local_tempdir()
+  def <- history_variant_definition()
+  def$variants$choices[[2]]$datasets <- list(list(template = "shared_ds@latest"))
+  write_history_definition(root, def)
+  for (version in c("1.0", "2.0")) {
+    cols <- if (version == "1.0") "COL_A" else c("COL_A", "COL_NEW")
+    write_history_definition(root, list(
+      kind = "dta_dataset_template", id = "shared_ds", version = version,
+      dataset = history_variant_dataset(cols)
+    ), ".dta-dataset-template.yaml")
+  }
+  idx <- index_over(root)
+
+  up <- Filter(function(e) e$type == "upstream", app_fn("template_history")(idx, "platforms"))
+  expect_length(up, 1)
+  expect_null(up[[1]]$error)
+  expect_equal(up[[1]]$title, "shared_ds 1.0 -> 2.0, followed by platforms@1.0")
+  expect_setequal(
+    up[[1]]$changes$what,
+    c(
+      "Variant 'trial_platform', choice 'veeva' (Veeva): Dataset 'ds1', column 'COL_NEW'",
+      "Variant 'trial_platform', choice 'veeva' (Veeva): Dataset 'ds1': template_version"
+    )
+  )
+  column <- up[[1]]$changes[grepl("column 'COL_NEW'", up[[1]]$changes$what, fixed = TRUE), ]
+  provenance <- up[[1]]$changes[grepl(": template_version", up[[1]]$changes$what, fixed = TRUE), ]
+  expect_equal(column$change, "added")
+  expect_equal(provenance$change, "changed")
+  expect_equal(c(provenance$from, provenance$to), c("1.0", "2.0"))
+})
+
+test_that("followed vocabulary releases inside one variant appear only for that branch", {
+  root <- withr::local_tempdir()
+  def <- history_variant_definition()
+  def$variants$choices[[2]]$datasets[[1]]$columns[[1]]$values_from <- "visit"
+  write_history_definition(root, def)
+  for (version in c("1.0", "2.0")) {
+    codes <- if (version == "1.0") "SCR" else c("SCR", "EOT")
+    write_history_definition(root, list(
+      kind = "dta_vocabulary", id = "visit", version = version, type = "text",
+      terms = lapply(codes, function(code) list(code = code, label = code))
+    ), ".dta-vocabulary.yaml")
+  }
+  idx <- index_over(root)
+
+  up <- Filter(function(e) e$type == "upstream", app_fn("template_history")(idx, "platforms"))
+  expect_length(up, 1)
+  expect_null(up[[1]]$error)
+  expect_equal(up[[1]]$title, "visit 1.0 -> 2.0, followed by platforms@1.0")
+  ch <- up[[1]]$changes
+  expect_gt(nrow(ch), 0)
+  expect_true(all(ch$area == "Datasets"))
+  expect_true(all(startsWith(ch$what, "Variant 'trial_platform', choice 'veeva' (Veeva): ")))
+  expect_true(any(grepl("values", ch$what, fixed = TRUE)))
+  expect_true(any(grepl("EOT", ch$to, fixed = TRUE)))
+  expect_false(any(grepl("BRAVE|brave", ch$what)))
+})
+
+test_that("added and removed choices are explicit without diffing unrelated branches", {
+  root <- withr::local_tempdir()
+  before <- history_variant_definition()
+  after <- history_variant_definition("2.0")
+  after$variants$choices[[1]]$value <- "rave"
+  after$variants$choices[[1]]$label <- "Rave"
+  write_history_definition(root, before)
+  write_history_definition(root, after)
+  idx <- index_over(root)
+
+  e <- entry_for(app_fn("template_history")(idx, "platforms"), "version", "2.0")
+  expect_null(e$error)
+  expect_setequal(
+    paste(e$changes$what, e$changes$change),
+    c(
+      "Variant 'trial_platform', choice 'brave' (BRAVE) removed",
+      "Variant 'trial_platform', choice 'rave' (Rave) added"
+    )
+  )
+  expect_true(all(e$changes$area == "Template"))
+})
+
+test_that("ordinary and variant templates can replace each other in history", {
+  root <- withr::local_tempdir()
+  ordinary <- history_variant_definition()
+  ordinary$variants <- NULL
+  ordinary$datasets <- list(history_variant_dataset())
+  write_history_definition(root, ordinary)
+  write_history_definition(root, history_variant_definition("2.0"))
+  ordinary$version <- "3.0"
+  write_history_definition(root, ordinary)
+  idx <- index_over(root)
+  history <- app_fn("template_history")(idx, "platforms")
+
+  for (version in c("2.0", "3.0")) {
+    e <- entry_for(history, "version", version)
+    expect_null(e$error)
+    ch <- e$changes
+    expect_identical(names(ch), c("area", "what", "change", "from", "to"))
+    summaries <- ch[ch$what %in% c(
+      "Variant 'trial_platform', choice 'brave' (BRAVE)",
+      "Variant 'trial_platform', choice 'veeva' (Veeva)"
+    ), , drop = FALSE]
+    expect_equal(nrow(summaries), 2)
+    expect_true(all(summaries$change == if (version == "2.0") "added" else "removed"))
+  }
+})
+
+test_that("one broken variant is an explicit build and history error", {
+  root <- withr::local_tempdir()
+  write_history_definition(root, history_variant_definition())
+  broken <- history_variant_definition("2.0")
+  broken$variants$choices[[2]]$datasets <- list(list(template = "missing_ds"))
+  write_history_definition(root, broken)
+  idx <- index_over(root)
+
+  built <- app_fn("template_history_build")("platforms@2.0", idx)
+  expect_false(built$ok)
+  expect_null(built$value)
+  expect_match(built$error, "trial_platform=veeva", fixed = TRUE)
+  expect_match(built$error, "missing_ds", fixed = TRUE)
+  e <- entry_for(app_fn("template_history")(idx, "platforms"), "version", "2.0")
+  expect_null(e$changes)
+  expect_match(e$error, "trial_platform=veeva", fixed = TRUE)
+})
+
+test_that("ordinary history builds retain their original result and comparison shape", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "1.0")
+  write_ct(root, "demo", "2.0")
+  idx <- index_over(root)
+  a <- app_fn("template_history_build")("demo@1.0", idx)
+  b <- app_fn("template_history_build")("demo@2.0", idx)
+
+  expect_true(a$ok, info = a$error)
+  expect_true(b$ok, info = b$error)
+  expect_identical(names(a$value), c("def", "lineage", "dta"))
+  ch <- app_fn("template_history_compare")(a$value, b$value)
+  expect_identical(names(ch), c("area", "what", "change", "from", "to"))
+  expect_equal(nrow(ch), 0)
 })

@@ -1248,6 +1248,8 @@ bi_css <- function() {
     .tmpl-aside .tmpl-version { margin-left: 0; }
     .tmpl-aside .tmpl-lineage { margin: 8px 0 0; }
     .tmpl-aside-desc { font-size: .8125rem; line-height: 1.5; color: var(--bi-ink); margin: 10px 0 0; }
+    .tmpl-aside-variant { font-weight: 600; color: var(--bi-ink); margin: 0 0 8px; }
+    .tmpl-aside-block .msg-hint { margin-top: 6px; }
     .tmpl-ds-list { list-style: none; margin: 0; padding: 0; }
     .tmpl-ds-list li {
       font-family: var(--bs-font-monospace); font-size: .8125rem; overflow-wrap: anywhere;
@@ -1293,6 +1295,10 @@ bi_css <- function() {
     .tmpl-field-control .form-group, .tmpl-field-control .shiny-input-container { margin-bottom: 0; }
     .tmpl-field-control .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
     .tmpl-field-control textarea { min-height: 5.5rem; }
+    /* A textarea option with suggestions: the picker above it is a helper,
+       so its label is a quiet caption rather than a second field label. */
+    .tmpl-field-control .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
+    .tmpl-field-control .form-group + .form-group { margin-top: 10px; }
     .tmpl-field-error { margin: 7px 0 0; }
     .tmpl-req {
       display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px;
