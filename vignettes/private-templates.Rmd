@@ -224,7 +224,9 @@ whatever you rename.
 
 Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
 whichever CI file(s) `ci` asks for, with none of the four starter template
-files. Pass `ci = FALSE` to skip CI scaffolding entirely. By default,
+files. Until you add a template, such a repository (and its CI) fails
+validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
+entirely. By default,
 `create_template_repo()` refuses to touch a directory where any file it would
 write already exists — it aborts, naming every conflict, and writes nothing at
 all, rather than leave a repository half-written from two different calls

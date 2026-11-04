@@ -395,6 +395,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The CI files `create_template_repo()` writes now work once their DTAtools
+  install placeholder is filled in. The GitHub workflow passed
+  `packages: none` to `setup-r-dependencies`, which asks for a package called
+  `none` and failed the job before validation ran; it now installs `remotes`,
+  which the install examples in all three files call and none of them used to
+  install. The Jenkinsfile now installs into a library of its own (set through
+  `R_LIBS`), since Jenkins runs the container as a user who cannot write to
+  the image's site library.
+  The files' header comments no longer describe DTAtools' own deployment as
+  if it were the user's repository, and they list `*.dta-vocabulary.yaml`.
+- The authoring guide `create_template_repo()` writes as `README.md` now
+  covers creation-template `variants:` and lists the `variant_invalid`
+  validator code.
+- `create_template_repo(examples = FALSE)` no longer ends by suggesting
+  `validate_template(path, strict = TRUE)`, which always fails with
+  `no_templates` on a repository with no templates; it says to add templates
+  first.
 - A creation-template option that has both `target:` and `effects_all:`, and no
   `effects:`, now writes the selected value to its target. Before, the
   `effects_all:` block took the place of the missing `effects:`, so the value
