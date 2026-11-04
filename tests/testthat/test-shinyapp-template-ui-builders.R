@@ -738,7 +738,8 @@ test_that("a small vocabulary is a plain checklist: every term visible, no filte
 
   expect_match(html, 'value="T001" checked', fixed = TRUE)
   expect_false(grepl('value="T002" checked', html, fixed = TRUE))
-  expect_match(html, "T002</span> — Term 2", fixed = TRUE)
+  # htmltools puts a newline between a tag and the text after it.
+  expect_match(html, "T002</span>\\s+— Term 2")
   expect_match(html, "About term 2.", fixed = TRUE)
   expect_match(html, "2 of 3 selected", fixed = TRUE)
   expect_false(grepl("vocab-pick-filter", html, fixed = TRUE))

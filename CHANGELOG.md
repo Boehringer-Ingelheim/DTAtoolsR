@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   labels. "Choose from vocabulary…" then preselects that vocabulary for the
   column being edited. A column without a declaration is matched by its
   current values instead, so a column built from a `values_from:` binding finds
-  its vocabulary again. The picker gains a "Write: Codes / Labels" choice,
+  its vocabulary again. The picker gains a "Write as: Codes / Labels" choice,
   which lets the decode half of a code/decode pair take the labels. When none
   of a column's values are in the chosen vocabulary yet, every term starts
   ticked.

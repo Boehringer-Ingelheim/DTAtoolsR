@@ -3726,14 +3726,20 @@ server <- function(input, output, session) {
       rv$col_msg <- list(ok = FALSE, error = "Select at least one term, or go back without applying.")
       return()
     }
+    vocab <- tryCatch(
+      vocabulary_resolver(dta_template_index_cached())(input$col_vocab_ref),
+      error = function(e) NULL
+    )
+    codes <- vapply(vocab$terms %||% list(), function(t) t$code, character(1))
+    # A vocabulary with no terms renders no checklist, but Shiny keeps the last
+    # one's selection: never write that stale selection under this vocabulary.
+    if (length(codes) == 0) {
+      rv$col_msg <- list(ok = FALSE, error = "This vocabulary has no terms to use.")
+      return()
+    }
     # The decode half of a code/decode pair (GFTEST beside GFTESTCD) wants the
-    # labels. A value typed in that is no term of the vocabulary stays as typed.
+    # labels. A value the vocabulary does not have stays as it is.
     if (identical(input$col_vocab_field, "label")) {
-      vocab <- tryCatch(
-        vocabulary_resolver(dta_template_index_cached())(input$col_vocab_ref),
-        error = function(e) NULL
-      )
-      codes <- vapply(vocab$terms %||% list(), function(t) t$code, character(1))
       hit <- match(sel, codes)
       ok <- !is.na(hit)
       sel[ok] <- as.character(vocabulary_values(vocab, field = "label"))[hit[ok]]
