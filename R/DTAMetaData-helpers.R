@@ -127,6 +127,31 @@ method(as.list, DTAMetaData) <- function(x, ...) {
     sections = x@sections
   )
 
+  # Write the original text of a date that raised an import issue, so the
+  # constructor reproduces the same issue on read. Only while the field still
+  # holds what that text resolved to; a value changed since load is written as is.
+  for (issue in x@import_issues) {
+    if (!issue$reason %in% c("trailing_residue", "not_convertible")) next
+    current <- switch(issue$column,
+      "date" = x@date,
+      "transmission$date_first_transfer" = x@transmission$date_first_transfer,
+      "transmission$date_last_transfer" = x@transmission$date_last_transfer,
+      next
+    )
+    resolved <- .parse_metadata_date(issue$raw, issue$column, require_date = TRUE)$value
+    unchanged <- if (identical(issue$reason, "not_convertible")) {
+      length(current) == 0 || is.na(current)
+    } else {
+      inherits(current, "Date") && identical(current, resolved)
+    }
+    if (!unchanged) next
+    if (identical(issue$column, "date")) {
+      result$date <- issue$raw
+    } else {
+      result$transmission[[sub("transmission$", "", issue$column, fixed = TRUE)]] <- issue$raw
+    }
+  }
+
   keep <- vapply(
     names(result),
     function(name) !.dta_metadata_field_is_absent(result[[name]], name),
@@ -196,7 +221,9 @@ get_authorized_for_corrections <- function(x) {
 #' @param x A DTAMetaData object
 #' @param name_only Logical. If TRUE, return only names; if FALSE, return full contact objects
 #'
-#' @return A character vector of reviewer names or list of reviewer contact objects
+#' @return A character vector of reviewer names or list of reviewer contact
+#'   objects; \code{NULL} when there is no receiver or the receiver has no
+#'   contacts.
 #'
 #' @examples
 #' md <- create_example_DTAMetaData(2)
@@ -328,7 +355,10 @@ get_version_history_df <- function(x) {
 
 
 #' @title Validate Transmission Dates
-#' @description Check that transmission dates are valid (either Date objects or non-empty character phrases)
+#' @description Check that transmission dates are valid (either Date objects or
+#' non-empty character phrases).
+#' The check also fails when both dates are Date objects and the first transfer
+#' date is after the last.
 #'
 #' @param x A DTAMetaData object
 #'

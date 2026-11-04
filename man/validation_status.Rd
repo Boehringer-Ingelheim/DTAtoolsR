@@ -7,7 +7,7 @@
 validation_status(x, ...)
 }
 \arguments{
-\item{x}{A \'DTADataSetTabular\' object.}
+\item{x}{A \'DTADataSetTabular\' or \'DTADataSetFile\' object.}
 
 \item{...}{Additional arguments:
 \describe{
@@ -15,7 +15,16 @@ validation_status(x, ...)
 }}
 }
 \value{
-A data.frame with validation status per table.
+A data.frame with one row per table (per file, for a
+\code{DTADataSetFile}) and the columns \code{table}, \code{target_type}
+(\code{"table"} or \code{"file"}), \code{status}, \code{ok},
+\code{validated_at}, \code{run_id}, \code{validation_run},
+\code{n_columnspec_errors}, \code{n_rule_errors} and
+\code{n_import_errors}. \code{status} is \code{"validated"},
+\code{"not_validated"} or, for a table checked against no column
+specification, \code{"unspecified"}; \code{ok} is \code{NA} for the last
+two. A dataset with no tables yields a zero-row data.frame with the same
+columns.
 }
 \description{
 Returns a compact status table for validated tables.

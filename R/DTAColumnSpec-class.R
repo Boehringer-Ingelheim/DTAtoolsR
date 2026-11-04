@@ -41,27 +41,31 @@ dta_normalise_spec_values <- function(values) {
   unname(flattened)
 }
 
-#' @title DTA Column Format Class
+#' @title DTA Column Specification Class
 #' @description
-#' Class for column format.
-#'
-#' This class defines the format of a column in a DTA dataset.
+#' Specification of one column of a DTA dataset: its id, label, type and
+#' format, whether it may be missing, and the values or pattern it must
+#' satisfy.
 #' @import S7
 #' @export
 #'
 #' @param id Character. The id of the column.
-#' @param label Character or NA. The label of the column.
-#' @param type Character or NA. The type of the column.
-#' @param format Character or NA. The format of the column.
-#' @param length Numeric or NA. The max character length.
-#' @param nullable Logical or NA. Whether the column can be null.
-#' @param pattern Character or NA. The pattern of the column.
+#' @param label Character or NULL. The label of the column.
+#' @param type Character or NULL. The type of the column.
+#' @param format Character or NULL. The format of the column.
+#' @param length Numeric or NULL. The max character length.
+#' @param nullable Logical or NULL. Whether the column can be null.
+#' @param pattern Character or NULL. The pattern of the column.
 #' @param values Character or numeric vector, or NULL. The permitted values of
 #'   the column. A list is accepted and flattened to a vector.
 #' @param examples Character or numeric vector, or NULL. Example value(s) for
 #'   the column. A list is accepted and flattened to a vector.
-#' @param description Character or NA. The description of the column.
-#' @param colclass Character or NA. The R/SAS storage class of the column.
+#' @param description Character or NULL. The description of the column.
+#' @param colclass Character or NULL. The semantic category of the column; one
+#'   of \code{"patient_info"}, \code{"measurement_patient"},
+#'   \code{"measurement"}, \code{"visit_related"}, \code{"date_related"},
+#'   \code{"study_info"}, \code{"wide_format"}, \code{"long_format"} or
+#'   \code{"wide_and_long_format"}.
 #' @return An object of class DTAColumnSpec.
 #' @examples
 #' col_format <- DTAColumnSpec(

@@ -12,7 +12,7 @@ metadata(x, ...)
 \item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-A list with metadata information
+A \code{DTAMetaData} object
 }
 \description{
 Method to get Metadata from a DTA object.

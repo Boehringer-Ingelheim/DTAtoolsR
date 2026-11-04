@@ -147,10 +147,17 @@ qual_report_md <- function(x) {
     "## 7. Requirements traceability",
     "",
     sprintf(
-      "%d requirements; %d verified, %d failed, %d not verified, %d uncovered.",
-      x$summary$n_requirements, x$summary$n_verified, x$summary$n_failed,
+      "%d requirements; %d verified, %d verified with deviation, %d failed, %d not verified, %d uncovered.",
+      x$summary$n_requirements, x$summary$n_verified,
+      x$summary$n_verified_with_deviation %||% 0L, x$summary$n_failed,
       x$summary$n_not_verified + x$summary$n_not_executed, x$summary$n_uncovered
     ),
+    "",
+    "A requirement is `verified_with_deviation` when every test case tracing to",
+    "it passed but a registered deviation that is not closed affects it: the",
+    "defect is known and was assessed, and the requirement does not hold in full.",
+    "The deviations are named in the last column; judge each one against",
+    "section 8 before accepting the requirement for the intended use.",
     "",
     qual_md_table(qual_report_trace_table(x, coverage)),
     "",
@@ -357,6 +364,7 @@ qual_report_trace_table <- function(x, coverage) {
     Statement = qual_truncate(text, 90),
     `Test cases` = coverage$tc_ids,
     Status = coverage$status,
+    Deviations = coverage$deviations %||% rep("", nrow(coverage)),
     check.names = FALSE, stringsAsFactors = FALSE
   )
 }

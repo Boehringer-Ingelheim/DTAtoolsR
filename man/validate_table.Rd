@@ -14,11 +14,13 @@ validate_table(specs, table, verbose = TRUE)
 \item{verbose}{Logical. If TRUE (default), prints validation progress.}
 }
 \value{
-Transformed and checked table (a data.frame) if valid. If the table
-has column spec errors, returns a list with \code{summarised_error},
-\code{full_error}, \code{columnspec_checks} (the per-check breakdown described
-above), \code{rules_valid} and \code{rule_errors}. If the schema is valid but rules
-are violated, aborts.
+The input table, unchanged, if valid. If the table has column spec
+errors, returns a list with \code{summarised_error}, \code{full_error},
+\code{columnspec_checks} (the per-check breakdown described above),
+\code{rules_valid}, \code{rule_errors}, \code{import_valid}, \code{n_import_errors} and
+\code{import_errors}. If the column specs are satisfied but rules are
+violated, or values cannot be represented in their declared type,
+aborts.
 }
 \description{
 Validates a data.frame against the constraints declared by its
@@ -26,11 +28,14 @@ column specs, evaluating each column's values directly rather than
 serialising the table and running a JSON Schema validator over it.
 }
 \details{
-Both axes -- the column specs and the rules -- are always evaluated,
-and both are reported in a single pass. When the table has column spec errors, the
-returned error list additionally carries \code{rules_valid} and \code{rule_errors}, and
-any rule violations are raised as a warning so they cannot go unnoticed while
-the column spec errors are being fixed.
+All three axes -- the column specs, the rules and the import typing -- are
+always evaluated, and all are reported in a single pass. When the table has
+column spec errors, the returned error list additionally carries
+\code{rules_valid}, \code{rule_errors}, \code{import_valid}, \code{n_import_errors} and
+\code{import_errors}, and any rule violations are raised as a warning so they
+cannot go unnoticed while the column spec errors are being fixed. A table
+that passes the column specs but has rule violations, or values that cannot
+be represented in their declared type, aborts instead.
 
 The column spec axis is reported per check kind -- presence, extra columns,
 format, length, values and pattern -- rather than as one verdict, so a

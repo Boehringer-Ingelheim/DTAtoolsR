@@ -14,7 +14,7 @@ A list with \code{col} and \code{range}.
 }
 \description{
 A range rule may state its bounds as \code{range} or as \code{min}/\code{max}, and its
-target as \code{column} or \code{columns}. Resolving that once, here, keeps every
+target as \code{columns}. Resolving that once, here, keeps every
 caller agreeing about what the rule actually says.
 }
 \keyword{internal}

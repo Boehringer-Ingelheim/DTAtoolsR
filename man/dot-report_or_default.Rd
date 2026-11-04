@@ -17,7 +17,8 @@ A length-1 character string.
 \description{
 Returns \code{default} when \code{x} is \code{NULL}, not length 1, or \code{NA}; otherwise
 returns \code{x} coerced to character (or \code{default} if that coercion is blank).
-Used throughout this file instead of \verb{\%||\%}, which this package does not
-import (base R only gained it in 4.4.0, and \code{DESCRIPTION} allows R >= 4.1).
+Used throughout this file instead of \verb{\%||\%} because it also covers the
+length-1, \code{NA} and blank-string checks that \verb{\%||\%} (which only tests for
+\code{NULL}) does not.
 }
 \keyword{internal}

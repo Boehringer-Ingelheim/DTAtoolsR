@@ -670,7 +670,20 @@ qual_deviation_status <- function(dev_df, exp_df) {
 
 # ---- traceability -----------------------------------------------------------
 
-qual_traceability <- function(req_df, disc_df, tests_df, stages_run) {
+# `dev_df` is the deviation register. A requirement whose test cases all passed
+# but that a deviation not yet closed `affects` is "verified_with_deviation",
+# not "verified": the binding step of a reproduced defect succeeds, so on test
+# results alone the very requirement the defect contradicts would read as
+# verified, and the traceability matrix would disagree with section 8 of the
+# report. Any other status stands -- a failure is still a failure.
+qual_traceability <- function(req_df, disc_df, tests_df, stages_run, dev_df = NULL) {
+  live <- if (is.null(dev_df)) list() else dev_df[dev_df$status != "closed", , drop = FALSE]
+  live_ids <- as.character(live$id)
+  live_affects <- strsplit(as.character(live$affects), " ", fixed = TRUE)
+  devs_against <- function(id) {
+    hit <- vapply(live_affects, function(a) id %in% a, logical(1))
+    paste(live_ids[hit], collapse = " ")
+  }
   pairs <- list()
   for (i in seq_len(nrow(disc_df))) {
     ids <- strsplit(disc_df$req_ids[[i]] %||% "", " ", fixed = TRUE)[[1]]
@@ -709,10 +722,14 @@ qual_traceability <- function(req_df, disc_df, tests_df, stages_run) {
     } else {
       "not_verified"
     }
+    against <- devs_against(id)
+    if (identical(status, "verified") && nzchar(against)) {
+      status <- "verified_with_deviation"
+    }
     data.frame(
       req_id = id, area = req_df$area[[i]], risk = req_df$risk[[i]],
       n_tc = nrow(mine), tc_ids = paste(mine$tc_id, collapse = " "),
-      status = status, stringsAsFactors = FALSE
+      status = status, deviations = against, stringsAsFactors = FALSE
     )
   })
   structure(
@@ -723,7 +740,7 @@ qual_traceability <- function(req_df, disc_df, tests_df, stages_run) {
       data.frame(
         req_id = character(0), area = character(0), risk = character(0),
         n_tc = integer(0), tc_ids = character(0), status = character(0),
-        stringsAsFactors = FALSE
+        deviations = character(0), stringsAsFactors = FALSE
       )
     }
   )
@@ -1221,7 +1238,9 @@ qual_unit_tests <- function(mode = c("auto", "never", "always"), scale = "standa
 # developer suite sets options, changes directory and loads packages, none of
 # which should be able to reach the session that is producing the evidence.
 #
-# Returns the per-file result frame, or NULL when the suite did not finish.
+# Returns list(results, failures, reason). `results` is the per-test result
+# frame and `reason` is NA on success; when the suite did not finish, `results`
+# and `failures` are NULL and `reason` says why.
 qual_unit_tests_run <- function(dir, timeout_sec) {
   script <- tempfile(fileext = ".R")
   out <- tempfile(fileext = ".rds")
@@ -1553,9 +1572,10 @@ qual_write_summary_txt <- function(x, dir) {
       sum(x$tests$status == "skip")
     ),
     sprintf(
-      "Requirements     : %d total, %d verified, %d failed, %d not verified",
+      "Requirements     : %d total, %d verified, %d verified with deviation, %d failed, %d not verified",
       nrow(x$requirements),
       sum(attr(x$traceability, "requirements")$status == "verified"),
+      sum(attr(x$traceability, "requirements")$status == "verified_with_deviation"),
       sum(attr(x$traceability, "requirements")$status == "failed"),
       sum(attr(x$traceability, "requirements")$status %in% c("not_verified", "not_executed", "uncovered"))
     ),
@@ -1871,7 +1891,7 @@ run_qualification <- function(output_dir,
     req_df, devs$deviations, devs$limitations, disc_df, tests_df, exp_df,
     api, index, tests_dir, stages, filter, performance, perf_floor
   )
-  trace <- qual_traceability(req_df, disc_df, tests_df, stages)
+  trace <- qual_traceability(req_df, disc_df, tests_df, stages, devs$deviations)
   partial <- !is.null(filter) || !identical(stages, qual_stages())
   verdict <- qual_verdict(tests_df, meta_df, dev_status, partial)
 
@@ -1906,6 +1926,7 @@ run_qualification <- function(output_dir,
       per_stage = per_stage %||% data.frame(),
       n_requirements = nrow(req_df),
       n_verified = sum(coverage$status == "verified"),
+      n_verified_with_deviation = sum(coverage$status == "verified_with_deviation"),
       n_failed = sum(coverage$status == "failed"),
       n_not_verified = sum(coverage$status == "not_verified"),
       n_not_executed = sum(coverage$status == "not_executed"),
@@ -1946,9 +1967,10 @@ run_qualification <- function(output_dir,
   }
   qual_write_summary_txt(x, bundle_dir)
 
-  # results.json is rewritten once so that it records the hash of the report it
-  # is bound to and the formats actually produced. Its own hash, quoted in the
-  # report and in SUMMARY.txt, is the one taken before this rewrite.
+  # results/run.json (the serialised x$run) is written last, so that it can
+  # record formats_rendered, hash_manifest and results_json_hash, none of which
+  # exist when results.json is built. The hash quoted in the report and in
+  # SUMMARY.txt is that of results.json, taken before this write.
   jsonlite::write_json(
     x$run, file.path(bundle_dir, "results", "run.json"),
     auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null"

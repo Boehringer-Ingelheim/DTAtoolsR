@@ -118,7 +118,7 @@ DTA                              ← top-level agreement container
                                           may restrict the allowed endings
 ```
 
-**Three ways to build any object, from most to least common:**
+**Four ways to build any object, from most to least common:**
 
 1. **`read_dta_from_yaml()`** — a full DTA/DTS (metadata + one or more datasets). The
    recommended entry point for production use — see the Quickstart below.
@@ -229,6 +229,8 @@ directly to a column entry in a YAML specification.
 | `values`      |          | Closed list of allowed values (`enum` in JSON Schema)    |
 | `pattern`     |          | Regular expression every value must match                |
 | `description` |          | Free-text description for documentation                  |
+| `examples`    |          | Example values; each must match `pattern`; not allowed together with `values` |
+| `colclass`    |          | Column category, one of `patient_info`, `measurement_patient`, `measurement`, `visit_related`, `date_related`, `study_info`, `wide_format`, `long_format`, `wide_and_long_format` |
 
 > **Note:** `values` and `pattern` are mutually exclusive — a column either has
 > a closed value list or a regex pattern, not both.
@@ -356,9 +358,11 @@ colspec(gf_specs, "GFSTAT")
 gf_specs@rules
 ```
 
-> **Nested YAML:** If your specs live inside a larger YAML file under a nested
-> key (e.g. under `DTA: format:`), pass `tag = c("DTA", "format")` to
-> `import_specs_from_yaml()`.
+> **Nested YAML:** `import_specs_from_yaml(file)` only reads top-level
+> `columns:` and `rules:` keys. If your specs live inside a larger YAML file
+> under a nested key (e.g. under `DTA: format:`), read the file with
+> `yaml::read_yaml()`, pick out the sub-list, and pass its columns and rules to
+> `specs_from_list(columns, rules)`.
 
 ### Exporting Specifications to YAML and JSON
 
@@ -378,6 +382,10 @@ unlink(yaml_out)
 json_out <- tempfile(fileext = ".json")
 write_columns_to_json(gf_specs, json_out)
 cat(paste(readLines(json_out, n = 25), collapse = "\n"))
+
+# Read it back with import_specs_from_json()
+gf_specs_json <- import_specs_from_json(json_out)
+length(gf_specs_json@columns) == length(gf_specs@columns)
 unlink(json_out)
 ```
 
@@ -465,7 +473,7 @@ inline_ds
 2. **Column spec errors** — JSON Schema validation of every row against column types,
    `nullable`, `values`, `pattern`, and `length`.
 3. **Rule errors** — inter-column rules (`col_condition`, `col_range`,
-   `col_unique`).
+   `col_unique`, `group_condition`).
 
 All three are always evaluated, and a failure on any one of them fails the
 table. `check()` **always returns the updated object** — assign the result back.
@@ -718,7 +726,8 @@ validation_status(ds_import)[, c(
 The three axes are independent: `n_columnspec_errors` and `n_rule_errors` are `0`,
 `n_import_errors` is `1`, and `ok` is `FALSE`.
 
-> **Reading the console output.** `check()` reports all three axes, each under
+> **Reading the console output.** `check()` on an in-memory table reports all
+> three axes (the streaming path does not print the import heading), each under
 > its own heading. The column spec axis prints one line per check kind —
 > presence, format, length, values, pattern — so a failure names the check that
 > failed and the columns it failed in, and a pass says which checks actually
@@ -756,12 +765,18 @@ The stored table holds `NA` in that cell, and the column is numeric as declared:
 as.data.frame(get_table(ds_import, "demo"))
 ```
 
-Two reasons are reported:
+Four reasons are reported:
 
 | `reason` / `keyword` | Meaning                                                                 |
 |----------------------|-------------------------------------------------------------------------|
 | `not_convertible`    | No part of the value fits the declared type, e.g. `"unknown"` as a number |
 | `trailing_residue`   | A prefix of the value fits and the remainder would be dropped, e.g. `"2026-12-31 at the earliest"` as a date |
+| `not_whole`          | A number in a declared integer column is fractional or not finite, e.g. `"8.5"` |
+| `out_of_range`       | A whole number in a declared integer column lies outside the 32-bit integer range, e.g. `"5000000000"` |
+
+A declared integer column is always stored as an R `integer`, so a value that
+cannot be stored that way becomes `NA` and is reported here rather than
+changing the type of the whole column.
 
 ### Import errors in metadata
 
@@ -811,6 +826,7 @@ The most versatile rule type. When `condition` is satisfied for a row, the
 | `less`          | number            | `less: 200`                      |
 | `less_equal`    | number            | `less_equal: 65`                 |
 | `min` / `max`   | number range      | `min: 10` + `max: 100`           |
+| `range`         | `[lo, hi]`, inclusive | `range: [10, 100]`           |
 
 ```yaml
 rules:
@@ -862,13 +878,14 @@ rules:
 
 #### `col_range` — Numeric Range Check
 
-Enforces that all values in a numeric column fall within `[min, max]`.
+Enforces that all values in a numeric column fall within `[min, max]`. The bounds can also be
+given as `range: [18, 65]` in place of `min`/`max`.
 
 ```yaml
 rules:
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 ```
@@ -883,12 +900,12 @@ rules:
   # Single column uniqueness
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # Composite key uniqueness: SUBJECT_ID + VISIT must be unique per row
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 ```
@@ -1052,8 +1069,8 @@ bad_data <- data.frame(
   VISIT        = c("SCREENING", "BASELINE"),
   AGE          = c(16, 32), # 16 violates age_range (min 18)
   CONSENT      = c("YES", "NO"),
-  CONSENT_DATE = c(NA, NA), # CONSENT=YES but no date: violates consent_requires_date
-  SUBJECT_ID   = c("P01", "P01") # duplicate SUBJECT_ID: violates subject_visit_unique when VISIT differs too
+  CONSENT_DATE = c(NA, NA), # CONSENT=YES but no date: violates consent_requires_date and consent_requires_date_per_subject
+  SUBJECT_ID   = c("P01", "P01") # same subject twice, but the (SUBJECT_ID, VISIT) pairs differ, so subject_visit_unique still passes
 )
 
 ds_bad <- DTADataSetTabular(
@@ -1376,7 +1393,7 @@ cat("Rows loaded:", nrow(loaded), "\n")
 ## `DTADataSetFile`: File Presence and Readability Checks
 
 While `DTADataSetTabular` validates the *content* of a delivered file against a
-column column spec and rules, `DTADataSetFile` answers a more basic question:
+column specification and rules, `DTADataSetFile` answers a more basic question:
 **did the expected files actually arrive, and can we open them?**
 
 Use `DTADataSetFile` when a DTS requires that certain non-tabular files (PDFs,
@@ -1477,9 +1494,12 @@ the full delivery — column-level content *and* file presence — in one `check
 # Tabular dataset (column spec validation)
 ds_tab <- DTADataSetTabular(
   id = "clinical_data",
-  specs = import_specs_from_yaml(
-    system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
-  ),
+  specs = specs(datasets(
+    read_dta_from_yaml(
+      system.file("extdata", "clinical_dta.yaml", package = "DTAtools")
+    ),
+    "clinical_data"
+  )),
   tables = list(clinical_data = read.csv(delivered_csv))
 )
 
@@ -1693,7 +1713,11 @@ Key arguments for `write_table_to_file()`:
 | `compression`         | `"none"`   | `"none"` or `"gzip"`                                   |
 | `get_md5sum`          | `TRUE`     | Compute and print the MD5 checksum of the written file  |
 | `write_md5sum_to_file`| `TRUE`     | Write MD5 + row/column count to a `.md5` sidecar file  |
-| `overwrite`           | `TRUE`     | Whether to overwrite an existing file                  |
+| `arrange_desc`        | `FALSE`    | Sort in descending order                                |
+| `na`                  | `""`       | String written for missing values                       |
+| `quote`               | `FALSE`    | Whether to quote strings and factors                    |
+| `overwrite`           | `FALSE`    | Whether to overwrite an existing file                  |
+| `quiet`               | `FALSE`    | Suppress progress messages                              |
 
 ### Export Spec Table to Word
 
@@ -2044,7 +2068,7 @@ rules:
   # AGE must be between 18 and 65 (inclusive)
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 
@@ -2052,12 +2076,12 @@ rules:
   # SUBJECT_ID must be globally unique
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # The combination of SUBJECT_ID + VISIT must be unique
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 
@@ -2180,12 +2204,12 @@ datasets:
     rules:
       - id: age_range
         type: col_range
-        column: AGE
+        columns: AGE
         min: 18
         max: 65
       - id: subject_visit_unique
         type: col_unique
-        column:
+        columns:
           - SUBJECT_ID
           - VISIT
       - id: v03_completed

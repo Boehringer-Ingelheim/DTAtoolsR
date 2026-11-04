@@ -63,10 +63,10 @@
 # Recursively flatten a (possibly nested) list to dotted-path leaves.
 #
 # A LIST is walked one level at a time: a NAMED list contributes its own
-# names as the next path segment; an list with no names (or with any blank
+# names as the next path segment; a list with no names (or with any blank
 # name) is treated as an ARRAY and contributes 1-based positions instead --
 # this is what turns `version_history[[1]]$version` into the dotted key
-# "version_history.1.version" the task specifies verbatim.
+# "version_history.1.version".
 #
 # Anything that is NOT a list (character, numeric, logical, Date, or an
 # atomic vector of length > 1) is a LEAF, stored as-is -- not stringified
@@ -147,7 +147,7 @@ dta_metadata_leaves <- function(md) {
 
 # Flatten every dataset of a DTA to dotted-path leaves.
 #
-# Two shapes, per the task's own contract:
+# Two shapes, by design:
 #   "<dataset>.<field>"                      every non-column field of
 #                                             dta_dataset_to_list()'s output
 #                                             (name/type/description/
@@ -406,7 +406,7 @@ dta_template_provenance <- function(dta) {
 }
 
 # Three-way classification of every leaf key across ancestor/current/target,
-# per the task's own rule table:
+# by the following rule table:
 #
 #   changed in target only (current == ancestor)  -> "take_template"
 #   changed in current only (target == ancestor)  -> "keep_user"
@@ -524,7 +524,7 @@ dta_template_provenance <- function(dta) {
 # ALONGSIDE from_version/to_version/... rather than nested under `value`), so
 # a caller never has to branch on shape before reading e.g. `plan$to_version`.
 #
-# Steps, per the task's own contract:
+# Steps:
 #   1. Read provenance from `current`.
 #   2. Materialise the ancestor at the RECORDED version/selections.
 #   3. Materialise the target at `to_version`, same selections.
@@ -591,7 +591,7 @@ rebase_plan <- function(current, to_version, index = NULL) {
     # was built from, so the two can never disagree) -- except `lineage`,
     # which is deliberately the CURRENT document's own lineage, not
     # whatever the target version's `extends:` chain looks like today. That
-    # is what "preserving lineage" (the task's own wording) means: the
+    # is what "preserving lineage" means: the
     # document's inheritance trail is a fact about ITS history, unaffected
     # by which template version it happens to be rebased onto.
     target_provenance <- template_provenance(

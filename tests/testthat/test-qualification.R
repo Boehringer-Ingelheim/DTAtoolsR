@@ -37,6 +37,27 @@ test_that("the test-title grammar accepts well-formed names and rejects the rest
   }
 })
 
+test_that("a requirement a live deviation affects is verified with deviation, not verified", {
+  req_df <- data.frame(id = c("R-1", "R-2", "R-3", "R-4"), area = "X", risk = "high")
+  disc_df <- data.frame(
+    tc_id = c("T-1", "T-2", "T-3", "T-4"), req_ids = c("R-1", "R-2", "R-3", "R-4"), stage = "OQ"
+  )
+  tests_df <- data.frame(tc_id = c("T-1", "T-2", "T-3", "T-4"), status = c("pass", "pass", "pass", "fail"))
+  dev_df <- data.frame(
+    id = c("D-1", "D-2", "D-3"), status = c("open", "pending", "closed"),
+    affects = c("R-2 R-4", "R-2", "R-3")
+  )
+
+  req <- attr(qual_traceability(req_df, disc_df, tests_df, "OQ", dev_df), "requirements")
+  expect_identical(req$status, c("verified", "verified_with_deviation", "verified", "failed"))
+  expect_identical(req$deviations, c("", "D-1 D-2", "", "D-1"))
+
+  # Without a register the status is decided by the test cases alone.
+  plain <- attr(qual_traceability(req_df, disc_df, tests_df, "OQ"), "requirements")
+  expect_identical(plain$status, c("verified", "verified", "verified", "failed"))
+  expect_identical(plain$deviations, rep("", 4))
+})
+
 test_that("every shipped requirement satisfies the schema and is reachable", {
   reqs <- qualification_requirements()
   expect_gt(nrow(reqs), 0)

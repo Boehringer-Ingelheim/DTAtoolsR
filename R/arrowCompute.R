@@ -81,21 +81,18 @@ dta_use_arrow_compute <- function() {
 dta_count_duplicates <- function(df, cols) {
   # `dta_unique_key()` (R/streamingValidation.R) encodes each row as one string
   # and maps NA to a marker, which is much faster than the data.frame method of
-  # `duplicated()` -- but it goes through `as.character()`, and *any* type
-  # whose distinct values can render to the same string is at risk of
-  # colliding on the same key string, not just doubles: a double only
-  # round-trips through `as.character()` to about 15 significant digits (two
-  # doubles that `==` reports as different, e.g. `0.1 + 0.2` and `0.3`, can
-  # collide), and the same kind of risk applies to Dates, POSIXt, complex,
-  # list columns, or any type this code does not specifically recognise as
-  # safe. Rather than enumerate the unsafe types, the fast key path is used
-  # only for types *provably* safe to render as character -- character,
-  # factor, integer, and logical -- and everything else falls back to the
-  # data.frame method of `duplicated()`, which keeps that case exactly as
-  # precise as it is today. The streaming path (`dta_rule_stream_update()`)
-  # already keys every type, including doubles, the same way regardless --
-  # that drift between the two paths for an unsafe key column is pre-existing
-  # and deliberately not addressed here.
+  # `duplicated()`. For character, factor, integer and logical columns the
+  # string is `as.character()`, which is exact. This gate keeps the fast path
+  # to exactly those types and sends everything else (double, Date, POSIXt,
+  # complex, list columns, any class with its own `as.character()` method) to
+  # the data.frame method of `duplicated()`, which compares the values
+  # themselves. `dta_row_key()` itself no longer loses precision for doubles,
+  # Date, POSIXct or complex -- it renders them with `%.17g`, which
+  # distinguishes everything `==` does -- and the streaming path
+  # (`dta_rule_stream_update()`) keys every type through it. So the two
+  # paths agree on those types; the gate here is simply the conservative,
+  # unchanged one, and a list column or a class with its own `as.character()`
+  # method is the case it still protects.
   #
   # This type gate is about *rendering* collisions only. The other way two
   # different rows could share a key -- values that straddle the field
@@ -173,6 +170,16 @@ dta_count_duplicates <- function(df, cols) {
 #' validation verdict does not depend on either option (the R and Arrow paths
 #' are tested to agree), which is what makes Arrow compute safe to enable
 #' selectively for performance without changing results.
+#'
+#' Two further Arrow switches belong to streaming validation and are
+#' independent of the options above. Both default to `TRUE` and exist as
+#' diagnostic off switches:
+#'
+#' * `options(DTAtools.stream_arrow_unique = FALSE)` -- turns off Arrow's
+#'   engine for `col_unique` key tracking over text keys, falling back to the
+#'   per-batch R key set.
+#' * `options(DTAtools.stream_arrow_numeric = FALSE)` -- sends every column
+#'   down the R parsing path instead of Arrow's numeric parsing.
 #' @param n `NULL` (default, report only), or a single positive whole number
 #'   giving the number of threads arrow's compute kernels should use.
 #' @return The *previous* thread count, invisibly, as reported by

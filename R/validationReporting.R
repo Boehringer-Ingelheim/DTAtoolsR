@@ -5,17 +5,22 @@
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments. The `DTADataSet` and `DTADataSetTabular`
+#'   methods take `tables` (names or indices of the tables to report on;
+#'   `NULL` for all). The `DTA` method takes `datasets` (`NULL`, dataset
+#'   names, or indices).
 #' @return
-#' A data.frame summarizing validation state.
-#'
-#' For `DTADataSetTabular`, columns are:
-#' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
-#' `n_columnspec_errors`, `n_rule_errors`, `n_import_errors`.
-#'
-#' For `DTA`, the summary is aggregated per dataset and includes:
-#' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
+#' A data.frame with one row per validation target (table), with columns:
+#' `dataset`, `target`, `target_type`, `status`, `validated_at`, `run_id`,
+#' `validation_run`, `n_columnspec_errors`, `n_rule_errors`,
+#' `n_import_errors`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
 #' `n_skipped`, `n_not_validated`.
+#'
+#' The `n_targets` ... `n_not_validated` columns are counts over all
+#' targets of the dataset and repeat on every row of that dataset; they are
+#' not aggregated across datasets. For a `DTA`, the per-dataset results are
+#' row-bound. A dataset that is not a `DTADataSet` contributes a single row
+#' with status `"not_validated"` and `NA` in the other columns.
 #' @examples
 #' dta <- create_example_DTA()
 #' dta <- check(dta, quiet = TRUE)
@@ -171,15 +176,24 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' @title Retrieve Check Messages
 #' @description
 #' Returns one row per validation message to support debugging workflows.
-#' The output combines column spec and rule failures into a single flat table.
+#' The output combines column spec, rule and import failures into a single
+#' flat table.
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments:
+#'   * `tables` (`DTADataSet` and `DTADataSetTabular` methods): names or
+#'     indices of the tables to report on; `NULL` for all.
+#'   * `datasets` (`DTA` method): `NULL`, dataset names, or indices.
+#'   * `source`: where validation details are read from, one of `"auto"`
+#'     (the default), `"memory"` or `"artifact"`.
+#'   * `as_tibble`: logical, default `TRUE`. Return a tibble when the
+#'     `tibble` package is installed.
 #' @return
 #' A data.frame (or tibble when `as_tibble = TRUE` and package `tibble`
 #' is installed) with columns:
-#' `dataset`, `target`, `severity`, `source`, `rule_id`,
+#' `id` (sequential integer), `dataset`, `target`, `severity`, `source`
+#' (`"columnspec"`, `"rule"` or `"import"`), `rule_id`,
 #' `row`, `column`, `keyword`, `message`.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
@@ -287,12 +301,17 @@ dta_import_error_messages <- function(import_errors) {
     return(character(0))
   }
 
+  reason <- as.character(import_errors$reason)
+  detail <- ifelse(
+    reason == "not_whole", "not a whole number",
+    ifelse(reason == "out_of_range", "outside the 32-bit integer range", reason)
+  )
   sprintf(
     "value '%s' in column '%s' cannot be represented as declared type '%s' (%s); imported as NA",
     as.character(import_errors$raw),
     as.character(import_errors$column),
     as.character(import_errors$declared_type),
-    as.character(import_errors$reason)
+    detail
   )
 }
 
@@ -362,7 +381,9 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
   out <- lapply(target_tables, function(table_name) {
     entry <- x@validation_index[[table_name]]
-    if (is.null(entry)) {
+    # "unspecified" (a spec with no columns) records no artifact and no store
+    # entry, so there is nothing to collect; validation_errors() would abort.
+    if (is.null(entry) || identical(entry$status, "unspecified")) {
       return(dta_empty_messages())
     }
 
@@ -516,7 +537,10 @@ S7::method(messages, DTA) <- function(
 #'   }
 #' @return A tibble/data.frame with one or more rows per requested id.
 #'   Detail fields are appended as flat columns prefixed with
-#'   \code{schema_}, \code{context_}, and \code{failing_}.
+#'   \code{columnspec_}, \code{context_}, \code{failing_}, \code{import_}
+#'   and \code{group_violation_}. Summary fields of the validation result are
+#'   added as \code{details_*} columns, and the class of the rule behind a
+#'   rule message as \code{rule_definition_class}.
 #' @seealso \code{\link{explain_messages}} for the same findings in plain language.
 #' @usage inspect(x, ...)
 #' @examples
@@ -1483,6 +1507,33 @@ S7::method(inspect, DTADataSet) <- function(
   cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile subclasses.")
 }
 
+# Inspect record for one metadata import message: an "import" record whose
+# import_matches carry the matching import_issues row (same field and reason),
+# in the shape the report renders for per-table import errors.
+#' @keywords internal
+dta_inspect_metadata_message <- function(metadata, msg_row) {
+  errors <- metadata_import_errors(metadata)
+  hit <- which(errors$column %in% as.character(msg_row$column) &
+    errors$reason %in% as.character(msg_row$keyword))
+  matches <- errors[utils::head(hit, 1), , drop = FALSE]
+  rownames(matches) <- NULL
+  list(
+    id = as.integer(msg_row$id),
+    dataset = NA_character_,
+    target = "metadata",
+    source = "import",
+    severity = as.character(msg_row$severity),
+    type = "import",
+    headline = sprintf("[metadata] %s", msg_row$message),
+    why = paste(
+      "A metadata value could not be fully interpreted, so the value",
+      "recorded differs from what was written."
+    ),
+    message = as.character(msg_row$message),
+    import_matches = matches
+  )
+}
+
 #' @export
 S7::method(inspect, DTA) <- function(
   x,
@@ -1496,6 +1547,9 @@ S7::method(inspect, DTA) <- function(
 
   records <- lapply(seq_len(nrow(msg_rows)), function(i) {
     msg_row <- msg_rows[i, , drop = FALSE]
+    if (is.na(msg_row$dataset) && identical(as.character(msg_row$target), "metadata")) {
+      return(dta_inspect_metadata_message(x@metadata, msg_row))
+    }
     dataset_name <- as.character(msg_row$dataset)
     ds <- x@datasets[[dataset_name]]
     if (is.null(ds) || !inherits(ds, "DTAtools::DTADataSet")) {

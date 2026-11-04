@@ -75,30 +75,9 @@ dta_template_library_dir <- function(root) {
 
 # ---- Header reading ------------------------------------------------------
 
-# yaml scalar handlers that hand back the ORIGINAL text of an int/float scalar
-# instead of the R number yaml::read_yaml() would otherwise coerce it to.
-#
-# This exists for exactly one field: `version`. An unquoted `version: 1.0` is,
-# to a YAML parser, just the number one -- yaml::read_yaml() returns the double
-# 1, and as.character(1) is "1", silently dropping the ".0" that is the entire
-# point of a version string ("1.0" and "1" must stay distinguishable; "1.9"
-# must not collapse into anything that sorts next to "1.10" as a number would
-# have to). Overriding "int" and the two float subtypes to return their
-# untouched source text fixes this for the WHOLE parsed document, not just the
-# `version` key -- which is fine here, because read_template_header() only
-# reads a handful of NAMED fields out of the result and discards the rest, so
-# a numeric-looking value elsewhere in the file (a `base:`/`datasets:` body
-# read_template_header() never looks at) coming back as a string instead of a
-# number has no effect on anything this function returns.
-#
-# The handler names are yaml's own vocabulary, not a guess: see the "custom
-# scalar handler" example under `?yaml::yaml.load`, which uses the identical
-# "float#fix" spelling. A plain "float" handler name -- the intuitive first
-# guess -- is simply never invoked by the underlying libyaml resolver.
-# Retained as the index's own name for the shared handler set in
-# template_core.R, so there is exactly ONE definition of which libyaml scalar
-# tags preserve their source text. See dta_template_yaml_handlers() for why the
-# obvious tag name "float" does not work.
+# Alias for dta_template_yaml_handlers() (template_core.R), which defines the
+# scalar handler set that preserves int/float source text (e.g. `version: 1.0`);
+# see there for why the handler names are what they are.
 dta_template_header_yaml_handlers <- function() {
   dta_template_yaml_handlers()
 }
@@ -185,9 +164,9 @@ dta_template_index_empty <- function() {
   df
 }
 
-# Roots are library directories, not necessarily repository checkouts.
 # The resolved-source metadata (name/scheme/resolved_commit) for one library
-# directory, looked up by exact path match against the `sources` list
+# directory (roots are library directories, not necessarily repository
+# checkouts), looked up by exact path match against the `sources` list
 # dta_template_source_roots() returns alongside `roots`.
 #
 # A root can have NO matching source record: dta_template_source_roots()

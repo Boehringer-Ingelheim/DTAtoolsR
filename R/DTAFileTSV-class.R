@@ -89,12 +89,11 @@ DTAFileTSV <- S7::new_class(
 #'
 #' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file to be read, and an
-#'   optional `specs` argument: a `DTAColumnSpecCollection` whose declared
-#'   types decide how the columns are parsed. Without it every column is
-#'   inferred, as before.
+#'   optional `specs` argument: a `DTAColumnSpecCollection`. When supplied,
+#'   every column is read as text and the declared types are applied
+#'   afterwards, in R; without it, column types are inferred.
 #'
-#' @return A tibble containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#' @return An Arrow Table with the file's contents.
 ##' @name read_file_execution
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileTSV) <- function(x, ...) {
@@ -120,8 +119,8 @@ method(read_file_execution, DTAFileTSV) <- function(x, ...) {
 #' treated as missing.
 #' @param x A \code{DTAFileTSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file, and an optional
-#'   `specs` argument: a `DTAColumnSpecCollection` whose declared types decide
-#'   how the columns are parsed.
+#'   `specs` argument: a `DTAColumnSpecCollection`. When supplied, every
+#'   column is read as text; without it, column types are inferred.
 #' @return An \code{arrow::Dataset}.
 #' @usage open_file_execution(x, ...)
 method(open_file_execution, DTAFileTSV) <- function(x, ...) {

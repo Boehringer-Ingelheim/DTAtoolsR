@@ -150,7 +150,7 @@ dta_table_content_hash <- function(df) {
 #' [dta_table_content_hash()] of the frame it coerced, rather than of the Table
 #' it then builds -- which is what lets it convert the data once instead of
 #' three times. That is only the same answer while the round trip is lossless,
-#' and for three types it is not:
+#' and for four kinds of column it is not:
 #'
 #' * a `bit64::integer64` whose values fit in 32 bits comes back as `integer`
 #'   (Arrow's `int64_downcast`);
@@ -361,15 +361,18 @@ dta_compile_spec_types <- function(specs) {
 #' no value can fail to parse. This is also what stops the import axis from
 #' inventing errors on a clean file.
 #'
-#' An `Int` target is narrowed to R `integer` only when every value is whole.
-#' Rounding a fractional value into an integer column would silently discard the
-#' fraction *and* hide the `type: integer` column spec error that exists to report
-#' it, so a fractional value stays a double and is left to the column spec axis.
+#' An `Int` target is always stored as R `integer`: the declaration decides the
+#' storage, never the values in hand, so the same column types identically
+#' whether it is converted whole or batch by batch. A value that cannot be
+#' stored as declared -- fractional, non-finite, or outside the int32 range --
+#' becomes `NA` and is an import error (reason `"not_whole"` or
+#' `"out_of_range"`), with its raw text kept.
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the
-#'   converted `values`, the integer indices of the `offending` values, and
-#'   `source` -- the original input vector, from which the raw text of row `i`
+#'   converted `values`, the integer indices of the `offending` values, a
+#'   parallel `reason` vector (`"not_convertible"`, `"not_whole"` or
+#'   `"out_of_range"`), and `source` -- the original input vector, from which the raw text of row `i`
 #'   is `as.character(source[i])`, i.e. [dta_numeric_raw()].
 #' @keywords internal
 dta_coerce_column <- function(values, target) {
@@ -396,20 +399,28 @@ dta_coerce_column <- function(values, target) {
   # column and its raw text is retained in the issue below.
   out <- converted$values
 
+  offending <- which(converted$unconvertible)
+  reason <- rep("not_convertible", length(offending))
+
   if (identical(target, "integer")) {
-    present <- out[!is.na(out)]
-    is_whole <- length(present) == 0 ||
-      (all(is.finite(present)) &&
-        all(present == trunc(present)) &&
-        all(abs(present) <= .Machine$integer.max))
-    if (is_whole) {
-      out <- as.integer(out)
+    not_whole <- !is.na(out) & (!is.finite(out) | out != trunc(out))
+    out_of_range <- !is.na(out) & !not_whole & abs(out) > .Machine$integer.max
+    bad <- which(not_whole | out_of_range)
+    if (length(bad) > 0) {
+      offending <- c(offending, bad)
+      reason <- c(reason, ifelse(not_whole[bad], "not_whole", "out_of_range"))
+      ord <- order(offending)
+      offending <- offending[ord]
+      reason <- reason[ord]
+      out[bad] <- NA
     }
+    out <- as.integer(out)
   }
 
   list(
     values = out,
-    offending = which(converted$unconvertible),
+    offending = offending,
+    reason = reason,
     # The input vector itself, not a character rendering of it: the raw text is
     # read at the offending indices only, and rendering the whole column up
     # front cost an order of magnitude more memory than the column.
@@ -532,6 +543,7 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
     # may be.
     n_kept <- min(n_offending, max_rows_per_column)
     kept <- coerced$offending[seq_len(n_kept)]
+    kept_reason <- coerced$reason[seq_len(n_kept)]
 
     declared <- dta_spec_declared_type(specs, column)
     if (is.na(declared)) {
@@ -543,7 +555,7 @@ dta_coerce_table_to_specs <- function(table, specs, type_map = NULL, max_rows_pe
       column = column,
       raw = substr(dta_numeric_raw(coerced, kept), 1L, dta_import_raw_max_chars),
       declared_type = declared,
-      reason = "not_convertible",
+      reason = kept_reason,
       stringsAsFactors = FALSE
     )
   }

@@ -42,7 +42,7 @@
 # WHAT THIS FILE DELIBERATELY DOES NOT DO: it never produces a DTAColumnSpec
 # property of its own. A vocabulary is EXPANDED into an ordinary `values:`
 # vector before any spec is built (see expand_column_vocabularies() in
-# dataset_template.R), so `values_from:` never reaches DTAColumnSpec and never
+# this file), so `values_from:` never reaches DTAColumnSpec and never
 # survives into a produced document. A DTA YAML handed to a supplier has to be
 # readable without access to the vocabulary library that shaped it.
 #

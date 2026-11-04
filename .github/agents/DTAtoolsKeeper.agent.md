@@ -1,6 +1,6 @@
 ---
 name: DTAtoolsKeeper
-description: Long-running, autonomous R-package engineer for DTAtools (Boehringer-Ingelheim/DTAtoolsR). Use for implementing features, fixing bugs, refactoring S7 classes, writing/expanding testthat coverage, keeping roxygen2/NAMESPACE/DESCRIPTION/CHANGELOG in sync, and getting the package to a clean, mergeable state (styler + roxygenize + R CMD check + full test suite all green). Not for quick one-line questions — this agent is built to work end-to-end on real package changes across many files and iterations.
+description: Long-running, autonomous R-package engineer for DTAtools (Boehringer-Ingelheim/DTAtoolsR). Use for implementing features, fixing bugs, refactoring S7 classes, writing/expanding testthat coverage, keeping roxygen2/NAMESPACE/DESCRIPTION/CHANGELOG in sync, and getting the package to a clean, mergeable state (styler + roxygenise + R CMD check + full test suite all green). Not for quick one-line questions — this agent is built to work end-to-end on real package changes across many files and iterations.
 argument-hint: A feature, bug, class, rule type, or YAML capability to design/implement/fix in DTAtools, e.g. "add a col_regex rule type" or "fix DTAFileTSV encoding handling and add tests".
 tools: ['vscode', 'execute', 'read', 'edit', 'search', 'web', 'todo']
 ---
@@ -29,7 +29,7 @@ checks, docs) says it's done.
 
 ## Architecture
 
-- **S7 object system** (`Depends: S7 (>= 0.2.0)`), not S3/S4/R6. Classes are
+- **S7 object system** (see `DESCRIPTION` for the minimum version), not S3/S4/R6. Classes are
   defined with `new_class()`, generics with `new_generic()`, methods with
   `method(generic, class) <- function(...) {...}`. Preserve this style
   exactly — do not introduce S3/R4/R6 patterns.
@@ -41,8 +41,9 @@ checks, docs) says it's done.
   → `DTADataSetTabular` / `DTADataSetFile`. Column specs:
   `DTAColumnSpecCollection` (named list of `DTAColumnSpec` + optional rules).
   Rules: `DTARule` → `DTARuleColCondition` / `DTARuleColRange` /
-  `DTARuleColUnique`. File handlers: `DTAFile` → `DTAFileTabular` →
-  `DTAFileCSV` / `DTAFileTSV` / `DTAFileDelim`.
+  `DTARuleColUnique` / `DTARuleGroupCondition`. File handlers: `DTAFile` →
+  `DTAFileTabular` → `DTAFileCSV` / `DTAFileTSV` / `DTAFileDelim`, and
+  `DTAFile` → `DTAFileAny` (non-tabular files).
 - Because R has no forward declarations, **`DESCRIPTION`'s `Collate:` field
   encodes load order** and must stay a valid topological order of class
   dependencies. When you add a new class file, add it to `Collate:` in the
@@ -135,11 +136,15 @@ checks, docs) says it's done.
 
 ## CI reality check
 
-- `R-CMD-check.yaml` runs on macOS/Windows/Ubuntu across release/devel/oldrel-1
-  R versions and additionally installs **S7 from GitHub**
-  (`remotes::install_github("RConsortium/S7")`) because released S7 may lag
-  what the package needs — keep this in mind if S7 API usage changes.
-  `release.yml` and `pre-commit.yml` also exist — don't break them.
+- `R-CMD-check.yaml` runs on pull requests to `master`/`dev` (plus a weekly
+  schedule) as a five-leg matrix: macOS release, Windows release, and Ubuntu
+  devel/release/oldrel-1. Dependencies come from released packages via
+  `setup-r-dependencies`; it does not install S7 from GitHub.
+- Other workflows in `.github/workflows/`: `r-style.yaml` (the `check_*.R`
+  scripts, `sync_qualification_manifest.R --check`, `style.R --check`, and a
+  `roxygenise()` diff check), `pre-commit.yml`, `manifest-sync.yml`,
+  `qualification.yml`, `bump-version.yml`, `release.yml`,
+  `manifest-release-sha.yml` and `pages.yml` — don't break them.
 - Locally you cannot run the full OS matrix, but you can and should run the
   R-native equivalents (see Workflow below) before considering work done.
 
@@ -181,14 +186,18 @@ checks, docs) says it's done.
 
 ## Practical R commands (adapt to the environment's R/Rscript path)
 
+This is a standalone editor agent: it runs R itself. (The project
+workflow in `CLAUDE.md`, which delegates test runs to a subagent, does not
+apply here.)
+
 Prefer running these via `Rscript -e "..."` (or an R console) with generous
 timeouts — package checks are slow by nature, not a sign something is stuck:
 
-- Regenerate docs: `Rscript -e "roxygen2::roxygenize()"`
+- Regenerate docs: `Rscript -e "roxygen2::roxygenise()"`
 - Style changed files: `Rscript .github/scripts/style.R` (check without
   writing: `Rscript .github/scripts/style.R --check`)
 - Run tests: `Rscript -e "devtools::test()"` (or `testthat::test_dir('tests/testthat')`)
-- Full check: `Rscript -e "devtools::check()"` or `Rscript -e "rcmdcheck::rcmdcheck(args = c('--no-manual'))"`
+- Full check: `Rscript -e "devtools::check()"` or `Rscript -e "rcmdcheck::rcmdcheck(args = '--no-manual', env = c(NOT_CRAN = 'true'))"`
 - Load for interactive verification: `Rscript -e "devtools::load_all(); <your smoke test code>"`
 - Pre-commit locally (if `pre-commit` is installed): `pre-commit run --all-files`
 

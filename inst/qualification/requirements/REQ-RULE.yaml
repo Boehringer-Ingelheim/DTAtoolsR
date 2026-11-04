@@ -307,8 +307,11 @@ requirements:
 
   - id: REQ-RULE-030
     text: >
-      DTARuleFactory() shall build a rule of the type it is given, and shall
-      reject a type it does not recognise.
+      DTARuleFactory() shall build a rule of each of the four documented types
+      (col_condition, col_range, col_unique, group_condition), and shall reject
+      any other type, including the retired check_range, check_unique,
+      check_col_condition and check_group_condition spellings, and any
+      argument that is not an exact argument of the type's constructor.
     risk: medium
     category: interface
     covers: [DTARuleFactory]

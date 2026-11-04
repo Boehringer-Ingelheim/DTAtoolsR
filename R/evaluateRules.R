@@ -7,17 +7,6 @@ rule_get_slot <- function(rule, name) {
   fields[[name]]
 }
 
-#' @keywords internal
-normalize_rule_type <- function(type) {
-  switch(as.character(type),
-    col_range = "check_range",
-    col_unique = "check_unique",
-    col_condition = "check_col_condition",
-    group_condition = "check_group_condition",
-    as.character(type)
-  )
-}
-
 #' @title Strict Numeric Conversion
 #' @description
 #' Converts a column to numeric while keeping apart the three cases that a bare
@@ -141,8 +130,8 @@ dta_numeric_raw <- function(entry, idx) {
 #' @param rules A list of `DTARule` objects, or `NULL`.
 #' @param columns Character, or `NULL` (the default). The columns the rules read
 #'   numerically, when the caller has already derived them. Deriving them means
-#'   re-parsing every rule's clause structure -- for `check_col_condition` and
-#'   `check_group_condition` rules that is `dta_normalize_conditions()` over
+#'   re-parsing every rule's clause structure -- for `col_condition` and
+#'   `group_condition` rules that is `dta_normalize_conditions()` over
 #'   every clause of every rule -- which is invariant across the batches of one
 #'   scan. The streaming driver computes the list once before its batch loop and
 #'   passes it here so the parse is not repeated per batch. When `NULL` the list
@@ -281,12 +270,12 @@ dta_equality_bound <- function(x, value) {
   parsed
 }
 
-#' @title Rule: check_range
-#' @param rule A DTARule object of type `"check_range"`. Expected slots:
+#' @title Rule: col_range
+#' @param rule A DTARule object of type `"col_range"`. Expected slots:
 #'   - `@id` character
-#'   - `@type` = "check_range"
-#'   - the target column, spelled either `@columns` (what [DTARuleColRange()]
-#'     stores) or `@column`. Exactly one column is required.
+#'   - `@type` = "col_range"
+#'   - the target column, `@columns` (as [DTARuleColRange()] stores it).
+#'     Exactly one column is required.
 #'   - the bounds, spelled either `@min` and `@max` (what [DTARuleColRange()]
 #'     stores, including when it was constructed from `range =`) or a
 #'     `@range` numeric(2) giving inclusive lower and upper bounds.
@@ -297,8 +286,10 @@ dta_equality_bound <- function(x, value) {
 #' @param numeric_cache A named list from [dta_build_numeric_cache()] mapping
 #'   column name to its cached numeric conversion, or `NULL` to convert on
 #'   demand.
-#' @description Ensures all non-missing values in `rule@column` fall within
-#' an **inclusive** numeric range `[lower, upper]`. Missing values are ignored.
+#' @description Ensures all non-missing values in the rule's target column
+#' (`rule@columns`) fall within an **inclusive** numeric range
+#' `[lower, upper]`. Missing values are ignored. A value that is present but
+#' cannot be converted to a number counts as a violation.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' df <- data.frame(AGE = c(34, 71, 12))
@@ -325,27 +316,21 @@ rule_check_range <- function(rule, df, numeric_cache = NULL) {
   }
 }
 
-#' @title Target Columns of a Rule, However They Are Spelled
+#' @title Target Columns of a Rule
 #' @description
-#' A rule may name its target under `column` or `columns`. Four call sites used
-#' to restate that fallback independently; this is the one place that resolves
-#' it, so a new spelling (or a change in precedence) is a one-line change.
+#' Reads the `columns` slot of a rule. Four call sites share this one place.
 #' @param rule A rule object.
 #' @return The slot's value -- a character vector -- or `NULL` when the rule
 #'   names no target either way.
 #' @keywords internal
 dta_rule_target_columns <- function(rule) {
-  cols <- rule_get_slot(rule, "column")
-  if (is.null(cols)) {
-    cols <- rule_get_slot(rule, "columns")
-  }
-  cols
+  rule_get_slot(rule, "columns")
 }
 
 #' @title Resolved Column and Bounds of a Range Rule
 #' @description
 #' A range rule may state its bounds as `range` or as `min`/`max`, and its
-#' target as `column` or `columns`. Resolving that once, here, keeps every
+#' target as `columns`. Resolving that once, here, keeps every
 #' caller agreeing about what the rule actually says.
 #' @param rule A range rule.
 #' @return A list with `col` and `range`.
@@ -425,20 +410,21 @@ dta_range_violation_message <- function(id, n, col, range) {
   )
 }
 
-#' @title Rule: check_unique
-#' @param rule A DTARule object of type `"check_unique"`. Expected slots:
+#' @title Rule: col_unique
+#' @param rule A DTARule object of type `"col_unique"`. Expected slots:
 #'   - `@id` character
-#'   - `@type` = "check_unique"
-#'   - the target columns, spelled either `@columns` (what
-#'     [DTARuleColUnique()] stores) or `@column`. Several columns are checked
-#'     as a combination: it is the tuple that must be unique.
+#'   - `@type` = "col_unique"
+#'   - the target columns, `@columns` (as [DTARuleColUnique()] stores them).
+#'     Several columns are checked as a combination: it is the tuple that
+#'     must be unique.
 #' @param df A data.frame to validate.
 #' @param numeric_cache A named list from [dta_build_numeric_cache()], or
 #'   `NULL`. Ignored: uniqueness never compares columns numerically, but the
 #'   parameter is accepted so `apply_rules()` can dispatch to every rule
 #'   function uniformly.
-#' @description Ensures that all values in the specified column are unique.
-#' Repeated `NA` values are considered duplicates by base R `duplicated()`.
+#' @description Ensures that the values of the target column, or the
+#' combination of values across several target columns, are unique. Repeated
+#' `NA` values count as duplicates, as in base R `duplicated()`.
 #' @return A list with elements `id`, `valid`, and `message`.
 #' @examples
 #' df <- data.frame(SUBJID = c("S1", "S2", "S2"), stringsAsFactors = FALSE)
@@ -748,16 +734,13 @@ dta_condition_in_scope <- function(conditions, df, if_rows, numeric_cache = NULL
 #' @return A character vector of column names, possibly empty.
 #' @keywords internal
 dta_rule_numeric_columns <- function(rule) {
-  type <- tryCatch(
-    normalize_rule_type(rule@type),
-    error = function(e) NA_character_
-  )
+  type <- rule@type
 
-  if (identical(type, "check_range")) {
+  if (identical(type, "col_range")) {
     return(as.character(dta_rule_target_columns(rule)))
   }
 
-  if (identical(type, "check_col_condition")) {
+  if (identical(type, "col_condition")) {
     clauses <- c(
       dta_normalize_conditions(rule_get_slot(rule, "condition"), arg = "condition"),
       dta_normalize_conditions(rule_get_slot(rule, "then"), arg = "then")
@@ -779,7 +762,7 @@ dta_rule_numeric_columns <- function(rule) {
     return(unique(as.character(names(clauses)[is_numeric_clause])))
   }
 
-  if (identical(type, "check_group_condition")) {
+  if (identical(type, "group_condition")) {
     groups <- rule_get_slot(rule, "conditions")
     if (is.null(groups) || length(groups) == 0) {
       return(character(0))
@@ -959,10 +942,10 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
   Reduce(`&`, results)
 }
 
-#' @title Rule: check_col_condition
-#' @param rule A DTARule object of type `"check_col_condition"`. Expected slots:
+#' @title Rule: col_condition
+#' @param rule A DTARule object of type `"col_condition"`. Expected slots:
 #'   - `@id` character
-#'   - `@type` = "check_col_condition"
+#'   - `@type` = "col_condition"
 #'   - `@condition` list: named by column, each with one or more of:
 #'       `equals`, `not_equals`, `in`, `not_in`,
 #'       `greater`, `less`, `greater_equal`, `less_equal`, `min`, `max`,
@@ -992,7 +975,8 @@ evaluate_conditions <- function(conditions, df, numeric_cache = NULL) {
 #' - Numeric comparisons: `greater`, `less`, `greater_equal`, `less_equal`,
 #'   `min`, `max`, `range`
 #' - Text: `pattern` (a regular expression; row passes when the value matches)
-#' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, or `""`; FALSE means not empty)
+#' - Emptiness: `empty` (TRUE means empty: `NA`, `NaN`, `""`, or a text value
+#'   that is only whitespace; FALSE means not empty)
 #'
 #' Against a numeric column, `equals`/`not_equals`/`in`/`not_in` compare
 #' numerically when the supplied value parses as a number (so `equals: "18"`
@@ -1149,15 +1133,30 @@ dta_group_scope_truth <- function(mask, scope) {
   }
 }
 
-#' @title Rule: check_group_condition
+#' @title Rule: group_condition
 #' @description
 #' Evaluates named conditions per group and applies constraints between those
 #' condition outcomes.
+#' @details
+#' Each condition is evaluated per row, then reduced per group with a scope:
+#' `"any"` (the default; some row of the group matches) or `"all"` (every row
+#' of the group matches). Constraints are lists with a `type`:
+#' * `mutually_exclusive`: `left` and `right` name conditions, with optional
+#'   `left_scope` and `right_scope`. A group violates it when both sides hold.
+#' * `requires`: `if` and `then` name conditions, with optional `if_scope` and
+#'   `then_scope`. A group violates it when `if` holds and `then` does not.
+#'
+#' Either type accepts an optional `message` (replaces the generated text) and
+#' `id` (reported as `constraint_id`). Constraints of any other type are
+#' ignored.
 #' @param rule A `DTARuleGroupCondition` object.
 #' @param df A data.frame to validate.
 #' @param numeric_cache A named list from [dta_build_numeric_cache()], or
 #'   `NULL` to convert each column on demand.
-#' @return A list with elements `id`, `valid`, and `message`.
+#' @return A list with elements `id`, `valid`, and `message`. When the rule
+#'   fails on a constraint, it also has `details`: a list with one element per
+#'   violating group and constraint, each holding `constraint_id`, `group`,
+#'   `message`, `rows` and `rows_truncated`.
 #' @examples
 #' df <- data.frame(
 #'   SUBJECT_ID = c("S1", "S1", "S2"),
@@ -1453,7 +1452,10 @@ rule_check_group_condition <- function(rule, df, numeric_cache = NULL) {
 #' @param df A data.frame to validate.
 #' @param verbose Logical. If TRUE (default), prints progress messages.
 #' @return (Invisibly) a list of rule validation results, each as a list with
-#'   elements `id`, `valid`, and `message`.
+#'   elements `id`, `valid`, `message` and `import_errors` (a data.frame of
+#'   values the rule read that could not be represented as the declared type;
+#'   zero rows when there are none). A failed group-condition rule also has
+#'   `details`; see [rule_check_group_condition()].
 #' @examples
 #' df <- data.frame(
 #'   SUBJID = c("S1", "S2", "S2"),
@@ -1479,14 +1481,14 @@ apply_rules <- function(rules, df, verbose = TRUE) {
   numeric_cache <- dta_build_numeric_cache(df, rules)
 
   rule_functions <- list(
-    check_range = rule_check_range,
-    check_unique = rule_check_unique,
-    check_col_condition = rule_check_col_condition,
-    check_group_condition = rule_check_group_condition
+    col_range = rule_check_range,
+    col_unique = rule_check_unique,
+    col_condition = rule_check_col_condition,
+    group_condition = rule_check_group_condition
   )
 
   results <- lapply(rules, function(rule) {
-    rule_type <- normalize_rule_type(rule@type)
+    rule_type <- rule@type
     if (!rule_type %in% names(rule_functions)) {
       msg <- paste("Unknown rule type:", rule_type)
       if (isTRUE(verbose)) {
@@ -1562,7 +1564,8 @@ apply_rules <- function(rules, df, verbose = TRUE) {
 #' @param table A data.frame to validate.
 #' @importFrom stats setNames
 #' @return (Invisibly) the list of rule results from [apply_rules()], each a
-#'   list with elements `id`, `valid` and `message`.
+#'   list with elements `id`, `valid`, `message` and `import_errors`, plus
+#'   `details` for a group-condition rule that failed.
 #' @examples
 #' specs <- DTAColumnSpecCollection(
 #'   columns = list(SUBJID = DTAColumnSpec(id = "SUBJID", type = "SAS Char")),

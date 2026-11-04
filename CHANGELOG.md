@@ -52,12 +52,76 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   metadata defaults, option effects or dataset replacement. Unchanged
   ancestor-authored choices retain their existing seal exemption.
 
+- **All ten open defects in the qualification register are fixed**
+  (DEV-001, 003, 004, 005, 006, 007, 010, 012, 014, 015). Each register entry
+  is closed and its pinning test now asserts the correct behaviour.
+
+- A declared `SAS Int` column no longer silently accepts values outside the
+  32-bit integer range: `5000000000` used to validate completely clean, so a
+  receiving system could narrow and corrupt it with nothing in the transfer
+  record. Such a value is now an import error (`out_of_range`), stored as `NA`
+  with its raw text kept; the column-specification integer check enforces the
+  range too (DEV-006).
+
+- A declared `SAS Int` column is now always stored as an R `integer`. The
+  storage type used to depend on the values in hand, so the in-memory and
+  streaming engines could type the same file differently depending only on how
+  it was batched (DEV-004). **Behaviour change:** a fractional or non-finite
+  value in a declared Int column (e.g. `8.5`) is now an import error
+  (`not_whole`) and becomes `NA` in the typed table. It used to keep the
+  column as a double and be reported only on the column-specification axis.
+
+- A `BESTw.` SAS format with no explicit type now infers `Num` instead of
+  `Int`. `BESTw.` is SAS's general numeric format, and the generated JSON
+  schema used to reject a legitimate decimal such as `1.25` (DEV-001). An
+  explicit `type: Int` with a `BESTw.` format is still accepted.
+
+- `messages()` no longer aborts for a dataset whose specification declares no
+  columns; it returns zero rows. Any loop collecting messages across datasets
+  used to fail outright on such a dataset, with an error that blamed
+  `persist = TRUE` (DEV-005).
+
+- The HTML validation report keeps its click-to-inspect detail when the
+  transfer has a metadata issue. One metadata import error used to strip the
+  detail from every message in the report. Metadata messages now get detail
+  of their own, a failure to build detail for one dataset no longer affects
+  the others, and a message whose detail could not be built says so (DEV-012).
+
+- A questionable metadata date (such as `2026-12-31 at the earliest`, or a
+  top-level date such as `after approval`) no longer turns into a clean one
+  after a single save and reload. The original text is written back, so the
+  import issue is still reported, unless the field has been changed since it
+  was read (DEV-010).
+
+- `export_column_value_table()` now aborts with a package error naming the
+  expected class when given something other than a column specification
+  collection, instead of a raw base R error (DEV-003).
+
+- `write_table_to_file()` now returns `md5sum` as the single checksum string
+  it documents (`NA_character_` when no checksum is requested), plus `n_rows`
+  and `n_cols`. A transfer-integrity check written to the documented contract,
+  such as `if (!is.na(res$md5sum))`, used to fail on a three-element list
+  (DEV-007).
+
+- The Word specification exchange now completes. `export_specs_table()` writes
+  each format with its backend prefix, and `columns_specs_from_word()` accepts
+  an empty Format or Length cell and, for documents written by earlier
+  versions, an unprefixed format. A specification exported to Word could not
+  be read back by the package that wrote it (DEV-014).
+
+- A specification written with `write_columns_to_json()` no longer contains
+  `{}` for unset properties, so it can be read back (DEV-015).
+
 ### Changed
 
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
 ### Added
+
+- `import_specs_from_json()` reads a specification written by
+  `write_columns_to_json()`, rules included, so JSON is no longer a
+  write-only format.
 
 - **"Authorized for corrections" is now a picker in the app.** The Metadata
   tab offers the Receiver and Supplier contacts to choose from, accepts any
@@ -292,6 +356,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   other non-alphanumeric character goes too, so `1.2.0-beta` gives `v120beta`).
   A document without a version keeps the old `<title>_<date>.yaml`.
 
+- **The qualification report no longer calls a requirement with a known
+  defect against it "verified".** A requirement whose test cases all passed
+  but that an open or pending deviation affects is now reported as
+  `verified_with_deviation`, and the traceability matrix names the deviations
+  against it in a new column. SUMMARY.txt, the report and
+  `results/requirements.csv` count these separately from clean verifications.
+  Previously a reproduced defect's binding step passed like any other, so the
+  requirement it contradicts read as verified in section 7 while section 8
+  listed the defect. The verdict rules are unchanged (REQ-CORE-011).
+
+- **The qualification suite now reproduces DEV-002 and DEV-016 itself.** Both
+  were registered as `pending`, so no run checked that they still occur.
+  OQ-VAL-038 binds DEV-002 (an unchanged table with an unnamed-timezone
+  timestamp is revalidated after a rebuild; its `affects` is corrected to
+  REQ-VAL-015, the skip requirement), and OQ-EXPORT-048 binds DEV-016 (an
+  inline placeholder spelled by a dataset value is resolved inside a region).
+
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
   template or an inline template dataset whose `id` is absent, null or empty
   is reported as `dataset_id_missing`, an error. The app already refused to
@@ -427,7 +508,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   none of this, so `check_manifest.R` — the check that genuinely validates a
   manifest-only change — still runs on every pull request.
 
+### Removed
+
+- **Breaking: the legacy rule spellings are gone.** The `check_range`,
+  `check_unique`, `check_col_condition` and `check_group_condition` rule types
+  are no longer accepted; a rule is `col_range`, `col_unique`, `col_condition`
+  or `group_condition`, and `@type` now holds exactly that value. The singular
+  `column:` key on `col_range` / `col_unique` rules is gone too: write
+  `columns:`. `DTARuleFactory()` now rejects any argument that is not an exact
+  argument of the rule's constructor, where it used to let R partially match an
+  abbreviation such as `column` onto `columns`.
+
 ### Fixed
+
+- The shipped example specifications and the documentation now write
+  `columns:` on `col_range` / `col_unique` rules; they had relied on partial
+  argument matching to load.
+- "Include YAML in document" is no longer offered with PDF export, where the
+  hidden comment printed as a paragraph of literal text. In the Markdown file,
+  a `-->` inside the YAML no longer ends the comment early: it is written as
+  `--&gt;`, the one change made to the embedded YAML.
+
+- A Markdown export that fell back from PDF is saved as `.md`, not as a
+  `.pdf` file holding Markdown.
 
 - The CI files `create_template_repo()` writes now work once their DTAtools
   install placeholder is filled in. The GitHub workflow passed
@@ -679,6 +782,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   silently empty.
 
 ### Security
+
+- **"Restore previous session" is bound to the signed-in user.** The saved
+  session was found by a random id kept in the browser's local storage, which
+  every other app or page published on the same Posit Connect server can read.
+  Where Connect authenticates viewers, the session file is now also keyed to
+  and checked against the user, so a copied id no longer restores someone
+  else's data. Deployments without authentication still rely on the id alone.
+
+- **Uploaded data no longer stays on the server indefinitely.** The autosave,
+  its tables, the staged copy of every upload and every export are deleted
+  once they are older than `DTATOOLS_SESSION_TTL_HOURS` (default 24) and no
+  live session is using them; exports go when the session ends, and
+  "Start over" deletes everything at once. Autosaving also no longer copies
+  every loaded table in memory and rewrites it to disk on each click: each
+  table is written once and reused until it changes.
+
+- **The PDF export no longer fetches images named in a document.** Markdown
+  image syntax survived the earlier hardening, so a title like
+  `![](http://internal-host/...)` made the server request that URL, and a local
+  image path was embedded in the PDF. Images are now dropped before conversion,
+  and the browser route's page may load nothing at all.
+
+- Template sources whose git locator or `#ref` starts with `-` are rejected:
+  git read them as options, and `--upload-pack=` runs a command.
+
+- Validation messages downloaded as CSV or TSV no longer carry spreadsheet
+  formulas: a cell starting with `=`, `+`, `-` or `@` (often a column name or
+  value from the uploaded data) is prefixed with `'`.
+
+- Export errors show only the error message, no longer the R call with its
+  server paths.
 
 - The app's headless-browser PDF route now blocks scripts with a
   Content-Security-Policy in the printed page. The `--disable-javascript` flag

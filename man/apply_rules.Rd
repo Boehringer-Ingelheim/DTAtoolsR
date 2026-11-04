@@ -15,7 +15,10 @@ apply_rules(rules, df, verbose = TRUE)
 }
 \value{
 (Invisibly) a list of rule validation results, each as a list with
-elements \code{id}, \code{valid}, and \code{message}.
+elements \code{id}, \code{valid}, \code{message} and \code{import_errors} (a data.frame of
+values the rule read that could not be represented as the declared type;
+zero rows when there are none). A failed group-condition rule also has
+\code{details}; see \code{\link[=rule_check_group_condition]{rule_check_group_condition()}}.
 }
 \description{
 Applies all rules to a data frame with CLI feedback.

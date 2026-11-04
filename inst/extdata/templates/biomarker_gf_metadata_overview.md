@@ -1,7 +1,7 @@
 # Biomarker GF DTS Metadata Overview
 
 Source template analyzed:
-- .tmp_dts_templates/BIOMARKER GF TRANSFER SPECIFICATIONS (DTS).docx
+- BIOMARKER GF TRANSFER SPECIFICATIONS (DTS).docx (source document not shipped)
 
 Goal:
 - map the GF DTS document to the metadata the `DTAtools` package actually models
@@ -10,8 +10,8 @@ Goal:
   canonical `DTAMetaData` class (so every value the template sets is visible and
   editable in the Shiny app metadata editor)
 
-> Only the fields in the "Canonical `DTAMetaData` fields" sections below are
-> real object properties. The template's `base.metadata` and every option
+> The fields listed in the "Canonical `DTAMetaData` fields" sections below are
+> the ones this template sets (`DTAMetaData` has further properties: `study`, `sections`, `template`, `import_issues`). The template's `base.metadata` and every option
 > `effect` write to those fields only. GF-specific concepts that `DTAMetaData`
 > does not (yet) model are collected in the appendix as free text / future work,
 > not as invented `transmission.*` keys.
@@ -39,7 +39,7 @@ Contact records support `name`, `role`, `email`, `phone`, `department`,
 `address`, `signature`, `reviewer`, and `backup` (see `inst/extdata/clinical_dta.yaml`).
 
 ## Canonical `DTAMetaData` fields — Transmission
-These are the only `metadata.transmission.*` keys the app editor renders.
+These are the `metadata.transmission.*` keys this template sets. `DTAMetaData` additionally validates the optional text fields `extent`, `scope`, `packaging`, `security`, `checksum`, `test_requirements` and `blinding_requirements`.
 | Field | Type | Example |
 |---|---|---|
 | metadata.transmission.type | string | Secure EDT server (SSH sFTP) |
@@ -65,6 +65,9 @@ These are the only `metadata.transmission.*` keys the app editor renders.
 | date_last_transfer | text combo | metadata.transmission.date_last_transfer |
 | error_handling | text combo | metadata.error_handling |
 | authorized_for_corrections | text combo | metadata.authorized_for_corrections |
+| gf_detail (vocabulary slot, `gf_tstdtl@1.0`) | closed vocabulary choice | datasets.gf_data_specs_pattern.columns.GFTSTDTL.values |
+| supplier (party slot) | party profile | metadata.supplier |
+| receiver (party slot) | party profile | metadata.receiver |
 
 "text combo" options show the suggested values in a searchable dropdown: pick
 one, choose "(leave blank)", or type your own value (this template's text
@@ -82,7 +85,7 @@ as future schema work:
 - study number (belongs to the `STUDYID` column, not metadata)
 - recipient role (model as a contact `role`, e.g. TDM / SciMo)
 - data format, file-name specification, supplier / data-type codes, allowed extensions
-- transfer extent (e.g. cumulative vs. incremental)
+- transfer extent: modelled as the optional `metadata.transmission.extent` text field (not set by this template)
 - missing-response handling
 - test-upload / blinded-transfer free-text descriptions
 - unidentified / unexpected sample handling

@@ -144,9 +144,11 @@ inspect(ds_imp, id = msgs$id[msgs$source == "import"][1])
 as.data.frame(get_table(ds_imp, "demo"))   # the offending cell is now NA
 ```
 
-> `check()` prints a per-axis console report for the column spec and rule passes
-> but not for the import pass. When a table fails with no visible reason,
-> read `n_import_errors` from `results()` or filter `messages()` on
+> `check()` on an in-memory table prints a per-axis console report for all three
+> passes, including a "validating imports" heading that names the row, column
+> and raw text of each value that did not fit. The streaming path does not print
+> an import heading, so when a streamed table fails with no visible reason, read
+> `n_import_errors` from `results()` or filter `messages()` on
 > `source == "import"`.
 
 See the [vignette's Import Errors
@@ -232,7 +234,7 @@ specification contains definitions of:
   values. See [YAML Column Format](#yaml-column-format).
 - **rules:** cross-column logic, e.g. "if column A is empty, column B must
   contain a value". See
-  [YAML Schema Rule Specification](#yaml-rule-specification).
+  [YAML Schema Rule Specification](#yaml-schema-rule-specification).
 - **metadata:** DTA/DTS metadata — title, version, contacts, transmission
   schedule. See [YAML Metadata](#yaml-metadata).
 
@@ -751,9 +753,14 @@ Column specifications can contain:
   `Yes`/`No`)
 - `pattern`: (optional) a regex the values must match
 - `values`: (optional) a closed list of allowed values
+- `examples`: (optional) example values; each must match `pattern`, and they
+  cannot be combined with `values`
+- `colclass`: (optional) a column category, one of `patient_info`,
+  `measurement_patient`, `measurement`, `visit_related`, `date_related`,
+  `study_info`, `wide_format`, `long_format`, `wide_and_long_format`
 
-> **Note:** `values` and `pattern` are mutually exclusive — a column has
-> either a closed value list or a regex pattern, not both.
+> **Note:** `values` excludes both `pattern` and `examples` — a column has
+> either a closed value list or a regex pattern (with optional examples), not both.
 
 Example of a column `SUBJECT_ID` with a pattern:
 
@@ -809,6 +816,7 @@ Supported operators in both `condition` and `then`:
 - `less_equal`: Number
 - `less`: Number
 - `min` / `max`: Number range
+- `range`: `[lo, hi]` list of two numbers (inclusive)
 - `in`: List of strings / numbers
 - `not_in`: List of strings / numbers
 - `empty`: Boolean
@@ -864,13 +872,14 @@ rules:
 
 #### `col_range`
 
-Ensures that all values in a numeric column fall within `[min, max]`.
+Ensures that all values in a numeric column fall within `[min, max]`. The bounds can also be
+given as `range: [18, 65]` in place of `min`/`max`.
 
 ```yaml
 rules:
   - id: age_range
     type: col_range
-    column: AGE
+    columns: AGE
     min: 18
     max: 65
 ```
@@ -885,12 +894,12 @@ rules:
   # Single column uniqueness
   - id: subject_unique
     type: col_unique
-    column: SUBJECT_ID
+    columns: SUBJECT_ID
 
   # Composite key uniqueness
   - id: subject_visit_unique
     type: col_unique
-    column:
+    columns:
       - SUBJECT_ID
       - VISIT
 ```
@@ -1156,7 +1165,7 @@ specs <- DTAColumnSpecCollection(columns = list(STUDYID = col1, VISIT = col2))
 
 - All rules must include a unique `id`.
 - Rule `type` must match exactly one of the supported types
-  (`col_condition`, `col_range`, `col_unique`).
+  (`col_condition`, `col_range`, `col_unique`, `group_condition`).
 - Missing or malformed rules trigger validation errors before data
   evaluation.
 - `values` and `pattern` on a column spec are mutually exclusive.

@@ -1,6 +1,7 @@
 #' @title DTAColumnSpecCollection Class
 #' @description
-#' This class represents a collection of DTAColumnSpec objects with optional template.
+#' This class represents a collection of DTAColumnSpec objects with optional
+#' rules.
 #' @import S7
 #' @importFrom cli cli_abort
 #' @importFrom stringr str_flatten_comma
@@ -102,11 +103,13 @@ DTAColumnSpecCollection <- S7::new_class(
 #'
 #' @description
 #' Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
-#' If the collection contains more than 5 columns, it returns the IDs of the first four columns,
-#' an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+#' If the collection contains more than \code{n} columns (8 by default), it
+#' returns the IDs of the first \code{n - 1} columns, an ellipsis, and the last
+#' column's ID. Otherwise it returns all column IDs.
 #'
 #' @param x A \code{DTAColumnSpecCollection} object.
-#' @param ... Not used by current methods; reserved for future extensions.
+#' @param ... Optional \code{n}: a single number, the number of columns above
+#'   which the preview is shortened. Defaults to 8.
 #'
 #' @return A character string representing a preview of the column IDs.
 #'
@@ -140,7 +143,9 @@ method(column_preview, DTAColumnSpecCollection) <- function(x, n = 8) {
 #' @description
 #' Provides a preview of the rules contained within a \code{DTAColumnSpecCollection} object.
 #' If the collection contains more than 5 rules, it returns the IDs of the first four rules,
-#' an ellipsis, and the rules ID. If there are 5 or fewer rules, it returns all rules.
+#' an ellipsis, and the last rule's ID. If there are 5 or fewer rules, it
+#' returns all rules' IDs. If the collection has no rules (\code{rules} is
+#' \code{NULL}), it returns \code{"not set"}.
 #'
 #' @importFrom stringr str_flatten_comma
 #'
@@ -453,32 +458,30 @@ dta_warn_numeric_values_on_text_column <- function(spec) {
 #   )
 # }
 
-# #' @title Create DTAColumnSpecCollection from JSON File
-# #' @description
-# #' Parses a JSON file to extract column specifications and create a DTAColumnSpecCollection object.
-# #' @importFrom jsonlite fromJSON
-# #' @importFrom cli cli_abort
-# #' @export
-# #' @param file Character. Path to the JSON file containing specifications.
-# #' @examples
-# #' \dontrun{
-# #'   import_specs_from_json(file)
-# #' }
-# #'
-# #' @return A DTAColumnSpecCollection object.
-# import_specs_from_json <- function(file) {
-#   json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
-#   columns <- json$columns
-#   rules <- json$rules
-#   if (!is.list(columns)) {
-#     cli_abort("`columns` must be a list.")
-#   }
-#   if (!is.null && !is.list(rules)) {
-#     cli_abort("`rules` must be a list or null.")
-#   }
-#   specs_from_list(columns, rules)
-#   # TODO check this function, was heavily modified
-# }
+#' @title Create DTAColumnSpecCollection from JSON File
+#' @description
+#' Reads a JSON file written by \code{\link{write_columns_to_json}} and creates
+#' the DTAColumnSpecCollection it describes, including its rules. The reader
+#' of the YAML counterpart is \code{\link{import_specs_from_yaml}}.
+#' @importFrom jsonlite fromJSON
+#' @export
+#' @param file Character. Path to the JSON file containing specifications.
+#' @examples
+#' specs <- create_example_DTAColumnSpecCollection()
+#' json_file <- tempfile(fileext = ".json")
+#' write_columns_to_json(specs, json_file)
+#' back <- import_specs_from_json(json_file)
+#' names(back@columns)
+#' unlink(json_file)
+#'
+#' @return A DTAColumnSpecCollection object.
+import_specs_from_json <- function(file) {
+  json <- jsonlite::fromJSON(file, simplifyVector = FALSE)
+  if (is.null(json$columns)) {
+    cli::cli_abort("JSON file must contain a 'columns' section.")
+  }
+  specs_from_list(json$columns, json$rules)
+}
 
 #' @title Create DTAColumnSpecCollection from DTA Word Document
 #' @description
@@ -492,7 +495,19 @@ dta_warn_numeric_values_on_text_column <- function(spec) {
 #' # Word import examples are intentionally skipped until the API is reworked.
 #' @param file Character. Path to the Word document.
 #' @param table_position Integer. Index of the table to extract.
-#' @param colnames Vector. Vector containing column names of the table. Essential column names are: id Variable Name), label (Variable Label), type (Type), nullable (Nullable), description (Description)
+#' @param colnames Vector. Names assigned, in order, to the table's columns.
+#'   The default is \code{c("id", "label", "type", "length", "format",
+#'   "nullable", "description")}: id (Variable Name), label (Variable Label),
+#'   type (Type), length (Length), format (Format), nullable (Nullable; "Yes"
+#'   or "yes" means nullable) and description (Description). All seven are
+#'   used, so the table needs seven columns in that order unless
+#'   \code{colnames} says otherwise.
+#'
+#'   A description cell may carry markers on their own lines:
+#'   \code{#@values: a;b;c} gives the permitted values (separated by
+#'   \code{value_sep}) and \code{#@pattern: <regex>} gives a pattern. Both
+#'   markers, and everything after them, are removed from the stored
+#'   description.
 #' @param value_sep Character. Separator dividing the values. Default: ";"
 #' @return A DTAColumnSpecCollection object.
 columns_specs_from_word <- function(
@@ -565,12 +580,26 @@ columns_specs_from_word <- function(
     } else {
       values <- row$values[[1]]
     }
+    format <- row$format
+    # An empty cell means "no format"; an unprefixed format (documents written
+    # by older versions) takes the backend of this row's Type cell.
+    if (is.null(format) || is.na(format) || !nzchar(trimws(format)) || trimws(format) == "NA") {
+      format <- NULL
+    } else {
+      format <- trimws(format)
+      format_prefix <- strsplit(format, "\\s+")[[1]][1]
+      type_prefix <- strsplit(trimws(row$type), "\\s+")[[1]][1]
+      if (!format_prefix %in% `__DTAtools_supported_backends__` &&
+        isTRUE(type_prefix %in% `__DTAtools_supported_backends__`)) {
+        format <- paste(type_prefix, format)
+      }
+    }
     DTAColumnSpec(
       id = row$id,
       label = row$label,
       type = row$type,
-      format = row$format,
-      length = as.numeric(row$length),
+      format = format,
+      length = if (is.na(suppressWarnings(as.numeric(row$length)))) NULL else as.numeric(row$length),
       nullable = row$nullable,
       values = values,
       pattern = pattern,
@@ -716,7 +745,8 @@ write_columns_to_yaml <- function(
 #' @param columns An object of class DTAColumnSpecCollection.
 #' @param file Character. Path to the JSON file to write the specifications to.
 #' @param pretty Logical. Whether to pretty-print the JSON. Default is TRUE.
-#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file.
+#' @return NULL. The function writes the DTAColumnSpecCollection to a JSON file;
+#'   read it back with \code{\link{import_specs_from_json}}.
 #' @examples
 #' columns <- create_example_DTAColumnSpecCollection()
 #' out_file <- tempfile(fileext = ".json")
@@ -727,8 +757,17 @@ write_columns_to_json <- function(
   file,
   pretty = TRUE
 ) {
+  # jsonlite writes an unset (NULL) property as `{}`, which reads back as an
+  # empty list that the typed properties reject. Omit unset properties, as the
+  # YAML output does; as.list() itself is left alone.
+  drop_unset <- function(x) {
+    if (!is.list(x)) {
+      return(x)
+    }
+    lapply(x[!vapply(x, is.null, logical(1))], drop_unset)
+  }
   jsonlite::write_json(
-    as.list(columns),
+    drop_unset(as.list(columns)),
     path = file,
     pretty = pretty,
     auto_unbox = TRUE

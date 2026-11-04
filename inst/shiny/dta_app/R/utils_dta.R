@@ -1,6 +1,8 @@
 # -----------------------------------------------------------------------------
 # Utilities: thin, safe wrappers around the DTAtools API.
-# The app mutates the DTA object ONLY through these helpers.
+# The app mutates the DTA object mainly through these helpers (a few spots in
+# app.R, e.g. restoring the version history after a rebuild, set properties
+# directly).
 #
 # `%||%` and `dta_try()` below are the two primitives every other engine file
 # (template_core.R, template_create.R, template_inherit.R, template_index.R,
@@ -782,7 +784,7 @@ dta_status_map <- function(dta) {
   }
 
   for (nm in names_ds) {
-    # No bound data -> nodata, independent of results() (Contract C5).
+    # No bound data -> nodata, independent of results().
     if (dta_dataset_content_count(dta_get_dataset(dta, nm)) == 0) {
       out[[nm]] <- "nodata"
       next
@@ -2195,17 +2197,6 @@ dta_rule_to_list <- function(rule) {
     return(NULL)
   }
   ty <- raw$type %||% ""
-  ty <- switch(ty,
-    check_col_condition = ,
-    col_condition = "col_condition",
-    check_range = ,
-    col_range = "col_range",
-    check_unique = ,
-    col_unique = "col_unique",
-    check_group_condition = ,
-    group_condition = "group_condition",
-    ty
-  )
   out <- list(id = raw$id, type = ty)
   if (!is.null(raw$description) && length(raw$description) && nzchar(raw$description)) {
     out$description <- raw$description
@@ -2440,7 +2431,7 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # Create a new, empty dataset of the given `type` and append it to `dta`.
 #
 # `type` is a CREATION-TIME choice only, never revisited afterwards -- see the
-# comment above dta_set_dataset_meta() (~L1629-1637) for why the property
+# comment above dta_set_dataset_meta() for why the property
 # itself cannot be trusted once a dataset exists: assigning `ds@type` passes
 # its validator without changing the S7 class, so nothing downstream would
 # dispatch correctly on the new value. That is exactly why no helper in this
@@ -2448,7 +2439,8 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # a different type is to add a new dataset and remove the old one.
 #
 # APPENDED AT THE END, never inserted anywhere else. Every nav button, upload
-# slot and example picker in the app (app.R:774-799 and nearby) is keyed by
+# slot and example picker in the app (see the dataset nav and upload observers
+# in app.R) is keyed by
 # the dataset's POSITION in `dta@datasets`, resolving the name only at click
 # time -- so inserting ahead of an existing entry would silently repoint those
 # controls at the wrong dataset. Appending is the one mutation that cannot do
@@ -2588,7 +2580,7 @@ dta_column_fields <- function(dta, dataset, id) {
 
 # Add or update a column (rename when old_id differs). Returns dta_try().
 #
-# RENAME GUARD mirrors dta_set_dataset_meta() (~L2244-2251): renaming onto an
+# RENAME GUARD mirrors dta_set_dataset_meta()'s rename guard: renaming onto an
 # id another column already holds would otherwise fall straight through to
 # `cols[[id]] <- spec` and silently destroy that column. Adding a column
 # under an already-existing id with old_id = NULL is a different, intended
@@ -2761,17 +2753,7 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
   if (!nzchar(id)) stop("A rule id is required.")
   if (grepl("\\s", id)) stop("Rule id cannot contain whitespace.")
   desc <- if (!is.null(description) && nzchar(description)) description else NULL
-  ty <- switch(type,
-    col_condition = ,
-    check_col_condition = "col_condition",
-    col_range = ,
-    check_range = "col_range",
-    col_unique = ,
-    check_unique = "col_unique",
-    group_condition = ,
-    check_group_condition = "group_condition",
-    type
-  )
+  ty <- type
   if (identical(ty, "col_condition")) {
     DTAtools::DTARuleColCondition(
       id = id, description = desc,
@@ -3317,8 +3299,9 @@ dta_update_contact <- function(dta, side, index, fields) {
 # ---- Raw-YAML apply reconciliation (handler / spec diff + data transfer) --
 # When the editable Raw YAML is applied, the app must NOT blindly discard bound
 # uploads. These helpers let the server compare the OLD and NEW dataset shapes
-# so it can: keep uploads whose file handlers are unchanged, clear a dataset's
-# uploads when its handlers changed, drop deleted datasets, and clear only the
+# so it can: keep uploads whose file handlers are unchanged, re-key uploads of
+# a dataset whose handlers changed (dta_match_handlers(); only files whose
+# handler vanished are unloaded), drop deleted datasets, and clear only the
 # affected dataset's validation when its columns/rules changed.
 
 # A stable string signature of a dataset's file handlers (for equality tests).
@@ -3382,7 +3365,13 @@ dta_transfer_bound_data <- function(dta, dataset, old_ds, keep_validation = TRUE
 # rebuild real arrow tables on restore.
 
 # Returns list(dta = <tables/validation stripped>, tables, vindex, vstore).
-dta_dump_session <- function(dta) {
+#
+# `table_ref`, when given, is called as table_ref(dataset, table_name, table)
+# and its return value is stored in place of the collected data.frame -- the
+# app passes one that writes each table to an Arrow IPC file ONCE and returns
+# the path (see dta_table_store()), so an autosave after a validation run or a
+# spec edit no longer re-collects and re-serialises every bound table.
+dta_dump_session <- function(dta, table_ref = NULL) {
   tables <- list()
   vindex <- list()
   vstore <- list()
@@ -3392,7 +3381,13 @@ dta_dump_session <- function(dta) {
     if (is.null(ds)) next
     tb <- tryCatch(ds@tables, error = function(e) NULL)
     if (length(tb) > 0) {
-      tables[[nm]] <- lapply(tb, function(t) tryCatch(as.data.frame(t), error = function(e) NULL))
+      tables[[nm]] <- lapply(stats::setNames(names(tb), names(tb)), function(tn) {
+        t <- tb[[tn]]
+        tryCatch(
+          if (is.function(table_ref)) table_ref(nm, tn, t) else as.data.frame(t),
+          error = function(e) NULL
+        )
+      })
       vindex[[nm]] <- tryCatch(ds@validation_index, error = function(e) list()) %||% list()
       vstore[[nm]] <- tryCatch(ds@validation_store, error = function(e) list()) %||% list()
       # Clear in an order the S7 validator tolerates: index/store (<= tables)
@@ -3408,7 +3403,11 @@ dta_dump_session <- function(dta) {
 
 # Rebuild a live DTA from dta_dump_session() output: re-materialize each saved
 # data.frame as an arrow table and restore its validation index/store.
-dta_restore_session <- function(dump) {
+#
+# `table_dir` is the only directory a table path in the dump may point into:
+# the dump comes out of a file on disk, and a copied or planted one must not
+# be able to read an arbitrary Arrow file the server can reach.
+dta_restore_session <- function(dump, table_dir = NULL) {
   if (is.null(dump)) {
     return(NULL)
   }
@@ -3423,7 +3422,21 @@ dta_restore_session <- function(dump) {
       if (is.null(df)) {
         return(NULL)
       }
-      tryCatch(arrow::as_arrow_table(df), error = function(e) NULL)
+      tryCatch(
+        # A path written by dta_table_store(); a data.frame from an older
+        # session file or a dump taken without a table_ref.
+        if (is.character(df)) {
+          if (is.null(table_dir) || !.dta_path_under(df, table_dir)) {
+            return(NULL)
+          }
+          # mmap = FALSE: the table must not pin the file, which the store
+          # deletes as soon as the table is replaced.
+          arrow::read_ipc_file(df, as_data_frame = FALSE, mmap = FALSE)
+        } else {
+          arrow::as_arrow_table(df)
+        },
+        error = function(e) NULL
+      )
     })
     arrow_tbls <- arrow_tbls[!vapply(arrow_tbls, is.null, logical(1))]
     ds@tables <- arrow_tbls
@@ -3442,6 +3455,122 @@ dta_restore_session <- function(dump) {
     dta@datasets[[nm]] <- ds
   }
   dta
+}
+
+# The name the autosave slot is filed under. The browser's localStorage id is
+# a bearer secret that any other content served from the same origin can read
+# -- and on Posit Connect every published app, report and page shares one
+# origin -- so whenever the platform authenticates the viewer the key is bound
+# to that user too: a stolen id used while signed in as someone else names a
+# different file, and restore_session re-checks the user stored inside it.
+# Without authentication (session$user NULL) the id alone is all there is.
+dta_session_key <- function(client_id, user = NULL) {
+  if (is.null(user) || length(user) != 1L || is.na(user) || !nzchar(user)) {
+    return(client_id)
+  }
+  rlang::hash(c(user, client_id))
+}
+
+# Per-session writer for dta_dump_session(table_ref = ). Each bound table is
+# written to `dir` ONCE, as an Arrow IPC file, and that file is re-used for as
+# long as the same table object stays bound -- identical() on the R6 object is
+# a reference comparison -- so an autosave that changed no data writes no data.
+# A table that was replaced or unbound has its file deleted by the dump that
+# no longer sees it.
+#
+# Superseded files are only queued by dump() and deleted by commit(), which
+# the caller runs once the autosave that stops referring to them is safely on
+# disk -- until then the previous autosave still points at them.
+dta_table_store <- function(dir) {
+  seen <- new.env(parent = emptyenv()) # "dataset\001table" -> list(obj, path)
+  used <- character(0)
+  stale <- character(0)
+  ref <- function(ds, tn, t) {
+    key <- paste(ds, tn, sep = "\001")
+    used <<- c(used, key)
+    hit <- seen[[key]]
+    if (!is.null(hit) && identical(hit$obj, t) && file.exists(hit$path)) {
+      return(hit$path)
+    }
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    path <- tempfile("table-", tmpdir = dir, fileext = ".arrow")
+    tryCatch(arrow::write_ipc_file(t, path), error = function(e) {
+      unlink(path)
+      stop(e)
+    })
+    if (!is.null(hit)) stale <<- c(stale, hit$path)
+    seen[[key]] <- list(obj = t, path = path)
+    path
+  }
+  list(
+    dump = function(dta) {
+      used <<- character(0)
+      out <- dta_dump_session(dta, table_ref = ref)
+      for (k in setdiff(ls(seen, all.names = TRUE), used)) {
+        stale <<- c(stale, seen[[k]]$path)
+        rm(list = k, envir = seen)
+      }
+      out
+    },
+    commit = function() {
+      unlink(stale)
+      stale <<- character(0)
+      # The sweep ages files by mtime; the table files are written once, so
+      # the directory is touched with every saved autosave to keep it as
+      # fresh as the .rds that refers to it.
+      if (dir.exists(dir)) Sys.setFileTime(dir, Sys.time())
+      invisible(NULL)
+    },
+    # After a restore: the files the dump points at back the tables just
+    # rebuilt from them, so the next autosave need not write them again.
+    adopt = function(dta, dump) {
+      for (nm in names(dump$tables)) {
+        for (tn in names(dump$tables[[nm]])) {
+          p <- dump$tables[[nm]][[tn]]
+          t <- tryCatch(dta@datasets[[nm]]@tables[[tn]], error = function(e) NULL)
+          if (is.character(p) && !is.null(t)) {
+            seen[[paste(nm, tn, sep = "\001")]] <- list(obj = t, path = p)
+          }
+        }
+      }
+      invisible(NULL)
+    },
+    clear = function() {
+      rm(list = ls(seen, all.names = TRUE), envir = seen)
+      unlink(dir, recursive = TRUE, force = TRUE)
+    }
+  )
+}
+
+# ---- Retention of session files ---------------------------------------------
+# Everything this app writes that carries a user's data -- the autosave slot
+# and its table files, the staged copy of every upload, every export -- lives
+# in tempdir() so that 'Restore previous session' can outlive a reload. None of
+# it may outlive that purpose: dta_sweep_session_files() deletes whatever is
+# older than the retention window, except paths a live session still owns.
+# Each session registers what it owns here, keyed by session$token.
+.dta_live_session_paths <- new.env(parent = emptyenv())
+
+# Retention window in seconds, from DTATOOLS_SESSION_TTL_HOURS (default 24).
+dta_session_ttl_seconds <- function() {
+  h <- suppressWarnings(as.numeric(Sys.getenv("DTATOOLS_SESSION_TTL_HOURS", "")))
+  if (length(h) != 1L || is.na(h) || h <= 0) h <- 24
+  h * 3600
+}
+
+dta_sweep_session_files <- function(dir = tempdir(), ttl = dta_session_ttl_seconds(),
+                                    keep = unlist(as.list(.dta_live_session_paths), use.names = FALSE),
+                                    now = Sys.time()) {
+  paths <- list.files(dir,
+    pattern = "^(dtatools_app_session_|dta_upload_|dta-export-)",
+    full.names = TRUE, all.files = TRUE
+  )
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  paths <- paths[!norm(paths) %in% norm(keep %||% character(0))]
+  age <- as.numeric(difftime(now, file.mtime(paths), units = "secs"))
+  old <- paths[!is.na(age) & age > ttl]
+  unlink(old, recursive = TRUE, force = TRUE)
+  invisible(old)
 }
 
 # Format the date/time suffix of an export file name as "%Y-%m-%d_%H-%M".

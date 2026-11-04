@@ -13,8 +13,12 @@
 #' @param ... Additional arguments passed to [shiny::runApp()].
 #'
 #' @details
-#' Requires the suggested packages **shiny**, **bslib**, **DT**, and **shinyjs**. If any are
-#' missing, an informative error explains what to install.
+#' Requires the suggested packages **shiny**, **bslib**, **DT** and
+#' **shinyjs** (the app attaches it unconditionally on start-up). If any of **shiny**,
+#' **bslib** or **DT** is missing, an informative error explains what to
+#' install. The packages **shinyAce** (YAML editor tab) and **writexl** (Excel
+#' download of the message table) are optional; the corresponding feature is
+#' unavailable without them.
 #'
 #' @return Called for its side effect of running the Shiny app. Invisibly
 #'   returns `NULL`.

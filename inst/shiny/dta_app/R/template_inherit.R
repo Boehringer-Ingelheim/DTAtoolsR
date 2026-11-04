@@ -10,10 +10,11 @@
 # Design constraint: this file does NOT know how to look a reference up. A
 # `resolve_ref` function is INJECTED into resolve_template_inheritance() by
 # the caller. The template INDEX (which directories to search, which file
-# matches an id, which version is "latest") is a separate, not-yet-written
-# concern; keeping it out of this file means the merge logic here is pure list
+# matches an id, which version is "latest") is a separate concern (see
+# template_index.R and template_index_resolver() in template_create.R);
+# keeping it out of this file means the merge logic here is pure list
 # arithmetic, unit-testable with plain R lists and a stub resolver, and the
-# index can be wired in later without touching a single merge rule.
+# index is wired in without touching a single merge rule.
 #
 # `%||%` and `dta_try()` are already bound in the app helper environment (see
 # utils_dta.R) -- not redefined here. `resolve_template_inheritance()`
@@ -901,10 +902,6 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
       dta_template_merge_datasets(parent_items, child_spec, section = "datasets")
     }
   )
-  # party_slots have no `remove:` requirement in the spec, but reusing the
-  # options merge costs nothing and honours `remove:` there too if a template
-  # author ever writes one -- harmless, not a feature anyone has to maintain
-  # separately.
   # Vocabulary slots merge by id exactly as party slots do, and for the same
   # reason: a deviation template overriding one slot's default (or dropping it
   # with `remove: true`) must not have to restate the others.
@@ -914,6 +911,10 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
       dta_template_merge_options(parent_items, child_spec, section = "vocabulary_slots")
     }
   )
+  # party_slots have no `remove:` requirement in the spec, but reusing the
+  # options merge costs nothing and honours `remove:` there too if a template
+  # author ever writes one -- harmless, not a feature anyone has to maintain
+  # separately.
   merged$party_slots <- dta_template_merge_collection_section(
     def, "party_slots", parent_def$party_slots,
     function(parent_items, child_spec) {
@@ -933,7 +934,7 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
 
   # id/version are NEVER inherited: every template file must declare its own,
   # and the merged result always keeps the CHILD's. A child that inherited its
-  # parent's id would shadow the parent in the (not-yet-written) template
+  # parent's id would shadow the parent in the template
   # index and make `metadata$template` provenance a lie -- the very thing
   # dta_metadata_machine_fields() in template_core.R exists to prevent from
   # the other direction.

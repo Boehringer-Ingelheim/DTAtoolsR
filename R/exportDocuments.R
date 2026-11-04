@@ -16,8 +16,13 @@
 #' @param format Character. Output format: "docx" (default), "pdf", or "md".
 #'   If NULL, inferred from file extension.
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
-#' @param include_signatures Logical. Whether to include signature approval section. Default: TRUE.
-#' @param signature_list List of signatories with name and role fields.
+#' @param include_signatures Logical. Whether to include signature approval
+#'   section. Default: TRUE. Ignored for `format = "md"` (no signature section
+#'   is written) and when a `template` is supplied.
+#' @param signature_list List of signatories, each a list with `name`, `role`
+#'   and optionally `organization` (or `org`) fields; or a data.frame with
+#'   columns `Organization`, `Name`, `Role`. Used only by the built-in
+#'   DOCX/PDF layout; ignored for `format = "md"` and with a `template`.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #' @param include_yaml Logical. If `TRUE`, append the machine-readable YAML
 #'   specification as a final, small-font section of the built-in DOCX/PDF
@@ -35,8 +40,9 @@
 #'   placeholder values passed to [export_with_template()] when `template` is
 #'   supplied. Default: `NULL`.
 #'
-#' @return Invisibly returns the document object (for chaining), or the output
-#'   file path when a `template` is used.
+#' @return Invisibly. For `format = "docx"` or `"pdf"` with the built-in layout,
+#'   the `officer` `rdocx` document object; when a `template` is used, the
+#'   output file path; for `format = "md"`, `NULL`.
 #'
 #' @seealso [export_with_template()] for the full list of supported placeholders.
 #'
@@ -897,15 +903,23 @@ dta_pdf_backend <- function() {
 #'
 #' @param x A DTADataSet, DTADataSetTabular, or DTADataSetFile object
 #' @param file Character. Output file path
-#' @param format Character. Output format: "docx" (default), "pdf", or "md"
+#' @param format Character. Output format: "docx", "pdf", or "md". If NULL
+#'   (the default), inferred from the file extension, falling back to "docx"
+#'   when the file has none.
 #' @param overwrite Logical. Whether to overwrite existing files. Default: FALSE.
-#' @param include_signatures Logical. Whether to include signature section. Default: TRUE.
-#' @param include_file_specs Logical. Whether to include file specifications. Default: TRUE.
-#' @param include_rules Logical. Whether to include validation rules (DTADataSetTabular only). Default: TRUE.
-#' @param signature_list List of signatories
+#' @param include_signatures Logical. Whether to include the signature section.
+#'   Default: TRUE. In DOCX/PDF the section appears only when `signature_list`
+#'   is non-empty.
+#' @param include_file_specs Logical. Whether to include file specifications.
+#'   Default: TRUE. Ignored for `format = "md"`, which always includes them.
+#' @param include_rules Logical. Whether to include validation rules
+#'   (DTADataSetTabular only). Default: TRUE. Ignored for `format = "md"`,
+#'   which always includes them.
+#' @param signature_list List of signatories, each a list with `name`, `role`
+#'   and optionally `organization` (or `org`) fields.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
 #'
-#' @return Invisibly returns the document object
+#' @return Invisibly `NULL`. The document is written to `file`.
 #'
 #' @export
 #' @examples
@@ -1065,7 +1079,7 @@ write_dataset_metadata <- function(
 #' @param ... Additional arguments passed on to \code{write_dataset_metadata()}
 #'   (\code{format}, \code{overwrite}, \code{include_signatures},
 #'   \code{include_file_specs}, \code{include_rules}, \code{signature_list}).
-#' @return Invisibly returns the document object
+#' @return Invisibly `NULL`, as [write_dataset_metadata()].
 #' @export
 #' @examples
 #' ds <- create_example_DTADataSetTabular()

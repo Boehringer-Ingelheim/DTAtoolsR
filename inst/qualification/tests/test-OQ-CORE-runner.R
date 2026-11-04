@@ -1,4 +1,4 @@
-# Qualification of the qualification runner. REQ-CORE-001 .. REQ-CORE-008.
+# Qualification of the qualification runner. REQ-CORE-001 .. REQ-CORE-011.
 #
 # The runner is the instrument every other measurement in this suite is taken
 # with, so it is checked like anything else the package exports. Most cases
@@ -254,15 +254,53 @@ test_that("OQ-CORE-005 | a file that errors outside a test case is reported, not
 })
 
 test_that("OQ-CORE-006 | a registered deviation is reported as reproduced while it still occurs | REQ-CORE-006", {
-  # The defect itself: BESTw. is SAS's general numeric output format, so
-  # inferring "Int" from it makes the generated schema reject a legitimate
-  # decimal. This binds DEV-001 to the run. When the inference is fixed, this
-  # step FAILS on purpose and the register must be updated.
-  qa_known_deviation(
-    "DEV-001",
-    identical(
-      DTAColumnSpecStructureSAS(format = "BEST12.", length = 12)@type,
-      "Int"
+  # The mechanism is exercised against a fixture register holding two
+  # synthetic open entries, so the test never depends on a real defect staying
+  # open. The nested run reads the register named by the `root` option.
+  fixture_root <- qa_tempdir()
+  writeLines(
+    c(
+      "deviations:",
+      "  - id: DEV-901",
+      "    status: open",
+      "  - id: DEV-902",
+      "    status: open"
+    ),
+    file.path(fixture_root, "deviations.yaml")
+  )
+  dir <- qa_core_fixture(qa_tempdir())
+  writeLines(
+    c(
+      "test_that(\"OQ-XX-004 | a reproduced deviation | REQ-XX-004\", {",
+      "  qa_known_deviation(\"DEV-901\", TRUE)",
+      "})",
+      "",
+      "test_that(\"OQ-XX-005 | a deviation that no longer reproduces | REQ-XX-005\", {",
+      "  qa_known_deviation(\"DEV-902\", FALSE)",
+      "})"
+    ),
+    file.path(dir, "test-OQ-XX-deviation.R")
+  )
+  results <- withr::with_options(
+    list(DTAtools.qualification = utils::modifyList(qa_config(), list(root = fixture_root))),
+    qa_core_run(dir)
+  )
+  exps <- qual_expectations_df(results, "OQ")
+
+  qa_step(
+    "a deviation whose condition holds is recorded as reproduced",
+    c(type = "success", reproduced = TRUE),
+    c(
+      type = exps$type[exps$tc_id == "OQ-XX-004"][[1]],
+      reproduced = grepl("DEV-901 reproduced", exps$message[exps$tc_id == "OQ-XX-004"][[1]], fixed = TRUE)
+    )
+  )
+  qa_step(
+    "a deviation whose condition no longer holds is recorded as a failure",
+    c(type = "failure", names_it = TRUE),
+    c(
+      type = exps$type[exps$tc_id == "OQ-XX-005"][[1]],
+      names_it = grepl("DEV-902 no longer reproduces", exps$message[exps$tc_id == "OQ-XX-005"][[1]], fixed = TRUE)
     )
   )
 
@@ -521,4 +559,55 @@ test_that("OQ-CORE-010 | one unwritable evidence file does not cost the run its 
       failures = unlist(results_json$run$evidence_write_failures)
     )
   )
+})
+
+test_that("OQ-CORE-011 | a requirement a live deviation affects is reported as verified with deviation, and named | REQ-CORE-011 | tags: white-box", {
+  # Four requirements, one test case each, and a register of two deviations.
+  # Every expected status below is read off REQ-CORE-011, not off the runner.
+  req_df <- data.frame(
+    id = c("REQ-X-001", "REQ-X-002", "REQ-X-003", "REQ-X-004"),
+    area = "X", risk = "high", stringsAsFactors = FALSE
+  )
+  disc_df <- data.frame(
+    tc_id = c("OQ-X-001", "OQ-X-002", "OQ-X-003", "OQ-X-004"),
+    req_ids = c("REQ-X-001", "REQ-X-002", "REQ-X-003", "REQ-X-004"),
+    stage = "OQ", stringsAsFactors = FALSE
+  )
+  tests_df <- data.frame(
+    tc_id = c("OQ-X-001", "OQ-X-002", "OQ-X-003", "OQ-X-004"),
+    status = c("pass", "pass", "pass", "fail"), stringsAsFactors = FALSE
+  )
+  dev_df <- data.frame(
+    id = c("DEV-901", "DEV-902"),
+    status = c("open", "closed"),
+    affects = c("REQ-X-002 REQ-X-004", "REQ-X-003"),
+    stringsAsFactors = FALSE
+  )
+
+  trace <- qual_traceability(req_df, disc_df, tests_df, "OQ", dev_df)
+  req <- attr(trace, "requirements")
+  qa_step(
+    "no deviation: verified; open deviation: verified with deviation; closed only: verified; failing: failed",
+    c("verified", "verified_with_deviation", "verified", "failed"),
+    req$status
+  )
+  qa_step(
+    "each requirement names the deviations not yet closed against it, and only those",
+    c("", "DEV-901", "", "DEV-901"),
+    req$deviations
+  )
+
+  # The report's matrix is what a reviewer signs from, so the names must reach it.
+  x <- list(requirements = data.frame(id = req_df$id, text = "a statement", stringsAsFactors = FALSE))
+  matrix <- qual_report_trace_table(x, req)
+  qa_step(
+    "the traceability matrix in the report carries the status and the deviation",
+    list(status = "verified_with_deviation", deviations = "DEV-901"),
+    list(status = matrix$Status[[2]], deviations = matrix$Deviations[[2]])
+  )
+
+  # A pending deviation is still a live defect: only `closed` releases it.
+  dev_df$status[[1]] <- "pending"
+  pending <- attr(qual_traceability(req_df, disc_df, tests_df, "OQ", dev_df), "requirements")
+  qa_step("a pending deviation counts as live", "verified_with_deviation", pending$status[[2]])
 })

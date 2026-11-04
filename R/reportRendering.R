@@ -518,8 +518,9 @@
 #' @description
 #' Returns `default` when `x` is `NULL`, not length 1, or `NA`; otherwise
 #' returns `x` coerced to character (or `default` if that coercion is blank).
-#' Used throughout this file instead of `%||%`, which this package does not
-#' import (base R only gained it in 4.4.0, and `DESCRIPTION` allows R >= 4.1).
+#' Used throughout this file instead of `%||%` because it also covers the
+#' length-1, `NA` and blank-string checks that `%||%` (which only tests for
+#' `NULL`) does not.
 #' @param x A scalar value, or `NULL`.
 #' @param default Character scalar to fall back to.
 #' @return A length-1 character string.
@@ -1073,7 +1074,8 @@
 #'   legitimately return more than one row per id (a rule's failing-row
 #'   preview, or multiple group_condition violations); every row is used
 #'   where it matters (the "actual" tables), while metadata that's constant
-#'   across rows (`id`, `type`, `message`, `headline`) is read from the first.
+#'   across rows (`id`, `type`, `message`) is read from the first. The panel
+#'   headline is not a column: it is built from `message`.
 #' @param rule_def Optional S7 rule object to describe; `NULL` for
 #'   columnspec/import messages, or when the rule definition could not be
 #'   resolved.
@@ -1135,7 +1137,11 @@
     } else {
       ""
     }
-    actual <- "(see technical detail below)"
+    actual <- if (identical(type, "unknown")) {
+      "Detail could not be generated for this message; only the validation message itself is available."
+    } else {
+      "(see technical detail below)"
+    }
   }
 
   # Technical detail: the first row's raw columns, key/value.

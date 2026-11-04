@@ -17,8 +17,9 @@ DTAColumnSpecStructureFactory(type = NULL, format = NULL, length = NULL)
 An object of class \code{DTAColumnSpecStructureSAS}.
 }
 \description{
-Constructs a DTAColumnSpecStructure object for a specified backend (e.g., SAS or R),
-based on the provided type, format, and length. The function validates that the
+Constructs a DTAColumnSpecStructure object for a specified backend (currently
+only SAS), based on the provided type, format, and length. The function
+validates that the
 prefixes of type and format are supported and match, then dispatches to the appropriate
 backend-specific constructor.
 }

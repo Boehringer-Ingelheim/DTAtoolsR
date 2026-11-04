@@ -9,15 +9,17 @@ column_preview(x, ...)
 \arguments{
 \item{x}{A \code{DTAColumnSpecCollection} object.}
 
-\item{...}{Not used by current methods; reserved for future extensions.}
+\item{...}{Optional \code{n}: a single number, the number of columns above
+which the preview is shortened. Defaults to 8.}
 }
 \value{
 A character string representing a preview of the column IDs.
 }
 \description{
 Provides a preview of the column IDs contained within a \code{DTAColumnSpecCollection} object.
-If the collection contains more than 5 columns, it returns the IDs of the first four columns,
-an ellipsis, and the last column's ID. If there are 5 or fewer columns, it returns all column IDs.
+If the collection contains more than \code{n} columns (8 by default), it
+returns the IDs of the first \code{n - 1} columns, an ellipsis, and the last
+column's ID. Otherwise it returns all column IDs.
 }
 \examples{
 x <- create_example_DTAColumnSpecCollection()

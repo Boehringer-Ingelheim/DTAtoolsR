@@ -200,17 +200,18 @@ test_that("a browser restores the workspace from its own autosave", {
   })
 })
 
-test_that("an autosave carrying a different browser id is not restored", {
+test_that("an autosave written for a different user is not restored", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(dta_client_id = strrep("c", 32))
     session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
 
-    # Re-stamp this browser's slot as though another browser had written it,
-    # which is what an attacker who guessed the filename would be doing.
+    # Re-stamp this browser's slot as though it had been written while
+    # someone else was signed in. (The old check compared a stored browser id
+    # with the one the filename is built from, which could never fail.)
     payload <- readRDS(session_file())
-    payload$client_id <- strrep("d", 32)
+    payload$user <- "mallory"
     saveRDS(payload, session_file())
 
     rv$dta <- NULL

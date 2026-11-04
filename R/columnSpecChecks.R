@@ -3,7 +3,7 @@
 # This replaces the chunk -> jsonlite::toJSON -> ajv-on-V8 loop that previously
 # dominated validation cost (~95% of total runtime, measured; see
 # benchmarks/bench_validation.R). The constraint vocabulary the package can
-# emit is only six keywords wide -- type, maxLength, enum/const, pattern,
+# emit is only seven keywords wide -- type, maxLength, enum, const, pattern,
 # required and additionalProperties -- so the validator was doing a
 # general-purpose job for a closed, small problem.
 #
@@ -151,7 +151,7 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
       integer(0)
     } else {
       ok <- if (elementwise) {
-        is.finite(x) & x == trunc(x)
+        is.finite(x) & x == trunc(x) & abs(x) <= .Machine$integer.max
       } else {
         rep(type_ok, n)
       }

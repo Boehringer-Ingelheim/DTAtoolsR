@@ -15,12 +15,14 @@ cache_as_parquet(
 )
 }
 \arguments{
-\item{specs}{A \code{DTAColumnSpecCollection}, used to type the columns.}
+\item{specs}{A \code{DTAColumnSpecCollection}, used to normalise the header
+names; columns are written as text.}
 
 \item{path}{Character. Path to the delimited file.}
 
 \item{cache_path}{Character or \code{NULL}. Where to write. Defaults to the input
-path with a \verb{_parquet} suffix.}
+path with its extension replaced by \verb{_parquet} (\code{data.csv} becomes
+\code{data_parquet}).}
 
 \item{delim, quote, has_header}{Parse options for the input file.}
 
@@ -51,9 +53,9 @@ wide file where the specs and rules read only a few of its columns, so the
 rest need never be read at all. If your data looks like that, measure it.
 Otherwise, do not convert.
 
-The columns are typed by the specs during conversion, exactly as they would
-be when validating the text directly, so the cache preserves the declared
-types rather than Parquet's own inference of them.
+Every column is written as text (utf8), exactly as the delimited file is
+read for validation: the specs normalise the header names, and the declared
+types are applied when the cache is validated, not stored in it.
 }
 
 \examples{

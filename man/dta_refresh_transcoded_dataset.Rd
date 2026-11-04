@@ -7,7 +7,7 @@
 dta_refresh_transcoded_dataset(table)
 }
 \arguments{
-\item{table}{A table holding of any kind.}
+\item{table}{A table of any kind.}
 }
 \value{
 The same object, or a freshly opened \code{arrow::Dataset}.

@@ -91,23 +91,14 @@ requirements:
     covers: [write_validation_report, inspect]
     source: R/exportValidationReport.R, R/validationReporting.R
     notes: >
-      Pinned, not endorsed; currently violated. write_validation_report()
-      fetches inspect() detail for every message with ONE batched call,
-      inspect(x, id = messages(x)$id), wrapped in tryCatch(..., error =
-      function(e) NULL). A metadata message's row carries dataset = NA, and
-      inspect(DTA)'s method looks up x@datasets[[NA_character_]] for it --
-      which is NULL, not an error by itself, but the method then aborts with
-      "Dataset 'NA' not found in DTA object." because the lookup came back
-      NULL. That single error discards the WHOLE batched result, so every
-      message's panel -- not only the metadata one -- falls back to the
-      generic "unknown"-badged panel ("(see technical detail below)"
-      instead of the plain-language should-be/actual comparison the same
-      message would get if no metadata issue existed anywhere in the
-      transfer). Verified directly: an otherwise identical transfer produces
-      an inspect-badge-columnspec panel with real comparison text when its
-      metadata is clean, and an inspect-badge-unknown fallback panel for the
-      very same message once one metadata import issue is added anywhere in
-      the same DTA.
+      write_validation_report() fetches inspect() detail for every message
+      with ONE batched call, inspect(x, id = messages(x)$id). inspect(DTA)
+      answers a metadata message (dataset = NA, target "metadata") from the
+      metadata's import issues, as an import record, so the batch succeeds. If
+      the batch still fails, the report retries once per dataset group (the
+      metadata group on its own), so a failure loses only that group's
+      detail; a message left without detail says so in its panel, which keeps
+      the inspect-badge-unknown class.
 
   - id: REQ-REPORT-007
     text: >

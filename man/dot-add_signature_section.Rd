@@ -11,8 +11,8 @@ The document, unchanged when there is nothing to sign.
 }
 \description{
 Accepts either a data.frame(Organization, Name, Role) (as returned by
-\code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
-records, or NULL. One signature row is rendered per authorized signatory.
+\code{.extract_signatories()}), a plain list of
+list(name=, role=, organization=) records, or NULL. One signature row is rendered per authorized signatory.
 
 When no signatory is known the section is omitted entirely rather than
 padded with blank "Approved by / Signature" rules: an anonymous underline

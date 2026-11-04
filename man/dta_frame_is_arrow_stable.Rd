@@ -22,7 +22,7 @@ The \code{DTADataSetTabular()} constructor stamps a data-frame table with
 \code{\link[=dta_table_content_hash]{dta_table_content_hash()}} of the frame it coerced, rather than of the Table
 it then builds -- which is what lets it convert the data once instead of
 three times. That is only the same answer while the round trip is lossless,
-and for three types it is not:
+and for four kinds of column it is not:
 \itemize{
 \item a \code{bit64::integer64} whose values fit in 32 bits comes back as \code{integer}
 (Arrow's \code{int64_downcast});

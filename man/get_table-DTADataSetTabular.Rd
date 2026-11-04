@@ -8,14 +8,15 @@
 get_table(x, id = 1, ...)
 }
 \arguments{
-\item{x}{An object of class DTADataSet.}
+\item{x}{An object of class DTADataSetTabular.}
 
 \item{id}{Character or numeric. Name or index of the table to retrieve.}
 
 \item{...}{Not used by current methods; reserved for future extensions.}
 }
 \value{
-An Arrow Table object.
+The table as stored: an Arrow Table, or, for a table loaded lazily,
+an Arrow Dataset, \code{arrow_dplyr_query} or RecordBatchReader.
 }
 \description{
 Extract a table from the tables in a DTADataSetTabular object.

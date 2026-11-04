@@ -12,14 +12,18 @@
 #'   property is a character vector for consistency with the other rule
 #'   classes, but a range rule must name exactly one column; more than one is
 #'   an error when the rule is evaluated.
-#' @param range Numeric vector or list. Legacy argument for range checks.
+#' @param range Numeric vector or list of length 2 (lower, upper). Legacy
+#'   argument for range checks; it is used only when both \code{min} and
+#'   \code{max} are \code{NULL}, and is ignored otherwise.
 #' @param description Character or NULL. Free-text description of the rule.
-#' @param min Numeric or NULL. Lower bound of the allowed range.
-#' @param max Numeric or NULL. Upper bound of the allowed range.
+#' @param min Numeric. Lower bound of the allowed range. Required unless
+#'   \code{range} is given, and must be less than \code{max}.
+#' @param max Numeric. Upper bound of the allowed range. Required unless
+#'   \code{range} is given, and must be greater than \code{min}.
 #' @return An object of class `DTARuleColRange`.
 #'
 #' @examples
-#' # Create a check_range rule
+#' # Create a col_range rule
 #' rule1 <- DTAtools::DTARuleColRange(
 #'   id = "rule1",
 #'   columns = "age",
@@ -59,7 +63,7 @@ DTARuleColRange <- S7::new_class(
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "check_range",
+        type = "col_range",
         description = description
       ),
       columns = columns,
@@ -81,8 +85,8 @@ DTARuleColRange <- S7::new_class(
       cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
-    if (!self@type %in% c("check_range", "col_range")) {
-      cli_abort("'type' must be 'check_range' or 'col_range'.")
+    if (!identical(self@type, "col_range")) {
+      cli_abort("{.arg type} must be {.val col_range}.")
     }
 
     if (is.null(self@columns) || length(self@columns) < 1) {

@@ -34,13 +34,13 @@ packages in `renv.lock` into a library that dies with the worktree. Say which fl
   when the caller names a scope.
 - Style: `Rscript .github/scripts/style.R --check`. That script is the single
   definition of "styled" here — the `r-style` workflow runs the same file, and
-  it covers `inst/`, which `styler::style_pkg()` never descends into (15 files,
-  ~17k lines). Never call `style_pkg()` yourself, and never run `style.R`
+  it covers `inst/`, which `styler::style_pkg()` never descends into (the Shiny app,
+  template engine and qualification suite). Never call `style_pkg()` yourself, and never run `style.R`
   without `--check`: rewriting R sources is the main thread's job, not yours.
 - Docs: `Rscript -e "roxygen2::roxygenise()"`, then
   `git status --porcelain man NAMESPACE` — report the paths if it is non-empty,
   since CI fails on stale generated docs.
-- Full check: `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"`
+- Full check: `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual', env=c(NOT_CRAN='true'))"`
 - Fast hooks: `pre-commit run --all-files`. These are whitespace, merge
   conflicts, private keys and the forbidden-artifact check only — they do
   **not** style or roxygenise, so passing hooks says nothing about the two

@@ -10,14 +10,14 @@
 #'
 #' @param id Character. A unique identifier for the rule.
 #' @param type Optional character value kept for backward compatibility.
-#'   If provided, it must be either "check_unique" or "col_unique".
+#'   If provided, it must be "col_unique".
 #' @param columns Character vector. Columns that will be collectively checked
 #'   for uniqueness throughout the table.
 #' @param description Character or NULL. Free-text description of the rule.
 #' @return An object of class `DTARuleColUnique`.
 #'
 #' @examples
-#' # Create a check_unique rule
+#' # Create a col_unique rule
 #' rule2 <- DTAtools::DTARuleColUnique(
 #'   id = "rule2",
 #'   columns = "id"
@@ -36,8 +36,8 @@ DTARuleColUnique <- S7::new_class(
       cli_abort("'columns' must be a non-empty list of column names.")
     }
 
-    if (!is.null(type) && !type %in% c("check_unique", "col_unique")) {
-      cli_abort("'type' must be NULL, 'check_unique', or 'col_unique'.")
+    if (!is.null(type) && !identical(type, "col_unique")) {
+      cli_abort("{.arg type} must be NULL or {.val col_unique}.")
     }
 
     if (is.list(columns)) {
@@ -51,7 +51,7 @@ DTARuleColUnique <- S7::new_class(
     new_object(
       .parent = DTAtools::DTARule(
         id = id,
-        type = "check_unique",
+        type = "col_unique",
         description = description
       ),
       columns = columns
@@ -69,8 +69,8 @@ DTARuleColUnique <- S7::new_class(
       cli_abort("@id cannot have whitespaces and needs to be defined.")
     }
 
-    if (!self@type %in% c("check_unique", "col_unique")) {
-      cli_abort("'type' must be 'check_unique' or 'col_unique'.")
+    if (!identical(self@type, "col_unique")) {
+      cli_abort("{.arg type} must be {.val col_unique}.")
     }
 
     if (is.null(self@columns) || length(self@columns) < 1) {

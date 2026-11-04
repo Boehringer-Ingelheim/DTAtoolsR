@@ -35,7 +35,8 @@ expected.}
 \item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected.}
 
-\item{info}{Character or \code{NULL}; free-text description of the file.}
+\item{info}{Character, list or \code{NULL}; free-text description of the
+file.}
 
 \item{extensions}{Character vector or \code{NULL}; allowed file endings. See
 the section above.}

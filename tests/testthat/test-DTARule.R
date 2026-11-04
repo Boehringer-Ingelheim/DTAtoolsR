@@ -1,7 +1,8 @@
 # DTARuleFactory() is the one entry point every YAML/JSON-declared rule goes
-# through, and it carries two things worth pinning on their own: the legacy
-# check_* aliases stay accepted forever (specs written years ago still load),
-# and an unrecognised type aborts instead of silently falling through. Neither
+# through, and it carries things worth pinning on their own: the retired
+# check_* spellings are rejected, an unrecognised type aborts instead of
+# silently falling through, and an argument name that is not an exact
+# constructor argument aborts instead of being partially matched. Neither
 # had a test anywhere in this suite. DTARule itself -- the parent every
 # concrete rule class extends -- was likewise never constructed directly.
 
@@ -12,15 +13,15 @@ test_that("DTARuleFactory() dispatches every modern type to its rule class", {
     then = list(status = list(equals = "adult"))
   )
   expect_true(inherits(col_condition, "DTAtools::DTARuleColCondition"))
-  expect_identical(col_condition@type, "check_col_condition")
+  expect_identical(col_condition@type, "col_condition")
 
   col_range <- DTARuleFactory("r2", "col_range", columns = "score", min = 0, max = 100)
   expect_true(inherits(col_range, "DTAtools::DTARuleColRange"))
-  expect_identical(col_range@type, "check_range")
+  expect_identical(col_range@type, "col_range")
 
   col_unique <- DTARuleFactory("r3", "col_unique", columns = "id")
   expect_true(inherits(col_unique, "DTAtools::DTARuleColUnique"))
-  expect_identical(col_unique@type, "check_unique")
+  expect_identical(col_unique@type, "col_unique")
 
   group_condition <- DTARuleFactory(
     "r4", "group_condition",
@@ -32,35 +33,64 @@ test_that("DTARuleFactory() dispatches every modern type to its rule class", {
     constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
   )
   expect_true(inherits(group_condition, "DTAtools::DTARuleGroupCondition"))
-  expect_identical(group_condition@type, "check_group_condition")
+  expect_identical(group_condition@type, "group_condition")
 })
 
-test_that("DTARuleFactory() accepts the legacy check_* aliases", {
-  # Every alias maps to the same modern type before the outer switch runs, so
-  # each must land on exactly the class its modern spelling would.
-  col_condition <- DTARuleFactory(
-    "r1", "check_col_condition",
-    condition = list(age = list(equals = 18)),
-    then = list(status = list(equals = "adult"))
+test_that("DTARuleFactory() rejects the retired check_* type spellings", {
+  for (old in c("check_col_condition", "check_range", "check_unique", "check_group_condition")) {
+    expect_error(
+      DTARuleFactory("r1", old, columns = "id"),
+      regexp = paste0("Unknown rule type: ", old),
+      fixed = TRUE
+    )
+  }
+})
+
+test_that("DTARuleFactory() rejects an argument that is not an exact constructor argument", {
+  # `column` partially matches `columns`; it must not be smuggled through.
+  expect_error(
+    DTARuleFactory("r1", "col_range", column = "score", min = 0, max = 100),
+    regexp = "Unknown argument"
   )
-  expect_true(inherits(col_condition, "DTAtools::DTARuleColCondition"))
+  expect_error(
+    DTARuleFactory("r1", "col_unique", column = "id"),
+    regexp = "Unknown argument"
+  )
+  # An unnamed element is rejected too.
+  expect_error(
+    DTARuleFactory("r1", "col_unique", "id"),
+    regexp = "Unknown argument"
+  )
+  # An argument that belongs to a different rule type is not accepted either.
+  expect_error(
+    DTARuleFactory("r1", "col_unique", columns = "id", min = 0),
+    regexp = "Unknown argument"
+  )
+})
 
-  col_range <- DTARuleFactory("r2", "check_range", columns = "score", min = 0, max = 100)
-  expect_true(inherits(col_range, "DTAtools::DTARuleColRange"))
-
-  col_unique <- DTARuleFactory("r3", "check_unique", columns = "id")
-  expect_true(inherits(col_unique, "DTAtools::DTARuleColUnique"))
-
-  group_condition <- DTARuleFactory(
-    "r4", "check_group_condition",
-    group_by = "SUBJID",
-    conditions = list(
-      c1 = list(AGE = list(equals = 18)),
-      c2 = list(AGE = list(equals = 19))
+test_that("a YAML rule with the singular `column` key aborts on import", {
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+  writeLines(
+    c(
+      "columns:",
+      "  - id: AGE",
+      "    type: SAS Num",
+      "rules:",
+      "  - id: bad_rule_key",
+      "    type: col_range",
+      "    column: AGE",
+      "    min: 18",
+      "    max: 65"
     ),
-    constraints = list(list(type = "mutually_exclusive", left = "c1", right = "c2"))
+    path
   )
-  expect_true(inherits(group_condition, "DTAtools::DTARuleGroupCondition"))
+  expect_error(import_specs_from_yaml(path), regexp = "Unknown argument")
+
+  # The same rule spelled `columns:` loads.
+  writeLines(sub("    column: AGE", "    columns: AGE", readLines(path), fixed = TRUE), path)
+  specs <- import_specs_from_yaml(path)
+  expect_identical(specs@rules[[1]]@columns, "AGE")
 })
 
 test_that("DTARuleFactory() aborts on an unrecognised rule type", {

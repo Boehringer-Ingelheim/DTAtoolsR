@@ -1,4 +1,4 @@
-# check() and its arguments. REQ-VAL-014 .. REQ-VAL-021.
+# check() and its arguments. REQ-VAL-014 .. REQ-VAL-021; DEV-002 under REQ-VAL-015.
 #
 # Every argument of check() changes what a validation run does or what it
 # records, and each is tested against a stated expected outcome rather than
@@ -231,11 +231,14 @@ test_that("OQ-VAL-026 | a specification with no columns is unspecified, not clea
   qa_step("the status says the table was not specified", "unspecified", status$status)
   qa_step("and the verdict is unknown rather than true", NA, status$ok)
 
-  # DEV-005: results() copes with such a dataset and messages() does not.
-  qa_known_deviation(
-    "DEV-005",
-    inherits(tryCatch(messages(ds), error = function(e) e), "condition") &&
-      !inherits(tryCatch(results(ds), error = function(e) e), "condition")
+  # A table with nothing to check has nothing to report: zero rows in the
+  # documented ten-column frame (REQ-VAL-023), not an abort.
+  msgs <- messages(ds, as_tibble = FALSE)
+  qa_step("messages() reports no rows for a table that had nothing to check", 0L, nrow(msgs))
+  qa_step(
+    "and still has the ten documented columns",
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message"),
+    names(msgs)
   )
 })
 
@@ -363,5 +366,49 @@ test_that("OQ-VAL-029 | a repeated column name is refused, not validated | REQ-V
     "a table with distinct names is validated as before",
     "data.frame",
     class(validate_table(specs = specs, table = distinct, verbose = FALSE))[[1]]
+  )
+})
+
+test_that("OQ-VAL-038 | an unchanged table rebuilt from its own contents is not revalidated | REQ-VAL-015", {
+  # REQ-VAL-015 is about contents, not about which R object holds them: a
+  # table rebuilt from the table on record carries the same contents, so the
+  # next check() must reuse the verdict. Rebuilt the way a caller would --
+  # read the stored table out and put an Arrow copy of it back.
+  specs <- vc_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
+    DTAColumnSpec(id = "VAL", type = "SAS Num", nullable = TRUE)
+  ))
+  frame <- function(tz) {
+    data.frame(
+      ID = c("a", "b"), VAL = c("1", "2"),
+      W = as.POSIXct(c("2026-01-01 10:00:00", "2026-01-02 11:00:00"), tz = tz),
+      stringsAsFactors = FALSE
+    )
+  }
+  rebuild_and_check <- function(tz) {
+    ds <- DTADataSetTabular(id = "d", specs = specs, tables = list(t = frame(tz)))
+    ds <- check(ds, persist = FALSE, quiet = TRUE)
+    before <- validation_status(ds)
+    ds@tables <- list(t = arrow::arrow_table(as.data.frame(ds@tables[["t"]])))
+    ds <- check(ds, persist = FALSE, quiet = TRUE)
+    list(call = vc_call_status(ds), before = before, after = validation_status(ds))
+  }
+
+  # A timestamp with a named timezone: the requirement holds.
+  named <- rebuild_and_check("UTC")
+  qa_step("a rebuilt table with a named timezone is skipped", "skipped", named$call)
+
+  # A timestamp with no named timezone is the one type that is not stable
+  # under repeated Arrow round trips, so the rebuild hashes differently and
+  # the same contents are scanned again.
+  unnamed <- rebuild_and_check("")
+  qa_known_deviation("DEV-002", identical(unnamed$call, "validated"))
+
+  # The deviation's impact statement: cost only, never a different answer.
+  counts <- c("ok", "n_columnspec_errors", "n_rule_errors", "n_import_errors")
+  qa_step(
+    "the rescan reaches the same verdict and the same counts",
+    unnamed$before[, counts],
+    unnamed$after[, counts]
   )
 })

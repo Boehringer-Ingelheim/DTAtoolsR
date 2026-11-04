@@ -9,10 +9,13 @@ dta_dataset_from_list(x, recursive = TRUE)
 \arguments{
 \item{x}{List}
 
-\item{recursive}{Logical, if TRUE (default) processes nested datasets}
+\item{recursive}{Unused. It is only set to \code{FALSE} by the function's
+own recursive call for a list of datasets and is never read; leave it at
+its default.}
 }
 \value{
-An object of class DTADataSet
+A \code{DTADataSet} object, or, when \code{x} is a list of dataset
+specifications, a list of \code{DTADataSet} objects.
 }
 \description{
 Constructs a DTADataSet object from a list

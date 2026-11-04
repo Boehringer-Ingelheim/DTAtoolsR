@@ -1037,3 +1037,56 @@ test_that("max_errors bounds retained detail on an in-memory table, never the co
   expect_equal(capped$rows, 3)
   expect_equal(uncapped$rows, 25)
 })
+
+
+# ---------------------------------------------------------------------------
+# messages() on an "unspecified" dataset returns zero rows, never aborts
+# ---------------------------------------------------------------------------
+
+make_unspecified_dataset <- function(id = "d") {
+  ds <- DTADataSetTabular(
+    id = id,
+    specs = specs_from_list(NULL),
+    files = list(DTAFileCSV(filename = "clinical_data.csv"))
+  )
+  ds <- load_file(
+    ds,
+    file = system.file("extdata", "clinical_data.csv", package = "DTAtools"),
+    handler_index = 1
+  )
+  check(ds, quiet = TRUE, persist = FALSE)
+}
+
+test_that("messages() on an unspecified dataset is a zero-row frame with the ten documented columns", {
+  ds <- make_unspecified_dataset()
+  schema_cols <- c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message")
+  schema_types <- c(
+    id = "integer", dataset = "character", target = "character", severity = "character",
+    source = "character", rule_id = "character", row = "numeric", column = "character",
+    keyword = "character", message = "character"
+  )
+
+  for (as_tbl in c(FALSE, TRUE)) {
+    msgs <- messages(ds, as_tibble = as_tbl)
+    expect_equal(nrow(msgs), 0L)
+    expect_equal(names(msgs), schema_cols)
+    expect_equal(
+      vapply(msgs, function(col) class(col)[1], character(1)),
+      schema_types
+    )
+  }
+})
+
+test_that("messages() on a DTA mixing specified and unspecified datasets returns only the specified rows", {
+  spec_ds <- create_example_DTADataSetTabular(2)
+  spec_ds <- check(spec_ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
+  dta <- DTA(
+    datasets = list(demographics = spec_ds, empty = make_unspecified_dataset("empty")),
+    metadata = DTAMetaData(title = "mixed")
+  )
+
+  msgs <- messages(dta, as_tibble = FALSE)
+  expect_gt(nrow(msgs), 0L)
+  expect_false("empty" %in% msgs$dataset)
+  expect_true(all(msgs$dataset == "demographics"))
+})
