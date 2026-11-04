@@ -278,12 +278,7 @@ method(print_info, DTAFileAny) <- function(x) {
   # `.csv` prints identically to one that accepts anything.
   cli::cli_alert_info("Filename: {x@filename}")
   cli::cli_alert("Pattern: {x@pattern}")
-  if (x@min_number_of_files == x@max_number_of_files) {
-    cli::cli_alert("Number of files: {x@min_number_of_files}")
-  } else {
-    cli::cli_alert("Min number of files: {x@min_number_of_files}")
-    cli::cli_alert("Max number of files: {x@max_number_of_files}")
-  }
+  dta_print_file_count(x)
   endings <- if (is.null(x@extensions)) "any" else paste(x@extensions, collapse = ", ")
   cli::cli_alert("Allowed endings: {endings}")
   invisible(x)

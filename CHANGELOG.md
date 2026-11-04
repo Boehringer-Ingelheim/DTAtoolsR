@@ -8,6 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The app's Markdown export with "Export as PDF" ticked wrote its Markdown
+  into a file named `.pdf` and then asked Pandoc to read and write that one
+  path. When no PDF could be made, the Markdown text was delivered under a
+  `.pdf` name that no PDF viewer can open. The working file is now always
+  Markdown, the PDF is derived from it, and the download is renamed to `.pdf`
+  only once a PDF exists; otherwise the Markdown arrives as `.md`.
+
+- Exported rule text (Word and Markdown) now reads every condition operator in
+  words. `greater`, `less`, `equal`, `not_equal` and `pattern` were printed as
+  the raw key ("'AGE' greater '18'"), and `range` was printed as
+  "one of ('1', '5')", which says something different from an interval.
+  `print()` of a column-condition rule listed operator names where column names
+  belong; it now prints each clause with its column and operator.
+
+- `run_dta_app()` now checks for **shinyjs** up front, with the install hint,
+  instead of failing inside the app, which attaches it unconditionally.
+
+- `print_info()` of an "any" file handler no longer errors when the number of
+  files has no upper (or lower) bound; it prints "unbounded", as the other file
+  handlers do.
+
+- `create_example_DTA()` aborts for an index with no example. Index 2 used to
+  return `NULL` without a message, as did any index past the last example.
+  `get_arrow_type()` now raises package (cli) errors like the rest of the API.
+  `names()` of a column-spec structure no longer fails by reading a `columns`
+  property it does not have. The "not found" error from `files()` named
+  datasets, and `datasets()` printed "datasetss" for two missing names.
+
+- The numbered Word base template no longer silently falls back to a stock
+  template without a 'heading 4' style, which made the export fail later on its
+  first level-4 heading. A missing bundled template now aborts with a
+  reinstall hint. The qualification report's "Evidence inventory" section no
+  longer promises a list of files "below" that it never contained.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain

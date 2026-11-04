@@ -273,6 +273,11 @@ FONT_SIZES <- list(
   parts <- character(0)
   for (op in names(constraint)) {
     val <- constraint[[op]]
+    if (identical(op, "range") && length(val) == 2) {
+      # Two numbers that are the ENDS of one interval, not a set of values.
+      parts <- c(parts, paste0("'", col, "' is between '", val[[1]], "' and '", val[[2]], "'"))
+      next
+    }
     val_str <- if (is.logical(val)) {
       if (isTRUE(val)) "(is present / non-empty)" else "(is absent / empty)"
     } else if (is.character(val) || is.numeric(val)) {
@@ -285,17 +290,20 @@ FONT_SIZES <- list(
       as.character(val)
     }
     part <- switch(op,
-      equals          = paste0("'", col, "' = ", val_str),
-      not_equals      = paste0("'", col, "' \u2260 ", val_str),
-      `in`            = paste0("'", col, "' is ", val_str),
-      not_in          = paste0("'", col, "' is NOT ", val_str),
-      empty           = if (isTRUE(val)) paste0("'", col, "' is empty/absent") else paste0("'", col, "' is present"),
-      greater_than    = paste0("'", col, "' > ", val_str),
-      less_than       = paste0("'", col, "' < ", val_str),
-      greater_equal   = paste0("'", col, "' \u2265 ", val_str),
-      less_equal      = paste0("'", col, "' \u2264 ", val_str),
-      min             = paste0("'", col, "' \u2265 ", val_str),
-      max             = paste0("'", col, "' \u2264 ", val_str),
+      equals = ,
+      equal = paste0("'", col, "' = ", val_str),
+      not_equals = ,
+      not_equal = paste0("'", col, "' \u2260 ", val_str),
+      `in` = paste0("'", col, "' is ", val_str),
+      not_in = paste0("'", col, "' is NOT ", val_str),
+      empty = if (isTRUE(val)) paste0("'", col, "' is empty/absent") else paste0("'", col, "' is present"),
+      greater = paste0("'", col, "' > ", val_str),
+      less = paste0("'", col, "' < ", val_str),
+      pattern = paste0("'", col, "' matches pattern ", val_str),
+      greater_equal = paste0("'", col, "' \u2265 ", val_str),
+      less_equal = paste0("'", col, "' \u2264 ", val_str),
+      min = paste0("'", col, "' \u2265 ", val_str),
+      max = paste0("'", col, "' \u2264 ", val_str),
       paste0("'", col, "' ", op, " ", val_str)
     )
     parts <- c(parts, part)

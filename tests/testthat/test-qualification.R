@@ -347,3 +347,26 @@ test_that("the generated fixture's expected result is arithmetic, not a recordin
     ignore_attr = TRUE
   )
 })
+
+test_that("the report's evidence-inventory section claims only what it contains", {
+  # The section said "Every file below is covered by SHA256SUMS", but it
+  # listed no files, so the sentence promised an inventory the report never
+  # held. The hash manifest IS the inventory; the section has to say that and
+  # tell the reader how to verify it.
+  run <- list(hash_manifest = "SHA256SUMS", hash_algorithm = "sha256")
+  out <- qual_report_inventory(list(run = run))
+  text <- paste(out, collapse = "\n")
+
+  expect_equal(out[[1]], "## 12. Evidence inventory")
+  expect_no_match(text, "below", fixed = TRUE)
+  expect_match(text, "`SHA256SUMS` lists", fixed = TRUE)
+  expect_match(text, "sha256sum -c SHA256SUMS", fixed = TRUE)
+})
+
+test_that("the evidence-inventory section still reads sensibly with no manifest recorded", {
+  out <- qual_report_inventory(list(run = list(hash_algorithm = "sha256")))
+  text <- paste(out, collapse = "\n")
+
+  expect_match(text, "the hash manifest", fixed = TRUE)
+  expect_no_match(text, "below", fixed = TRUE)
+})

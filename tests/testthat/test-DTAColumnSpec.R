@@ -236,3 +236,34 @@ test_that("a typeless spec's enum matches both character and numeric data", {
   expect_true(all(c("1", "2") %in% schema$enum))
   expect_true(all(c(1, 2) %in% schema$enum))
 })
+
+test_that("get_arrow_type rejects bad input with a cli condition, not a bare stop()", {
+  # The three guards used stop(), so every other argument check in the package
+  # raised an rlang_error and these three a plain simpleError. Pin the class and
+  # the package-authored wording (never the base R text).
+  expect_error(get_arrow_type("AGE"), "must be a DTAColumnSpec", class = "rlang_error")
+
+  expect_error(
+    get_arrow_type(DTAColumnSpec(id = "FLAG", nullable = TRUE)),
+    "Structure is not set for FLAG",
+    class = "rlang_error"
+  )
+
+  no_type <- DTAColumnSpec(id = "AGE", type = "SAS Char")
+  no_type@structure@type <- NULL
+  expect_error(
+    get_arrow_type(no_type),
+    "Type is not set for AGE",
+    class = "rlang_error"
+  )
+})
+
+test_that("get_arrow_type does not interpolate braces in a column id", {
+  # The id is data. A brace in it must come out literally, not be evaluated.
+  expect_error(
+    get_arrow_type(DTAColumnSpec(id = "A{1+1}B", nullable = TRUE)),
+    "A{1+1}B",
+    fixed = TRUE,
+    class = "rlang_error"
+  )
+})

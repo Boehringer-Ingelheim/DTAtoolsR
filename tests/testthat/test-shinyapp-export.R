@@ -486,3 +486,73 @@ test_that("editor tables escape attacker-controlled text but keep the Actions bu
     expect_match(block, "escape = -ncol(ov)", fixed = TRUE)
   }
 })
+
+# ---- Markdown / PDF export: the file and the name must agree ---------------
+#
+# The handler made its temp file with the extension of the REQUESTED format, so
+# a PDF export wrote Markdown into "dta-export-*.pdf" and then derived the PDF
+# path from it with sub("\.md$", ".pdf", ...) -- the same path. Pandoc was then
+# told to read and write one file, and when no PDF route worked the Markdown
+# text was delivered under a ".pdf" name.
+
+# Drive the export modal's Export button in markdown mode with "PDF" ticked and
+# hand back what the server queued for download.
+run_markdown_pdf_export <- function() {
+  out <- list()
+  shiny::testServer(.shiny_app_dir(), {
+    rv$dta <- app_fixture_dta()
+    session$setInputs(
+      export_format = "markdown",
+      export_as_pdf = TRUE,
+      export_include_yaml_md = FALSE
+    )
+    session$setInputs(export_do = 1)
+    out$path <<- export_state$file_path
+    out$name <<- export_state$file_name
+  })
+  out
+}
+
+first_bytes <- function(path, n = 5L) {
+  rawToChar(readBin(path, "raw", n = n))
+}
+
+test_that("a PDF export that cannot make a PDF delivers Markdown under a .md name", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  # No pandoc means neither PDF route is attempted: the documented fallback.
+  local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+
+  res <- run_markdown_pdf_export()
+
+  expect_equal(tolower(tools::file_ext(res$name)), "md")
+  expect_equal(tolower(tools::file_ext(res$path)), "md")
+  expect_true(file.exists(res$path))
+  expect_false(startsWith(first_bytes(res$path), "%PDF"))
+  expect_match(paste(readLines(res$path, warn = FALSE), collapse = "\n"), "#", fixed = TRUE)
+})
+
+test_that("a PDF export that succeeds delivers a real PDF under a .pdf name", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc is not available")
+  skip_if_not(
+    app_fn("has_pdf_engine")() || nzchar(app_fn("find_chrome_binary")()),
+    "no PDF engine or Chrome/Edge is available"
+  )
+
+  res <- run_markdown_pdf_export()
+
+  # Whichever route produced it, the extension and the content agree.
+  expect_equal(tolower(tools::file_ext(res$name)), "pdf")
+  expect_equal(tolower(tools::file_ext(res$path)), "pdf")
+  expect_true(file.exists(res$path))
+  expect_equal(first_bytes(res$path), "%PDF-")
+})

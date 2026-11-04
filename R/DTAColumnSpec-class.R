@@ -195,14 +195,14 @@ DTAColumnSpec <- S7::new_class(
 #' @export
 get_arrow_type <- function(x) {
   if (!inherits(x, "DTAtools::DTAColumnSpec")) {
-    stop("Input must be a DTAColumnSpec object.")
+    cli::cli_abort("Input must be a DTAColumnSpec object.")
   }
   if (is.null(x@structure)) {
-    stop(glue::glue("Structure is not set for {x@id}."))
+    cli::cli_abort("Structure is not set for {x@id}.")
   }
   type <- x@structure@type
   if (is.null(type)) {
-    stop(glue::glue("Type is not set for {x@id}."))
+    cli::cli_abort("Type is not set for {x@id}.")
   }
   switch(type,
     "Char" = "utf8",

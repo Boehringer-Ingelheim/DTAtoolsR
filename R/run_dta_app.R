@@ -13,7 +13,7 @@
 #' @param ... Additional arguments passed to [shiny::runApp()].
 #'
 #' @details
-#' Requires the suggested packages **shiny**, **bslib**, and **DT**. If any are
+#' Requires the suggested packages **shiny**, **bslib**, **DT**, and **shinyjs**. If any are
 #' missing, an informative error explains what to install.
 #'
 #' @return Called for its side effect of running the Shiny app. Invisibly
@@ -25,7 +25,7 @@
 #' }
 #' @export
 run_dta_app <- function(launch.browser = TRUE, port = NULL, ...) {
-  required <- c("shiny", "bslib", "DT")
+  required <- c("shiny", "bslib", "DT", "shinyjs")
   missing <- required[!vapply(
     required,
     function(pkg) requireNamespace(pkg, quietly = TRUE),

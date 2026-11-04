@@ -189,7 +189,7 @@ method(datasets, DTA) <- function(x, name = NULL) {
 
   missing <- setdiff(name, names(all_datasets))
   if (length(missing) > 0) {
-    cli_abort("The following datasets{?s} not found: {.field {missing}}")
+    cli_abort("The following dataset{?s} not found: {.field {missing}}")
   }
 
   return(all_datasets[[name]])
@@ -1108,18 +1108,17 @@ method(print, DTA) <- function(x, ...) {
 #' print(example_dta)
 #' @export
 create_example_DTA <- function(index = 1) {
-  switch(index,
-    `1` = {
-      DTA(
-        datasets = list(
-          create_example_DTADataSetTabular(2),
-          create_example_DTADataSetTabular(3)
-        ),
-        metadata = create_example_DTAMetaData()
-      )
-    },
-    `2` = {},
+  # Not switch(): a numeric `index` selects by POSITION there, and an index
+  # past the last alternative returns NULL instead of reaching the abort.
+  if (!identical(as.numeric(index), 1)) {
     cli_abort("No example found with index {index}.")
+  }
+  DTA(
+    datasets = list(
+      create_example_DTADataSetTabular(2),
+      create_example_DTADataSetTabular(3)
+    ),
+    metadata = create_example_DTAMetaData()
   )
 }
 

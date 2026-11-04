@@ -7210,7 +7210,13 @@ server <- function(input, output, session) {
       {
         if (input$export_format == "markdown") {
           # Markdown export
-          ext <- if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
+          # The file written here is ALWAYS Markdown, whatever was asked for:
+          # a PDF is derived from it below (pdf_file), and only swapped in as
+          # the delivered file, and the download name only changed to ".pdf",
+          # once a PDF really exists. Creating this one with ".pdf" made
+          # pdf_file the same path as the input and, when no PDF route worked,
+          # delivered Markdown text under a .pdf name.
+          ext <- ".md"
           filename <- paste0(stem, ext)
           # The browser fetches the file on a LATER request, so the path it
           # waits on must be unique. Deriving it from title and date meant two

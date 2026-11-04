@@ -27,7 +27,7 @@ Word/PDF documents.
 The app is shipped inside the package under \code{inst/shiny/dta_app}.
 }
 \details{
-Requires the suggested packages \strong{shiny}, \strong{bslib}, and \strong{DT}. If any are
+Requires the suggested packages \strong{shiny}, \strong{bslib}, \strong{DT}, and \strong{shinyjs}. If any are
 missing, an informative error explains what to install.
 }
 \examples{

@@ -116,26 +116,15 @@ method(print, DTARuleColCondition) <- function(x, ...) {
   cli_text("<{.emph DTARuleColCondition}> : {.field {x@id}}")
   if (!is.null(x@description)) cli_text("{x@description}")
 
-  # TODO: check more complicated scenarios
-  if (is.list(x@condition)) {
-    for (i in 1:length(x@condition)) {
-      for (nm in names(x@condition[[i]])) {
-        cli_alert_info("  {.field {nm}}: {format(x@condition[[i]][[nm]])}")
-      }
-    }
-  } else {
-    cli_alert_info("  {format(x@condition)}")
-  }
-
+  # Both clauses map column -> constraint; .format_condition_map() names the
+  # column AND the operator ("'AGE' > '17'"). Assigned to a variable first so
+  # braces in a value are printed literally, not interpolated by cli.
+  if_text <- .format_condition_map(x@condition)
+  then_text <- .format_condition_map(x@then)
+  cli_alert_info("  {if_text}")
   cli_alert("then:")
-  # TODO: check more complicated scenarios
-  if (is.list(x@then)) {
-    for (nm in names(x@then)) {
-      cli_text("  {.field {nm}}: {format(x@then[[nm]])}")
-    }
-  } else {
-    cli_text("  {format(x@then)}")
-  }
+  cli_text("  {then_text}")
+  invisible(x)
 }
 
 
