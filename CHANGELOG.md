@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **The column editor opens its vocabulary picker on the right vocabulary.**
+  A vocabulary can name the columns it is for with a new optional `columns:`
+  field: a bare id gets the codes, and `{id: GFTEST, field: label}` gets the
+  labels. "Choose from vocabulary…" then preselects that vocabulary for the
+  column being edited. A column without a declaration is matched by its
+  current values instead, so a column built from a `values_from:` binding finds
+  its vocabulary again. The picker gains a "Write: Codes / Labels" choice,
+  which lets the decode half of a code/decode pair take the labels. When none
+  of a column's values are in the chosen vocabulary yet, every term starts
+  ticked.
+
+  The picker's terms are now a checklist instead of a box of chips. Each term
+  shows its code, label and description, and the list keeps a fixed height and
+  scrolls, so a 300-term vocabulary no longer pushes the buttons off the
+  screen. From 11 terms up a filter narrows the list. All and None act on the
+  terms shown, and a live count says how many are selected and shown. Values
+  the column already holds that the vocabulary lacks are listed as "Not in this
+  vocabulary" and stay ticked, so adding a term no longer drops them. In the
+  "Create new from template" dialog, a vocabulary choice with hundreds of terms
+  selected now scrolls inside its box instead of growing the dialog. The shipped `gf_test`,
+  `gf_tstdtl` and `starter_terms` vocabularies declare their columns.
+  `validate_template()` reports a malformed `columns:` entry as
+  `vocabulary_invalid`.
+
 - **Structured study identity and ordered agreement clauses.** `DTAMetaData`
   accepts optional `study` identifiers and named `sections` with titles and
   plain-text paragraphs. They round-trip through YAML and template inheritance

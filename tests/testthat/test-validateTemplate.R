@@ -710,6 +710,21 @@ test_that("vocabulary_invalid fires, as an error, for a vocabulary that will not
   expect_code_row(result, "vocabulary_invalid", "error")
 })
 
+test_that("vocabulary_invalid fires for a columns: entry with a bad field", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: pairs", "version: \"1.0\"",
+      "columns:", "  - id: GFTEST", "    field: decode",
+      "terms:", "  - code: TRNSCPTN"
+    ),
+    file.path(dir, "pairs.dta-vocabulary.yaml")
+  )
+
+  result <- validate_template(dir)
+  expect_code_row(result, "vocabulary_invalid", "error")
+})
+
 test_that("vocabulary_unresolved fires when extends: names a vocabulary not in this directory", {
   dir <- withr::local_tempdir()
   write_vocab_file(

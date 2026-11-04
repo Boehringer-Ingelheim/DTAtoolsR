@@ -8,6 +8,7 @@ description: >-
   this vocabulary via `values_from:`, so this list is written once and
   reused rather than retyped into every column that needs it.
 type: text
+columns: [STATUS]
 terms:
   - code: PASS
     label: Pass

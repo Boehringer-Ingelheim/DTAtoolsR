@@ -724,3 +724,44 @@ test_that("carry-over offers the open document only when one is open", {
   expect_match(open, "From the open document", fixed = TRUE)
   expect_match(open, 'id="tmpl_carry_fields"', fixed = TRUE)
 })
+
+# ---- The column editor's term checklist ------------------------------------
+
+checklist_terms <- function(n) {
+  lapply(seq_len(n), function(i) {
+    list(code = sprintf("T%03d", i), label = sprintf("Term %d", i), description = sprintf("About term %d.", i))
+  })
+}
+
+test_that("a small vocabulary is a plain checklist: every term visible, no filter", {
+  html <- html_of(app_fn("vocab_term_checklist")("pick", checklist_terms(3), selected = c("T001", "T003")))
+
+  expect_match(html, 'value="T001" checked', fixed = TRUE)
+  expect_false(grepl('value="T002" checked', html, fixed = TRUE))
+  expect_match(html, "T002</span> — Term 2", fixed = TRUE)
+  expect_match(html, "About term 2.", fixed = TRUE)
+  expect_match(html, "2 of 3 selected", fixed = TRUE)
+  expect_false(grepl("vocab-pick-filter", html, fixed = TRUE))
+  # The script text is constant: nothing vocabulary-authored is spliced into it.
+  expect_match(html, 'onclick="return DTA_vocabCheck(this, false)"', fixed = TRUE)
+})
+
+test_that("a large vocabulary gets a filter naming its size", {
+  html <- html_of(app_fn("vocab_term_checklist")("pick", checklist_terms(300), selected = "T001"))
+
+  expect_match(html, "Filter 300 terms by code, label or description", fixed = TRUE)
+  expect_match(html, "1 of 300 selected", fixed = TRUE)
+  expect_equal(count_occurrences(html, 'type="checkbox"'), 300L)
+})
+
+test_that("values the vocabulary does not have are listed first and counted", {
+  html <- html_of(app_fn("vocab_term_checklist")(
+    "pick", checklist_terms(2),
+    selected = c("OWN", "T001"), extras = "OWN"
+  ))
+
+  expect_match(html, 'value="OWN" checked', fixed = TRUE)
+  expect_match(html, "Not in this vocabulary", fixed = TRUE)
+  expect_lt(regexpr('value="OWN"', html, fixed = TRUE), regexpr('value="T001"', html, fixed = TRUE))
+  expect_match(html, "2 of 3 selected", fixed = TRUE)
+})
