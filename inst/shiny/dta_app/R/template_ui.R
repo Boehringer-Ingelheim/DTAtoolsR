@@ -504,7 +504,68 @@ template_picker_detail_ui <- function(loaded, versions, selected_version, index)
     if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
     if (nzchar(description)) p(class = "tmpl-detail-desc", description),
     div(class = "section-label", "What it creates"),
-    p(class = "tmpl-summary", tmpl_detail_summary(def))
+    p(class = "tmpl-summary", tmpl_detail_summary(def)),
+    if (!is.null(index)) {
+      # The history is extra information: a failure computing it must never
+      # take the picker's detail panel down with it.
+      history <- tryCatch(template_history_cached(index, value$id), error = function(e) list())
+      template_history_ui(history, selected_version)
+    }
+  )
+}
+
+# ---- Version history (template_history.R) -----------------------------------
+
+# One change as a list item: "Dataset 'gf', column 'AGE': type  integer -> numeric".
+template_history_change_item <- function(row) {
+  clip <- function(x) {
+    if (is.na(x)) "" else if (nchar(x) > 200) paste0(substr(x, 1, 200), "...") else x
+  }
+  detail <- switch(row$change,
+    added = if (is.na(row$to)) "added" else paste0("added: ", clip(row$to)),
+    removed = if (is.na(row$from)) "removed" else paste0("removed (was: ", clip(row$from), ")"),
+    paste0(clip(row$from), " → ", clip(row$to))
+  )
+  tags$li(span(class = "msg-hint", row$area), " ", row$what, " — ", detail)
+}
+
+template_history_entry_body <- function(entry) {
+  if (!is.null(entry$error)) {
+    return(p(class = "text-danger", paste0("Could not be compared: ", entry$error)))
+  }
+  if (identical(entry$type, "initial")) {
+    return(p(class = "msg-hint", "First version of this template."))
+  }
+  if (nrow(entry$changes) == 0) {
+    return(p(class = "msg-hint", "No change to what this template builds."))
+  }
+  tags$ul(lapply(seq_len(nrow(entry$changes)), function(i) {
+    template_history_change_item(entry$changes[i, , drop = FALSE])
+  }))
+}
+
+# What changed in the selected version, then the whole history behind a
+# native <details> -- the picker is itself a modal, and Shiny has only one.
+template_history_ui <- function(history, selected_version) {
+  if (length(history) == 0) {
+    return(NULL)
+  }
+  own <- Filter(function(e) e$type != "upstream" && identical(e$version, selected_version), history)
+  div(
+    class = "tmpl-history",
+    div(class = "section-label", "History"),
+    if (length(own) > 0) {
+      tagList(
+        tags$strong(paste0("What changed in ", selected_version)),
+        template_history_entry_body(own[[1]])
+      )
+    },
+    tags$details(
+      tags$summary(sprintf("Full history (%d entries)", length(history))),
+      lapply(history, function(e) {
+        tagList(tags$strong(e$title), template_history_entry_body(e))
+      })
+    )
   )
 }
 
