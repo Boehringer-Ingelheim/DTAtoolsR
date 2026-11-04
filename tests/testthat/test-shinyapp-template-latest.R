@@ -40,7 +40,7 @@ write_base_ct <- function(root, version, title) {
       sprintf('    title: "%s"', title),
       '    header: "Base header"',
       "datasets:",
-      "  - name: mini_ds",
+      "  - id: mini_ds",
       "    type: file",
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
@@ -188,7 +188,7 @@ test_that("a dataset import may also use @latest", {
         sprintf('version: "%s"', version),
         sprintf("label: %s", label),
         "dataset:",
-        "  name: mini_ds",
+        "  id: mini_ds",
         "  type: tabular",
         "  files: { filename: mini.csv, type: csv }",
         "  columns:",

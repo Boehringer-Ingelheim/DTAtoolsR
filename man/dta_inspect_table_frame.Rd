@@ -30,7 +30,8 @@ A table already in memory is untouched: \code{as.data.frame()}, exactly as
 before. A \code{RecordBatchReader} cannot be safely re-read -- it is one-shot,
 and the scan \code{check()} ran may already have consumed it -- so this returns
 \code{NULL} rather than reading (and thereby destroying) whatever is left of it.
-Any other lazy source (\code{Dataset}, \code{arrow_dplyr_query}) is scanned fresh via
-\code{dplyr}, which is safe to repeat.
+Any other lazy source (\code{Dataset}, \code{arrow_dplyr_query}) is scanned fresh,
+which is safe to repeat, through the same ordered record-batch reader the
+validation scan numbers its rows from.
 }
 \keyword{internal}

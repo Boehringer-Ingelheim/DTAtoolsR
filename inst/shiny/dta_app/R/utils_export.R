@@ -67,6 +67,13 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   html_file <- sub("\\.[^.]+$", ".html", pdf_file)
   header_file <- tempfile(fileext = ".html")
   writeLines(c(
+    # Defence in depth behind the pandoc reader below: the page may run no
+    # script and load no plugin, whatever reaches it. A meta CSP is what
+    # actually does this -- tested 2026-11-04 with headless Edge:
+    # `--disable-javascript` is not a Chromium switch (scripts still ran), and
+    # `--blink-settings=scriptEnabled=false` blocks scripts but also stops
+    # --print-to-pdf from writing anything.
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'; object-src 'none'\">",
     "<style>",
     "@page { margin: 1.6cm; }",
     "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt;",
@@ -107,7 +114,6 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
     args <- c(
       headless_flag, "--disable-gpu", "--no-first-run",
       "--no-default-browser-check", "--disable-extensions",
-      "--disable-javascript",
       sprintf("--user-data-dir=%s", udd),
       "--no-pdf-header-footer",
       sprintf("--print-to-pdf=%s", pdf_file),

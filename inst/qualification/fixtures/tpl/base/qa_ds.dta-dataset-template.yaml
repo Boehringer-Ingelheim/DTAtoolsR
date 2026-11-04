@@ -3,7 +3,7 @@ id: qa_ds
 version: "1.0"
 label: QA dataset
 dataset:
-  name: qa_data
+  id: qa_data
   type: tabular
   files:
     filename: qa_data.tsv

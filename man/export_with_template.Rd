@@ -91,7 +91,9 @@ values: \code{{DATASET_ID}}, \code{{DATASET_NAME}} (its id where no name is set)
 \code{{DATASET_COLUMN_COUNT}} and \code{{DATASET_RULE_COUNT}} (the last two are
 \code{0} for a non-tabular dataset). A bare dataset block (\code{{COLUMN_SPECS}}, \code{{VALIDATION_RULES}},
 \code{{FILE_SPECS}}, \code{{DATASETS}}) alone in a paragraph of the region is
-bound to the repetition's dataset and rendered without its generated
+bound to the repetition's dataset (a bare \code{{COLUMN_SPECS}} or
+\code{{VALIDATION_RULES}} renders nothing for a non-tabular dataset) and
+rendered without its generated
 heading; an explicit \code{{COLUMN_SPECS:NAME}} is left as written. A
 malformed marker -- unclosed, unopened, or not alone in its paragraph
 -- is left in place and reported alongside unrendered blocks. A dataset

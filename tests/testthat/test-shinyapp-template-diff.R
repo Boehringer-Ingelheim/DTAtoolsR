@@ -31,7 +31,7 @@ atomic_rebase_family <- function(ancestor, target, .local_envir = parent.frame()
         title = "Agreement", version = "1.0", sections = collections[[version]]
       )),
       datasets = list(list(
-        name = "records", type = "tabular",
+        id = "records", type = "tabular",
         columns = list(list(
           id = "SUBJECT", type = "SAS Char",
           nullable = identical(version, "2.0")

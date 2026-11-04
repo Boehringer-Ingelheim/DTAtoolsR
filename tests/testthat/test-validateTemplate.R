@@ -23,7 +23,7 @@ write_clean_template <- function(dir, filename = "clean.dta-template.yaml",
       "  metadata:",
       "    title: Clean Template",
       "datasets:",
-      "  - name: ds1",
+      "  - id: ds1",
       "    type: tabular",
       "    files: {filename: x.csv, type: csv}",
       "    columns:",
@@ -285,7 +285,7 @@ test_that("extends_unresolved fires when 'extends:' names a template not in this
       # Abstract templates skip the instantiate dry-run, so this entry need
       # not be buildable; resolution must still diagnose the missing parent.
       "datasets:",
-      "  - name: placeholder"
+      "  - id: placeholder"
     ),
     file.path(dir, "child.dta-template.yaml")
   )
@@ -300,7 +300,7 @@ test_that("extends_cycle fires for a two-node extends cycle", {
     c(
       "kind: dta_creation_template", "id: cyc_a", "version: \"1.0\"",
       "abstract: true", "extends: cyc_b", "base: {metadata: {}}",
-      "datasets:", "  - name: placeholder"
+      "datasets:", "  - id: placeholder"
     ),
     file.path(dir, "a.dta-template.yaml")
   )
@@ -308,7 +308,7 @@ test_that("extends_cycle fires for a two-node extends cycle", {
     c(
       "kind: dta_creation_template", "id: cyc_b", "version: \"1.0\"",
       "abstract: true", "extends: cyc_a", "base: {metadata: {}}",
-      "datasets:", "  - name: placeholder"
+      "datasets:", "  - id: placeholder"
     ),
     file.path(dir, "b.dta-template.yaml")
   )
@@ -346,7 +346,7 @@ test_that("patch_incoherent fires when remove_columns names an absent column id"
       "id: ds_tpl",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
@@ -381,7 +381,7 @@ test_that("a coherent template:/patch: dataset entry does not fire patch_incoher
       "id: ds_tpl_ok",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
@@ -429,7 +429,7 @@ test_that("dataset_missing fires, as an error, when a dta_dataset_template carri
       "id: slipped",
       "version: \"1.0\"",
       "datasets:",
-      "  - name: one",
+      "  - id: one",
       "    type: tabular",
       "    files:",
       "      filename: one.tsv",
@@ -459,7 +459,7 @@ test_that("a well-formed dta_dataset_template with a proper 'dataset:' body vali
       "id: has_dataset_body",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
@@ -639,7 +639,7 @@ test_that("kinds restricts which files get their own report row but not cross-fi
     c(
       "kind: dta_dataset_template", "id: ds_tpl_k", "version: \"1.0\"",
       "dataset:",
-      "  name: ds1", "  type: tabular", "  files: {filename: x.csv, type: csv}",
+      "  id: ds1", "  type: tabular", "  files: {filename: x.csv, type: csv}",
       "  columns:", "    - {id: COL1, type: SAS Char}"
     ),
     file.path(dir, "ds_tpl_k.dta-dataset-template.yaml")
@@ -787,7 +787,7 @@ write_bound_dataset_tpl <- function(dir, col_lines, filename = "bound.dta-datase
       "id: bound_ds",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      "  id: ds1",
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",

@@ -43,39 +43,6 @@ write_dataset_template_fixture <- function(
   path
 }
 
-# The same template as write_dataset_template_fixture(), but with its `dataset:`
-# body written the way templates were before datasets had an `id`: the
-# identifier under `name:`, and the short label under `description:`.
-write_legacy_dataset_template_fixture <- function(dir, filename = "legacy.yaml") {
-  path <- file.path(dir, filename)
-  writeLines(
-    c(
-      "kind: dta_dataset_template",
-      "id: gf_smrnaseq",
-      'version: "3.0"',
-      "label: GF domain smrnaseq",
-      "description: Genomic Findings data table",
-      "date: 2024-12-17",
-      "options:",
-      "  - id: vendor_name",
-      "    label: Vendor name",
-      "    type: text",
-      "    target: dataset.columns.GFNAM.values",
-      "dataset:",
-      "  name: gf_legacy_pattern",
-      "  type: tabular",
-      "  description: Genomic Findings data table (legacy label)",
-      "  files: { filename: gf.tsv, type: tsv }",
-      "  columns:",
-      "    - { id: STUDYID, label: Study Identifier, type: SAS Char }",
-      "    - { id: GFNAM, label: Vendor Name, type: SAS Char }",
-      "  rules: []"
-    ),
-    path
-  )
-  path
-}
-
 # A minimal plain-list dataset spec, the shape apply_dataset_template_path()/
 # apply_dataset_patch() operate on directly (never an S7 object).
 minimal_dataset_spec <- function() {
@@ -120,72 +87,34 @@ test_that("read_dataset_template() accepts a valid file", {
   )
 })
 
-test_that("read_dataset_template() upgrades a legacy dataset body: name becomes id, description becomes name", {
-  # Templates written before datasets had an `id` name the dataset in `name:`
-  # and label it in `description:`. They keep loading: the same upgrade the
-  # package's readers apply, run on the `dataset:` body before anything reads it.
+test_that("read_dataset_template() rejects a dataset without an id, even one that has a name", {
   dir <- withr::local_tempdir()
-  path <- write_legacy_dataset_template_fixture(dir)
-
-  res <- app_fn("read_dataset_template")(path)
-
-  expect_true(res$ok)
-  expect_null(res$error)
-  expect_equal(res$value$dataset$id, "gf_legacy_pattern")
-  expect_equal(res$value$dataset$name, "Genomic Findings data table (legacy label)")
-  # The old short label must not ALSO survive as the new long description.
-  expect_null(res$value$dataset$description)
-  # The template's own header fields are not touched by the upgrade.
-  expect_equal(res$value$id, "gf_smrnaseq")
-  expect_equal(res$value$description, "Genomic Findings data table")
-  expect_equal(res$value$dataset$type, "tabular")
-})
-
-test_that("read_dataset_template() reads a legacy dataset body's name as its id even with no description", {
-  dir <- withr::local_tempdir()
-  path <- file.path(dir, "template.yaml")
-  writeLines(
-    c(
-      "kind: dta_dataset_template",
-      "id: x",
-      'version: "1.0"',
-      "dataset:",
-      "  name: only_name",
-      "  type: tabular"
-    ),
-    path
+  bodies <- list(
+    only_type = c("  type: tabular", "  description: A dataset nobody can address"),
+    # `name` is the label, so it can no more stand in for the identifier than
+    # nothing at all can.
+    only_name = c("  name: Some label", "  type: tabular")
   )
+  for (case in names(bodies)) {
+    path <- file.path(dir, paste0(case, ".yaml"))
+    writeLines(
+      c(
+        "kind: dta_dataset_template",
+        "id: x",
+        'version: "1.0"',
+        "dataset:",
+        bodies[[case]],
+        "  files: { filename: gf.tsv, type: tsv }"
+      ),
+      path
+    )
 
-  res <- app_fn("read_dataset_template")(path)
+    res <- app_fn("read_dataset_template")(path)
 
-  expect_true(res$ok)
-  expect_equal(res$value$dataset$id, "only_name")
-  expect_null(res$value$dataset$name)
-  expect_null(res$value$dataset$description)
-})
-
-test_that("read_dataset_template() rejects a dataset with neither an id nor a name", {
-  dir <- withr::local_tempdir()
-  path <- file.path(dir, "template.yaml")
-  writeLines(
-    c(
-      "kind: dta_dataset_template",
-      "id: x",
-      'version: "1.0"',
-      "dataset:",
-      "  type: tabular",
-      "  description: A dataset nobody can address",
-      "  files: { filename: gf.tsv, type: tsv }"
-    ),
-    path
-  )
-
-  res <- app_fn("read_dataset_template")(path)
-
-  expect_false(res$ok)
-  expect_null(res$value)
-  expect_match(res$error, "must contain an 'id'", fixed = TRUE)
-  expect_equal(res$error, "Dataset template's 'dataset' section must contain an 'id'.")
+    expect_false(res$ok)
+    expect_null(res$value)
+    expect_equal(res$error, "Dataset template's 'dataset' section must contain an 'id'.")
+  }
 })
 
 test_that("read_dataset_template() rejects a wrong 'kind'", {
@@ -197,7 +126,7 @@ test_that("read_dataset_template() rejects a wrong 'kind'", {
       "id: x",
       'version: "1.0"',
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -219,7 +148,7 @@ test_that("read_dataset_template() rejects a missing 'id'", {
       "kind: dta_dataset_template",
       'version: "1.0"',
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -239,7 +168,7 @@ test_that("read_dataset_template() rejects a missing 'version'", {
       "kind: dta_dataset_template",
       "id: x",
       "dataset:",
-      "  name: ds1"
+      "  id: ds1"
     ),
     path
   )
@@ -328,7 +257,7 @@ test_that("build_dataset_from_template() rejects a hand-built def carrying 'data
   fn <- app_fn("build_dataset_from_template")
   def <- list(
     id = "gf_smrnaseq", version = "3.0",
-    datasets = list(list(name = "gf_data_specs_pattern", type = "tabular"))
+    datasets = list(list(id = "gf_data_specs_pattern", type = "tabular"))
   )
 
   res <- fn(def)
@@ -771,35 +700,6 @@ test_that("build_dataset_from_template() sets the dataset's id when as_name is g
   )
   # The provenance records the id the dataset ended up with.
   expect_equal(res$value$provenance$id, "gf_second_copy")
-})
-
-test_that("build_dataset_from_template() upgrades a legacy def whose dataset has only a name", {
-  # A def that never went through read_dataset_template() -- hand-built, or read
-  # by an older caller -- still carries the identifier under `name:`. The build
-  # upgrades it too, so as_name, the patch and the provenance all see one shape.
-  fn <- app_fn("build_dataset_from_template")
-  def <- list(
-    id = "legacy_tpl", version = "1.0",
-    dataset = list(
-      name = "legacy_ds", type = "tabular", description = "Old label",
-      files = list(filename = "x.tsv", type = "tsv"),
-      columns = list(list(id = "A", label = "Alpha", type = "SAS Char")),
-      rules = list()
-    )
-  )
-
-  res <- fn(def)
-
-  expect_true(res$ok)
-  expect_equal(res$value$dataset$id, "legacy_ds")
-  expect_equal(res$value$dataset$name, "Old label")
-  expect_null(res$value$dataset$description)
-  expect_equal(res$value$provenance$id, "legacy_ds")
-  expect_equal(res$value$provenance$template, "legacy_tpl")
-
-  renamed <- fn(def, as_name = "second")
-  expect_equal(renamed$value$dataset$id, "second")
-  expect_equal(renamed$value$provenance$id, "second")
 })
 
 test_that("build_dataset_from_template() applies the patch on top of options", {

@@ -175,7 +175,8 @@ test_that("write_dta markdown heads a dataset by name and id, an unnamed one by 
   md <- readLines(out_md, warn = FALSE)
 
   named_at <- match("### Demographics (demographics)", md)
-  unnamed_at <- match("### audit_trail", md)
+  # Escaped Markdown: the `_` would otherwise start emphasis.
+  unnamed_at <- match("### audit\\_trail", md)
   expect_false(is.na(named_at))
   expect_false(is.na(unnamed_at))
   # The long description is the paragraph under its heading.
@@ -184,6 +185,28 @@ test_that("write_dta markdown heads a dataset by name and id, an unnamed one by 
   # Neither the bare id of a named dataset nor a name-only heading appears.
   expect_false("### demographics" %in% md)
   expect_false("### Demographics" %in% md)
+})
+
+test_that("the Markdown exports escape a dataset's name and description", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@name <- "*Draft* #2"
+  ds@description <- "# not a heading"
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+  expect_true("### \\*Draft\\* \\#2 (demographics)" %in% md)
+  expect_true("\\# not a heading" %in% md)
+  expect_false("# not a heading" %in% md)
+
+  out_ds <- tempfile(fileext = ".md")
+  on.exit(unlink(out_ds, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
+  ds_md <- readLines(out_ds, warn = FALSE)
+  expect_true(any(grepl("**Name:** \\*Draft\\* \\#2", ds_md, fixed = TRUE)))
+  expect_true(any(grepl("**Description:** \\# not a heading", ds_md, fixed = TRUE)))
 })
 
 test_that("write_dta docx heads a dataset by name and id, with its description as body text", {
@@ -231,8 +254,9 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
   write_dataset_metadata(bare, file = out_bare, format = "md", overwrite = TRUE, quiet = TRUE)
   md_bare <- readLines(out_bare, warn = FALSE)
 
-  expect_true(any(grepl("^## +example_container_specs_without_data$", md_bare)))
-  expect_true("**ID:** example_container_specs_without_data" %in% md_bare)
+  # Escaped Markdown, so the underscores cannot start emphasis.
+  expect_true(any(grepl("^## +example\\\\_container\\\\_specs\\\\_without\\\\_data$", md_bare)))
+  expect_true("**ID:** example\\_container\\_specs\\_without\\_data" %in% md_bare)
   expect_false(any(grepl("^\\*\\*Name:\\*\\*", md_bare)))
 })
 

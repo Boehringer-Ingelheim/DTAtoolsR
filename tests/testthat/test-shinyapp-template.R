@@ -109,7 +109,7 @@ test_that("read_dta_creation_template() fails when 'kind' is missing", {
       "base:",
       "  metadata: {}",
       "datasets:",
-      "  - name: x",
+      "  - id: x",
       "    type: file",
       "    files: {filename: a.csv, type: csv}"
     ),
@@ -133,7 +133,7 @@ test_that("read_dta_creation_template() fails when 'base' is missing", {
     c(
       "kind: dta_creation_template",
       "datasets:",
-      "  - name: x",
+      "  - id: x",
       "    type: file",
       "    files: {filename: a.csv, type: csv}"
     ),
@@ -384,7 +384,7 @@ test_that("resolve_template_dataset_path() does not resolve an absolute path", {
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   ds_file <- file.path(tmp_dir, "dataset.yaml")
-  writeLines("name: x", ds_file)
+  writeLines("id: x", ds_file)
 
   fn <- app_fn("resolve_template_dataset_path")
   # An absolute ref names a file outside the template's own directory, so it
@@ -400,7 +400,7 @@ test_that("resolve_template_dataset_path() resolves a path relative to the templ
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   ds_file <- file.path(tmp_dir, "dataset.yaml")
-  writeLines("name: x", ds_file)
+  writeLines("id: x", ds_file)
   template_path <- file.path(tmp_dir, "template.yaml") # need not exist
 
   fn <- app_fn("resolve_template_dataset_path")
@@ -449,9 +449,9 @@ test_that("a template dataset reference cannot escape the template directory", {
   tpl <- file.path(tpl_dir, "t.yaml")
   writeLines("kind: dta_creation_template", tpl)
   ds <- file.path(tpl_dir, "ds.yaml")
-  writeLines("name: x", ds)
+  writeLines("id: x", ds)
   secret <- file.path(root, "secret.yaml")
-  writeLines("name: secret", secret)
+  writeLines("id: secret", secret)
 
   fn <- app_fn("resolve_template_dataset_path")
   under <- app_fn(".dta_path_under")
@@ -593,6 +593,23 @@ test_that("collect_option_effects() appends effects_all to the per-value effects
   )
 })
 
+test_that("an option with `target:` and only `effects_all:` still writes its target", {
+  # `opt$effects` partially matched `effects_all`, so the effects_all block
+  # stood in for `effects:` and the `target:` shorthand was never applied.
+  opt <- list(
+    target = "metadata.title",
+    effects_all = list(list(path = "metadata.header", value = "H"))
+  )
+  expect_equal(
+    app_fn("collect_option_effects")(opt, "My Title"),
+    list(
+      list(path = "metadata.title", value = "__selection__"),
+      list(path = "metadata.header", value = "H")
+    )
+  )
+  expect_equal(app_fn("dta_template_option_path")(opt), "metadata.title")
+})
+
 # ---- apply_template_metadata_path --------------------------------------
 
 test_that("apply_template_metadata_path() sets a scalar metadata field", {
@@ -709,12 +726,12 @@ test_that("create_dta_from_template() accepts a plain string dataset reference",
   expect_equal(result$value@datasets[["mini_ds"]]@name, "Mini dataset")
 })
 
-test_that("create_dta_from_template() still accepts a plain string reference to a legacy dataset file", {
+test_that("create_dta_from_template() refuses a referenced dataset file without an id", {
+  # A `name:` without `id:` is no longer read as the identifier: there is no
+  # old shape to fall back on, so the file is refused rather than reshaped.
   tmp_dir <- tempfile()
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
-  # Written before datasets had an `id`: `name` is the identifier and
-  # `description` the short label.
   writeLines(
     c(
       "name: mini_ds", "type: file", "description: Mini dataset",
@@ -729,12 +746,8 @@ test_that("create_dta_from_template() still accepts a plain string reference to 
 
   result <- create_fn(template_def, template_path, selections = list())
 
-  expect_true(result$ok)
-  expect_equal(names(result$value@datasets), "mini_ds")
-  ds <- result$value@datasets[["mini_ds"]]
-  expect_equal(ds@id, "mini_ds")
-  expect_equal(ds@name, "Mini dataset")
-  expect_null(ds@description)
+  expect_false(result$ok)
+  expect_match(result$error, "needs an", fixed = TRUE)
 })
 
 test_that("create_dta_from_template() accepts a {source: ...} dataset reference", {
@@ -781,30 +794,6 @@ test_that("create_dta_from_template() accepts an inline dataset definition", {
   expect_equal(ds@description, "Defined in the template itself.")
 })
 
-test_that("create_dta_from_template() still accepts an inline dataset written with the legacy `name:` identifier", {
-  template_path <- file.path(tempdir(), "template.yaml")
-
-  template_def <- list(
-    base = list(),
-    datasets = list(list(
-      name = "inline_ds",
-      type = "file",
-      description = "Short label",
-      files = list(filename = "mini2.csv", type = "csv")
-    ))
-  )
-  create_fn <- app_fn("create_dta_from_template")
-
-  result <- create_fn(template_def, template_path, selections = list())
-
-  expect_true(result$ok)
-  expect_equal(names(result$value@datasets), "inline_ds")
-  ds <- result$value@datasets[["inline_ds"]]
-  expect_equal(ds@id, "inline_ds")
-  expect_equal(ds@name, "Short label")
-  expect_null(ds@description)
-})
-
 test_that("create_dta_from_template() fails without throwing when a dataset reference cannot be resolved", {
   template_path <- file.path(tempdir(), "template.yaml")
   template_def <- list(base = list(), datasets = list("does-not-exist.yaml"))
@@ -823,7 +812,7 @@ test_that("create_dta_from_template() rejects an unknown base.metadata field wit
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml")
@@ -1048,7 +1037,7 @@ test_that("a non-list base is rejected whether or not the template extends", {
 
 required_fixture <- function(dir) {
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(dir, "dataset.yaml")
   )
   list(

@@ -7,7 +7,7 @@ base:
   metadata:
     title: Parent
 datasets:
-  - name: x
+  - id: x
     type: tabular
     columns:
       - id: A

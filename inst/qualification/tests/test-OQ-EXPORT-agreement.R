@@ -59,7 +59,9 @@ test_that("OQ-EXPORT-045 | default documents include study and ordered agreement
     for (flag in c("test_upload", "blinded_transfer")) {
       qa_check(paste(format, "does not invent an absent decision", flag), !grepl(flag, text, fixed = TRUE))
     }
-    positions <- vapply(c("Scope clause", "Review clause", "probe_data"), function(value) {
+    # Markdown escapes the dataset id's `_`, Word shows it as written.
+    dataset_id <- if (format == "md") "probe\\_data" else "probe_data"
+    positions <- vapply(c("Scope clause", "Review clause", dataset_id), function(value) {
       regexpr(value, text, fixed = TRUE)[[1]]
     }, integer(1))
     qa_check(paste(format, "renders declared section order before datasets"), all(positions > 0L) && all(diff(positions) > 0L))
