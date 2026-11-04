@@ -1064,6 +1064,7 @@ bi_css <- function() {
        when motion is reduced -- it just stops turning. */
     @media (prefers-reduced-motion: reduce) {
       .dta-busy-shown::after { animation: none; opacity: .55; }
+      .tmpl-switch input[type=checkbox], .tmpl-switch input[type=checkbox]::before { transition: none; }
     }
 
     /* Create-from-template picker and options dialog (template_ui.R).
@@ -1206,24 +1207,158 @@ bi_css <- function() {
     /* The version picker is a setting of the selected template, not a field
        of the form: a quiet label, as the drop zones use. */
     .tmpl-detail .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
-    /* The carry-over section's own summary line is its heading. */
-    .tmpl-options-body details { margin-top: 18px; }
-    .tmpl-options-body details > summary { font-weight: 600; cursor: pointer; }
     .tmpl-detail-head { margin-bottom: 12px; }
     .tmpl-detail .tmpl-detail-title { font-size: 1.125rem; margin: 0 0 4px; color: var(--bi-ink); }
     .tmpl-detail-sub { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
     .tmpl-detail-desc { font-size: .875rem; line-height: 1.5; }
     .tmpl-detail .section-label { margin-top: 14px; }
     .tmpl-summary { font-size: .875rem; margin: 0; }
-    /* Two columns where the width allows, one where it does not; a textarea
-       option spans the whole width whatever the count. */
-    .tmpl-opts-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 0 20px;
+    /* ---- New DTA from template: the options dialog ------------------------
+       A wide scrollable dialog: title and buttons stay put, a sidebar holds
+       the template's context and the section links, and the form scrolls on
+       its own beside it. Every field is one row -- label and help on the
+       left, control on the right -- so the controls form a single column the
+       eye can run down. */
+    .tmpl-options-dialog { max-width: min(94vw, 1240px); }
+    .tmpl-options-dialog .modal-header { padding: 16px 28px 14px; }
+    .tmpl-options-dialog .modal-title { display: flex; flex-direction: column; gap: 2px; font-size: 1.25rem; }
+    .tmpl-eyebrow { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); }
+    .tmpl-options-dialog .modal-body { padding: 0; overflow: hidden; display: flex; }
+    .tmpl-options-dialog .modal-footer { padding: 12px 28px 16px; }
+    .tmpl-options-dialog .modal-footer .tmpl-back {
+      margin-right: auto; padding-left: 0; color: var(--bi-green); text-decoration: none; font-weight: 500;
     }
-    .tmpl-opt-wide { grid-column: 1 / -1; }
-    .tmpl-vocab-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
-    .tmpl-vocab-actions a { font-size: .82rem; margin-right: 8px; }
+    .tmpl-options-dialog .modal-footer .tmpl-back:hover { text-decoration: underline; }
+    .tmpl-options-body {
+      flex: 1 1 auto; min-width: 0; min-height: 0;
+      display: grid; grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+    }
+    .tmpl-aside {
+      overflow-y: auto; padding: 22px 22px 24px; background: var(--bi-grey-light);
+      border-right: 1px solid var(--bi-pending-border);
+      display: flex; flex-direction: column; gap: 22px;
+    }
+    .tmpl-aside .section-label { margin-bottom: 8px; }
+    .tmpl-aside .tmpl-head { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 0; }
+    .tmpl-aside .tmpl-id {
+      font-family: var(--bs-font-monospace); font-size: .8125rem; color: var(--bi-ink);
+      overflow-wrap: anywhere;
+    }
+    .tmpl-aside .tmpl-version { margin-left: 0; }
+    .tmpl-aside .tmpl-lineage { margin: 8px 0 0; }
+    .tmpl-aside-desc { font-size: .8125rem; line-height: 1.5; color: var(--bi-ink); margin: 10px 0 0; }
+    .tmpl-aside-variant { font-weight: 600; color: var(--bi-ink); margin: 0 0 8px; }
+    .tmpl-aside-block .msg-hint { margin-top: 6px; }
+    .tmpl-ds-list { list-style: none; margin: 0; padding: 0; }
+    .tmpl-ds-list li {
+      font-family: var(--bs-font-monospace); font-size: .8125rem; overflow-wrap: anywhere;
+      padding: 5px 10px; margin-bottom: 4px; background: #fff;
+      border: 1px solid var(--bi-pending-border); border-radius: .5rem;
+    }
+    .tmpl-toc { display: flex; flex-direction: column; gap: 2px; }
+    .tmpl-toc-link {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 7px 10px; border-radius: .5rem; color: var(--bi-ink); text-decoration: none;
+      border-left: 3px solid transparent; font-size: .9rem;
+    }
+    .tmpl-toc-link:hover { background: rgba(0,98,91,.06); color: var(--bi-green-dark); }
+    .tmpl-toc-link.active {
+      background: #fff; border-left-color: var(--bi-green); color: var(--bi-green-dark); font-weight: 600;
+      box-shadow: 0 1px 2px rgba(26,43,42,.08);
+    }
+    .tmpl-toc-link:focus-visible { outline: 2px solid var(--bi-green); outline-offset: 1px; }
+    .tmpl-toc-count {
+      min-width: 1.6rem; padding: 1px 7px; border-radius: 999px; text-align: center;
+      font-size: .75rem; font-weight: 500; color: var(--bi-grey); background: var(--bi-pending-bg);
+    }
+    .tmpl-main { position: relative; overflow-y: auto; padding: 4px 32px 40px; scroll-padding-top: 8px; }
+    .tmpl-sec { padding-top: 22px; }
+    .tmpl-sec + .tmpl-sec { margin-top: 18px; border-top: 1px solid var(--bi-pending-border); }
+    .tmpl-sec-head { margin-bottom: 6px; }
+    .modal-body .tmpl-sec-title { font-size: 1.0625rem; font-weight: 600; color: var(--bi-green-dark); margin: 0 0 2px; }
+    .tmpl-sec-hint { margin: 0; }
+    .modal-body .tmpl-group-title {
+      font-size: .8125rem; font-weight: 600; color: var(--bi-grey); margin: 18px 0 0;
+      padding-bottom: 6px; border-bottom: 1px solid var(--bi-pending-border);
+    }
+    .tmpl-empty { color: var(--bi-grey); margin: 10px 0 0; }
+    .tmpl-field {
+      display: grid; grid-template-columns: minmax(180px, 34%) minmax(0, 1fr);
+      gap: 4px 28px; align-items: start; padding: 14px 0;
+    }
+    .tmpl-opts-grid > .tmpl-field + .tmpl-field { border-top: 1px dashed var(--bi-pending-border); }
+    .tmpl-field-text { padding-top: 7px; min-width: 0; }
+    .tmpl-field-label { display: inline; font-weight: 500; color: var(--bi-ink); margin: 0; }
+    .tmpl-field .tmpl-help { margin-top: 3px; }
+    .tmpl-field-control { min-width: 0; }
+    .tmpl-field-control .form-group, .tmpl-field-control .shiny-input-container { margin-bottom: 0; }
+    .tmpl-field-control .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
+    .tmpl-field-control textarea { min-height: 5.5rem; }
+    /* A textarea option with suggestions: the picker above it is a helper,
+       so its label is a quiet caption rather than a second field label. */
+    .tmpl-field-control .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
+    .tmpl-field-control .form-group + .form-group { margin-top: 10px; }
+    .tmpl-field-error { margin: 7px 0 0; }
+    .tmpl-req {
+      display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px;
+      font-size: .6875rem; font-weight: 500; line-height: 1.5; vertical-align: 1px;
+      color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
+    }
+    /* A boolean option is a switch that reads its state: Yes or No. */
+    .tmpl-switch .checkbox { margin: 0; padding-top: 6px; }
+    .tmpl-switch .checkbox label { display: inline-flex; align-items: center; gap: 10px; padding-left: 0; cursor: pointer; }
+    .tmpl-switch input[type=checkbox] {
+      appearance: none; -webkit-appearance: none; flex: none; margin: 0; position: relative;
+      width: 2.5rem; height: 1.4rem; border-radius: 999px; cursor: pointer;
+      background: var(--bi-pending-border); transition: background-color .15s ease;
+    }
+    .tmpl-switch input[type=checkbox]::before {
+      content: ''; position: absolute; top: 3px; left: 3px; width: calc(1.4rem - 6px); height: calc(1.4rem - 6px);
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(26,43,42,.3); transition: transform .15s ease;
+    }
+    .tmpl-switch input[type=checkbox]:checked { background: var(--bi-green); }
+    .tmpl-switch input[type=checkbox]:checked::before { transform: translateX(1.1rem); }
+    .tmpl-switch input[type=checkbox]:focus-visible { outline: 2px solid var(--bi-green); outline-offset: 2px; }
+    .tmpl-switch input + span::after { content: 'No'; color: var(--bi-grey); }
+    .tmpl-switch input:checked + span::after { content: 'Yes'; color: var(--bi-ink); font-weight: 500; }
+    /* The carry-over source is a segmented control rather than a radio list. */
+    .tmpl-segmented .shiny-options-group {
+      display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+      background: var(--bi-pending-bg); border-radius: .625rem;
+    }
+    .tmpl-segmented .shiny-input-container-inline .shiny-options-group .radio-inline {
+      margin: 0; padding: 6px 14px; border-radius: .5rem; cursor: pointer;
+      color: var(--bi-grey); font-weight: 500;
+    }
+    .tmpl-segmented .shiny-options-group input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
+    .tmpl-segmented .shiny-options-group .radio-inline:hover { color: var(--bi-ink); }
+    .tmpl-segmented .shiny-options-group .radio-inline:has(input:checked) {
+      background: #fff; color: var(--bi-green-dark); box-shadow: 0 1px 3px rgba(26,43,42,.14);
+    }
+    .tmpl-segmented .shiny-options-group input:checked + span { color: var(--bi-green-dark); }
+    .tmpl-segmented .shiny-options-group .radio-inline:focus-within { outline: 2px solid var(--bi-green); outline-offset: 1px; }
+    .tmpl-carry-fields .shiny-options-group {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 18px; padding-top: 6px;
+    }
+    .tmpl-carry-fields .checkbox { margin: 0; }
+    .tmpl-carry-fields .checkbox label { display: flex; align-items: flex-start; gap: 8px; padding-left: 0; }
+    .tmpl-carry-fields .checkbox input { position: static; flex: none; margin: 4px 0 0; }
+    .tmpl-carry-fields input[type=checkbox] { accent-color: var(--bi-green); }
+    @media (max-width: 991.98px) {
+      .tmpl-options-dialog .modal-body { overflow-y: auto; display: block; }
+      .tmpl-options-body { display: block; }
+      .tmpl-aside { border-right: 0; border-bottom: 1px solid var(--bi-pending-border); }
+      .tmpl-toc { display: none; }
+      .tmpl-main { overflow: visible; padding: 4px 20px 28px; }
+      .tmpl-field { grid-template-columns: minmax(0, 1fr); }
+      .tmpl-field-text { padding-top: 0; }
+    }
+    .tmpl-vocab-bar {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px;
+      align-items: baseline; margin-top: 6px;
+    }
+    .tmpl-vocab-actions a { font-size: .82rem; margin-right: 14px; font-weight: 500; text-decoration: none; }
+    .tmpl-vocab-actions a:hover { text-decoration: underline; }
     .tmpl-vocab-count { font-size: .82rem; color: var(--bi-grey); }
     /* Term descriptions inside the selectize dropdown rows. */
     .vocab-opt-desc { font-size: .8rem; color: var(--bi-grey); white-space: normal; }
@@ -1243,12 +1378,6 @@ bi_css <- function() {
     .vocab-pick-list .checkbox label { width: 100%; }
     .vocab-pick .vocab-code { font-family: var(--bs-font-monospace); font-weight: 500; }
     .vocab-pick .vocab-desc { display: block; font-size: .8rem; color: var(--bi-grey); }
-    .tmpl-head {
-      display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline;
-      margin-bottom: 4px;
-    }
-    /* Sections are separated by space rather than rules. */
-    .tmpl-options-body h6 { margin-top: 18px; }
     "))
 }
 

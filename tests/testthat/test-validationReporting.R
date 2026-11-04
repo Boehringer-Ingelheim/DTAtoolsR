@@ -137,7 +137,7 @@ test_that("validation_run groups items checked together", {
   expect_false(identical(unique(second_status$validation_run), first_run))
 })
 
-test_that("dta_rule_failure_row_indices reports failing rows for a check_range rule", {
+test_that("dta_rule_failure_row_indices reports failing rows for a col_range rule", {
   df <- data.frame(age = c(10, 20, 70, 50, NA), stringsAsFactors = FALSE)
 
   # min/max constructor

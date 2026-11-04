@@ -431,6 +431,12 @@ tmpl_dataset_names <- function(def) {
 # Sentences rather than middle-dot-joined fragments, per the design pass: a
 # meta strip reads as decoration, a sentence reads as information.
 tmpl_detail_summary <- function(def) {
+  if (!is.null(def$variants)) {
+    return(paste0(
+      "Choose ", def$variants$label %||% def$variants$id,
+      " first. The selected platform determines the datasets and agreement options."
+    ))
+  }
   ds <- tmpl_dataset_names(def)
   n_opts <- length(def$options %||% list())
   n_party <- length(tryCatch(normalise_party_slots(def$party_slots), error = function(e) list()))
@@ -569,6 +575,24 @@ template_history_ui <- function(history, selected_version) {
 
 # ---- Options dialog: one control per option --------------------------------
 
+template_variant_input <- function(def) {
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(NULL)
+  }
+  dta_template_validate_variants(def)
+  label <- as.character(spec$label %||% spec$id)
+  choices <- stats::setNames(
+    vapply(spec$choices, function(choice) choice$value, character(1)),
+    vapply(spec$choices, function(choice) choice$label %||% choice$value, character(1))
+  )
+  selectInput(
+    paste0("tmpl_variant_", spec$id), label,
+    choices = c(stats::setNames("", paste("Choose", label)), choices),
+    selected = "", selectize = FALSE, width = "100%"
+  )
+}
+
 # Build one input control for a creation-template option.
 #
 # An option with `choices:` is ONE combobox rather than a dropdown padded with
@@ -611,7 +635,7 @@ render_template_option_input <- function(opt, base_metadata = list()) {
       }
     }
     selectizeInput(
-      iid, label,
+      iid, NULL,
       choices = c(stats::setNames(blank_val, "(leave blank)"), extra, ch),
       selected = selected, multiple = FALSE, width = "100%",
       options = list(
@@ -622,36 +646,132 @@ render_template_option_input <- function(opt, base_metadata = list()) {
     )
   }
 
+  ch <- if (typ %in% c("boolean", "textarea", "number")) character(0) else dta_template_choices(opt)
+  # The controls carry no label of their own: tmpl_field_row() puts the label
+  # and the help text in the row's left column, so every control starts on the
+  # same vertical line however long its help is.
   ctl <- switch(typ,
-    boolean = checkboxInput(iid, label, value = identical(def, TRUE) || identical(def, "yes")),
-    textarea = textAreaInput(
-      iid, label,
-      value = as.character(def %||% ""), rows = 3, width = "100%"
+    # A switch whose state reads "Yes"/"No" beside it (CSS ::after), so the
+    # row says what the document will hold, not just that a box is ticked.
+    boolean = div(
+      class = "tmpl-switch",
+      checkboxInput(iid, NULL, value = identical(def, TRUE) || identical(def, "yes"))
     ),
-    number = numericInput(
-      iid, label,
-      value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
-    ),
-    {
+    textarea = {
+      # Its own `ch`, not the outer one: the row's label must keep pointing at
+      # the textarea, which is what holds the value, not at the suggestion box.
       ch <- dta_template_choices(opt)
-      if (length(ch) > 0) {
-        combobox(ch)
+      def_chr <- as.character(def %||% "")[[1]]
+      value <- textAreaInput(
+        iid, NULL,
+        value = def_chr, rows = 3, width = "100%"
+      )
+      if (length(ch) == 0) {
+        value
       } else {
-        textInput(iid, label,
-          value = as.character(def %||% ""),
-          placeholder = "Type a value", width = "100%"
+        suggestion_id <- paste0(iid, "_suggestion")
+        selected <- if (def_chr %in% unname(ch)) def_chr else blank_val
+        on_change <- sprintf(
+          paste0(
+            "function(value) {",
+            "var target = document.getElementById(%s);",
+            "if (target) {",
+            "target.value = value === %s ? '' : (value || '');",
+            "target.dispatchEvent(new Event('input', { bubbles: true }));",
+            "}}"
+          ),
+          jsonlite::toJSON(iid, auto_unbox = TRUE),
+          jsonlite::toJSON(blank_val, auto_unbox = TRUE)
+        )
+        tagList(
+          selectizeInput(
+            suggestion_id, "Choose a suggestion",
+            choices = c(stats::setNames(blank_val, "(leave blank)"), ch),
+            selected = selected, multiple = FALSE, width = "100%",
+            options = list(create = FALSE, onChange = I(on_change))
+          ),
+          value
         )
       }
+    },
+    number = numericInput(
+      iid, NULL,
+      value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
+    ),
+    if (length(ch) > 0) {
+      combobox(ch)
+    } else {
+      textInput(iid, NULL,
+        value = as.character(def %||% ""),
+        placeholder = "Type a value", width = "100%"
+      )
     }
   )
 
-  div(
-    # A textarea spans the whole grid: three lines of prose squeezed into one
-    # column of a two-column grid is unreadable at any width.
-    class = if (identical(typ, "textarea")) "tmpl-opt tmpl-opt-wide" else "tmpl-opt",
-    ctl,
-    if (nzchar(help)) div(class = "msg-hint tmpl-help", help)
+  tmpl_field_row(
+    # selectize hides the <select> and types into "<id>-selectized"; the label
+    # has to point at the element that actually takes focus.
+    for_id = if (length(ch) > 0) paste0(iid, "-selectized") else iid,
+    label = label,
+    hints = if (nzchar(help)) div(class = "msg-hint tmpl-help", help),
+    control = ctl,
+    # A textarea gets the row's full width under its label: three lines of
+    # prose in the narrower control column wrap far too early.
+    class = if (identical(typ, "textarea")) "tmpl-opt tmpl-opt-wide" else "tmpl-opt"
   )
+}
+
+# One row of the options dialog: what the field is -- its label, any badge,
+# its help -- in the left column, the control in the right. Every section of
+# the dialog (options, parties, vocabularies) is built from this, so labels,
+# help and controls line up down the whole form.
+#
+# `group = TRUE` is for a control that is a set of inputs (radio buttons,
+# checkboxes): a <label for=> cannot name a group, so the text becomes the
+# group's aria-labelledby instead.
+tmpl_field_row <- function(for_id, label, hints = NULL, control = NULL, class = NULL,
+                           badge = NULL, group = FALSE) {
+  label_id <- paste0(for_id, "-row-label")
+  div(
+    class = paste(c("tmpl-field", class), collapse = " "),
+    div(
+      class = "tmpl-field-text",
+      if (group) {
+        span(class = "tmpl-field-label", id = label_id, label, badge)
+      } else {
+        tags$label(class = "tmpl-field-label", `for` = for_id, label, badge)
+      },
+      hints
+    ),
+    if (group) {
+      div(class = "tmpl-field-control", role = "group", `aria-labelledby` = label_id, control)
+    } else {
+      div(class = "tmpl-field-control", control)
+    }
+  )
+}
+
+# "Required" next to a label: a word rather than an asterisk, which needs a
+# legend to mean anything.
+tmpl_required_badge <- function() span(class = "tmpl-req", "Required")
+
+# "error_handling" -> "Error handling".
+tmpl_humanise <- function(x) {
+  x <- gsub("_", " ", as.character(x), fixed = TRUE)
+  paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
+}
+
+# The group an option is listed under: the metadata block its `target:` writes
+# to ("metadata.transmission.type" -> "transmission"), or "general" for a
+# top-level field, an `effects:` longhand, or no target at all. Derived rather
+# than declared, so a template needs no extra key for the dialog to read well.
+tmpl_option_group <- function(opt) {
+  target <- opt[["target"]]
+  if (!is.character(target) || length(target) != 1) {
+    return("general")
+  }
+  parts <- strsplit(target, ".", fixed = TRUE)[[1]]
+  if (length(parts) >= 3 && identical(parts[[1]], "metadata") && nzchar(parts[[2]])) parts[[2]] else "general"
 }
 
 # ---- Options dialog: vocabulary slots --------------------------------------
@@ -743,7 +863,11 @@ tmpl_vocab_slot_ui <- function(record) {
   slot <- record$slot
   iid <- paste0("tmpl_vocab_", slot$id)
   if (!is.null(record$error)) {
-    return(p(class = "msg-hint", paste0(slot$label, ": ", record$error)))
+    return(tmpl_field_row(
+      iid, slot$label,
+      control = p(class = "text-danger tmpl-field-error", record$error),
+      class = "tmpl-vocab"
+    ))
   }
   items <- record$items
   defaults <- as.character(slot$default %||% character(0))
@@ -786,23 +910,33 @@ tmpl_vocab_slot_ui <- function(record) {
     )
   )
 
-  div(
-    class = "tmpl-vocab",
-    div(
-      class = "tmpl-vocab-head",
-      tags$strong(slot$label),
-      div(class = "tmpl-vocab-actions", actions)
+  # `.tmpl-vocab` is what DTA_vocabSet() climbs to from a link, and the first
+  # <select> under it is the control it sets -- keep both on this row.
+  tmpl_field_row(
+    for_id = paste0(iid, "-selectized"),
+    label = slot$label,
+    badge = if (slot$min > 0) tmpl_required_badge(),
+    hints = tagList(
+      if (nzchar(slot$description)) div(class = "msg-hint tmpl-help", slot$description),
+      # "Required" already says "at least one"; only a higher floor needs words.
+      if (slot$min > 1) div(class = "msg-hint tmpl-help", paste0("Choose at least ", slot$min, "."))
     ),
-    selectizeInput(
-      iid, NULL,
-      choices = NULL, multiple = TRUE, width = "100%",
-      options = tmpl_vocab_selectize_options(slot, items)
+    control = tagList(
+      selectizeInput(
+        iid, NULL,
+        choices = NULL, multiple = TRUE, width = "100%",
+        options = tmpl_vocab_selectize_options(slot, items)
+      ),
+      div(
+        class = "tmpl-vocab-bar",
+        div(class = "tmpl-vocab-actions", actions[1:3]),
+        actions[[4]]
+      ),
+      if (identical(slot$mode, "open")) {
+        div(class = "msg-hint tmpl-help", "Type a term and press Enter to add one that is not in the list.")
+      }
     ),
-    if (nzchar(slot$description)) p(class = "msg-hint", slot$description),
-    if (slot$min > 0) p(class = "msg-hint", paste0("Choose at least ", slot$min, ".")),
-    if (identical(slot$mode, "open")) {
-      p(class = "msg-hint", "Type a term and press Enter to add one that is not in the list.")
-    }
+    class = "tmpl-vocab"
   )
 }
 
@@ -873,60 +1007,136 @@ vocab_term_checklist <- function(id, terms, selected, extras = character(0)) {
 
 # ---- Options dialog: the whole body ----------------------------------------
 
-# Everything between the modal's title and its footer.
+# One titled section of the options dialog. `key` is ours, never template
+# text: the section navigation finds a section by it (template_options_scripts()).
+tmpl_section <- function(key, title, hint = NULL, ...) {
+  tags$section(
+    class = "tmpl-sec", `data-sec` = key,
+    div(
+      class = "tmpl-sec-head",
+      tags$h3(class = "tmpl-sec-title", title),
+      if (!is.null(hint)) p(class = "msg-hint tmpl-sec-hint", hint)
+    ),
+    ...
+  )
+}
+
+# The dialog's client-side half: the section links scroll the form, and the
+# link of the section being read is highlighted as the form scrolls. Delegated
+# document listeners behind one window flag, as in template_picker_scripts():
+# the dialog is rebuilt on every open. The section keys are our own constants
+# (tmpl_section()), so the selector built from one is never template text.
+template_options_scripts <- function() {
+  tags$script(HTML(paste(
+    "(function(){",
+    "  if (window.DTA_tmplOptsBound) return;",
+    "  window.DTA_tmplOptsBound = true;",
+    # A section near the end cannot scroll to the top of the form, so the
+    # position alone would credit the LAST section after a click on one of
+    # the others. The clicked link therefore holds until the smooth scroll it
+    # started has settled.
+    "  var pinnedUntil = 0;",
+    "  function mark(body, key){",
+    "    body.querySelectorAll('.tmpl-toc-link').forEach(function(a){",
+    "      var on = a.getAttribute('data-sec') === key;",
+    "      a.classList.toggle('active', on);",
+    "      if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');",
+    "    });",
+    "  }",
+    "  function spy(m){",
+    "    if (Date.now() < pinnedUntil) return;",
+    "    var body = m.closest('.tmpl-options-body');",
+    "    var secs = m.querySelectorAll('.tmpl-sec');",
+    "    if (!body || !secs.length) return;",
+    "    var cur = secs[0];",
+    "    for (var i = 0; i < secs.length; i++) {",
+    "      if (secs[i].offsetTop - m.scrollTop <= 96) cur = secs[i];",
+    "    }",
+    "    if (m.scrollTop + m.clientHeight >= m.scrollHeight - 4) cur = secs[secs.length - 1];",
+    "    mark(body, cur.getAttribute('data-sec'));",
+    "  }",
+    "  document.addEventListener('click', function(ev){",
+    "    var a = ev.target && ev.target.closest ? ev.target.closest('.tmpl-toc-link') : null;",
+    "    if (!a) return;",
+    "    ev.preventDefault();",
+    "    var body = a.closest('.tmpl-options-body');",
+    "    var m = body ? body.querySelector('.tmpl-main') : null;",
+    "    var sec = m ? m.querySelector('.tmpl-sec[data-sec=\"' + a.getAttribute('data-sec') + '\"]') : null;",
+    "    if (!sec) return;",
+    "    var calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;",
+    "    mark(body, a.getAttribute('data-sec'));",
+    "    pinnedUntil = Date.now() + (calm ? 150 : 900);",
+    "    if (m.scrollHeight > m.clientHeight + 1) {",
+    "      m.scrollTo({top: sec.offsetTop - 4, behavior: calm ? 'auto' : 'smooth'});",
+    "    } else {",
+    "      sec.scrollIntoView({block: 'start', behavior: calm ? 'auto' : 'smooth'});",
+    "    }",
+    "  });",
+    "  document.addEventListener('scroll', function(ev){",
+    "    var t = ev.target;",
+    "    if (t && t.classList && t.classList.contains('tmpl-main')) spy(t);",
+    "  }, true);",
+    "})();",
+    sep = "\n"
+  )))
+}
+
+# Everything between the modal's title and its footer: a sidebar that says
+# which template this is, what it builds and where each part of the form is,
+# and the form itself, in sections of label-left / control-right rows.
 #
 # `vocab_specs` is passed in rather than computed here so the caller resolves
 # each vocabulary once per open (template_vocab_slot_specs()); `has_open_doc`
 # rather than a reachable `rv$dta` so this stays a pure function of arguments.
 # Input ids are unchanged from the dialog this replaces -- tmpl_opt_<id>,
 # tmpl_party_<id>, tmpl_vocab_<id>, tmpl_carry_* -- because the collectors in
-# app.R read them by name.
-template_options_modal_body <- function(def, loaded, index, vocab_specs, has_open_doc = FALSE) {
+# app.R read them by name. `aside_extra` is a sidebar block the server builds
+# (the chosen platform and its "Change platform" button).
+template_options_modal_body <- function(def, loaded, index, vocab_specs, has_open_doc = FALSE,
+                                        aside_extra = NULL) {
   value <- loaded$value
   source_name <- as.character(value$source_name %||% "")
   version <- as.character(value$version %||% def$version %||% "")
   lineage <- template_lineage_text(value$lineage, index)
   description <- as.character(def$description %||% "")
+  datasets <- tmpl_dataset_names(def)
 
-  head_ui <- tagList(
-    div(
-      class = "tmpl-head",
-      span(class = "tmpl-id", as.character(def$id %||% "")),
-      if (nzchar(version)) span(class = "tmpl-version", paste0("version ", version)),
-      if (nzchar(source_name)) span(class = "badge tmpl-source", source_name)
-    ),
-    if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
-    if (nzchar(description)) p(class = "msg-hint", description)
-  )
-
+  # -- Options, grouped by the metadata block they write to ------------------
   opts <- def$options %||% list()
-  options_ui <- tagList(
-    tags$h6("Options"),
-    p(class = "msg-hint", "Values land in the document's metadata and can be changed later."),
+  opts <- opts[vapply(opts, function(o) nzchar(as.character(o$id %||% "")), logical(1))]
+  # Resolve ${today} for the preview too, so the dialog never offers a raw
+  # token as a default where the created DTA would carry a date.
+  base_md <- resolve_template_expressions(def$base$metadata %||% list(), dta_template_today_env())
+  groups <- vapply(opts, tmpl_option_group, character(1))
+  options_sec <- tmpl_section(
+    "options", "Options",
+    paste(
+      "Pre-filled with the template's values. Everything here lands in the",
+      "document's metadata and can be changed later."
+    ),
     if (length(opts) == 0) {
-      p("This template has no configurable options.")
+      p(class = "tmpl-empty", "This template has no configurable options.")
     } else {
-      div(
-        class = "tmpl-opts-grid",
-        lapply(
-          opts, render_template_option_input,
-          # Resolve ${today} for the preview too, so the dialog never offers a
-          # raw token as a default where the created DTA would carry a date.
-          base_metadata = resolve_template_expressions(
-            def$base$metadata %||% list(), dta_template_today_env()
+      lapply(unique(groups), function(g) {
+        tagList(
+          if (length(unique(groups)) > 1) tags$h4(class = "tmpl-group-title", tmpl_humanise(g)),
+          div(
+            class = "tmpl-opts-grid",
+            lapply(opts[groups == g], render_template_option_input, base_metadata = base_md)
           )
         )
-      )
+      })
     }
   )
 
+  # -- Parties --------------------------------------------------------------
   slots <- normalise_party_slots(def$party_slots)
   profiles <- if (!is.null(index)) template_party_profiles(index) else list()
-  party_ui <- if (length(slots) > 0) {
-    tagList(
-      tags$h6("Parties"),
-      p(class = "msg-hint", "Leave a party on its template default, or pick a saved profile."),
-      lapply(slots, function(slot) {
+  party_sec <- if (length(slots) > 0) {
+    tmpl_section(
+      "parties", "Parties",
+      "Keep the template's party, or replace it with a saved profile.",
+      div(class = "tmpl-opts-grid", lapply(slots, function(slot) {
         # The template's own default is named rather than described: "(use
         # template default)" told the author nothing about what they would get
         # if they left it alone.
@@ -946,83 +1156,161 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
             vapply(eligible, function(p) as.character(p$label %||% p$id), character(1))
           ))
         }
-        label <- if (isTRUE(slot$required)) paste0(slot$label, " *") else slot$label
-        # A plain <select>, not selectize: selectize drops an option whose
-        # value is "" (its allowEmptyOption is off), and that is exactly the
-        # template-default row -- the control would open naming nothing, with
-        # no way back to the default once a profile had been picked.
-        selectInput(paste0("tmpl_party_", slot$id), label,
-          choices = choices, selected = "", selectize = FALSE
+        iid <- paste0("tmpl_party_", slot$id)
+        tmpl_field_row(
+          for_id = iid,
+          label = slot$label,
+          badge = if (isTRUE(slot$required)) tmpl_required_badge(),
+          hints = div(
+            class = "msg-hint tmpl-help",
+            if (length(eligible) > 0) {
+              paste0(tmpl_count_label(length(eligible), "saved profile"), " available.")
+            } else {
+              "No saved profile fits this party."
+            }
+          ),
+          # A plain <select>, not selectize: selectize drops an option whose
+          # value is "" (its allowEmptyOption is off), and that is exactly the
+          # template-default row -- the control would open naming nothing,
+          # with no way back to the default once a profile had been picked.
+          control = selectInput(iid, NULL,
+            choices = choices, selected = "", selectize = FALSE, width = "100%"
+          ),
+          class = "tmpl-party"
         )
-      })
+      }))
     )
   }
 
-  vocab_ui <- if (!is.null(vocab_specs$error)) {
-    tagList(
-      tags$h6("Controlled vocabularies"),
-      p(
-        class = "msg-hint",
-        paste("This template's vocabulary slots could not be read:", vocab_specs$error)
-      )
+  # -- Controlled vocabularies ------------------------------------------------
+  vocab_sec <- if (!is.null(vocab_specs$error)) {
+    tmpl_section(
+      "vocab", "Controlled vocabularies", NULL,
+      p(class = "text-danger", paste(
+        "This template's vocabulary slots could not be read:", vocab_specs$error
+      ))
     )
   } else if (length(vocab_specs$slots) > 0) {
-    tagList(
-      tags$h6("Controlled vocabularies"),
-      p(
-        class = "msg-hint",
-        "Pick the terms this study collects. Each column keeps exactly the terms chosen here."
-      ),
-      lapply(vocab_specs$slots, tmpl_vocab_slot_ui)
+    tmpl_section(
+      "vocab", "Controlled vocabularies",
+      "Pick the terms this study collects. Each column keeps exactly the terms chosen here.",
+      div(class = "tmpl-opts-grid", lapply(vocab_specs$slots, tmpl_vocab_slot_ui))
     )
   }
 
-  # "From the open document" is offered ONLY when a document is actually open --
+  # -- Carry-over -------------------------------------------------------------
+  # "The open document" is offered ONLY when a document is actually open --
   # there is nothing to carry over from otherwise -- and is the default in that
   # case, since a user who already has a document open and is creating a
   # related one most often wants its relationship metadata to follow.
-  carry_choices <- stats::setNames("none", "Don't carry anything over")
+  carry_choices <- stats::setNames("none", "Nothing")
   if (isTRUE(has_open_doc)) {
-    carry_choices <- c(carry_choices, stats::setNames("open", "From the open document"))
+    carry_choices <- c(carry_choices, stats::setNames("open", "The open document"))
   }
-  carry_choices <- c(carry_choices, stats::setNames("file", "From a file"))
+  carry_choices <- c(carry_choices, stats::setNames("file", "A DTA file"))
   carry_default <- if (isTRUE(has_open_doc)) "open" else "none"
+  fields <- dta_template_metadata_fields()
+  field_labels <- tmpl_humanise(fields)
+  field_labels[fields == "study"] <- "Study identity"
+  field_labels[fields == "sections"] <- "Agreement sections (replace template clauses)"
 
-  # The <summary> line is this section's heading; a separate one above it would
-  # say the same thing twice.
-  carry_ui <- tagList(
-    tags$details(
-      tags$summary("Carry over metadata from an existing document"),
-      div(
-        style = "padding:8px 0 0;",
-        radioButtons("tmpl_carry_source", NULL, choices = carry_choices, selected = carry_default),
-        conditionalPanel(
-          condition = "input.tmpl_carry_source == 'file'",
-          fileInput("tmpl_carry_file", "DTA YAML to carry metadata over from",
-            accept = c(".yaml", ".yml")
+  carry_sec <- tmpl_section(
+    "carry", "Carry over metadata",
+    "Start from an existing DTA's parties, transfer details or study instead of the template's values.",
+    tmpl_field_row(
+      for_id = "tmpl_carry_source",
+      label = "Copy from", group = TRUE,
+      control = div(
+        class = "tmpl-segmented",
+        radioButtons("tmpl_carry_source", NULL,
+          choices = carry_choices, selected = carry_default, inline = TRUE
+        )
+      )
+    ),
+    conditionalPanel(
+      condition = "input.tmpl_carry_source == 'file'",
+      tmpl_field_row(
+        for_id = "tmpl_carry_file",
+        label = "DTA file",
+        hints = div(class = "msg-hint tmpl-help", "The YAML file to carry metadata over from."),
+        control = fileInput("tmpl_carry_file", NULL, accept = c(".yaml", ".yml"), width = "100%")
+      )
+    ),
+    conditionalPanel(
+      condition = "input.tmpl_carry_source != 'none'",
+      tmpl_field_row(
+        for_id = "tmpl_carry_fields",
+        label = "Fields to carry over", group = TRUE,
+        hints = div(class = "msg-hint tmpl-help", "Ticked fields replace the template's values."),
+        control = div(
+          class = "tmpl-carry-fields",
+          checkboxGroupInput("tmpl_carry_fields", NULL,
+            choices = stats::setNames(fields, field_labels),
+            selected = carry_over_default_fields(), width = "100%"
           )
-        ),
-        checkboxGroupInput(
-          "tmpl_carry_fields", "Fields to carry over",
-          choices = {
-            fields <- dta_template_metadata_fields()
-            labels <- fields
-            labels[fields == "study"] <- "Study identity"
-            labels[fields == "sections"] <- "Agreement sections (replace template clauses)"
-            stats::setNames(fields, labels)
-          },
-          selected = carry_over_default_fields()
         )
       )
     )
   )
 
+  # -- Sidebar ----------------------------------------------------------------
+  sections <- Filter(Negate(is.null), list(
+    list(key = "options", title = "Options", n = length(opts)),
+    if (!is.null(party_sec)) list(key = "parties", title = "Parties", n = length(slots)),
+    if (!is.null(vocab_sec)) {
+      list(key = "vocab", title = "Vocabularies", n = length(vocab_specs$slots))
+    },
+    list(key = "carry", title = "Carry over", n = NULL)
+  ))
+  toc <- tags$nav(
+    class = "tmpl-toc", `aria-label` = "Sections of this form",
+    div(class = "section-label", "In this form"),
+    lapply(seq_along(sections), function(i) {
+      s <- sections[[i]]
+      tags$a(
+        href = "#", class = if (i == 1) "tmpl-toc-link active" else "tmpl-toc-link",
+        `data-sec` = s$key,
+        span(s$title),
+        if (!is.null(s$n)) span(class = "tmpl-toc-count", s$n)
+      )
+    })
+  )
+
+  aside <- tags$aside(
+    class = "tmpl-aside",
+    div(
+      class = "tmpl-aside-block",
+      div(class = "section-label", "Template"),
+      div(
+        class = "tmpl-head",
+        span(class = "tmpl-id", as.character(def$id %||% "")),
+        if (nzchar(version)) span(class = "tmpl-version", paste0("version ", version)),
+        if (nzchar(source_name)) span(class = "badge tmpl-source", source_name)
+      ),
+      if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
+      if (nzchar(description)) p(class = "tmpl-aside-desc", description)
+    ),
+    if (length(datasets) > 0) {
+      div(
+        class = "tmpl-aside-block",
+        div(class = "section-label", paste("Creates", tmpl_count_label(length(datasets), "dataset"))),
+        tags$ul(class = "tmpl-ds-list", lapply(datasets, tags$li))
+      )
+    },
+    aside_extra,
+    toc
+  )
+
   div(
     class = "tmpl-options-body",
-    head_ui,
-    options_ui,
-    party_ui,
-    vocab_ui,
-    carry_ui
+    aside,
+    div(
+      class = "tmpl-main",
+      options_sec,
+      party_sec,
+      vocab_sec,
+      carry_sec
+    ),
+    template_options_scripts()
   )
 }

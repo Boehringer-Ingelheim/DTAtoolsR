@@ -157,7 +157,8 @@ document.
 ## Creation templates
 
 A creation template (`kind: dta_creation_template`) describes a whole new DTA. Its `base:` supplies initial document data; `options:` describes
-inputs the author can choose; and `datasets:` supplies datasets to build into the new document.
+inputs the author can choose; `datasets:` supplies datasets to build into the new document; and the optional `variants:` offers mutually
+exclusive record structures, such as one per trial platform.
 
 The starter creation template has the following shape:
 
@@ -189,7 +190,8 @@ party_slots:
 A non-inheriting creation template needs a `base:` mapping. A concrete template
 must have at least one dataset after inheritance; an abstract base may provide
 metadata only. A child with `extends:` may omit sections to inherit them, but
-must supply datasets if its parent has none.
+must supply datasets if its parent has none. A template may omit top-level
+`datasets:` when every `variants:` choice supplies its own.
 
 ### `base:` metadata
 
@@ -396,6 +398,39 @@ datasets:
 A bare string or `{source: ...}` reads a finished dataset YAML. An inline mapping contains the dataset definition itself. In a private library,
 prefer `template:` when sharing a reusable dataset schema and use `source:` only when a ready-made dataset specification is actually the intended
 input.
+
+### `variants:`
+
+Use `variants:` when one agreement has mutually exclusive record structures, for example one dataset layout per trial platform. Unlike an
+option, the choice is structural and mandatory: the creation dialog asks for it first, accepts only the declared values, and cannot leave it
+unresolved.
+
+```yaml
+variants:
+  id: trial_platform
+  label: Trial platform
+  choices:
+    - value: brave
+      label: BRAVE
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_brave_records@1.0
+    - value: veeva
+      label: Veeva
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_veeva_records@1.0
+```
+
+- `id` is required and must not equal any option id, including options a choice adds. `label` is optional.
+- `choices` is a non-empty sequence. Each choice needs a unique, non-empty `value`; the reserved values `__blank__` and `__custom__` are rejected.
+- Each choice must supply a non-empty `datasets:` sequence, which **replaces** the template's dataset list rather than appending to it.
+- A choice may add `label`, a `source:` mapping, `base:` (deep-merged over the inherited base), and `options:` (merged by option id with the
+  same rules as creation-template inheritance). No other keys are allowed.
+
+Record the source document version in each choice's `source:`, not in the template's own `version:`, which identifies the library definition.
+A created document records the chosen value and source under `metadata.template.variant`. The validator reports a malformed `variants:` block as
+`variant_invalid` and dry-runs every choice, not only a default; seals inherited from an ancestor are checked against each choice too.
 
 ### `party_slots:`
 
@@ -1117,7 +1152,8 @@ literal severity reported in the result. A concrete template can receive `instan
 | `extends_unresolved` | warning | A creation template's parent cannot be resolved in the validated library. | Add the parent or correct its reference. |
 | `sealed_violation` | warning | A descendant changes a path sealed by an ancestor. | Remove the descendant change or revise the parent's seal. |
 | `sealed_path_unknown` | warning | A sealed path does not match a value in the resolved template. | Correct the path or remove the ineffective seal. |
-| `instantiate_failed` | error | A concrete creation template cannot be built with its resolved defaults and minimum slot selections. | Fix the template, referenced data, dataset definition, or required choices. |
+| `variant_invalid` | error | A creation template's `variants:` block is malformed: missing id or choices, an invalid or repeated choice value, a choice without datasets, or an id that collides with an option id. | Correct the block as described under `variants:`. |
+| `instantiate_failed` | error | A concrete creation template cannot be built with its resolved defaults and minimum slot selections (for each `variants:` choice, if it has any). | Fix the template, referenced data, dataset definition, or required choices. |
 
 A validator code names a detected issue; the message column adds the actual file, path, or reference involved. For warnings on unresolved
 references, remember that validation is scoped to the directory passed to the validator. A reference available only in a separate app source may

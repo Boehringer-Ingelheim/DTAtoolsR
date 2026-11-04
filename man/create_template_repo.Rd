@@ -54,8 +54,9 @@ profile, a controlled vocabulary) under \verb{templates/}, a root-level
 \code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
 \code{\link[=validate_template]{validate_template()}} against the repository on every push and pull
-request. The result already passes \code{validate_template(path, strict = TRUE)} unmodified, so it is a starting point to edit rather than a stub to
-fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
+request. With the default \code{examples = TRUE}, the result already passes
+\code{validate_template(path, strict = TRUE)} unmodified, so it is a starting
+point to edit rather than a stub to fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
 creates.
 }
 \details{

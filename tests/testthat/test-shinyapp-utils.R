@@ -1159,3 +1159,51 @@ test_that("dta_export_stem renders a bare Date as midnight rather than now", {
 
   expect_true(endsWith(stem_fn(dta, when = as.Date("2024-03-07")), "-2024-03-07_00-00"))
 })
+
+# ---- authorized-for-corrections picker helpers -----------------------------
+
+auth_dta <- function(authorized = NULL, receiver = character(), supplier = character()) {
+  dta <- app_fixture_dta()
+  md <- DTAtools::metadata(dta)
+  mk <- function(side, nms) {
+    sl <- S7::prop(md, side) %||% list()
+    sl$contacts <- lapply(nms, function(n) list(name = n, role = "", email = ""))
+    S7::prop(md, side) <<- sl
+  }
+  mk("receiver", receiver)
+  mk("supplier", supplier)
+  md@authorized_for_corrections <- authorized
+  dta@metadata <- md
+  dta
+}
+
+test_that("dta_authorized_values flattens, trims, drops blanks and duplicates", {
+  vals <- app_fn("dta_authorized_values")
+  expect_identical(vals(auth_dta(NULL)), character(0))
+  expect_identical(vals(auth_dta("Alice")), "Alice")
+  expect_identical(vals(auth_dta(list("Alice", "Bob"))), c("Alice", "Bob"))
+  expect_identical(
+    vals(auth_dta(c(" Alice ", "", NA, "Bob", "Alice", "  "))),
+    c("Alice", "Bob")
+  )
+})
+
+test_that("dta_authorized_choices groups contacts and keeps unmatched values", {
+  ch <- app_fn("dta_authorized_choices")
+  expect_identical(ch(auth_dta()), list())
+
+  got <- ch(auth_dta(
+    authorized = c("Ann", "Zed"),
+    receiver = c("Ann", " Bea ", ""), supplier = c("Ann", "Cy")
+  ))
+  expect_named(got, c("Receiver", "Supplier", "Entered manually"))
+  expect_identical(got$Receiver, c(Ann = "Ann", Bea = "Bea"))
+  # A name on both sides appears once, under Receiver.
+  expect_identical(got$Supplier, c(Cy = "Cy"))
+  expect_identical(got[["Entered manually"]], c(Zed = "Zed"))
+
+  # Empty groups are omitted.
+  only_sup <- ch(auth_dta(supplier = "Cy"))
+  expect_named(only_sup, "Supplier")
+  expect_named(ch(auth_dta(authorized = "Zed")), "Entered manually")
+})

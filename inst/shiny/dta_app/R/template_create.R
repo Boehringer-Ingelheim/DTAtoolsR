@@ -164,20 +164,14 @@ template_dataset_entry_kind <- function(ref) {
 # template.R) and reproducing the three legacy forms exactly as create_dta_
 # from_template() has always built them.
 #
-# `selections` is accepted for symmetry with create_dta_from_template()'s own
-# top-level option selections, but is NOT threaded into a `template:` entry's
-# own dataset-template options today -- those come only from that entry's OWN
-# `options:` map, which is the literal, static contract the spec describes
-# ("build_dataset_from_template() with that entry's options and patch and
-# as"). A creation template wanting a dataset's option to track a top-level
-# user choice has to say so explicitly via its own option effects, not an
-# implicit fallback here; wiring one up implicitly, with no test describing
-# its precedence against an explicit `options:` entry, would be a guess this
-# file has no business making. `template_path` locates the `path:`/`source:`
-# dataset files relative to the template file. It defaults to NULL, under
-# which resolve_template_dataset_path() skips the relative-to-template-file
-# lookup and only the package-extdata lookup by bare name can succeed (there
-# is no absolute-path branch to fall back on).
+# `selections` resolves a structural variant before building its datasets.
+# Dataset-template options still come only from each entry's static `options:`
+# map, not from implicit propagation of creation metadata options.
+# `template_path` locates the `path:`/`source:` dataset files relative to the
+# template file. It defaults to NULL, under which
+# resolve_template_dataset_path() skips the relative-to-template-file lookup
+# and only the package-extdata lookup by bare name can succeed (there is no
+# absolute-path branch to fall back on).
 #
 # Returns list(datasets = <list of DTADataSet objects>, provenance = <list,
 # one entry per "template" dataset entry, in encounter order>). The legacy
@@ -185,6 +179,7 @@ template_dataset_entry_kind <- function(ref) {
 # to record, unlike an entry built from a dataset template.
 build_template_datasets <- function(def, index, selections, source_label = NULL, template_path = NULL,
                                     vocab_overrides = list()) {
+  def <- resolve_template_variant(def, selections)
   # Mirrors create_dta_from_template()'s own ${today} handling: only base$
   # datasets (the legacy `base.datasets` fallback) is expression-resolved --
   # the preferred top-level `datasets:` never was, and changing that now would
