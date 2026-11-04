@@ -337,13 +337,10 @@ test_that("the two paths agree on a file with no rows and on one with a single r
 # the constructor coerced once, the streaming engine coerces each batch as it
 # arrives. Both must still reach the same verdict.
 #
-# The pinned Int-narrowing defect is the one place they cannot: `SAS Int`
-# narrows to R `integer` only when every value in hand is whole and inside the
-# integer range, and "in hand" is the whole column on one path and one batch on
-# the other, so a column that is fractional or out of range only in SOME batches
-# is typed differently by the two. That is a real defect, pinned elsewhere; it is
-# kept out of this generator by giving every `SAS Int` column whole values well
-# inside the integer range, so the two agree by construction rather than by luck.
+# A declared `SAS Int` column is always stored as R `integer`, whatever the
+# batch holds, so the generator deliberately places a fractional and an
+# out-of-range value in it: only some batches contain them, and both engines
+# must still agree on class, import errors and verdict.
 
 parity_memory_pool <- function() {
   list(
@@ -384,9 +381,15 @@ parity_memory_values <- function(name, n) {
       if (n >= 8) v[[8]] <- NA_real_ # missing in a nullable column
       v
     },
-    # Whole and far inside the integer range in EVERY batch -- see the note on
-    # the pinned Int-narrowing defect above.
-    CNT = as.integer(rep(0:5, length.out = n)),
+    # Text, with a fractional and an out-of-range value at fixed positions, so
+    # with small batches most batches are clean and a few are not: the
+    # declaration, not the batch, must decide the storage type.
+    CNT = {
+      v <- as.character(rep(0:5, length.out = n))
+      if (n >= 10) v[[10]] <- "8.5"
+      if (n >= 25) v[[25]] <- "5000000000"
+      v
+    },
     cli::cli_abort("No generator for column {name}.")
   )
 }
@@ -399,6 +402,7 @@ parity_memory_values <- function(name, n) {
 parity_memory_extras <- function(n) {
   extras <- list(
     XKEY = rep(c(1.5, 1.5, 2, 2, 0, -0.5, NA_real_, 3), length.out = n),
+    ICNT = as.integer(rep(0:3, length.out = n)),
     FLAG = rep(c(TRUE, FALSE, NA), length.out = n),
     DAY = as.Date("2026-01-01") + rep(0:6, length.out = n),
     WHEN = as.POSIXct("2026-01-01 00:00:00", tz = "UTC") +

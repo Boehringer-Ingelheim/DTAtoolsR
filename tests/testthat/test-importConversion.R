@@ -133,26 +133,54 @@ test_that("an already numeric column is left alone", {
 })
 
 
-test_that("an Int column narrows to integer only when that is lossless", {
+test_that("an Int column is always integer; values it cannot hold are import errors", {
   specs <- make_specs(DTAColumnSpec(id = "N", type = "SAS Int", nullable = TRUE))
+  type_one <- function(x) {
+    dta_coerce_table_to_specs(data.frame(N = x, stringsAsFactors = FALSE), specs)
+  }
 
-  whole <- dta_coerce_table_to_specs(
-    data.frame(N = c("1", "2", NA), stringsAsFactors = FALSE),
-    specs
-  )
+  whole <- type_one(c("1", "2", NA))
   expect_true(is.integer(whole$table$N))
   expect_equal(whole$table$N, c(1L, 2L, NA))
 
-  # Rounding a fractional value into an integer column would discard the
-  # fraction and hide the `type: integer` column spec error that reports it, so the
-  # value stays a double and the column spec axis keeps its job.
-  fractional <- dta_coerce_table_to_specs(
-    data.frame(N = c("1", "2.5"), stringsAsFactors = FALSE),
-    specs
+  # The declaration decides storage: a fractional value becomes NA and an
+  # import error carrying its raw text.
+  fractional <- type_one(c("1", "2.5"))
+  expect_true(is.integer(fractional$table$N))
+  expect_equal(fractional$table$N, c(1L, NA))
+  expect_equal(nrow(fractional$issues), 1)
+  expect_equal(fractional$issues$row, 2L)
+  expect_equal(fractional$issues$raw, "2.5")
+  expect_equal(fractional$issues$reason, "not_whole")
+
+  # value, reason (NA reason = accepted) per literal.
+  cases <- list(
+    list("2147483647", 2147483647L, NA_character_),
+    list("2147483648", NA_integer_, "out_of_range"),
+    list("-2147483648", NA_integer_, "out_of_range"),
+    list("5000000000", NA_integer_, "out_of_range"),
+    list("Inf", NA_integer_, "not_whole"),
+    list("1.0", 1L, NA_character_),
+    list("8.5", NA_integer_, "not_whole")
   )
-  expect_false(is.integer(fractional$table$N))
-  expect_equal(fractional$table$N, c(1, 2.5))
-  expect_equal(nrow(fractional$issues), 0)
+  for (case in cases) {
+    res <- type_one(c("7", case[[1]]))
+    label <- case[[1]]
+    expect_true(is.integer(res$table$N), info = label)
+    expect_identical(res$table$N, c(7L, case[[2]]), info = label)
+    if (is.na(case[[3]])) {
+      expect_equal(nrow(res$issues), 0, info = label)
+    } else {
+      expect_equal(res$issues$reason, case[[3]], info = label)
+      expect_equal(res$issues$raw, label, info = label)
+      expect_equal(res$issues$row, 2L, info = label)
+    }
+  }
+
+  # An unparseable value keeps its own reason, mixed with the new ones.
+  mixed <- type_one(c("x", "2.5", "3000000000", "4"))
+  expect_identical(mixed$table$N, c(NA, NA, NA, 4L))
+  expect_equal(mixed$issues$reason, c("not_convertible", "not_whole", "out_of_range"))
 })
 
 
@@ -749,10 +777,11 @@ test_that("a float in a declared Int column is an import error, not a read abort
 
   typed <- as.data.frame(ds@tables[["float_in_int"]])
 
-  # The fractional value is readable; it stays as a double so the schema axis
-  # can report it as a type violation.
-  expect_true(is.numeric(typed$DOSE))
-  expect_equal(typed$DOSE[[101]], 0.01)
+  # The declaration decides storage: the column is integer and the fractional
+  # value is NA, reported as an import error rather than a schema violation.
+  expect_type(typed$DOSE, "integer")
+  expect_true(is.na(typed$DOSE[[101]]))
+  expect_equal(typed$DOSE[[100]], 10L)
 })
 
 
@@ -781,8 +810,7 @@ test_that("streaming validation does not abort on a float in a declared Int colu
     details <- validate_file_stream(specs, csv, verbose = FALSE)
   )
 
-  # 0.01 in an Int column is a schema (column spec) violation, so the table
-  # fails even though there are no *import* errors.
+  # 0.01 in an Int column is an import error (value NA), so the table fails.
   expect_false(details$ok)
 })
 
@@ -1115,6 +1143,33 @@ test_that("every accepted integer literal parses to the same integer in Arrow an
   expect_identical(in_arrow, in_r)
 })
 
+test_that("batches of one Int column type and report identically on the Arrow and R routes", {
+  specs <- ic_num_specs("SAS Int")
+  batches <- list(
+    c("123456789", "-123456789", "0"), # all nine-digit whole: Arrow route
+    c("1", "8.5", "3"), # fractional: R route
+    c("2147483648", "5", NA), # out of range: R route
+    c("4", "5", "6")
+  )
+
+  for (i in seq_along(batches)) {
+    literals <- batches[[i]]
+    via_r <- dta_coerce_table_to_specs(
+      data.frame(VAL = literals, stringsAsFactors = FALSE), specs
+    )
+    state <- dta_arrow_numeric_state(dta_compile_spec_types(specs))
+    parsed <- as.data.frame(
+      dta_arrow_parse_numeric_batch(arrow::record_batch(VAL = literals), state)
+    )
+    via_arrow <- dta_coerce_table_to_specs(parsed, specs)
+
+    expect_type(via_r$table$VAL, "integer")
+    expect_identical(class(via_arrow$table$VAL), class(via_r$table$VAL), info = i)
+    expect_identical(via_arrow$table$VAL, via_r$table$VAL, info = i)
+    expect_equal(via_arrow$issues, via_r$issues, info = i)
+  }
+})
+
 test_that("a signed zero survives the Arrow route with its sign", {
   parsed <- ic_parse_in_arrow(c("-0", "0", "1"), "SAS Num")
   expect_identical(1 / parsed, c(-Inf, Inf, 1))
@@ -1143,7 +1198,7 @@ test_that("the patterns exclude every form the two parsers may disagree on", {
     # Arrow's integer parser refuses a leading `+`, so the pattern must too.
     "+4",
     # Past 9 digits a value can exceed `.Machine$integer.max`, where the R path
-    # would keep the column a double instead of narrowing it.
+    # would report it as an out-of-range import error instead of narrowing it.
     "1234567890", "2147483648", "-2147483648",
     "1.0", "1e5", "", " 4", "NA"
   )

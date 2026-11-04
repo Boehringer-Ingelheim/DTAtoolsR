@@ -21,18 +21,12 @@ test_that("DTAColumnSpecStructureSAS accepts all documented SAS format families"
 })
 
 test_that("DTAColumnSpecStructureSAS infers type from format when type is missing", {
-  # KNOWN DEFECT (deferred, needs an R/ fix): `BEST12.` infers "Int".
-  # BESTw. is SAS's *general numeric* default output format -- see the format
-  # reference in R/DTAColumnSpecStructureSAS-class.R, which describes BESTw. as
-  # "SAS's default for numeric output" and notes it may use scientific notation.
-  # Inferring Int makes as_json_schema_type() emit "integer", so a legitimate
-  # value such as 1.25 is rejected by the generated schema. The expectation
-  # below records what the implementation does today, NOT what it should do;
-  # once the inference is fixed this line must change to "Num".
+  # BESTw. is SAS's general numeric output format (decimals, exponents), so it
+  # infers Num, not Int.
   cases <- list(
     list(format = "$10.", expected_type = "Char"),
     list(format = "8.2", expected_type = "Num"),
-    list(format = "BEST12.", expected_type = "Int"),
+    list(format = "BEST12.", expected_type = "Num"),
     list(format = "8.", expected_type = "Int"),
     list(format = "DATE9.", expected_type = "Date"),
     list(format = "TIME8.2", expected_type = "Time"),
@@ -44,6 +38,14 @@ test_that("DTAColumnSpecStructureSAS infers type from format when type is missin
     expect_equal(x@type, case$expected_type)
     expect_equal(x@format, case$format)
   }
+})
+
+test_that("an inferred BESTw. column is a JSON number; an explicit Int BESTw. stays Int", {
+  inferred <- DTAColumnSpecStructureSAS(format = "BEST12.", length = 20)
+  expect_equal(as_json_schema_type(inferred), "number")
+
+  explicit <- DTAColumnSpecStructureSAS(type = "Int", format = "BEST8.", length = 20)
+  expect_equal(explicit@type, "Int")
 })
 
 test_that("DTAColumnSpecStructureSAS rejects unsupported or incompatible type/format combinations", {

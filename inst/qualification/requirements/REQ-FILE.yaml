@@ -324,20 +324,16 @@ requirements:
       get_md5sum = TRUE shall compute a checksum equal to tools::md5sum() of
       the file just written, and write_md5sum_to_file = TRUE shall
       additionally write it, with the written row and column counts, to a
-      "<filename>.md5" sidecar file.
+      "<filename>.md5" sidecar file. The returned md5sum element shall be the
+      bare checksum string (NA_character_ when get_md5sum = FALSE), and the
+      result shall carry the written dimensions as n_rows and n_cols.
     risk: medium
     category: integrity
     covers: [write_table_to_file]
     source: R/exportFunctions.R
     notes: >
-      Pinned: get_md5sum = TRUE returns its checksum nested inside a list
-      (md5sum, n_rows, n_cols) under the result's own md5sum element, not the
-      bare checksum string the function's own documentation describes -- that
-      bare form is only what get_md5sum = FALSE returns (NA). A caller who
-      follows the documented contract literally, e.g.
-      `if (!is.na(result$md5sum))`, hits R's own "the condition has length >
-      1" instead of the intended branch. Recorded as observed, not endorsed,
-      behaviour.
+      The bare string makes `if (!is.na(result$md5sum))` evaluate cleanly in
+      both branches. Closes DEV-007.
 
   - id: REQ-FILE-028
     text: >

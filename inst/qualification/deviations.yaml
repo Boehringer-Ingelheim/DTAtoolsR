@@ -22,7 +22,7 @@
 deviations:
   - id: DEV-001
     title: The SAS format BEST12. is inferred as an integer type
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-CORE-006, REQ-TYPE-001]
     observed: >
@@ -36,7 +36,7 @@ deviations:
     workaround: Declare the column type explicitly instead of relying on format inference.
     reference: tests/testthat/test-DTAColumnSpecStructureSAS.R:24
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-002
     title: A POSIXct column with no named timezone is rescanned on every rebuild
@@ -62,7 +62,7 @@ deviations:
 
   - id: DEV-003
     title: export_column_value_table() leaks an internal error for a bad first argument
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-EXPORT-001]
     observed: >
@@ -78,11 +78,11 @@ deviations:
     workaround: Validate the argument before the call.
     reference: tests/testthat/test-exportFunctions.R:127
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-004
     title: A declared Int column can be typed differently by the two engines
-    status: open
+    status: closed
     severity: major
     affects: [REQ-TYPE-002]
     observed: >
@@ -103,11 +103,11 @@ deviations:
       the integer range.
     reference: tests/testthat/test-streaming-parity.R:340
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-005
     title: messages() aborts on a dataset whose specification declares no columns
-    status: open
+    status: closed
     severity: major
     affects: [REQ-VAL-020, REQ-VAL-023]
     observed: >
@@ -129,11 +129,11 @@ deviations:
       messages(), or give every dataset at least one column specification.
     reference: inst/qualification/tests/test-OQ-VAL-check.R
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-006
     title: A declared integer column silently accepts values outside the integer range
-    status: open
+    status: closed
     severity: major
     affects: [REQ-TYPE-009]
     observed: >
@@ -153,11 +153,11 @@ deviations:
     workaround: Declare such a column as SAS Num, which imposes no integer bound.
     reference: inst/qualification/tests/test-OQ-TYPE-declared.R
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-007
     title: write_table_to_file() returns a list where it documents a checksum
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-FILE-027]
     observed: >
@@ -177,7 +177,7 @@ deviations:
     workaround: Read the checksum as result$md5sum[[1]].
     reference: R/DTADataSetTabular-class.R:573 with R/exportFunctions.R:283
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-008
     title: validate_table() reports a clean pass when its specification is not one
@@ -228,7 +228,7 @@ deviations:
 
   - id: DEV-010
     title: A metadata import issue is lost after one write and read
-    status: open
+    status: closed
     severity: major
     affects: [REQ-META-018]
     observed: >
@@ -246,7 +246,7 @@ deviations:
     workaround: Correct the value at source rather than relying on the recorded issue.
     reference: R/DTAMetaData-helpers.R:41
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-011
     title: The report overview shows all targets passed when only metadata failed
@@ -274,7 +274,7 @@ deviations:
 
   - id: DEV-012
     title: One metadata import error removes the inspect detail from every message
-    status: open
+    status: closed
     severity: major
     affects: [REQ-REPORT-006]
     observed: >
@@ -292,7 +292,7 @@ deviations:
     workaround: Correct metadata import issues before generating the report.
     reference: R/exportValidationReport.R:88 with R/validationReporting.R:1072
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-013
     title: An uncompressed export can leave a header-only file at the destination
@@ -319,7 +319,7 @@ deviations:
 
   - id: DEV-014
     title: The Word specification round trip cannot read its own output
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-EXPORT-019]
     observed: >
@@ -335,11 +335,11 @@ deviations:
     workaround: Exchange specifications as YAML, which round-trips.
     reference: R/exportFunctions.R:58 with R/DTAColumnSpecCollection-class.R:491
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-015
     title: A specification written to JSON cannot be read back
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-EXPORT-029, REQ-SPEC-015]
     observed: >
@@ -358,7 +358,7 @@ deviations:
     workaround: Use write_columns_to_yaml(), whose round trip is verified.
     reference: R/DTAColumnSpec-class.R:375
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-04
 
   - id: DEV-016
     title: An inline placeholder spelled by a dataset value is substituted inside a region

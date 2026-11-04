@@ -18,12 +18,76 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   metadata defaults, option effects or dataset replacement. Unchanged
   ancestor-authored choices retain their existing seal exemption.
 
+- **All ten open defects in the qualification register are fixed**
+  (DEV-001, 003, 004, 005, 006, 007, 010, 012, 014, 015). Each register entry
+  is closed and its pinning test now asserts the correct behaviour.
+
+- A declared `SAS Int` column no longer silently accepts values outside the
+  32-bit integer range: `5000000000` used to validate completely clean, so a
+  receiving system could narrow and corrupt it with nothing in the transfer
+  record. Such a value is now an import error (`out_of_range`), stored as `NA`
+  with its raw text kept; the column-specification integer check enforces the
+  range too (DEV-006).
+
+- A declared `SAS Int` column is now always stored as an R `integer`. The
+  storage type used to depend on the values in hand, so the in-memory and
+  streaming engines could type the same file differently depending only on how
+  it was batched (DEV-004). **Behaviour change:** a fractional or non-finite
+  value in a declared Int column (e.g. `8.5`) is now an import error
+  (`not_whole`) and becomes `NA` in the typed table. It used to keep the
+  column as a double and be reported only on the column-specification axis.
+
+- A `BESTw.` SAS format with no explicit type now infers `Num` instead of
+  `Int`. `BESTw.` is SAS's general numeric format, and the generated JSON
+  schema used to reject a legitimate decimal such as `1.25` (DEV-001). An
+  explicit `type: Int` with a `BESTw.` format is still accepted.
+
+- `messages()` no longer aborts for a dataset whose specification declares no
+  columns; it returns zero rows. Any loop collecting messages across datasets
+  used to fail outright on such a dataset, with an error that blamed
+  `persist = TRUE` (DEV-005).
+
+- The HTML validation report keeps its click-to-inspect detail when the
+  transfer has a metadata issue. One metadata import error used to strip the
+  detail from every message in the report. Metadata messages now get detail
+  of their own, a failure to build detail for one dataset no longer affects
+  the others, and a message whose detail could not be built says so (DEV-012).
+
+- A questionable metadata date (such as `2026-12-31 at the earliest`, or a
+  top-level date such as `after approval`) no longer turns into a clean one
+  after a single save and reload. The original text is written back, so the
+  import issue is still reported, unless the field has been changed since it
+  was read (DEV-010).
+
+- `export_column_value_table()` now aborts with a package error naming the
+  expected class when given something other than a column specification
+  collection, instead of a raw base R error (DEV-003).
+
+- `write_table_to_file()` now returns `md5sum` as the single checksum string
+  it documents (`NA_character_` when no checksum is requested), plus `n_rows`
+  and `n_cols`. A transfer-integrity check written to the documented contract,
+  such as `if (!is.na(res$md5sum))`, used to fail on a three-element list
+  (DEV-007).
+
+- The Word specification exchange now completes. `export_specs_table()` writes
+  each format with its backend prefix, and `columns_specs_from_word()` accepts
+  an empty Format or Length cell and, for documents written by earlier
+  versions, an unprefixed format. A specification exported to Word could not
+  be read back by the package that wrote it (DEV-014).
+
+- A specification written with `write_columns_to_json()` no longer contains
+  `{}` for unset properties, so it can be read back (DEV-015).
+
 ### Changed
 
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
 ### Added
+
+- `import_specs_from_json()` reads a specification written by
+  `write_columns_to_json()`, rules included, so JSON is no longer a
+  write-only format.
 
 - **"Authorized for corrections" is now a picker in the app.** The Metadata
   tab offers the Receiver and Supplier contacts to choose from, accepts any

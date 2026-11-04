@@ -421,7 +421,7 @@ test_that("OQ-META-017 | a full metadata document survives a YAML round trip | R
   )
 })
 
-test_that("OQ-META-018 | import_issues is never written to YAML, and a round trip permanently loses the qualifying text that caused one | REQ-META-017 REQ-META-018", {
+test_that("OQ-META-018 | import_issues is never written to YAML, but the original text of a qualified date is, so a round trip reproduces the issue | REQ-META-017 REQ-META-018", {
   original <- DTAMetaData(title = "t", transmission = list(date_last_transfer = "2026-12-31 at the earliest"))
   qa_step("the source object has one import issue", 1L, nrow(metadata_import_errors(original)))
 
@@ -431,28 +431,26 @@ test_that("OQ-META-018 | import_issues is never written to YAML, and a round tri
     !"import_issues" %in% names(as_list)
   )
   qa_step(
-    "and the qualifying text itself is gone too: only the resolved Date is serialized",
-    "2026-12-31", as_list$transmission$date_last_transfer
+    "the qualifying text itself is written, not just the resolved Date",
+    "2026-12-31 at the earliest", as_list$transmission$date_last_transfer
   )
 
   path <- file.path(qa_tempdir(), "dirty.yaml")
   yaml::write_yaml(as_list, path)
   restored <- do.call(DTAMetaData, qa_read_yaml(path))
 
-  # Pinned, not endorsed (see REQ-META-018 notes): this is NOT the same
-  # import issue recomputed - it is gone. The reloaded object reads back as a
-  # clean, unqualified date, with nothing left to say it was ever qualified.
+  restored_issues <- metadata_import_errors(restored)
   qa_step(
-    "the reloaded document reports zero import issues, not the one it started with",
-    0L, nrow(metadata_import_errors(restored))
+    "the reloaded document reports the one import issue it started with",
+    1L, nrow(restored_issues)
   )
   qa_step(
-    "because the date itself now reads back as a plain, unqualified ISO date",
+    "and the issue carries the same reason and the same raw text",
+    list(reason = "trailing_residue", raw = "2026-12-31 at the earliest"),
+    list(reason = restored_issues$reason[[1]], raw = restored_issues$raw[[1]])
+  )
+  qa_step(
+    "the date itself still resolves to 2026-12-31",
     "2026-12-31", format(restored@transmission$date_last_transfer, "%Y-%m-%d")
-  )
-  qa_known_deviation(
-    "DEV-010",
-    nrow(metadata_import_errors(original)) == 1L &&
-      nrow(metadata_import_errors(restored)) == 0L
   )
 })

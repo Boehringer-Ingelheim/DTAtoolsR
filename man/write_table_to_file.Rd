@@ -62,9 +62,10 @@ the output. Only consulted when \code{get_md5sum = TRUE}. Default is TRUE.}
 }
 \value{
 Invisibly, a list with \code{tables} (the data as written),
-\code{table} (the table's name) and \code{md5sum} (the checksum, or
-\code{NA} when \code{get_md5sum = FALSE}). Called mainly for the side
-effect of writing the file.
+\code{table} (the table's name), \code{md5sum} (the checksum as a
+single string, or \code{NA_character_} when \code{get_md5sum = FALSE}),
+and \code{n_rows} and \code{n_cols} (the dimensions of the table
+written). Called mainly for the side effect of writing the file.
 }
 \description{
 Write a named DTA table saved in a DTADataSetTabular object to a file.

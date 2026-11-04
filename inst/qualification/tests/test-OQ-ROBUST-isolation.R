@@ -95,7 +95,7 @@ test_that("OQ-ROBUST-006 | the recorded checksum follows the bytes on disk | REQ
     ds,
     table = table_name, filename = target, quiet = TRUE, overwrite = TRUE
   )
-  recorded <- as.character(written$md5sum[[1]])
+  recorded <- written$md5sum
 
   qa_step(
     "the recorded checksum is the checksum of the file",

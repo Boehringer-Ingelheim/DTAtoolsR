@@ -14,7 +14,8 @@ write_columns_to_json(columns, file, pretty = TRUE)
 \item{pretty}{Logical. Whether to pretty-print the JSON. Default is TRUE.}
 }
 \value{
-NULL. The function writes the DTAColumnSpecCollection to a JSON file.
+NULL. The function writes the DTAColumnSpecCollection to a JSON file;
+read it back with �\code{\link{import_specs_from_json}}.
 }
 \description{
 This function writes a DTAColumnSpecCollection object to a JSON file.

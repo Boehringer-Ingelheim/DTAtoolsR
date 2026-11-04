@@ -99,9 +99,9 @@ et_two_cols <- function() {
   ))
 }
 
-# ---- export_column_value_table() input validation (DEV-003) ----------------
+# ---- export_column_value_table() input validation ---------------------------
 
-test_that("OQ-EXPORT-001 | export_column_value_table on a bad first argument leaks an internal error | REQ-EXPORT-001", {
+test_that("OQ-EXPORT-001 | export_column_value_table on a bad first argument raises a package error | REQ-EXPORT-001", {
   dir <- qa_tempdir()
   out <- file.path(dir, "bad.docx")
 
@@ -111,10 +111,9 @@ test_that("OQ-EXPORT-001 | export_column_value_table on a bad first argument lea
   )
   qa_check("a condition was raised for the malformed argument", inherits(cond, "condition"))
 
-  # DEV-003: the function has no input validation of its own, so the failure
-  # is a bare base R condition rather than the cli condition
-  # export_specs_table() raises for the equivalent mistake (see OQ-EXPORT-017).
-  qa_known_deviation("DEV-003", !inherits(cond, "rlang_error"))
+  # The same classed cli condition export_specs_table() raises for the
+  # equivalent mistake (see OQ-EXPORT-017).
+  qa_check("the condition is a classed cli (rlang) error", inherits(cond, "rlang_error"))
   qa_check("no file was written for the failed call", !file.exists(out))
 })
 
@@ -552,9 +551,9 @@ test_that("OQ-EXPORT-024 | export_with_template falls back to the standard layou
 test_that("OQ-EXPORT-025 | columns_specs_from_word reconstructs id, type, length and nullable from a well-formed table | REQ-EXPORT-018", {
   dir <- qa_tempdir()
 
-  # Built directly with officer/flextable rather than export_specs_table(),
-  # whose own Format column does not pair with this reader -- see
-  # OQ-EXPORT-026 and REQ-EXPORT-019.
+  # Built directly with officer/flextable, so the table is exactly the one
+  # this reader documents; the round trip through export_specs_table() is
+  # OQ-EXPORT-026.
   fixture <- data.frame(
     id = c("STUDYID", "AGE"),
     label = c("Study Identifier", "Age"),
@@ -590,33 +589,39 @@ test_that("OQ-EXPORT-025 | columns_specs_from_word reconstructs id, type, length
   )
 })
 
-test_that("OQ-EXPORT-026 | columns_specs_from_word cannot read the table export_specs_table just wrote | REQ-EXPORT-019", {
+test_that("OQ-EXPORT-026 | columns_specs_from_word reads back the table export_specs_table just wrote | REQ-EXPORT-019", {
   dir <- qa_tempdir()
 
-  # The common case: no column declares an explicit format, exactly as in the
-  # shipped clinical_dta.yaml fixture.
+  # No column without a format (the shipped clinical_dta.yaml case), one with an
+  # explicit format, and the Char, Int and Num types.
   coll <- DTAColumnSpecCollection(columns = list(
-    STUDYID = DTAColumnSpec(id = "STUDYID", label = "Study Identifier", type = "SAS Char", length = 10, nullable = FALSE)
+    STUDYID = DTAColumnSpec(id = "STUDYID", label = "Study Identifier", type = "SAS Char", length = 10, nullable = FALSE),
+    VISITNUM = DTAColumnSpec(id = "VISITNUM", label = "Visit Number", type = "SAS Int", format = "SAS 8.", nullable = TRUE),
+    AGE = DTAColumnSpec(id = "AGE", label = "Age", type = "SAS Num", nullable = TRUE)
   ))
   path <- file.path(dir, "roundtrip.docx")
   export_specs_table(coll, file = path, quiet = TRUE)
 
-  cond <- tryCatch(
-    columns_specs_from_word(
-      path,
-      colnames = c("id", "label", "type", "length", "format", "nullable", "description")
-    ),
-    error = function(e) e
+  back <- columns_specs_from_word(
+    path,
+    colnames = c("id", "label", "type", "length", "format", "nullable", "description")
   )
-  qa_check(
-    "reading export_specs_table's own output back aborts rather than reconstructing the collection",
-    inherits(cond, "condition")
+  qa_step("the same column identifiers come back, in order", c("STUDYID", "VISITNUM", "AGE"), names(back@columns))
+  qa_step(
+    "each column keeps its declared type",
+    c(STUDYID = "Char", VISITNUM = "Int", AGE = "Num"),
+    vapply(back@columns, function(x) x@structure@type, character(1))
   )
   qa_step(
-    "the abort is the low-level prefix-extraction error, not a caller-facing one",
-    TRUE, grepl("prefix", conditionMessage(cond), fixed = TRUE)
+    "the explicit format survives and a column with none still has none",
+    c(STUDYID = "none", VISITNUM = "8.", AGE = "none"),
+    vapply(back@columns, function(x) if (is.null(x@structure@format)) "none" else x@structure@format, character(1))
   )
-  qa_known_deviation("DEV-014", inherits(cond, "condition"))
+  qa_step(
+    "the declared length survives and an undeclared one stays undeclared",
+    c(STUDYID = "10", VISITNUM = "none", AGE = "none"),
+    vapply(back@columns, function(x) if (is.null(x@structure@length)) "none" else as.character(x@structure@length), character(1))
+  )
 })
 
 # ---- document exports write atomically ---------------------------------------

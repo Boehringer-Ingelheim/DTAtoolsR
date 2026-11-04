@@ -157,13 +157,10 @@ test_that("OQ-TYPE-012 | a w.d format infers Num | REQ-TYPE-001", {
   qa_step("'8.2' infers Num", "Num", DTAColumnSpec(id = "X", format = "SAS 8.2")@structure@type)
 })
 
-test_that("OQ-TYPE-013 | a BESTw. format infers Int | REQ-TYPE-001", {
-  # This is the mapping DEV-001 questions: BESTw. is SAS's general numeric
-  # output format and may use scientific notation, so a legitimate decimal
-  # could be declared this way. The mapping is stated here as the behaviour
-  # on record; the deviation itself is bound once, in test-OQ-CORE-runner.R
-  # (OQ-CORE-006), and not re-bound here.
-  qa_step("'BEST12.' infers Int", "Int", DTAColumnSpec(id = "X", format = "SAS BEST12.")@structure@type)
+test_that("OQ-TYPE-013 | a BESTw. format infers Num | REQ-TYPE-001", {
+  # BESTw. is SAS's general numeric output format and may hold decimals or
+  # scientific notation, so it infers Num, not Int.
+  qa_step("'BEST12.' infers Num", "Num", DTAColumnSpec(id = "X", format = "SAS BEST12.")@structure@type)
 })
 
 test_that("OQ-TYPE-014 | a DATEw. format infers Date | REQ-TYPE-001", {
@@ -293,19 +290,19 @@ test_that("OQ-TYPE-022 | an integer64 column reaches the same rule verdict as it
     rules = list(DTARuleColRange(id = "qty_range", columns = "QTY", range = c(1, 10)))
   )
 
-  # 5,000,000,000 is a valid integer64 value, far outside the 32-bit range a
-  # declared Int narrows to (REQ-TYPE-009) and outside the declared range
-  # rule -- exercising both an unusual R storage type and the rule axis in
-  # the same value.
+  # 50 is a valid integer64 value inside the 32-bit range but outside the
+  # declared range rule -- exercising both an unusual R storage type and the
+  # rule axis. (A value beyond the 32-bit range is an import error when read
+  # from text, REQ-TYPE-009, so it is outside this comparison.)
   df_r <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
-  df_r$QTY <- bit64::as.integer64(c(5, 5000000000))
+  df_r$QTY <- bit64::as.integer64(c(5, 50))
   det_r <- validate_table_detailed(specs, df_r, verbose = FALSE)
 
   dir <- qa_tempdir()
-  ds <- td_check(c("ID,QTY", "A001,5", "A002,5000000000"), specs, dir)
+  ds <- td_check(c("ID,QTY", "A001,5", "A002,50"), specs, dir)
 
   qa_step(
-    "an out-of-range integer64 value costs the same one rule error as the same text from a file",
+    "a rule-violating integer64 value costs the same one rule error as the same text from a file",
     c(ok = FALSE, columnspec = 0L, rule = 1L, import = 0L),
     c(ok = det_r$ok, columnspec = det_r$n_columnspec_errors, rule = det_r$n_rule_errors, import = det_r$n_import_errors)
   )
@@ -342,53 +339,54 @@ test_that("OQ-TYPE-023 | a native logical column fails the type check against ev
 
 # ---- Int narrowing ------------------------------------------------------------
 
-test_that("OQ-TYPE-024 | a value outside the 32-bit integer range is stored as double, on no axis | REQ-TYPE-009", {
+test_that("OQ-TYPE-024 | a value outside the 32-bit integer range in a declared Int column is an import error | REQ-TYPE-009", {
   dir <- qa_tempdir()
   specs <- DTAColumnSpecCollection(columns = list(
     N = DTAColumnSpec(id = "N", type = "SAS Int", nullable = TRUE)
   ))
 
-  # An all-whole, in-range column narrows to integer storage, for contrast.
-  ds_clean <- td_check(c("N", "1", "2", "3"), specs, dir)
-  qa_step("an all-whole, in-range column narrows to R integer", "integer", class(td_column(ds_clean, "N")))
-
-  # One value one past the 32-bit signed range (2^31), everything else
-  # ordinary. `.Machine$integer.max` is 2^31 - 1.
-  ds_wide <- td_check(c("N", "1", "2", "2147483648"), specs, dir)
+  # The largest int32, 2^31 - 1, is accepted clean.
+  ds_edge <- td_check(c("N", "1", "2147483647"), specs, dir)
+  qa_step("2147483647 is stored as R integer", "integer", class(td_column(ds_edge, "N")))
   qa_step(
-    "the whole column stays double instead, because it cannot be narrowed as a whole",
-    "numeric", class(td_column(ds_wide, "N"))
-  )
-  qa_step(
-    "and this is reported on no axis at all -- a silent narrowing failure, pinned as REQ-TYPE-009",
+    "...and is accepted on every axis",
     c(ok = TRUE, columnspec = 0L, rule = 0L, import = 0L),
+    td_axis(ds_edge)
+  )
+
+  # One past the 32-bit signed range (2^31).
+  ds_wide <- td_check(c("N", "1", "2", "2147483648"), specs, dir)
+  qa_step("the column is still stored as R integer", "integer", class(td_column(ds_wide, "N")))
+  qa_step("the out-of-range value is stored as NA", NA_integer_, td_column(ds_wide, "N")[3])
+  qa_step(
+    "...and costs exactly one import error",
+    c(ok = FALSE, columnspec = 0L, rule = 0L, import = 1L),
     td_axis(ds_wide)
   )
-  # Bound to the register: when the package starts reporting an out-of-range
-  # value on the import axis, this stops reproducing and the run fails until
-  # DEV-006 is closed and the two steps above are rewritten as the pass they
-  # should have been.
-  qa_known_deviation(
-    "DEV-006",
-    all(td_axis(ds_wide)[c("columnspec", "rule", "import")] == 0L)
-  )
-  # The most-negative value R would need is one further out than +2^31-1,
-  # because .Machine$integer.max is checked against abs(); the same failure
-  # to narrow, at the other end.
+
+  # -2^31 is out of range too: R reserves that bit pattern for NA_integer_.
   ds_neg <- td_check(c("N", "1", "-2147483648"), specs, dir)
-  qa_step("the same holds at the negative boundary", "numeric", class(td_column(ds_neg, "N")))
+  qa_step("the negative boundary is stored as R integer", "integer", class(td_column(ds_neg, "N")))
+  qa_step(
+    "...and is one import error",
+    c(ok = FALSE, columnspec = 0L, rule = 0L, import = 1L),
+    td_axis(ds_neg)
+  )
+
+  ds_big <- td_check(c("N", "1", "5000000000"), specs, dir)
+  qa_step(
+    "5000000000 is one import error",
+    c(ok = FALSE, columnspec = 0L, rule = 0L, import = 1L),
+    td_axis(ds_big)
+  )
 })
 
-test_that("OQ-TYPE-025 | the whole-column and per-batch engines can type the same declared Int column differently | REQ-TYPE-002", {
+test_that("OQ-TYPE-025 | the whole-column and per-batch engines type the same declared Int column identically | REQ-TYPE-002", {
   # dta_coerce_table_to_specs() is the one function both engines call to type
-  # a declared column: load_file(stream = "never") calls it once over the
-  # whole table, and check()'s streaming scan calls it once per batch (see
-  # R/streamingValidation.R, the loop that builds `coerced <-
-  # dta_coerce_table_to_specs(df, specs, ...)`). An Int column narrows to R
-  # integer only when every value *currently in hand* is whole and within
-  # +/-2^31-1 (R/importConversion.R, dta_coerce_column()) -- so "in hand"
-  # meaning the whole column versus one batch is exactly where the two
-  # engines can part ways.
+  # a declared column: once over the whole table for the whole-column engine,
+  # once per batch for the streaming scan. A declared Int is always stored as
+  # R integer and each cell is judged alone, so where a batch boundary falls
+  # cannot change the result.
   specs <- DTAColumnSpecCollection(columns = list(
     N = DTAColumnSpec(id = "N", type = "SAS Int", nullable = TRUE)
   ))
@@ -398,36 +396,32 @@ test_that("OQ-TYPE-025 | the whole-column and per-batch engines can type the sam
   lines <- c(rows_a, rows_b)
 
   whole <- data.frame(N = lines, stringsAsFactors = FALSE)
-  first_batch <- data.frame(N = lines[seq_len(batch_rows)], stringsAsFactors = FALSE)
+  batches <- lapply(
+    c(1L, 6L),
+    function(from) data.frame(N = lines[from:(from + batch_rows - 1L)], stringsAsFactors = FALSE)
+  )
 
   whole_result <- dta_coerce_table_to_specs(whole, specs)
-  batch_result <- dta_coerce_table_to_specs(first_batch, specs)
+  batch_results <- lapply(batches, dta_coerce_table_to_specs, specs = specs)
 
-  # Row 4 ("4") is identical text in both calls; only the scope of "what else
-  # is in hand" differs.
   qa_step(
-    "row 4's value ('4') is typed as double when the whole column is in hand...",
-    "numeric", class(whole_result$table$N[4])
+    "the whole column is typed integer",
+    "integer", class(whole_result$table$N)
   )
   qa_step(
-    "...and as integer when only its own batch is in hand",
-    "integer", class(batch_result$table$N[4])
+    "the clean batch is typed integer too",
+    "integer", class(batch_results[[1]]$table$N)
   )
-  qa_known_deviation(
-    "DEV-004",
-    !identical(class(whole_result$table$N), class(batch_result$table$N))
+  qa_step(
+    "the batch holding the fractional value is typed integer too",
+    "integer", class(batch_results[[2]]$table$N)
   )
-
-  # This is stated plainly rather than left implicit: verified separately
-  # (not asserted here, to keep this case to the one defect it binds) that
-  # driving the same file through load_file(stream = "never") versus
-  # load_file(stream = "always") + check(batch_rows = 5) reports IDENTICAL
-  # validation_status()/messages() on both paths for this scenario. The
-  # divergence DEV-004 describes is real and is exactly the one shown above,
-  # but it is invisible on the import and column-specification axes here:
-  # narrowing failure is never an import error (REQ-TYPE-009), and the
-  # column-specification "type" check re-tests whole-ness value by value
-  # regardless of storage class (R/columnSpecChecks.R, the `elementwise`
-  # branch of the type check), so a whole value such as "4" passes an
-  # "integer" schema type whether it is stored as R integer or as double.
+  qa_step(
+    "the whole column reports one import error, for the fractional value",
+    1L, nrow(whole_result$issues)
+  )
+  qa_step(
+    "the batches together report the same one import error",
+    c(0L, 1L), vapply(batch_results, function(r) nrow(r$issues), integer(1))
+  )
 })
