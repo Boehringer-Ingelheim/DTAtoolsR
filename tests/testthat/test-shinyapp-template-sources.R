@@ -532,3 +532,14 @@ test_that("legacy template directories autodetect populated templates/ without c
   expect_equal(sum(dirs == lib), 1)
   expect_false(root %in% dirs)
 })
+
+test_that("parse_template_sources() rejects a git locator or ref that git would read as an option", {
+  fn <- app_fn("parse_template_sources")
+  expect_error(
+    fn("git:https://host/repo.git#--upload-pack=touch /tmp/pwned"),
+    "read as an option"
+  )
+  expect_error(fn("git:--upload-pack=x"), "read as an option")
+  # A hyphen anywhere else is ordinary.
+  expect_identical(fn("git:https://host/my-repo.git#release-1")[[1]]$ref, "release-1")
+})
