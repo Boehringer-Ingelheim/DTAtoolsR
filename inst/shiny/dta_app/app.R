@@ -547,6 +547,7 @@ server <- function(input, output, session) {
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
     col_prefill = NULL, # list() of the column fields loaded in the form
+    col_search = "", # column-list search text, kept across the editor's re-renders
     rule_view = "list", # rule editor view: "list" | "form"
     rule_token = 0, # bump to re-render the rule editor body
     rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
@@ -2869,21 +2870,21 @@ server <- function(input, output, session) {
         ""
       } else if (i > 1L) {
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25B2;</button> ",
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move up\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25B2;</button> ",
           up_input, i
         )
       } else {
-        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move up\" disabled>&#x25B2;</button> "
+        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move up\" disabled>&#x25B2;</button> "
       }
       down_btn <- if (is.null(down_input)) {
         ""
       } else if (i < n) {
         sprintf(
-          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25BC;</button> ",
+          "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move down\" onclick=\"Shiny.setInputValue('%s', %d, {priority:'event'})\">&#x25BC;</button> ",
           down_input, i
         )
       } else {
-        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn\" title=\"Move down\" disabled>&#x25BC;</button> "
+        "<button class=\"btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn\" title=\"Move down\" disabled>&#x25BC;</button> "
       }
       paste0(
         up_btn, down_btn,
@@ -3353,6 +3354,9 @@ server <- function(input, output, session) {
     rv$col_edit_id <- NULL
     rv$col_prefill <- list()
     rv$col_msg <- NULL
+    # A fresh editor starts unfiltered: input$col_tbl_search still holds
+    # whatever the last session of this modal typed, for whichever dataset.
+    rv$col_search <- ""
     rv$col_token <- rv$col_token + 1
     showModal(modalDialog(
       title = paste("Edit columns \u2014", rv$active),
@@ -3378,7 +3382,17 @@ server <- function(input, output, session) {
             "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
           )
         ),
-        DT::dataTableOutput("col_tbl"),
+        # col_tbl's callback toggles .dta-reorder-off on this wrapper, which
+        # hides the move arrows and shows the hint below.
+        div(
+          class = "col-tbl-wrap",
+          div(
+            class = "spec-hint reorder-off-hint",
+            "Reordering is off while the list is searched or sorted. ",
+            tags$a(href = "#", class = "reorder-reset", "Show all in spec order")
+          ),
+          DT::dataTableOutput("col_tbl")
+        ),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
@@ -3524,15 +3538,43 @@ server <- function(input, output, session) {
     } else {
       character(0)
     }
+    # The move arrows swap a column with its neighbour in the SPEC, which is
+    # not the row above or below it once the view is searched or sorted -- so
+    # hide them in either state rather than move something the user cannot
+    # see. Edit and remove carry the spec index and stay correct throughout.
     DT::datatable(
       ov,
       rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
-        pageLength = 8, dom = "tp", scrollX = TRUE,
-        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
+        pageLength = 8, dom = "ftp", scrollX = TRUE,
+        search = list(search = isolate(rv$col_search)),
+        columnDefs = list(list(
+          orderable = FALSE, searchable = FALSE, targets = ncol(ov) - 1L
+        ))
+      ),
+      callback = DT::JS(
+        "var wrap = $(table.table().container()).closest('.col-tbl-wrap');",
+        "function sync() {",
+        "  wrap.toggleClass('dta-reorder-off',",
+        "    table.search() !== '' || table.order().length > 0);",
+        # DT's own col_tbl_search report is deduplicated client-side, so
+        # re-typing last session's term after a reopen (which resets
+        # rv$col_search) would never reach the server's move guard.
+        "  Shiny.setInputValue('col_tbl_search', table.search(), {priority: 'event'});",
+        "}",
+        "table.on('search.dt order.dt', sync);",
+        "wrap.find('.reorder-reset').off('click').on('click', function(e) {",
+        "  e.preventDefault();",
+        "  table.search('').order([]).draw();",
+        "});",
+        "sync();"
       )
     )
+  })
+
+  observeEvent(input$col_tbl_search, {
+    rv$col_search <- input$col_tbl_search %||% ""
   })
 
   output$col_editor_msg <- renderUI({
@@ -3751,6 +3793,10 @@ server <- function(input, output, session) {
 
   observeEvent(input$col_up_click, {
     req(editing())
+    # The arrows are hidden under a search; refuse one driven over the
+    # websocket too. (A sorted view is not reported, but a move there is still
+    # a correct move in spec order.)
+    req(!nzchar(rv$col_search))
     idx <- as.integer(input$col_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -3771,6 +3817,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$col_down_click, {
     req(editing())
+    req(!nzchar(rv$col_search))
     idx <- as.integer(input$col_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)

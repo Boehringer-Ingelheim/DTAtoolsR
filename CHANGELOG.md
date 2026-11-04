@@ -171,6 +171,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   kind `"region"` and the six dataset placeholders with kind `"dataset"`;
   both keep their description rather than a single value even when called
   with a transfer, exactly as a block placeholder does.
+- **The app's column editor has a search box.** "Edit columns" now filters
+  the column specs as you type, and the filter stays in place when you edit
+  a column and come back to the list. While the list is searched or sorted
+  by a header, the move arrows are hidden — they swap a column with its
+  neighbour in the specification, which is no longer the row next to it on
+  screen — and a "Show all in spec order" link brings them back. Edit and
+  remove keep working on the filtered list.
 
 ### Changed
 

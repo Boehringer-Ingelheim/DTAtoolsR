@@ -396,6 +396,47 @@ test_that("opening the column editor targets the active dataset", {
   })
 })
 
+test_that("the column editor's search pauses reordering and survives re-renders", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    ids <- function() app_fn("dta_column_ids")(rv$dta, "clinical_data")
+    original <- ids()
+    expect_gt(length(original), 2)
+
+    session$setInputs(edit_cols = 1)
+    out <- unclass(output$col_tbl)
+    expect_match(out, '"dom":"ftp"', fixed = TRUE)
+    expect_match(out, '"searchable":false', fixed = TRUE)
+    expect_match(out, "dta-reorder-off", fixed = TRUE)
+
+    # Under a search the visible neighbour is not the spec neighbour, so a
+    # move -- even one driven over the websocket -- must not happen.
+    session$setInputs(col_tbl_search = original[[2]])
+    expect_equal(rv$col_search, original[[2]])
+    session$setInputs(col_up_click = 2, col_down_click = 1)
+    expect_equal(ids(), original)
+
+    # The term is handed back to DT on every re-render (edit -> back here).
+    session$setInputs(col_add = 1, col_back = 1)
+    expect_match(
+      unclass(output$col_tbl),
+      sprintf('"search":{"search":"%s"}', original[[2]]),
+      fixed = TRUE
+    )
+
+    # Re-opening the editor starts unfiltered, whatever the input still holds.
+    session$setInputs(edit_cols = 2)
+    expect_equal(rv$col_search, "")
+
+    session$setInputs(col_tbl_search = "")
+    session$setInputs(col_up_click = 2)
+    expect_equal(ids()[1:2], original[2:1])
+  })
+})
+
 test_that("saving a new column updates the spec, the YAML view and clears validation", {
   clean_session_file()
 
