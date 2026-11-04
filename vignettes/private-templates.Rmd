@@ -995,6 +995,38 @@ halves to the same vocabulary, so the two columns cannot drift apart:
   values_from: {vocabulary: gf_test@1.0, field: label}   # -> Transcription
 ```
 
+### Naming the columns a vocabulary is for
+
+The app's column editor has a "Choose from vocabulary…" button under a
+column's allowed values. A vocabulary can say which columns it belongs to, so
+that the picker already shows the right one for the column you are editing:
+
+```yaml
+kind: dta_vocabulary
+id: gf_test
+version: "1.0"
+columns:
+  - GFTESTCD               # a bare id gets the codes
+  - id: GFTEST             # the decode half gets the labels
+    field: label
+terms:
+  - code: TRNSCPTN
+    label: Transcription
+```
+
+Column ids are compared without regard to case. The picker then preselects
+the vocabulary and sets "Write as" to codes or labels as declared. If none of
+the column's values are in the vocabulary yet, every term starts ticked. The
+terms appear as a checklist that shows each term's code, label and
+description. For a vocabulary with more than ten terms the checklist has a
+filter, and All and None apply to the terms the filter shows. Values the
+column holds that are not in the vocabulary appear at the top and stay ticked. A column without a declaration still
+gets a suggestion when its current values all come from one vocabulary,
+either all codes or all labels. That covers every column that was built from a
+`values_from:` binding. If several vocabularies contain those values, the
+picker suggests the smallest. `columns:` affects only this suggestion, not
+validation, and a vocabulary does not inherit it through `extends:`.
+
 ### Extending a vocabulary
 
 One vocabulary can build on another. This is *not* the generic `extends:`

@@ -1210,6 +1210,22 @@ bi_css <- function() {
     .tmpl-vocab-count { font-size: .82rem; color: var(--bi-grey); }
     /* Term descriptions inside the selectize dropdown rows. */
     .vocab-opt-desc { font-size: .8rem; color: var(--bi-grey); white-space: normal; }
+    /* A slot with hundreds of terms chosen scrolls inside its box instead of
+       pushing the dialog's buttons off-screen. */
+    .tmpl-vocab .selectize-input { max-height: 10.5rem; overflow-y: auto; }
+    /* The column editor's term checklist (vocab_term_checklist()). */
+    .vocab-pick { margin-bottom: 8px; }
+    .vocab-pick-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 6px; }
+    .vocab-pick-filter { margin-bottom: 6px; }
+    .vocab-pick-list {
+      max-height: 18rem; overflow-y: auto; padding: 4px 12px;
+      border: 1px solid var(--bi-grey-light); border-radius: .5rem;
+    }
+    .vocab-pick-list .form-group { margin-bottom: 0; }
+    .vocab-pick-list .checkbox { margin: 4px 0; }
+    .vocab-pick-list .checkbox label { width: 100%; }
+    .vocab-pick .vocab-code { font-family: var(--bs-font-monospace); font-weight: 500; }
+    .vocab-pick .vocab-desc { display: block; font-size: .8rem; color: var(--bi-grey); }
     .tmpl-head {
       display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline;
       margin-bottom: 4px;

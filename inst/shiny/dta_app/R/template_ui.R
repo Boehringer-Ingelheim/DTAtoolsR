@@ -745,6 +745,71 @@ tmpl_vocab_slot_ui <- function(record) {
   )
 }
 
+# The column editor's term picker: a checklist, not a chip box.
+#
+# Every term is a visible row -- code, label, description -- so a 3-term
+# vocabulary is three clicks with nothing hidden, and a 300-term one stays a
+# scrollable box of fixed height instead of 300 chips pushing the buttons
+# off-screen. From 11 terms up a filter narrows the rows, and All/None act on
+# the rows shown, so "all but these three" is: All, filter, untick.
+# DTA_vocabFilter()/DTA_vocabCheck()/DTA_vocabCount() (app.R) do that
+# client-side; the onclick/oninput text is constant, as in tmpl_vocab_slot_ui().
+#
+# `extras` are values the column holds that are no term of this vocabulary.
+# They are listed first so that adding one term to a column does not quietly
+# drop the column's own values on the way.
+vocab_term_checklist <- function(id, terms, selected, extras = character(0)) {
+  codes <- vapply(terms, function(t) as.character(t$code), character(1))
+  term_row <- function(t) {
+    lab <- as.character(t$label %||% "")
+    desc <- as.character(t$description %||% "")
+    tagList(
+      tags$span(class = "vocab-code", t$code),
+      if (nzchar(lab) && !identical(lab, t$code)) paste0(" — ", lab),
+      if (nzchar(desc)) tags$span(class = "vocab-desc", desc)
+    )
+  }
+  rows <- c(
+    lapply(extras, function(v) {
+      tagList(tags$span(class = "vocab-code", v), tags$span(class = "vocab-desc", "Not in this vocabulary"))
+    }),
+    lapply(terms, term_row)
+  )
+  values <- c(extras, codes)
+
+  div(
+    class = "vocab-pick",
+    div(
+      class = "vocab-pick-head",
+      tags$strong("Terms"),
+      div(
+        class = "tmpl-vocab-actions",
+        tags$a(href = "#", onclick = "return DTA_vocabCheck(this, true)", title = "Tick every term shown", "All"),
+        tags$a(href = "#", onclick = "return DTA_vocabCheck(this, false)", title = "Untick every term shown", "None")
+      ),
+      tags$span(
+        class = "tmpl-vocab-count vocab-pick-count", `aria-live` = "polite",
+        sprintf("%d of %d selected", sum(values %in% selected), length(values))
+      )
+    ),
+    if (length(values) > 10) {
+      tags$input(
+        type = "search", class = "form-control form-control-sm vocab-pick-filter",
+        placeholder = sprintf("Filter %d terms by code, label or description", length(values)),
+        `aria-label` = "Filter terms", oninput = "DTA_vocabFilter(this)"
+      )
+    },
+    div(
+      class = "vocab-pick-list",
+      checkboxGroupInput(id, NULL,
+        choiceNames = rows, choiceValues = values,
+        selected = intersect(values, selected), width = "100%"
+      ),
+      p(class = "msg-hint vocab-pick-empty", style = "display:none;", "No term matches the filter.")
+    )
+  )
+}
+
 # ---- Options dialog: the whole body ----------------------------------------
 
 # Everything between the modal's title and its footer.

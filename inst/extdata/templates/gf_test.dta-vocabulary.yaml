@@ -8,6 +8,10 @@ description: >-
   in GFTESTCD, and the `label` is the full name that belongs in GFTEST. One
   vocabulary drives both columns, so the two can never drift apart.
 type: text
+columns:
+  - GFTESTCD
+  - id: GFTEST
+    field: label
 terms:
   - code: TRNSCPTN
     label: Transcription
