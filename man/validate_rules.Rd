@@ -13,7 +13,8 @@ validate_rules(DTAColumnSpecCollection, table)
 }
 \value{
 (Invisibly) the list of rule results from \code{\link[=apply_rules]{apply_rules()}}, each a
-list with elements \code{id}, \code{valid} and \code{message}.
+list with elements \code{id}, \code{valid}, \code{message} and \code{import_errors}, plus
+\code{details} for a group-condition rule that failed.
 }
 \description{
 Validates a table using rules defined in a \code{DTAColumnSpecCollection}.

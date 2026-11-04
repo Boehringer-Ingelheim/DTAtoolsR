@@ -10,9 +10,11 @@
 #' The template is treated as an Open Packaging Conventions (OPC) archive: it is
 #' unzipped, the WordprocessingML text of each paragraph is substituted at the
 #' XML level (which transparently escapes any special characters such as `&`,
-#' `<` and `>`), and the parts are repackaged into a new `.docx`. Because
-#' substitution operates on the concatenated text of a whole paragraph, it is
-#' robust to Word splitting a single placeholder across multiple runs.
+#' `<` and `>`), and the parts are repackaged into a new `.docx`. Placeholders
+#' are substituted run by run, which preserves each run's formatting. Only when
+#' Word has split a placeholder across several runs is the paragraph's text
+#' joined and written into its first run (the other runs are emptied, so
+#' that paragraph's per-run formatting is lost).
 #'
 #' @details
 #' The following placeholders are populated automatically from the DTA metadata
@@ -54,12 +56,12 @@
 #'     values: `{DATASET_ID}`, `{DATASET_NAME}` (its id where no name is set),
 #'     `{DATASET_TYPE}`, `{DATASET_DESCRIPTION}`, `{DATASET_FILE_COUNT}`,
 #'     `{DATASET_COLUMN_COUNT}` and `{DATASET_RULE_COUNT}` (the last two are
-#'     `0` for a non-tabular dataset). A bare dataset block (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`,
-#'     `{FILE_SPECS}`, `{DATASETS}`) alone in a paragraph of the region is
-#'     bound to the repetition's dataset (a bare `{COLUMN_SPECS}` or
-#'     `{VALIDATION_RULES}` renders nothing for a non-tabular dataset) and
-#'     rendered without its generated
-#'     heading; an explicit `{COLUMN_SPECS:NAME}` is left as written. A
+#'     `0` for a non-tabular dataset). A bare dataset block
+#'     (`{COLUMN_SPECS}`, `{VALIDATION_RULES}`, `{FILE_SPECS}`, `{DATASETS}`)
+#'     alone in a paragraph of the region is bound to the repetition's dataset
+#'     (a bare `{COLUMN_SPECS}` or `{VALIDATION_RULES}` renders nothing for a
+#'     non-tabular dataset) and rendered without its generated heading; an
+#'     explicit `{COLUMN_SPECS:NAME}` is left as written. A
 #'     malformed marker -- unclosed, unopened, or not alone in its paragraph
 #'     -- is left in place and reported alongside unrendered blocks. A dataset
 #'     value that happens to spell a *block* placeholder renders as the text it
@@ -74,10 +76,10 @@
 #'     placeholder inside a sentence.}
 #' }
 #'
-#' Additional or overriding values can be supplied through `variables`; names may
-#' be given with or without the surrounding braces (`"DTA_TITLE"` and
-#' `"{DTA_TITLE}"` are equivalent). User-supplied values take precedence over the
-#' automatically extracted ones and may introduce entirely new placeholders.
+#' Additional or overriding values can be supplied through `variables`; names
+#' may be given with or without the surrounding braces (`"DTA_TITLE"` and
+#' `"{DTA_TITLE}"` are equivalent). User-supplied values take precedence over
+#' the automatically extracted ones and may introduce entirely new placeholders.
 #' Study and agreement sections appear only where their placeholders occur;
 #' user-owned templates are never extended automatically. The new blocks
 #' render nothing when the corresponding metadata is empty. Agreement sections
@@ -869,10 +871,11 @@ dta_template_placeholders <- function(dta = NULL) {
 #' responsible for writing the owning document back to disk; this function's
 #' return value is only the leftover report.
 #'
-#' Within each paragraph the text of all runs is concatenated before
-#' substitution so that placeholders split across runs are still matched; the
-#' replacement text is written to the first run and the remaining runs of that
-#' paragraph are blanked. Setting text through `xml2` escapes XML special
+#' Within each paragraph, placeholders that lie inside a single run are
+#' substituted run by run, leaving each run's formatting untouched. Only if a
+#' placeholder spans runs (see `.tv_spans_runs()`) is the text of all runs
+#' joined, substituted, and written to the first run, with the remaining runs
+#' of that paragraph blanked. Setting text through `xml2` escapes XML special
 #' characters automatically.
 #'
 #' @param paras An `xml_nodeset` of `<w:p>` paragraph nodes to substitute into.

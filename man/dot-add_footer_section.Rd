@@ -2,7 +2,8 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.add_footer_section}
 \alias{.add_footer_section}
-\title{Add footer with page numbers and metadata}
+\title{Add a closing paragraph with generation time and version metadata
+(a "Generated: ... | Document Version: ..." line; no page numbers).}
 \usage{
 .add_footer_section(
   doc,
@@ -12,6 +13,7 @@
 )
 }
 \description{
-Add footer with page numbers and metadata
+Add a closing paragraph with generation time and version metadata
+(a "Generated: ... | Document Version: ..." line; no page numbers).
 }
 \keyword{internal}

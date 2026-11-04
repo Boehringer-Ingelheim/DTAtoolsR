@@ -13,7 +13,10 @@ validate_transmission_dates(x)
 A list with elements is_valid (logical) and messages (character vector)
 }
 \description{
-Check that transmission dates are valid (either Date objects or non-empty character phrases)
+Check that transmission dates are valid (either Date objects or
+non-empty character phrases).
+The check also fails when both dates are Date objects and the first transfer
+date is after the last.
 }
 \examples{
 md <- create_example_DTAMetaData(2)

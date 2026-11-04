@@ -17,12 +17,12 @@
 | Run single test file | `Rscript -e "devtools::test(filter='TestFileName')"` (e.g., `'DTAFile'`) |
 | Style R code | `Rscript .github/scripts/style.R` (check only: `--check`) |
 | Regenerate docs + NAMESPACE | `Rscript -e "roxygen2::roxygenise()"` |
-| Full package check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual')"` |
+| Full package check (= CI) | `Rscript -e "rcmdcheck::rcmdcheck(args='--no-manual', env=c(NOT_CRAN='true'))"` |
 | Fast pre-commit hooks | `pre-commit run --all-files` |
 
 **Note (Windows/PowerShell):** `R` is an alias for `Invoke-History` — always use `Rscript`, and quote `-e` arguments with double quotes so they survive shell parsing. If `Rscript` is not on `PATH`, check `CLAUDE.local.md` for the absolute path on this machine.
 
-**Note on `pre-commit`:** Only runs language-agnostic checks (whitespace, merge conflicts, private keys, forbidden artifacts). It does **not** style or roxygenise R code. You must run the "Style R code" and "Regenerate docs" commands yourself before committing. CI enforces both in `r-style` and `R-CMD-check` workflows — PRs with unstyled code or stale `man/` or `NAMESPACE` will not pass.
+**Note on `pre-commit`:** Only runs language-agnostic checks (whitespace, merge conflicts, private keys, forbidden artifacts). It does **not** style or roxygenise R code. You must run the "Style R code" and "Regenerate docs" commands yourself before committing. CI enforces both in the `r-style` workflow — PRs with unstyled code or stale `man/` or `NAMESPACE` will not pass.
 
 ## Architecture
 
@@ -32,17 +32,18 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 - **DTA** — Root object: holds metadata + a list of datasets + rules.
 - **DTADataSet** (abstract base)
-  - **DTADataSetTabular** — In-memory or on-disk tabular data (CSV, TSV).
+  - **DTADataSetTabular** — In-memory or on-disk tabular data (delimited text such as CSV, TSV).
   - **DTADataSetFile** — Non-tabular deliverable files (presence/readability validation only).
 - **DTAFile** (abstract base, for file I/O)
-  - **DTAFileCSV**, **DTAFileDelim**, **DTAFileTSV** — Delimited text files.
-  - **DTAFileTabular** — Generic handler.
+  - **DTAFileTabular** — Tabular file handler (child of DTAFile).
+    - **DTAFileCSV**, **DTAFileDelim**, **DTAFileTSV** — Delimited text files (children of DTAFileTabular).
+  - **DTAFileAny** — Handler for non-tabular deliverable files (child of DTAFile).
 - **DTAColumnSpec** — Single column type/nullability/allowed values/regex.
 - **DTAColumnSpecCollection** — All columns for one dataset.
 - **DTAMetaData** — Agreement title, version, author, etc.
 - **DTARule** (abstract base, for cross-column validation)
-  - **DTARuleColCondition** — Single-column conditional (e.g., if A, then B must be X).
-  - **DTARuleColRange** — Value range constraint across multiple columns.
+  - **DTARuleColCondition** — Row-level IF/THEN conditional across columns (e.g., if A, then B must be X).
+  - **DTARuleColRange** — Numeric min/max constraint on exactly one column.
   - **DTARuleColUnique** — Uniqueness constraint.
   - **DTARuleGroupCondition** — Group-level conditional.
 
@@ -51,13 +52,13 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 ### Data Flow
 
 1. **Input:** YAML spec file → `read_dta_from_yaml()` → DTA object with metadata + column specs.
-2. **Load:** CSV/TSV/XLSX file → `load_file(dataset, file)` → Data loaded into DTADataSet, read in declared column types.
+2. **Load:** CSV/TSV (delimited text) file → `load_file(dataset, file)` → Data loaded into DTADataSet, read in declared column types.
 3. **Validate:** `check(dta)` runs three independent validation passes:
    - **Import** — Can each value be read in its declared type?
    - **Schema** — Does each value conform to nullability, allowed values, regex, etc.?
    - **Rules** — Do rows satisfy cross-column logical constraints?
 4. **Inspect:** `results(dta)`, `messages(dta)`, `inspect(dta, dataset, table, row, column)` for detailed drilling.
-5. **Export:** `write_file(dta, ...)` → CSV/TSV with optional gzip compression and MD5 checksums; `write_dta()` → Word document with spec tables.
+5. **Export:** `write_table_to_file()` → delimited text (CSV/TSV) with optional gzip compression and MD5 checksums; `write_dta()` / `write_file_specification()` → Word document (or other formats) with spec tables.
 
 ### Key Helpers
 
@@ -124,7 +125,7 @@ The package is organized as a hierarchy of S7 classes, all defined in `R/<ClassN
 
 ## Workflow: Using Subagents
 
-This repository is configured with three custom subagents in `.claude/commands/`:
+This repository is configured with three project subagents in `.claude/agents/` (`Explore`, `r-verify`, `r-review`), wrapped by the slash commands `/find`, `/verify`, `/review` in `.claude/commands/`:
 
 ### Triggers (Use Without Asking)
 
@@ -164,10 +165,15 @@ Subagents start cold and re-derive context, so they're expensive for small work.
 
 Located in `.github/workflows/`:
 
-- **`R-CMD-check.yaml`** — `R CMD check --no-manual` plus R version matrix.
-- **`r-style.yaml`** — Runs `styler` and `roxygen2::roxygenise()`, fails on any diff (does not auto-fix).
-- **`pre-commit.yml`** — Fast language-agnostic checks (whitespace, merge conflicts, private keys).
-- **`release.yml`** — Release workflow (release branch only).
+- **`R-CMD-check.yaml`** — `R CMD check` on PRs to `master`/`dev` (5-leg matrix: macOS/Windows release, Ubuntu devel/release/oldrel-1), weekly schedule, manual dispatch.
+- **`r-style.yaml`** — PRs to `master`/`dev`: the `check_*.R` scripts (R sanity, deps-in-DESCRIPTION, version sync, app manifest), `sync_qualification_manifest.R --check`, `style.R --check`, and `roxygen2::roxygenise()`; fails on any diff (does not auto-fix).
+- **`pre-commit.yml`** — PRs to `master`/`dev`: fast language-agnostic checks (whitespace, merge conflicts, private keys).
+- **`manifest-sync.yml`** — PRs to `master`/`dev`: syncs the Shiny app `manifest.json` checksums/refs via `bump_version.R --sync-manifest`.
+- **`qualification.yml`** — Weekly schedule (quick tier) and manual dispatch (scale input: quick/standard/full): qualification suite on three operating systems.
+- **`bump-version.yml`** — Manual dispatch: runs `bump_version.R` and opens a version-bump PR.
+- **`release.yml`** — On a published release (or manual dispatch with a tag): builds the package tarball and attaches it to the release.
+- **`manifest-release-sha.yml`** — On a published release (or manual dispatch): opens a PR pinning the app manifest to the release tag's commit.
+- **`pages.yml`** — Pushes to `master` that touch `docs/**` (or manual dispatch): deploys `docs/` to GitHub Pages.
 
 **Before pushing:** Always run `Rscript .github/scripts/style.R` and `Rscript -e "roxygen2::roxygenise()"` yourself. CI is strict.
 

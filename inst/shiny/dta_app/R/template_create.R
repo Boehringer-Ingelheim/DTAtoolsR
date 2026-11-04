@@ -22,9 +22,10 @@
 #                                           dataset_template.R.
 #
 # create_dta_from_template() (template_core.R) is extended, not replaced, to
-# call these when a caller supplies an `index` -- every caller that does not
-# (all 55 pre-existing tests) takes the exact code path that predates this
-# file, byte-identical.
+# call these when it has an `index` -- supplied by the caller or built on demand
+# when a `template:` entry or vocabulary slot needs one. A template using only
+# the legacy dataset forms, with no index, takes the exact code path that
+# predates this file, byte-identical.
 #
 # `%||%` and `dta_try()` are already bound in the app helper environment (see
 # utils_dta.R) -- not redefined here, same convention as every other template
@@ -166,14 +167,11 @@ template_dataset_entry_kind <- function(ref) {
 # `selections` resolves a structural variant before building its datasets.
 # Dataset-template options still come only from each entry's static `options:`
 # map, not from implicit propagation of creation metadata options.
-# `template_path` is NOT one of the four
-# arguments the calling convention advertises, but the three legacy forms
-# cannot resolve a dataset path "relative to the template file" without it --
-# it defaults to NULL, under which those two branches degrade to exactly what
-# resolve_template_dataset_path() already does with a NULL template_path
-# (package-extdata resolution by bare name still works; the
-# relative-to-template-file branch simply never matches, and there is no
-# absolute-path branch left for it to fall back on).
+# `template_path` locates the `path:`/`source:` dataset files relative to the
+# template file. It defaults to NULL, under which
+# resolve_template_dataset_path() skips the relative-to-template-file lookup
+# and only the package-extdata lookup by bare name can succeed (there is no
+# absolute-path branch to fall back on).
 #
 # Returns list(datasets = <list of DTADataSet objects>, provenance = <list,
 # one entry per "template" dataset entry, in encounter order>). The legacy
@@ -341,8 +339,9 @@ template_party_profiles <- function(index) {
 # describe the RELATIONSHIP the document is about, which does not change just
 # because a new version is being drafted from a template.
 #
-# sections are available explicitly, but NOT selected by default: old clauses
-# must not silently overwrite a revised template's agreement text.
+# sections can be carried over when a caller names them in `fields`, but they
+# are NOT in this default list: old clauses must not silently overwrite a
+# revised template's agreement text.
 #
 # title/version/date/version_history are DELIBERATELY excluded: they are the
 # ancestor document's own identity and revision history, not properties of

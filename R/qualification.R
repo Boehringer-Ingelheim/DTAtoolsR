@@ -1238,7 +1238,9 @@ qual_unit_tests <- function(mode = c("auto", "never", "always"), scale = "standa
 # developer suite sets options, changes directory and loads packages, none of
 # which should be able to reach the session that is producing the evidence.
 #
-# Returns the per-file result frame, or NULL when the suite did not finish.
+# Returns list(results, failures, reason). `results` is the per-test result
+# frame and `reason` is NA on success; when the suite did not finish, `results`
+# and `failures` are NULL and `reason` says why.
 qual_unit_tests_run <- function(dir, timeout_sec) {
   script <- tempfile(fileext = ".R")
   out <- tempfile(fileext = ".rds")
@@ -1965,9 +1967,10 @@ run_qualification <- function(output_dir,
   }
   qual_write_summary_txt(x, bundle_dir)
 
-  # results.json is rewritten once so that it records the hash of the report it
-  # is bound to and the formats actually produced. Its own hash, quoted in the
-  # report and in SUMMARY.txt, is the one taken before this rewrite.
+  # results/run.json (the serialised x$run) is written last, so that it can
+  # record formats_rendered, hash_manifest and results_json_hash, none of which
+  # exist when results.json is built. The hash quoted in the report and in
+  # SUMMARY.txt is that of results.json, taken before this write.
   jsonlite::write_json(
     x$run, file.path(bundle_dir, "results", "run.json"),
     auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null"

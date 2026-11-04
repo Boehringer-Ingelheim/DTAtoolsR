@@ -126,7 +126,7 @@ surfaced as "Validation INCOMPLETE".
 }
 \section{Options that tune a scan}{
 
-Three options change how a streamed table is read. None of them changes
+Four options change how a streamed table is read. None of them changes
 what is reported: a table gets the same verdict, the same counts and the
 same error detail whatever they are set to.
 

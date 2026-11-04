@@ -2,7 +2,7 @@
 % Please edit documentation in R/evaluateRules.R
 \name{dta_rule_target_columns}
 \alias{dta_rule_target_columns}
-\title{Target Columns of a Rule, However They Are Spelled}
+\title{Target Columns of a Rule}
 \usage{
 dta_rule_target_columns(rule)
 }
@@ -14,8 +14,6 @@ The slot's value -- a character vector -- or \code{NULL} when the rule
 names no target either way.
 }
 \description{
-A rule may name its target under \code{column} or \code{columns}. Four call sites used
-to restate that fallback independently; this is the one place that resolves
-it, so a new spelling (or a change in precedence) is a one-line change.
+Reads the \code{columns} slot of a rule. Four call sites share this one place.
 }
 \keyword{internal}

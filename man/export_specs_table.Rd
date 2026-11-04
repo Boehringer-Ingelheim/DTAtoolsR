@@ -19,14 +19,17 @@ column specifications.}
 
 \item{file}{Character. The name of the output Word file in which the DTA Spec Table shall be written. Default is "dta_spec_table.docx".}
 
-\item{overwrite}{Logical. whether to overwrite the file.}
+\item{overwrite}{Logical. Whether to overwrite an existing \code{file}; if
+\code{FALSE} (the default) an existing file is an error.}
 
-\item{colnames}{Vector. Vector containing column names of the DTA table. Default: c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")}
+\item{colnames}{Character vector of column names for the table. Only two
+values are accepted, otherwise the function aborts: the default
+\code{c("Variable Name", "Variable Label", "Type", "Length", "Format", "Nullable", "Description")}, or the same without \code{"Length"}.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
 }
 \value{
-Flextable object that is saved.
+Invisibly, the flextable that was saved to \code{file}.
 }
 \description{
 This function takes a DTAColumnSpecCollection and generates a Word document containing a table with the DTA columns specs.

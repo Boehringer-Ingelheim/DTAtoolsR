@@ -81,7 +81,7 @@ starting the app. See \code{vignette("DTAtools")} for a walkthrough and
 session default for \code{load_file(stream =)}, and the size in bytes
 above which \code{"auto"} keeps a file lazy (512 MB by default).}
 \item{\code{DTAtools.stream_block_size}}{Bytes per Arrow read block on a
-delimited file, 1 MiB by default. This, times Arrow's read-ahead, is
+delimited file, 8 MiB by default. This, times Arrow's read-ahead, is
 what governs peak memory during a scan.}
 \item{\code{DTAtools.max_errors}}{How many per-cell error rows are held in
 memory, 10000 by default. Counts and the verdict are exact whatever it

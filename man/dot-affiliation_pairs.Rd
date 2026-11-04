@@ -2,13 +2,17 @@
 % Please edit documentation in R/formattingHelpers.R
 \name{.affiliation_pairs}
 \alias{.affiliation_pairs}
-\title{Extract affiliation fields (name/country/address/...) as ordered key-value pairs.
-Deliberately excludes the "contacts" element, which is rendered separately as a table.}
+\title{Extract affiliation fields (name/country/address/...) as ordered key-value
+pairs. Deliberately excludes the "contacts" element, which is rendered
+separately: as per-contact blocks in the built-in layout, as a table in the
+template block.}
 \usage{
 .affiliation_pairs(affiliation)
 }
 \description{
-Extract affiliation fields (name/country/address/...) as ordered key-value pairs.
-Deliberately excludes the "contacts" element, which is rendered separately as a table.
+Extract affiliation fields (name/country/address/...) as ordered key-value
+pairs. Deliberately excludes the "contacts" element, which is rendered
+separately: as per-contact blocks in the built-in layout, as a table in the
+template block.
 }
 \keyword{internal}

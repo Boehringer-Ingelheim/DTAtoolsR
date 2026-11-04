@@ -43,13 +43,17 @@ expected.}
 \item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected.}
 
-\item{info}{Character or \code{NULL}; free-text description of the file.}
+\item{info}{Character, list or \code{NULL}; free-text description of the
+file.}
 
-\item{missing_values}{Character. String representing missing values in the
-file. Default is \code{""}.}
+\item{missing_values}{Character. Values the file writes for a missing cell
+(for instance \code{"."} in the SAS convention), honoured in addition to
+the empty string and \code{"NA"}, which are always treated as missing.
+The default \code{""} declares nothing and keeps the reader's own missing
+set.}
 
-\item{sep}{Character. Field separator used in the TSV file.
-Defaults to tab ("\\t").}
+\item{sep}{Character. Single-character field separator. Defaults to tab
+(\code{"\\t"}).}
 
 \item{has_header}{Logical; \code{TRUE} if the first row is a header. Default
 is \code{TRUE}.}
@@ -86,9 +90,10 @@ copied byte for byte rather than normalised.
 The cost is disk and one pass, not memory. Conversion runs at an order of
 20 MB/s -- 21 MB/s measured here on a 172 MiB, 1,000,000 x 20 latin1 CSV,
 and 19 MB/s of decoded output when the source is gzip-compressed -- and the
-copy is the size of the decoded text: roughly the size of the source for latin1
-that is mostly ASCII, up to twice it for text that is wholly accented, and
-the full decoded size for a \code{.gz} source. A very large non-UTF-8
+copy is the size of the decoded text: roughly the size of the source for
+latin1 that is mostly ASCII, up to twice it for text that is wholly
+accented, and the full decoded size for a \code{.gz} source. A very large
+non-UTF-8
 delivery needs that much free space under \code{tempdir()}; declaring
 \code{"UTF-8"} for a file that really is UTF-8 costs nothing at all. The
 block the conversion works in is

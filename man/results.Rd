@@ -9,18 +9,23 @@ results(x, ...)
 \arguments{
 \item{x}{A \code{DTA}, \code{DTADataSet}, or \code{DTADataSetTabular} object.}
 
-\item{...}{Additional method arguments.}
+\item{...}{Method arguments. The \code{DTADataSet} and \code{DTADataSetTabular}
+methods take \code{tables} (names or indices of the tables to report on;
+\code{NULL} for all). The \code{DTA} method takes \code{datasets} (\code{NULL}, dataset
+names, or indices).}
 }
 \value{
-A data.frame summarizing validation state.
-
-For \code{DTADataSetTabular}, columns are:
-\code{target}, \code{status}, \code{validated_at}, \code{run_id}, \code{validation_run},
-\code{n_columnspec_errors}, \code{n_rule_errors}, \code{n_import_errors}.
-
-For \code{DTA}, the summary is aggregated per dataset and includes:
-\code{dataset}, \code{n_targets}, \code{n_validated}, \code{n_valid}, \code{n_invalid},
+A data.frame with one row per validation target (table), with columns:
+\code{dataset}, \code{target}, \code{target_type}, \code{status}, \code{validated_at}, \code{run_id},
+\code{validation_run}, \code{n_columnspec_errors}, \code{n_rule_errors},
+\code{n_import_errors}, \code{n_targets}, \code{n_validated}, \code{n_valid}, \code{n_invalid},
 \code{n_skipped}, \code{n_not_validated}.
+
+The \code{n_targets} ... \code{n_not_validated} columns are counts over all
+targets of the dataset and repeat on every row of that dataset; they are
+not aggregated across datasets. For a \code{DTA}, the per-dataset results are
+row-bound. A dataset that is not a \code{DTADataSet} contributes a single row
+with status \code{"not_validated"} and \code{NA} in the other columns.
 }
 \description{
 Returns a programmatic summary of the latest validation/check state.

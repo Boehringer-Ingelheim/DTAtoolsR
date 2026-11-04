@@ -120,7 +120,7 @@ DTA <- S7::new_class(
 #' Method to get Metadata from a DTA object.
 #' @param x An object of class DTA
 #' @param ... Not used by current methods; reserved for future extensions.
-#' @return A list with metadata information
+#' @return A \code{DTAMetaData} object
 #' @examples
 #' dta_obj <- create_example_DTA()
 #' metadata(dta_obj)
@@ -311,7 +311,8 @@ method(`[`, DTA) <- function(x, i) {
 #'     \code{\link{check}()}.}
 #' }
 #'
-#' @param x A \code{DTA} or \code{DTADataSetTabular} object.
+#' @param x A \code{DTA}, \code{DTADataSetTabular} or \code{DTADataSetFile}
+#'   object.
 #' @param ... Additional arguments passed to the method.
 #' @return The updated object.
 #' @seealso \code{\link{check}()}, whose \code{batch_rows} and \code{max_errors}
@@ -586,8 +587,8 @@ dta_overall_summary_message <- function(total_invalid,
 # Both unknown-severity paths abort rather than falling through. `switch()`
 # without a default arm returns NULL invisibly for an unmatched string, so a
 # severity added to a builder but not here would make that summary line vanish
-# silently -- the same class of defect as the two this change fixes, in the
-# code that fixes them.
+# silently -- a verdict line missing or wrong where the builders above decide
+# what it must say.
 #' @keywords internal
 dta_emit_summary_message <- function(summary_message) {
   severity <- summary_message$severity
@@ -611,7 +612,7 @@ dta_emit_summary_message <- function(summary_message) {
 #' Provides comprehensive validation summary across all datasets.
 #'
 #' @section Options that tune a scan:
-#' Three options change how a streamed table is read. None of them changes
+#' Four options change how a streamed table is read. None of them changes
 #' what is reported: a table gets the same verdict, the same counts and the
 #' same error detail whatever they are set to.
 #'
@@ -1100,7 +1101,8 @@ method(print, DTA) <- function(x, ...) {
 #' @title Create Example DTA Object
 #' @description
 #' Creates an example DTA object for demonstration purposes.
-#' @param index index of the example to create
+#' @param index Index of the example to create. Only \code{1} is currently
+#'   available; any other value is an error (or, for \code{2}, \code{NULL}).
 #' @importFrom cli cli_abort
 #' @return An object of class DTA with example data
 #' @examples

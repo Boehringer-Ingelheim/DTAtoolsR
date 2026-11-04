@@ -8,6 +8,9 @@
 #'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
+#'   Every handler must inherit \code{DTAFileTabular} (for example
+#'   \code{DTAFileCSV} or \code{DTAFileTSV}), because a tabular dataset parses
+#'   its files; a reader-less handler is rejected.
 #' @param tables A named list of tabular objects. A materialised entry
 #'   (data.frame or Arrow Table) is typed by `specs` and converted to an Arrow
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
@@ -17,10 +20,10 @@
 #'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
 #' @param description Character or NULL. Long free-text description of the
 #'   dataset.
-#' @param template_source Character or NA. Source of the template used to
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @details
 #' A table handed to this constructor is a table already in memory, which is
 #' the case [check()]'s retained-error cap is least suited to. `max_errors`
@@ -328,10 +331,11 @@ method(specs, DTADataSetTabular) <- function(x) {
 #' @title Get table from DTADataSetTabular Object
 #' @description
 #' Extract a table from the tables in a DTADataSetTabular object.
-#' @param x An object of class DTADataSet.
+#' @param x An object of class DTADataSetTabular.
 #' @param id Character or numeric. Name or index of the table to retrieve.
 #' @param ... Not used by current methods; reserved for future extensions.
-#' @return An Arrow Table object.
+#' @return The table as stored: an Arrow Table, or, for a table loaded lazily,
+#'   an Arrow Dataset, \code{arrow_dplyr_query} or RecordBatchReader.
 #' @importFrom cli cli_abort
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
@@ -425,15 +429,16 @@ method(labels, DTADataSetTabular) <- function(object, ...) {
 #' @importFrom cli cli_alert_info cli_alert_success format_message cli_abort
 #' @importFrom tools md5sum
 #' @export
-#' @param DTADataSetTabular An object of class DTADataSet.
+#' @param DTADataSetTabular An object of class DTADataSetTabular.
 #' @param table Character. The name of the table within the DTADataSetTabular object to write.
 #' @param filename Character. The name of the file to write to.
 #' @param arrange_by Character vector. Columns to arrange the table by. NULL, Table won't be arranged. "all" (Default) -> Table will be arranged by all columns.
 #' @param arrange_desc Logical. Whether to arrange the table in descending order. Default is FALSE.
-#' @param sep Character. The field separator string. Default is ",".
+#' @param sep Character. The field separator string. Default is a tab
+#'   (\code{"\\t"}).
 #' @param na Character. The string to use for missing values in the data. Default is "".
-#' @param row.names Logical. Row names provided.
-#' @param quote Logical. Use of quotes
+#' @param row.names Logical. Write row names.
+#' @param quote Logical. Quote character and factor fields.
 #' @param overwrite Logical. Whether to overwrite the file if it exists. Default
 #'   is FALSE, so a call against an existing path aborts unless `overwrite =
 #'   TRUE` is passed explicitly.
@@ -787,10 +792,10 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 }
 
 
-#' @title loads file
+#' @title Load a file into a DTADataSetTabular
 #' @description
 #' Load the content of the file into dataset
-#' @param x An object of class DTADataSet
+#' @param x An object of class DTADataSetTabular
 #' @param ... Additional named arguments:
 #'   \describe{
 #'     \item{file}{file to be loaded}
@@ -805,7 +810,7 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #'     \item{stream}{whether to keep the file lazy rather than reading it into
 #'       memory. See \code{\link{load_file}}.}
 #'   }
-#' @return object of class DTADataSet with loaded data
+#' @return object of class DTADataSetTabular with loaded data
 #' @examples
 #' file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 #' ds <- DTADataSetTabular(
@@ -993,12 +998,21 @@ dta_unspecified_validation_row <- function(table_name, target_type = "table") {
 
 #' @title Validation Status for DTADataSetTabular
 #' @description Returns a compact status table for validated tables.
-#' @param x A \'DTADataSetTabular\' object.
+#' @param x A \'DTADataSetTabular\' or \'DTADataSetFile\' object.
 #' @param ... Additional arguments:
 #'   \describe{
 #'     \item{tables}{NULL (default), character table names, or numeric table indices.}
 #'   }
-#' @return A data.frame with validation status per table.
+#' @return A data.frame with one row per table (per file, for a
+#'   \code{DTADataSetFile}) and the columns \code{table}, \code{target_type}
+#'   (\code{"table"} or \code{"file"}), \code{status}, \code{ok},
+#'   \code{validated_at}, \code{run_id}, \code{validation_run},
+#'   \code{n_columnspec_errors}, \code{n_rule_errors} and
+#'   \code{n_import_errors}. \code{status} is \code{"validated"},
+#'   \code{"not_validated"} or, for a table checked against no column
+#'   specification, \code{"unspecified"}; \code{ok} is \code{NA} for the last
+#'   two. A dataset with no tables yields a zero-row data.frame with the same
+#'   columns.
 #' @usage validation_status(x, ...)
 #' @name validation_status
 #' @export
@@ -1067,7 +1081,7 @@ S7::method(validation_status, DTADataSetTabular) <- function(x, tables = NULL) {
 #' @description
 #' Returns detailed validation output for one table, either from in-memory
 #' store or from persisted artifact.
-#' @param x A \'DTADataSetTabular\' object.
+#' @param x A \'DTADataSetTabular\' or \'DTADataSetFile\' object.
 #' @param ... Additional arguments:
 #'   \describe{
 #'     \item{table}{Character or numeric table identifier.}
@@ -1163,7 +1177,8 @@ S7::method(clear_validation, DTADataSetTabular) <- function(
 #' @title Invalidate Validation Due to Spec Changes
 #' @description
 #' Marks validation as outdated for specified tables when specs are changed.
-#' This is a helper function called automatically when specs are updated.
+#' It is not called automatically: call it yourself after changing \code{@specs}
+#' so the next \code{check()} revalidates.
 #' @param x A \'DTADataSetTabular\' object.
 #' @param tables NULL (default) to invalidate all tables, or character/numeric
 #'   table identifiers.

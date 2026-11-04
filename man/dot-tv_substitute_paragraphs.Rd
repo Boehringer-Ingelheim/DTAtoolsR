@@ -24,10 +24,11 @@ responsible for writing the owning document back to disk; this function's
 return value is only the leftover report.
 }
 \details{
-Within each paragraph the text of all runs is concatenated before
-substitution so that placeholders split across runs are still matched; the
-replacement text is written to the first run and the remaining runs of that
-paragraph are blanked. Setting text through \code{xml2} escapes XML special
+Within each paragraph, placeholders that lie inside a single run are
+substituted run by run, leaving each run's formatting untouched. Only if a
+placeholder spans runs (see \code{.tv_spans_runs()}) is the text of all runs
+joined, substituted, and written to the first run, with the remaining runs
+of that paragraph blanked. Setting text through \code{xml2} escapes XML special
 characters automatically.
 }
 \keyword{internal}

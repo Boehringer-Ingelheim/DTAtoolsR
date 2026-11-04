@@ -1,6 +1,8 @@
 # -----------------------------------------------------------------------------
 # Utilities: thin, safe wrappers around the DTAtools API.
-# The app mutates the DTA object ONLY through these helpers.
+# The app mutates the DTA object mainly through these helpers (a few spots in
+# app.R, e.g. restoring the version history after a rebuild, set properties
+# directly).
 #
 # `%||%` and `dta_try()` below are the two primitives every other engine file
 # (template_core.R, template_create.R, template_inherit.R, template_index.R,
@@ -782,7 +784,7 @@ dta_status_map <- function(dta) {
   }
 
   for (nm in names_ds) {
-    # No bound data -> nodata, independent of results() (Contract C5).
+    # No bound data -> nodata, independent of results().
     if (dta_dataset_content_count(dta_get_dataset(dta, nm)) == 0) {
       out[[nm]] <- "nodata"
       next
@@ -2195,17 +2197,6 @@ dta_rule_to_list <- function(rule) {
     return(NULL)
   }
   ty <- raw$type %||% ""
-  ty <- switch(ty,
-    check_col_condition = ,
-    col_condition = "col_condition",
-    check_range = ,
-    col_range = "col_range",
-    check_unique = ,
-    col_unique = "col_unique",
-    check_group_condition = ,
-    group_condition = "group_condition",
-    ty
-  )
   out <- list(id = raw$id, type = ty)
   if (!is.null(raw$description) && length(raw$description) && nzchar(raw$description)) {
     out$description <- raw$description
@@ -2440,7 +2431,7 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # Create a new, empty dataset of the given `type` and append it to `dta`.
 #
 # `type` is a CREATION-TIME choice only, never revisited afterwards -- see the
-# comment above dta_set_dataset_meta() (~L1629-1637) for why the property
+# comment above dta_set_dataset_meta() for why the property
 # itself cannot be trusted once a dataset exists: assigning `ds@type` passes
 # its validator without changing the S7 class, so nothing downstream would
 # dispatch correctly on the new value. That is exactly why no helper in this
@@ -2448,7 +2439,8 @@ dta_set_dataset_meta <- function(dta, dataset, id, name = NULL, description = NU
 # a different type is to add a new dataset and remove the old one.
 #
 # APPENDED AT THE END, never inserted anywhere else. Every nav button, upload
-# slot and example picker in the app (app.R:774-799 and nearby) is keyed by
+# slot and example picker in the app (see the dataset nav and upload observers
+# in app.R) is keyed by
 # the dataset's POSITION in `dta@datasets`, resolving the name only at click
 # time -- so inserting ahead of an existing entry would silently repoint those
 # controls at the wrong dataset. Appending is the one mutation that cannot do
@@ -2588,7 +2580,7 @@ dta_column_fields <- function(dta, dataset, id) {
 
 # Add or update a column (rename when old_id differs). Returns dta_try().
 #
-# RENAME GUARD mirrors dta_set_dataset_meta() (~L2244-2251): renaming onto an
+# RENAME GUARD mirrors dta_set_dataset_meta()'s rename guard: renaming onto an
 # id another column already holds would otherwise fall straight through to
 # `cols[[id]] <- spec` and silently destroy that column. Adding a column
 # under an already-existing id with old_id = NULL is a different, intended
@@ -2761,17 +2753,7 @@ dta_build_rule <- function(id, type, description = NULL, condition = NULL,
   if (!nzchar(id)) stop("A rule id is required.")
   if (grepl("\\s", id)) stop("Rule id cannot contain whitespace.")
   desc <- if (!is.null(description) && nzchar(description)) description else NULL
-  ty <- switch(type,
-    col_condition = ,
-    check_col_condition = "col_condition",
-    col_range = ,
-    check_range = "col_range",
-    col_unique = ,
-    check_unique = "col_unique",
-    group_condition = ,
-    check_group_condition = "group_condition",
-    type
-  )
+  ty <- type
   if (identical(ty, "col_condition")) {
     DTAtools::DTARuleColCondition(
       id = id, description = desc,
@@ -3317,8 +3299,9 @@ dta_update_contact <- function(dta, side, index, fields) {
 # ---- Raw-YAML apply reconciliation (handler / spec diff + data transfer) --
 # When the editable Raw YAML is applied, the app must NOT blindly discard bound
 # uploads. These helpers let the server compare the OLD and NEW dataset shapes
-# so it can: keep uploads whose file handlers are unchanged, clear a dataset's
-# uploads when its handlers changed, drop deleted datasets, and clear only the
+# so it can: keep uploads whose file handlers are unchanged, re-key uploads of
+# a dataset whose handlers changed (dta_match_handlers(); only files whose
+# handler vanished are unloaded), drop deleted datasets, and clear only the
 # affected dataset's validation when its columns/rules changed.
 
 # A stable string signature of a dataset's file handlers (for equality tests).

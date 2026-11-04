@@ -289,11 +289,27 @@ test_that("OQ-RULE-034 | the rule factory builds each type and rejects the rest 
     vapply(built, function(x) class(x)[[1]], character(1))
   )
 
-  # The check_* spellings are the ones a YAML specification uses.
-  qa_step(
-    "the check_ spellings build the same class",
-    "DTAtools::DTARuleColRange",
-    class(DTARuleFactory(id = "e", type = "check_range", columns = "A", range = c(1, 2)))[[1]]
+  # The retired spellings are not aliases: they are unknown types.
+  err_old <- tryCatch(
+    DTARuleFactory(id = "e", type = "check_range", columns = "A", range = c(1, 2)),
+    error = function(e) e
+  )
+  qa_check("the retired check_range type is rejected", inherits(err_old, "error"))
+  qa_check(
+    "and the message names the type it did not recognise",
+    grepl("Unknown rule type: check_range", conditionMessage(err_old), fixed = TRUE)
+  )
+
+  # `column` is an abbreviation of the `columns` argument, not a spelling of it.
+  err_key <- tryCatch(
+    DTARuleFactory(id = "g", type = "col_range", column = "A", range = c(1, 2)),
+    error = function(e) e
+  )
+  qa_check("an inexact argument name is rejected", inherits(err_key, "error"))
+  qa_check(
+    "and the message names the offending argument",
+    grepl("Unknown argument", conditionMessage(err_key), fixed = TRUE) &&
+      grepl("column", conditionMessage(err_key), fixed = TRUE)
   )
 
   err <- tryCatch(DTARuleFactory(id = "f", type = "no_such_rule"), error = function(e) e)

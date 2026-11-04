@@ -838,20 +838,22 @@ apply_template_expressions <- function(dta) {
 # Build a new DTA object from a creation template + selected option values.
 #
 # `selections` is a named list keyed by option id (unchanged from before this
-# function grew the four arguments below).
+# function grew the five arguments below).
 #
-# The four new arguments each default to exactly what reproduces the ORIGINAL
+# The five new arguments each default to exactly what reproduces the ORIGINAL
 # behaviour of this function -- every one of the 55 tests that predate them
-# calls this with none of the four set, and must keep passing unmodified:
+# calls this with none of the five set, and must keep passing unmodified:
 #
 #   index            when supplied, `datasets:` entries are built via
 #                    build_template_datasets() (template_create.R), which
 #                    additionally understands a `template:` entry (built from
 #                    a dataset template resolved through `index`) on top of
-#                    the three legacy forms. When NULL (the default), dataset
-#                    building takes the ORIGINAL inline code path below,
-#                    verbatim -- so a `template:` entry is simply unreachable
-#                    without an index, exactly as it always has been.
+#                    the three legacy forms. When NULL (the default), the
+#                    index is built on demand (dta_template_index_cached())
+#                    only if a `template:` entry, a vocabulary slot or a
+#                    vocabulary binding needs it; a template using just the
+#                    legacy forms never builds one and takes the ORIGINAL
+#                    inline code path below, verbatim.
 #   carry_over       list(metadata = <DTAMetaData>, fields = <character>) --
 #                    an ancestor document's metadata to carry onto this one
 #                    (see apply_metadata_carry_over(), template_create.R).
@@ -868,12 +870,17 @@ apply_template_expressions <- function(dta) {
 #                    all -- exactly the pre-existing behaviour, since
 #                    @template did not exist as a settable concept before this
 #                    file's own history.
+#   vocab_selections named list, vocabulary slot id -> chosen vocabulary.
+#                    NULL (default) selects nothing, so every slot keeps its
+#                    declared default (see resolve_vocabulary_slot_overrides()).
 #
-# The ORDER these six steps run in is the contract, and is deliberately NOT
+# The ORDER these steps run in is the contract, and is deliberately NOT
 # "whatever order was easiest to bolt on":
 #
 #   1. datasets   2. base.metadata   3. carry-over   4. party slots
 #   5. options    6. ${version}      7. provenance (LAST)
+#
+# (a `required:` check on the selections also runs, as 6a, after ${version}.)
 #
 # Carry-over (3) runs before party slots (4) and options (5) so that a value
 # THIS document's own author actively chooses always beats whatever an

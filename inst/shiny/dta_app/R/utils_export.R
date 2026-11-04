@@ -160,9 +160,10 @@ pandoc_no_images_filter <- function() {
   path
 }
 
-# The canonical placeholder-token grammar for template files. Mirrors
-# .tv_token_pattern() in R/exportTemplateDocx.R, extended with the optional
-# `:DATASET` argument a placeholder may carry (e.g. `{COLUMN_SPECS:ADSL}`).
+# The placeholder-token grammar for template files, a sibling of
+# .tv_token_pattern() in R/exportTemplateDocx.R. It differs in two ways: it
+# does not accept the `#`/`/` region-marker prefix (`{#DATASETS}`), and its
+# optional `:DATASET` argument (e.g. `{COLUMN_SPECS:ADSL}`) must be non-empty.
 .template_placeholder_pattern <- "\\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]+)?\\}"
 
 # Does this .docx contain at least one {PLACEHOLDER} marker?

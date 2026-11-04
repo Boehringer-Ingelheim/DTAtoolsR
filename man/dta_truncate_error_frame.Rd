@@ -31,6 +31,7 @@ again with a larger cap.
 Only retention is capped. Every count and summary a caller reads is taken
 from the complete frame before this runs, so truncation can never turn a
 failing table into a passing one.
+
 A \code{max_errors} that is not a cap at all is an error, not a silent "keep
 everything". \code{NA}, a negative number and a vector of two were each read as
 "no cap" here, so a caller that computed the cap wrongly -- \code{NA} out of an

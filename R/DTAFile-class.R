@@ -1,9 +1,11 @@
 #' @title DTAFile Class
 #' @description
-#' The \code{DTAFile} class stores metadata and parsing instructions for
-#' delimited data files. It specifies file names (or patterns), the expected
-#' number of files, and how to read them, including separator, header presence,
-#' quoting, and column types.
+#' The \code{DTAFile} class is the base of the file-handler hierarchy. It
+#' stores the file names (or patterns) a delivery may use, a description of the
+#' pattern, the expected (minimum, maximum or exact) number of files, and
+#' free-text info. How a file is read -- separator, header presence, quoting,
+#' column types -- is held by \code{\link{DTAFileTabular}} and its subclasses,
+#' not here.
 #'
 #' @import S7
 #' @importFrom cli cli_abort
@@ -22,7 +24,8 @@
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
-#' @param info Character or \code{NULL}; free-text description of the file.
+#' @param info Character, list or \code{NULL}; free-text description of the
+#'   file.
 #'
 #' @return An object of class \code{DTAFile} containing file parsing
 #'   information.
@@ -260,7 +263,10 @@ dta_strip_compression_extension <- function(file_name) {
 #'     \item{file}{A character string naming the file to check against the
 #'       handler's stored filename or pattern.}
 #'   }
-#' @return A logical value indicating whether the filename matches.
+#' @return A logical vector indicating whether the filename matches. With
+#'   \code{pattern = FALSE} it is a single value (does the name equal any
+#'   declared name); with \code{pattern = TRUE} it holds one value per declared
+#'   pattern, so reduce it with \code{any()} before using it in a condition.
 #' @importFrom stringr str_detect
 #' @examples
 #' file_info <- DTAFile("file.txt")
@@ -292,10 +298,10 @@ method(matches_filename, DTAFile) <- function(x, file) {
 # super() nowhere (the only two occurrences are commented out), and a plain
 # helper keeps the base behaviour testable on its own.
 #
-# Returns one logical PER declared name or pattern -- a handler may carry
-# several. That is a vector, not a scalar, so no caller may feed the raw
-# result straight into `if`; every caller reduces it first, with
-# `isTRUE(any(...))`.
+# With `pattern = TRUE` it returns one logical PER declared pattern -- a
+# handler may carry several; with `pattern = FALSE` a single logical. Since it
+# can be a vector, no caller may feed the raw result straight into `if`; every
+# caller reduces it first, with `isTRUE(any(...))`.
 #' @keywords internal
 dta_matches_filename_base <- function(x, file) {
   file_name <- basename(file)
@@ -437,7 +443,8 @@ method(read_file_execution, DTAFile) <- function(x, ...) {
 #'   column, and it guesses before any code in this package sees the data: a
 #'   column of quoted subject ids -- \code{"007"}, \code{"008"} -- is inferred as
 #'   an integer and arrives in R as \code{7} and \code{8}. Handing the specs to
-#'   the reader lets a column the specification declares as text be read as text.
+#'   the reader makes it read every column as text, so nothing is guessed: the
+#'   declared types are applied afterwards, in R.
 #'
 #'   \code{NULL} keeps the reader exactly as dumb as it was: every column is
 #'   inferred. This is the behaviour of a standalone \code{read_file()} call on a
@@ -545,9 +552,9 @@ method(open_file_execution, DTAFile) <- function(x, ...) {
 #' argument of \code{\link{check}()} reaches
 #' \code{arrow::Scanner$create(batch_size = )}, which only ever \emph{slices} a
 #' batch that is already larger, so on a delimited file it is a ceiling and not
-#' a target: measured on a 4.4 MB, 46,000-row CSV, the default block gave 5
+#' a target: measured on a 4.4 MB, 46,000-row CSV, a 1 MiB block gave 5
 #' batches of about 10,485 rows for \code{batch_rows} of 131,072 and of
-#' 1,000,000 alike.
+#' 1,000,000 alike, while the 8 MiB default gave one batch of all 46,000 rows.
 #'
 #' Peak memory during a scan is therefore governed by the block size times
 #' Arrow's read-ahead, not by \code{batch_rows}. Change it with

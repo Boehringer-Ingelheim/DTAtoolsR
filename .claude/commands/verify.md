@@ -12,7 +12,7 @@ Interpret the scope as follows — if it is empty, run the full test suite.
   writing, names every unstyled file, and covers `inst/` as well as `R/`
 - `docs` → `roxygen2::roxygenise()`, then report whether `man/` or `NAMESPACE`
   came out dirty (`git status --porcelain man NAMESPACE`)
-- `check` → `rcmdcheck::rcmdcheck(args='--no-manual')`
+- `check` → `rcmdcheck::rcmdcheck(args='--no-manual', env=c(NOT_CRAN='true'))`
 - `all` → tests, then `style`, then `docs`, then `check` — this mirrors what CI
   enforces. Run every stage even if an earlier one fails, and report all
   failures together; do not stop at the first.

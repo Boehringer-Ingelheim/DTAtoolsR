@@ -223,10 +223,7 @@ normalise_party_slots <- function(slots) {
 # names an explicit allow-list, membership in it. Ordered by label with
 # method = "radix": the dev machine collates under German locale, CI under C
 # collation, and a locale-dependent order in a user-facing dropdown is a
-# needless difference between the two that this sidesteps entirely (see
-# dta_creation_template_dirs()-adjacent sort() calls in template_core.R for
-# the same reasoning, and the project's "locale collation diverges from CI"
-# lesson).
+# needless difference between the two that this sidesteps entirely.
 party_profiles_for_slot <- function(profiles, slot) {
   eligible <- Filter(function(p) {
     role_ok <- identical(p$role, "any") || identical(p$role, slot$role)

@@ -17,8 +17,8 @@ open_file_execution(x, ...)
 \item{x}{A \code{DTAFileTSV} object containing file reading parameters.}
 
 \item{...}{A \code{file} argument giving the path to the file, and an optional
-\code{specs} argument: a \code{DTAColumnSpecCollection} whose declared types decide
-how the columns are parsed.}
+\code{specs} argument: a \code{DTAColumnSpecCollection}. When supplied, every
+column is read as text; without it, column types are inferred.}
 }
 \value{
 An \code{arrow::Dataset}.

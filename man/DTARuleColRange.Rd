@@ -21,13 +21,17 @@ property is a character vector for consistency with the other rule
 classes, but a range rule must name exactly one column; more than one is
 an error when the rule is evaluated.}
 
-\item{range}{Numeric vector or list. Legacy argument for range checks.}
+\item{range}{Numeric vector or list of length 2 (lower, upper). Legacy
+argument for range checks; it is used only when both \code{min} and
+\code{max} are \code{NULL}, and is ignored otherwise.}
 
 \item{description}{Character or NULL. Free-text description of the rule.}
 
-\item{min}{Numeric or NULL. Lower bound of the allowed range.}
+\item{min}{Numeric. Lower bound of the allowed range. Required unless
+\code{range} is given, and must be less than \code{max}.}
 
-\item{max}{Numeric or NULL. Upper bound of the allowed range.}
+\item{max}{Numeric. Upper bound of the allowed range. Required unless
+\code{range} is given, and must be greater than \code{min}.}
 }
 \value{
 An object of class \code{DTARuleColRange}.
@@ -37,7 +41,7 @@ Represents a rule for checking the range of values in a specific columns of
 a data table.
 }
 \examples{
-# Create a check_range rule
+# Create a col_range rule
 rule1 <- DTAtools::DTARuleColRange(
   id = "rule1",
   columns = "age",
