@@ -2,7 +2,7 @@
 % Please edit documentation in R/DTAColumnSpec-class.R
 \name{DTAColumnSpec}
 \alias{DTAColumnSpec}
-\title{DTA Column Format Class}
+\title{DTA Column Specification Class}
 \usage{
 DTAColumnSpec(
   id,
@@ -21,17 +21,17 @@ DTAColumnSpec(
 \arguments{
 \item{id}{Character. The id of the column.}
 
-\item{label}{Character or NA. The label of the column.}
+\item{label}{Character or NULL. The label of the column.}
 
-\item{type}{Character or NA. The type of the column.}
+\item{type}{Character or NULL. The type of the column.}
 
-\item{format}{Character or NA. The format of the column.}
+\item{format}{Character or NULL. The format of the column.}
 
-\item{length}{Numeric or NA. The max character length.}
+\item{length}{Numeric or NULL. The max character length.}
 
-\item{nullable}{Logical or NA. Whether the column can be null.}
+\item{nullable}{Logical or NULL. Whether the column can be null.}
 
-\item{pattern}{Character or NA. The pattern of the column.}
+\item{pattern}{Character or NULL. The pattern of the column.}
 
 \item{values}{Character or numeric vector, or NULL. The permitted values of
 the column. A list is accepted and flattened to a vector.}
@@ -39,17 +39,21 @@ the column. A list is accepted and flattened to a vector.}
 \item{examples}{Character or numeric vector, or NULL. Example value(s) for
 the column. A list is accepted and flattened to a vector.}
 
-\item{description}{Character or NA. The description of the column.}
+\item{description}{Character or NULL. The description of the column.}
 
-\item{colclass}{Character or NA. The R/SAS storage class of the column.}
+\item{colclass}{Character or NULL. The semantic category of the column; one
+of \code{"patient_info"}, \code{"measurement_patient"},
+\code{"measurement"}, \code{"visit_related"}, \code{"date_related"},
+\code{"study_info"}, \code{"wide_format"}, \code{"long_format"} or
+\code{"wide_and_long_format"}.}
 }
 \value{
 An object of class DTAColumnSpec.
 }
 \description{
-Class for column format.
-
-This class defines the format of a column in a DTA dataset.
+Specification of one column of a DTA dataset: its id, label, type and
+format, whether it may be missing, and the values or pattern it must
+satisfy.
 }
 \examples{
 col_format <- DTAColumnSpec(

@@ -9,7 +9,8 @@ DTARule(id, type, description)
 \arguments{
 \item{id}{Character. A unique identifier for the rule.}
 
-\item{type}{Character. The type of the rule (e.g., "check_range", "check_unique").}
+\item{type}{Character. The type of the rule (e.g., "col_range",
+"col_unique").}
 
 \item{description}{Character or NULL. Free-text description of the rule.}
 }
@@ -17,8 +18,8 @@ DTARule(id, type, description)
 An object of class \code{DTARule}.
 }
 \description{
-Represents a single rule for validating data tables. The rule can be of various types,
-such as \code{check_range}, \code{check_unique}, or \code{check_col_condition}
+Represents a single rule for validating data tables, of type
+\code{col_condition}, \code{col_range}, \code{col_unique} or \code{group_condition}.
 }
 \examples{
 rule <- DTARuleFactory("rule1", "col_unique", columns = "SUBJID")

@@ -283,8 +283,9 @@ Shiny.addCustomMessageHandler('dta_trigger_download', function(id) {
 #
 # Seen in the wild as "creating templates does not work": the picker modal
 # opened with an empty body, because output$template_picker_ui -- the uiOutput
-# holding the Template and Version dropdowns -- was suspended and its HTML
-# never sent. "Next" then found no selection and said so. Every other modal
+# holding the search box, library filter and the list/detail panes -- was
+# suspended and its HTML never sent. "Use this template" then found no
+# selection and said so. Every other modal
 # whose body is a uiOutput() (Create new, Add dataset, the file/column/rule/
 # details editors) was dead the same way, as were the inline *_msg outputs
 # that report a rejected value.
@@ -584,7 +585,7 @@ server <- function(input, output, session) {
   )
 
   # The single gate for every editing surface. Off by default: rv$editing is
-  # created FALSE (below) and isTRUE(FALSE) is FALSE, so the app is read-only
+  # created FALSE (above) and isTRUE(FALSE) is FALSE, so the app is read-only
   # from the first frame -- before any menu row has been clicked.
   #
   # Each surface is gated TWICE: its control is not rendered, and the observer
@@ -614,11 +615,10 @@ server <- function(input, output, session) {
   # writes it, so there is nothing left to compensate for and none of those
   # four calls survive this design.
   #
-  # rv$version_locked survives, but it no longer gates editing. It now only
-  # records that a LOADED document has not yet had a new version created in
-  # this session, which decides emphasis in the Edit menu (e.g. whether
-  # "Create new version" reads as the primary route), not whether editing is
-  # possible at all. A loaded document CAN be edited without creating a new
+  # rv$version_locked survives, but it no longer gates editing and no longer
+  # drives any UI. It only records (and is persisted in the autosave) that a
+  # LOADED document has not yet had a new version created in this session.
+  # A loaded document CAN be edited without creating a new
   # version first -- "Enable edit mode" is a deliberate route to exactly
   # that, recording nothing in the version history when no version entry is
   # open.
@@ -1054,8 +1054,9 @@ server <- function(input, output, session) {
     rv$doc_token <- rv$doc_token + 1
     # `versioned` is TRUE for a document LOADED from an existing one (upload,
     # bundled example) as opposed to one just created from a template -- see
-    # the WHY comment on editing() above for the read-only-until-versioned
-    # rule this arms. rv$version_baseline_yaml is captured from `yaml_text`
+    # rv$version_locked records that no version has been created yet, and a
+    # baseline is captured only for such a document. rv$version_baseline_yaml
+    # is captured from `yaml_text`
     # AFTER the wrapped_dataset re-serialisation above, so the baseline is the
     # text the Raw tab actually shows, not whatever the caller originally
     # passed in.
@@ -1078,8 +1079,8 @@ server <- function(input, output, session) {
     # is gated purely on editing() and offers no "+ Add dataset" control
     # until edit mode is on. A document LOADED from an existing one keeps
     # the default and arrives read-only; it can still be unlocked from the
-    # Edit menu without creating a version -- rv$version_locked only decides
-    # that menu's emphasis, not whether editing is possible at all.
+    # Edit menu without creating a version -- rv$version_locked does not
+    # affect whether editing is possible.
     rv$editing <- isTRUE(start_editing)
     autosave()
   }
@@ -1170,9 +1171,10 @@ server <- function(input, output, session) {
     list(id = as.character(t$id %||% ""), version = as.character(t$version %||% ""))
   }
 
-  # Turn the carry-over controls (tmpl_carry_source/_file/_fields, added to
-  # show_template_options_modal() below) into the `carry_over` argument
-  # create_dta_from_template() expects, or a clear error for the confirm
+  # Turn the carry-over controls (tmpl_carry_source/_file/_fields, rendered by
+  # template_options_modal_body() in R/template_ui.R) into the `carry_over`
+  # argument create_dta_from_template() expects, or a clear error for the
+  # confirm
   # handler to surface without closing the modal. "none" -- the only option
   # offered when no document is open -- is not an error: it means create the
   # document with no ancestor at all, same as a template with no carry-over
@@ -1485,10 +1487,11 @@ server <- function(input, output, session) {
   #
   # Two-step modal, both steps backed by dta_template_index_cached() (template_
   # index.R) rather than the legacy list_dta_creation_templates()/get_dta_
-  # creation_template_path() pair -- those still exist (template_core.R) and
-  # are still used internally (read_dta_creation_template(), load_template_
-  # definition()), but no longer drive the UI directly. That is what makes a
-  # configured private source (template_sources.R) visible here the same way
+  # creation_template_path() pair -- those still exist (template_core.R) but
+  # have no remaining callers in the app; template files are read through
+  # read_dta_creation_template() and load_template_definition(). That is what
+  # makes a configured private source (template_sources.R) visible here the
+  # same way
   # the packaged demo always was, with no separate code path for either:
   #
   #   1. show_template_picker_modal() -- pick a template and a version.
@@ -2214,7 +2217,8 @@ server <- function(input, output, session) {
     key <- paste0(dsname, "||", hi)
 
     # A dropped file will occupy a table named after it (for tabular datasets,
-    # load_file uses file_path_sans_ext; for file datasets, the basename with
+    # dta_bound_item_name() strips the extension (a gz suffix first); for file
+    # datasets, the basename with
     # extension is kept). This mapping drives overwrite detection and binds.
     ds_type <- tryCatch(ds@type, error = function(e) NA_character_)
     tbl_of <- function(nm) dta_bound_item_name(ds_type, nm)
@@ -2330,7 +2334,7 @@ server <- function(input, output, session) {
       autosave()
     }
 
-    # ONE reconciled outcome (Contract C1) with honest counts (C8): never a
+    # ONE reconciled outcome with honest counts: never a
     # success message when nothing was actually bound.
     ow <- if (length(overwritten) > 0) {
       sprintf(" (%d overwritten)", length(overwritten))
@@ -2592,11 +2596,11 @@ server <- function(input, output, session) {
       return()
     }
 
-    # C7 -- pre-flight: only validate datasets that actually have data bound.
+    # Pre-flight: only validate datasets that actually have data bound.
     ready <- Filter(function(nm) dta_dataset_readiness(rv$dta, nm)$has_data, targets)
     nodata <- setdiff(targets, ready)
 
-    # Mark no-data datasets explicitly; they are never reported as passed (C5).
+    # Mark no-data datasets explicitly; they are never reported as passed.
     if (length(nodata) > 0) {
       st <- rv$status
       for (nm in nodata) st[[nm]] <- "nodata"
@@ -2637,7 +2641,7 @@ server <- function(input, output, session) {
     }
     autosave()
 
-    # ONE reconciled summary (C1/C6) derived from the verified status map.
+    # ONE reconciled summary derived from the verified status map.
     st <- unlist(rv$status)
     n_pass <- sum(st[ready] == "pass", na.rm = TRUE)
     n_fail <- sum(st[ready] == "fail", na.rm = TRUE)
@@ -2818,9 +2822,11 @@ server <- function(input, output, session) {
     invisible(NULL)
   }
 
-  # The four things every file-handler mutation must do: clear this dataset's
-  # validation, rebuild the slot structure (which is what registers the upload
-  # observers for a new slot), re-render the editor, and re-serialise the YAML.
+  # What every file-handler mutation must do: re-key the dataset's bound uploads
+  # when handlers moved (remap_uploads(), only if `map` is given), clear its
+  # validation, rebuild the slot structure (which registers the upload
+  # observers for a new slot), reset its file inputs, re-render the editor, and
+  # re-serialise the YAML.
   after_handler_change <- function(ed, map = NULL) {
     if (!is.null(map)) remap_uploads(ed, map)
     invalidate_dataset(ed)
@@ -5229,9 +5235,9 @@ server <- function(input, output, session) {
   })
 
   # The dock's download buttons, in their own output rather than inline in
-  # output$floating_msgs: the dock is deliberately rendered once per structure
-  # so the DT inside stays stable, and therefore cannot react to validation
-  # state -- but these buttons must.
+  # output$floating_msgs: the dock is deliberately rendered once per loaded
+  # document so the DT inside stays stable, and therefore cannot react to
+  # validation state -- but these buttons must.
   #
   # Before a check has been run there is nothing to export. Exporting anyway
   # would hand back a file that reads as a clean result ("No validation
@@ -5854,11 +5860,12 @@ server <- function(input, output, session) {
     }
     # Read-only renders static text instead of form controls. Only the LEAF
     # controls swap; every div, layout_columns, card and section title below is
-    # shared, so the tab keeps its shape when the switch flips and there is one
+    # shared, so the tab keeps its shape when edit mode toggles and there is one
     # layout to maintain rather than two.
     #
     # editing() is deliberately NOT isolated -- this render has to re-run when
-    # the switch changes. rv$dta stays isolated, as before, so typing in a field
+    # edit mode (editing()) toggles. rv$dta stays isolated, as before, so typing
+    # in a field
     # still does not rebuild the form under the cursor.
     ro <- !editing()
     f_text <- function(id, label, value, ...) {
@@ -6049,7 +6056,7 @@ server <- function(input, output, session) {
   #
   # req(editing()) here is the server half of the read-only gate. The controls
   # not being rendered is not sufficient on its own: these fields save through a
-  # 700ms debounce, so a value typed just before the switch is flipped off still
+  # 700ms debounce, so a value typed just before "Stop editing" is chosen still
   # flushes afterwards, and an input driven straight over the websocket arrives
   # whatever is on screen. Both write into the document without this.
   #
@@ -6511,7 +6518,7 @@ server <- function(input, output, session) {
     g <- function(k) aff[[k]] %||% ""
     # Same leaf-swap rule as the metadata form above: the layout is shared, only
     # the controls differ. Reading editing() here is also what gives the two
-    # renderUI wrappers below their dependency on the switch.
+    # renderUI wrappers below their dependency on editing().
     ro <- !editing()
     ff <- function(id, label, value, ...) {
       if (ro) meta_field_text(label, value) else textInput(id, label, value = value, ...)
@@ -6779,8 +6786,10 @@ server <- function(input, output, session) {
       return()
     }
     # Smart reconcile: keep uploads for datasets whose file handlers are
-    # unchanged, keep validation only when columns/rules are also unchanged,
-    # and drop uploads for datasets that were removed from the document.
+    # unchanged, and re-key them (dta_match_handlers()) when handlers changed,
+    # unloading only records whose handler is gone. Keep validation only when
+    # columns/rules are also unchanged, and drop uploads for datasets that were
+    # removed from the document.
     new_dta <- res$value
     old_dta <- isolate(rv$dta)
     old_uploads <- isolate(rv$uploads)
@@ -7558,7 +7567,7 @@ server <- function(input, output, session) {
   #
   # edit_gate lives in the brandbar, outside output$main, so it never races
   # the workspace DOM swap itself -- but it re-renders exactly when a document
-  # loads (rv$version_locked flips), which is the same moment a fresh page
+  # loads (rv$doc_token bumps), which is the same moment a fresh page
   # visit's own visibility snapshot can be unreliable, so it is included here
   # for the same belt-and-braces reason as the sidebar outputs above.
   for (sidebar_output in c(
@@ -7912,11 +7921,9 @@ server <- function(input, output, session) {
     rv$is_example <- isTRUE(saved$is_example)
     # A session file written before the versioning feature existed has none
     # of these fields. The fallback is to treat the restored document as a
-    # gated load -- version_locked = TRUE, editing switched off -- rather
-    # than silently editable: read-only-until-versioned is this app's
-    # standing posture for anything it did not itself just create, and an
-    # older session reopening editable by default would be a quiet regression
-    # of that rule rather than a neutral default.
+    # loaded one that has not yet had a version created (version_locked =
+    # TRUE, with a baseline taken from the saved yaml_text below). Editing is
+    # restored separately from saved$editing further down.
     rv$version_locked <- if (is.null(saved$version_locked)) TRUE else isTRUE(saved$version_locked)
     # %||% cannot tell "this field is absent because the session file
     # predates the versioning feature" from "the field is present and

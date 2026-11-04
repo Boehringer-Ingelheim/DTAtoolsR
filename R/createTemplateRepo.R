@@ -192,9 +192,12 @@
 #'   than a directory.
 #' @param examples A single `TRUE`/`FALSE` (default `TRUE`). When `TRUE`,
 #'   writes the four starter templates into `templates/` beneath `path`.
-#'   `README.md` stays at the repository root. When `FALSE`, only `README.md`, `.gitignore` and (if `ci`
-#'   asks for any provider) its CI file(s) are written -- no template files,
-#'   for a caller who wants the scaffolding without the worked example.
+#'   `README.md` stays at the repository root. When `FALSE`, only `README.md`,
+#'   `.gitignore` and (if `ci` asks for any provider) its CI file(s) are
+#'   written -- no template files, for a caller who wants the scaffolding
+#'   without the worked example. Such a repository has no templates yet, so
+#'   [validate_template()] reports the error `no_templates` and the generated
+#'   CI workflow fails until a template is added.
 #' @param ci Either a single `TRUE`/`FALSE` (default `TRUE`), or a character
 #'   vector naming one or more of `"github"`, `"bitbucket"`, `"jenkins"`
 #'   (duplicates are silently dropped). `TRUE` is shorthand for `"github"`

@@ -5,17 +5,22 @@
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments. The `DTADataSet` and `DTADataSetTabular`
+#'   methods take `tables` (names or indices of the tables to report on;
+#'   `NULL` for all). The `DTA` method takes `datasets` (`NULL`, dataset
+#'   names, or indices).
 #' @return
-#' A data.frame summarizing validation state.
-#'
-#' For `DTADataSetTabular`, columns are:
-#' `target`, `status`, `validated_at`, `run_id`, `validation_run`,
-#' `n_columnspec_errors`, `n_rule_errors`, `n_import_errors`.
-#'
-#' For `DTA`, the summary is aggregated per dataset and includes:
-#' `dataset`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
+#' A data.frame with one row per validation target (table), with columns:
+#' `dataset`, `target`, `target_type`, `status`, `validated_at`, `run_id`,
+#' `validation_run`, `n_columnspec_errors`, `n_rule_errors`,
+#' `n_import_errors`, `n_targets`, `n_validated`, `n_valid`, `n_invalid`,
 #' `n_skipped`, `n_not_validated`.
+#'
+#' The `n_targets` ... `n_not_validated` columns are counts over all
+#' targets of the dataset and repeat on every row of that dataset; they are
+#' not aggregated across datasets. For a `DTA`, the per-dataset results are
+#' row-bound. A dataset that is not a `DTADataSet` contributes a single row
+#' with status `"not_validated"` and `NA` in the other columns.
 #' @examples
 #' dta <- create_example_DTA()
 #' dta <- check(dta, quiet = TRUE)
@@ -171,15 +176,24 @@ S7::method(results, DTA) <- function(x, datasets = NULL) {
 #' @title Retrieve Check Messages
 #' @description
 #' Returns one row per validation message to support debugging workflows.
-#' The output combines column spec and rule failures into a single flat table.
+#' The output combines column spec, rule and import failures into a single
+#' flat table.
 #'
 #' Methods are available for `DTA`, `DTADataSet`, and `DTADataSetTabular`.
 #' @param x A `DTA`, `DTADataSet`, or `DTADataSetTabular` object.
-#' @param ... Additional method arguments.
+#' @param ... Method arguments:
+#'   * `tables` (`DTADataSet` and `DTADataSetTabular` methods): names or
+#'     indices of the tables to report on; `NULL` for all.
+#'   * `datasets` (`DTA` method): `NULL`, dataset names, or indices.
+#'   * `source`: where validation details are read from, one of `"auto"`
+#'     (the default), `"memory"` or `"artifact"`.
+#'   * `as_tibble`: logical, default `TRUE`. Return a tibble when the
+#'     `tibble` package is installed.
 #' @return
 #' A data.frame (or tibble when `as_tibble = TRUE` and package `tibble`
 #' is installed) with columns:
-#' `dataset`, `target`, `severity`, `source`, `rule_id`,
+#' `id` (sequential integer), `dataset`, `target`, `severity`, `source`
+#' (`"columnspec"`, `"rule"` or `"import"`), `rule_id`,
 #' `row`, `column`, `keyword`, `message`.
 #' @examples
 #' ds <- create_example_DTADataSetTabular(2)
@@ -516,7 +530,10 @@ S7::method(messages, DTA) <- function(
 #'   }
 #' @return A tibble/data.frame with one or more rows per requested id.
 #'   Detail fields are appended as flat columns prefixed with
-#'   \code{schema_}, \code{context_}, and \code{failing_}.
+#'   \code{columnspec_}, \code{context_}, \code{failing_}, \code{import_}
+#'   and \code{group_violation_}. Summary fields of the validation result are
+#'   added as \code{details_*} columns, and the class of the rule behind a
+#'   rule message as \code{rule_definition_class}.
 #' @seealso \code{\link{explain_messages}} for the same findings in plain language.
 #' @usage inspect(x, ...)
 #' @examples

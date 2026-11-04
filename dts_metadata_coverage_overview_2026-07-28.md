@@ -1,10 +1,10 @@
 # DTS Metadata Coverage Overview (from 2026-07-28T2221 archive)
 
+> Status: historical analysis of 2026-07-28, partly superseded by later changes to `DTAMetaData`. See the note under "Mapping to current DTAtools metadata".
+
 ## Scope
 This overview is based on 28 DTS template documents from:
-- C:/Users/schwarz8/Downloads/2026-07-28T2221 - BI OneMed - Clinical.zip
-- extracted to C:/Users/schwarz8/workspace/DTAtoolsR_github/.tmp_dts_templates
-- plain-text conversions in C:/Users/schwarz8/workspace/DTAtoolsR_github/.tmp_dts_templates/_txt
+- (source archive not included in the repository)
 
 Goal: define what metadata model must exist so all template cases can be represented.
 
@@ -308,6 +308,8 @@ Current DTAMetaData already covers part of Layer 1:
   - explicit study_number
   - richer transfer sub-structure (naming/frequency/extent/test upload as structured fields)
   - module containers for case-specific requirements listed above
+
+Status update (since this analysis): `DTAMetaData` now also has `study` (`id`, `protocol_id`), `sections` (free-text document sections), `template` and `import_issues` properties, and `transmission` accepts the validated text fields `extent`, `scope`, `packaging`, `security`, `checksum`, `test_requirements` and `blinding_requirements` (see `R/DTAMetaData-class.R`). The gap list above is therefore partly closed; the case-specific modules remain unmodelled.
 
 ## Implementation minimum to claim full coverage
 To say all 28 templates are covered, implement:

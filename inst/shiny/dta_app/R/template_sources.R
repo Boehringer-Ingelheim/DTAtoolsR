@@ -1,5 +1,3 @@
-# A source root containing a templates/ folder holding template files is read
-# from that folder (see dta_template_library_dir()); otherwise it is read flat.
 # -----------------------------------------------------------------------------
 # Private/remote template sources for "Create new from template".
 #
@@ -26,8 +24,11 @@
 # back to the "biomarker_gf" example, or someone will author a real
 # specification from a demo file by mistake.
 #
-# `%||%` is already bound in the app helper environment (see template_core.R
-# / 00_helpers.R) -- it is not redefined here.
+# Whether a source root's templates/ subfolder is used is decided elsewhere,
+# by dta_template_library_dir() in template_index.R.
+#
+# `%||%` is already bound in the app helper environment (see utils_dta.R) --
+# it is not redefined here.
 # -----------------------------------------------------------------------------
 
 # ---- Config readers ---------------------------------------------------------
@@ -96,8 +97,6 @@ dta_template_refresh_seconds <- function() {
 # `git:`, whose locator is itself a URL containing `://`: `git:https://
 # host/x.git` must yield scheme "git" and locator "https://host/x.git", not
 # split again on the colon inside "https://".
-# Source grammar is unchanged: a populated templates/ folder inside any source
-# root is used automatically (see dta_template_library_dir()).
 parse_template_sources <- function(spec) {
   spec <- trimws(spec %||% "")
   if (!nzchar(spec)) {
@@ -186,7 +185,7 @@ parse_template_sources <- function(spec) {
 
 # ---- Cache -------------------------------------------------------------------
 
-# Directory that reads and removes a probe file, proving `dir` is genuinely
+# Writes and then removes a probe file in `dir`, proving `dir` is genuinely
 # writable. file.access() reports POSIX permission bits, which say nothing
 # about Windows ACLs or a Posit Connect content sandbox -- both can leave a
 # directory looking writable to file.access() while every actual write fails.

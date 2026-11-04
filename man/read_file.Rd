@@ -32,7 +32,8 @@ A reader that knows nothing about the specification has to guess a type per
 column, and it guesses before any code in this package sees the data: a
 column of quoted subject ids -- \code{"007"}, \code{"008"} -- is inferred as
 an integer and arrives in R as \code{7} and \code{8}. Handing the specs to
-the reader lets a column the specification declares as text be read as text.
+the reader makes it read every column as text, so nothing is guessed: the
+declared types are applied afterwards, in R.
 
 \code{NULL} keeps the reader exactly as dumb as it was: every column is
 inferred. This is the behaviour of a standalone \code{read_file()} call on a

@@ -8,7 +8,8 @@
 # same engine rebase_plan() uses (template_diff.R). A forgotten or wrong hand-
 # written note cannot make the history lie, because there is no such note.
 #
-# Two kinds of entry:
+# Three kinds of entry ("initial", below, is the oldest version with nothing
+# to compare against):
 #
 #   "version"   the template's OWN versions, each against its predecessor,
 #               both built against today's library. This isolates what the

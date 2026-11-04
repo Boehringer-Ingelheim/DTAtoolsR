@@ -2,15 +2,15 @@
 % Please edit documentation in R/evaluateRules.R
 \name{rule_check_col_condition}
 \alias{rule_check_col_condition}
-\title{Rule: check_col_condition}
+\title{Rule: col_condition}
 \usage{
 rule_check_col_condition(rule, df, numeric_cache = NULL)
 }
 \arguments{
-\item{rule}{A DTARule object of type \code{"check_col_condition"}. Expected slots:
+\item{rule}{A DTARule object of type \code{"col_condition"}. Expected slots:
 \itemize{
 \item \verb{@id} character
-\item \verb{@type} = "check_col_condition"
+\item \verb{@type} = "col_condition"
 \item \verb{@condition} list: named by column, each with one or more of:
 \code{equals}, \code{not_equals}, \verb{in}, \code{not_in},
 \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal}, \code{min}, \code{max},
@@ -52,7 +52,8 @@ Supported operators per column:
 \item Numeric comparisons: \code{greater}, \code{less}, \code{greater_equal}, \code{less_equal},
 \code{min}, \code{max}, \code{range}
 \item Text: \code{pattern} (a regular expression; row passes when the value matches)
-\item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, or \code{""}; FALSE means not empty)
+\item Emptiness: \code{empty} (TRUE means empty: \code{NA}, \code{NaN}, \code{""}, or a text value
+that is only whitespace; FALSE means not empty)
 }
 
 Against a numeric column, \code{equals}/\code{not_equals}/\verb{in}/\code{not_in} compare

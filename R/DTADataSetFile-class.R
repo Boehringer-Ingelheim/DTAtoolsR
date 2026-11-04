@@ -9,14 +9,18 @@
 #'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param paths Character vector of file paths to validate.
 #' @param files A list of DTAFile objects specifying input file information.
+#'   Any handler that is not a \code{DTAFileAny} is rebuilt as one, keeping its
+#'   filename, pattern, file-count limits and info.
+#'   When \code{files} is empty, one \code{DTAFileAny} handler is built per
+#'   entry of \code{paths}.
 #' @param name Character or NULL. Human-readable name of the dataset, e.g.
 #'   \code{"Delivery reports"}; shown in place of the \code{id} where one is set.
 #' @param description Character or NULL. Long free-text description of the
 #'   dataset.
-#' @param template_source Character or NA. Source of the template used to
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @return An object of class DTADataSetFile.
 #' @examples
 #' path <- tempfile(fileext = ".pdf")

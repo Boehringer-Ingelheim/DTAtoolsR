@@ -20,7 +20,8 @@
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
-#' @param info Character or \code{NULL}; free-text description of the file.
+#' @param info Character, list or \code{NULL}; free-text description of the
+#'   file.
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
 #'   is \code{TRUE}.
 #' @param quote Character or \code{NULL}; quoting character for fields. Default
@@ -91,11 +92,10 @@ DTAFileCSV <- S7::new_class(
 #' string, which is always treated as missing.
 #' @param x A \code{DTAFileCSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file to be read, and an
-#'   optional `specs` argument: a `DTAColumnSpecCollection` whose declared
-#'   types decide how the columns are parsed. Without it every column is
-#'   inferred, as before.
-#' @return A tibble containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#'   optional `specs` argument: a `DTAColumnSpecCollection`. When supplied,
+#'   every column is read as text and the declared types are applied
+#'   afterwards, in R; without it, column types are inferred.
+#' @return An Arrow Table with the file's contents.
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileCSV) <- function(x, ...) {
   args <- dta_reader_args(...)
@@ -120,8 +120,8 @@ method(read_file_execution, DTAFileCSV) <- function(x, ...) {
 #' treated as missing.
 #' @param x A \code{DTAFileCSV} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file, and an optional
-#'   `specs` argument: a `DTAColumnSpecCollection` whose declared types decide
-#'   how the columns are parsed.
+#'   `specs` argument: a `DTAColumnSpecCollection`. When supplied, every
+#'   column is read as text; without it, column types are inferred.
 #' @return An \code{arrow::Dataset}.
 #' @usage open_file_execution(x, ...)
 method(open_file_execution, DTAFileCSV) <- function(x, ...) {

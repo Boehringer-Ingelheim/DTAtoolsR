@@ -2,18 +2,18 @@
 % Please edit documentation in R/evaluateRules.R
 \name{rule_check_unique}
 \alias{rule_check_unique}
-\title{Rule: check_unique}
+\title{Rule: col_unique}
 \usage{
 rule_check_unique(rule, df, numeric_cache = NULL)
 }
 \arguments{
-\item{rule}{A DTARule object of type \code{"check_unique"}. Expected slots:
+\item{rule}{A DTARule object of type \code{"col_unique"}. Expected slots:
 \itemize{
 \item \verb{@id} character
-\item \verb{@type} = "check_unique"
-\item the target columns, spelled either \verb{@columns} (what
-\code{\link[=DTARuleColUnique]{DTARuleColUnique()}} stores) or \verb{@column}. Several columns are checked
-as a combination: it is the tuple that must be unique.
+\item \verb{@type} = "col_unique"
+\item the target columns, \verb{@columns} (as \code{\link[=DTARuleColUnique]{DTARuleColUnique()}} stores them).
+Several columns are checked as a combination: it is the tuple that
+must be unique.
 }}
 
 \item{df}{A data.frame to validate.}
@@ -27,8 +27,9 @@ function uniformly.}
 A list with elements \code{id}, \code{valid}, and \code{message}.
 }
 \description{
-Ensures that all values in the specified column are unique.
-Repeated \code{NA} values are considered duplicates by base R \code{duplicated()}.
+Ensures that the values of the target column, or the
+combination of values across several target columns, are unique. Repeated
+\code{NA} values count as duplicates, as in base R \code{duplicated()}.
 }
 \examples{
 df <- data.frame(SUBJID = c("S1", "S2", "S2"), stringsAsFactors = FALSE)

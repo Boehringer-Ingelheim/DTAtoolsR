@@ -37,17 +37,20 @@ expected.}
 \item{max_number_of_files}{Numeric or \code{NULL}; maximum number of files
 expected.}
 
-\item{info}{Character or \code{NULL}; free-text description of the file.}
+\item{info}{Character, list or \code{NULL}; free-text description of the
+file.}
 }
 \value{
 An object of class \code{DTAFile} containing file parsing
 information.
 }
 \description{
-The \code{DTAFile} class stores metadata and parsing instructions for
-delimited data files. It specifies file names (or patterns), the expected
-number of files, and how to read them, including separator, header presence,
-quoting, and column types.
+The \code{DTAFile} class is the base of the file-handler hierarchy. It
+stores the file names (or patterns) a delivery may use, a description of the
+pattern, the expected (minimum, maximum or exact) number of files, and
+free-text info. How a file is read -- separator, header presence, quoting,
+column types -- is held by \code{\link{DTAFileTabular}} and its subclasses,
+not here.
 }
 \details{
 This class is the base of the file-handler hierarchy and carries

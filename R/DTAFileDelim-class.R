@@ -22,7 +22,8 @@
 #'   expected.
 #' @param max_number_of_files Numeric or \code{NULL}; maximum number of files
 #'   expected.
-#' @param info Character or \code{NULL}; free-text description of the file.
+#' @param info Character, list or \code{NULL}; free-text description of the
+#'   file.
 #' @param sep Character. Single-character field separator used in the file.
 #'   Defaults to tab (\code{"\\t"}).
 #' @param has_header Logical; \code{TRUE} if the first row is a header. Default
@@ -95,12 +96,11 @@ DTAFileDelim <- S7::new_class(
 #'
 #' @param x A \code{DTAFileDelim} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file to be read, and an
-#'   optional `specs` argument: a `DTAColumnSpecCollection` whose declared
-#'   types decide how the columns are parsed. Without it every column is
-#'   inferred, as before.
+#'   optional `specs` argument: a `DTAColumnSpecCollection`. When supplied,
+#'   every column is read as text and the declared types are applied
+#'   afterwards, in R; without it, column types are inferred.
 #'
-#' @return A tibble containing the contents of the file if the filename
-#' matches; otherwise, returns \code{NULL}.
+#' @return An Arrow Table with the file's contents.
 ##' @name read_file_execution
 #' @usage read_file_execution(x, ...)
 method(read_file_execution, DTAFileDelim) <- function(x, ...) {
@@ -125,8 +125,8 @@ method(read_file_execution, DTAFileDelim) <- function(x, ...) {
 #' in addition to the empty string, which is always treated as missing.
 #' @param x A \code{DTAFileDelim} object containing file reading parameters.
 #' @param ... A `file` argument giving the path to the file, and an optional
-#'   `specs` argument: a `DTAColumnSpecCollection` whose declared types decide
-#'   how the columns are parsed.
+#'   `specs` argument: a `DTAColumnSpecCollection`. When supplied, every
+#'   column is read as text; without it, column types are inferred.
 #' @return An \code{arrow::Dataset}.
 #' @usage open_file_execution(x, ...)
 method(open_file_execution, DTAFileDelim) <- function(x, ...) {

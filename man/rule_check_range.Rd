@@ -2,17 +2,17 @@
 % Please edit documentation in R/evaluateRules.R
 \name{rule_check_range}
 \alias{rule_check_range}
-\title{Rule: check_range}
+\title{Rule: col_range}
 \usage{
 rule_check_range(rule, df, numeric_cache = NULL)
 }
 \arguments{
-\item{rule}{A DTARule object of type \code{"check_range"}. Expected slots:
+\item{rule}{A DTARule object of type \code{"col_range"}. Expected slots:
 \itemize{
 \item \verb{@id} character
-\item \verb{@type} = "check_range"
-\item the target column, spelled either \verb{@columns} (what \code{\link[=DTARuleColRange]{DTARuleColRange()}}
-stores) or \verb{@column}. Exactly one column is required.
+\item \verb{@type} = "col_range"
+\item the target column, \verb{@columns} (as \code{\link[=DTARuleColRange]{DTARuleColRange()}} stores it).
+Exactly one column is required.
 \item the bounds, spelled either \verb{@min} and \verb{@max} (what \code{\link[=DTARuleColRange]{DTARuleColRange()}}
 stores, including when it was constructed from \verb{range =}) or a
 \verb{@range} numeric(2) giving inclusive lower and upper bounds.
@@ -31,8 +31,10 @@ demand.}
 A list with elements \code{id}, \code{valid}, and \code{message}.
 }
 \description{
-Ensures all non-missing values in \code{rule@column} fall within
-an \strong{inclusive} numeric range \verb{[lower, upper]}. Missing values are ignored.
+Ensures all non-missing values in the rule's target column
+(\code{rule@columns}) fall within an \strong{inclusive} numeric range
+\verb{[lower, upper]}. Missing values are ignored. A value that is present but
+cannot be converted to a number counts as a violation.
 }
 \examples{
 df <- data.frame(AGE = c(34, 71, 12))

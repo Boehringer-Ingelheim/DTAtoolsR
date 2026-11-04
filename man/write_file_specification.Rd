@@ -16,7 +16,7 @@ write_file_specification(x, file, ...)
 \code{include_file_specs}, \code{include_rules}, \code{signature_list}).}
 }
 \value{
-Invisibly returns the document object
+Invisibly \code{NULL}, as \code{\link[=write_dataset_metadata]{write_dataset_metadata()}}.
 }
 \description{
 Convenience alias for write_dataset_metadata()

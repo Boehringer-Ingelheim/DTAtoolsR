@@ -37,7 +37,7 @@ templates.
 
 ## Folder layout
 
-Use this structure for a template library:
+Use this structure for a template library (only the CI file of each chosen provider is created, one per provider):
 
 ```text
 repository/
@@ -153,6 +153,7 @@ profile.
 
 A template's `metadata.template` field is not an author-settable header field. The app writes this machine-owned provenance onto a created
 document.
+
 ## Creation templates
 
 A creation template (`kind: dta_creation_template`) describes a whole new DTA. Its `base:` supplies initial document data; `options:` describes
@@ -447,6 +448,7 @@ still receives the selected values as its permitted-value list. `include` and `e
 `field` may be `code` or `label` and selects which vocabulary field populates the column values. The default is `code`. A vocabulary slot must
 name an existing vocabulary and a valid target. Invalid slot definitions produce `vocab_slot_invalid`; an unresolved vocabulary produces
 `vocab_slot_unresolved`.
+
 ## Dataset templates
 
 A dataset template (`kind: dta_dataset_template`) describes one reusable dataset, which a creation template can import or an app user can add to
@@ -599,7 +601,7 @@ rules:
         empty: false
 ```
 
-A range rule constrains one or more columns to a numeric minimum and maximum. Use `columns`, not `column`:
+A range rule constrains one column to a numeric minimum and maximum. The key is `columns` (a single name):
 
 ```yaml
 rules:
@@ -835,6 +837,7 @@ limits the choices to named profile IDs.
 
 Do not put real personal information in a public repository. Private contact data belongs only in a repository with appropriate access controls,
 and the profile should contain only information needed in the generated DTA.
+
 ## Inheritance, deviation templates and sealing
 
 A creation template can extend another creation template with `extends:`. This supports a shared standard plus small supplier-, study-, or
@@ -1040,6 +1043,7 @@ directory. These are useful for a developer's local copy and do not replace the 
 
 To test the source resolution without changing deployment settings, configure a local `dir:` source for the clone and run the app with that
 environment value. Remember that earlier DTAtools releases need the `dir:` locator to point directly at `<checkout>/templates`.
+
 ## Validating
 
 Run validation from the repository root after changing any template file:
@@ -1131,7 +1135,8 @@ Use a small, reviewable change process for each template update.
 6. Configure a local app source and preview the document when the change affects what authors see or what metadata is built.
 7. Open a pull request with the purpose, affected template IDs, and expected behavior.
 8. Ask the reviewer to check the YAML semantics, versioning, data privacy, and validation result.
-9. Merge only after required checks pass. 10. Allow the deployed app to refresh its source, or trigger the deployment's normal refresh process.
+9. Merge only after required checks pass.
+10. Allow the deployed app to refresh its source, or trigger the deployment's normal refresh process.
 
 A local preview source can be configured as:
 

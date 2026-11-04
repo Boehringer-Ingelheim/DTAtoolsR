@@ -20,6 +20,12 @@
 #   dta_append_version_entry(dta, ...)      -- add a new version_history entry
 #   dta_set_version_entry_changes(dta, ...) -- rewrite one entry's `changes`
 #                                               (and optionally its `version`)
+#   dta_new_document_seed(title, version)   -- the `changes` text for a
+#                                               restarted document's one entry
+#   dta_restart_version_history(dta, ...)   -- replace version_history with
+#                                               that single seeded entry
+#   dta_version_finalise(dta, index, ...)   -- close the open entry by filling
+#                                               in its diff-based `changes`
 # -----------------------------------------------------------------------------
 
 # ---- Suggesting the next version -------------------------------------------
@@ -75,9 +81,9 @@ dta_version_is_ignored_key <- function(keys) {
 
 # Make a value safe to put in a Markdown table cell.
 #
-# R/exportDocuments.R (around line 333) writes a version_history entry's
-# `changes` straight into a `|`-delimited Markdown table row via
-# .df_to_md_table(); an embedded newline or `|` would break the table
+# The Markdown builder in R/exportDocuments.R writes a version_history entry's
+# `changes` straight into its "Version History" table, a `|`-delimited row,
+# via .df_to_md_table(); an embedded newline or `|` would break the table
 # structure, so both are replaced before the value goes anywhere near an
 # export.
 dta_version_sanitise <- function(x) {
@@ -414,9 +420,8 @@ dta_restart_version_history <- function(dta, version = "0.1", date = Sys.Date(),
 #
 # Returns `dta` UNCHANGED on every failure path: no index yet, no baseline to
 # diff against, an unparseable baseline, a diff that throws. None of those may
-# ever be the reason a version bump -- or an export -- fails; a document with
-# a placeholder `changes` string is a worse outcome than not, but a blocked
-# export is worse still.
+# ever be the reason a version bump -- or an export -- fails. A document left
+# with a placeholder `changes` string is bad, but a blocked export is worse.
 dta_version_finalise <- function(dta, index, baseline_yaml, note = "") {
   # length() before nzchar(), not the other way round: nzchar(character(0)) is
   # logical(0), and `FALSE || logical(0)` is NA rather than FALSE, so a

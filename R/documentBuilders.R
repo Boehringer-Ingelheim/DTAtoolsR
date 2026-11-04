@@ -69,9 +69,9 @@ NULL
 
 #' Open the bundled numbered reference template so document headings 1-4
 #' auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
-#' when the document is edited). Falls back to officer's default template if the
-#' bundled asset cannot be located, in which case level-4 headings render without
-#' a computed number.
+#' when the document is edited). Falls back to officer's default template if
+#' the bundled asset cannot be located; that template defines only headings
+#' 1-3, so a level-4 heading would then fail.
 #' @keywords internal
 .new_numbered_docx <- function() {
   path <- system.file(
@@ -382,8 +382,8 @@ NULL
 #' Add signature approval section.
 #' @description
 #' Accepts either a data.frame(Organization, Name, Role) (as returned by
-#' \code{.extract_signatories()}), a plain list of list(name=, role=, organization=)
-#' records, or NULL. One signature row is rendered per authorized signatory.
+#' \code{.extract_signatories()}), a plain list of
+#' list(name=, role=, organization=) records, or NULL. One signature row is rendered per authorized signatory.
 #'
 #' When no signatory is known the section is omitted entirely rather than
 #' padded with blank "Approved by / Signature" rules: an anonymous underline
@@ -518,8 +518,10 @@ NULL
   }
 }
 
-#' Add a bold subheading paragraph — used for nesting deeper than officer's default
-#' template supports (it only defines "heading 1" through "heading 3").
+#' Add a bold subheading paragraph — used where heading styles cannot be
+#' relied on: officer's default template only defines "heading 1" through
+#' "heading 3"
+#' (write_dta() uses .new_numbered_docx(), which provides headings 1-4).
 #' @keywords internal
 .add_bold_subheading <- function(doc, text) {
   fp <- .house_fp_text(size = FONT_SIZES$heading3, bold = TRUE, color = THEME_COLORS$primary_dark)
@@ -606,9 +608,10 @@ NULL
 
 #' Add Column Specifications + Validation Rules sections for one dataset (DOCX).
 #' Used standalone by write_dataset_metadata() (heading_level = 2) and embedded
-#' within write_dta()'s per-dataset "Datasets" section (heading_level = NULL, which
-#' uses bold subheadings instead of doc heading styles to avoid needing a
-#' non-existent "heading 4" style).
+#' within write_dta()'s per-dataset "Datasets" section (heading_level = NULL,
+#' which uses bold subheadings instead of doc heading styles, so it also works
+#' on a template such as officer's default that lacks the deeper heading
+#' styles).
 #' @keywords internal
 .add_dataset_specs_section <- function(doc, dataset, include_rules = TRUE, heading_level = 2) {
   if (!inherits(dataset, "DTAtools::DTADataSetTabular")) {
@@ -766,7 +769,8 @@ NULL
   doc
 }
 
-#' Add footer with page numbers and metadata
+#' Add a closing paragraph with generation time and version metadata
+#' (a "Generated: ... | Document Version: ..." line; no page numbers).
 #' @keywords internal
 .add_footer_section <- function(doc, version = NULL, template_version = NULL, document_date = Sys.Date()) {
   # This is typically handled through section properties, but for simplicity,

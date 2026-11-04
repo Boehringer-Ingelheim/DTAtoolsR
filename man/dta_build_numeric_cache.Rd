@@ -13,8 +13,8 @@ dta_build_numeric_cache(df, rules, columns = NULL)
 
 \item{columns}{Character, or \code{NULL} (the default). The columns the rules read
 numerically, when the caller has already derived them. Deriving them means
-re-parsing every rule's clause structure -- for \code{check_col_condition} and
-\code{check_group_condition} rules that is \code{dta_normalize_conditions()} over
+re-parsing every rule's clause structure -- for \code{col_condition} and
+\code{group_condition} rules that is \code{dta_normalize_conditions()} over
 every clause of every rule -- which is invariant across the batches of one
 scan. The streaming driver computes the list once before its batch loop and
 passes it here so the parse is not repeated per batch. When \code{NULL} the list

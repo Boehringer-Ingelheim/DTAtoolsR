@@ -130,11 +130,10 @@ bi_css <- function() {
       border-color: rgba(255,255,255,.6);
       text-decoration: none;
     }
-    /* create_new_version_button() is an actionButton(), which renders
-       <button class='btn btn-default action-button'> -- none of the
-       .brand-link rule above applies to it (that rule targets <a>), and
-       Bootstrap's own .btn supplies a background and border of its own on
-       top. Re-state the .brand-link look property by property so the
+    /* .brand-action is applied to the plain <button> toggle in edit_menu().
+       None of the .brand-link rule above applies to it (that rule targets
+       <a>), and a <button> brings the browser's default background and
+       border. Re-state the .brand-link look property by property so the
        button reads as the same pill as the links either side of it. */
     .app-actions .brand-action {
       background: rgba(255,255,255,.06);

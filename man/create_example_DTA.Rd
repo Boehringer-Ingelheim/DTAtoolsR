@@ -7,7 +7,8 @@
 create_example_DTA(index = 1)
 }
 \arguments{
-\item{index}{index of the example to create}
+\item{index}{Index of the example to create. Only \code{1} is currently
+available; any other value is an error (or, for \code{2}, \code{NULL}).}
 }
 \value{
 An object of class DTA with example data

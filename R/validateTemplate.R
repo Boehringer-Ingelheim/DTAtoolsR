@@ -1310,6 +1310,19 @@
 #' this check, the job goes green having validated nothing: exactly the
 #' failure a repository linter exists to catch.
 #'
+#' The `code` column takes these values. Errors (these fail `strict = TRUE`):
+#' `parse_failed`, `version_unquoted`, `target_machine_owned`,
+#' `vocab_slot_invalid`, `instantiate_failed`, `values_from_pattern`,
+#' `values_from_invalid`, `values_from_terms_invalid`, `dataset_missing`,
+#' `dataset_id_missing`, `dataset_field_invalid`, `vocabulary_invalid`,
+#' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`.
+#' Warnings: `kind_unknown`, `id_missing`, `version_missing`,
+#' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
+#' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
+#' `extends_unresolved`, `extends_cycle`, `sealed_violation`,
+#' `sealed_path_unknown`, `values_and_values_from`, `values_from_unresolved`,
+#' `vocabulary_unresolved`, `duplicate_id_version`, `template_in_subdirectory`.
+#'
 #' @param path A template file, a library directory, or a repository root. For a
 #'   directory, templates are read from its `templates/` sub-folder when that
 #'   holds at least one template file, otherwise from the directory itself;

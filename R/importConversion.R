@@ -150,7 +150,7 @@ dta_table_content_hash <- function(df) {
 #' [dta_table_content_hash()] of the frame it coerced, rather than of the Table
 #' it then builds -- which is what lets it convert the data once instead of
 #' three times. That is only the same answer while the round trip is lossless,
-#' and for three types it is not:
+#' and for four kinds of column it is not:
 #'
 #' * a `bit64::integer64` whose values fit in 32 bits comes back as `integer`
 #'   (Arrow's `int64_downcast`);
@@ -361,10 +361,12 @@ dta_compile_spec_types <- function(specs) {
 #' no value can fail to parse. This is also what stops the import axis from
 #' inventing errors on a clean file.
 #'
-#' An `Int` target is narrowed to R `integer` only when every value is whole.
+#' An `Int` target is narrowed to R `integer` only when every present value is
+#' whole, finite and within the integer range (`.Machine$integer.max`).
 #' Rounding a fractional value into an integer column would silently discard the
 #' fraction *and* hide the `type: integer` column spec error that exists to report
 #' it, so a fractional value stays a double and is left to the column spec axis.
+#' The same holds for a value too large for an `integer`.
 #' @param values A column vector taken from the table.
 #' @param target Character. The target R type, from [as_r_type()].
 #' @return `NULL` when the column is left untouched, otherwise a list with the

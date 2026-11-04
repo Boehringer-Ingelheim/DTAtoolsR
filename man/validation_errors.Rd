@@ -7,7 +7,7 @@
 validation_errors(x, ...)
 }
 \arguments{
-\item{x}{A \'DTADataSetTabular\' object.}
+\item{x}{A \'DTADataSetTabular\' or \'DTADataSetFile\' object.}
 
 \item{...}{Additional arguments:
 \describe{

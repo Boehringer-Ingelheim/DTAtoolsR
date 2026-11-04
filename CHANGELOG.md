@@ -341,7 +341,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   none of this, so `check_manifest.R` — the check that genuinely validates a
   manifest-only change — still runs on every pull request.
 
+### Removed
+
+- **Breaking: the legacy rule spellings are gone.** The `check_range`,
+  `check_unique`, `check_col_condition` and `check_group_condition` rule types
+  are no longer accepted; a rule is `col_range`, `col_unique`, `col_condition`
+  or `group_condition`, and `@type` now holds exactly that value. The singular
+  `column:` key on `col_range` / `col_unique` rules is gone too: write
+  `columns:`. `DTARuleFactory()` now rejects any argument that is not an exact
+  argument of the rule's constructor, where it used to let R partially match an
+  abbreviation such as `column` onto `columns`.
+
 ### Fixed
+
+- The shipped example specifications and the documentation now write
+  `columns:` on `col_range` / `col_unique` rules; they had relied on partial
+  argument matching to load.
 
 - A creation-template option that has both `target:` and `effects_all:`, and no
   `effects:`, now writes the selected value to its target. Before, the

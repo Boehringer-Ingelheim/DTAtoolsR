@@ -23,7 +23,7 @@ write_table_to_file(
 )
 }
 \arguments{
-\item{DTADataSetTabular}{An object of class DTADataSet.}
+\item{DTADataSetTabular}{An object of class DTADataSetTabular.}
 
 \item{table}{Character. The name of the table within the DTADataSetTabular object to write.}
 
@@ -33,16 +33,17 @@ write_table_to_file(
 
 \item{arrange_desc}{Logical. Whether to arrange the table in descending order. Default is FALSE.}
 
-\item{sep}{Character. The field separator string. Default is ",".}
+\item{sep}{Character. The field separator string. Default is a tab
+(\code{"\\t"}).}
 
 \item{na}{Character. The string to use for missing values in the data. Default is "".}
 
-\item{row.names}{Logical. Row names provided.}
+\item{row.names}{Logical. Write row names.}
 
 \item{overwrite}{Logical. Whether to overwrite the file if it exists. Default
 is FALSE, so a call against an existing path aborts unless \code{overwrite = TRUE} is passed explicitly.}
 
-\item{quote}{Logical. Use of quotes}
+\item{quote}{Logical. Quote character and factor fields.}
 
 \item{compression}{Character. Compression method, either "none" or "gzip". Default is "none".}
 

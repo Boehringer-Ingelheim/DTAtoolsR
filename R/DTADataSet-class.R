@@ -14,10 +14,10 @@
 #'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
 #' @param description Character or NULL. Long free-text description of the
 #'   dataset.
-#' @param template_source Character or NA. Source of the template used to
+#' @param template_source Character or NULL. Source of the template used to
 #'   generate the dataset specification.
-#' @param template_version Character or NA. Version of the template used.
-#' @param template_date Character or NA. Date of the template used.
+#' @param template_version Character or NULL. Version of the template used.
+#' @param template_date Character or NULL. Date of the template used.
 #' @return An object of class DTADataSet.
 #'
 #' @examples
@@ -284,9 +284,12 @@ read_dataset_from_yaml <- function(file) {
 #' @description
 #' Constructs a DTADataSet object from a list
 #' @param x List
-#' @param recursive Logical, if TRUE (default) processes nested datasets
+#' @param recursive Unused. It is only set to \code{FALSE} by the function's
+#'   own recursive call for a list of datasets and is never read; leave it at
+#'   its default.
 #' @importFrom cli cli_abort
-#' @return An object of class DTADataSet
+#' @return A \code{DTADataSet} object, or, when \code{x} is a list of dataset
+#'   specifications, a list of \code{DTADataSet} objects.
 #' @examples
 #' file <- system.file("extdata", "gf_dataset.yaml", package = "DTAtools")
 #' yaml_dataset <- yaml::read_yaml(file)
@@ -348,9 +351,10 @@ dta_dataset_heading <- function(ds) {
 #' @param x An object of class DTADataSet.
 #' @param ... Additional arguments:
 #'   \describe{
-#'     \item{name}{Optional single character or single integer. if NULL, returns a
-#'       list of all files. If character, returns the datasets with the specified name.
-#'       If integer, returns the datasets at the specified index.}
+#'     \item{name}{Optional single character or single integer. if NULL, returns
+#'       a list of all file handlers. If character, returns the file handler
+#'       with the specified name. If integer, returns the file handler at the
+#'       specified index.}
 #'   }
 #' @return A list of DTAFile objects, or a single DTAFile object when a name
 #'   or index is provided.
@@ -430,7 +434,10 @@ if (!exists("load_file", mode = "function", inherits = FALSE)) {
 
 #' @title Load file into DTADataSet
 #' @description
-#' Convenience wrapper that dispatches to \code{load_file()} for a dataset.
+#' The \code{load_file()} method for the abstract \code{DTADataSet} base class.
+#' It is not implemented: it always aborts, directing the caller to
+#' \code{DTADataSetTabular} or \code{DTADataSetFile}, which have their own
+#' methods.
 #' @param x An object of class \code{DTADataSet}.
 #' @param ... Additional named arguments:
 #'   \describe{
@@ -438,9 +445,9 @@ if (!exists("load_file", mode = "function", inherits = FALSE)) {
 #'       file handler within the dataset. Defaults to \code{1}.}
 #'     \item{file}{Path to the input file to be read.}
 #'     \item{name}{Optional name under which the loaded table should be stored.
-#'       Defaults to \code{basename(file)}.}
+#'       Defaults to \code{tools::file_path_sans_ext(basename(file))}.}
 #'   }
-#' @return The updated dataset object.
+#' @return Never returns; always signals an error on this base class.
 #' @usage load_file(x, ...)
 #' @name load_file
 #' @export

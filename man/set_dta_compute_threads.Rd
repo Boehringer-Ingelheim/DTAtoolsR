@@ -47,6 +47,17 @@ Both options only ever affect internal compute \emph{paths}; a table's
 validation verdict does not depend on either option (the R and Arrow paths
 are tested to agree), which is what makes Arrow compute safe to enable
 selectively for performance without changing results.
+
+Two further Arrow switches belong to streaming validation and are
+independent of the options above. Both default to \code{TRUE} and exist as
+diagnostic off switches:
+\itemize{
+\item \code{options(DTAtools.stream_arrow_unique = FALSE)} -- turns off Arrow's
+engine for \code{col_unique} key tracking over text keys, falling back to the
+per-batch R key set.
+\item \code{options(DTAtools.stream_arrow_numeric = FALSE)} -- sends every column
+down the R parsing path instead of Arrow's numeric parsing.
+}
 }
 \examples{
 # Guarded: a no-op if arrow is not installed. CRAN check machines are

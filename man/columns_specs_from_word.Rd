@@ -16,7 +16,19 @@ columns_specs_from_word(
 
 \item{table_position}{Integer. Index of the table to extract.}
 
-\item{colnames}{Vector. Vector containing column names of the table. Essential column names are: id Variable Name), label (Variable Label), type (Type), nullable (Nullable), description (Description)}
+\item{colnames}{Vector. Names assigned, in order, to the table's columns.
+The default is \code{c("id", "label", "type", "length", "format",
+  "nullable", "description")}: id (Variable Name), label (Variable Label),
+type (Type), length (Length), format (Format), nullable (Nullable; "Yes"
+or "yes" means nullable) and description (Description). All seven are
+used, so the table needs seven columns in that order unless
+\code{colnames} says otherwise.
+
+A description cell may carry markers on their own lines:
+\code{#@values: a;b;c} gives the permitted values (separated by
+\code{value_sep}) and \code{#@pattern: <regex>} gives a pattern. Both
+markers, and everything after them, are removed from the stored
+description.}
 
 \item{value_sep}{Character. Separator dividing the values. Default: ";"}
 }

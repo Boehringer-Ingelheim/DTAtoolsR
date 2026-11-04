@@ -194,7 +194,7 @@ datasets:
             not_equals: DROPPED
       - id: rule_range_example
         type: col_range
-        column: AGE
+        columns: AGE
         min: 18
         max: 65
       - id: rule_dependency_example
@@ -207,7 +207,7 @@ datasets:
             empty: false
       - id: rule_unique_example
         type: col_unique
-        column: 
+        columns: 
           - SUBJECT_ID
           - VISIT
       - id: check_col_condition_example

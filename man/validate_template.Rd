@@ -74,6 +74,19 @@ an error row. Point that job at the wrong path -- a typo, a stale working
 directory, a checkout that put the templates one level down -- and, without
 this check, the job goes green having validated nothing: exactly the
 failure a repository linter exists to catch.
+
+The \code{code} column takes these values. Errors (these fail \code{strict = TRUE}):
+\code{parse_failed}, \code{version_unquoted}, \code{target_machine_owned},
+\code{vocab_slot_invalid}, \code{instantiate_failed}, \code{values_from_pattern},
+\code{values_from_invalid}, \code{values_from_terms_invalid}, \code{dataset_missing},
+\code{dataset_id_missing}, \code{dataset_field_invalid}, \code{vocabulary_invalid},
+\code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir}.
+Warnings: \code{kind_unknown}, \code{id_missing}, \code{version_missing},
+\code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
+\code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
+\code{extends_unresolved}, \code{extends_cycle}, \code{sealed_violation},
+\code{sealed_path_unknown}, \code{values_and_values_from}, \code{values_from_unresolved},
+\code{vocabulary_unresolved}, \code{duplicate_id_version}, \code{template_in_subdirectory}.
 }
 \examples{
 issues <- validate_template(system.file("extdata", "templates", package = "DTAtools"))

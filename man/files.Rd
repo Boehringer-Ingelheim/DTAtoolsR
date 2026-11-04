@@ -11,9 +11,10 @@ files(x, ...)
 
 \item{...}{Additional arguments:
 \describe{
-\item{name}{Optional single character or single integer. if NULL, returns a
-list of all files. If character, returns the datasets with the specified name.
-If integer, returns the datasets at the specified index.}
+\item{name}{Optional single character or single integer. if NULL, returns
+a list of all file handlers. If character, returns the file handler
+with the specified name. If integer, returns the file handler at the
+specified index.}
 }}
 }
 \value{
