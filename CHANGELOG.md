@@ -169,6 +169,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The "Create new from template" picker narrows to any number of template
+  libraries.** The source filter was a radio group that could show one
+  library or all of them; it is now a set of library chips, each with its
+  template count, and any combination of them can be checked (nothing checked
+  shows every library). A template whose parent lives in a library that is
+  filtered out is listed at the top level instead of disappearing, and still
+  names the template it extends.
+- The picker is a wider dialog with the template list and the selected
+  template side by side, so its version, lineage, description and what it
+  creates are in view without scrolling. Rows use the full width of the list
+  (they filled under half of it), the library badge on each row is legible
+  (it was white on white), search highlights no longer insert stray spaces,
+  "Refresh templates" moved to the dialog footer, and a double-click on a row
+  goes straight to the options step.
+- Two templates that both extend a template not in the list (an abstract
+  base, or one in a filtered-out library) are separate families again: each
+  counts and expands only its own variants.
 - `create_template_repo()` writes starter templates to `templates/` and ships
   a comprehensive README documenting every template feature, app configuration
   and validation codes.

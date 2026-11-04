@@ -58,28 +58,45 @@ template_picker_search_ui <- function(value = "") {
   )
 }
 
-# The source filter, which only exists when there is a choice to make: with one
-# configured library the control would be a radio group of one, which says
-# nothing and costs a line of the dialog.
+# The library filter, which only exists when there is a choice to make: with
+# one configured library the control would be a single chip, which says nothing
+# and costs a line of the dialog.
 #
-# Inline radios stay readable to about four options; past that they wrap into a
-# block of noise, so the same choices become a dropdown. "All sources" is always
-# first and always the empty value, which is what template_picker_filter()
-# reads as "do not restrict".
-template_picker_source_ui <- function(sources, selected = "") {
+# A multi-select, because "these two of my three libraries" is a real question
+# and a radio group could only ever answer "one" or "all". Nothing checked means
+# every library (template_picker_restrict_sources(), template_index.R): Shiny
+# reports an unchecked group and a not-yet-bound one identically, as NULL, so
+# "none" is the only reading of NULL that is right in both cases.
+#
+# Checkbox chips stay scannable to about six libraries; past that they wrap
+# into a block of noise, so the same choices become a multi-select dropdown.
+# `counts`, named by library, puts the template count on each chip.
+template_picker_source_ui <- function(sources, selected = character(0), counts = NULL) {
   sources <- as.character(sources %||% character(0))
   if (length(sources) < 2) {
     return(NULL)
   }
-  choices <- c(stats::setNames("", "All sources"), stats::setNames(sources, sources))
-  if (length(sources) <= 4) {
-    radioButtons(
-      "template_select_source", "Source",
-      choices = choices, selected = selected, inline = TRUE
-    )
-  } else {
-    selectInput("template_select_source", "Source", choices = choices, selected = selected)
+  selected <- intersect(as.character(selected %||% character(0)), sources)
+  if (length(sources) > 6) {
+    return(selectizeInput(
+      "template_select_source", "Libraries",
+      choices = sources, selected = selected, multiple = TRUE,
+      options = list(placeholder = "All libraries", plugins = list("remove_button"))
+    ))
   }
+  labels <- lapply(sources, function(s) {
+    if (!(s %in% names(counts))) {
+      return(s)
+    }
+    tagList(s, span(class = "tmpl-chip-count", as.integer(counts[[s]])))
+  })
+  div(
+    class = "tmpl-source-filter",
+    checkboxGroupInput(
+      "template_select_source", "Libraries",
+      choiceNames = labels, choiceValues = sources, selected = selected, inline = TRUE
+    )
+  )
 }
 
 # Wrap every case-insensitive occurrence of any token in <mark>, as a tagList of
@@ -123,7 +140,9 @@ template_picker_highlight <- function(text, tokens) {
     if (start > plain_from) {
       out[[length(out) + 1L]] <- substr(text, plain_from, start - 1L)
     }
-    out[[length(out) + 1L]] <- tags$mark(substr(text, start, start + lens[[k]] - 1L))
+    # .noWS: htmltools otherwise puts a line break either side of a child tag,
+    # which the browser renders as a space -- "biomarker_gf_ acme".
+    out[[length(out) + 1L]] <- tags$mark(substr(text, start, start + lens[[k]] - 1L), .noWS = "outside")
     plain_from <- start + lens[[k]]
   }
   if (plain_from <= n) {
@@ -159,7 +178,7 @@ template_picker_list_ui <- function(entries, selected = NULL, show_source = FALS
       class = if (flat) "tmpl-picker-list flat" else "tmpl-picker-list",
       p(
         class = "msg-hint",
-        "No templates match. Clear the search or pick another source."
+        "No templates match. Clear the search or choose other libraries."
       )
     ))
   }
@@ -175,24 +194,41 @@ template_picker_list_ui <- function(entries, selected = NULL, show_source = FALS
   # that is what Shiny's binding will report once it binds: the first radio of
   # a group with nothing checked. Rendering "nothing selected" would leave the
   # server's idea of the selection disagreeing with the client's.
+  ids <- as.character(entries$id)
   sel <- as.character(selected %||% "")
-  if (!nzchar(sel) || !(sel %in% entries$id)) {
-    sel <- as.character(entries$id[[1]])
+  if (!nzchar(sel) || !(sel %in% ids)) {
+    sel <- ids[[1]]
   }
-  sel_family <- as.character(entries$family[[match(sel, entries$id)]])
+
+  # Each row collapses under the nearest top row above it -- the rows arrive in
+  # depth-first tree order (template_picker_lineage()), so that IS its visible
+  # parent's family. Not the `family` column: that names the root ancestor,
+  # which may be hidden (abstract, or in a library filtered out), and two
+  # sibling top rows under one hidden root would then claim each other's
+  # variants and open together. A child with no top row above it is a top row
+  # itself, rather than a row nothing can ever expand.
+  tops <- logical(n)
+  group <- character(n)
+  cur <- ""
+  for (i in seq_len(n)) {
+    tops[[i]] <- as.integer(entries$indent[[i]]) == 0L || !nzchar(cur)
+    if (tops[[i]]) cur <- ids[[i]]
+    group[[i]] <- cur
+  }
+  sel_family <- group[[match(sel, ids)]]
 
   rows <- lapply(seq_len(n), function(i) {
-    id <- as.character(entries$id[[i]])
-    family <- as.character(entries$family[[i]])
-    indent <- as.integer(entries$indent[[i]])
+    id <- ids[[i]]
+    family <- group[[i]]
+    is_top <- tops[[i]]
+    indent <- if (is_top) 0L else as.integer(entries$indent[[i]])
     depth <- as.integer(entries$depth[[i]])
-    is_top <- indent == 0L
     is_sel <- identical(id, sel)
 
     # A top row stands for its whole family while the family is collapsed, so
     # it says how many rows are hiding behind it. A search result is flat and
     # hides nothing, so it gets no badge.
-    variants <- if (is_top && !flat) sum(entries$family == family & entries$indent > 0L) else 0L
+    variants <- if (is_top && !flat) sum(group == family & !tops) else 0L
 
     classes <- "tmpl-row"
     if (flat || identical(family, sel_family)) {
@@ -218,6 +254,8 @@ template_picker_list_ui <- function(entries, selected = NULL, show_source = FALS
         div(
           class = "tmpl-entry",
           style = if (!flat && indent > 0L) paste0("margin-left:", indent * 18L, "px") else NULL,
+          # Name, library and version on the line the eye scans down; the id,
+          # the parent and the variants on a quieter line under it.
           div(
             class = "tmpl-title",
             tags$strong(
@@ -227,15 +265,18 @@ template_picker_list_ui <- function(entries, selected = NULL, show_source = FALS
             if (show_source) {
               span(class = "badge tmpl-source", as.character(entries$source_name[[i]] %||% ""))
             },
+            span(class = "tmpl-version", paste0("version ", as.character(entries$version[[i]])))
+          ),
+          div(
+            class = "tmpl-meta",
             span(class = "tmpl-id", template_picker_highlight(id, tokens)),
-            span(class = "tmpl-version", paste0("version ", as.character(entries$version[[i]]))),
+            if (depth > 0L && nzchar(lineage)) {
+              span(class = "tmpl-lineage", paste0("extends ", lineage))
+            },
             if (variants > 0L) {
               span(class = "tmpl-variants", tmpl_count_label(variants, "variant"))
             }
           ),
-          if (depth > 0L && nzchar(lineage)) {
-            div(class = "tmpl-lineage msg-hint", paste0("extends ", lineage))
-          },
           if (nzchar(desc)) {
             div(class = "tmpl-desc msg-hint", template_picker_highlight(desc, tokens))
           }
@@ -244,6 +285,8 @@ template_picker_list_ui <- function(entries, selected = NULL, show_source = FALS
     )
   })
 
+  # The count is the box's sticky header (theme.R), so it stays in view however
+  # far down the list the user is.
   div(
     class = if (flat) "tmpl-picker-list flat" else "tmpl-picker-list",
     p(class = "msg-hint tmpl-count", count_text),
@@ -307,6 +350,24 @@ template_picker_scripts <- function() {
     "      }",
     "      var nx = document.getElementById('template_select_next');",
     "      if (nx) nx.click();",
+    "    });",
+    # A double-click on a row is "this one, go on". The two clicks before it
+    # have already checked the radio, and Shiny sends that input ahead of the
+    # button event, so Next acts on the row that was double-clicked.
+    "    document.addEventListener('dblclick', function(ev){",
+    "      if (!ev.target || !ev.target.closest || !ev.target.closest('.tmpl-row')) return;",
+    "      var nx = document.getElementById('template_select_next');",
+    "      if (nx) nx.click();",
+    "    });",
+    # The list is re-rendered whenever the search or the library filter
+    # changes, and a selection that survives the change can land below the
+    # fold. shiny:value fires before the new HTML is in, hence the timeout.
+    "    if (window.jQuery) jQuery(document).on('shiny:value', function(ev){",
+    "      if (ev.name !== 'template_picker_list') return;",
+    "      setTimeout(function(){",
+    "        var row = document.querySelector('.tmpl-picker-list .tmpl-row.selected');",
+    "        if (row) row.scrollIntoView({block: 'nearest'});",
+    "      }, 0);",
     "    });",
     "  }",
     # Runs on every render (not behind the flag): the body may arrive after the
@@ -430,13 +491,17 @@ template_picker_detail_ui <- function(loaded, versions, selected_version, index)
     class = "tmpl-detail",
     div(
       class = "tmpl-detail-head",
-      tags$strong(as.character(def$label %||% def$id %||% "")),
-      span(class = "tmpl-id", as.character(def$id %||% "")),
-      if (nzchar(source_name)) span(class = "badge tmpl-source", source_name)
+      tags$h5(class = "tmpl-detail-title", as.character(def$label %||% def$id %||% "")),
+      div(
+        class = "tmpl-detail-sub",
+        span(class = "tmpl-id", as.character(def$id %||% "")),
+        if (nzchar(source_name)) span(class = "badge tmpl-source", source_name)
+      )
     ),
     version_ui,
     if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
-    if (nzchar(description)) p(class = "msg-hint", description),
+    if (nzchar(description)) p(class = "tmpl-detail-desc", description),
+    div(class = "section-label", "What it creates"),
     p(class = "tmpl-summary", tmpl_detail_summary(def)),
     if (!is.null(index)) {
       # The history is extra information: a failure computing it must never
@@ -486,6 +551,7 @@ template_history_ui <- function(history, selected_version) {
   own <- Filter(function(e) e$type != "upstream" && identical(e$version, selected_version), history)
   div(
     class = "tmpl-history",
+    div(class = "section-label", "History"),
     if (length(own) > 0) {
       tagList(
         tags$strong(paste0("What changed in ", selected_version)),

@@ -168,13 +168,16 @@ test_that("opening the picker with a dir: source lists the private templates and
 
   shiny::testServer(app_server_dir(), {
     session$setInputs(create_from_template = 1)
-    html <- ui_text(output$template_picker_ui)
+    ui_text(output$template_picker_ui)
     list_html <- ui_text(output$template_picker_list)
 
-    # The source's own name is part of the picker FRAME (its status row);
-    # the template rows live in their own output, so that typing in the
-    # search box re-renders only them.
-    expect_match(html, "myprivate", fixed = TRUE)
+    # With one library there is no filter to name it and no per-row badge, so
+    # the selected template's detail pane is where its source is named.
+    expect_match(
+      ui_text(output$template_picker_detail),
+      '<span class="badge tmpl-source">myprivate</span>',
+      fixed = TRUE
+    )
     expect_match(list_html, "Private Template", fixed = TRUE)
     # Structural stand-in for "the packaged demo is not offered": with a
     # private source configured, dta_template_include_builtin() defaults to
@@ -299,6 +302,38 @@ test_that("the source filter appears only with several sources, and restricts th
     expect_equal(count_occurrences(filtered, "class=\"tmpl-entry"), 1)
     expect_match(filtered, "Two Template", fixed = TRUE)
     expect_false(grepl("One Template", filtered, fixed = TRUE))
+  })
+})
+
+test_that("the library filter takes several libraries at once, and none means all", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root_a <- withr::local_tempdir()
+  root_b <- withr::local_tempdir()
+  root_c <- withr::local_tempdir()
+  write_min_template(root_a, id = "one_tpl", version = "1.0", label = "One Template")
+  write_min_template(root_b, id = "two_tpl", version = "1.0", label = "Two Template")
+  write_min_template(root_c, id = "three_tpl", version = "1.0", label = "Three Template")
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0(
+    "one=dir:", root_a, ";two=dir:", root_b, ";three=dir:", root_c
+  ))
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    frame <- ui_text(output$template_picker_ui)
+    expect_equal(count_occurrences(frame, 'name="template_select_source"'), 3)
+
+    session$setInputs(template_select_source = c("one", "three"))
+    both <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(both, "class=\"tmpl-entry"), 2)
+    expect_match(both, "One Template", fixed = TRUE)
+    expect_match(both, "Three Template", fixed = TRUE)
+    expect_false(grepl("Two Template", both, fixed = TRUE))
+    expect_match(both, "2 of 3 templates", fixed = TRUE)
+
+    # Unchecking the last chip reports NULL, which restricts nothing.
+    session$setInputs(template_select_source = NULL)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 3)
   })
 })
 
