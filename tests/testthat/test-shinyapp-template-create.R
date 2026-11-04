@@ -64,8 +64,9 @@ write_gf_dataset_template <- function(root) {
       "    type: text",
       "    target: dataset.columns.GFNAM.values",
       "dataset:",
-      "  name: gf_data",
+      "  id: gf_data",
       "  type: tabular",
+      "  name: GF data table",
       "  files: { filename: gf.tsv, type: tsv }",
       "  columns:",
       "    - { id: STUDYID, label: Study ID, type: SAS Char }",
@@ -190,7 +191,7 @@ index_over <- function(root) {
 # A trivial inline dataset entry, the exact shape the pre-existing 55 tests
 # already use for a minimal, always-buildable dataset.
 mini_dataset_entry <- function() {
-  list(name = "mini_ds", type = "file", files = list(filename = "mini.csv", type = "csv"))
+  list(id = "mini_ds", type = "file", files = list(filename = "mini.csv", type = "csv"))
 }
 
 # ---- template_dataset_entry_kind() ------------------------------------------
@@ -201,7 +202,10 @@ test_that("template_dataset_entry_kind() classifies all four accepted shapes", {
   expect_equal(fn("gf_dataset.yaml"), "path")
   expect_equal(fn(list(source = "gf_dataset.yaml")), "source")
   expect_equal(fn(list(template = "gf@3.0")), "template")
-  expect_equal(fn(list(name = "inline_ds", type = "file")), "inline")
+  expect_equal(fn(list(id = "inline_ds", type = "file")), "inline")
+  # An entry written before datasets had an `id` names itself in `name:`; it is
+  # still an inline dataset.
+  expect_equal(fn(list(name = "legacy_inline_ds", type = "file")), "inline")
   # An (currently hypothetical) entry naming both is resolved as "template",
   # checked first.
   expect_equal(fn(list(template = "gf@3.0", source = "x.yaml")), "template")
@@ -484,7 +488,9 @@ test_that("a template: dataset entry builds the dataset, carries template_source
   expect_length(built$datasets, 1)
   ds <- built$datasets[[1]]
   expect_s3_class(ds, "DTAtools::DTADataSet")
-  expect_equal(ds@name, "gf_from_template")
+  # `as:` sets the dataset's id; the template's name (its label) is left alone.
+  expect_equal(ds@id, "gf_from_template")
+  expect_equal(ds@name, "GF data table")
   expect_equal(ds@template_source, "gf_dt")
   expect_equal(ds@template_version, "1.0")
   expect_equal(ds@template_date, "2024-01-01")
@@ -543,14 +549,14 @@ test_that("build_template_datasets() surfaces a malformed inline dataset definit
 
   fn <- app_fn("build_template_datasets")
   # `x[[1]]` must itself be list-shaped (not atomic) for dta_dataset_from_
-  # list()'s own `x[[1]]$name` probe to return NULL rather than raising a raw
+  # list()'s own `x[[1]]$id` probe to return NULL rather than raising a raw
   # "$ operator is invalid for atomic vectors" -- a nested empty list is the
-  # simplest value that is safely list-shaped while still lacking `name`.
+  # simplest value that is safely list-shaped while still lacking an `id`.
   def <- list(label = "y", datasets = list(list(columns = list())))
 
   expect_error(
     fn(def, idx, list(), template_path = file.path(root, "whatever.yaml")),
-    regexp = "must contain a 'name' field"
+    regexp = "must contain an id field"
   )
 })
 
@@ -586,6 +592,14 @@ test_that("all three legacy datasets: forms build the identical DTA whether or n
     sort(names(res_with_index$value@datasets)),
     sort(names(res_no_index$value@datasets))
   )
+  # All three entries were written with `name:` as the identifier; each is read
+  # as an id, and none had a label to carry over as a name.
+  built <- res_no_index$value@datasets
+  for (nm in names(built)) {
+    expect_equal(built[[nm]]@id, nm)
+    expect_null(built[[nm]]@name)
+    expect_null(built[[nm]]@description)
+  }
   expect_equal(DTAtools::metadata(res_with_index$value)@title, DTAtools::metadata(res_no_index$value)@title)
 })
 

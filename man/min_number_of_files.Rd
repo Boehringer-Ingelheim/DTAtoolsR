@@ -43,7 +43,7 @@ Returns the min number of files specified in a \code{DTAFile} object.
 
 \examples{
 ds <- DTADataSet(
-  name = "example_dataset",
+  id = "example_dataset",
   type = "file",
   files = list(create_example_DTAFileCSV())
 )

@@ -196,8 +196,35 @@ test_that("dta_get_dataset returns the named dataset or NULL when absent", {
   dta <- app_fixture_dta()
 
   ds <- app_fn("dta_get_dataset")(dta, "clinical_data")
-  expect_equal(ds@name, "clinical_data")
+  expect_equal(ds@id, "clinical_data")
+  expect_equal(ds@name, "Clinical data table")
   expect_null(app_fn("dta_get_dataset")(dta, "no_such_dataset"))
+})
+
+test_that("dta_dataset_label is the name when set and the id otherwise", {
+  label <- app_fn("dta_dataset_label")
+  ds <- app_fn("dta_get_dataset")(app_fixture_dta(), "clinical_data")
+
+  expect_equal(label(ds), "Clinical data table")
+
+  # Unset (NULL) and blank both fall back to the id: a label is never empty.
+  ds@name <- NULL
+  expect_equal(label(ds), "clinical_data")
+  ds@name <- ""
+  expect_equal(label(ds), "clinical_data")
+})
+
+test_that("dta_blank_to_null unsets blank form values and trims the rest", {
+  blank <- app_fn("dta_blank_to_null")
+
+  expect_null(blank(NULL))
+  expect_null(blank(character(0)))
+  expect_null(blank(""))
+  expect_null(blank("   "))
+  expect_null(blank(NA_character_))
+  expect_equal(blank("  Demographics "), "Demographics")
+  # Only the first element is read, as a single-valued form input is.
+  expect_equal(blank(c("a", "b")), "a")
 })
 
 test_that("dta_handlers exposes the dataset's file handler list", {
@@ -368,10 +395,36 @@ test_that("dta_dataset_to_list builds the standalone-dataset shape with all colu
 
   l <- app_fn("dta_dataset_to_list")(ds)
 
-  expect_equal(l$name, "clinical_data")
+  expect_equal(l$id, "clinical_data")
   expect_equal(l$type, "tabular")
+  expect_equal(l$name, "Clinical data table")
+  expect_match(l$description, "^Subject-level clinical observations")
   expect_length(l$columns, 14)
   expect_length(l$rules, 8)
+})
+
+test_that("dta_dataset_to_list leads with id, type, name and description, in that order", {
+  # The order is the order the serialised YAML reads in, so it is pinned: a
+  # dataset opens with its identifier, then what it is, then how it is labelled.
+  ds <- app_fn("dta_get_dataset")(app_fixture_dta(), "clinical_data")
+
+  l <- app_fn("dta_dataset_to_list")(ds)
+
+  expect_equal(names(l)[1:4], c("id", "type", "name", "description"))
+})
+
+test_that("dta_dataset_to_list omits an unset name and an unset description", {
+  ds <- app_fn("dta_get_dataset")(app_fixture_dta(), "clinical_data")
+  ds@name <- NULL
+  ds@description <- NULL
+
+  l <- app_fn("dta_dataset_to_list")(ds)
+
+  expect_equal(l$id, "clinical_data")
+  expect_false("name" %in% names(l))
+  expect_false("description" %in% names(l))
+  # Neither is written back as an empty value either: the keys are just absent.
+  expect_equal(names(l)[1:2], c("id", "type"))
 })
 
 test_that("dta_to_list builds metadata + datasets top-level keys", {
@@ -382,7 +435,8 @@ test_that("dta_to_list builds metadata + datasets top-level keys", {
   expect_setequal(names(l), c("metadata", "datasets"))
   expect_equal(l$metadata$title, "Clinical Data Specification")
   expect_length(l$datasets, 1)
-  expect_equal(l$datasets[[1]]$name, "clinical_data")
+  expect_equal(l$datasets[[1]]$id, "clinical_data")
+  expect_equal(l$datasets[[1]]$name, "Clinical data table")
 })
 
 # ---- YAML blank-line layout -------------------------------------------------
@@ -400,7 +454,7 @@ nested_yaml_fixture <- function() {
     "  receiver:",
     "    name: N",
     "datasets:",
-    "- name: d",
+    "- id: d",
     "  type: tabular",
     "  columns:",
     "  - id: A",
@@ -424,7 +478,7 @@ test_that("dta_yaml_blank_lines spaces blocks down to max_depth and leaves deepe
       "    name: N",
       "",
       "datasets:",
-      "- name: d",
+      "- id: d",
       "  type: tabular",
       "",
       "  columns:",
@@ -448,7 +502,7 @@ test_that("dta_yaml_blank_lines honours max_depth: at 1 only the top-level block
 
 test_that("dta_yaml_blank_lines lays a standalone dataset out at max_depth 1", {
   text <- paste(
-    "name: d",
+    "id: d",
     "type: tabular",
     "files:",
     "  filename: f.csv",
@@ -462,7 +516,7 @@ test_that("dta_yaml_blank_lines lays a standalone dataset out at max_depth 1", {
   expect_equal(
     yaml_lines(app_fn("dta_yaml_blank_lines")(text, max_depth = 1L)),
     c(
-      "name: d",
+      "id: d",
       "type: tabular",
       "",
       "files:",
@@ -483,7 +537,7 @@ test_that("dta_yaml_blank_lines keeps a block flush against the parent that open
     app_fn("dta_yaml_blank_lines")(nested_yaml_fixture(), max_depth = 3L)
   )
 
-  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- name: d")
+  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- id: d")
   expect_equal(lines[[which(lines == "  receiver:") + 1L]], "    name: N")
 })
 
@@ -658,17 +712,20 @@ test_that("dta_to_yaml_text lays the document out in blank-line separated sectio
   expect_true(all(nzchar(lines[ids[-1] - 1L])))
 
   # A block never opens with a blank, and the document never ends with one.
-  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- name: clinical_data")
+  expect_equal(lines[[which(lines == "datasets:") + 1L]], "- id: clinical_data")
   expect_true(nzchar(lines[[length(lines)]]))
   expect_false(any(!nzchar(utils::head(lines, -1L)) & !nzchar(lines[-1])))
 })
 
-test_that("dta_dataset_to_yaml_text serializes one dataset and errors for an unknown name", {
+test_that("dta_dataset_to_yaml_text serializes one dataset and errors for an unknown id", {
   dta <- app_fixture_dta()
 
   ok_res <- app_fn("dta_dataset_to_yaml_text")(dta, "clinical_data")
   expect_true(ok_res$ok)
-  expect_true(grepl("name: clinical_data", ok_res$value, fixed = TRUE))
+  # The first key is the identifier -- asserted on the text's first line, where
+  # a substring match would be satisfied by any column that mentions the id.
+  expect_equal(yaml_lines(ok_res$value)[[1]], "id: clinical_data")
+  expect_true(grepl("\nname: Clinical data table\n", ok_res$value, fixed = TRUE))
 
   bad_res <- app_fn("dta_dataset_to_yaml_text")(dta, "no_such_dataset")
   expect_false(bad_res$ok)
@@ -946,6 +1003,47 @@ test_that("dta_specs_signature is stable for the same dataset and differs across
 })
 
 # ---- validation report --------------------------------------------------------
+
+test_that("the validation summary's Datasets table has Dataset, Name and Status columns", {
+  dta <- app_fixture_dta()
+
+  html <- app_fn("dta_build_validation_report")(dta, c(clinical_data = "pass"))
+
+  expect_match(html, "<th>Dataset</th><th>Name</th><th>Status</th>", fixed = TRUE)
+  # One row per dataset: the id first (what the messages refer to), the name
+  # beside it, then the status.
+  expect_match(
+    html,
+    "<tr><td>clinical_data</td><td>Clinical data table</td><td class='ok'>",
+    fixed = TRUE
+  )
+})
+
+test_that("an unnamed dataset, or a status with no dataset behind it, gets an empty name cell", {
+  dta <- app_fixture_dta()
+  dta <- app_fn("dta_set_dataset_meta")(dta, "clinical_data", id = "clinical_data")$value
+
+  html <- app_fn("dta_build_validation_report")(
+    dta, c(clinical_data = "pass", lab_data = "nodata")
+  )
+
+  # No name set: the cell is empty rather than repeating the id.
+  expect_match(html, "<tr><td>clinical_data</td><td></td><td class='ok'>", fixed = TRUE)
+  expect_false(grepl("Clinical data table", html, fixed = TRUE))
+  expect_match(html, "<tr><td>lab_data</td><td></td>", fixed = TRUE)
+})
+
+test_that("a dataset name is escaped in the validation summary", {
+  dta <- app_fn("dta_set_dataset_meta")(
+    app_fixture_dta(), "clinical_data",
+    id = "clinical_data", name = "<b>Bold</b> & co"
+  )$value
+
+  html <- app_fn("dta_build_validation_report")(dta, c(clinical_data = "pass"))
+
+  expect_false(grepl("<b>Bold</b>", html, fixed = TRUE))
+  expect_match(html, "&lt;b&gt;Bold&lt;/b&gt; &amp; co", fixed = TRUE)
+})
 
 test_that("dta_build_validation_report includes dataset names and reflects nodata status", {
   dta <- app_fixture_dta()

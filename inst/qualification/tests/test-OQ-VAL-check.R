@@ -21,11 +21,11 @@ vc_id_specs <- function() {
 
 # A loaded, unchecked dataset backed by a file on disk, which is the shape a
 # real delivery arrives in.
-vc_dataset <- function(frame, specs, dir, name = "qual", stream = "never") {
+vc_dataset <- function(frame, specs, dir, id = "qual", stream = "never") {
   path <- file.path(dir, paste0("c", as.integer(stats::runif(1, 1, 1e9)), ".csv"))
   utils::write.csv(frame, path, row.names = FALSE, na = "")
   ds <- DTADataSetTabular(
-    name = name, specs = specs,
+    id = id, specs = specs,
     files = list(DTAFileCSV(filename = basename(path)))
   )
   load_file(ds, file = path, handler_index = 1, stream = stream)
@@ -48,7 +48,7 @@ test_that("OQ-VAL-020 | only the named tables are validated | REQ-VAL-014", {
   utils::write.csv(data.frame(ID = c("B001", "B002"), stringsAsFactors = FALSE), two, row.names = FALSE)
 
   ds <- DTADataSetTabular(
-    name = "qual", specs = specs,
+    id = "qual", specs = specs,
     files = list(DTAFileCSV(filename = "one.csv"), DTAFileCSV(filename = "two.csv"))
   )
   ds <- load_file(ds, file = one, handler_index = 1)
@@ -204,7 +204,7 @@ test_that("OQ-VAL-025 | thread use changes scheduling, not the answer | REQ-VAL-
   utils::write.csv(frame, path, row.names = FALSE, na = "")
   load_once <- function() {
     ds <- DTADataSetTabular(
-      name = "qual", specs = specs,
+      id = "qual", specs = specs,
       files = list(DTAFileCSV(filename = "threads.csv"))
     )
     load_file(ds, file = path, handler_index = 1, stream = "never")

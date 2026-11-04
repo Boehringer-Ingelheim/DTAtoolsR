@@ -21,7 +21,7 @@ td_check <- function(lines, specs, dir, name = "t", stream = "never", ...) {
   path <- file.path(dir, paste0(name, as.integer(stats::runif(1, 1, 1e9)), ".csv"))
   writeLines(lines, path)
   ds <- DTADataSetTabular(
-    name = name, specs = specs,
+    id = name, specs = specs,
     files = list(DTAFileCSV(filename = basename(path)))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = stream)

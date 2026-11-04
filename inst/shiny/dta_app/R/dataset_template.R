@@ -28,8 +28,9 @@
 #       type: text
 #       target: dataset.columns.GFNAM.values
 #   dataset:
-#     name: gf_data_specs_pattern
+#     id: gf_data_specs_pattern
 #     type: tabular
+#     name: Genomic Findings data table
 #     files: { filename: gf.tsv, type: tsv }
 #     columns:
 #       - { id: STUDYID, label: Study Identifier, type: SAS Char }
@@ -91,12 +92,16 @@ read_dataset_template <- function(path) {
     # `def$dataset` silently return that array. `is.list()` on it was still
     # TRUE (it's a list of dataset entries), so this guard passed, and the
     # only visible symptom was the unrelated-looking "'dataset' section must
-    # contain a 'name'" error three lines below.
+    # contain an 'id'" error a few lines below.
     if (!is.list(def[["dataset"]])) {
       stop(.dataset_template_missing_dataset_msg(def))
     }
-    if (is.null(def[["dataset"]][["name"]]) || !nzchar(as.character(def[["dataset"]][["name"]]))) {
-      stop("Dataset template's 'dataset' section must contain a 'name'.")
+    # A template written before datasets had an `id` names its dataset in
+    # `name:`; upgraded HERE, before anything below reads or rewrites the body,
+    # so as_name, the patch and the provenance all see one shape.
+    def[["dataset"]] <- DTAtools::dta_dataset_list_upgrade(def[["dataset"]])
+    if (is.null(def[["dataset"]][["id"]]) || !nzchar(as.character(def[["dataset"]][["id"]]))) {
+      stop("Dataset template's 'dataset' section must contain an 'id'.")
     }
 
     def$id <- id
@@ -198,7 +203,7 @@ dataset_item_index_by_id <- function(items, id, kind, ds_name) {
 #   dataset.rules.<id>.<field>          -- rule located by id, not position
 apply_dataset_template_path <- function(ds, path, value) {
   parts <- dataset_template_path_parts(path)
-  ds_name <- as.character(ds$name %||% "?")
+  ds_name <- as.character(ds$id %||% "?")
 
   # A single tail part is a bare top-level field -- `dataset.description`, or
   # any other key a template author adds. There is no allow-list here (unlike
@@ -278,7 +283,7 @@ apply_dataset_patch <- function(ds, patch) {
     return(list(dataset = ds, deviations = list()))
   }
 
-  ds_name <- as.character(ds$name %||% "?")
+  ds_name <- as.character(ds$id %||% "?")
   deviations <- list()
 
   # 0) columns: the same four ops written in the SHARED collection vocabulary
@@ -430,7 +435,7 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
     # still held a raw token, and there is no later pass here to catch one
     # that survived unresolved into the final dataset.
     today_env <- dta_template_today_env()
-    ds <- resolve_template_expressions(def[["dataset"]], today_env)
+    ds <- resolve_template_expressions(DTAtools::dta_dataset_list_upgrade(def[["dataset"]]), today_env)
     opts <- resolve_template_expressions(def$options %||% list(), today_env)
 
     # 2) Option-driven effects. dataset_template_selection_values() decides
@@ -499,14 +504,15 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
       resolve_vocab <- vocabulary_resolver(dta_template_index_cached())
     }
     if (!is.null(resolve_vocab)) {
-      ds <- expand_column_vocabularies(ds, resolve_vocab, dataset_name = ds$name)
+      ds <- expand_column_vocabularies(ds, resolve_vocab, dataset_name = ds$id)
     }
 
-    # 5) Rename, if the caller asked for a name different from the template's
+    # 5) Re-id, if the caller asked for an id different from the template's
     # own -- e.g. adding a second dataset built from the same template to one
-    # DTA, where both cannot keep the template's literal dataset name.
+    # DTA, where both cannot keep the template's literal dataset id. The
+    # template's `name` (label) is left alone: two datasets may share a label.
     if (!is.null(as_name) && is.character(as_name) && nzchar(as_name)) {
-      ds$name <- as_name
+      ds$id <- as_name
     }
 
     # 6) Stamp provenance as PLAIN LIST KEYS on `ds`, not as an S7 property
@@ -536,7 +542,7 @@ build_dataset_from_template <- function(def, selections = list(), patch = NULL, 
       dataset = ds,
       deviations = deviations,
       provenance = list(
-        name = ds$name,
+        id = ds$id,
         template = def$id,
         version = as.character(def$version),
         deviations = deviations

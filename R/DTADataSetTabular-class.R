@@ -4,7 +4,8 @@
 #' @importFrom cli cli_alert_info cli_abort
 #' @importFrom arrow arrow_table
 #' @importFrom tools md5sum
-#' @param name Character. Name of the container.
+#' @param id Character. Identifier of the dataset: its key in a DTA's
+#'   \code{datasets}, in every validation message and in \code{load_file()}.
 #' @param specs A DTAColumnSpecCollection object specifying the column specs.
 #' @param files A list of DTAFile objects specifying input file information.
 #' @param tables A named list of tabular objects. A materialised entry
@@ -12,7 +13,10 @@
 #'   Table before storage. A lazy entry (Arrow Dataset, `arrow_dplyr_query`, or
 #'   RecordBatchReader) is stored exactly as given -- it is typed and checked
 #'   for import issues later, at scan time, in `check()`.
-#' @param description Character or NA. Free-text description of the dataset.
+#' @param name Character or NULL. Human-readable name of the dataset, e.g.
+#'   \code{"Demographics"}; shown in place of the \code{id} where one is set.
+#' @param description Character or NULL. Long free-text description of the
+#'   dataset.
 #' @param template_source Character or NA. Source of the template used to
 #'   generate the dataset specification.
 #' @param template_version Character or NA. Version of the template used.
@@ -39,24 +43,27 @@
 #'
 #' # Create the DTADataSetTabular object
 #' data_obj <- DTADataSetTabular(
-#'   name = "example",
+#'   id = "example",
 #'   specs = create_example_DTAColumnSpecCollection(1),
-#'   tables = tables
+#'   tables = tables,
+#'   name = "Example visits"
 #' )
 #' @export
 DTADataSetTabular <- S7::new_class(
   "DTADataSetTabular",
   parent = DTADataSet,
   constructor = function(
-    name,
+    id,
     specs,
     tables = list(),
     files = list(),
+    name = NULL,
     description = NULL,
     template_source = NULL,
     template_version = NULL,
     template_date = NULL
   ) {
+    if (missing(id)) dta_abort_missing_dataset_id(name)
     if (inherits(files, "DTAtools::DTAFile")) {
       files <- list(files)
     }
@@ -139,9 +146,10 @@ DTADataSetTabular <- S7::new_class(
 
     new_object(
       .parent = DTADataSet(
-        name = name,
+        id = id,
         type = "tabular",
         files = files,
+        name = name,
         template_source = template_source,
         template_version = template_version,
         template_date = template_date,
@@ -670,20 +678,22 @@ create_example_DTADataSetTabular <- function(index = 1) {
   switch(index,
     `1` = {
       DTADataSetTabular(
-        name = "example_container_specs_without_data",
+        id = "example_container_specs_without_data",
         specs = create_example_DTAColumnSpecCollection(1),
       )
     },
     `2` = {
       DTADataSetTabular(
-        name = "demographics",
+        id = "demographics",
+        name = "Demographics",
         specs = create_example_DTAColumnSpecCollection(1),
         tables = list("tab1" = table1)
       )
     },
     `3` = {
       DTADataSetTabular(
-        name = "vitals",
+        id = "vitals",
+        name = "Vital signs",
         specs = create_example_DTAColumnSpecCollection(2),
         tables = list("tab2" = table2)
       )
@@ -698,7 +708,7 @@ create_example_DTADataSetTabular <- function(index = 1) {
 #' @export
 method(print, DTADataSetTabular) <- function(x, ...) {
   cli::cli_div(theme = list(span.emph = list(color = "orange")))
-  cli_text("<{.emph DTADataSetTabular}> : {.field {x@name}}")
+  cli_text("<{.emph DTADataSetTabular}> : {.field {x@id}}")
 
   print_info(x)
 
@@ -790,7 +800,7 @@ method(print_short_info, DTADataSetTabular) <- function(x, ...) {
 #' @examples
 #' file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 #' ds <- DTADataSetTabular(
-#'   name = "demo",
+#'   id = "demo",
 #'   specs = create_example_DTAColumnSpecCollection(1),
 #'   files = list(file_handler)
 #' )
@@ -1320,7 +1330,7 @@ S7::method(check, DTADataSetTabular) <- function(
   if (length(target_tables) == 0) {
     if (!isTRUE(quiet)) {
       cli::cli_alert_warning(
-        "Dataset {.field {x@name}} has no tables loaded; nothing was checked."
+        "Dataset {.field {x@id}} has no tables loaded; nothing was checked."
       )
     }
 
@@ -1361,7 +1371,7 @@ S7::method(check, DTADataSetTabular) <- function(
     if (length(x@specs@columns) == 0) {
       if (!isTRUE(quiet)) {
         cli::cli_alert_warning(
-          "Dataset {.field {x@name}} declares no columns in its specs; table {.field {table_name}} was not checked."
+          "Dataset {.field {x@id}} declares no columns in its specs; table {.field {table_name}} was not checked."
         )
       }
 
@@ -1649,6 +1659,9 @@ S7::method(check, DTADataSetTabular) <- function(
 
       if (n_invalid > 0) {
         cli::cli_alert_danger("{n_valid} of {n_total} {table_word} valid")
+        if (!isTRUE(dta_check_state$nested)) {
+          cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+        }
       } else if (n_valid < n_total) {
         # No table failed, but not every table was actually checked either --
         # e.g. a table validated against zero column specs, status

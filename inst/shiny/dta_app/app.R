@@ -210,6 +210,50 @@ function DTA_vocabSet(link, what){
   else s.setValue((link.dataset.vals || '').split('\\u001f').filter(Boolean));
   return false;
 }
+
+// The column editor's term checklist (vocab_term_checklist(), R/template_ui.R).
+// While a filter is typed the count also says how many rows are shown, which
+// is what All/None act on.
+function DTA_vocabCount(el){
+  var box = el && el.closest ? el.closest('.vocab-pick') : null;
+  var c = box ? box.querySelector('.vocab-pick-count') : null;
+  if (!c) return;
+  var f = box.querySelector('.vocab-pick-filter');
+  var shown = [].filter.call(box.querySelectorAll('.checkbox'), function(r){ return r.style.display !== 'none'; }).length;
+  c.textContent = box.querySelectorAll('input[type=checkbox]:checked').length + ' of ' +
+    box.querySelectorAll('input[type=checkbox]').length + ' selected' +
+    (f && f.value.trim() ? ' · ' + shown + ' shown' : '');
+}
+function DTA_vocabFilter(input){
+  var box = input.closest('.vocab-pick');
+  if (!box) return;
+  var q = input.value.trim().toLowerCase(), shown = 0;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var hit = !q || row.textContent.toLowerCase().indexOf(q) >= 0;
+    row.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  var empty = box.querySelector('.vocab-pick-empty');
+  if (empty) empty.style.display = shown ? 'none' : '';
+  DTA_vocabCount(input);
+}
+// Acts on the rows the filter shows, and fires ONE change event: Shiny reads
+// the whole group on any change, so one is enough for every box flipped.
+function DTA_vocabCheck(link, on){
+  var box = link.closest('.vocab-pick');
+  if (!box) return false;
+  var last = null;
+  box.querySelectorAll('.checkbox').forEach(function(row){
+    var cb = row.querySelector('input[type=checkbox]');
+    if (row.style.display !== 'none' && cb && cb.checked !== on) { cb.checked = on; last = cb; }
+  });
+  if (last) last.dispatchEvent(new Event('change', {bubbles: true}));
+  DTA_vocabCount(link);
+  return false;
+}
+document.addEventListener('change', function(e){
+  if (e.target && e.target.closest && e.target.closest('.vocab-pick')) DTA_vocabCount(e.target);
+});
 "
 
 # Programmatic trigger for the hidden export download button. shinyjs::click()
@@ -499,6 +543,7 @@ server <- function(input, output, session) {
     pending_handler_removal = NULL, # list(index, tables) awaiting a remove confirmation
     col_view = "list", # column editor view: "list" | "form" | "vocab"
     col_vocab_ref = NULL, # last vocabulary picked, so the picker reopens on it
+    col_vocab_sug = NULL, # vocabulary_suggestion() for the column the picker was opened on
     col_token = 0, # bump to re-render the column editor body
     col_edit_id = NULL, # id of the column being edited (NULL = adding new)
     col_prefill = NULL, # list() of the column fields loaded in the form
@@ -922,6 +967,13 @@ server <- function(input, output, session) {
   }
 
   # --- helpers ------------------------------------------------------------
+  # The label a modal title or notification shows for dataset `id`: its name,
+  # else the id itself (also when the dataset is already gone).
+  ds_title <- function(id) {
+    label <- dta_dataset_label(dta_get_dataset(isolate(rv$dta), id))
+    if (length(label) == 1 && nzchar(label)) label else id
+  }
+
   build_structure <- function(dta) {
     names_ds <- dta_dataset_names(dta)
     if (length(names_ds) == 0) {
@@ -941,7 +993,9 @@ server <- function(input, output, session) {
       })
       list(
         index = i,
-        name = names_ds[i],
+        # What the nav shows. Carried here, not read from rv$dta, so the nav
+        # re-renders only when a label actually changes -- see meta_save.
+        label = dta_dataset_label(ds),
         type = tryCatch(ds@type, error = function(e) NA_character_),
         handlers = handlers
       )
@@ -1852,6 +1906,9 @@ server <- function(input, output, session) {
         class = "dataset-nav-list",
         lapply(seq_along(names_ds), function(i) {
           nm <- names_ds[i]
+          # A structure restored from a session saved before labels existed
+          # has none; the id is the right fallback, as everywhere else.
+          label <- rv$structure[[i]]$label %||% nm
           st <- dta_lookup(st_map, nm, "pending")
           # Row background + icon encode status: passed (green), failed (red),
           # missing/no-data (orange), not-checked-yet (neutral grey).
@@ -1890,14 +1947,20 @@ server <- function(input, output, session) {
               class = "nav-select",
               label = tagList(
                 span(class = paste("nav-ic", ic_cls), title = ic_ttl, ic_ch),
-                span(class = "nav-name", nm)
+                span(
+                  class = "nav-text",
+                  span(class = "nav-name", label),
+                  # The id stays visible under a name: it is what every
+                  # validation message and download refers to.
+                  if (!identical(label, nm)) span(class = "nav-id", nm)
+                )
               )
             ),
             actionButton(
               paste0("checkds_", i),
               label = HTML("&#x25B6;"),
               class = "btn btn-sm nav-check",
-              title = sprintf("Check '%s'", nm)
+              title = sprintf("Check '%s'", label)
             )
           )
         })
@@ -1973,9 +2036,21 @@ server <- function(input, output, session) {
   output$add_ds_body <- renderUI({
     rv$add_ds_token
     tagList(
-      textInput("add_ds_name", "Name",
+      textInput("add_ds_id", "ID",
         value = "", width = "100%",
-        placeholder = "e.g. demographics"
+        placeholder = "e.g. dm"
+      ),
+      div(
+        class = "msg-hint", style = "margin:-8px 0 12px;",
+        "Identifies the dataset in the specification, in every validation message and in load_file()."
+      ),
+      textInput("add_ds_name", "Name (optional)",
+        value = "", width = "100%",
+        placeholder = "e.g. Demographics"
+      ),
+      textAreaInput("add_ds_description", "Description (optional)",
+        value = "", width = "100%", rows = 3,
+        placeholder = "What this dataset contains, in words"
       ),
       radioButtons("add_ds_type", "Type",
         choices = c("Tabular" = "tabular", "Files" = "file"),
@@ -2001,21 +2076,23 @@ server <- function(input, output, session) {
     req(editing())
     r <- dta_add_dataset(
       isolate(rv$dta),
+      id = input$add_ds_id,
+      type = input$add_ds_type %||% "tabular",
       name = input$add_ds_name,
-      type = input$add_ds_type %||% "tabular"
+      description = input$add_ds_description
     )
     if (!isTRUE(r$ok)) {
       # The modal stays open with everything the user typed still in it, and
       # nothing in rv changes -- the same contract as meta_save() below.
       # Deliberately NOT bumping rv$add_ds_token here: that is add_ds_body's
-      # only dependency, and re-rendering would reset the name field to "" and
-      # the type back to "tabular", making the user retype a name they can see
+      # only dependency, and re-rendering would reset every field to "" and
+      # the type back to "tabular", making the user retype an ID they can see
       # is wrong rather than correct it in place. output$add_ds_msg reacts to
       # rv$add_ds_msg on its own, so the error still appears.
       rv$add_ds_msg <- list(ok = FALSE, error = r$error)
       return()
     }
-    nm <- trimws(as.character(input$add_ds_name)[1])
+    nm <- trimws(as.character(input$add_ds_id)[1])
     rv$dta <- r$value
     # build_structure() is what registers the new dataset's nav and upload
     # observers, so it has to run before anything can address the new slot.
@@ -2027,7 +2104,10 @@ server <- function(input, output, session) {
     rv$add_ds_msg <- NULL
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' added.", nm), type = "message")
+    showNotification(
+      sprintf("Dataset '%s' added.", ds_title(nm)),
+      type = "message"
+    )
   })
 
   observeEvent(input$remove_dataset, {
@@ -2049,7 +2129,7 @@ server <- function(input, output, session) {
         # tags$b() rather than HTML(sprintf(...)): the name is user-supplied and
         # htmltools escapes a plain string, so a dataset called "<b>x" cannot
         # inject markup here.
-        tags$p("Dataset ", tags$b(ed), " and its specification will be removed from the document."),
+        tags$p("Dataset ", tags$b(ds_title(ed)), " and its specification will be removed from the document."),
         if (n_files > 0) {
           div(class = "msg-hint", sprintf(
             "%d loaded file%s will be unloaded with it.",
@@ -2078,6 +2158,7 @@ server <- function(input, output, session) {
     ed <- isolate(rv$removing_dataset)
     req(ed)
     rv$removing_dataset <- NULL
+    ed_title <- ds_title(ed) # read while the dataset still exists
     r <- dta_remove_dataset(isolate(rv$dta), ed)
     if (!isTRUE(r$ok)) {
       showNotification(paste("Could not remove dataset —", r$error),
@@ -2108,7 +2189,7 @@ server <- function(input, output, session) {
 
     sync_yaml_text()
     removeModal()
-    showNotification(sprintf("Dataset '%s' removed.", ed), type = "message")
+    showNotification(sprintf("Dataset '%s' removed.", ed_title), type = "message")
   })
 
   # --- upload observers (registered once per handler) ---------------------
@@ -2805,7 +2886,7 @@ server <- function(input, output, session) {
 
   show_file_editor_modal <- function(ed) {
     showModal(modalDialog(
-      title = paste("Edit files —", ed),
+      title = paste("Edit files —", ds_title(ed)),
       size = "xl", easyClose = FALSE,
       uiOutput("file_modal_body"),
       footer = NULL
@@ -3329,7 +3410,7 @@ server <- function(input, output, session) {
     rv$col_search <- ""
     rv$col_token <- rv$col_token + 1
     showModal(modalDialog(
-      title = paste("Edit columns \u2014", rv$active),
+      title = paste("Edit columns \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("col_modal_body"),
       footer = NULL
@@ -3384,14 +3465,29 @@ server <- function(input, output, session) {
             class = "msg-hint"
           )
         } else {
+          refs <- paste0(vocabs$id, "@", vocabs$version)
+          # Open on the vocabulary meant for THIS column; only when nothing
+          # points at one, on the last one used (if it is still offered).
+          sug <- isolate(rv$col_vocab_sug)
+          last <- isolate(rv$col_vocab_ref)
           tagList(
             selectInput("col_vocab_ref", "Vocabulary",
-              choices = stats::setNames(
-                paste0(vocabs$id, "@", vocabs$version),
-                paste0(vocabs$label, " (", vocabs$id, "@", vocabs$version, ")")
-              ),
-              selected = isolate(rv$col_vocab_ref), width = "100%"
+              choices = stats::setNames(refs, paste0(vocabs$label, " (", refs, ")")),
+              selected = sug$ref %||% (if (isTRUE(last %in% refs)) last), width = "100%"
             ),
+            if (!is.null(sug)) {
+              p(
+                paste0(
+                  "Suggested: ", sug$ref, " — ",
+                  if (identical(sug$reason, "declared")) {
+                    paste0("it lists column ", trimws(pf$id %||% ""), ".")
+                  } else {
+                    "it holds every value this column already lists."
+                  }
+                ),
+                class = "msg-hint"
+              )
+            },
             uiOutput("col_vocab_terms"),
             p(
               paste(
@@ -3579,9 +3675,25 @@ server <- function(input, output, session) {
     )
   }
 
+  # The column's current permitted values, as the form holds them: one per line.
+  col_prefill_values <- function() {
+    v <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
+    v[nzchar(v)]
+  }
+
   observeEvent(input$col_vocab_open, {
     req(editing())
     rv$col_prefill <- snapshot_col_form()
+    # Once per open, not per render: the body names it and the terms below
+    # take its Codes/Labels choice from it.
+    idx <- dta_template_index_cached()
+    vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+    rv$col_vocab_sug <- if (NROW(vocabs) > 0) {
+      vocabulary_suggestion(
+        rv$col_prefill$id, col_prefill_values(),
+        paste0(vocabs$id, "@", vocabs$version), vocabulary_resolver(idx)
+      )
+    }
     rv$col_msg <- NULL
     rv$col_view <- "vocab"
     rv$col_token <- rv$col_token + 1
@@ -3593,11 +3705,20 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
   })
 
-  # The terms of whichever vocabulary is selected, pre-ticked with any of them
-  # the column already lists -- so re-opening the picker on a column that was
-  # built from this vocabulary shows the current selection rather than a blank
-  # form.
+  # The Codes/Labels choice and the terms of whichever vocabulary is selected,
+  # pre-ticked with any of them the column already lists, by code or by label
+  # -- so re-opening the picker on a column that was built from this vocabulary
+  # (its code or its decode half) shows the current selection. When the column
+  # lists none of them -- a new column, or a different vocabulary -- every term
+  # is ticked, because the whole vocabulary is what a column usually wants.
+  #
+  # Deliberately not dependent on input$col_vocab_field: flipping codes/labels
+  # must not throw away terms the user has already picked. It IS dependent on
+  # rv$col_token, which every open of the picker bumps: the suggestion often
+  # selects the same vocabulary as last time, so input$col_vocab_ref alone
+  # would leave the previous column's ticks on screen.
   output$col_vocab_terms <- renderUI({
+    rv$col_token
     ref <- input$col_vocab_ref
     req(ref)
     resolve <- vocabulary_resolver(dta_template_index_cached())
@@ -3607,22 +3728,45 @@ server <- function(input, output, session) {
       return(p(paste("Vocabulary", ref, msg), class = "msg-hint"))
     }
 
-    codes <- vapply(vocab$terms, function(t) as.character(t$code), character(1))
-    labels <- vapply(vocab$terms, function(t) {
-      lb <- as.character(t$label %||% "")
-      if (nzchar(lb) && !identical(lb, t$code)) paste0(t$code, " — ", lb) else t$code
-    }, character(1))
+    codes <- vapply(vocab$terms %||% list(), function(t) as.character(t$code), character(1))
+    if (length(codes) == 0) {
+      return(p(paste("Vocabulary", ref, "has no terms."), class = "msg-hint"))
+    }
+    decodes <- vocabulary_values(vocab, field = "label")
+    current <- col_prefill_values()
+    hit <- codes %in% current | decodes %in% current
+    extras <- setdiff(current, c(codes, decodes))
 
-    current <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
-    selectizeInput("col_vocab_terms_sel", "Terms",
-      choices = stats::setNames(codes, labels),
-      selected = intersect(codes, current[nzchar(current)]),
-      multiple = TRUE, width = "100%",
-      # `create = TRUE`: the column editor is the free-form surface of the app,
-      # so a value the vocabulary does not have is allowed here by default --
-      # "pick from the vocabulary, or use your own". A template's slot is where
-      # a closed list is enforced.
-      options = list(create = TRUE)
+    # The suggestion's field for the suggested vocabulary; for any other, labels
+    # only when the column already holds labels and no codes of it.
+    sug <- isolate(rv$col_vocab_sug)
+    field <- if (identical(sug$ref, ref)) {
+      sug$field
+    } else if (any(decodes %in% current) && !any(codes %in% current)) {
+      "label"
+    } else {
+      "code"
+    }
+
+    tagList(
+      # A vocabulary without labels has nothing to choose between.
+      if (!identical(codes, decodes)) {
+        radioButtons("col_vocab_field", "Write as",
+          choiceNames = list(
+            paste0("Codes (e.g. ", codes[[1]], ")"),
+            paste0("Labels (e.g. ", decodes[[1]], ")")
+          ),
+          choiceValues = list("code", "label"),
+          selected = field, inline = TRUE
+        )
+      },
+      vocab_term_checklist(
+        "col_vocab_terms_sel", vocab$terms,
+        # The column's own values stay ticked beside its terms; a column that
+        # shares nothing with this vocabulary gets all of it instead.
+        selected = if (any(hit)) c(extras, codes[hit]) else codes,
+        extras = extras
+      )
     )
   })
 
@@ -3632,6 +3776,24 @@ server <- function(input, output, session) {
     if (length(sel) == 0) {
       rv$col_msg <- list(ok = FALSE, error = "Select at least one term, or go back without applying.")
       return()
+    }
+    vocab <- tryCatch(
+      vocabulary_resolver(dta_template_index_cached())(input$col_vocab_ref),
+      error = function(e) NULL
+    )
+    codes <- vapply(vocab$terms %||% list(), function(t) t$code, character(1))
+    # A vocabulary with no terms renders no checklist, but Shiny keeps the last
+    # one's selection: never write that stale selection under this vocabulary.
+    if (length(codes) == 0) {
+      rv$col_msg <- list(ok = FALSE, error = "This vocabulary has no terms to use.")
+      return()
+    }
+    # The decode half of a code/decode pair (GFTEST beside GFTESTCD) wants the
+    # labels. A value the vocabulary does not have stays as it is.
+    if (identical(input$col_vocab_field, "label")) {
+      hit <- match(sel, codes)
+      ok <- !is.na(hit)
+      sel[ok] <- as.character(vocabulary_values(vocab, field = "label"))[hit[ok]]
     }
     rv$col_vocab_ref <- input$col_vocab_ref
     pf <- isolate(rv$col_prefill) %||% list()
@@ -4243,7 +4405,7 @@ server <- function(input, output, session) {
     rv$gconstr_removed <- integer(0)
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
-      title = paste("Edit rules \u2014", rv$active),
+      title = paste("Edit rules \u2014", ds_title(rv$active)),
       size = "xl", easyClose = FALSE,
       uiOutput("rule_modal_body"),
       footer = NULL
@@ -4826,7 +4988,7 @@ server <- function(input, output, session) {
       # of ds_edit_menu() opens (ui_components.R), and its title should read
       # like the label the user just clicked, not the internal name the
       # server-side code still uses for the concept (edit_meta, rv$meta_*).
-      title = paste("Edit details —", ed),
+      title = paste("Edit details —", ds_title(ed)),
       size = "l", easyClose = FALSE,
       uiOutput("meta_modal_body"),
       footer = NULL
@@ -4852,26 +5014,34 @@ server <- function(input, output, session) {
     tagList(
       div(
         class = "spec-form",
-        textInput("meta_name", "Dataset name",
-          value = g("name"), width = "100%",
-          placeholder = "vitals"
+        textInput("meta_id", "Dataset ID",
+          value = g("id"), width = "100%",
+          placeholder = "vs"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
           paste(
-            "The name identifies the dataset in the specification, in every",
-            "validation message and in the exported documents. Renaming it",
+            "The ID identifies the dataset in the specification, in every",
+            "validation message and in the exported documents. Changing it",
             "clears this dataset's validation, because results recorded under",
-            "the old name no longer describe it."
+            "the old ID no longer describe it."
           )
         ),
+        textInput("meta_name", "Name",
+          value = g("name"), width = "100%",
+          placeholder = "Vital signs"
+        ),
+        div(
+          class = "msg-hint", style = "margin:-8px 0 12px;",
+          "Shown as the heading of this dataset's page and in the dataset list; the ID is shown when it is empty."
+        ),
         textAreaInput("meta_description", "Description",
-          value = g("description"), width = "100%", rows = 2,
+          value = g("description"), width = "100%", rows = 4,
           placeholder = "What this dataset contains, in words"
         ),
         div(
           class = "msg-hint", style = "margin:-8px 0 12px;",
-          "Shown as the heading of this dataset's page when set."
+          "Shown under the heading of this dataset's page."
         ),
         tags$h6("Template", style = "margin-top:4px;"),
         div(
@@ -4920,6 +5090,7 @@ server <- function(input, output, session) {
     req(ed)
     r <- dta_set_dataset_meta(
       isolate(rv$dta), ed,
+      id = input$meta_id,
       name = input$meta_name,
       description = input$meta_description,
       template_source = input$meta_template_source,
@@ -4933,30 +5104,32 @@ server <- function(input, output, session) {
       return()
     }
 
-    new_name <- trimws(as.character(input$meta_name %||% "")[1])
-    renamed <- !identical(new_name, ed)
+    new_id <- trimws(as.character(input$meta_id %||% "")[1])
+    renamed <- !identical(new_id, ed)
     rv$dta <- r$value
 
     # ORDER MATTERS: the state migration has to land before anything reads the
-    # dataset by name again -- invalidate_dataset() looks its status up by name,
+    # dataset by id again -- invalidate_dataset() looks its status up by id,
     # and every output keyed off rv$active re-renders as soon as it changes.
     if (renamed) {
-      rename_dataset_state(ed, new_name)
-      # A rename does not change what the data IS, but every stored validation
-      # record carries the dataset name it was checked under, so results left
-      # in place would report a dataset that no longer exists. The description
-      # and template fields take no part in validation, so editing only those
-      # deliberately leaves a passed check passed.
-      invalidate_dataset(new_name)
-      # Only a rename touches rv$structure -- it is keyed by name and caches
-      # each dataset's name, so the nav list would otherwise keep showing the
-      # old one. Assigning it re-renders every structure-dependent output
-      # (dataset nav, detail panel and its file inputs), which is why the
-      # column and rule editors never touch it and why a description-only edit
-      # here must not either. It does NOT rebuild the whole workspace:
-      # output$main depends only on rv$doc_token (load/reset/restore).
-      rv$structure <- build_structure(rv$dta)
+      rename_dataset_state(ed, new_id)
+      # A new id does not change what the data IS, but every stored validation
+      # record carries the dataset id it was checked under, so results left in
+      # place would report a dataset that no longer exists. The name,
+      # description and template fields take no part in validation, so editing
+      # only those deliberately leaves a passed check passed.
+      invalidate_dataset(new_id)
     }
+    # rv$structure is keyed by id and caches each dataset's label, so an id or
+    # name change must reach it or the nav keeps showing the old one. Assigning
+    # it re-renders every structure-dependent output (dataset nav, detail panel
+    # and its file inputs), which is why the column and rule editors never touch
+    # it. Here it is assigned unconditionally on purpose: reactiveValues drops an
+    # assignment identical to the stored value, so a description- or
+    # template-only edit -- which leaves the structure identical -- still
+    # re-renders nothing. It does NOT rebuild the whole workspace: output$main
+    # depends only on rv$doc_token (load/reset/restore).
+    rv$structure <- build_structure(rv$dta)
 
     rv$meta_msg <- NULL
     sync_yaml_text()
@@ -7113,7 +7286,8 @@ server <- function(input, output, session) {
     type_txt <- if (!is.null(s) && !is.na(s$type)) s$type else ""
     ds <- dta_get_dataset(rv$dta, rv$active)
     desc <- tryCatch(ds@description, error = function(e) NULL) %||% ""
-    heading <- if (nzchar(desc)) desc else rv$active
+    heading <- dta_dataset_label(ds)
+    if (!nzchar(heading)) heading <- rv$active
     div(
       class = paste0("ds-head-block ds-st-", st),
       div(
@@ -7122,12 +7296,14 @@ server <- function(input, output, session) {
       ),
       div(
         style = "display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;",
-        # Every dataset carries a tag with its name (alongside the type tag),
-        # so the dataset is always clearly identified on the Datasets page.
-        tags$span(class = "dta-name-chip", rv$active),
+        # Every dataset carries a tag with its id (alongside the type tag), so
+        # the dataset is always clearly identified on the Datasets page --
+        # also when the heading above is its name.
+        tags$span(class = "dta-name-chip", title = "Dataset ID", rv$active),
         if (nzchar(type_txt)) tags$span(class = "status-chip status-pending", type_txt),
         status_chip(st)
-      )
+      ),
+      if (nzchar(desc)) tags$p(class = "ds-long-desc", desc)
     )
   })
 

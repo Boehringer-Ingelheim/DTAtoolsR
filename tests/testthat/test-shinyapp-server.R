@@ -59,6 +59,36 @@ ui_text <- function(out) {
   if (is.null(out) || is.null(out$html)) "" else paste(as.character(out$html), collapse = "")
 }
 
+# A rendered HTML string parsed as a fragment, for assertions about WHICH
+# element holds a value rather than whether the value appears somewhere.
+html_doc <- function(html) {
+  skip_if_not_installed("xml2")
+  xml2::read_html(paste0("<body>", paste(html, collapse = ""), "</body>"))
+}
+
+# The `value` attribute of the <input> with this id, "" if it has none.
+input_value <- function(html, id) {
+  node <- xml2::xml_find_first(html_doc(html), sprintf("//input[@id='%s']", id))
+  expect_false(inherits(node, "xml_missing"), info = paste("no <input id=", id, ">"))
+  xml2::xml_attr(node, "value", default = "")
+}
+
+# The text inside the <textarea> with this id.
+textarea_body <- function(html, id) {
+  node <- xml2::xml_find_first(html_doc(html), sprintf("//textarea[@id='%s']", id))
+  expect_false(inherits(node, "xml_missing"), info = paste("no <textarea id=", id, ">"))
+  xml2::xml_text(node)
+}
+
+# The text of every element of a rendered output that matches `tag` + CSS class.
+# Class matching is whole-word, so `nav-id` does not also pick up `nav-idx`.
+ui_class_texts <- function(out, tag, cls) {
+  xpath <- sprintf(
+    "//%s[contains(concat(' ', normalize-space(@class), ' '), ' %s ')]", tag, cls
+  )
+  xml2::xml_text(xml2::xml_find_all(html_doc(ui_text(out)), xpath), trim = TRUE)
+}
+
 # The markup of ONE control out of a rendered button group, sliced out so a
 # per-button assertion cannot be satisfied by a sibling's markup.
 #
@@ -477,6 +507,75 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
     expect_equal(rv$status, c(clinical_data = "pending"))
     # ... and the raw YAML view must reflect the edit.
     expect_match(rv$yaml_text, "ZZTEST", fixed = TRUE)
+  })
+})
+
+test_that("the vocabulary picker opens on the vocabulary that names the column", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  # "AAA first" sorts first, so it is what the picker would open on unguided.
+  writeLines(
+    c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
+    file.path(dir, "aaa.dta-vocabulary.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: gf_test", 'version: "1.0"', "label: Genomic tests",
+      "columns:", "  - GFTESTCD", "  - id: GFTEST", "    field: label",
+      "terms:",
+      "  - code: TRNSCPTN", "    label: Transcription",
+      "  - code: METHYL", "    label: Methylation"
+    ),
+    file.path(dir, "gf_test.dta-vocabulary.yaml")
+  )
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$setInputs(col_vocab_open = 1)
+    expect_equal(rv$col_view, "vocab")
+
+    body <- ui_text(output$col_modal_body)
+    expect_match(body, '<option value="gf_test@1.0" selected>', fixed = TRUE)
+    expect_match(body, "it lists column GFTEST", fixed = TRUE)
+
+    # A column with no values yet starts with the whole vocabulary ticked, and
+    # the declared field is preselected.
+    session$setInputs(col_vocab_ref = "gf_test@1.0")
+    terms <- ui_text(output$col_vocab_terms)
+    expect_match(terms, 'value="label" checked', fixed = TRUE)
+    expect_match(terms, 'value="TRNSCPTN" checked', fixed = TRUE)
+    expect_match(terms, 'value="METHYL" checked', fixed = TRUE)
+    expect_match(terms, "2 of 2 selected", fixed = TRUE)
+
+    # The decode column takes labels; a value typed in by hand stays as typed.
+    session$setInputs(
+      col_vocab_field = "label",
+      col_vocab_terms_sel = c("TRNSCPTN", "OWN VALUE")
+    )
+    session$setInputs(col_vocab_apply = 1)
+    expect_equal(rv$col_view, "form")
+    expect_identical(rv$col_prefill$values, "Transcription\nOWN VALUE")
+
+    # Re-opening on that column finds its terms again by label.
+    session$setInputs(col_values = rv$col_prefill$values)
+    session$setInputs(col_vocab_open = 2)
+    terms <- ui_text(output$col_vocab_terms)
+    expect_match(terms, 'value="TRNSCPTN" checked', fixed = TRUE)
+    expect_false(grepl('value="METHYL" checked', terms, fixed = TRUE))
+    # The column's own value is offered too, ticked, so it survives the next apply.
+    expect_match(terms, 'value="OWN VALUE" checked', fixed = TRUE)
+    expect_match(terms, "Not in this vocabulary", fixed = TRUE)
   })
 })
 
@@ -1279,9 +1378,14 @@ test_that("opening the metadata editor targets the active dataset and pre-fills 
 
     expect_equal(rv$editor_dataset, "clinical_data")
     # The form pre-fills from rv$meta_prefill rather than from live inputs, so
-    # a re-render can never resurrect a stale value.
-    expect_equal(rv$meta_prefill$name, "clinical_data")
-    expect_equal(rv$meta_prefill$description, "Clinical data table")
+    # a re-render can never resurrect a stale value. The id, the name and the
+    # long description are three different fields, each with its own value.
+    expect_equal(rv$meta_prefill$id, "clinical_data")
+    expect_equal(rv$meta_prefill$name, "Clinical data table")
+    expect_match(
+      rv$meta_prefill$description,
+      "^Subject-level clinical observations for the study"
+    )
     expect_gt(rv$meta_token, 0)
     expect_null(rv$meta_msg)
   })
@@ -1305,14 +1409,20 @@ test_that("the metadata modal body renders every field, pre-filled, and no type 
     html <- as.character(output$meta_modal_body$html)
 
     for (id in c(
-      "meta_name", "meta_description", "meta_template_source",
+      "meta_id", "meta_name", "meta_description", "meta_template_source",
       "meta_template_version", "meta_template_date", "meta_save"
     )) {
       expect_match(html, paste0("\"", id, "\""), fixed = TRUE)
     }
-    # The form opens on the dataset's current values, not empty.
-    expect_match(html, "value=\"clinical_data\"", fixed = TRUE)
-    expect_match(html, "Clinical data table", fixed = TRUE)
+    # The form opens on the dataset's current values, not empty -- and each
+    # value sits in ITS OWN control: the id is the identifier input's value,
+    # the label the name input's, the long text the textarea's body.
+    expect_equal(input_value(html, "meta_id"), "clinical_data")
+    expect_equal(input_value(html, "meta_name"), "Clinical data table")
+    expect_match(
+      textarea_body(html, "meta_description"),
+      "^Subject-level clinical observations for the study"
+    )
     # A dataset's type is fixed by its S7 class; the editor offers no way in,
     # not even a disabled control (which would still put an id on the page).
     expect_no_match(html, "meta_type", fixed = TRUE)
@@ -1336,7 +1446,8 @@ test_that("editing only the description leaves a passed check passed", {
 
     session$setInputs(edit_meta = 1)
     session$setInputs(
-      meta_name = "clinical_data",
+      meta_id = "clinical_data",
+      meta_name = "Clinical data table",
       meta_description = "Vitals collected at every visit",
       meta_template_source = "CDISC SDTM",
       meta_template_version = "3.4",
@@ -1345,10 +1456,12 @@ test_that("editing only the description leaves a passed check passed", {
     session$setInputs(meta_save = 1)
 
     expect_null(rv$meta_msg)
-    # rv$structure is left alone: reassigning it re-renders every
-    # structure-dependent output (dataset nav, detail panel and its file
-    # inputs) for no reason -- nothing name-keyed changed. Only a rename has
-    # to pay that price.
+    # rv$structure is reassigned on every save, but reactiveValues drops an
+    # assignment identical to the stored value -- and a description- or
+    # template-only edit leaves the structure (id, label, type, handlers)
+    # identical, so nothing structure-dependent (dataset nav, detail panel and
+    # its file inputs) re-renders for no reason. Only a new id or a new name
+    # has to pay that price.
     expect_identical(rv$structure, structure_before)
     expect_equal(
       DTAtools::datasets(rv$dta, "clinical_data")@description,
@@ -1361,7 +1474,84 @@ test_that("editing only the description leaves a passed check passed", {
   })
 })
 
-test_that("renaming a dataset migrates every piece of name-keyed state", {
+test_that("editing only the name relabels the dataset and leaves a passed check passed", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(up_1_1 = app_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    expect_equal(rv$status, c(clinical_data = "pass"))
+    expect_equal(rv$structure[["clinical_data"]]$label, "Clinical data table")
+    expect_equal(
+      ui_class_texts(output$dataset_nav_ui, "span", "nav-name"),
+      "Clinical data table"
+    )
+    long_description <- DTAtools::datasets(rv$dta, "clinical_data")@description
+
+    session$setInputs(edit_meta = 1)
+    # The id is unchanged; only the name differs.
+    session$setInputs(
+      meta_id = "clinical_data",
+      meta_name = "Study 1 clinical observations",
+      meta_description = long_description,
+      meta_template_source = "", meta_template_version = "", meta_template_date = ""
+    )
+    session$setInputs(meta_save = 1)
+
+    expect_null(rv$meta_msg)
+    # The structure carries the label the nav shows, so it has to follow ...
+    expect_equal(names(rv$structure), "clinical_data")
+    expect_equal(rv$structure[["clinical_data"]]$label, "Study 1 clinical observations")
+    ds <- DTAtools::datasets(rv$dta, "clinical_data")
+    expect_equal(ds@id, "clinical_data")
+    expect_equal(ds@name, "Study 1 clinical observations")
+    expect_equal(ds@description, long_description)
+    # ... but nothing keyed by the id moved, and the passed check survives: a
+    # label takes no part in validation (unlike a new id, which clears it).
+    expect_equal(rv$active, "clinical_data")
+    expect_equal(names(rv$uploads), "clinical_data||1")
+    expect_equal(rv$status, c(clinical_data = "pass"))
+    expect_match(rv$yaml_text, "name: Study 1 clinical observations", fixed = TRUE)
+
+    # And the sidebar shows the new label, with the unchanged id beneath it.
+    expect_equal(
+      ui_class_texts(output$dataset_nav_ui, "span", "nav-name"),
+      "Study 1 clinical observations"
+    )
+    expect_equal(ui_class_texts(output$dataset_nav_ui, "span", "nav-id"), "clinical_data")
+  })
+})
+
+test_that("clearing the name falls back to the id, in the structure and in the nav", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_meta = 1)
+    session$setInputs(
+      meta_id = "clinical_data", meta_name = "   ", meta_description = "",
+      meta_template_source = "", meta_template_version = "", meta_template_date = ""
+    )
+    session$setInputs(meta_save = 1)
+
+    expect_null(rv$meta_msg)
+    expect_null(DTAtools::datasets(rv$dta, "clinical_data")@name)
+    expect_equal(rv$structure[["clinical_data"]]$label, "clinical_data")
+    expect_equal(
+      ui_class_texts(output$dataset_nav_ui, "span", "nav-name"),
+      "clinical_data"
+    )
+    # Label and id are the same words, so the id is not printed a second time.
+    expect_length(ui_class_texts(output$dataset_nav_ui, "span", "nav-id"), 0)
+  })
+})
+
+test_that("changing a dataset's id migrates every piece of id-keyed state", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
@@ -1378,7 +1568,8 @@ test_that("renaming a dataset migrates every piece of name-keyed state", {
 
     session$setInputs(edit_meta = 1)
     session$setInputs(
-      meta_name = "renamed_data", meta_description = "Clinical data table",
+      meta_id = "renamed_data", meta_name = "Clinical data table",
+      meta_description = "A description",
       meta_template_source = "", meta_template_version = "", meta_template_date = ""
     )
     session$setInputs(meta_save = 1)
@@ -1392,6 +1583,9 @@ test_that("renaming a dataset migrates every piece of name-keyed state", {
     expect_equal(rv$editor_dataset, "renamed_data")
     expect_equal(names(rv$structure), "renamed_data")
     expect_equal(names(rv$status), "renamed_data")
+    # The dataset's own id moved with its key, and its name stayed a name.
+    expect_equal(DTAtools::datasets(rv$dta, "renamed_data")@id, "renamed_data")
+    expect_equal(rv$structure[["renamed_data"]]$label, "Clinical data table")
     # The data itself travelled with the dataset.
     expect_equal(
       DTAtools::tables(DTAtools::datasets(rv$dta, "renamed_data")) |> names(),
@@ -1401,7 +1595,7 @@ test_that("renaming a dataset migrates every piece of name-keyed state", {
   })
 })
 
-test_that("renaming a dataset clears its validation", {
+test_that("changing a dataset's id clears its validation", {
   clean_session_file()
 
   shiny::testServer(app_server_dir(), {
@@ -1417,12 +1611,12 @@ test_that("renaming a dataset clears its validation", {
 
     session$setInputs(edit_meta = 1)
     session$setInputs(
-      meta_name = "renamed_data", meta_description = "",
+      meta_id = "renamed_data", meta_name = "", meta_description = "",
       meta_template_source = "", meta_template_version = "", meta_template_date = ""
     )
     session$setInputs(meta_save = 1)
 
-    # Every stored validation record carries the name it was checked under, so
+    # Every stored validation record carries the id it was checked under, so
     # results left in place would report a dataset that no longer exists.
     expect_equal(rv$status, c(renamed_data = "pending"))
   })
@@ -1440,19 +1634,124 @@ test_that("a rejected metadata save leaves the workspace untouched", {
     unlock_editing(session)
     session$setInputs(edit_meta = 1)
     session$setInputs(
-      meta_name = "   ", meta_description = "irrelevant",
+      meta_id = "   ", meta_name = "Edited label", meta_description = "irrelevant",
       meta_template_source = "", meta_template_version = "", meta_template_date = ""
     )
     session$setInputs(meta_save = 1)
 
     expect_false(rv$meta_msg$ok)
-    expect_match(rv$meta_msg$error, "name is required")
-    # Nothing was written: the dataset keeps its name and its description.
+    expect_equal(rv$meta_msg$error, "A dataset ID is required.")
+    # Nothing was written: the dataset keeps its id, its name and its
+    # description, and the label the nav shows is still the old one.
     expect_equal(names(rv$structure), "clinical_data")
+    expect_equal(rv$structure[["clinical_data"]]$label, "Clinical data table")
+    ds <- DTAtools::datasets(rv$dta, "clinical_data")
+    expect_equal(ds@id, "clinical_data")
+    expect_equal(ds@name, "Clinical data table")
+    expect_match(ds@description, "^Subject-level clinical observations")
+  })
+})
+
+# ---- Dataset labels: the sidebar nav and the dataset header ------------------
+#
+# A dataset is addressed by its ID, but read by its NAME: the sidebar row and
+# the page heading show the name (the id when there is none), with the id kept
+# visible beside it. Both outputs are renderUI, so nothing here is evaluated
+# unless a test reads the output.
+
+test_that("the sidebar nav shows a dataset's name, with its id beneath; an unnamed one shows only its id", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    # A second dataset added with an id only, so it has no name.
+    session$setInputs(add_ds_id = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_save = 1)
+    expect_equal(names(rv$structure), c("clinical_data", "second_ds"))
+
+    # The label comes from the dataset's name, else its id ...
+    expect_equal(rv$structure[["clinical_data"]]$label, "Clinical data table")
+    expect_equal(rv$structure[["second_ds"]]$label, "second_ds")
+
+    # ... and the nav prints it in .nav-name, in dataset order.
     expect_equal(
-      DTAtools::datasets(rv$dta, "clinical_data")@description,
-      "Clinical data table"
+      ui_class_texts(output$dataset_nav_ui, "span", "nav-name"),
+      c("Clinical data table", "second_ds")
     )
+    # The id is printed in .nav-id only where it differs from the label: so
+    # exactly one row has one, and it is the named dataset's.
+    expect_equal(ui_class_texts(output$dataset_nav_ui, "span", "nav-id"), "clinical_data")
+
+    # The row's check button names the dataset the way the row does.
+    titles <- xml2::xml_attr(
+      xml2::xml_find_all(
+        html_doc(ui_text(output$dataset_nav_ui)),
+        "//button[contains(@class, 'nav-check')]"
+      ),
+      "title"
+    )
+    expect_equal(titles, c("Check 'Clinical data table'", "Check 'second_ds'"))
+  })
+})
+
+test_that("the dataset header puts the name in the heading, the id in a chip and the description beneath", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    expect_equal(rv$active, "clinical_data")
+
+    header <- output$dataset_status_line
+    expect_equal(ui_class_texts(header, "h4", "ds-desc"), "Clinical data table")
+    expect_equal(ui_class_texts(header, "span", "dta-name-chip"), "clinical_data")
+    long <- ui_class_texts(header, "p", "ds-long-desc")
+    expect_length(long, 1)
+    expect_match(long, "^Subject-level clinical observations for the study")
+    # The long description is the description, not a second copy of the name.
+    expect_false(identical(long, "Clinical data table"))
+  })
+})
+
+test_that("an unnamed, undescribed dataset's header headlines its id and has no description paragraph", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(add_ds_id = "bare_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_save = 1)
+    expect_equal(rv$active, "bare_ds")
+
+    header <- output$dataset_status_line
+    expect_equal(ui_class_texts(header, "h4", "ds-desc"), "bare_ds")
+    expect_equal(ui_class_texts(header, "span", "dta-name-chip"), "bare_ds")
+    expect_length(ui_class_texts(header, "p", "ds-long-desc"), 0)
+    expect_false(grepl("ds-long-desc", ui_text(header), fixed = TRUE))
+  })
+})
+
+test_that("a dataset added with a name and a description shows both in its header", {
+  skip_if_not_installed("xml2")
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(
+      add_ds_id = "dm", add_ds_name = "Demographics",
+      add_ds_description = "One row per subject.", add_ds_type = "tabular"
+    )
+    session$setInputs(add_ds_save = 1)
+    expect_equal(rv$active, "dm")
+
+    header <- output$dataset_status_line
+    expect_equal(ui_class_texts(header, "h4", "ds-desc"), "Demographics")
+    expect_equal(ui_class_texts(header, "span", "dta-name-chip"), "dm")
+    expect_equal(ui_class_texts(header, "p", "ds-long-desc"), "One row per subject.")
   })
 })
 

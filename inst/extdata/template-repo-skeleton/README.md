@@ -385,7 +385,7 @@ datasets:
 ```
 
 - `template` names a dataset template by ID, optionally pinned to a version.
-- `as` supplies the name for the dataset in the created DTA.
+- `as` supplies the id for the dataset in the created DTA.
 - `options` supplies values for the dataset template's options; these are static values for that dataset build, not additional creation-dialog
   controls.
 - `patch` modifies the dataset template's result.
@@ -437,7 +437,7 @@ vocabulary_slots:
     min: 1
 ```
 
-The supported target form is `datasets.<dataset name>.columns.<column id>.values`. The `dataset` and column names must refer to objects the
+The supported target form is `datasets.<dataset id>.columns.<column id>.values`. The dataset and column ids must refer to objects the
 template actually builds.
 
 `mode` is `closed` or `open`. `closed` only offers vocabulary terms; `open` also permits the author to type additional terms. The final document
@@ -464,8 +464,9 @@ version: "1.0"
 description: A small reusable tabular dataset.
 
 dataset:
-  name: starter_data
+  id: starter_data
   type: tabular
+  name: Starter dataset
   description: Example dataset for a new template library.
   files:
     filename: starter_data.tsv
@@ -547,7 +548,7 @@ used.
 
 ```yaml
 dataset:
-  name: supporting_documents
+  id: supporting_documents
   type: file
   files:
     - type: any
@@ -681,7 +682,7 @@ datasets:
         description: Starter dataset with site identifiers.
 ```
 
-`set` paths are relative to the dataset body. Examples include `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
+`set` paths are relative to the dataset body. Examples include `name`, `description`, `files.filename`, and `columns.SOURCE.values`. Column and rule
 paths are addressed by ID. Do not use a positional index in a patch path.
 
 The generic collection form is also accepted under `patch.columns:`. It supports the collection verbs `inherit`, `remove`, `add`, `modify`, and
@@ -761,6 +762,25 @@ built; the finished DTA does not depend on access to the template library.
 
 A column must not combine `values_from` with `pattern`. The validator reports `values_from_pattern` as an error. A column that specifies both a
 literal `values` list and `values_from` produces `values_and_values_from` as a warning; the binding wins and the literal list is ignored.
+
+### Naming the columns a vocabulary is for: `columns:`
+
+A vocabulary may list the columns it belongs to. The app's column editor then preselects that vocabulary in "Choose from vocabulary…".
+
+```yaml
+columns:
+  - STATUS                 # a bare id writes the codes
+  - id: STATUS_TEXT        # field: label writes the labels instead
+    field: label
+```
+
+- Column ids are compared without regard to case.
+- `field` is `code` or `label` and defaults to `code`.
+- An entry with no id, a key other than `id` and `field`, or any other `field` value makes the vocabulary invalid (`vocabulary_invalid`).
+- `columns:` is not inherited through `extends:`.
+- It affects only the suggestion; validation does not use it.
+
+A column without a declaration still gets a suggestion when its current values are all codes, or all labels, of one vocabulary.
 
 ### Vocabulary inheritance
 

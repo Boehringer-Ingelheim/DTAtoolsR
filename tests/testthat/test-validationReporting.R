@@ -86,13 +86,13 @@ test_that("message collection handles dataset-level aggregation and ordering", {
     c("STUDYID", "VISIT", "STUDYID", "VISIT", "STUDYID", "VISIT", "SUBJID")
   )
 
-  dta <- DTA(datasets = list(clinical_data = ds), metadata = DTAMetaData(title = "Test DTA"))
-  dta_msgs <- messages(dta, datasets = "clinical_data", as_tibble = FALSE)
+  dta <- DTA(datasets = list(demographics = ds), metadata = DTAMetaData(title = "Test DTA"))
+  dta_msgs <- messages(dta, datasets = "demographics", as_tibble = FALSE)
   expect_true(is.data.frame(dta_msgs))
   expect_equal(nrow(dta_msgs), 7)
   expect_true(all(c("dataset", "target", "message") %in% names(dta_msgs)))
   expect_equal(dta_msgs$id, seq_len(nrow(dta_msgs)))
-  expect_equal(unique(dta_msgs$dataset), "clinical_data")
+  expect_equal(unique(dta_msgs$dataset), "demographics")
 })
 
 test_that("validation summaries report target type and validation run metadata", {
@@ -110,7 +110,7 @@ test_that("validation summaries report target type and validation run metadata",
 
   path <- tempfile(fileext = ".txt")
   writeLines("hello world", path)
-  file_ds <- DTADataSetFile(name = "notes", paths = path)
+  file_ds <- DTADataSetFile(id = "notes", paths = path)
   file_ds <- check(file_ds, quiet = TRUE)
 
   file_status <- validation_status(file_ds)
@@ -229,7 +229,7 @@ mixed_numeric_rule_dataset <- function() {
     stringsAsFactors = FALSE
   ))
 
-  DTADataSetTabular(name = "mixed", specs = specs, tables = list(tab = table))
+  DTADataSetTabular(id = "mixed", specs = specs, tables = list(tab = table))
 }
 
 # The count a rule message states, read back out of the message text. This is a

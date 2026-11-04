@@ -296,7 +296,7 @@ write_dta <- function(
     for (ds_name in names(dta@datasets)) {
       dataset <- dta@datasets[[ds_name]]
 
-      doc <- .add_heading(doc, ds_name, level = 3)
+      doc <- .add_heading(doc, dta_dataset_heading(dataset), level = 3)
       if (!is.null(dataset@description) && nzchar(dataset@description)) {
         doc <- .add_body_par(doc, dataset@description)
         doc <- .add_spacer(doc)
@@ -423,7 +423,7 @@ write_dta <- function(
     for (ds_name in names(dta@datasets)) {
       dataset <- dta@datasets[[ds_name]]
 
-      lines <- c(lines, paste("###", ds_name), "")
+      lines <- c(lines, paste("###", dta_dataset_heading(dataset)), "")
       if (!is.null(dataset@description) && nzchar(dataset@description)) {
         lines <- c(lines, dataset@description, "")
       }
@@ -968,7 +968,7 @@ write_dataset_metadata <- function(
   # Title section
   doc <- .add_title_section(
     doc,
-    title = paste0("Dataset Specification: ", dataset@name),
+    title = paste0("Dataset Specification: ", dta_dataset_heading(dataset)),
     subtitle = "Data Transfer Agreement - Dataset Metadata",
     date = Sys.Date(),
     version = dataset@template_version
@@ -980,7 +980,8 @@ write_dataset_metadata <- function(
   }
 
   # Basic metadata
-  metadata <- list()
+  metadata <- list("ID" = dataset@id)
+  if (!is.null(dataset@name)) metadata[["Name"]] <- dataset@name
   if (!is.null(dataset@description)) metadata[["Description"]] <- dataset@description
   if (!is.null(dataset@template_source)) metadata[["Template Source"]] <- dataset@template_source
   if (!is.null(dataset@template_version)) metadata[["Template Version"]] <- dataset@template_version
@@ -1013,9 +1014,11 @@ write_dataset_metadata <- function(
 .write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL) {
   lines <- c(
     "# Dataset Specification",
-    paste("## ", dataset@name),
+    paste("## ", dta_dataset_heading(dataset)),
     "",
     "### Overview",
+    paste("**ID:**", dataset@id),
+    if (!is.null(dataset@name)) paste("**Name:**", dataset@name) else "",
     if (!is.null(dataset@description)) paste("**Description:**", dataset@description) else "",
     if (!is.null(dataset@template_source)) paste("**Template Source:**", dataset@template_source) else "",
     if (!is.null(dataset@template_version)) paste("**Template Version:**", dataset@template_version) else "",

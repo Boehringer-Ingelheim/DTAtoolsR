@@ -20,6 +20,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   without changing its version number. Pinned references produce no such
   entry.
 
+- `explain_messages()` prints each validation message in plain language: the
+  violated constraint (for example "Must be one of: 1234, 5678.") next to the
+  offending value, using the same wording as the HTML report. `check()` now
+  points to it when a run finds errors.
+
+- **The column editor opens its vocabulary picker on the right vocabulary.**
+  A vocabulary can name the columns it is for with a new optional `columns:`
+  field: a bare id gets the codes, and `{id: GFTEST, field: label}` gets the
+  labels. "Choose from vocabulary…" then preselects that vocabulary for the
+  column being edited. A column without a declaration is matched by its
+  current values instead, so a column built from a `values_from:` binding finds
+  its vocabulary again. The picker gains a "Write as: Codes / Labels" choice,
+  which lets the decode half of a code/decode pair take the labels. When none
+  of a column's values are in the chosen vocabulary yet, every term starts
+  ticked.
+
+  The picker's terms are now a checklist instead of a box of chips. Each term
+  shows its code, label and description, and the list keeps a fixed height and
+  scrolls, so a 300-term vocabulary no longer pushes the buttons off the
+  screen. From 11 terms up a filter narrows the list. All and None act on the
+  terms shown, and a live count says how many are selected and shown. Values
+  the column already holds that the vocabulary lacks are listed as "Not in this
+  vocabulary" and stay ticked, so adding a term no longer drops them. In the
+  "Create new from template" dialog, a vocabulary choice with hundreds of terms
+  selected now scrolls inside its box instead of growing the dialog. The shipped `gf_test`,
+  `gf_tstdtl` and `starter_terms` vocabularies declare their columns.
+  `validate_template()` reports a malformed `columns:` entry as
+  `vocabulary_invalid`.
+
 - **Structured study identity and ordered agreement clauses.** `DTAMetaData`
   accepts optional `study` identifiers and named `sections` with titles and
   plain-text paragraphs. They round-trip through YAML and template inheritance
@@ -168,6 +197,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   remove keep working on the filtered list.
 
 ### Changed
+
+- **Datasets now have an `id`, a `name` and a `description`.** The identifier
+  a dataset used to carry in `name` is its `id` (the key in a DTA, in every
+  validation message, in `load_file()` and in `{COLUMN_SPECS:<id>}`); `name`
+  is now the human-readable label that `description` used to hold; and
+  `description` is a new long free-text field. `DTADataSet()`,
+  `DTADataSetTabular()` and `DTADataSetFile()` take `id` as their first
+  argument and abort with a hint when called the old way. YAML written in the
+  old shape -- a dataset with `name:` but no `id:`, including dataset
+  templates and inline template datasets -- still loads: its `name` becomes
+  the `id` and its `description` the `name`, through the new exported
+  `dta_dataset_list_upgrade()`. Everything the package and the app write uses
+  the new shape. A DTA's dataset list must now be keyed by each dataset's
+  `id`. In the app, the sidebar and the dataset heading show the name with the
+  id beneath it, the long description appears under the heading, and the
+  add-dataset and Details dialogs edit all three. Exported documents head a
+  dataset "Name (id)". Word templates gain `{DATASET_ID}` and `{DATASET_IDS}`;
+  `{DATASET_NAME}` and `{DATASET_NAMES}` now render the name (the id where none
+  is set) and `{DATASET_DESCRIPTION}` the long description, so a template that
+  printed `{DATASET_NAME}` for the identifier should switch to `{DATASET_ID}`.
+  A template `patch:` that sets `description` now sets the long description;
+  set `name` for the label. In a template whose inline datasets still use the
+  old shape, its own `sealed:`/`required:` paths into them are remapped along
+  with the fields (`datasets.<x>.description` → `.name`, `.name` → `.id`).
 
 - **The "Create new from template" picker narrows to any number of template
   libraries.** The source filter was a radio group that could show one

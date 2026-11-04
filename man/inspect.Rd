@@ -39,3 +39,6 @@ ds <- check(create_example_DTADataSetTabular(2), quiet = TRUE)
 messages(ds)
 inspect(ds, id = 1)
 }
+\seealso{
+\code{\link{explain_messages}} for the same findings in plain language.
+}

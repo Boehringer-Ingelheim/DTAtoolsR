@@ -44,6 +44,54 @@ test_that(".extract_template_variables maps DTA metadata to placeholders", {
   expect_match(vars[["{VERSION_HISTORY}"]], "1.0 \\(2025-10-01\\)")
 })
 
+test_that("{DATASET_IDS} and {DATASET_NAMES} list ids and names, a name falling back to its id", {
+  vars <- .extract_template_variables(create_example_DTA())
+  expect_identical(vars[["{DATASET_IDS}"]], "demographics, vitals")
+  expect_identical(vars[["{DATASET_NAMES}"]], "Demographics, Vital signs")
+
+  # A dataset with no name is listed by its id among the named ones.
+  mixed <- DTA(
+    datasets = list(create_example_DTADataSetTabular(1), create_example_DTADataSetTabular(2)),
+    metadata = create_example_DTAMetaData()
+  )
+  vars <- .extract_template_variables(mixed)
+  expect_identical(
+    vars[["{DATASET_IDS}"]],
+    "example_container_specs_without_data, demographics"
+  )
+  expect_identical(
+    vars[["{DATASET_NAMES}"]],
+    "example_container_specs_without_data, Demographics"
+  )
+
+  # No datasets, nothing to list.
+  vars <- .extract_template_variables(
+    DTA(datasets = list(), metadata = create_example_DTAMetaData())
+  )
+  expect_identical(vars[["{DATASET_IDS}"]], "")
+  expect_identical(vars[["{DATASET_NAMES}"]], "")
+
+  # Both are discoverable inline placeholders.
+  tokens <- dta_template_placeholders()
+  expect_identical(
+    unname(attr(tokens, "kind")[c("{DATASET_IDS}", "{DATASET_NAMES}")]),
+    c("inline", "inline")
+  )
+})
+
+test_that("{DATASET_IDS} and {DATASET_NAMES} render into an exported document", {
+  template <- .make_template(c("IDs: {DATASET_IDS}", "Names: {DATASET_NAMES}"))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+
+  export_with_template(create_example_DTA(), template, out, quiet = TRUE)
+
+  expect_identical(
+    .docx_paragraphs(out),
+    c("IDs: demographics, vitals", "Names: Demographics, Vital signs")
+  )
+})
+
 test_that(".extract_template_variables is robust to empty metadata", {
   ds <- create_example_DTADataSetTabular(2)
   dta <- DTA(datasets = list(ds), metadata = DTAMetaData())
@@ -761,7 +809,10 @@ test_that("template variables are extracted from a bundled YAML fixture", {
   expect_equal(vars[["{RECEIVER_NAME}"]], "Test Company")
   expect_equal(vars[["{SUPPLIER_NAME}"]], "Test Company 2")
   expect_equal(vars[["{SUPPLIER_COUNTRY}"]], "Test Country")
-  expect_match(vars[["{DATASET_NAMES}"]], "clinical_data")
+  # The ids are the keys the document is addressed by; the names are what a
+  # reader of the exported document sees.
+  expect_equal(vars[["{DATASET_IDS}"]], "clinical_data")
+  expect_equal(vars[["{DATASET_NAMES}"]], "Clinical data table")
   expect_equal(vars[["{TRANSMISSION_TYPE}"]], "secure S3 bucket")
 
   # The only fixture with validation rules, so the only place where a non-zero

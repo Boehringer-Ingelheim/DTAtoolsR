@@ -24,7 +24,7 @@ test_that("write_validation_report happy path with capping", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 
@@ -77,7 +77,7 @@ test_that("write_validation_report capping disabled with max_repeats = NULL", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 
@@ -111,7 +111,7 @@ test_that("write_validation_report capping disabled with max_repeats = Inf", {
   ds <- create_example_DTADataSetTabular(2)
   ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
   dta <- DTA(
-    datasets = list(clinical_data = ds),
+    datasets = list(demographics = ds),
     metadata = DTAMetaData(title = "Test DTA")
   )
 

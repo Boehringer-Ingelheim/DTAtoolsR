@@ -144,9 +144,123 @@ test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
   # be carried by those heading levels, not by bold body paragraphs.
   headings <- summary[summary$style_name %in% paste("heading", 1:4), ]
   expect_equal(headings$style_name[headings$text == "Datasets"], "heading 2")
-  expect_equal(unique(headings$style_name[headings$text == "demographics"]), "heading 3")
+  # A dataset with a name is headed "<name> (<id>)".
+  expect_equal(
+    unique(headings$style_name[headings$text == "Demographics (demographics)"]),
+    "heading 3"
+  )
   expect_equal(unique(headings$style_name[headings$text == "Dataset Specifications"]), "heading 4")
   expect_true("Data Transfer Agreement" %in% summary$text)
+})
+
+# A dataset is headed by its name with the id beside it ("Demographics
+# (demographics)"), because the id is what every validation message and
+# {COLUMN_SPECS:<id>} refers to; a dataset with no name is headed by the bare
+# id. The long description is body text under the heading.
+.export_naming_dta <- function() {
+  named <- create_example_DTADataSetTabular(2)
+  named@description <- "One row per subject, as delivered by the CRO."
+  unnamed <- DTADataSetTabular(
+    id = "audit_trail",
+    specs = create_example_DTAColumnSpecCollection(1),
+    description = "Every change made to the records."
+  )
+  DTA(datasets = list(named, unnamed), metadata = create_example_DTAMetaData())
+}
+
+test_that("write_dta markdown heads a dataset by name and id, an unnamed one by its id", {
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dta(.export_naming_dta(), file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+
+  named_at <- match("### Demographics (demographics)", md)
+  unnamed_at <- match("### audit_trail", md)
+  expect_false(is.na(named_at))
+  expect_false(is.na(unnamed_at))
+  # The long description is the paragraph under its heading.
+  expect_identical(md[named_at + 2], "One row per subject, as delivered by the CRO.")
+  expect_identical(md[unnamed_at + 2], "Every change made to the records.")
+  # Neither the bare id of a named dataset nor a name-only heading appears.
+  expect_false("### demographics" %in% md)
+  expect_false("### Demographics" %in% md)
+})
+
+test_that("write_dta docx heads a dataset by name and id, with its description as body text", {
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dta(.export_naming_dta(), file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+
+  is_heading <- summary$style_name %in% paste("heading", 1:4)
+  headings <- summary$text[is_heading]
+  expect_true("Demographics (demographics)" %in% headings)
+  expect_true("audit_trail" %in% headings)
+  expect_false("demographics" %in% headings)
+
+  # The descriptions are paragraphs, not headings and not table cells.
+  body <- summary$text[summary$content_type == "paragraph" & !is_heading]
+  expect_true("One row per subject, as delivered by the CRO." %in% body)
+  expect_true("Every change made to the records." %in% body)
+})
+
+test_that("write_dataset_metadata markdown lists the id, name and description of a dataset", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "One row per subject, as delivered by the CRO."
+  out_md <- tempfile(fileext = ".md")
+  on.exit(unlink(out_md, force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
+  md <- readLines(out_md, warn = FALSE)
+
+  expect_true(any(grepl("^## +Demographics \\(demographics\\)$", md)))
+  overview <- match("### Overview", md)
+  expect_false(is.na(overview))
+  expect_identical(
+    md[overview + 1:3],
+    c(
+      "**ID:** demographics",
+      "**Name:** Demographics",
+      "**Description:** One row per subject, as delivered by the CRO."
+    )
+  )
+
+  # Without a name there is no Name line and the heading is the bare id.
+  bare <- create_example_DTADataSetTabular(1)
+  out_bare <- tempfile(fileext = ".md")
+  on.exit(unlink(out_bare, force = TRUE), add = TRUE)
+  write_dataset_metadata(bare, file = out_bare, format = "md", overwrite = TRUE, quiet = TRUE)
+  md_bare <- readLines(out_bare, warn = FALSE)
+
+  expect_true(any(grepl("^## +example_container_specs_without_data$", md_bare)))
+  expect_true("**ID:** example_container_specs_without_data" %in% md_bare)
+  expect_false(any(grepl("^\\*\\*Name:\\*\\*", md_bare)))
+})
+
+test_that("write_dataset_metadata docx titles a dataset by name and id and tables ID, Name, Description", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- "One row per subject, as delivered by the CRO."
+  out_docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(out_docx, force = TRUE), add = TRUE)
+  write_dataset_metadata(
+    ds,
+    file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE,
+    include_signatures = FALSE
+  )
+  summary <- officer::docx_summary(officer::read_docx(out_docx))
+
+  paragraphs <- summary$text[summary$content_type == "paragraph"]
+  expect_true("Dataset Specification: Demographics (demographics)" %in% paragraphs)
+
+  # The metadata table opens with the header, then ID, Name, Description in
+  # that order -- the identifier first, the label second, the long text last.
+  cells <- summary$text[summary$content_type == "table cell"]
+  expect_identical(
+    cells[1:8],
+    c(
+      "Item", "Details", "ID", "demographics", "Name", "Demographics",
+      "Description", "One row per subject, as delivered by the CRO."
+    )
+  )
 })
 
 test_that("write_dta docx places Process Information before Datasets", {

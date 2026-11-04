@@ -35,6 +35,6 @@ Clears in-memory validation state for one or all file targets.
 \examples{
 path <- tempfile(fileext = ".txt")
 writeLines("content", path)
-ds <- check(DTADataSetFile(name = "delivery", paths = path), quiet = TRUE)
+ds <- check(DTADataSetFile(id = "delivery", paths = path), quiet = TRUE)
 nrow(validation_status(clear_validation(ds)))
 }

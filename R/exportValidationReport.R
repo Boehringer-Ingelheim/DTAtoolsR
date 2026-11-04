@@ -123,22 +123,7 @@ write_validation_report <- function(
     # Look up rule definition if this is a rule message
     rule_def <- NULL
     if (source_type == "rule" && !is.na(msg_row$rule_id)) {
-      rule_id <- as.character(msg_row$rule_id)
-      tryCatch(
-        {
-          ds <- x@datasets[[dataset_name]]
-          if (!is.null(ds) && !is.null(ds@specs) && !is.null(ds@specs@rules)) {
-            rules_list <- ds@specs@rules
-            for (r in rules_list) {
-              if (!is.null(r@id) && identical(r@id, rule_id)) {
-                rule_def <- r
-                break
-              }
-            }
-          }
-        },
-        error = function(e) NULL
-      )
+      rule_def <- dta_find_rule_def(x, dataset_name, as.character(msg_row$rule_id))
     }
 
     # Build inspect panel

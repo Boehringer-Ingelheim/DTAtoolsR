@@ -132,13 +132,23 @@ test_that("OQ-SPEC-033 | the dataset classes carry their name, handlers and stat
     columns = list(ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE))
   )
   tabular <- DTADataSetTabular(
-    name = "clinical", specs = specs,
+    id = "clinical", specs = specs,
     files = list(DTAFileCSV(filename = "clinical.csv"))
   )
 
   qa_check("a tabular dataset is built", sc_inherits(tabular, "DTADataSetTabular"))
   qa_check("it is a dataset", sc_inherits(tabular, "DTADataSet"))
-  qa_step("carrying its name", "clinical", tabular@name)
+  qa_step("carrying its id", "clinical", tabular@id)
+  qa_check("and no name or description unless it is given one", is.null(tabular@name) && is.null(tabular@description))
+  labelled <- DTADataSetTabular(
+    id = "clinical", name = "Clinical data", description = "One row per subject and visit.",
+    specs = specs, files = list(DTAFileCSV(filename = "clinical.csv"))
+  )
+  qa_step(
+    "a name and a description, when given, are kept apart from the id",
+    list(id = "clinical", name = "Clinical data", description = "One row per subject and visit."),
+    list(id = labelled@id, name = labelled@name, description = labelled@description)
+  )
   qa_step("and its file handlers", 1L, length(files(tabular)))
   # Nothing is on record until a delivery has been bound and checked: a
   # dataset with no table has no verdict to report, which is different from
@@ -151,13 +161,13 @@ test_that("OQ-SPEC-033 | the dataset classes carry their name, handlers and stat
   # A file-presence dataset checks that a deliverable arrived, which is what a
   # transfer of archives or images needs and what a tabular check cannot say.
   presence <- DTADataSetFile(
-    name = "images", files = list(DTAFileAny(filename = "scan.nii.gz"))
+    id = "images", files = list(DTAFileAny(filename = "scan.nii.gz"))
   )
   qa_check("a file-presence dataset is built", sc_inherits(presence, "DTADataSetFile"))
-  qa_step("carrying its name", "images", presence@name)
+  qa_step("carrying its id", "images", presence@id)
 
   by_factory <- DTADataSetFactory(
-    type = "tabular", name = "made",
+    type = "tabular", id = "made",
     columns = list(), rules = list(), files = list()
   )
   qa_check("the factory builds the type it is asked for", sc_inherits(by_factory, "DTADataSetTabular"))
@@ -234,7 +244,7 @@ test_that("OQ-SPEC-036 | a factory refuses a type it does not know | REQ-SPEC-01
   # into service that does not describe what its author wrote.
   qa_check(
     "an unknown dataset type raises a condition",
-    inherits(tryCatch(DTADataSetFactory(name = "x", type = "nonsense"), error = function(e) e), "condition")
+    inherits(tryCatch(DTADataSetFactory(id = "x", type = "nonsense"), error = function(e) e), "condition")
   )
   qa_check(
     "an unknown file type raises a condition",
@@ -274,11 +284,11 @@ test_that("OQ-SPEC-037 | every shipped example constructor builds its class | RE
 })
 
 test_that("OQ-SPEC-045 | a DTA whose datasets carry a duplicate, empty or NA name is refused | REQ-SPEC-024", {
-  one_ds <- function(name) {
-    DTADataSetTabular(name = name, specs = create_example_DTAColumnSpecCollection(1))
+  one_ds <- function(id) {
+    DTADataSetTabular(id = id, specs = create_example_DTAColumnSpecCollection(1))
   }
 
-  # An unnamed list: DTA() derives names from each dataset's own @name, and
+  # An unnamed list: DTA() derives names from each dataset's own @id, and
   # two datasets sharing "clinical" collide there before check() ever runs.
   dup_err <- tryCatch(
     DTA(datasets = list(one_ds("clinical"), one_ds("clinical")), metadata = create_example_DTAMetaData()),
@@ -322,4 +332,62 @@ test_that("OQ-SPEC-045 | a DTA whose datasets carry a duplicate, empty or NA nam
     error = function(e) e
   )
   qa_check("two datasets with distinct names construct without complaint", !inherits(ok, "condition"))
+})
+
+test_that("OQ-SPEC-047 | a DTA whose list name for a dataset differs from that dataset's id is refused | REQ-SPEC-024", {
+  one_ds <- function(id) {
+    DTADataSetTabular(id = id, specs = create_example_DTAColumnSpecCollection(1))
+  }
+  flat <- function(e) gsub("[[:space:]]+", " ", conditionMessage(e))
+
+  # results() reports a dataset under its @id while check(), messages() and the
+  # exports report it under its key, so a key that is not the id would show one
+  # dataset under two names in the same transfer.
+  wrong_key <- tryCatch(
+    DTA(datasets = list(wrong_key = one_ds("real_id")), metadata = create_example_DTAMetaData()),
+    error = function(e) e
+  )
+  qa_check("a dataset listed under a key other than its id is refused", inherits(wrong_key, "condition"))
+  qa_step(
+    "saying that the key must be the dataset's id",
+    TRUE, grepl("keyed by its dataset", flat(wrong_key), fixed = TRUE)
+  )
+  qa_step(
+    "and naming both the key and the id it disagrees with",
+    c(key = TRUE, id = TRUE),
+    c(key = grepl("wrong_key", flat(wrong_key), fixed = TRUE), id = grepl("real_id", flat(wrong_key), fixed = TRUE))
+  )
+
+  # One matching entry beside one that is not: the refusal names only the
+  # offender.
+  one_bad <- tryCatch(
+    DTA(
+      datasets = list(good = one_ds("good"), other = one_ds("labs")),
+      metadata = create_example_DTAMetaData()
+    ),
+    error = function(e) e
+  )
+  qa_step(
+    "only the entry that disagrees is named",
+    c(offender = TRUE, innocent = FALSE),
+    c(
+      offender = grepl("other", flat(one_bad), fixed = TRUE),
+      innocent = grepl("\"good\"", flat(one_bad), fixed = TRUE)
+    )
+  )
+
+  # The same rule holds for a DTA that already exists: assigning to @datasets
+  # re-validates, so the route that bypasses the constructor is closed too.
+  dta <- DTA(datasets = list(labs = one_ds("labs")), metadata = create_example_DTAMetaData())
+  reassigned <- tryCatch(
+    {
+      dta@datasets <- list(renamed = one_ds("labs"))
+      NULL
+    },
+    error = function(e) e
+  )
+  qa_check(
+    "re-keying an existing DTA's dataset away from its id is refused as well",
+    inherits(reassigned, "condition") && grepl("keyed by its dataset", flat(reassigned), fixed = TRUE)
+  )
 })

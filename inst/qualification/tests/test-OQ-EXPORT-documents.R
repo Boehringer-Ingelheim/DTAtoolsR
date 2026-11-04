@@ -25,7 +25,7 @@ et_dta <- function() {
 et_minimal_dta <- function() {
   DTA(
     datasets = list(DTADataSetTabular(
-      name = "demo",
+      id = "demo",
       specs = DTAColumnSpecCollection(columns = list(
         ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)
       ))
@@ -145,7 +145,11 @@ test_that("OQ-EXPORT-003 | write_dta docx names every dataset and its declared c
   write_dta(et_dta(), file = out, quiet = TRUE)
 
   text <- qa_docx_text(out)
-  qa_step("the dataset name appears", TRUE, grepl("clinical_data", text, fixed = TRUE))
+  qa_step("the dataset id appears", TRUE, grepl("clinical_data", text, fixed = TRUE))
+  qa_step(
+    "and the dataset's label appears with its id kept beside it",
+    TRUE, grepl("Clinical data table (clinical_data)", text, fixed = TRUE)
+  )
 
   declared_columns <- c(
     "STUDYID", "VISIT", "AGE", "GENDER", "INCLUDE", "HEIGHT", "WEIGHT",
@@ -268,7 +272,12 @@ test_that("OQ-EXPORT-010 | format = \"md\" writes a markdown file with the same 
   text <- paste(readLines(out, warn = FALSE), collapse = "\n")
   qa_step("the title line is present", TRUE, grepl("**Title:** Clinical Data Specification", text, fixed = TRUE))
   qa_step("the version line is present", TRUE, grepl("**Version:** 0.1", text, fixed = TRUE))
-  qa_step("the dataset heading is present", TRUE, grepl("### clinical_data", text, fixed = TRUE))
+  # The fixture gives the dataset the label "Clinical data table", so its
+  # heading carries the label with the id kept visible beside it.
+  qa_step(
+    "the dataset heading is present, naming the dataset by its label and its id",
+    TRUE, grepl("### Clinical data table (clinical_data)", text, fixed = TRUE)
+  )
 })
 
 test_that("OQ-EXPORT-011 | format = \"pdf\" produces a genuine PDF when a backend is available | REQ-EXPORT-008", {
@@ -322,7 +331,23 @@ test_that("OQ-EXPORT-014 | write_dataset_metadata names the dataset, its files a
   write_dataset_metadata(ds, file = out, quiet = TRUE)
 
   text <- qa_docx_text(out)
-  qa_step("the dataset name is named", TRUE, grepl("clinical_data", text, fixed = TRUE))
+  qa_step("the dataset id is named", TRUE, grepl("clinical_data", text, fixed = TRUE))
+  qa_step(
+    "the title names the dataset by its label with its id beside it",
+    TRUE, grepl("Dataset Specification: Clinical data table (clinical_data)", text, fixed = TRUE)
+  )
+
+  # The information table leads with the identifier, then the label, then the
+  # long description, each in its own row.
+  info <- et_docx_tables(out)[[1]]
+  qa_step(
+    "the information table lists the id, name and description rows in that order",
+    c("ID", "Name", "Description"), info$col1[2:4]
+  )
+  qa_step(
+    "with the id and the name as the fixture declares them",
+    c("clinical_data", "Clinical data table"), info$col2[2:3]
+  )
   qa_step("the declared file pattern is named", TRUE, grepl("clinical_data.*.csv$", text, fixed = TRUE))
   qa_step("a declared column id is named", TRUE, grepl("SUBJECT_ID", text, fixed = TRUE))
 })

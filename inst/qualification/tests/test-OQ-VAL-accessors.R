@@ -39,7 +39,7 @@ va_dataset <- function(dir) {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = "acc", specs = va_specs(),
+    id = "acc", specs = va_specs(),
     files = list(DTAFileCSV(filename = "accessors.csv"))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
@@ -224,7 +224,7 @@ test_that("OQ-VAL-034 | validation_errors carries the full detail and its scan r
     row.names = FALSE, na = ""
   )
   streamed <- DTADataSetTabular(
-    name = "acc", specs = va_specs(),
+    id = "acc", specs = va_specs(),
     files = list(DTAFileCSV(filename = "scanned.csv"))
   )
   streamed <- check(
@@ -269,5 +269,31 @@ test_that("OQ-VAL-035 | the accessors agree with one another | REQ-VAL-022 REQ-V
       rule = as.integer(res$n_rule_errors[[1]]),
       import = as.integer(res$n_import_errors[[1]])
     )
+  )
+})
+
+test_that("OQ-VAL-037 | explain_messages states the constraint and the offending value | REQ-VAL-030", {
+  ds <- va_dataset(qa_tempdir())
+  explained <- NULL
+  suppressMessages(explained <- explain_messages(ds))
+
+  # SEX is declared with the codelist M, F and the delivered value is X.
+  sex <- explained[explained$source == "columnspec" & explained$column %in% "SEX", ]
+  qa_step(
+    "a codelist violation names the allowed values and the delivered one",
+    list(should_be = "Must be one of: M, F.", actual = "X"),
+    list(should_be = sex$should_be[[1]], actual = sex$actual[[1]])
+  )
+
+  # age_range is declared as 18 to 70, inclusive.
+  rule <- explained[explained$source == "rule", ]
+  qa_step(
+    "a rule violation states the declared range",
+    "Values in AGE must be between 18 and 70 (inclusive).",
+    rule$should_be[[1]]
+  )
+  qa_step(
+    "and one row is returned per explained message",
+    nrow(as.data.frame(messages(ds))), nrow(explained)
   )
 })

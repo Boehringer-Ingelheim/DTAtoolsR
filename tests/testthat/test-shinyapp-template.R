@@ -667,6 +667,15 @@ test_that("create_dta_from_template() builds a DTA from the real bundled templat
   expect_true(result$ok)
   expect_null(result$error)
   expect_equal(names(result$value@datasets), "gf_data_specs_pattern")
+  # The dataset arrives with its id and its name (label) as the dataset
+  # template wrote them, and no long description, since that template sets none
+  # -- its migration to `id:` was kept content-preserving on purpose, so the
+  # refactor-equivalence test in test-bundled-templates.R still compares like
+  # with like.
+  ds <- result$value@datasets[[1]]
+  expect_equal(ds@id, "gf_data_specs_pattern")
+  expect_equal(ds@name, "Genomic Findings data table with pattern for filename")
+  expect_null(ds@description)
 
   md <- metadata(result$value)
   # selection override applied
@@ -681,7 +690,10 @@ test_that("create_dta_from_template() accepts a plain string dataset reference",
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c(
+      "id: mini_ds", "type: file", "name: Mini dataset",
+      "files:", "  filename: mini.csv", "  type: csv"
+    ),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml") # need not exist on disk
@@ -693,6 +705,36 @@ test_that("create_dta_from_template() accepts a plain string dataset reference",
 
   expect_true(result$ok)
   expect_equal(names(result$value@datasets), "mini_ds")
+  expect_equal(result$value@datasets[["mini_ds"]]@id, "mini_ds")
+  expect_equal(result$value@datasets[["mini_ds"]]@name, "Mini dataset")
+})
+
+test_that("create_dta_from_template() still accepts a plain string reference to a legacy dataset file", {
+  tmp_dir <- tempfile()
+  dir.create(tmp_dir)
+  on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  # Written before datasets had an `id`: `name` is the identifier and
+  # `description` the short label.
+  writeLines(
+    c(
+      "name: mini_ds", "type: file", "description: Mini dataset",
+      "files:", "  filename: mini.csv", "  type: csv"
+    ),
+    file.path(tmp_dir, "dataset.yaml")
+  )
+  template_path <- file.path(tmp_dir, "template.yaml")
+
+  template_def <- list(base = list(), datasets = list("dataset.yaml"))
+  create_fn <- app_fn("create_dta_from_template")
+
+  result <- create_fn(template_def, template_path, selections = list())
+
+  expect_true(result$ok)
+  expect_equal(names(result$value@datasets), "mini_ds")
+  ds <- result$value@datasets[["mini_ds"]]
+  expect_equal(ds@id, "mini_ds")
+  expect_equal(ds@name, "Mini dataset")
+  expect_null(ds@description)
 })
 
 test_that("create_dta_from_template() accepts a {source: ...} dataset reference", {
@@ -700,7 +742,7 @@ test_that("create_dta_from_template() accepts a {source: ...} dataset reference"
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
   writeLines(
-    c("name: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
+    c("id: mini_ds", "type: file", "files:", "  filename: mini.csv", "  type: csv"),
     file.path(tmp_dir, "dataset.yaml")
   )
   template_path <- file.path(tmp_dir, "template.yaml")
@@ -720,8 +762,10 @@ test_that("create_dta_from_template() accepts an inline dataset definition", {
   template_def <- list(
     base = list(),
     datasets = list(list(
-      name = "inline_ds",
+      id = "inline_ds",
       type = "file",
+      name = "Inline dataset",
+      description = "Defined in the template itself.",
       files = list(filename = "mini2.csv", type = "csv")
     ))
   )
@@ -731,6 +775,34 @@ test_that("create_dta_from_template() accepts an inline dataset definition", {
 
   expect_true(result$ok)
   expect_equal(names(result$value@datasets), "inline_ds")
+  ds <- result$value@datasets[["inline_ds"]]
+  expect_equal(ds@id, "inline_ds")
+  expect_equal(ds@name, "Inline dataset")
+  expect_equal(ds@description, "Defined in the template itself.")
+})
+
+test_that("create_dta_from_template() still accepts an inline dataset written with the legacy `name:` identifier", {
+  template_path <- file.path(tempdir(), "template.yaml")
+
+  template_def <- list(
+    base = list(),
+    datasets = list(list(
+      name = "inline_ds",
+      type = "file",
+      description = "Short label",
+      files = list(filename = "mini2.csv", type = "csv")
+    ))
+  )
+  create_fn <- app_fn("create_dta_from_template")
+
+  result <- create_fn(template_def, template_path, selections = list())
+
+  expect_true(result$ok)
+  expect_equal(names(result$value@datasets), "inline_ds")
+  ds <- result$value@datasets[["inline_ds"]]
+  expect_equal(ds@id, "inline_ds")
+  expect_equal(ds@name, "Short label")
+  expect_null(ds@description)
 })
 
 test_that("create_dta_from_template() fails without throwing when a dataset reference cannot be resolved", {

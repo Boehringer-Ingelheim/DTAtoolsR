@@ -5,9 +5,11 @@
 #' @import S7
 #' @importFrom cli cli_h1
 #'
-#' @param datasets A named list of DTADataSet objects. Names must be
-#'   non-empty and unique -- \code{check()} looks datasets up by name, so a
-#'   repeated name would validate one entry twice and the other never.
+#' @param datasets A list of DTADataSet objects, keyed by their \code{id}. An
+#'   unnamed list is keyed automatically; a named one must use each dataset's
+#'   \code{id} as its name. Ids must be unique -- \code{check()} looks datasets
+#'   up by id, so a repeated id would validate one entry twice and the other
+#'   never.
 #' @param metadata A DTAMetaData object.
 #' @param ... If metadata is not set, additional arguments are passed to
 #'   DTAMetaData(...).
@@ -24,13 +26,13 @@
 #'
 #' # Create the DTADataSet object
 #' data_obj <- DTADataSetTabular(
-#'   name = "example",
+#'   id = "example",
 #'   specs = create_example_DTAColumnSpecCollection(1),
 #'   tables = tables
 #' )
 #'
 #' DTA(
-#'   datasets = list(data = data_obj),
+#'   datasets = list(example = data_obj),
 #'   metadata = create_example_DTAMetaData()
 #' )
 #' @export
@@ -43,10 +45,10 @@ DTA <- S7::new_class(
   ) {
     if (inherits(datasets, "DTAtools::DTADataSet")) {
       datasets <- list(datasets)
-      names(datasets) <- datasets[[1]]@name
+      names(datasets) <- datasets[[1]]@id
     }
     if (is.list(datasets) && !is.null(datasets) && is.null(names(datasets))) {
-      names(datasets) <- vapply(datasets, function(x) x@name, character(1))
+      names(datasets) <- vapply(datasets, function(x) x@id, character(1))
     }
 
     if (is.null(metadata)) {
@@ -95,6 +97,20 @@ DTA <- S7::new_class(
         one entry and never under the other."
       )
     }
+
+    # The key IS the id. results() reports a dataset under its @id while
+    # messages(), check() and the exports report it under its key, so a key that
+    # differs from the id splits one dataset into two names across reports.
+    ids <- vapply(ds, function(d) {
+      if (inherits(d, "DTAtools::DTADataSet")) d@id else NA_character_
+    }, character(1))
+    mismatch <- !is.na(ids) & ids != nms
+    if (any(mismatch)) {
+      cli_abort(c(
+        "Every entry in @datasets must be keyed by its dataset's id.",
+        x = "{cli::qty(sum(mismatch))}Key{?s} {.val {nms[mismatch]}} hold{?s/} dataset{?s} with id{?s} {.val {ids[mismatch]}}."
+      ))
+    }
   }
 )
 
@@ -126,8 +142,8 @@ method(metadata, DTA) <- function(x) {
 #'   \describe{
 #'     \item{name}{Optional single character or single integer. If NULL
 #'       (the default), returns a list of all datasets. If character, returns
-#'       the dataset with that name. If integer, returns the dataset at that
-#'       index.}
+#'       the dataset with that \code{id} (its key in the DTA). If integer,
+#'       returns the dataset at that index.}
 #'   }
 #' @return Either a list of DTADataSet objects or a single DTADataSet.
 #' @examples
@@ -370,11 +386,10 @@ method(load_file, DTA) <- function(
 
   dataset_object <- do.call(load_file, args)
 
-  if (is.numeric(dataset)) {
-    x@datasets[[dataset]] <- dataset_object
-  } else {
-    x@datasets[[dataset_object@name]] <- dataset_object
-  }
+  # Written back under the key it was read from (name or index alike), never
+  # under the object's own id: the two are kept equal by the validator, but a
+  # write-back keyed on the object could only ever disagree by adding an entry.
+  x@datasets[[dataset]] <- dataset_object
 
   x
 }
@@ -771,6 +786,11 @@ method(check, DTA) <- function(
     cli_abort("DTA object has no datasets to check.")
   }
 
+  # The datasets print their own "run explain_messages()" hint; inside a DTA
+  # check only the final summary should.
+  dta_check_state$nested <- TRUE
+  on.exit(dta_check_state$nested <- FALSE, add = TRUE)
+
   state <- dta_benchmark_begin(benchmark)
   # The reset cannot live only inside dta_benchmark_end(): several branches
   # below (a bad `datasets` index, an unknown dataset name, ...) cli_abort()
@@ -977,6 +997,9 @@ method(check, DTA) <- function(
       total_unchecked = total_unchecked,
       total_undelivered = total_undelivered
     ))
+    if (total_invalid > 0 || total_import_errors > 0) {
+      cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+    }
   }
 
   attr(x, "last_validation_summary") <- summary_df

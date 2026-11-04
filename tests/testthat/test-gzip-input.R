@@ -181,7 +181,7 @@ test_that("a gzipped latin1 file gets the same verdict on all four routes", {
 
   route <- function(path, stream) {
     ds <- DTADataSetTabular(
-      name = "enc",
+      id = "enc",
       specs = specs,
       files = list(DTAFileCSV(filename = "gz_latin1_verdict.csv", encoding = "latin1"))
     )

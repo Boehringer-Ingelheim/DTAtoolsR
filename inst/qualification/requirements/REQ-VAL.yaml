@@ -336,3 +336,18 @@ requirements:
       it and dta_columnspec_errors() then skipped every one of its value
       checks -- a column declared with a codelist but no type validated any
       value at all, including ones outside that codelist.
+
+  - id: REQ-VAL-030
+    text: >
+      explain_messages() shall state, for each validation message, the
+      constraint that was violated and the offending value in plain text,
+      taking the allowed values from the column specification and the
+      offending value from the data, and shall return one row per explained
+      message.
+    risk: medium
+    category: interface
+    covers: [explain_messages]
+    source: R/validationReporting.R
+    notes: >
+      The wording is shared with the HTML report, so a codelist violation reads
+      "Must be one of: <values>." in both.

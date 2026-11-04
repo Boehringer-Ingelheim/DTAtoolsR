@@ -65,7 +65,7 @@ file_ds_clean_session <- function() {
 file_ds_setup <- quote({
   session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
   unlock_editing(session)
-  session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+  session$setInputs(add_ds_id = "reports", add_ds_type = "file")
   session$setInputs(add_ds_save = 1)
   file_ds_select(session, rv, "reports")
   testthat::expect_equal(rv$active, "reports")
@@ -216,7 +216,7 @@ test_that("a Files dataset with nothing bound reports no data rather than passin
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "empty_reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "empty_reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "empty_reports")
     expect_equal(rv$active, "empty_reports")
@@ -243,7 +243,7 @@ test_that("the handler form for a Files dataset offers no type to choose", {
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "reports")
     expect_equal(rv$active, "reports")
@@ -293,7 +293,7 @@ test_that("saving the form's own default builds an unparsed handler", {
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "reports")
     expect_equal(rv$active, "reports")
@@ -383,7 +383,7 @@ test_that("edit_cols and edit_rules refuse to open on a file dataset", {
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "reports")
     expect_equal(rv$active, "reports")
@@ -412,7 +412,7 @@ test_that("col_save and rule_save refuse a stashed editor_dataset that is a file
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "reports")
 
@@ -463,7 +463,7 @@ test_that("the file editor shows the zero-handlers banner for a freshly added Fi
   shiny::testServer(file_ds_app_dir(), {
     session$setInputs(dta_file = file_ds_upload(app_fixture_path("clinical_dta.yaml")))
     unlock_editing(session)
-    session$setInputs(add_ds_name = "reports", add_ds_type = "file")
+    session$setInputs(add_ds_id = "reports", add_ds_type = "file")
     session$setInputs(add_ds_save = 1)
     file_ds_select(session, rv, "reports")
     expect_equal(rv$active, "reports")

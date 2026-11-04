@@ -25,7 +25,7 @@ vs_check <- function(frame, specs, dir, ...) {
   path <- file.path(dir, paste0("t", as.integer(stats::runif(1, 1, 1e9)), ".csv"))
   utils::write.csv(frame, path, row.names = FALSE, na = "")
   ds <- DTADataSetTabular(
-    name = "qual", specs = specs,
+    id = "qual", specs = specs,
     files = list(DTAFileCSV(filename = basename(path)))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
