@@ -692,6 +692,24 @@ template_picker_filter <- function(entries, query = "", source = "") {
   out
 }
 
+# `rows` (template_picker_lineage()'s result) restricted to the libraries named
+# in `sources` -- any number of them, unioned. Nothing chosen means no
+# restriction, and so does a name that no longer has templates: Shiny keeps a
+# control's last value after a refresh takes the control away, and that must
+# not leave every row filtered out behind a choice nobody can see any more.
+#
+# The tree is rebuilt over the surviving rows rather than filtered: a template
+# whose parent lives in a library that was just filtered out would otherwise
+# keep its indent and render as a hidden child of a row that is not there. Its
+# `lineage` still names that parent, so the context survives.
+template_picker_restrict_sources <- function(index, rows, sources = character(0)) {
+  sources <- intersect(as.character(sources %||% character(0)), unique(rows$source_name))
+  if (length(sources) == 0) {
+    return(rows)
+  }
+  template_picker_lineage(index, rows[rows$source_name %in% sources, , drop = FALSE])
+}
+
 # ---- Memoised access -------------------------------------------------------
 
 # File-local cache: a fresh scan of every configured root (each of which may
