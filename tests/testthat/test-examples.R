@@ -48,7 +48,7 @@ test_that("Examples can be built with current constructors", {
     }
 
     ds <- DTADataSetTabular(
-      name = "example",
+      id = "example",
       specs = specs,
       tables = list(DTA = table)
     )

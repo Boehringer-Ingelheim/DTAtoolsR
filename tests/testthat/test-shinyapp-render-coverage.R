@@ -42,13 +42,14 @@ test_that("the Word export download produces a real .docx with the document's ow
     path <- output$dl_docx
     expect_true(file.exists(path))
 
-    # The title and the dataset name are read from clinical_dta.yaml by hand
-    # (metadata.title / the dataset's own key), not from anything this test
-    # ran -- so a docx that came back empty, truncated, or built from the
-    # wrong document would fail here even though the file itself exists.
+    # The title and the dataset are read from clinical_dta.yaml by hand
+    # (metadata.title / the dataset's own name and id), not from anything this
+    # test ran -- so a docx that came back empty, truncated, or built from the
+    # wrong document would fail here even though the file itself exists. A
+    # named dataset is headed "<name> (<id>)".
     text <- .docx_text(path)
     expect_true(any(grepl("Clinical Data Specification", text, fixed = TRUE)))
-    expect_true(any(grepl("clinical_data", text, fixed = TRUE)))
+    expect_true(any(grepl("Clinical data table (clinical_data)", text, fixed = TRUE)))
   })
 })
 

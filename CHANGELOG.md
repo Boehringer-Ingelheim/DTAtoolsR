@@ -181,6 +181,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Datasets now have an `id`, a `name` and a `description`.** The identifier
+  a dataset used to carry in `name` is its `id` (the key in a DTA, in every
+  validation message, in `load_file()` and in `{COLUMN_SPECS:<id>}`); `name`
+  is now the human-readable label that `description` used to hold; and
+  `description` is a new long free-text field. `DTADataSet()`,
+  `DTADataSetTabular()` and `DTADataSetFile()` take `id` as their first
+  argument and abort with a hint when called the old way. YAML written in the
+  old shape -- a dataset with `name:` but no `id:`, including dataset
+  templates and inline template datasets -- still loads: its `name` becomes
+  the `id` and its `description` the `name`, through the new exported
+  `dta_dataset_list_upgrade()`. Everything the package and the app write uses
+  the new shape. A DTA's dataset list must now be keyed by each dataset's
+  `id`. In the app, the sidebar and the dataset heading show the name with the
+  id beneath it, the long description appears under the heading, and the
+  add-dataset and Details dialogs edit all three. Exported documents head a
+  dataset "Name (id)". Word templates gain `{DATASET_ID}` and `{DATASET_IDS}`;
+  `{DATASET_NAME}` and `{DATASET_NAMES}` now render the name (the id where none
+  is set) and `{DATASET_DESCRIPTION}` the long description, so a template that
+  printed `{DATASET_NAME}` for the identifier should switch to `{DATASET_ID}`.
+  A template `patch:` that sets `description` now sets the long description;
+  set `name` for the label. In a template whose inline datasets still use the
+  old shape, its own `sealed:`/`required:` paths into them are remapped along
+  with the fields (`datasets.<x>.description` → `.name`, `.name` → `.id`).
+
 - **The "Create new from template" picker narrows to any number of template
   libraries.** The source filter was a radio group that could show one
   library or all of them; it is now a set of library chips, each with its

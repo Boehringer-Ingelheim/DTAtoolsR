@@ -637,7 +637,7 @@ test_that("dta_set_handler() rejects a parsing type when dataset_type is file", 
   # The mirror of the test above, and the programmatic half of the rule the
   # form enforces by rendering its type control read-only.
   fn <- app_fn("dta_set_handler")
-  ds <- DTAtools::DTADataSetFile(name = "reports")
+  ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   for (ty in c("csv", "tsv")) {
@@ -664,7 +664,7 @@ test_that("a type='any' handler with extensions survives a YAML round trip", {
     pattern = TRUE,
     extensions = c("pdf", "zip")
   )
-  ds <- DTAtools::DTADataSetFile(name = "reports", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "reports", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   txt <- to_yaml(dta_obj)
@@ -687,7 +687,7 @@ test_that("dta_handler_fields() returns extensions as a comma-separated string",
   fn <- app_fn("dta_handler_fields")
 
   h <- DTAtools::DTAFileAny(filename = "report.pdf", extensions = c("pdf", "zip"))
-  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "rpts", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
 
   fields <- fn(dta_obj, "rpts", 1)
@@ -871,7 +871,7 @@ test_that("a DTAFileAny reports no reader settings at all", {
   fields_fn <- app_fn("dta_handler_fields")
 
   h <- DTAtools::DTAFileAny(filename = "report.pdf")
-  ds <- DTAtools::DTADataSetFile(name = "rpts", files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = "rpts", files = list(h))
   dta_obj <- DTAtools::DTA(datasets = list(rpts = ds))
 
   expect_length(fields_fn(dta_obj, "rpts", 1)$reader_settings, 0)
@@ -934,7 +934,7 @@ test_that("reader settings a type cannot take are dropped, not forwarded", {
   set_fn <- app_fn("dta_set_handler")
   handlers_fn <- app_fn("dta_handlers")
 
-  ds <- DTAtools::DTADataSetFile(name = "reports")
+  ds <- DTAtools::DTADataSetFile(id = "reports")
   dta_obj <- DTAtools::DTA(datasets = list(reports = ds))
 
   res <- set_fn(dta_obj, "reports",

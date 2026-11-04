@@ -16,7 +16,7 @@ make_file_dta <- function(
     filename = handler_filename,
     extensions = extensions
   )
-  ds <- DTAtools::DTADataSetFile(name = ds_name, files = list(h))
+  ds <- DTAtools::DTADataSetFile(id = ds_name, files = list(h))
   DTAtools::DTA(datasets = setNames(list(ds), ds_name))
 }
 
@@ -361,7 +361,7 @@ test_that("dta_load_file() derives its default key from the dataset type", {
   # A tabular dataset still names the table with the extension STRIPPED.
   csv <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
   tab <- DTAtools::DTA(datasets = list(clinical_data = DTAtools::DTADataSetTabular(
-    name = "clinical_data",
+    id = "clinical_data",
     specs = DTAtools::create_example_DTAColumnSpecCollection(1),
     files = list(DTAtools::DTAFileCSV(filename = "clinical_data.csv"))
   )))

@@ -871,10 +871,10 @@ resolve_vocabulary_slot_overrides <- function(slots, selections, resolve_vocab) 
 
 # Write every override addressed to THIS dataset into a plain dataset list.
 #
-# Applied to the plain list, after build_dataset_from_template() has renamed it
+# Applied to the plain list, after build_dataset_from_template() has re-id'd it
 # and before dta_dataset_from_list() turns it into S7 objects -- so a slot
-# targets the dataset by the name it ends up with (`as:`), which is the name
-# the template author sees, and the write costs no S7 object surgery.
+# targets the dataset by the id it ends up with (`as:`), which is the id the
+# template author sees, and the write costs no S7 object surgery.
 #
 # An override naming a column the dataset does not have is an ERROR: a slot
 # whose target has drifted from the dataset template it points at must not
@@ -883,7 +883,7 @@ apply_vocabulary_slot_overrides <- function(ds, overrides) {
   if (length(overrides) == 0) {
     return(ds)
   }
-  ds_name <- as.character(ds$name %||% "")
+  ds_name <- as.character(ds$id %||% "")
   mine <- Filter(function(o) identical(o$dataset, ds_name), overrides)
   if (length(mine) == 0) {
     return(ds)

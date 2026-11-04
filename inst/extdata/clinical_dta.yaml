@@ -69,9 +69,13 @@ metadata:
     date_last_transfer: 2026-01-15
 
 datasets:
-  - name: clinical_data
+  - id: clinical_data
     type: tabular
-    description: Clinical data table
+    name: Clinical data table
+    description: >-
+      Subject-level clinical observations for the study, one row per subject and
+      visit, exported from the EDC system as CSV. The transfer is checked
+      against the column specification and validation rules below.
 
     files:
       filename: "clinical_data.*.csv$"

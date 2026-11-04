@@ -17,7 +17,7 @@ ri_specs <- function() {
 
 ri_dataset <- function(path) {
   DTADataSetTabular(
-    name = "robust", specs = ri_specs(),
+    id = "robust", specs = ri_specs(),
     files = list(DTAFileCSV(filename = basename(path)))
   )
 }

@@ -17,7 +17,7 @@
   )
 }
 
-#' The six per-dataset placeholders usable inside a repeating region, with a
+#' The seven per-dataset placeholders usable inside a repeating region, with a
 #' one-line description
 #'
 #' The single source of truth for which per-dataset placeholders exist.
@@ -28,7 +28,8 @@
 #' @keywords internal
 .tv_dataset_catalog <- function() {
   c(
-    "{DATASET_NAME}" = "Name of the current dataset",
+    "{DATASET_ID}" = "Identifier of the current dataset",
+    "{DATASET_NAME}" = "Name of the current dataset (its identifier when no name is set)",
     "{DATASET_TYPE}" = "Type of the current dataset",
     "{DATASET_DESCRIPTION}" = "Description of the current dataset",
     "{DATASET_FILE_COUNT}" = "Number of expected files of the current dataset",
@@ -37,13 +38,12 @@
   )
 }
 
-#' Resolve the six per-dataset placeholders for one dataset
+#' Resolve the seven per-dataset placeholders for one dataset
 #'
 #' @param ds A `DTADataSet` (or subclass) object.
-#' @param name Character. The dataset's name -- its key in `dta@datasets`.
 #' @return A named list keyed exactly like [.tv_dataset_catalog()].
 #' @keywords internal
-.tv_dataset_variables <- function(ds, name) {
+.tv_dataset_variables <- function(ds) {
   is_tabular <- inherits(ds, "DTAtools::DTADataSetTabular")
   column_count <- if (is_tabular) length(ds@specs@columns) else 0L
   rule_count <- if (is_tabular) {
@@ -54,7 +54,8 @@
   }
 
   list(
-    "{DATASET_NAME}" = name,
+    "{DATASET_ID}" = ds@id,
+    "{DATASET_NAME}" = dta_dataset_label(ds),
     "{DATASET_TYPE}" = .tv_scalar(ds@type),
     "{DATASET_DESCRIPTION}" = .tv_scalar(ds@description),
     "{DATASET_FILE_COUNT}" = as.character(length(ds@files)),
@@ -157,7 +158,7 @@
 #' paragraph whose whole (trimmed) text is `{#DATASETS}` and closed by the
 #' next top-level body paragraph whose whole text is `{/DATASETS}`; every body
 #' child strictly between the two -- paragraph or table -- is copied once per
-#' dataset in `names(dta@datasets)`, in document order, with the six
+#' dataset in `names(dta@datasets)`, in document order, with the seven
 #' per-dataset placeholders ([.tv_dataset_variables()]) resolved inside each
 #' copy and a bare dataset block bound to that dataset
 #' ([.tv_bind_region_block()]). The two marker paragraphs and the original
@@ -233,7 +234,7 @@
     ds_names <- names(dta@datasets)
 
     for (nm in ds_names) {
-      ds_vars <- .tv_dataset_variables(dta@datasets[[nm]], nm)
+      ds_vars <- .tv_dataset_variables(dta@datasets[[nm]])
       ds_vars <- ds_vars[!names(ds_vars) %in% names(variables)]
       if (is.null(region)) {
         next

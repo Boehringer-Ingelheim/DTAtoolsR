@@ -25,7 +25,7 @@ test_that("a region repeats its content once per dataset, in order, with the mar
   template <- .make_template(c(
     "BEFORE",
     "{#DATASETS}",
-    "Dataset: {DATASET_NAME} ({DATASET_TYPE})",
+    "Dataset: {DATASET_ID} ({DATASET_TYPE})",
     "{/DATASETS}",
     "AFTER"
   ))
@@ -45,7 +45,7 @@ test_that("a bare {COLUMN_SPECS} block inside a region binds to each dataset and
   # create_example_DTA() bundles "demographics" (has AGE) then "vitals" (has
   # AVAL instead) -- verified in R/DTA-class.R and R/DTADataSetTabular-class.R.
   dta <- create_example_DTA()
-  template <- .make_template(c("{#DATASETS}", "{DATASET_NAME}", "{COLUMN_SPECS}", "{/DATASETS}"))
+  template <- .make_template(c("{#DATASETS}", "{DATASET_ID}", "{COLUMN_SPECS}", "{/DATASETS}"))
   on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
@@ -72,7 +72,7 @@ test_that("a bare {COLUMN_SPECS} block inside a region binds to each dataset and
 
   txt <- .docx_text(out)
   expect_false(grepl("{COLUMN_SPECS}", txt, fixed = TRUE))
-  expect_false(grepl("{DATASET_NAME}", txt, fixed = TRUE))
+  expect_false(grepl("{DATASET_ID}", txt, fixed = TRUE))
 })
 
 test_that("a table inside a region is repeated once per dataset with its cells substituted", {
@@ -80,7 +80,7 @@ test_that("a table inside a region is repeated once per dataset with its cells s
   template <- tempfile(fileext = ".docx")
   doc <- officer::read_docx()
   doc <- officer::body_add_par(doc, "{#DATASETS}")
-  doc <- officer::body_add_table(doc, data.frame(x = "Cell {DATASET_NAME}"), header = FALSE)
+  doc <- officer::body_add_table(doc, data.frame(x = "Cell {DATASET_ID}"), header = FALSE)
   doc <- officer::body_add_par(doc, "{/DATASETS}")
   print(doc, target = template)
   on.exit(unlink(template, force = TRUE), add = TRUE)
@@ -95,10 +95,10 @@ test_that("a table inside a region is repeated once per dataset with its cells s
 
 test_that("the description, file, column and rule count placeholders resolve for one dataset", {
   dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
-  if (is.null(dta@datasets[[1]]@description)) {
-    dta@datasets[[1]]@description <- "Demo description"
-  }
   ds <- dta@datasets[[1]]
+  # The fixture carries a long description of its own, so the placeholder has
+  # something to resolve to.
+  expect_match(ds@description, "^Subject-level clinical observations")
 
   template <- .make_template(c(
     "{#DATASETS}",
@@ -145,7 +145,7 @@ test_that("an explicit {COLUMN_SPECS:NAME} inside a region is not rebound to the
   expect_false("AGE" %in% cell_text)
 
   heading_text <- summary$text[summary$content_type == "paragraph"]
-  expect_equal(sum(heading_text == "Column Specifications — vitals"), 2)
+  expect_equal(sum(heading_text == "Column Specifications — Vital signs (vitals)"), 2)
 })
 
 test_that("a region and an ordinary block placeholder in the same template both render", {
@@ -172,8 +172,8 @@ test_that("a region and an ordinary block placeholder in the same template both 
 test_that("two sequential regions each repeat independently", {
   dta <- create_example_DTA()
   template <- .make_template(c(
-    "{#DATASETS}", "A {DATASET_NAME}", "{/DATASETS}",
-    "{#DATASETS}", "B {DATASET_NAME}", "{/DATASETS}"
+    "{#DATASETS}", "A {DATASET_ID}", "{/DATASETS}",
+    "{#DATASETS}", "B {DATASET_ID}", "{/DATASETS}"
   ))
   on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
@@ -189,7 +189,7 @@ test_that("two sequential regions each repeat independently", {
 
 test_that("a nested {#DATASETS} marker is treated as region content, not a nested region", {
   dta <- create_example_DTA()
-  template <- .make_template(c("{#DATASETS}", "{#DATASETS}", "{DATASET_NAME}", "{/DATASETS}"))
+  template <- .make_template(c("{#DATASETS}", "{#DATASETS}", "{DATASET_ID}", "{/DATASETS}"))
   on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
@@ -355,22 +355,76 @@ test_that("dta_template_placeholders() lists region markers and dataset placehol
   kind <- attr(x, "kind")
   expect_identical(kind[["{#DATASETS}"]], "region")
   expect_identical(kind[["{/DATASETS}"]], "region")
+  expect_identical(kind[["{DATASET_ID}"]], "dataset")
   expect_identical(kind[["{DATASET_NAME}"]], "dataset")
 
   dataset_names <- c(
-    "{DATASET_NAME}", "{DATASET_TYPE}", "{DATASET_DESCRIPTION}",
+    "{DATASET_ID}", "{DATASET_NAME}", "{DATASET_TYPE}", "{DATASET_DESCRIPTION}",
     "{DATASET_FILE_COUNT}", "{DATASET_COLUMN_COUNT}", "{DATASET_RULE_COUNT}"
   )
   expect_true(all(dataset_names %in% names(x)))
+  # Exactly these seven, in this order: the catalogue is what the Word-template
+  # help lists, so its order is part of what a reader sees.
+  expect_identical(names(.tv_dataset_catalog()), dataset_names)
 
   dta <- create_example_DTA()
   with_dta <- dta_template_placeholders(dta)
   expect_identical(names(with_dta), names(x))
+  expect_identical(with_dta[["{DATASET_ID}"]], x[["{DATASET_ID}"]])
   expect_identical(with_dta[["{DATASET_NAME}"]], x[["{DATASET_NAME}"]])
 
-  expect_setequal(
-    names(.tv_dataset_catalog()),
-    names(.tv_dataset_variables(dta@datasets[[1]], "x"))
+  # Resolving a dataset takes the dataset alone -- its id is its own property.
+  expect_identical(
+    names(.tv_dataset_variables(dta@datasets[[1]])),
+    names(.tv_dataset_catalog())
+  )
+})
+
+test_that("{DATASET_ID} renders the id and {DATASET_NAME} the name, falling back to the id", {
+  named <- create_example_DTADataSetTabular(2) # id demographics, name Demographics
+  unnamed <- create_example_DTADataSetTabular(1) # id example_container_specs_without_data
+  blank <- create_example_DTADataSetTabular(3) # id vitals ...
+  blank@name <- "" # ... whose name is set but empty
+  dta <- DTA(datasets = list(named, unnamed, blank), metadata = create_example_DTAMetaData())
+
+  template <- .make_template(c(
+    "{#DATASETS}",
+    "id={DATASET_ID}|name={DATASET_NAME}",
+    "{/DATASETS}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  expect_no_warning(export_with_template(dta, template, out, quiet = TRUE))
+
+  expect_identical(
+    .docx_paragraphs(out),
+    c(
+      "id=demographics|name=Demographics",
+      "id=example_container_specs_without_data|name=example_container_specs_without_data",
+      "id=vitals|name=vitals"
+    )
+  )
+})
+
+test_that("{DATASET_DESCRIPTION} renders the long description, never the name", {
+  dta <- create_example_DTA()
+  dta@datasets[["demographics"]]@description <- "One row per subject."
+  template <- .make_template(c(
+    "{#DATASETS}", "{DATASET_ID}: {DATASET_DESCRIPTION}", "{/DATASETS}"
+  ))
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  # "vitals" has a name but no description: the placeholder is empty, it does
+  # not borrow the name.
+  expect_identical(
+    .docx_paragraphs(out),
+    c("demographics: One row per subject.", "vitals: ")
   )
 })
 

@@ -208,7 +208,7 @@ test_that("a dataset can be added to a freshly created empty DTA", {
     # Deliberately NO enter_edit_mode() call -- see the file header.
     expect_true(rv$editing)
 
-    session$setInputs(add_ds_name = "demographics", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "demographics", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     expect_equal(names(DTAtools::datasets(rv$dta)), "demographics")
@@ -234,7 +234,7 @@ test_that("the workspace tells an author with no datasets what to do next", {
 
     # It is the empty state that is showing, not a dataset view that happens
     # to mention the phrase: adding a dataset replaces it with that dataset.
-    session$setInputs(add_ds_name = "demographics", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "demographics", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     expect_false(grepl("no datasets yet", render_html(output$dataset_detail$html), fixed = TRUE))
   })

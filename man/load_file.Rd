@@ -131,7 +131,7 @@ batch is typed in R, which is cheaper at that size. See
 \examples{
 file_handler <- DTAFileCSV(filename = "clinical_data.csv")
 ds <- DTADataSetTabular(
-  name = "demo",
+  id = "demo",
   specs = create_example_DTAColumnSpecCollection(1),
   files = list(file_handler)
 )
@@ -146,7 +146,7 @@ ds_lazy <- load_file(
 )
 names(tables(ds_lazy))
 handler <- DTAFileAny(filename = "clinical_data.csv")
-ds <- DTADataSetFile(name = "delivery", files = list(handler))
+ds <- DTADataSetFile(id = "delivery", files = list(handler))
 
 file <- system.file("extdata", "clinical_data.csv", package = "DTAtools")
 ds <- load_file(ds, file = file, handler_index = 1)

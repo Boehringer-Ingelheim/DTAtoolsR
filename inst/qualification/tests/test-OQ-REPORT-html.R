@@ -24,7 +24,7 @@ qrpt_dataset <- function(dir, name, n_bad) {
   path <- file.path(dir, paste0(name, ".csv"))
   utils::write.csv(df, path, row.names = FALSE, na = "")
   ds <- DTADataSetTabular(
-    name = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
+    id = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
   check(ds, persist = FALSE, quiet = TRUE)
@@ -38,7 +38,7 @@ qrpt_clean_dataset <- function(dir, name) {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
+    id = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "never")
   check(ds, persist = FALSE, quiet = TRUE)
@@ -52,7 +52,7 @@ qrpt_unchecked_dataset <- function(dir, name) {
     row.names = FALSE, na = ""
   )
   ds <- DTADataSetTabular(
-    name = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
+    id = name, specs = qrpt_specs(), files = list(DTAFileCSV(filename = paste0(name, ".csv")))
   )
   load_file(ds, file = path, handler_index = 1, stream = "never") # deliberately never check()ed
 }
@@ -167,7 +167,7 @@ test_that("OQ-REPORT-003 | a metadata-only failure is visible in the overview, n
 
   # A clean transfer must be untouched by this: the overview stays a statement
   # about its targets, with no metadata row invented to say nothing happened.
-  clean_dta <- DTA(datasets = list(clean = qrpt_clean_dataset(dir, "clean2")), metadata = DTAMetaData(title = "clean meta"))
+  clean_dta <- DTA(datasets = list(clean2 = qrpt_clean_dataset(dir, "clean2")), metadata = DTAMetaData(title = "clean meta"))
   clean_out <- file.path(dir, "clean.html")
   write_validation_report(clean_dta, clean_out, quiet = TRUE)
   clean_info <- qa_html_report(clean_out)

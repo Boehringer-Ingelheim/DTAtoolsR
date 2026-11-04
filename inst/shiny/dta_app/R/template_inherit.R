@@ -406,10 +406,12 @@ dta_template_merge_options <- function(parent_opts, child_opts, order = NULL,
 # `template:` (with any `@version` pin stripped -- `gf@3.0` and `gf@4.0` name
 # the SAME slot in a template family, just different pinned revisions of it,
 # so a deviation that bumps the pin must still match and override, not
-# duplicate), else `source:`, else `name:`, else -- for a bare character
-# entry -- the string itself. NA when none of these apply, which marks the
-# entry as unkeyable: it can never be matched against anything and is always
-# appended as-is.
+# duplicate), else `source:`, else `id:`, else `name:` -- an inline entry
+# written before datasets had an `id` carries its identifier there, so a
+# legacy parent and a current child still key the same dataset alike -- else,
+# for a bare character entry, the string itself. NA when none of these apply,
+# which marks the entry as unkeyable: it can never be matched against anything
+# and is always appended as-is.
 dta_template_dataset_key <- function(entry) {
   if (is.character(entry) && length(entry) == 1 && nzchar(entry)) {
     return(entry)
@@ -417,7 +419,7 @@ dta_template_dataset_key <- function(entry) {
   if (!is.list(entry)) {
     return(NA_character_)
   }
-  for (field in c("as", "source", "name")) {
+  for (field in c("as", "source", "id", "name")) {
     v <- entry[[field]]
     if (!is.null(v) && is.character(v) && length(v) == 1 && nzchar(v)) {
       return(v)
@@ -436,10 +438,21 @@ dta_template_dataset_key <- function(entry) {
 
 # Merge two unnamed lists of dataset entries by the identity key above.
 dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets") {
-  parent_ds <- parent_ds %||% list()
+  # Entries written before datasets had an `id` are upgraded on BOTH sides
+  # before anything merges: a legacy parent's `description:` is the label a
+  # current child calls `name:`, and merging the two shapes field by field would
+  # leave the old label behind as the new long description.
+  # A sequence of bare paths parses to a character vector, not a list, and is
+  # passed through as it came.
+  upgrade <- function(items) {
+    if (is.list(items)) lapply(items, DTAtools::dta_dataset_list_upgrade) else items
+  }
+  parent_ds <- upgrade(parent_ds %||% list())
 
   parsed <- dta_template_parse_collection(child_ds, section)
   if (identical(parsed$form, "verbs")) {
+    parsed$verbs$add <- upgrade(parsed$verbs$add)
+    parsed$verbs$modify <- upgrade(parsed$verbs$modify)
     return(dta_template_assert_unique_keys(
       dta_template_apply_collection_verbs(
         parent_ds, parsed$verbs, section, dta_template_dataset_key
@@ -448,7 +461,7 @@ dta_template_merge_datasets <- function(parent_ds, child_ds, section = "datasets
     ))
   }
 
-  child_ds <- parsed$items
+  child_ds <- upgrade(parsed$items)
   # Same reason as `options:` above, and the route that actually defeated a
   # seal: two child entries under one key, the first leaving the sealed value
   # alone and the second carrying the value the author really wanted.
@@ -830,7 +843,51 @@ dta_template_merge_collection_section <- function(def, key, parent_items, merge_
 # rather than hard-coded so this file never has to know how a reference is
 # looked up (see the file banner). `.depth`/`.seen` are recursion bookkeeping,
 # not meant to be supplied by an external caller.
+# Bring a template's inline `datasets:` entries written before datasets had an
+# `id` into the current shape, together with the template's OWN `sealed:` and
+# `required:` paths into those entries -- in such a template
+# `datasets.<x>.description` addressed the label (now `name`) and
+# `datasets.<x>.name` the identifier (now `id`). Done once per template, as it
+# is read, so the parent a child is merged into and the parent a seal is
+# checked against are the same shape; upgrading only inside the merge made
+# every child of a legacy parent "change" a sealed entry it never touched.
+dta_template_upgrade_datasets <- function(def) {
+  ds <- def$datasets
+  if (!is.list(ds) || length(ds) == 0) {
+    return(def)
+  }
+  legacy <- vapply(ds, function(e) {
+    is.list(e) && is.null(e[["id"]]) && is.character(e[["name"]]) && length(e[["name"]]) == 1
+  }, logical(1))
+  if (!any(legacy)) {
+    return(def)
+  }
+  keys <- vapply(ds[legacy], function(e) e[["name"]], character(1))
+  def$datasets <- lapply(ds, DTAtools::dta_dataset_list_upgrade)
+
+  remap <- function(paths) {
+    if (is.null(paths)) {
+      return(paths)
+    }
+    paths <- as.character(paths)
+    for (k in keys) {
+      prefix <- paste0("datasets.", k, ".")
+      # Both masks first: mapped one after the other, a `description` path
+      # just turned into `name` would be turned again into `id`.
+      was_label <- paths == paste0(prefix, "description")
+      was_id <- paths == paste0(prefix, "name")
+      paths[was_label] <- paste0(prefix, "name")
+      paths[was_id] <- paste0(prefix, "id")
+    }
+    paths
+  }
+  def$sealed <- remap(def$sealed)
+  def$required <- remap(def$required)
+  def
+}
+
 resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = character(0)) {
+  def <- dta_template_upgrade_datasets(def)
   # Every template -- the original child, and every def a resolver hands
   # back -- must declare its own id/version (never inherited, see below), so
   # this identity is always available to check against the lineage visited so

@@ -215,7 +215,7 @@ qp_sort <- function(errors) {
 # as ignored for a table held in memory.
 qp_run <- function(case, stream, batch_rows = getOption("DTAtools.stream_batch_rows", 131072L)) {
   ds <- DTADataSetTabular(
-    name = "parity",
+    id = "parity",
     specs = case$specs,
     files = list(DTAFileCSV(filename = case$declared))
   )
@@ -405,7 +405,7 @@ qp_run_memory <- function(case, engine) {
   }
 
   ds <- DTADataSetTabular(
-    name = "parity_memory",
+    id = "parity_memory",
     specs = case$specs,
     tables = list(t = holding)
   )

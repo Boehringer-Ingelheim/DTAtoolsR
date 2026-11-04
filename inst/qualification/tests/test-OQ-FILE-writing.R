@@ -10,7 +10,7 @@ fw_dataset_with_na <- function() {
     ID = c("A", "B"), VAL = c(1, NA), stringsAsFactors = FALSE
   ))
   DTADataSetTabular(
-    name = "na_demo", specs = create_example_DTAColumnSpecCollection(1),
+    id = "na_demo", specs = create_example_DTAColumnSpecCollection(1),
     tables = list(t = tbl)
   )
 }
@@ -196,7 +196,7 @@ test_that("OQ-FILE-045 | a written table read back reaches the identical validat
 
   p_src <- file.path(dir, "src.csv")
   writeLines(c("ID,AGE", "A0000001,30", "A0000002,40"), p_src)
-  ds1 <- DTADataSetTabular(name = "s1", specs = specs, files = list(DTAFileCSV(filename = "src.csv")))
+  ds1 <- DTADataSetTabular(id = "s1", specs = specs, files = list(DTAFileCSV(filename = "src.csv")))
   ds1 <- load_file(ds1, file = p_src, handler_index = 1, stream = "never")
   ds1 <- check(ds1, persist = FALSE, quiet = TRUE)
   before <- validation_status(ds1)
@@ -204,7 +204,7 @@ test_that("OQ-FILE-045 | a written table read back reaches the identical validat
   p_out <- file.path(dir, "roundtrip.csv")
   write_table_to_file(ds1, table = names(tables(ds1))[[1]], filename = p_out, sep = ",", arrange_by = NULL, quiet = TRUE)
 
-  ds2 <- DTADataSetTabular(name = "s2", specs = specs, files = list(DTAFileCSV(filename = "roundtrip.csv")))
+  ds2 <- DTADataSetTabular(id = "s2", specs = specs, files = list(DTAFileCSV(filename = "roundtrip.csv")))
   ds2 <- load_file(ds2, file = p_out, handler_index = 1, stream = "never")
   ds2 <- check(ds2, persist = FALSE, quiet = TRUE)
   after <- validation_status(ds2)

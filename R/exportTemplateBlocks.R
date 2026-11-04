@@ -296,7 +296,7 @@
   sets
 }
 
-#' Does the DTA contain a dataset by this name (any kind)?
+#' Does the DTA contain a dataset with this id (any kind)?
 #' @keywords internal
 .tv_block_dataset_exists <- function(dta, name) name %in% names(dta@datasets)
 
@@ -310,7 +310,7 @@
   }
   for (nm in names(sets)) {
     if (isTRUE(heading)) {
-      doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", nm), level = 2)
+      doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
       doc, .build_column_specs_table(sets[[nm]]@specs),
@@ -330,7 +330,7 @@
   }
   for (nm in names(sets)) {
     if (isTRUE(heading)) {
-      doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", nm), level = 2)
+      doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
       doc, .build_rules_table(sets[[nm]]@specs@rules),
@@ -350,7 +350,7 @@
   }
   for (nm in names(sets)) {
     if (isTRUE(heading)) {
-      doc <- .tv_block_heading(doc, paste0("Files \u2014 ", nm), level = 2)
+      doc <- .tv_block_heading(doc, paste0("Files \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
       doc, .build_file_specs_table(sets[[nm]]@files),
@@ -374,7 +374,7 @@
     ds <- sets[[nm]]
 
     if (isTRUE(heading)) {
-      doc <- .tv_block_heading(doc, nm, level = 2)
+      doc <- .tv_block_heading(doc, dta_dataset_heading(ds), level = 2)
     }
     doc <- .add_body_par(doc, paste0("Type: ", ds@type))
     if (!is.null(ds@description) && nzchar(ds@description)) {

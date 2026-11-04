@@ -185,7 +185,7 @@ parity_sort <- function(errors) {
 
 parity_run <- function(case, stream) {
   ds <- DTADataSetTabular(
-    name = "parity",
+    id = "parity",
     specs = case$specs,
     files = list(DTAFileCSV(filename = case$declared))
   )
@@ -463,7 +463,7 @@ parity_run_memory <- function(case, engine) {
   }
 
   ds <- DTADataSetTabular(
-    name = "parity_memory",
+    id = "parity_memory",
     specs = case$specs,
     tables = list(t = holding)
   )

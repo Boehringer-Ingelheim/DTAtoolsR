@@ -265,7 +265,7 @@ test_that("a retained raw value is truncated but reported in full count", {
 
 test_that("the DTADataSetTabular constructor types its tables", {
   ds <- DTADataSetTabular(
-    name = "ctor",
+    id = "ctor",
     specs = char_num_specs(),
     tables = list(
       t = data.frame(
@@ -289,7 +289,7 @@ test_that("the DTADataSetTabular constructor types its tables", {
 
 test_that("a clean table leaves import_issues an empty list", {
   ds <- DTADataSetTabular(
-    name = "clean",
+    id = "clean",
     specs = char_num_specs(),
     tables = list(t = data.frame(SUBJID = "a", VAL = "1", stringsAsFactors = FALSE))
   )
@@ -312,7 +312,7 @@ test_that("load_file types the table and records its import issues", {
 
   handler <- DTAFileCSV(filename = "typed_import.csv")
   ds <- DTADataSetTabular(
-    name = "typed",
+    id = "typed",
     specs = char_num_specs(),
     files = list(handler)
   )
@@ -373,7 +373,7 @@ dta_load_id_fixture <- function(handler, name, sep) {
   )
 
   ds <- DTADataSetTabular(
-    name = "ids",
+    id = "ids",
     specs = id_specs(),
     files = list(handler)
   )
@@ -529,7 +529,7 @@ test_that("check() rescans a table Arrow rebuilt and skips the same object", {
   writeLines(c("ID,VAL", "a,1", "b,2", "c,3"), csv)
 
   ds <- DTADataSetTabular(
-    name = "d", specs = specs, files = list(DTAFileCSV(filename = "ids.csv"))
+    id = "d", specs = specs, files = list(DTAFileCSV(filename = "ids.csv"))
   )
   ds <- load_file(ds, file = csv, handler_index = 1, stream = "never")
   ds <- check(ds, persist = FALSE, quiet = TRUE)
@@ -683,7 +683,7 @@ test_that("load_file and the DTADataSetTabular constructor both stamp their tabl
   specs <- char_num_specs()
 
   ds <- DTADataSetTabular(
-    name = "stamped",
+    id = "stamped",
     specs = specs,
     tables = list(
       t = data.frame(SUBJID = c("a", "b"), VAL = c("1", "heavy"), stringsAsFactors = FALSE)
@@ -698,7 +698,7 @@ test_that("load_file and the DTADataSetTabular constructor both stamp their tabl
   writeLines(c('"SUBJID","VAL"', '"a","1"', '"b","heavy"'), csv)
 
   loaded <- DTADataSetTabular(
-    name = "stamped_file",
+    id = "stamped_file",
     specs = specs,
     files = list(DTAFileCSV(filename = "stamped.csv"))
   )
@@ -742,7 +742,7 @@ test_that("a float in a declared Int column is an import error, not a read abort
   )
 
   handler <- DTAFileCSV(filename = "float_in_int.csv")
-  ds <- DTADataSetTabular(name = "fi", specs = specs, files = list(handler))
+  ds <- DTADataSetTabular(id = "fi", specs = specs, files = list(handler))
 
   # Must not abort -- this was the bug.
   expect_no_error(ds <- DTAtools:::load_file(ds, file = csv, handler_index = 1))

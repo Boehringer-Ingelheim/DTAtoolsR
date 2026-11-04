@@ -88,7 +88,7 @@ test_that("inspect() supports DTADataSetFile messages", {
     unlink(path)
   }
 
-  ds <- DTADataSetFile(name = "missing_file", paths = path)
+  ds <- DTADataSetFile(id = "missing_file", paths = path)
   ds <- check(ds, quiet = TRUE)
 
   msgs <- messages(ds, as_tibble = FALSE)
@@ -201,7 +201,7 @@ inspect_stream_as_char <- function(df) {
 
 inspect_stream_dataset <- function(path, stream) {
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = inspect_stream_specs(),
     files = list(DTAFileCSV(filename = basename(path)))
   )

@@ -146,7 +146,7 @@ test_that("OQ-APP-007 | a dataset can only be added while editing | REQ-APP-007"
 
     # A document arrives read-only. Adding a dataset without unlocking it would
     # change a specification the user had not chosen to edit.
-    session$setInputs(add_ds_name = "locked_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "locked_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     qa_step(
       "an add attempted outside edit mode changes nothing",
@@ -154,7 +154,7 @@ test_that("OQ-APP-007 | a dataset can only be added while editing | REQ-APP-007"
     )
 
     qapp_enter_edit_mode(session)
-    session$setInputs(add_ds_name = "second_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "second_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
 
     qa_step(
@@ -178,7 +178,7 @@ test_that("OQ-APP-008 | removing a dataset drops it from the document and the st
     session$setInputs(dta_client_id = strrep("d", 32))
     session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
     qapp_enter_edit_mode(session)
-    session$setInputs(add_ds_name = "to_remove", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "to_remove", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     qa_check("the dataset to remove exists", "to_remove" %in% names(rv$status))
 
@@ -301,7 +301,7 @@ test_that("OQ-APP-013 | a dataset with no delivery is never reported as passing 
     session$setInputs(dta_client_id = strrep("i", 32))
     session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
     qapp_enter_edit_mode(session)
-    session$setInputs(add_ds_name = "empty_ds", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "empty_ds", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     session$setInputs(check_all = 1)
 
@@ -355,7 +355,7 @@ test_that("OQ-APP-015 | edit mode unlocks and re-locks the specification | REQ-A
     history_before <- nrow(get_version_history_df(metadata(rv$dta)))
 
     qapp_enter_edit_mode(session)
-    session$setInputs(add_ds_name = "while_editing", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "while_editing", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     qa_step(
       "a change made while editing reaches the document",
@@ -371,7 +371,7 @@ test_that("OQ-APP-015 | edit mode unlocks and re-locks the specification | REQ-A
 
     qapp_leave_edit_mode(session)
     after_lock <- names(rv$status)
-    session$setInputs(add_ds_name = "after_locking", add_ds_type = "tabular")
+    session$setInputs(add_ds_id = "after_locking", add_ds_type = "tabular")
     session$setInputs(add_ds_save = 1)
     qa_step(
       "while a change attempted after locking does not",

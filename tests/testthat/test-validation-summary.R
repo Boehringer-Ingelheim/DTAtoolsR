@@ -206,7 +206,7 @@ vs_specced <- function() {
 # check() records status "unspecified" with ok = NA rather than validating it.
 vs_unchecked_dataset <- function() {
   DTADataSetTabular(
-    name = "unchecked",
+    id = "unchecked",
     specs = DTAColumnSpecCollection(columns = list()),
     tables = list(tab = data.frame(ID = "A001", stringsAsFactors = FALSE))
   )
@@ -214,7 +214,7 @@ vs_unchecked_dataset <- function() {
 
 vs_invalid_dataset <- function() {
   DTADataSetTabular(
-    name = "bad",
+    id = "bad",
     specs = vs_specced(),
     tables = list(tab = data.frame(ID = "TOO-LONG", stringsAsFactors = FALSE))
   )
@@ -257,7 +257,7 @@ test_that("check() reports an unchecked dataset even when another one failed", {
 test_that("a clean DTA still reports PASSED", {
   dta <- DTA(
     datasets = list(good = DTADataSetTabular(
-      name = "good", specs = vs_specced(),
+      id = "good", specs = vs_specced(),
       tables = list(tab = data.frame(ID = "A001", stringsAsFactors = FALSE))
     )),
     metadata = create_example_DTAMetaData()
@@ -277,7 +277,7 @@ test_that("check() does not certify a DTA whose data was never delivered", {
   # found in dataset." rather than reporting anything at all.
   dta <- DTA(
     datasets = list(undelivered = DTADataSetTabular(
-      name = "undelivered", specs = vs_specced(), tables = list()
+      id = "undelivered", specs = vs_specced(), tables = list()
     )),
     metadata = create_example_DTAMetaData()
   )

@@ -107,7 +107,8 @@ requirements:
   - id: REQ-SPEC-010
     text: >
       The dataset classes DTADataSetTabular and DTADataSetFile shall each carry
-      their name, their file handlers and their validation state, and
+      their id, their optional name and description, their file handlers and
+      their validation state, and
       DTADataSetFactory() shall build the one its type names.
     risk: high
     category: interface
@@ -260,9 +261,10 @@ requirements:
   - id: REQ-SPEC-024
     text: >
       DTA() shall refuse a non-empty @datasets whose names are not all
-      distinct, non-empty and non-NA, with a condition naming the offending
-      names, rather than construct an object in which one dataset is
-      unreachable by name.
+      distinct, non-empty and non-NA, or whose name for an entry differs from
+      that dataset's @id, with a condition naming the offending names, rather
+      than construct an object in which one dataset is unreachable by name or
+      reported under two different names.
     risk: high
     category: integrity
     covers: [DTA]
@@ -273,3 +275,22 @@ requirements:
       it is never reachable by name, so it is validated only insofar as the
       first entry stands in for it, and the caller sees one verdict where two
       were meant.
+
+  - id: REQ-SPEC-025
+    text: >
+      dta_dataset_from_list(), and with it read_dta_from_yaml() and
+      read_dataset_from_yaml(), shall read a dataset entry that has a name but
+      no id -- the shape written before datasets had an id -- as a dataset
+      whose @id is that name and whose @name is the entry's description, and
+      shall read an entry that has an id with its id, name and description
+      unchanged.
+    risk: high
+    category: integrity
+    covers: [dta_dataset_from_list, dta_dataset_list_upgrade, read_dta_from_yaml, read_dataset_from_yaml]
+    source: R/DTADataSet-class.R
+    notes: >
+      Specifications, template libraries and qualification fixtures written in
+      the old shape exist outside this repository. Reading one with the old
+      identifier in the wrong field would key every dataset by its label, so
+      every load_file() and every report would address a dataset that is not
+      there.

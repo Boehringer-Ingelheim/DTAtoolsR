@@ -20,7 +20,7 @@
 # answer and the cost of getting it from the same call, which also means the
 # figures describe the run whose verdict is being reported.
 ps_measure <- function(path, stream, tc_id, tier, rows) {
-  ds <- qa_dta(path, stream = stream)
+  ds <- qa_dta(path, id = "qual", stream = stream)
   dta <- DTA(datasets = list(qual = ds), metadata = create_example_DTAMetaData())
   dta <- check(dta, benchmark = TRUE, persist = FALSE, quiet = TRUE)
 

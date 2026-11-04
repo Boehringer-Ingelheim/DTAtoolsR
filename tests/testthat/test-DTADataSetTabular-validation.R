@@ -378,7 +378,7 @@ test_that("a table checked against zero column specs is 'unspecified', not a pas
   # as either a pass or a fail -- which is what makes the dataset read as
   # incomplete instead of either verdict.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = specs_from_list(NULL),
     files = list(DTAFileCSV(filename = "clinical_data.csv"))
   )
@@ -430,7 +430,7 @@ test_that("loading a different file under a bound table name drops the old verdi
   writeLines(c("ID", "TOO-LONG"), bad)
 
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = tv_id_specs(),
     files = list(DTAFileCSV(filename = "t.csv"), DTAFileCSV(filename = "t2.csv"))
   )
@@ -461,7 +461,7 @@ test_that("re-loading the same file under a bound name also drops the old verdic
   writeLines(c("ID", "A001"), path)
 
   ds <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(),
+    id = "d", specs = tv_id_specs(),
     files = list(DTAFileCSV(filename = "t.csv"))
   )
   ds <- check(
@@ -546,7 +546,7 @@ test_that("check() reports a lazily held table whose file has vanished", {
   writeLines(c("ID", "A001"), path)
 
   ds <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(),
+    id = "d", specs = tv_id_specs(),
     files = list(DTAFileCSV(filename = "vanish.csv"))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "always")
@@ -582,7 +582,7 @@ test_that("a vanished delivery is reported by its own path, not by its copy", {
   close(con)
 
   ds <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(),
+    id = "d", specs = tv_id_specs(),
     files = list(DTAFileCSV(filename = "vanish_latin1.csv", encoding = "latin1"))
   )
   ds <- load_file(ds, file = path, handler_index = 1, stream = "always")
@@ -630,7 +630,7 @@ test_that("check() records the same import issues eager and streamed", {
     writeLines(lines, path)
     lapply(c(never = "never", always = "always"), function(stream) {
       ds <- DTADataSetTabular(
-        name = "d", specs = specs, files = list(DTAFileCSV(filename = name))
+        id = "d", specs = specs, files = list(DTAFileCSV(filename = name))
       )
       ds <- load_file(ds, file = path, handler_index = 1, stream = stream)
       ds <- check(ds, persist = FALSE, quiet = TRUE)
@@ -686,7 +686,7 @@ test_that("a table whose name contains braces checks without aborting", {
   writeLines(c("ID", "A001"), path)
 
   ds <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(),
+    id = "d", specs = tv_id_specs(),
     files = list(DTAFileCSV(filename = "a{b}.csv"))
   )
   ds <- load_file(ds, file = path, handler_index = 1)
@@ -699,13 +699,13 @@ test_that("a table whose name contains braces checks without aborting", {
 })
 
 
-test_that("print() survives braces in the dataset name and in a table name", {
+test_that("print() survives braces in the dataset id and in a table name", {
   # print() pasted every table name into `{.field <name>}` markup and handed
   # the result to cli, which then tried to evaluate `b` as an R expression:
   # printing an object built from a delivered `a{b}.csv` aborted. The dataset
-  # name goes through the same path and is asserted alongside it.
+  # id goes through the same path and is asserted alongside it.
   ds <- DTADataSetTabular(
-    name = "d{x}",
+    id = "d{x}",
     specs = tv_id_specs(),
     tables = list(`a{b}` = data.frame(ID = "A001", stringsAsFactors = FALSE))
   )
@@ -731,7 +731,7 @@ test_that("print() lists several table names comma-separated and truncates past 
   }
 
   three <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(), tables = named(c("t1", "t2", "t3"))
+    id = "d", specs = tv_id_specs(), tables = named(c("t1", "t2", "t3"))
   )
   expect_match(
     tv_console(print(three)), "Tables (3): t1, t2, t3",
@@ -739,7 +739,7 @@ test_that("print() lists several table names comma-separated and truncates past 
   )
 
   many <- DTADataSetTabular(
-    name = "d", specs = tv_id_specs(), tables = named(sprintf("t%d", 1:7))
+    id = "d", specs = tv_id_specs(), tables = named(sprintf("t%d", 1:7))
   )
   expect_match(
     tv_console(print(many)), "Tables (7): t1, t2, t3, t4, ..., t7",
@@ -810,7 +810,7 @@ tv_summary <- function(x) attr(x, "last_validation_summary")
 
 test_that("a table built from a data frame carries the digest check() would derive", {
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = tv_stamp_specs(),
     tables = list(t = data.frame(
       ID = c("a", "b", "c"), VAL = c(1, 2, 3), stringsAsFactors = FALSE
@@ -852,7 +852,7 @@ test_that("an import issue raised at construction is inside the stamp", {
   # changed can never be skipped with a stale verdict.
   build <- function(vals) {
     DTADataSetTabular(
-      name = "d",
+      id = "d",
       specs = tv_stamp_specs(),
       tables = list(t = data.frame(
         ID = c("a", "b"), VAL = vals, stringsAsFactors = FALSE
@@ -919,7 +919,7 @@ test_that("a frame Arrow does not return unchanged is stamped from the round tri
       expect_false(dta_frame_is_arrow_stable(frames[[label]]), info = info)
 
       ds <- DTADataSetTabular(
-        name = "d", specs = tv_stamp_specs(), tables = list(t = frames[[label]])
+        id = "d", specs = tv_stamp_specs(), tables = list(t = frames[[label]])
       )
       stored <- ds@tables[["t"]]
 
@@ -964,7 +964,7 @@ test_that("a POSIXct with no named timezone still checks, and still skips a re-c
   # Nothing to type: the coercion hands back the Table it was given, whose own
   # as.data.frame() IS what was hashed, so the digests agree after all.
   untyped <- DTADataSetTabular(
-    name = "d", specs = tv_stamp_specs(), tables = list(t = frame(c(1, 2)))
+    id = "d", specs = tv_stamp_specs(), tables = list(t = frame(c(1, 2)))
   )@tables[["t"]]
   expect_identical(
     dta_table_change_signal(untyped),
@@ -974,7 +974,7 @@ test_that("a POSIXct with no named timezone still checks, and still skips a re-c
   # VAL arrives as text and has to be typed, so the coercion rebuilds -- and
   # this is where the second round trip bites.
   ds <- DTADataSetTabular(
-    name = "d", specs = tv_stamp_specs(), tables = list(t = frame(c("1", "2")))
+    id = "d", specs = tv_stamp_specs(), tables = list(t = frame(c("1", "2")))
   )
   stored <- ds@tables[["t"]]
   expect_false(identical(
@@ -1004,7 +1004,7 @@ test_that("max_errors bounds retained detail on an in-memory table, never the co
   # both halves of that advice: the cap really does drop detail, and it really
   # does not touch the answer.
   ds <- DTADataSetTabular(
-    name = "d",
+    id = "d",
     specs = tv_id_specs(),
     tables = list(t = data.frame(
       ID = rep("TOO-LONG", 25), stringsAsFactors = FALSE

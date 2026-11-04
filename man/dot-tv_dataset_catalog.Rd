@@ -2,7 +2,7 @@
 % Please edit documentation in R/exportTemplateRegions.R
 \name{.tv_dataset_catalog}
 \alias{.tv_dataset_catalog}
-\title{The six per-dataset placeholders usable inside a repeating region, with a
+\title{The seven per-dataset placeholders usable inside a repeating region, with a
 one-line description}
 \usage{
 .tv_dataset_catalog()

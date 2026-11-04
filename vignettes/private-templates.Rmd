@@ -501,8 +501,9 @@ options:
     help: Name or identifier of the data supplier who provides the test results.
 
 dataset:
-  name: gf_data_specs_pattern
+  id: gf_data_specs_pattern
   type: tabular
+  name: Genomic Findings data table with pattern for filename
   files:
     filename: gf_data_small_smirna.tsv
     type: tsv
@@ -522,8 +523,8 @@ The `{template:, as:, options:, patch:}` shape a creation template's
 `datasets:` entry uses to import one of these:
 
 - `template:` — the `id@version` (or bare `id`) of the dataset template.
-- `as:` — rename the built dataset, so the same dataset template can be
-  imported twice into one DTA under two different names.
+- `as:` — give the built dataset a different id, so the same dataset template
+  can be imported twice into one DTA under two different ids.
 - `options:` — selections for the dataset template's own `options:` (here,
   `vendor_name`); anything not selected falls back to that option's
   `default:`.
@@ -1076,7 +1077,7 @@ a live "n of m selected" count. `min:` is shown as "Choose at least n." and
 is enforced when the document is created. An emptied slot means no terms,
 not "back to the default": the control opens holding the default, and
 whatever it holds when the document is created is what is applied. `target:` is always
-`datasets.<dataset>.columns.<column>.values`; a slot whose target names a
+`datasets.<dataset id>.columns.<column>.values`; a slot whose target names a
 dataset or column the template does not build fails loudly rather than
 silently doing nothing.
 

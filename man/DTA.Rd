@@ -7,9 +7,11 @@
 DTA(datasets = NULL, metadata = NULL, ...)
 }
 \arguments{
-\item{datasets}{A named list of DTADataSet objects. Names must be
-non-empty and unique -- \code{check()} looks datasets up by name, so a
-repeated name would validate one entry twice and the other never.}
+\item{datasets}{A list of DTADataSet objects, keyed by their \code{id}. An
+unnamed list is keyed automatically; a named one must use each dataset's
+\code{id} as its name. Ids must be unique -- \code{check()} looks datasets
+up by id, so a repeated id would validate one entry twice and the other
+never.}
 
 \item{metadata}{A DTAMetaData object.}
 
@@ -35,13 +37,13 @@ tables <- list(table1 = table1, table2 = table2)
 
 # Create the DTADataSet object
 data_obj <- DTADataSetTabular(
-  name = "example",
+  id = "example",
   specs = create_example_DTAColumnSpecCollection(1),
   tables = tables
 )
 
 DTA(
-  datasets = list(data = data_obj),
+  datasets = list(example = data_obj),
   metadata = create_example_DTAMetaData()
 )
 }

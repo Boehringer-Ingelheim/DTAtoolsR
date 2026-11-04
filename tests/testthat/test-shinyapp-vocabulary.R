@@ -669,7 +669,7 @@ test_that("normalise_values_from() reads 'vocabulary' with [[, not $", {
 # mid-flight: `columns` is a list of plain column lists, not DTAColumnSpecs.
 vocab_dataset_body <- function(columns) {
   list(
-    name = "ds1",
+    id = "ds1",
     type = "tabular",
     files = list(filename = "ds1.tsv", type = "tsv"),
     columns = columns
@@ -769,7 +769,7 @@ test_that("dataset_has_vocabulary_binding() distinguishes bound from unbound bod
   has_binding <- app_fn("dataset_has_vocabulary_binding")
 
   expect_false(has_binding(vocab_dataset_body(list(list(id = "A")))))
-  expect_false(has_binding(list(name = "empty")))
+  expect_false(has_binding(list(id = "empty")))
   expect_true(has_binding(vocab_dataset_body(list(
     list(id = "A"), list(id = "B", values_from = "visit@1.0")
   ))))
@@ -1099,7 +1099,7 @@ test_that("overrides write into the addressed column and clear its binding", {
 
 # A temp source directory holding a vocabulary, a dataset template bound to it,
 # and a creation template offering a slot over the same column.
-vocab_slot_source_dir <- function(slot_lines) {
+vocab_slot_source_dir <- function(slot_lines, dataset_id_line = "  id: ds1") {
   dir <- withr::local_tempdir(.local_envir = parent.frame())
   write_vocabulary_fixture(dir)
 
@@ -1109,7 +1109,7 @@ vocab_slot_source_dir <- function(slot_lines) {
       "id: bound_ds",
       "version: \"1.0\"",
       "dataset:",
-      "  name: ds1",
+      dataset_id_line,
       "  type: tabular",
       "  files: {filename: x.csv, type: csv}",
       "  columns:",
@@ -1174,6 +1174,37 @@ test_that("a vocabulary slot narrows the bound column at creation time", {
   )
   expect_true(isTRUE(chosen$ok), info = chosen$error)
   expect_identical(chosen$value@datasets[[1]]@specs@columns[[1]]@values, "EOT")
+})
+
+test_that("a slot still finds a dataset template written with the legacy `name:` identifier", {
+  # The slot targets the dataset by the id it ends up with. A dataset template
+  # from before datasets had an `id` names it in `name:`; reading it upgrades
+  # that to the id, so the same `datasets.ds1...` target keeps working.
+  dir <- vocab_slot_source_dir(
+    c(
+      "vocabulary_slots:",
+      "  - id: visit_choice",
+      "    target: datasets.ds1.columns.VISIT.values",
+      "    vocabulary: visit@1.0",
+      "    default: [SCR]"
+    ),
+    dataset_id_line = "  name: ds1"
+  )
+
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  app_fn("dta_template_index_invalidate")()
+  idx <- app_fn("build_template_index")(refresh = TRUE)
+
+  loaded <- app_fn("load_template_definition")("with_slot@1.0", index = idx)
+  built <- app_fn("create_dta_from_template")(loaded$value$def, loaded$value$path, index = idx)
+
+  expect_true(isTRUE(built$ok), info = built$error)
+  ds <- built$value@datasets[[1]]
+  expect_equal(ds@id, "ds1")
+  expect_identical(ds@specs@columns[[1]]@values, "SCR")
 })
 
 test_that("without a slot, the column binding alone still reaches the built DTA", {

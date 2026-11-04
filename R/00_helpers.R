@@ -587,14 +587,14 @@ DTAColumnSpecStructureFactory <- function(
 #' @examples
 #' DTADataSetFactory(
 #'   type = "file",
-#'   name = "mydataset",
+#'   id = "mydataset",
 #'   files = list(type = "csv", filename = "clinical_data.csv")
 #' )
 #'
 #' # Several file handlers: an unnamed list of handler specifications.
 #' DTADataSetFactory(
 #'   type = "file",
-#'   name = "mydataset",
+#'   id = "mydataset",
 #'   files = list(
 #'     list(type = "csv", filename = "clinical_data.csv"),
 #'     list(type = "tsv", filename = "gf_data_small_smirna.tsv")
