@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **"Authorized for corrections" is now a picker in the app.** The Metadata
+  tab offers the Receiver and Supplier contacts to choose from, accepts any
+  other name typed in, and allows several people or none (empty leaves the
+  field unset). A document whose `authorized_for_corrections` is a list is now
+  shown in full instead of only its first entry, in edit and read-only mode
+  alike. A single comma-separated string stays one entry.
+
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind
   "Full history", every version of the template since the first. Nothing is

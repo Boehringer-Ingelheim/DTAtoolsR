@@ -6029,11 +6029,28 @@ server <- function(input, output, session) {
         width = "100%", rows = 2,
         placeholder = "How data/format errors are handled and communicated."
       ),
-      f_text("md_authorized", "Authorized for corrections",
-        getf("authorized_for_corrections"),
-        width = "100%",
-        placeholder = "Contact(s) authorized to request corrections"
-      ),
+      if (ro) {
+        meta_field_text("Authorized for corrections", paste(dta_authorized_values(dta), collapse = ", "))
+      } else {
+        tagList(
+          selectizeInput("md_authorized", "Authorized for corrections",
+            choices = dta_authorized_choices(dta),
+            selected = dta_authorized_values(dta),
+            multiple = TRUE, width = "100%",
+            # delimiter: selectize splits typed and pasted text on its
+            # delimiter, which defaults to ",", so "Lastname, Firstname" would
+            # become two people. Names do not contain ";".
+            options = list(
+              create = TRUE, delimiter = ";", plugins = list("remove_button"),
+              placeholder = "Pick contacts or type a name"
+            )
+          ),
+          div(
+            class = "msg-hint", style = "margin:-8px 0 10px;",
+            "Choose Receiver or Supplier contacts, type any other name and press Enter (separate several with ;), or leave empty when nobody is named."
+          )
+        )
+      },
       # Only true while editing; in read-only there is nothing to save.
       if (!ro) {
         div(
@@ -6107,7 +6124,6 @@ server <- function(input, output, session) {
   version_d <- debounce(reactive(input$md_version), 700)
   header_d <- debounce(reactive(input$md_header), 700)
   errh_d <- debounce(reactive(input$md_error_handling), 700)
-  auth_d <- debounce(reactive(input$md_authorized), 700)
   # title and version are REQUIRED (non-nullable); block saves of empty/blank values
   observeEvent(title_d(),
     {
@@ -6127,7 +6143,36 @@ server <- function(input, output, session) {
   )
   observeEvent(header_d(), save_md("header", header_d()), ignoreInit = TRUE)
   observeEvent(errh_d(), save_md("error_handling", errh_d()), ignoreInit = TRUE)
-  observeEvent(auth_d(), save_md("authorized_for_corrections", auth_d()), ignoreInit = TRUE)
+  # ignoreNULL = FALSE: a multiple selectize emptied by the user sends NULL,
+  # which must unset the field. The guard makes a re-render (document load,
+  # edit toggle) a no-op instead of a spurious edit that would show in the
+  # version-history change summary. It compares as SETS on purpose: selectize
+  # reports its initial selection in option (DOM) order -- Receiver, Supplier,
+  # then manual entries -- not in the stored order, so identical() would
+  # rewrite a document just by opening it. The picker has no drag-to-reorder,
+  # so a set comparison cannot miss a real edit. No debounce: selectize emits
+  # on discrete picks, not per keystroke.
+  observeEvent(input$md_authorized,
+    {
+      req(rv$dta)
+      v <- trimws(as.character(input$md_authorized %||% character(0)))
+      v <- unique(v[!is.na(v) & nzchar(v)])
+      if (!setequal(v, dta_authorized_values(rv$dta))) save_md("authorized_for_corrections", v)
+    },
+    ignoreInit = TRUE,
+    ignoreNULL = FALSE
+  )
+  # Contacts feed the picker's options; keep them current while editing.
+  observeEvent(rv$contacts_token,
+    {
+      req(editing(), rv$dta)
+      updateSelectizeInput(session, "md_authorized",
+        choices = dta_authorized_choices(rv$dta),
+        selected = dta_authorized_values(rv$dta)
+      )
+    },
+    ignoreInit = TRUE
+  )
   observeEvent(input$md_date,
     {
       v <- input$md_date
