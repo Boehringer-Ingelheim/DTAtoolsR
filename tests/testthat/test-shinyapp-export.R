@@ -235,7 +235,10 @@ test_that("find_chrome_binary ignores an override pointing at a missing file", {
 # (--disable-javascript) or also break --print-to-pdf (--blink-settings).
 test_that("the Chrome PDF route blocks scripts with a CSP, not with a browser flag", {
   src <- app_source(file.path("R", "utils_export.R"))
-  expect_match(src, "Content-Security-Policy\\\" content=\\\"script-src 'none'", fixed = TRUE)
+  # default-src 'none' blocks scripts (and every fetch: images, frames) and
+  # nothing re-allows a script source.
+  expect_match(src, "Content-Security-Policy\\\" content=\\\"default-src 'none';", fixed = TRUE)
+  expect_no_match(src, "script-src", fixed = TRUE)
   expect_no_match(src, "\"--disable-javascript\"", fixed = TRUE)
   expect_no_match(src, "\"--blink-settings", fixed = TRUE)
 })
@@ -485,4 +488,60 @@ test_that("editor tables escape attacker-controlled text but keep the Actions bu
     expect_length(block, 1)
     expect_match(block, "escape = -ncol(ov)", fixed = TRUE)
   }
+})
+
+test_that("embed_yaml_markdown keeps a '-->' in the document from closing the comment", {
+  # An HTML comment ends at the first "-->"; a title carrying one would
+  # otherwise expose the rest of the YAML as live markdown/HTML.
+  dta <- app_fixture_dta()
+  dta@metadata@title <- "a --> <img src=x> --!> b"
+
+  out <- app_fn("embed_yaml_markdown")("", dta)
+
+  closers <- gregexpr("--!?>", out)[[1]]
+  expect_length(closers, 1)
+  expect_true(endsWith(out, "END EMBEDDED DTA YAML ========== -->"))
+  expect_match(out, "a --&gt; <img src=x> --!&gt; b", fixed = TRUE)
+})
+
+test_that("pandoc_no_images_filter turns planted images into their alt text", {
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc not available")
+  filter <- app_fn("pandoc_no_images_filter")()
+  on.exit(unlink(filter), add = TRUE)
+  md <- tempfile(fileext = ".md")
+  html <- tempfile(fileext = ".html")
+  on.exit(unlink(c(md, html)), add = TRUE)
+  writeLines(
+    "**Title:** ![alt words](http://169.254.169.254/x.png) and ![](file:///etc/x.png)",
+    md
+  )
+
+  rmarkdown::pandoc_convert(
+    md,
+    from = "markdown-raw_tex-raw_html-raw_attribute", to = "html5",
+    output = html, options = c("--lua-filter", filter)
+  )
+  out <- paste(readLines(html, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("<img", out, fixed = TRUE))
+  expect_false(grepl("169.254.169.254", out, fixed = TRUE))
+  expect_match(out, "alt words", fixed = TRUE)
+})
+
+test_that("csv_formula_safe defuses formula-leading text cells and leaves the rest", {
+  df <- data.frame(
+    column = c("=HYPERLINK(\"http://x\")", "+1", "-2", "@SUM(A1)", "\tx", "plain", NA),
+    row = c(1L, 2L, 3L, 4L, 5L, 6L, 7L),
+    table = factor(c("=t", "t", "t", "t", "t", "t", "t")),
+    stringsAsFactors = FALSE
+  )
+
+  out <- app_fn("csv_formula_safe")(df)
+
+  expect_identical(
+    out$column,
+    c("'=HYPERLINK(\"http://x\")", "'+1", "'-2", "'@SUM(A1)", "'\tx", "plain", NA)
+  )
+  expect_identical(out$row, df$row)
+  expect_identical(out$table, c("'=t", rep("t", 6)))
 })

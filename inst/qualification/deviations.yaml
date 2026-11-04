@@ -40,9 +40,9 @@ deviations:
 
   - id: DEV-002
     title: A POSIXct column with no named timezone is rescanned on every rebuild
-    status: pending
+    status: open
     severity: minor
-    affects: [REQ-VAL-001]
+    affects: [REQ-VAL-015]
     observed: >
       A tzone = "" timestamp column is not stable under repeated Arrow round
       trips: the first returns no tzone and the second the session timezone, so
@@ -56,7 +56,7 @@ deviations:
       contents, so it cannot report "unchanged" for data that changed, and a
       re-check of the same object is still skipped.
     workaround: Name the timezone when constructing POSIXct columns.
-    reference: tests/testthat/test-DTADataSetTabular-validation.R:942
+    reference: inst/qualification/tests/test-OQ-VAL-check.R (OQ-VAL-038); tests/testthat/test-DTADataSetTabular-validation.R
     opened: 2026-09-09
     closed: null
 
@@ -362,7 +362,7 @@ deviations:
 
   - id: DEV-016
     title: An inline placeholder spelled by a dataset value is substituted inside a region
-    status: pending
+    status: open
     severity: minor
     affects: [REQ-EXPORT-031]
     observed: >
@@ -391,7 +391,7 @@ deviations:
       A template author who repeats a region can keep free-text dataset
       placeholders out of it. A reviewer comparing the export against the
       template sees the inserted content.
-    reference: R/exportTemplateDocx.R:775-777
+    reference: inst/qualification/tests/test-OQ-EXPORT-regions.R (OQ-EXPORT-048); R/exportTemplateDocx.R
     opened: 2026-09-14
     closed: null
 

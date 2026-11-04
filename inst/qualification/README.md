@@ -121,7 +121,10 @@ read, so that nothing in the report has to be taken on trust.
 3. Check section 3 describes the system you intended to qualify.
 4. Check section 7, the traceability matrix, for requirements that are not
    verified, and section 9 for tests that did not run. Decide whether each is
-   acceptable for your intended use.
+   acceptable for your intended use. A requirement marked
+   `verified_with_deviation` passed its tests but has a registered defect
+   against it, named in the matrix; judge it together with that entry in
+   section 8.
 5. Check section 8 for deviations. Known deviations are defects that were
    already assessed and accepted; anything under "New failures" was not.
 6. Sign the approval table in section 1.

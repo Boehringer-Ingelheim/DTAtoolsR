@@ -123,7 +123,10 @@ Register it rather than working around it.
 - **`status: pending`** is for a defect you have documented but this suite does
   not itself reproduce, usually because it was found elsewhere. A pending entry
   needs no binding and M7 ignores it. Use it honestly, not to avoid writing a
-  binding.
+  binding: it is a holding state, and a defect the suite *can* observe through
+  the installed package is promoted to `open` with its binding as soon as that
+  observation is written. Pending and open entries alike mark the requirements
+  in their `affects` as `verified_with_deviation`; only `closed` releases them.
 
 - A **limitation** (the software behaves as designed, but the design has a
   consequence worth recording) becomes a `LIM-nnn` entry. Limitations get no

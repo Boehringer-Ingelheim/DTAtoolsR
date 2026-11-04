@@ -57,11 +57,11 @@ find_chrome_binary <- function() {
 markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
                                        chrome = find_chrome_binary()) {
   if (!nzchar(chrome)) {
-    stop("No Chrome or Edge browser was found for PDF printing.")
+    cli::cli_abort("No Chrome or Edge browser was found for PDF printing.")
   }
   if (!requireNamespace("rmarkdown", quietly = TRUE) ||
     !rmarkdown::pandoc_available()) {
-    stop("pandoc is not available to render Markdown to HTML.")
+    cli::cli_abort("pandoc is not available to render Markdown to HTML.")
   }
 
   html_file <- sub("\\.[^.]+$", ".html", pdf_file)
@@ -73,7 +73,11 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
     # `--disable-javascript` is not a Chromium switch (scripts still ran), and
     # `--blink-settings=scriptEnabled=false` blocks scripts but also stops
     # --print-to-pdf from writing anything.
-    "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'; object-src 'none'\">",
+    # default-src 'none' also stops every fetch the page could make -- an
+    # image, frame or stylesheet URL planted in document text would otherwise
+    # be requested by the server (SSRF) or read off its disk via file:///.
+    # Only the inline <style> below and pandoc's own inline styles may apply.
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">",
     "<style>",
     "@page { margin: 1.6cm; }",
     "body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt;",
@@ -94,12 +98,19 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
   # left at the default "markdown" reader, a `\input{}` planted in any of
   # those fields reads a server-side file into the PDF, and a `<script>`
   # in one runs in the headless browser this HTML is about to be printed by.
+  # Images are dropped as well (pandoc_no_images_filter()): raw passthrough
+  # is off, but markdown image syntax is not raw and still becomes an <img>.
+  no_images <- pandoc_no_images_filter()
+  on.exit(unlink(no_images), add = TRUE)
   rmarkdown::pandoc_convert(
     input = normalizePath(md_file),
     from = "markdown-raw_tex-raw_html-raw_attribute",
     to = "html5",
     output = html_file,
-    options = c("--standalone", "--include-in-header", header_file)
+    options = c(
+      "--standalone", "--include-in-header", header_file,
+      "--lua-filter", no_images
+    )
   )
 
   udd <- file.path(
@@ -133,9 +144,20 @@ markdown_to_pdf_via_chrome <- function(md_file, pdf_file,
     ok <- tryCatch(print_pdf("--headless"), error = function(e) FALSE)
   }
   if (!isTRUE(ok) || !file.exists(pdf_file)) {
-    stop("The headless browser did not produce a PDF file.")
+    cli::cli_abort("The headless browser did not produce a PDF file.")
   }
   pdf_file
+}
+
+# Path of a fresh pandoc Lua filter that replaces every image with its alt
+# text; the caller unlinks it. No exported document carries an image of its
+# own, so any image in the markdown came from document text a third party
+# controls -- and pandoc's PDF route downloads a remote image server-side
+# (SSRF) while LaTeX embeds any local image path it is given.
+pandoc_no_images_filter <- function() {
+  path <- tempfile("dta-no-images-", fileext = ".lua")
+  writeLines("function Image(el) return el.caption end", path)
+  path
 }
 
 # The canonical placeholder-token grammar for template files. Mirrors
@@ -240,7 +262,10 @@ embed_yaml_markdown <- function(markdown_text, dta) {
   if (!res$ok) {
     return(markdown_text) # Return unchanged if YAML extraction fails
   }
-  yaml_text <- res$value
+  # An HTML comment ends at the first "-->" (or "--!>"); a value containing
+  # one would close it early and expose everything after it as live markdown
+  # and HTML to whatever renders the file. Only that sequence is altered.
+  yaml_text <- gsub("--(!?)>", "--\\1&gt;", res$value)
   yaml_block <- paste(
     "",
     "<!-- ========== EMBEDDED DTA YAML (Machine-Readable, Do Not Edit) ==========",
@@ -249,6 +274,24 @@ embed_yaml_markdown <- function(markdown_text, dta) {
     sep = "\n"
   )
   paste0(markdown_text, yaml_block)
+}
+
+# Neutralise spreadsheet formulas in a data frame bound for CSV/TSV: a text
+# cell starting with = + - @ (or a tab / carriage return) is executed as a
+# formula when the file is opened in Excel, and these cells carry column names
+# and values straight out of an uploaded data file. A leading apostrophe makes
+# the spreadsheet show the text as text. XLSX is written as typed strings and
+# needs none of this.
+csv_formula_safe <- function(df) {
+  for (nm in names(df)) {
+    x <- df[[nm]]
+    if (is.factor(x)) x <- as.character(x)
+    if (!is.character(x)) next
+    hit <- !is.na(x) & grepl("^[-=+@\t\r]", x)
+    x[hit] <- paste0("'", x[hit])
+    df[[nm]] <- x
+  }
+  df
 }
 
 # Format a single-line summary of datasets
