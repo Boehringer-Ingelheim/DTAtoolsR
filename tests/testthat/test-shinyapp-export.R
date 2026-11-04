@@ -498,8 +498,14 @@ test_that("editor tables escape attacker-controlled text but keep the Actions bu
 # told to read and write one file, and when no PDF route worked the Markdown
 # text was delivered under a ".pdf" name.
 
+first_bytes <- function(path, n = 5L) {
+  rawToChar(readBin(path, "raw", n = n))
+}
+
 # Drive the export modal's Export button in markdown mode with "PDF" ticked and
-# hand back what the server queued for download.
+# hand back what the server queued for download. The file is read INSIDE the
+# server block: the app deletes its export files when the session ends, which
+# is before testServer() returns.
 run_markdown_pdf_export <- function() {
   out <- list()
   shiny::testServer(.shiny_app_dir(), {
@@ -512,12 +518,11 @@ run_markdown_pdf_export <- function() {
     session$setInputs(export_do = 1)
     out$path <<- export_state$file_path
     out$name <<- export_state$file_name
+    out$exists <<- file.exists(out$path)
+    out$head <<- if (out$exists) first_bytes(out$path) else ""
+    out$text <<- if (out$exists) paste(readLines(out$path, warn = FALSE, n = 200L), collapse = "\n") else ""
   })
   out
-}
-
-first_bytes <- function(path, n = 5L) {
-  rawToChar(readBin(path, "raw", n = n))
 }
 
 test_that("a PDF export that cannot make a PDF delivers Markdown under a .md name", {
@@ -533,9 +538,9 @@ test_that("a PDF export that cannot make a PDF delivers Markdown under a .md nam
 
   expect_equal(tolower(tools::file_ext(res$name)), "md")
   expect_equal(tolower(tools::file_ext(res$path)), "md")
-  expect_true(file.exists(res$path))
-  expect_false(startsWith(first_bytes(res$path), "%PDF"))
-  expect_match(paste(readLines(res$path, warn = FALSE), collapse = "\n"), "#", fixed = TRUE)
+  expect_true(res$exists)
+  expect_false(startsWith(res$head, "%PDF"))
+  expect_match(res$text, "#", fixed = TRUE)
 })
 
 test_that("a PDF export that succeeds delivers a real PDF under a .pdf name", {
@@ -556,8 +561,8 @@ test_that("a PDF export that succeeds delivers a real PDF under a .pdf name", {
   # Whichever route produced it, the extension and the content agree.
   expect_equal(tolower(tools::file_ext(res$name)), "pdf")
   expect_equal(tolower(tools::file_ext(res$path)), "pdf")
-  expect_true(file.exists(res$path))
-  expect_equal(first_bytes(res$path), "%PDF-")
+  expect_true(res$exists)
+  expect_equal(res$head, "%PDF-")
 })
 
 test_that("embed_yaml_markdown keeps a '-->' in the document from closing the comment", {
