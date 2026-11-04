@@ -2285,8 +2285,8 @@ dta_to_list <- function(dta) {
 }
 
 # File name of the "Export DTA YAML" download: <title>_v<version>_<date>.yaml.
-# The version has its dots removed ("1.2.0" -> "v120") and the segment is
-# left out when the document has no version.
+# Dots in the version become underscores ("1.2.0" -> "v1_2_0", so "1.0" and
+# "10" stay distinct) and the segment is left out when there is no version.
 dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
   field <- function(name) {
@@ -2295,7 +2295,7 @@ dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
   }
   ttl <- field("title")
   base <- if (nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-  ver <- gsub("[^A-Za-z0-9]+", "", field("version"))
+  ver <- gsub("^_+|_+$", "", gsub("[^A-Za-z0-9]+", "_", field("version")))
   paste0(base, if (nzchar(ver)) paste0("_v", ver), "_", date, ".yaml")
 }
 
