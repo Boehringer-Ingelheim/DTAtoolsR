@@ -245,6 +245,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   a visible section whose field list only appears once a source is chosen.
   "Back to templates" moved to the left of the footer.
 
+- **The app's "Export DTA YAML" file name now carries the document version.**
+  The download is named `<title>_v<version>_<date>.yaml`, with the dots of the
+  version removed (version `1.2.0` gives `Title_v120_2026-11-04.yaml`; any
+  other non-alphanumeric character goes too, so `1.2.0-beta` gives `v120beta`).
+  A document without a version keeps the old `<title>_<date>.yaml`.
+
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
   template or an inline template dataset whose `id` is absent, null or empty
   is reported as `dataset_id_missing`, an error. The app already refused to

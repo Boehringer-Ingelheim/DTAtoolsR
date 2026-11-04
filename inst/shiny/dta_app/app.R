@@ -6991,12 +6991,6 @@ server <- function(input, output, session) {
     on.exit(close(con))
     writeLines(enc2utf8(text), con, useBytes = TRUE)
   }
-  yaml_export_stub <- function() {
-    md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
-    ttl <- tryCatch(as.character(S7::prop(md, "title"))[1], error = function(e) NULL)
-    base <- if (!is.null(ttl) && nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-    base
-  }
 
   # The document as it should be WRITTEN OUT: the live document, with the open
   # version-history entry's `changes` replaced by a summary of everything that
@@ -7031,7 +7025,7 @@ server <- function(input, output, session) {
   }
 
   output$dl_yaml <- downloadHandler(
-    filename = function() paste0(yaml_export_stub(), "_", Sys.Date(), ".yaml"),
+    filename = function() dta_yaml_export_filename(rv$dta),
     content = function(file) {
       req(rv$dta)
       res <- dta_to_yaml_text(export_dta())
