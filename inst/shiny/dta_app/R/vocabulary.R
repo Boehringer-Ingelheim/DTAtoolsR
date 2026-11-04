@@ -19,8 +19,16 @@
 #       description: Pre-randomisation screening visit.
 #     - code: C1D1
 #       label: Cycle 1 Day 1
+#   columns:                   # optional: the columns this vocabulary is for
+#     - VISIT                  # a bare id writes the codes
+#     - id: VISITNAM           # `field: label` writes the labels instead
+#       field: label
 #
 # A bare string in `terms:` is shorthand for `{ code: <string> }`.
+#
+# `columns:` changes nothing about validation or expansion. It only tells the
+# column editor's picker which vocabulary to open on (vocabulary_suggestion()),
+# and like `label:` and `type:` it is never inherited through `extends:`.
 #
 # One vocabulary can extend another. This is NOT the generic `extends:` merge
 # in template_inherit.R, and cannot be: dta_template_merge_value() replaces
@@ -185,6 +193,43 @@ dta_vocabulary_types <- function() {
   out
 }
 
+# Turn a raw parsed `columns:` sequence into a list of list(id=, field=).
+#
+# A malformed entry stops the read rather than being dropped, so
+# validate_template() reports it as `vocabulary_invalid` -- the same treatment
+# as a bad `type:`. `entry[["id"]]`, not `entry$id`: these are raw YAML
+# mappings; see the `$` vs `[[` rule in utils_dta.R.
+.normalise_vocabulary_columns <- function(columns, vocab_id) {
+  # A single mapping written without the leading `-` is one entry, not a
+  # sequence of its own values.
+  if (is.list(columns) && !is.null(names(columns))) columns <- list(columns)
+  out <- list()
+  for (entry in columns %||% list()) {
+    # A misspelt key (`feild: label`) would otherwise read as a valid entry
+    # that silently writes codes.
+    unknown <- setdiff(names(entry), c("id", "field"))
+    if (is.list(entry) && length(unknown) > 0) {
+      stop(sprintf(
+        "Vocabulary '%s': a 'columns' entry has unknown key%s %s; only 'id' and 'field' are allowed.",
+        vocab_id, if (length(unknown) > 1) "s" else "", paste(sprintf("'%s'", unknown), collapse = ", ")
+      ))
+    }
+    id <- trimws(as.character((if (is.list(entry)) entry[["id"]] else entry) %||% ""))
+    if (length(id) != 1 || is.na(id) || !nzchar(id)) {
+      stop(sprintf("Vocabulary '%s': every 'columns' entry must name a column id.", vocab_id))
+    }
+    field <- as.character((if (is.list(entry)) entry[["field"]]) %||% "code")
+    if (length(field) != 1 || !(field %in% c("code", "label"))) {
+      stop(sprintf(
+        "Vocabulary '%s': column '%s' has invalid field '%s'; must be 'code' or 'label'.",
+        vocab_id, id, paste(field, collapse = ", ")
+      ))
+    }
+    out[[length(out) + 1L]] <- list(id = id, field = field)
+  }
+  out
+}
+
 # Read and minimally validate a vocabulary YAML.
 #
 # Never throws for a bad FILE -- dta_try() turns that into list(ok = FALSE,
@@ -254,6 +299,7 @@ read_vocabulary <- function(path) {
     def$terms <- terms
     def$add_terms <- add_terms
     def$remove_terms <- as.character(def$remove_terms %||% character(0))
+    def$columns <- .normalise_vocabulary_columns(def[["columns"]], id)
 
     def
   })
@@ -444,6 +490,75 @@ vocabulary_values <- function(vocab, terms = NULL, field = c("code", "label")) {
 
   codes <- vapply(terms, function(t) t$code, character(1))
   .coerce_vocabulary_codes(codes, as.character(vocab$type %||% "text"), as.character(vocab$id %||% "<unknown>"))
+}
+
+# ---- Suggesting -------------------------------------------------------------
+
+# The vocabulary the column editor's picker should open on for one column, as
+# list(ref=, field=, reason=), or NULL when nothing points anywhere.
+#
+# `refs` are the picker's choices in the order it lists them, which
+# list_template_index_entries() puts newest-version-first within an id, so the
+# first version of an id that qualifies is the one suggested -- an older
+# version never wins over it, even with fewer terms. `values` are the column's
+# current permitted values. In order of preference:
+#
+#   1. reason "declared": the vocabulary's `columns:` names this column
+#      (case-insensitively), and the column holds no values yet or only ones
+#      the declared field offers.
+#   2. reason "values": every current value is a code (or every one a label)
+#      of the vocabulary. This is how a column already expanded from a
+#      template finds its vocabulary again with no declaration at all. The
+#      vocabulary with the fewest terms wins, so a Y/N column lands on Y/N
+#      rather than on Y/N/U.
+#   3. reason "declared", even though the values have drifted from it.
+#
+# A vocabulary that will not resolve is skipped: one broken file in a library
+# must not take the picker down -- read_vocabulary()'s reasoning, one level up.
+# Its warnings are muted for the same reason: this is a scan of the whole
+# library, and the picker still resolves the vocabulary actually selected on
+# its own, where any warning belongs.
+#
+# Note: resolves every vocabulary in the index on each call. Memoise the
+# resolver per index if a library ever holds hundreds.
+vocabulary_suggestion <- function(column_id, values, refs, resolve) {
+  column_id <- toupper(trimws(as.character(column_id %||% "")))
+  values <- as.character(values %||% character(0))
+  values <- values[!is.na(values) & nzchar(values)]
+
+  drifted <- NULL
+  fits <- NULL
+  fit_ids <- character(0)
+  for (ref in refs) {
+    vocab <- tryCatch(suppressWarnings(resolve(ref)), error = function(e) NULL)
+    if (length(vocab$terms %||% list()) == 0) next
+    codes <- vapply(vocab$terms, function(t) t$code, character(1))
+    fits_field <- c(
+      code = all(values %in% codes),
+      label = all(values %in% vocabulary_values(vocab, field = "label"))
+    )
+
+    declared <- Filter(function(cl) identical(toupper(cl$id), column_id), vocab$columns %||% list())
+    if (nzchar(column_id) && length(declared) > 0) {
+      field <- declared[[1]]$field
+      if (fits_field[[field]]) {
+        return(list(ref = ref, field = field, reason = "declared"))
+      }
+      drifted <- drifted %||% list(ref = ref, field = field, reason = "declared")
+    }
+
+    if (length(values) > 0 && any(fits_field) && !(vocab$id %in% fit_ids)) {
+      fit_ids <- c(fit_ids, vocab$id)
+      if (is.null(fits) || length(codes) < fits$n) {
+        fits <- list(ref = ref, field = names(which(fits_field))[[1]], reason = "values", n = length(codes))
+      }
+    }
+  }
+
+  if (!is.null(fits)) {
+    return(fits[c("ref", "field", "reason")])
+  }
+  drifted
 }
 
 # ---- The column binding -----------------------------------------------------

@@ -510,6 +510,75 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
   })
 })
 
+test_that("the vocabulary picker opens on the vocabulary that names the column", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  # "AAA first" sorts first, so it is what the picker would open on unguided.
+  writeLines(
+    c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
+    file.path(dir, "aaa.dta-vocabulary.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: gf_test", 'version: "1.0"', "label: Genomic tests",
+      "columns:", "  - GFTESTCD", "  - id: GFTEST", "    field: label",
+      "terms:",
+      "  - code: TRNSCPTN", "    label: Transcription",
+      "  - code: METHYL", "    label: Methylation"
+    ),
+    file.path(dir, "gf_test.dta-vocabulary.yaml")
+  )
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$setInputs(col_vocab_open = 1)
+    expect_equal(rv$col_view, "vocab")
+
+    body <- ui_text(output$col_modal_body)
+    expect_match(body, '<option value="gf_test@1.0" selected>', fixed = TRUE)
+    expect_match(body, "it lists column GFTEST", fixed = TRUE)
+
+    # A column with no values yet starts with the whole vocabulary ticked, and
+    # the declared field is preselected.
+    session$setInputs(col_vocab_ref = "gf_test@1.0")
+    terms <- ui_text(output$col_vocab_terms)
+    expect_match(terms, 'value="label" checked', fixed = TRUE)
+    expect_match(terms, 'value="TRNSCPTN" checked', fixed = TRUE)
+    expect_match(terms, 'value="METHYL" checked', fixed = TRUE)
+    expect_match(terms, "2 of 2 selected", fixed = TRUE)
+
+    # The decode column takes labels; a value typed in by hand stays as typed.
+    session$setInputs(
+      col_vocab_field = "label",
+      col_vocab_terms_sel = c("TRNSCPTN", "OWN VALUE")
+    )
+    session$setInputs(col_vocab_apply = 1)
+    expect_equal(rv$col_view, "form")
+    expect_identical(rv$col_prefill$values, "Transcription\nOWN VALUE")
+
+    # Re-opening on that column finds its terms again by label.
+    session$setInputs(col_values = rv$col_prefill$values)
+    session$setInputs(col_vocab_open = 2)
+    terms <- ui_text(output$col_vocab_terms)
+    expect_match(terms, 'value="TRNSCPTN" checked', fixed = TRUE)
+    expect_false(grepl('value="METHYL" checked', terms, fixed = TRUE))
+    # The column's own value is offered too, ticked, so it survives the next apply.
+    expect_match(terms, 'value="OWN VALUE" checked', fixed = TRUE)
+    expect_match(terms, "Not in this vocabulary", fixed = TRUE)
+  })
+})
+
 test_that("saving a group_condition rule from the rule editor updates spec and YAML", {
   clean_session_file()
 

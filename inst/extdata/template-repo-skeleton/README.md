@@ -763,6 +763,25 @@ built; the finished DTA does not depend on access to the template library.
 A column must not combine `values_from` with `pattern`. The validator reports `values_from_pattern` as an error. A column that specifies both a
 literal `values` list and `values_from` produces `values_and_values_from` as a warning; the binding wins and the literal list is ignored.
 
+### Naming the columns a vocabulary is for: `columns:`
+
+A vocabulary may list the columns it belongs to. The app's column editor then preselects that vocabulary in "Choose from vocabulary…".
+
+```yaml
+columns:
+  - STATUS                 # a bare id writes the codes
+  - id: STATUS_TEXT        # field: label writes the labels instead
+    field: label
+```
+
+- Column ids are compared without regard to case.
+- `field` is `code` or `label` and defaults to `code`.
+- An entry with no id, a key other than `id` and `field`, or any other `field` value makes the vocabulary invalid (`vocabulary_invalid`).
+- `columns:` is not inherited through `extends:`.
+- It affects only the suggestion; validation does not use it.
+
+A column without a declaration still gets a suggestion when its current values are all codes, or all labels, of one vocabulary.
+
 ### Vocabulary inheritance
 
 Vocabulary inheritance uses its own term operations:

@@ -8,6 +8,7 @@ description: >-
   belongs to whoever creates the specification rather than to the template
   author, through a `vocabulary_slots:` picker.
 type: text
+columns: [GFTSTDTL]
 terms:
   - code: FRAGMENT COUNT
     label: Fragment count
