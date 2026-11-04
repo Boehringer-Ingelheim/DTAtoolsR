@@ -553,6 +553,7 @@ server <- function(input, output, session) {
     rule_view = "list", # rule editor view: "list" | "form"
     rule_token = 0, # bump to re-render the rule editor body
     rule_edit_index = NULL, # index of the rule being edited (NULL = adding new)
+    rule_search = "", # rule-list search text, kept across the editor's re-renders
     rule_prefill = NULL, # list() of the rule fields currently loaded in the form
     meta_token = 0, # bump to re-render the dataset-metadata editor body
     meta_prefill = NULL, # list() of the dataset metadata fields loaded in the form
@@ -2953,6 +2954,49 @@ server <- function(input, output, session) {
     }, character(1))
   }
 
+  # A searchable spec list (columns, rules) whose move arrows swap an item with
+  # its neighbour in the SPEC -- which is not the row above or below it once
+  # the view is searched or sorted. So in either state the arrows are hidden
+  # rather than move something the user cannot see; edit and remove carry the
+  # spec index and stay correct throughout. reorder_table_ui() wraps the
+  # output; reorder_table_callback() toggles .dta-reorder-off on that wrapper
+  # and reports the search term as input$<search_input>, which the server's
+  # move guards read.
+  reorder_table_ui <- function(table_id) {
+    div(
+      class = "reorder-wrap",
+      div(
+        class = "spec-hint reorder-off-hint",
+        "Reordering is off while the list is searched or sorted. ",
+        tags$a(href = "#", class = "reorder-reset", "Show all in spec order")
+      ),
+      DT::dataTableOutput(table_id)
+    )
+  }
+
+  reorder_table_callback <- function(search_input) {
+    DT::JS(
+      "var wrap = $(table.table().container()).closest('.reorder-wrap');",
+      "function sync() {",
+      "  wrap.toggleClass('dta-reorder-off',",
+      "    table.search() !== '' || table.order().length > 0);",
+      # DT's own <id>_search report is deduplicated client-side, so re-typing
+      # last session's term after a reopen (which resets the server's copy)
+      # would never reach the move guard.
+      sprintf(
+        "  Shiny.setInputValue('%s', table.search(), {priority: 'event'});",
+        search_input
+      ),
+      "}",
+      "table.on('search.dt order.dt', sync);",
+      "wrap.find('.reorder-reset').off('click').on('click', function(e) {",
+      "  e.preventDefault();",
+      "  table.search('').order([]).draw();",
+      "});",
+      "sync();"
+    )
+  }
+
   # ========================= Edit file handlers ===========================
   # Same single-modal, two-view (list <-> form) shape as the column and rule
   # editors. What is different here is the blast radius: a file handler IS an
@@ -3435,17 +3479,7 @@ server <- function(input, output, session) {
             "Use the pencil to edit a column or the bin to remove it. Any change resets this dataset's validation."
           )
         ),
-        # col_tbl's callback toggles .dta-reorder-off on this wrapper, which
-        # hides the move arrows and shows the hint below.
-        div(
-          class = "col-tbl-wrap",
-          div(
-            class = "spec-hint reorder-off-hint",
-            "Reordering is off while the list is searched or sorted. ",
-            tags$a(href = "#", class = "reorder-reset", "Show all in spec order")
-          ),
-          DT::dataTableOutput("col_tbl")
-        ),
+        reorder_table_ui("col_tbl"),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       )
@@ -3591,10 +3625,6 @@ server <- function(input, output, session) {
     } else {
       character(0)
     }
-    # The move arrows swap a column with its neighbour in the SPEC, which is
-    # not the row above or below it once the view is searched or sorted -- so
-    # hide them in either state rather than move something the user cannot
-    # see. Edit and remove carry the spec index and stay correct throughout.
     DT::datatable(
       ov,
       rownames = FALSE, selection = "none", escape = -ncol(ov),
@@ -3606,23 +3636,7 @@ server <- function(input, output, session) {
           orderable = FALSE, searchable = FALSE, targets = ncol(ov) - 1L
         ))
       ),
-      callback = DT::JS(
-        "var wrap = $(table.table().container()).closest('.col-tbl-wrap');",
-        "function sync() {",
-        "  wrap.toggleClass('dta-reorder-off',",
-        "    table.search() !== '' || table.order().length > 0);",
-        # DT's own col_tbl_search report is deduplicated client-side, so
-        # re-typing last session's term after a reopen (which resets
-        # rv$col_search) would never reach the server's move guard.
-        "  Shiny.setInputValue('col_tbl_search', table.search(), {priority: 'event'});",
-        "}",
-        "table.on('search.dt order.dt', sync);",
-        "wrap.find('.reorder-reset').off('click').on('click', function(e) {",
-        "  e.preventDefault();",
-        "  table.search('').order([]).draw();",
-        "});",
-        "sync();"
-      )
+      callback = reorder_table_callback("col_tbl_search")
     )
   })
 
@@ -4405,6 +4419,8 @@ server <- function(input, output, session) {
     rv$gconstr_n <- 1L
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
+    # A fresh editor starts unfiltered (see edit_cols).
+    rv$rule_search <- ""
     rv$rule_token <- rv$rule_token + 1
     showModal(modalDialog(
       title = paste("Edit rules \u2014", ds_title(rv$active)),
@@ -4430,7 +4446,7 @@ server <- function(input, output, session) {
             "Use the pencil to edit a rule or the bin to remove it. Any change resets this dataset's validation."
           )
         ),
-        DT::dataTableOutput("rule_tbl"),
+        reorder_table_ui("rule_tbl"),
         tags$hr(),
         div(style = "text-align:right;", modalButton("Close"))
       ))
@@ -4616,10 +4632,18 @@ server <- function(input, output, session) {
       rownames = FALSE, selection = "none", escape = -ncol(ov),
       class = "display compact", width = "100%",
       options = list(
-        pageLength = 8, dom = "tp", scrollX = TRUE,
-        columnDefs = list(list(orderable = FALSE, targets = ncol(ov) - 1L))
-      )
+        pageLength = 8, dom = "ftp", scrollX = TRUE,
+        search = list(search = isolate(rv$rule_search)),
+        columnDefs = list(list(
+          orderable = FALSE, searchable = FALSE, targets = ncol(ov) - 1L
+        ))
+      ),
+      callback = reorder_table_callback("rule_tbl_search")
     )
+  })
+
+  observeEvent(input$rule_tbl_search, {
+    rv$rule_search <- input$rule_tbl_search %||% ""
   })
 
   output$rule_editor_msg <- renderUI({
@@ -4702,6 +4726,8 @@ server <- function(input, output, session) {
 
   observeEvent(input$rule_up_click, {
     req(editing())
+    # Same guard as col_up_click: no move under a search.
+    req(!nzchar(rv$rule_search))
     idx <- as.integer(input$rule_up_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
@@ -4721,6 +4747,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$rule_down_click, {
     req(editing())
+    req(!nzchar(rv$rule_search))
     idx <- as.integer(input$rule_down_click)
     ed <- isolate(rv$editor_dataset)
     req(ed)
