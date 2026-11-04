@@ -228,3 +228,34 @@ test_that("OQ-APP-025 | a template that extends another carries the parent forwa
     qa_check("carrying metadata inherited through the chain", carried)
   })
 })
+
+test_that("OQ-APP-031 | narrative template suggestions preserve editable input | REQ-APP-024", {
+  qapp_skip_unless_app_installed()
+  html <- paste(as.character(qapp_fn("render_template_option_input")(list(
+    id = "scope", label = "Delivery scope", type = "textarea",
+    allow_custom = TRUE,
+    choices = c("Complete data", "Incremental data"),
+    default = "Complete data"
+  ))), collapse = "")
+
+  qa_step(
+    "suggested narrative controls retain the original editable multiline input and map blank to empty",
+    c(
+      textarea = TRUE, suggestions = TRUE, blank = TRUE,
+      bubbling_input = TRUE, custom_text = TRUE, sentinel_not_stored = TRUE
+    ),
+    c(
+      textarea = grepl('id="tmpl_opt_scope"', html, fixed = TRUE) &&
+        grepl('rows="3"', html, fixed = TRUE),
+      suggestions = grepl('id="tmpl_opt_scope_suggestion"', html, fixed = TRUE) &&
+        grepl("Complete data", html, fixed = TRUE) &&
+        grepl("Incremental data", html, fixed = TRUE),
+      blank = grepl("(leave blank)", html, fixed = TRUE),
+      bubbling_input = grepl("dispatchEvent(new Event('input', { bubbles: true }))", html, fixed = TRUE),
+      custom_text = grepl("<textarea", html, fixed = TRUE),
+      sentinel_not_stored = grepl("__blank__", html, fixed = TRUE) &&
+        grepl("value ===", html, fixed = TRUE) &&
+        grepl("? '' :", html, fixed = TRUE)
+    )
+  )
+})

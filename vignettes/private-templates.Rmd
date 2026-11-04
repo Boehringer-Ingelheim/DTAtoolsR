@@ -474,6 +474,57 @@ suggest; and any `help:` text an option carries shows under its control. All
 of it sits in a two-column grid, so a template with a dozen options still
 reads as a short form.
 
+### One agreement with platform-dependent schemas
+
+Use `variants:` when one agreement has mutually exclusive record structures.
+Unlike editable agreement options, this structural choice is mandatory and
+accepts only the declared values. The creation dialog asks for it before
+showing the platform's metadata defaults and suggestions.
+
+```yaml
+kind: dta_creation_template
+id: adjudication
+version: "1.0"
+base:
+  metadata:
+    title: Adjudication agreement
+variants:
+  id: trial_platform
+  label: Trial platform
+  choices:
+    - value: brave
+      label: BRAVE
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_brave_records@1.0
+    - value: veeva
+      label: Veeva
+      source: {document: Adjudication DTS, version: "5.0"}
+      datasets:
+        - template: adjudication_veeva_records@1.0
+```
+
+Each choice must supply a nonempty `datasets:` sequence, which **replaces**
+the template's dataset list rather than appending to it. Optional `base:` is
+deep-merged over the inherited base; optional `options:` uses the same
+id-keyed merge rules as creation-template inheritance. Thus a choice can
+change a suggestion list without losing its inherited target, label or
+custom/blank behavior. A template may omit top-level datasets when every
+variant supplies them.
+
+Keep the platform independent of the transfer medium: EDT can apply to more
+than one platform and must not determine the subject identifier. Agreement
+fields still permit custom text and `(leave blank)` as configured. Platform
+selection cannot be left unresolved when creating a document; changing it
+returns to platform selection and resets the agreement controls.
+
+The canonical template's `version:` identifies the library definition.
+Record source document versions separately in each choice's `source:` and,
+where appropriate, its metadata defaults. Created documents record the
+chosen value and source under `metadata.template.variant`, with the choice
+also in `metadata.template.selections`. `validate_template()` dry-runs every
+choice, not an arbitrary default.
+
 ## Reusable dataset templates
 
 A creation template does not have to inline its dataset structure. The
@@ -751,6 +802,12 @@ own definition never touches the sealed path directly. Sealing a section
 (`sealed: [options]`) fixes its membership *and its order*, so adding an
 entry or reordering with `order:` both fail; sealing `options.header.default`
 leaves every other option free.
+
+Every structural `variants:` choice is checked too, after applying its metadata,
+options and dataset replacement. A matching parent selector and choice value
+provides the effective baseline, so a sealing ancestor's own variations remain
+allowed when inherited unchanged. A new selector or choice value is checked
+against the parent's shared definition instead.
 
 **`required:` — this may not be left unset.** Checked when a document is
 created, not when the chain resolves, because an abstract parent is *supposed*

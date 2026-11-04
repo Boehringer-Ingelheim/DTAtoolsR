@@ -431,6 +431,12 @@ tmpl_dataset_names <- function(def) {
 # Sentences rather than middle-dot-joined fragments, per the design pass: a
 # meta strip reads as decoration, a sentence reads as information.
 tmpl_detail_summary <- function(def) {
+  if (!is.null(def$variants)) {
+    return(paste0(
+      "Choose ", def$variants$label %||% def$variants$id,
+      " first. The selected platform determines the datasets and agreement options."
+    ))
+  }
   ds <- tmpl_dataset_names(def)
   n_opts <- length(def$options %||% list())
   n_party <- length(tryCatch(normalise_party_slots(def$party_slots), error = function(e) list()))
@@ -569,6 +575,24 @@ template_history_ui <- function(history, selected_version) {
 
 # ---- Options dialog: one control per option --------------------------------
 
+template_variant_input <- function(def) {
+  spec <- def$variants
+  if (is.null(spec)) {
+    return(NULL)
+  }
+  dta_template_validate_variants(def)
+  label <- as.character(spec$label %||% spec$id)
+  choices <- stats::setNames(
+    vapply(spec$choices, function(choice) choice$value, character(1)),
+    vapply(spec$choices, function(choice) choice$label %||% choice$value, character(1))
+  )
+  selectInput(
+    paste0("tmpl_variant_", spec$id), label,
+    choices = c(stats::setNames("", paste("Choose", label)), choices),
+    selected = "", selectize = FALSE, width = "100%"
+  )
+}
+
 # Build one input control for a creation-template option.
 #
 # An option with `choices:` is ONE combobox rather than a dropdown padded with
@@ -624,10 +648,41 @@ render_template_option_input <- function(opt, base_metadata = list()) {
 
   ctl <- switch(typ,
     boolean = checkboxInput(iid, label, value = identical(def, TRUE) || identical(def, "yes")),
-    textarea = textAreaInput(
-      iid, label,
-      value = as.character(def %||% ""), rows = 3, width = "100%"
-    ),
+    textarea = {
+      ch <- dta_template_choices(opt)
+      def_chr <- as.character(def %||% "")[[1]]
+      value <- textAreaInput(
+        iid, label,
+        value = def_chr, rows = 3, width = "100%"
+      )
+      if (length(ch) == 0) {
+        value
+      } else {
+        suggestion_id <- paste0(iid, "_suggestion")
+        selected <- if (def_chr %in% unname(ch)) def_chr else blank_val
+        on_change <- sprintf(
+          paste0(
+            "function(value) {",
+            "var target = document.getElementById(%s);",
+            "if (target) {",
+            "target.value = value === %s ? '' : (value || '');",
+            "target.dispatchEvent(new Event('input', { bubbles: true }));",
+            "}}"
+          ),
+          jsonlite::toJSON(iid, auto_unbox = TRUE),
+          jsonlite::toJSON(blank_val, auto_unbox = TRUE)
+        )
+        tagList(
+          selectizeInput(
+            suggestion_id, "Choose a suggestion",
+            choices = c(stats::setNames(blank_val, "(leave blank)"), ch),
+            selected = selected, multiple = FALSE, width = "100%",
+            options = list(create = FALSE, onChange = I(on_change))
+          ),
+          value
+        )
+      }
+    },
     number = numericInput(
       iid, label,
       value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
