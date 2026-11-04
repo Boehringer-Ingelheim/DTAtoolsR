@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- `explain_messages()` prints each validation message in plain language: the
+  violated constraint (for example "Must be one of: 1234, 5678.") next to the
+  offending value, using the same wording as the HTML report. `check()` now
+  points to it when a run finds errors.
+
 - **Structured study identity and ordered agreement clauses.** `DTAMetaData`
   accepts optional `study` identifiers and named `sections` with titles and
   plain-text paragraphs. They round-trip through YAML and template inheritance

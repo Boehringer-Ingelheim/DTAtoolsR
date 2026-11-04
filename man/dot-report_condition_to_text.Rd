@@ -4,10 +4,12 @@
 \alias{.report_condition_to_text}
 \title{Human-Readable Text for a Condition Map}
 \usage{
-.report_condition_to_text(cond)
+.report_condition_to_text(cond, html = TRUE)
 }
 \arguments{
 \item{cond}{A named list, or \code{NULL}/empty/not list-shaped.}
+
+\item{html}{If \code{FALSE}, return plain text.}
 }
 \value{
 A length-1 character string (possibly \code{""}), HTML-escaped.

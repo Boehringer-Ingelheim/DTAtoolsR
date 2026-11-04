@@ -1649,6 +1649,9 @@ S7::method(check, DTADataSetTabular) <- function(
 
       if (n_invalid > 0) {
         cli::cli_alert_danger("{n_valid} of {n_total} {table_word} valid")
+        if (!isTRUE(dta_check_state$nested)) {
+          cli::cli_alert_info("Run {.fn explain_messages} on the checked object to see what failed and why.")
+        }
       } else if (n_valid < n_total) {
         # No table failed, but not every table was actually checked either --
         # e.g. a table validated against zero column specs, status

@@ -271,3 +271,29 @@ test_that("OQ-VAL-035 | the accessors agree with one another | REQ-VAL-022 REQ-V
     )
   )
 })
+
+test_that("OQ-VAL-037 | explain_messages states the constraint and the offending value | REQ-VAL-030", {
+  ds <- va_dataset(qa_tempdir())
+  explained <- NULL
+  suppressMessages(explained <- explain_messages(ds))
+
+  # SEX is declared with the codelist M, F and the delivered value is X.
+  sex <- explained[explained$source == "columnspec" & explained$column %in% "SEX", ]
+  qa_step(
+    "a codelist violation names the allowed values and the delivered one",
+    list(should_be = "Must be one of: M, F.", actual = "X"),
+    list(should_be = sex$should_be[[1]], actual = sex$actual[[1]])
+  )
+
+  # age_range is declared as 18 to 70, inclusive.
+  rule <- explained[explained$source == "rule", ]
+  qa_step(
+    "a rule violation states the declared range",
+    "Values in AGE must be between 18 and 70 (inclusive).",
+    rule$should_be[[1]]
+  )
+  qa_step(
+    "and one row is returned per explained message",
+    nrow(as.data.frame(messages(ds))), nrow(explained)
+  )
+})

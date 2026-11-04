@@ -139,6 +139,7 @@ DTA                              ← top-level agreement container
 3. `results(x)` — one-row-per-table summary (pass/fail, error counts per axis)
 4. `messages(x)` — one-row-per-error detail table (`source`, column, row, rule, message, `id`)
 5. `inspect(x, id = N)` — deep-dive into a specific error message by its `id`
+6. `explain_messages(x)` — the same findings in plain language: what each value should have been and what it was
 
 ---
 
