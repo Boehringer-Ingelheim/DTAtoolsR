@@ -16,7 +16,9 @@ than a directory.}
 writes the four starter templates into \verb{templates/} beneath \code{path}.
 \code{README.md} stays at the repository root. When \code{FALSE}, only \code{README.md}, \code{.gitignore} and (if \code{ci}
 asks for any provider) its CI file(s) are written -- no template files,
-for a caller who wants the scaffolding without the worked example.}
+for a caller who wants the scaffolding without the worked example. Such
+a repository fails \code{validate_template(path, strict = TRUE)} (code
+\code{no_templates}), and so does its CI, until the first template is added.}
 
 \item{ci}{Either a single \code{TRUE}/\code{FALSE} (default \code{TRUE}), or a character
 vector naming one or more of \code{"github"}, \code{"bitbucket"}, \code{"jenkins"}
@@ -51,8 +53,9 @@ profile, a controlled vocabulary) under \verb{templates/}, a root-level
 \code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
 \code{\link[=validate_template]{validate_template()}} against the repository on every push and pull
-request. The result already passes \code{validate_template(path, strict = TRUE)} unmodified, so it is a starting point to edit rather than a stub to
-fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
+request. With the default \code{examples = TRUE}, the result already passes
+\code{validate_template(path, strict = TRUE)} unmodified, so it is a starting
+point to edit rather than a stub to fill in from nothing. See \code{vignette("private-templates", package = "DTAtools")} for how to point the bundled Shiny app at the directory this
 creates.
 }
 \details{

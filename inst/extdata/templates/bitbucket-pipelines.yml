@@ -4,38 +4,33 @@
 # CI for a PRIVATE DTAtools template repository -- Bitbucket CLOUD Pipelines.
 #
 # Bitbucket Pipelines is a Bitbucket CLOUD feature; Bitbucket Server / Data
-# Center has no equivalent. If your Bitbucket is Server / Data Center, use the
-# Jenkinsfile shipped alongside this file instead -- see its own header for
-# why: this repository's production is Bitbucket Data Center, and Jenkins is
-# what fills this role there.
+# Center has no equivalent and never reads this file. For Server / Data
+# Center, use the Jenkinsfile instead (`create_template_repo(path, ci =
+# "jenkins")` writes it).
 #
-# Copy this file to `bitbucket-pipelines.yml` at the root of the repository
-# that holds your own `*.dta-template.yaml` / `*.dta-dataset-template.yaml` /
-# `*.dta-party.yaml` files. Bitbucket clones the repository automatically
-# before running the steps below (there is no separate checkout step, unlike
-# GitHub Actions); this pipeline installs DTAtools and runs
-# `validate_template(".", strict = TRUE)` -- the same structural checks (and,
-# as a final step, an actual dry-run build of every non-abstract creation
-# template) the bundled Shiny app's own "Create new from template" picker
-# relies on, without starting the app. `strict = TRUE` makes
+# Lives at `bitbucket-pipelines.yml` in the root of the repository that holds
+# your `*.dta-template.yaml` / `*.dta-dataset-template.yaml` /
+# `*.dta-party.yaml` / `*.dta-vocabulary.yaml` files. Bitbucket clones the
+# repository automatically before running the steps below (there is no
+# separate checkout step, unlike GitHub Actions); this pipeline installs
+# DTAtools and runs `validate_template(".", strict = TRUE)` -- the same
+# structural checks (and, as a final step, an actual dry-run build of every
+# non-abstract creation template) the bundled Shiny app's own "Create new from
+# template" picker relies on, without starting the app. `strict = TRUE` makes
 # `validate_template()` raise an error naming every problem found whenever any
 # of them is severity "error", which is what turns this pipeline red.
-#
-# See `.github/workflows/validate-templates.yml` (this file's GitHub Actions
-# counterpart) for the CI running against the GitHub-hosted mirror --
-# validate_template() itself has no CI-system-specific behaviour, so the only
-# difference between the two is how each one runs an R script inside a
-# container.
 # -----------------------------------------------------------------------------
 
-image: rocker/r-ver:4.4 # any R image containing (or able to install) yaml/cli and DTAtools itself
+image: rocker/r-ver:4.4 # any R image able to install DTAtools
 
 definitions:
   steps:
     - step: &validate-templates
         name: validate-templates
         script:
-          - Rscript -e 'install.packages(c("yaml", "cli"))' # skip if already baked into the image
+          # `remotes` is only for the install examples below; DTAtools' own
+          # Imports come with DTAtools itself.
+          - Rscript -e 'install.packages("remotes")' # skip if already baked into the image
           # ---------------------------------------------------------------
           # PLACEHOLDER: install DTAtools from your internal package
           # repository. This is deliberately NOT filled in -- the source (an
