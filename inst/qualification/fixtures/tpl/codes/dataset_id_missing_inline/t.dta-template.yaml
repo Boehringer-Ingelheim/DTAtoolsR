@@ -1,0 +1,13 @@
+kind: dta_creation_template
+id: noid_inline
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    title: Inline dataset without an id
+datasets:
+  - type: tabular
+    description: A long text, but no identifier
+    files: {filename: x.csv, type: csv}
+    columns:
+      - {id: COL1, type: SAS Char}

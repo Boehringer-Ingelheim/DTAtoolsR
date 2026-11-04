@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: noid
+version: "1.0"
+dataset:
+  type: tabular
+  description: A long text, but no identifier
+  files: {filename: one.tsv}
+  columns:
+    - {id: C1, type: SAS Char}

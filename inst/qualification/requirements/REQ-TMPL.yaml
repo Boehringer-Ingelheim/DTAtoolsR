@@ -561,3 +561,19 @@ requirements:
       inst/shiny/dta_app/R/template_core.R;
       inst/shiny/dta_app/R/template_create.R;
       inst/shiny/dta_app/R/template_diff.R
+
+  - id: REQ-TMPL-033
+    text: >
+      A dataset whose id is absent, null or the empty string shall be
+      reported dataset_id_missing at severity "error", both in a
+      dta_dataset_template's dataset: body and when written inline in a
+      creation template, including an abstract one. A dataset whose id, name
+      or description, as written, is anything but a single non-missing
+      scalar (a YAML sequence or mapping, or a missing value) shall be
+      reported dataset_field_invalid at severity "error", with a message
+      naming that key. A dataset in the pre-id shape (name: with no id:)
+      shall raise neither.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_dataset_identity_issue)
