@@ -1218,3 +1218,18 @@ test_that("a generated version-history summary does not break the Markdown table
   expect_match(v1_rows, "\\|$")
   expect_match(v2_rows, "\\|$")
 })
+
+test_that("the numbered docx base has the heading styles the exporters use", {
+  # write_dta() adds level-4 headings (.add_heading(level = 4)), and officer's
+  # stock template has no 'heading 4' style: with it the export fails.
+  doc <- .new_numbered_docx()
+
+  expect_true("heading 4" %in% officer::styles_info(doc)$style_name)
+  expect_no_error(.add_heading(doc, "Deep heading", level = 4))
+})
+
+test_that(".new_numbered_docx refuses to fall back to a template that lacks heading 4", {
+  local_mocked_bindings(.numbered_docx_path = function() "")
+
+  expect_error(.new_numbered_docx(), "reinstall", ignore.case = TRUE, class = "rlang_error")
+})

@@ -124,18 +124,6 @@ method(as_json_schema, DTAColumnSpecStructure) <- function(x) {
 }
 
 
-#' @name names
-#' @usage names(x, ...)
-#' @export
-if (!exists("names", mode = "function")) {
-  names <- new_generic("names", "x")
-}
-#' @export
-method(names, DTAColumnSpecStructure) <- function(x) {
-  sapply(x@columns, function(col) col@id)
-}
-
-
 #' @name print_info
 #' @usage print_info(x, ...)
 #' @export

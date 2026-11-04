@@ -4,17 +4,19 @@
 \alias{.new_numbered_docx}
 \title{Open the bundled numbered reference template so document headings 1-4
 auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
-when the document is edited). Falls back to officer's default template if
-the bundled asset cannot be located; that template defines only headings
-1-3, so a level-4 heading would then fail.}
+when the document is edited). There is no fallback: officer's stock template
+has no 'heading 4' style, so an export would fail later, on its first level-4
+heading, with an error about a style. A missing bundled asset is a broken
+installation and is reported as one.}
 \usage{
 .new_numbered_docx()
 }
 \description{
 Open the bundled numbered reference template so document headings 1-4
 auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
-when the document is edited). Falls back to officer's default template if
-the bundled asset cannot be located; that template defines only headings
-1-3, so a level-4 heading would then fail.
+when the document is edited). There is no fallback: officer's stock template
+has no 'heading 4' style, so an export would fail later, on its first level-4
+heading, with an error about a style. A missing bundled asset is a broken
+installation and is reported as one.
 }
 \keyword{internal}

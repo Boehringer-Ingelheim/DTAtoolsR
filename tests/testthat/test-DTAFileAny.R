@@ -85,3 +85,27 @@ test_that("print() says 'any' for allowed endings when extensions is NULL", {
 
   expect_true(any(grepl("Allowed endings: any", out, fixed = TRUE)))
 })
+
+test_that("print_info() renders a handler whose file count has no upper bound", {
+  # `min_number_of_files == max_number_of_files` was evaluated directly, so a
+  # handler with only a minimum (max is NULL) raised "argument is of length
+  # zero" from inside print_info(), the one method meant to describe it.
+  h <- DTAFileAny(filename = "report.pdf", pattern = TRUE, min_number_of_files = 2)
+  expect_null(h@max_number_of_files)
+
+  out <- cli::cli_fmt(print_info(h))
+
+  expect_true(any(grepl("Min number of files: 2", out, fixed = TRUE)))
+  expect_true(any(grepl("Max number of files: unbounded", out, fixed = TRUE)))
+})
+
+test_that("print_info() collapses equal bounds to one count and prints a range otherwise", {
+  exact <- cli::cli_fmt(print_info(DTAFileAny(filename = "a.pdf")))
+  expect_true(any(grepl("Number of files: 1", exact, fixed = TRUE)))
+
+  ranged <- cli::cli_fmt(print_info(
+    DTAFileAny(filename = "a.pdf", pattern = TRUE, min_number_of_files = 1, max_number_of_files = 3)
+  ))
+  expect_true(any(grepl("Min number of files: 1", ranged, fixed = TRUE)))
+  expect_true(any(grepl("Max number of files: 3", ranged, fixed = TRUE)))
+})

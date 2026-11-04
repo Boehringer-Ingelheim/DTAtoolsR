@@ -198,13 +198,7 @@ qual_report_md <- function(x) {
     "",
     qual_report_unit(x),
     "",
-    "## 12. Evidence inventory",
-    "",
-    sprintf(
-      "Every file below is covered by `%s`, written after the run finished.",
-      x$run$hash_manifest %||% "the hash manifest"
-    ),
-    sprintf("Verify with `%ssum -c %s` from the bundle directory.", x$run$hash_algorithm, x$run$hash_manifest %||% ""),
+    qual_report_inventory(x),
     "",
     "## 13. Appendix: requirement texts",
     "",
@@ -212,6 +206,21 @@ qual_report_md <- function(x) {
     ""
   )
   out
+}
+
+# The inventory IS the hash manifest, written after the report, so the report
+# cannot list the files itself; it says where the list is and how to check it.
+qual_report_inventory <- function(x) {
+  manifest <- x$run$hash_manifest %||% "the hash manifest"
+  c(
+    "## 12. Evidence inventory",
+    "",
+    sprintf(
+      "`%s` lists every file in this evidence bundle with its hash, and was written after the run finished.",
+      manifest
+    ),
+    sprintf("Verify with `%ssum -c %s` from the bundle directory.", x$run$hash_algorithm, x$run$hash_manifest %||% "")
+  )
 }
 
 qual_report_approach <- function(x) {

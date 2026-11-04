@@ -14,7 +14,7 @@
 #'
 #' @details
 #' Requires the suggested packages **shiny**, **bslib**, **DT** and
-#' **shinyjs** (the app attaches it unconditionally on start-up). If **shiny**,
+#' **shinyjs** (the app attaches it unconditionally on start-up). If any of **shiny**,
 #' **bslib** or **DT** is missing, an informative error explains what to
 #' install. The packages **shinyAce** (YAML editor tab) and **writexl** (Excel
 #' download of the message table) are optional; the corresponding feature is
@@ -29,7 +29,7 @@
 #' }
 #' @export
 run_dta_app <- function(launch.browser = TRUE, port = NULL, ...) {
-  required <- c("shiny", "bslib", "DT")
+  required <- c("shiny", "bslib", "DT", "shinyjs")
   missing <- required[!vapply(
     required,
     function(pkg) requireNamespace(pkg, quietly = TRUE),

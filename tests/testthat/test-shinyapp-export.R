@@ -490,6 +490,81 @@ test_that("editor tables escape attacker-controlled text but keep the Actions bu
   }
 })
 
+# ---- Markdown / PDF export: the file and the name must agree ---------------
+#
+# The handler made its temp file with the extension of the REQUESTED format, so
+# a PDF export wrote Markdown into "dta-export-*.pdf" and then derived the PDF
+# path from it with sub("\.md$", ".pdf", ...) -- the same path. Pandoc was then
+# told to read and write one file, and when no PDF route worked the Markdown
+# text was delivered under a ".pdf" name.
+
+first_bytes <- function(path, n = 5L) {
+  rawToChar(readBin(path, "raw", n = n))
+}
+
+# Drive the export modal's Export button in markdown mode with "PDF" ticked and
+# hand back what the server queued for download. The file is read INSIDE the
+# server block: the app deletes its export files when the session ends, which
+# is before testServer() returns.
+run_markdown_pdf_export <- function() {
+  out <- list()
+  shiny::testServer(.shiny_app_dir(), {
+    rv$dta <- app_fixture_dta()
+    session$setInputs(
+      export_format = "markdown",
+      export_as_pdf = TRUE,
+      export_include_yaml_md = FALSE
+    )
+    session$setInputs(export_do = 1)
+    out$path <<- export_state$file_path
+    out$name <<- export_state$file_name
+    out$exists <<- file.exists(out$path)
+    out$head <<- if (out$exists) first_bytes(out$path) else ""
+    out$text <<- if (out$exists) paste(readLines(out$path, warn = FALSE, n = 200L), collapse = "\n") else ""
+  })
+  out
+}
+
+test_that("a PDF export that cannot make a PDF delivers Markdown under a .md name", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  # No pandoc means neither PDF route is attempted: the documented fallback.
+  local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+
+  res <- run_markdown_pdf_export()
+
+  expect_equal(tolower(tools::file_ext(res$name)), "md")
+  expect_equal(tolower(tools::file_ext(res$path)), "md")
+  expect_true(res$exists)
+  expect_false(startsWith(res$head, "%PDF"))
+  expect_match(res$text, "#", fixed = TRUE)
+})
+
+test_that("a PDF export that succeeds delivers a real PDF under a .pdf name", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  skip_if_not(rmarkdown::pandoc_available(), "pandoc is not available")
+  skip_if_not(
+    app_fn("has_pdf_engine")() || nzchar(app_fn("find_chrome_binary")()),
+    "no PDF engine or Chrome/Edge is available"
+  )
+
+  res <- run_markdown_pdf_export()
+
+  # Whichever route produced it, the extension and the content agree.
+  expect_equal(tolower(tools::file_ext(res$name)), "pdf")
+  expect_equal(tolower(tools::file_ext(res$path)), "pdf")
+  expect_true(res$exists)
+  expect_equal(res$head, "%PDF-")
+})
+
 test_that("embed_yaml_markdown keeps a '-->' in the document from closing the comment", {
   # An HTML comment ends at the first "-->"; a title carrying one would
   # otherwise expose the rest of the YAML as live markdown/HTML.
