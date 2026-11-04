@@ -199,6 +199,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   lists have move up/down buttons in edit mode, and the order is saved to the
   YAML.
 
+- **The app's rule editor has the same search box.** "Edit rules" filters
+  the rules as you type, keeps the filter across edits, and hides the move
+  arrows while the list is searched or sorted, exactly as the column editor
+  does.
+
 ### Changed
 
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
