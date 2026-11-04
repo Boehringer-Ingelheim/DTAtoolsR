@@ -206,6 +206,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **The "Create new from template" options dialog is redesigned.** It is now a
+  wide dialog whose title and buttons stay in view while the form scrolls. A
+  sidebar names the template (id, version, library, lineage, description),
+  lists the datasets it creates and links to each part of the form,
+  highlighting the one being read. Every field is one row, label and help on
+  the left and the control on the right, so the controls line up in a single
+  column. Options are grouped by the metadata block they fill (for example
+  "Transmission"), yes/no options are switches that read "Yes" or "No",
+  required parties and vocabularies carry a "Required" tag, and carry-over is
+  a visible section whose field list only appears once a source is chosen.
+  "Back to templates" moved to the left of the footer.
+
 - **`validate_template()` now rejects a dataset without an `id`.** A dataset
   template or an inline template dataset whose `id` is absent, null or empty
   is reported as `dataset_id_missing`, an error. The app already refused to
