@@ -227,9 +227,13 @@ function DTA_vocabCount(el){
 function DTA_vocabFilter(input){
   var box = input.closest('.vocab-pick');
   if (!box) return;
-  var q = input.value.trim().toLowerCase(), shown = 0;
+  // Every word must occur somewhere in the row (code, label or description,
+  // in any order): the row's text has markup whitespace between those parts, so
+  // one contiguous phrase would miss 'T002 Term'.
+  var words = input.value.toLowerCase().split(/\\s+/).filter(Boolean), shown = 0;
   box.querySelectorAll('.checkbox').forEach(function(row){
-    var hit = !q || row.textContent.toLowerCase().indexOf(q) >= 0;
+    var text = row.textContent.toLowerCase();
+    var hit = words.every(function(w){ return text.indexOf(w) >= 0; });
     row.style.display = hit ? '' : 'none';
     if (hit) shown++;
   });
@@ -253,6 +257,20 @@ function DTA_vocabCheck(link, on){
 }
 document.addEventListener('change', function(e){
   if (e.target && e.target.closest && e.target.closest('.vocab-pick')) DTA_vocabCount(e.target);
+});
+// Put the cursor in the term filter when the picker's terms appear, so typing
+// starts at once. shiny:value fires BEFORE the new HTML is inserted, hence the
+// timeout. Only when a filter exists (more than 10 terms).
+if (window.jQuery) jQuery(document).on('shiny:value', function(e){
+  if (e.name !== 'col_vocab_terms') return;
+  setTimeout(function(){
+    var f = document.querySelector('.vocab-pick-filter');
+    // Not while the user is choosing the vocabulary: picking another one
+    // re-renders the terms and must not take the focus off that control.
+    var sel = document.getElementById('col_vocab_ref');
+    var box = sel && sel.closest ? sel.closest('.shiny-input-container') : null;
+    if (f && !(box && box.contains(document.activeElement))) f.focus();
+  }, 0);
 });
 "
 
@@ -3712,8 +3730,16 @@ server <- function(input, output, session) {
               textAreaInput("col_values", "Allowed values (one per line)",
                 value = g("values"), width = "100%", rows = 3
               ),
-              actionButton("col_vocab_open", "Choose from vocabulary…",
-                class = "btn btn-sm btn-outline-secondary"
+              # The hint below it is what makes the button read as
+              # "suggested" (theme.R styles the button off it), and it is the
+              # visible, non-colour half of that cue.
+              div(
+                class = "col-vocab-open",
+                actionButton("col_vocab_open", "Choose from vocabulary…",
+                  class = "btn btn-sm btn-outline-secondary",
+                  `aria-describedby` = "col_vocab_hint"
+                ),
+                uiOutput("col_vocab_hint")
               )
             ),
             textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
@@ -3820,10 +3846,85 @@ server <- function(input, output, session) {
   }
 
   # The column's current permitted values, as the form holds them: one per line.
-  col_prefill_values <- function() {
-    v <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
+  value_lines <- function(x) {
+    v <- trimws(strsplit(x %||% "", "\n")[[1]])
     v[nzchar(v)]
   }
+  col_prefill_values <- function() value_lines(isolate(rv$col_prefill)$values)
+
+  # --- column editor: say when a vocabulary is made for this column ---
+  #
+  # Only a DECLARED relation counts (the vocabulary's `columns:` names the
+  # column), drifted values included: the picker's other reason, "every value
+  # fits", also fires for any column already built from a vocabulary and for
+  # short code sets like Y/N, where it would be a lasting claim with nothing
+  # behind it. It is one vocabulary_suggestion() call, so the hint and the
+  # picker cannot name different vocabularies.
+  #
+  # Note: this resolves every vocabulary per call (see vocabulary_suggestion()).
+  # Memoising the resolver would have to be tied to the index BUILD, not to an
+  # equal index, or "Refresh templates" would stop re-reading edited files.
+  col_vocab_hint_for <- function(id, values) {
+    if (!nzchar(trimws(id))) {
+      return(NULL)
+    }
+    tryCatch(
+      {
+        idx <- dta_template_index_cached()
+        vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+        if (NROW(vocabs) == 0) {
+          return(NULL)
+        }
+        refs <- paste0(vocabs$id, "@", vocabs$version)
+        sug <- vocabulary_suggestion(id, values, refs, vocabulary_resolver(idx))
+        if (!identical(sug$reason, "declared")) {
+          return(NULL)
+        }
+        list(ref = sug$ref, label = as.character(vocabs$label[[match(sug$ref, refs)]]))
+      },
+      error = function(e) NULL
+    )
+  }
+
+  col_vocab_hint_val <- reactiveVal(NULL)
+
+  # Whenever the editor changes view or loads a column: from the prefill, which
+  # is what the form is about to show.
+  observeEvent(rv$col_token, {
+    col_vocab_hint_val(
+      if (identical(rv$col_view, "form") && editing()) {
+        pf <- rv$col_prefill %||% list()
+        col_vocab_hint_for(as.character(pf$id %||% ""), col_prefill_values())
+      }
+    )
+  })
+
+  # While the form is open: from what is typed. Created once, here, not per
+  # modal; and not while another view shows, where input$col_id still holds the
+  # removed form's last value.
+  col_form_d <- debounce(reactive(list(input$col_id, input$col_values)), 500)
+  observeEvent(col_form_d(),
+    {
+      req(identical(rv$col_view, "form"), editing())
+      col_vocab_hint_val(col_vocab_hint_for(input$col_id %||% "", value_lines(input$col_values)))
+    },
+    ignoreInit = TRUE
+  )
+
+  # No id on the paragraph: the output's own container carries col_vocab_hint,
+  # and the button's aria-describedby points at it. The label comes from a
+  # template author, so it goes through htmltools' escaping like any text.
+  output$col_vocab_hint <- renderUI({
+    rv$col_token
+    h <- col_vocab_hint_val()
+    if (is.null(h)) {
+      return(NULL)
+    }
+    p(
+      class = "msg-hint vocab-hint",
+      "Suggested vocabulary for this column: ", tags$strong(h$label), paste0(" (", h$ref, ")")
+    )
+  })
 
   observeEvent(input$col_vocab_open, {
     req(editing())

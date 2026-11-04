@@ -1369,6 +1369,19 @@ bi_css <- function() {
     .vocab-pick { margin-bottom: 8px; }
     .vocab-pick-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 6px; }
     .vocab-pick-filter { margin-bottom: 6px; }
+    /* The column editor's 'Choose from vocabulary' button when a vocabulary
+       declares this column: a tinted outline, never a fill (Save column is the
+       one filled button), plus the hint line under it as the non-colour cue. */
+    .col-vocab-open .vocab-hint { margin: 4px 0 0; }
+    .col-vocab-open:has(.vocab-hint) .btn {
+      border-color: var(--bi-green); color: var(--bi-green-dark);
+      background: color-mix(in srgb, var(--bi-green) 12%, white);
+    }
+    .col-vocab-open:has(.vocab-hint) .btn:hover,
+    .col-vocab-open:has(.vocab-hint) .btn:focus-visible {
+      background: color-mix(in srgb, var(--bi-green) 22%, white);
+      color: var(--bi-green-dark);
+    }
     .vocab-pick-list {
       max-height: 18rem; overflow-y: auto; padding: 4px 12px;
       border: 1px solid var(--bi-grey-light); border-radius: .5rem;

@@ -920,6 +920,11 @@ test_that("a large vocabulary gets a filter naming its size", {
   expect_match(html, "Filter 300 terms by code, label or description", fixed = TRUE)
   expect_match(html, "1 of 300 selected", fixed = TRUE)
   expect_equal(count_occurrences(html, 'type="checkbox"'), 300L)
+  # Typing and the native clear (Escape / the x) are different events: Escape
+  # fires `search` and no `input`, so both must run the filter or the field
+  # and the rows disagree. Constant text, as with the links.
+  expect_match(html, 'oninput="DTA_vocabFilter(this)"', fixed = TRUE)
+  expect_match(html, 'onsearch="DTA_vocabFilter(this)"', fixed = TRUE)
 })
 
 test_that("values the vocabulary does not have are listed first and counted", {
