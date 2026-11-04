@@ -613,6 +613,29 @@ dta_remove_contact <- function(dta, side, index) {
   })
 }
 
+# Swap a contact with its neighbour; a move past either end is a no-op.
+dta_move_contact <- function(dta, side, index, direction) {
+  dta_try({
+    if (length(side) != 1L || is.na(side) || !(side %in% c("receiver", "supplier"))) {
+      cli::cli_abort("Choose either receiver or supplier when moving a contact.")
+    }
+    if (length(direction) != 1L || is.na(direction) || !(direction %in% c("up", "down"))) {
+      cli::cli_abort("Choose either up or down when moving a contact.")
+    }
+    md <- DTAtools::metadata(dta)
+    side_list <- tryCatch(S7::prop(md, side), error = function(e) NULL) %||% list()
+    contacts <- side_list$contacts %||% list()
+    to <- index + if (identical(direction, "up")) -1L else 1L
+    if (index >= 1 && index <= length(contacts) && to >= 1 && to <= length(contacts)) {
+      contacts[c(index, to)] <- contacts[c(to, index)]
+      side_list$contacts <- contacts
+      S7::prop(md, side) <- side_list
+      dta@metadata <- md
+    }
+    dta
+  })
+}
+
 contact_display <- function(person) {
   nm <- person$name %||% "(unnamed)"
   role <- person$role %||% ""
