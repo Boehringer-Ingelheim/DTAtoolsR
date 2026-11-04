@@ -198,6 +198,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **`validate_template()` now rejects a dataset without an `id`.** A dataset
+  template or an inline template dataset whose `id` is absent, null or empty
+  is reported as `dataset_id_missing`, an error. The app already refused to
+  load such a dataset template, even when every import names it with `as:`,
+  but `validate_template()` used to pass it. An `id`, `name` or `description`
+  written as a list or as a missing value is reported as
+  `dataset_field_invalid`, naming the key as written. A dataset in the old
+  shape (`name:` with no `id:`) passes as before.
+
 - **Datasets now have an `id`, a `name` and a `description`.** The identifier
   a dataset used to carry in `name` is its `id` (the key in a DTA, in every
   validation message, in `load_file()` and in `{COLUMN_SPECS:<id>}`); `name`

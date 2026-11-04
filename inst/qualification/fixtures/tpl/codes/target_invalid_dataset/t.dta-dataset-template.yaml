@@ -7,5 +7,6 @@ options:
     type: text
     target: metadata.wrong_root
 dataset:
+  name: ds1
   columns:
     - id: A

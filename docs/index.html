@@ -689,7 +689,7 @@ library(DTAtools)</code></pre>
       <div class="step-connector">↓</div>
       <div class="step">
         <div class="step-num">5</div>
-        <div class="step-body"><strong>Drill into errors</strong> — use <code>messages()</code> for the error list and <code>inspect()</code> for row-level detail</div>
+        <div class="step-body"><strong>Drill into errors</strong> — use <code>messages()</code> for the error list, <code>explain_messages()</code> for a plain-language reading and <code>inspect()</code> for row-level detail</div>
       </div>
     </div>
 
@@ -1757,6 +1757,11 @@ validate_file_stream(specs, "transfer.csv", on_missing_column = "stop")</code></
             <td class="cheat-fn">inspect(dta, id = N)</td>
             <td>Deep-dive into one error by its <code>id</code></td>
             <td>data.frame</td>
+          </tr>
+          <tr>
+            <td class="cheat-fn">explain_messages(dta)</td>
+            <td>Print each error in plain language: should be vs. actual</td>
+            <td>data.frame (invisible)</td>
           </tr>
           <tr>
             <td class="cheat-fn">validation_status(dta)</td>

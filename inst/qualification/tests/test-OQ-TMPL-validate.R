@@ -459,3 +459,28 @@ test_that("OQ-TMPL-065 | empty or unrelated templates/ folders do not hide root 
   writeLines("Supporting notes, not a template.", file.path(lib, "notes.txt"))
   qa_step("a folder holding only notes preserves root validation", 0L, nrow(validate_template(root)))
 })
+
+# ---- REQ-TMPL-033: dataset_id_missing / dataset_field_invalid --------------
+
+test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reported; the pre-id shape is not | REQ-TMPL-033", {
+  tpl <- validate_template(tmpl_fixture("codes", "dataset_id_missing"))
+  qa_step("dataset template without id: exactly one row", 1L, nrow(tpl))
+  qa_step("dataset template without id: severity is error", "error", tmpl_severity(tpl, "dataset_id_missing"))
+
+  inline <- validate_template(tmpl_fixture("codes", "dataset_id_missing_inline"))
+  qa_step("inline dataset without id, abstract template: severity is error", "error", tmpl_severity(inline, "dataset_id_missing"))
+
+  field <- validate_template(tmpl_fixture("codes", "dataset_field_invalid"))
+  qa_step("a list for name: severity is error", "error", tmpl_severity(field, "dataset_field_invalid"))
+  qa_check("a list for name: the message names 'name'", grepl("'name'", tmpl_message(field, "dataset_field_invalid"), fixed = TRUE))
+
+  field_legacy <- validate_template(tmpl_fixture("codes", "dataset_field_invalid_legacy"))
+  qa_check(
+    "a list for a pre-id name: the message names 'name', the key as written",
+    grepl("'name'", tmpl_message(field_legacy, "dataset_field_invalid"), fixed = TRUE)
+  )
+
+  legacy <- validate_template(tmpl_fixture("codes", "dataset_legacy_shape"))
+  qa_step("pre-id shape: no dataset_id_missing", NA_character_, tmpl_severity(legacy, "dataset_id_missing"))
+  qa_step("pre-id shape: no dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
+})
