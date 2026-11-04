@@ -353,6 +353,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the image's site library.
   The files' header comments no longer describe DTAtools' own deployment as
   if it were the user's repository, and they list `*.dta-vocabulary.yaml`.
+- The authoring guide `create_template_repo()` writes as `README.md` now
+  covers creation-template `variants:` and lists the `variant_invalid`
+  validator code.
 - `create_template_repo(examples = FALSE)` no longer ends by suggesting
   `validate_template(path, strict = TRUE)`, which always fails with
   `no_templates` on a repository with no templates; it says to add templates
