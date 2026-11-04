@@ -222,6 +222,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   neighbour in the specification, which is no longer the row next to it on
   screen — and a "Show all in spec order" link brings them back. Edit and
   remove keep working on the filtered list.
+- **Contacts can be reordered in the app.** The Receiver and Supplier people
+  lists have move up/down buttons in edit mode, and the order is saved to the
+  YAML.
+
 - **The app's rule editor has the same search box.** "Edit rules" filters
   the rules as you type, keeps the filter across edits, and hides the move
   arrows while the list is searched or sorted, exactly as the column editor

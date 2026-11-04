@@ -780,6 +780,56 @@ test_that("dta_remove_contact returns ok=FALSE without throwing for an invalid s
   expect_true(nzchar(res$error))
 })
 
+test_that("dta_move_contact swaps a contact with its neighbour and the fields travel with the person", {
+  fn <- app_fn("dta_move_contact")
+  contacts_fn <- app_fn("dta_contacts")
+  dta <- app_fixture_dta()
+  before <- contacts_fn(dta, "receiver")
+
+  res <- fn(dta, "receiver", 1, "down")
+
+  expect_true(res$ok)
+  after <- contacts_fn(res$value, "receiver")
+  # clinical_dta.yaml: Alice Smith, Bob Johnson, Carol Lee, David Kim
+  expect_equal(
+    vapply(after, function(p) p$name, character(1)),
+    c("Bob Johnson", "Alice Smith", "Carol Lee", "David Kim")
+  )
+  expect_equal(after[[2]]$email, "alice.smith@testcompany.com")
+  expect_equal(after[[2]]$phone, "555-123-4567")
+  expect_equal(after[[1]]$email, "bob.johnson@testcompany.com")
+  expect_equal(after[[3]], before[[3]])
+  expect_equal(after[[4]], before[[4]])
+})
+
+test_that("dta_move_contact is a no-op past either end", {
+  fn <- app_fn("dta_move_contact")
+  contacts_fn <- app_fn("dta_contacts")
+  dta <- app_fixture_dta()
+  before <- contacts_fn(dta, "receiver")
+
+  up <- fn(dta, "receiver", 1, "up")
+  down <- fn(dta, "receiver", length(before), "down")
+  bad_index <- fn(dta, "receiver", 99, "up")
+
+  for (res in list(up, down, bad_index)) {
+    expect_true(res$ok)
+    expect_identical(contacts_fn(res$value, "receiver"), before)
+  }
+})
+
+test_that("dta_move_contact returns ok=FALSE without throwing for a bad side or direction", {
+  fn <- app_fn("dta_move_contact")
+
+  bad_side <- fn(app_fixture_dta(), "not_a_side", 1, "down")
+  bad_dir <- fn(app_fixture_dta(), "receiver", 1, "sideways")
+
+  expect_false(bad_side$ok)
+  expect_true(nzchar(bad_side$error))
+  expect_false(bad_dir$ok)
+  expect_true(nzchar(bad_dir$error))
+})
+
 test_that("dta_update_contact updates the given fields and preserves the rest", {
   update_fn <- app_fn("dta_update_contact")
   contact_at_fn <- app_fn("dta_contact_at")

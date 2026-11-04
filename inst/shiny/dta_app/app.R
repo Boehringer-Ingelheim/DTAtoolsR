@@ -6428,9 +6428,22 @@ server <- function(input, output, session) {
               span(class = "contact-edit-ic", "\u270E edit")
             )
           ),
-          actionButton(
-            paste0("rm_", side, "_", i), "Remove",
-            class = "btn btn-sm btn-outline-danger"
+          div(
+            class = "d-flex gap-1",
+            actionButton(
+              paste0("mvup_", side, "_", i), "▲",
+              class = "btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn",
+              title = "Move up", `aria-label` = "Move up", disabled = i == 1L
+            ),
+            actionButton(
+              paste0("mvdn_", side, "_", i), "▼",
+              class = "btn btn-sm btn-outline-secondary dta-row-btn dta-move-btn",
+              title = "Move down", `aria-label` = "Move down", disabled = i == length(cs)
+            ),
+            actionButton(
+              paste0("rm_", side, "_", i), "Remove",
+              class = "btn btn-sm btn-outline-danger"
+            )
           )
         )
       })
@@ -6612,7 +6625,7 @@ server <- function(input, output, session) {
     }
   }
 
-  # dynamic remove observers for contacts
+  # dynamic edit/move/remove observers for contacts
   contact_rm_registry <- new.env(parent = emptyenv())
   observe({
     rv$contacts_token
@@ -6629,6 +6642,32 @@ server <- function(input, output, session) {
             EID <- edid
             observeEvent(input[[EID]], edit_contact_flow(SIDE, IDX), ignoreInit = TRUE)
           })
+        }
+        for (dir in c("up", "dn")) {
+          mvid <- paste0("mv", dir, "_", side, "_", i)
+          if (is.null(contact_rm_registry[[mvid]])) {
+            contact_rm_registry[[mvid]] <- TRUE
+            local({
+              SIDE <- side
+              IDX <- i
+              DIR <- if (dir == "up") "up" else "down"
+              ID <- mvid
+              observeEvent(input[[ID]],
+                {
+                  req(editing())
+                  r <- dta_move_contact(rv$dta, SIDE, IDX, DIR)
+                  if (r$ok) {
+                    rv$dta <- r$value
+                    rv$contacts_token <- rv$contacts_token + 1
+                    sync_yaml_text()
+                  } else {
+                    showNotification(r$error, type = "error")
+                  }
+                },
+                ignoreInit = TRUE
+              )
+            })
+          }
         }
         rmid <- paste0("rm_", side, "_", i)
         if (is.null(contact_rm_registry[[rmid]])) {
