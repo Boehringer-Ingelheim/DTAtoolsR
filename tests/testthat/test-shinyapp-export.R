@@ -620,3 +620,120 @@ test_that("csv_formula_safe defuses formula-leading text cells and leaves the re
   expect_identical(out$row, df$row)
   expect_identical(out$table, c("'=t", rep("t", 6)))
 })
+
+# ---- the app's own PDF chain (dta_export_pdf) --------------------------------
+# soffice -> pandoc -> R's own graphics device. None of it was reached by any
+# test before; the external converters are mocked away so the built-in route,
+# the one every machine without LibreOffice or LaTeX takes, is what runs.
+
+test_that("dta_is_pdf() accepts a PDF and rejects anything else", {
+  is_pdf <- app_fn("dta_is_pdf")
+  pdf_file <- withr::local_tempfile(fileext = ".pdf")
+  grDevices::pdf(pdf_file)
+  graphics::plot.new()
+  grDevices::dev.off()
+  expect_true(is_pdf(pdf_file))
+
+  txt <- withr::local_tempfile(fileext = ".pdf")
+  writeLines("not a pdf at all", txt)
+  expect_false(is_pdf(txt))
+  expect_false(is_pdf(file.path(tempdir(), "no-such-file.pdf")))
+  expect_false(is_pdf(NULL))
+})
+
+test_that("dta_markdown_to_pdf() renders a long document onto several pages", {
+  out <- withr::local_tempfile(fileext = ".pdf")
+  lines <- c(
+    "# Heading", "", "**Label:** value", "", "- a bullet",
+    "| A | B |", "|---|---|", "| 1 | 2 |", "---",
+    rep("A line of ordinary body text that takes up its own line.", 150)
+  )
+  app_fn("dta_markdown_to_pdf")(lines, out)
+  expect_true(app_fn("dta_is_pdf")(out))
+
+  # Pagination, checked on a device whose output can be read back:
+  # dta_markdown_to_pdf() prefers cairo_pdf(), which packs its page objects into
+  # compressed streams, so draw the same lines with the renderer it uses onto an
+  # uncompressed pdf() and count "/Type /Page" (not "/Type /Pages") there.
+  plain <- withr::local_tempfile(fileext = ".pdf")
+  grDevices::pdf(plain, width = 8.27, height = 11.69, compress = FALSE)
+  app_fn("dta_render_markdown")(lines)
+  grDevices::dev.off()
+  bytes <- readBin(plain, "raw", file.size(plain))
+  pages <- length(grepRaw("/Type[[:space:]]*/Page[^s]", bytes, all = TRUE))
+  expect_gt(pages, 1)
+})
+
+test_that("dta_markdown_to_pdf() falls back to pdf() when cairo only warns that it cannot load", {
+  # macOS without XQuartz: capabilities("cairo") is TRUE, cairo_pdf() warns
+  # "failed to load cairo DLL" and opens no device.
+  testthat::local_mocked_bindings(
+    cairo_pdf = function(...) {
+      warning("failed to load cairo DLL")
+      invisible(NULL)
+    },
+    .package = "grDevices"
+  )
+  out <- withr::local_tempfile(fileext = ".pdf")
+  app_fn("dta_markdown_to_pdf")(c("# Heading", "", "Some body text."), out)
+  expect_true(app_fn("dta_is_pdf")(out))
+})
+
+test_that("without LibreOffice or pandoc, the PDF is rendered from the full Markdown export", {
+  env <- app_env()
+  rendered <- NULL
+  # rlang::local_bindings(), not testthat::local_mocked_bindings(): the latter
+  # resolves `.env` to its top-level namespace (shiny's, for app_env()) and so
+  # cannot see the app helpers. This patches app_env() itself and restores it
+  # when the test ends, so the shared environment is left as it was found.
+  rlang::local_bindings(
+    dta_find_soffice = function() "",
+    dta_pandoc_to_pdf = function(docx, file) FALSE,
+    dta_markdown_to_pdf = function(lines, file) {
+      rendered <<- lines
+      grDevices::pdf(file)
+      graphics::plot.new()
+      grDevices::dev.off()
+      invisible(file)
+    },
+    .env = env
+  )
+  dta <- create_example_DTA()
+  out <- withr::local_tempfile(fileext = ".pdf")
+  app_fn("dta_export_pdf")(dta, out)
+
+  expect_true(app_fn("dta_is_pdf")(out))
+  md <- withr::local_tempfile(fileext = ".md")
+  write_dta(dta, file = md, format = "md", include_signatures = FALSE, signature_list = NULL, quiet = TRUE)
+  expected <- readLines(md, warn = FALSE)
+  # The whole export reached the renderer -- not a stand-in page. Only the
+  # generation timestamp may differ between the two writes.
+  stamp <- function(x) grep("Generated", x, invert = TRUE, value = TRUE)
+  expect_identical(stamp(rendered), stamp(expected))
+  expect_false(any(grepl("could not be generated", rendered, fixed = TRUE)))
+})
+
+test_that("when the Markdown export fails too, the PDF export fails instead of writing a stub", {
+  env <- app_env()
+  real_write_dta <- DTAtools::write_dta
+  rlang::local_bindings(
+    dta_find_soffice = function() "",
+    dta_pandoc_to_pdf = function(docx, file) FALSE,
+    .env = env
+  )
+  testthat::local_mocked_bindings(
+    write_dta = function(dta, file, format = "docx", ...) {
+      if (identical(format, "md")) stop("markdown writer exploded")
+      real_write_dta(dta, file = file, format = format, ...)
+    },
+    .package = "DTAtools"
+  )
+  out <- withr::local_tempfile(fileext = ".pdf")
+  writeLines("stale bytes", out)
+
+  res <- app_fn("dta_export")(create_example_DTA(), out, "pdf")
+  expect_false(res$ok)
+  expect_match(res$error, "Could not produce a PDF", fixed = TRUE)
+  expect_match(res$error, "markdown writer exploded", fixed = TRUE)
+  expect_false(file.exists(out))
+})

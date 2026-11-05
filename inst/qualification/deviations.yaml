@@ -362,7 +362,7 @@ deviations:
 
   - id: DEV-016
     title: An inline placeholder spelled by a dataset value is substituted inside a region
-    status: open
+    status: closed
     severity: minor
     affects: [REQ-EXPORT-031]
     observed: >
@@ -391,9 +391,14 @@ deviations:
       A template author who repeats a region can keep free-text dataset
       placeholders out of it. A reviewer comparing the export against the
       template sees the inserted content.
-    reference: inst/qualification/tests/test-OQ-EXPORT-regions.R (OQ-EXPORT-048); R/exportTemplateDocx.R
+    resolution: >
+      Closed without carrying paragraph identity: the region pass writes the
+      braces of every value it substitutes as private-use stand-ins, which no
+      later pass reads as a token, and restores them once both have run.
+      OQ-EXPORT-048 asserts the corrected behaviour.
+    reference: R/exportTemplateRegions.R (.tv_expand_regions, .tv_protect_braces)
     opened: 2026-09-14
-    closed: null
+    closed: 2026-11-04
 
 limitations:
   - id: LIM-001

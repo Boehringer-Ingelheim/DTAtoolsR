@@ -1,4 +1,4 @@
-# The application's server logic. REQ-APP-001 .. REQ-APP-013, REQ-APP-026 and REQ-APP-027 .. REQ-APP-029.
+# The application's server logic. REQ-APP-001 .. REQ-APP-013, REQ-APP-026 and REQ-APP-027 .. REQ-APP-030.
 #
 # A user of the application never sees check()'s return value. They see a
 # coloured status against a dataset name and act on it, so a difference between
@@ -671,7 +671,56 @@ test_that("OQ-APP-035 | a column edit whose values cannot fit is refused and cha
   })
 })
 
-# ---- REQ-APP-027 .. REQ-APP-029: the editors keep rules and columns consistent --
+test_that("OQ-APP-036 | an IF or THEN row removed with the rule editor's own control stays out of the saved rule | REQ-APP-027", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("h", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(
+      rule_id = "oq_app_033_removed_row",
+      rule_desc = "IF row 1 and THEN row 2 are removed before Save"
+    )
+
+    # Row 1 of each list, then a second row added to each. Every row uses a
+    # different column because the saved condition is keyed by column.
+    session$setInputs(
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "Female",
+      then_col_1 = "AGE", then_op_1 = "equals", then_val_1 = "12"
+    )
+    session$setInputs(cond_add = 1, then_add = 1)
+    session$setInputs(
+      cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "DROPPED",
+      then_col_2 = "HEIGHT", then_op_2 = "equals", then_val_2 = "170"
+    )
+
+    # Filled in, then removed via the real remove-button inputs before Save.
+    session$setInputs(cond_remove_1 = 1)
+    session$setInputs(then_remove_2 = 1)
+
+    session$setInputs(rule_save = 1)
+
+    qa_check("the save reports no error", is.null(rv$rule_msg))
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    qa_step(
+      "the saved rule carries only the IF row never removed",
+      "STATUS", names(new_rule@condition)
+    )
+    qa_step(
+      "and only the THEN row never removed",
+      "AGE", names(new_rule@then)
+    )
+  })
+})
+
+# ---- REQ-APP-028 .. REQ-APP-030: the editors keep rules and columns consistent --
 
 # The bundled clinical specification declares AGE, used by a range rule and a
 # conditional rule, and SUBJECT_ID, used by a uniqueness rule; BMI is used by
@@ -680,7 +729,7 @@ qapp_clinical_columns <- function(rv) {
   names(DTAtools::datasets(rv$dta, "clinical_data")@specs@columns)
 }
 
-test_that("OQ-APP-036 | a column a rule uses cannot be removed, one no rule uses can | REQ-APP-027", {
+test_that("OQ-APP-037 | a column a rule uses cannot be removed, one no rule uses can | REQ-APP-028", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 
@@ -704,7 +753,7 @@ test_that("OQ-APP-036 | a column a rule uses cannot be removed, one no rule uses
   })
 })
 
-test_that("OQ-APP-037 | renaming a column in the editor renames it in the rules that use it | REQ-APP-028", {
+test_that("OQ-APP-038 | renaming a column in the editor renames it in the rules that use it | REQ-APP-029", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 
@@ -736,7 +785,7 @@ test_that("OQ-APP-037 | renaming a column in the editor renames it in the rules 
   })
 })
 
-test_that("OQ-APP-038 | raw YAML whose rules contradict its columns is refused and the same text repaired applies | REQ-APP-029", {
+test_that("OQ-APP-039 | raw YAML whose rules contradict its columns is refused and the same text repaired applies | REQ-APP-030", {
   app <- qapp_skip_unless_app_installed()
   qapp_clean_session_files()
 

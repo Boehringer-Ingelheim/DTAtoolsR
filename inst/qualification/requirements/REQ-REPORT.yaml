@@ -181,3 +181,21 @@ requirements:
     category: interface
     covers: [write_validation_report]
     source: R/exportValidationReport.R
+
+  - id: REQ-REPORT-015
+    text: >
+      The document shall record what its verdict was reached over: the
+      generation timestamp with its UTC offset, the DTAtools and R versions,
+      the specification's version, and, for every input, its dataset and
+      table, and either the delivered file it was read from -- with that
+      file's size and modification time -- or, for a table held in memory, its
+      content-hash stamp.
+    risk: high
+    category: integrity
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
+    notes: >
+      A validation report is evidence, and evidence that cannot be tied to the
+      data it describes is not evidence of anything in particular. Inputs are
+      fingerprinted from the file system rather than hashed: a delivery can be
+      tens of gigabytes, and the report must not re-read it.

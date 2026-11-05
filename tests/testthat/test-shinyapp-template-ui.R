@@ -441,7 +441,7 @@ test_that("the detail panel names the base a selected deviation template resolve
 
 # ---- Picker: "Back to templates" and an empty result ------------------------
 
-test_that("'Back to templates' reopens the picker with its search and selection intact", {
+test_that("'Back to templates' reopens the picker with its selection intact and its search cleared", {
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
@@ -471,17 +471,84 @@ test_that("'Back to templates' reopens the picker with its search and selection 
     session$setInputs(template_options_back = 1)
 
     # Going back does not discard the choice already made -- the author can
-    # press Cancel and still be where they were -- and the search typed
-    # before "Use this template" is still filtering the list.
+    # press Cancel and still be where they were -- but the search is gone:
+    # the box is empty and the list is no longer narrowed by it.
     expect_equal(rv$template_ref, "back_tpl@1.0")
     frame <- ui_text(output$template_picker_ui)
-    expect_match(frame, "value=\"back\"", fixed = TRUE)
+    expect_false(grepl("value=\"back\"", frame, fixed = TRUE))
     html <- ui_text(output$template_picker_list)
-    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 1)
-    # The search is still applied, so its match is still marked in the label.
-    expect_match(html, "<mark>Back</mark>", fixed = TRUE)
-    expect_match(html, "data-id=\"back_tpl\"", fixed = TRUE)
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 2)
+    expect_false(grepl("<mark>", html, fixed = TRUE))
     expect_match(html, "value=\"back_tpl\"[^>]*checked")
+  })
+})
+
+test_that("a re-opened picker shows an empty search box even if the close report never arrived", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    session$setInputs(template_search = "back")
+    # A re-render while the picker stays open (Refresh templates) keeps what
+    # was typed -- only an open starts empty.
+    session$setInputs(tmpl_refresh_templates = 1)
+    expect_match(ui_text(output$template_picker_ui), "value=\"back\"", fixed = TRUE)
+    expect_equal(count_occurrences(ui_text(output$template_picker_list), "class=\"tmpl-entry"), 1)
+
+    # Neither a close report nor a cleared input arrives (input$template_search
+    # still says "back"); only a second open. The box AND the list start over.
+    session$setInputs(create_from_template = 2)
+    expect_false(grepl("value=\"back\"", ui_text(output$template_picker_ui), fixed = TRUE))
+    html <- ui_text(output$template_picker_list)
+    expect_equal(count_occurrences(html, "class=\"tmpl-entry"), 2)
+    expect_false(grepl("<mark>", html, fixed = TRUE))
+  })
+})
+
+test_that("Enter acts on the search text that arrives in the same message as the click", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    # What the Enter key sends: the text, then the click, in one flush.
+    session$setInputs(template_search = "other", template_select_next = 1)
+    expect_equal(rv$template_ref, "other_tpl@1.0")
+  })
+})
+
+test_that("'Back to templates' lands on the template whose options were open, even for an implied selection", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  root <- withr::local_tempdir()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+  write_min_template(root, id = "back_tpl", version = "1.0", label = "Back Template")
+  write_min_template(root, id = "other_tpl", version = "1.0", label = "Other Template")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(create_from_template = 1)
+    ui_text(output$template_picker_ui)
+    # Search, no click: the only visible row is selected by implication.
+    session$setInputs(template_search = "other")
+    session$setInputs(template_select_next = 1)
+    expect_equal(rv$template_ref, "other_tpl@1.0")
+    session$setInputs(template_picker_closed = 1)
+
+    # With the search gone the first row of the full list is back_tpl; the
+    # author must still land on the template they chose.
+    session$setInputs(template_options_back = 1)
+    expect_match(ui_text(output$template_picker_list), "value=\"other_tpl\"[^>]*checked")
   })
 })
 

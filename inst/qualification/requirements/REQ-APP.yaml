@@ -398,6 +398,20 @@ requirements:
 
   - id: REQ-APP-027
     text: >
+      An IF or THEN condition row of a conditional (col_condition) rule removed
+      with the rule editor's own remove control shall be excluded from the rule
+      that results from Save, even when the row was filled in before it was
+      removed; only the rows still present shall be saved.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (cond_remove_/then_remove_ observers)
+    notes: >
+      Before this change the IF and THEN lists could grow but offered no way
+      to remove a row.
+
+  - id: REQ-APP-028
+    text: >
       Removing a column from the column editor shall be refused, and the
       document left unchanged, while any rule of the dataset uses that column.
       A column no rule uses shall still be removed.
@@ -406,7 +420,7 @@ requirements:
     covers: [run_dta_app]
     source: inst/shiny/dta_app/R/utils_dta.R (dta_remove_column); inst/shiny/dta_app/app.R (col_del_click)
 
-  - id: REQ-APP-028
+  - id: REQ-APP-029
     text: >
       Saving a column under a new id from the column editor shall rename the
       column in every rule of the dataset that uses it, in the same save, so
@@ -417,7 +431,7 @@ requirements:
     covers: [run_dta_app, lint_dta]
     source: inst/shiny/dta_app/R/utils_dta.R (dta_set_column)
 
-  - id: REQ-APP-029
+  - id: REQ-APP-030
     text: >
       Applying edited raw YAML whose rules contradict its columns shall be
       refused: the document held by the application shall be unchanged, the

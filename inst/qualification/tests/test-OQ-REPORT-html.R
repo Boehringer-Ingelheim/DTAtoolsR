@@ -513,3 +513,49 @@ test_that("OQ-REPORT-016 | x must be a DTA object, and title must be a scalar st
       grepl("'title' must be a single character string, or NULL", conditionMessage(e_title), fixed = TRUE)
   )
 })
+
+test_that("OQ-REPORT-017 | the document records the versions and the inputs its verdict rests on | REQ-REPORT-015", {
+  dir <- qa_tempdir()
+  in_memory <- qrpt_clean_dataset(dir, "mem")
+
+  streamed_path <- file.path(dir, "big.csv")
+  utils::write.csv(
+    data.frame(ID = c("A001", "A002"), SEX = c("M", "F"), stringsAsFactors = FALSE),
+    streamed_path,
+    row.names = FALSE, na = ""
+  )
+  streamed <- DTADataSetTabular(
+    id = "big", specs = qrpt_specs(), files = list(DTAFileCSV(filename = "big.csv"))
+  )
+  streamed <- load_file(streamed, file = streamed_path, handler_index = 1, stream = "always")
+  streamed <- check(streamed, persist = FALSE, quiet = TRUE)
+
+  dta <- DTA(
+    datasets = list(mem = in_memory, big = streamed),
+    metadata = DTAMetaData(title = "Traceable", version = "3.0")
+  )
+  out <- file.path(dir, "report.html")
+  write_validation_report(dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  metas <- xml2::xml_text(xml2::xml_find_all(doc, "//*[contains(@class,'report-meta')]"))
+  header <- paste(metas, collapse = " ")
+  qa_check(
+    "the timestamp carries its UTC offset",
+    grepl("[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}", header)
+  )
+  qa_check("the DTAtools version is shown", grepl(as.character(utils::packageVersion("DTAtools")), header, fixed = TRUE))
+  qa_check("the R version is shown", grepl(paste0("R ", getRversion()), header, fixed = TRUE))
+  qa_check("the specification version is shown", grepl("Specification version 3.0", header, fixed = TRUE))
+
+  inputs <- xml2::xml_text(xml2::xml_find_first(doc, "//section[contains(@class,'report-inputs')]"))
+  qa_check("the streamed input names its delivered file", grepl("big.csv", inputs, fixed = TRUE))
+  qa_check("with that file's size in bytes", grepl(as.character(file.size(streamed_path)), inputs, fixed = TRUE))
+  qa_check(
+    "and its modification time in UTC",
+    grepl(format(file.mtime(streamed_path), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"), inputs, fixed = TRUE)
+  )
+  stamp <- dta_table_hash_stamp(in_memory@tables[[1]])
+  qa_check("the in-memory table carries a content-hash stamp", is.character(stamp) && nzchar(stamp))
+  qa_check("and the report shows it", grepl(stamp, inputs, fixed = TRUE))
+})

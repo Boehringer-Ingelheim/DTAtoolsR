@@ -44,6 +44,14 @@ message with click-to-inspect detail. Repeated identical messages (same
 dataset/target/source/rule/column/keyword/message, differing only by row)
 are capped at \code{max_repeats} in the default view with a "show more" toggle
 in the resulting HTML.
+
+So that a filed report can be tied back to what it describes, its header
+records the generation time with its UTC offset, the DTAtools and R
+versions, and the specification's version (\code{metadata(x)@version}), and an
+Inputs section lists every table and file the verdict rests on: the source
+file(s) of a streamed dataset or a file dataset with their size and
+modification time, and the content-hash stamp of a table held in memory.
+Nothing is re-read to produce it.
 }
 \examples{
 dta <- create_example_DTA()
