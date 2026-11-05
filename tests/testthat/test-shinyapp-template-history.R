@@ -503,3 +503,125 @@ test_that("ordinary history builds retain their original result and comparison s
   expect_identical(names(ch), c("area", "what", "change", "from", "to"))
   expect_equal(nrow(ch), 0)
 })
+
+# ---- prior_versions: history from before the library ------------------------
+
+# Append a `prior_versions:` block to a file written by write_ct().
+add_prior <- function(root, id, version, lines) {
+  path <- file.path(root, sprintf("%s_%s.dta-template.yaml", id, gsub(".", "_", version, fixed = TRUE)))
+  write(c("prior_versions:", lines), path, append = TRUE)
+}
+
+test_that("prior_versions entries follow the first library version, newest first and exact", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "5.0")
+  add_prior(root, "demo", "5.0", c(
+    # Unquoted on purpose: 4.10 must not become the number 4.1.
+    "  - { version: 3.0, changes: Renamed columns. }",
+    "  - { version: 4.10, date: 2024-03-01, changes: Added the PK dataset. }"
+  ))
+  idx <- index_over(root)
+
+  history <- app_fn("template_history")(idx, "demo")
+  expect_equal(vapply(history, `[[`, "", "type"), c("initial", "manual", "manual"))
+  expect_equal(vapply(history[2:3], `[[`, "", "version"), c("4.10", "3.0"))
+  expect_equal(history[[2]]$title, "4.10 (2024-03-01, recorded by hand)")
+  expect_equal(history[[2]]$note, "Added the PK dataset.")
+  expect_equal(history[[3]]$title, "3.0 (recorded by hand)")
+})
+
+test_that("the newest version that declares prior_versions speaks for the past", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "5.0")
+  add_prior(root, "demo", "5.0", "  - { version: \"4.0\", changes: Old text. }")
+  write_ct(root, "demo", "5.1")
+  add_prior(root, "demo", "5.1", "  - { version: \"4.0\", changes: Corrected text. }")
+  write_ct(root, "demo", "5.2")
+  idx <- index_over(root)
+
+  manual <- Filter(function(e) e$type == "manual", app_fn("template_history")(idx, "demo"))
+  expect_length(manual, 1)
+  expect_equal(manual[[1]]$note, "Corrected text.")
+})
+
+test_that("a child never inherits its parent's prior_versions through extends", {
+  root <- withr::local_tempdir()
+  write_ct(root, "parent", "1.0")
+  add_prior(root, "parent", "1.0", "  - { version: \"0.9\", changes: Parent past. }")
+  write_ct(root, "child", "1.0", extends = "parent@1.0")
+  idx <- index_over(root)
+
+  expect_equal(vapply(app_fn("template_history")(idx, "child"), `[[`, "", "type"), "initial")
+  expect_equal(
+    vapply(app_fn("template_history")(idx, "parent"), `[[`, "", "type"), c("initial", "manual")
+  )
+})
+
+test_that("a malformed or overlapping entry is reported, the good ones still shown", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "4.0")
+  write_ct(root, "demo", "5.0")
+  add_prior(root, "demo", "5.0", c(
+    "  - { version: \"3.0\", changes: Fine. }",
+    "  - { version: \"4.0\", changes: Already in the library. }",
+    "  - { version: \"2.0\" }",
+    "  - { version: \"1.0\", date: March, changes: Bad date. }"
+  ))
+  idx <- index_over(root)
+
+  manual <- Filter(function(e) e$type == "manual", app_fn("template_history")(idx, "demo"))
+  expect_equal(vapply(manual, function(e) e$version, ""), c("3.0", NA_character_))
+  err <- manual[[2]]$error
+  expect_match(err, "entry 2 (4.0) is not older than 4.0", fixed = TRUE)
+  expect_match(err, "entry 3 (2.0) has no changes text", fixed = TRUE)
+  expect_match(err, "entry 4 (1.0): date 'March'", fixed = TRUE)
+  expect_equal(manual[[2]]$title, "Earlier versions (prior_versions in demo@5.0)")
+})
+
+test_that("the detail panel shows hand-written entries and says where the library starts", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "5.0")
+  add_prior(root, "demo", "5.0", "  - { version: \"4.0\", date: 2024-03-01, changes: Added the PK dataset. }")
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("demo@5.0", index = idx)
+  versions <- app_fn("template_id_versions")(idx, "demo")
+  html <- paste(as.character(
+    app_fn("template_picker_detail_ui")(loaded, versions, "5.0", idx)
+  ), collapse = "")
+
+  expect_match(html, "Full history (2 entries)", fixed = TRUE)
+  expect_match(html, "First version in the template library.", fixed = TRUE)
+  expect_match(html, "4.0 (2024-03-01, recorded by hand)", fixed = TRUE)
+  expect_match(html, "Added the PK dataset.", fixed = TRUE)
+})
+
+test_that("an empty prior_versions in a newer file does not hide an older file's entries", {
+  root <- withr::local_tempdir()
+  write_ct(root, "demo", "5.0")
+  add_prior(root, "demo", "5.0", "  - { version: \"4.0\", changes: Kept. }")
+  write_ct(root, "demo", "5.1")
+  write("prior_versions: []", file.path(root, "demo_5_1.dta-template.yaml"), append = TRUE)
+  idx <- index_over(root)
+
+  manual <- Filter(function(e) e$type == "manual", app_fn("template_history")(idx, "demo"))
+  expect_equal(vapply(manual, function(e) e$note, ""), "Kept.")
+})
+
+test_that("prior_versions keys match exactly and dates must be YYYY-MM-DD", {
+  root <- withr::local_tempdir()
+  writeLines(c(
+    "prior_versions:",
+    # `change` must not be read as `changes` through partial matching.
+    "  - { version: \"3.0\", change: Misspelt. }",
+    "  - { version: \"2.0\", date: 2024-3-1, changes: Short date. }",
+    "  - just a string"
+  ), path <- file.path(root, "p.yaml"))
+
+  res <- app_fn("template_prior_versions")(path, before = "5.0")
+  expect_length(res$entries, 0)
+  expect_true(any(grepl("entry 1 (3.0) has no changes text", res$problems, fixed = TRUE)))
+  expect_true(any(grepl("entry 1 (3.0) has unknown key(s): change", res$problems, fixed = TRUE)))
+  expect_true(any(grepl("entry 2 (2.0): date '2024-3-1'", res$problems, fixed = TRUE)))
+  expect_true(any(grepl("entry 3 is not a mapping", res$problems, fixed = TRUE)))
+})

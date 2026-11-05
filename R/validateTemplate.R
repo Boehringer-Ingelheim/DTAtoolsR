@@ -581,6 +581,20 @@
     }
   }
 
+  # ---- prior_versions_invalid ----------------------------------------------
+  # The same reader, and the same bound, the picker's history uses -- every
+  # entry must precede the template's OLDEST version in the directory, since
+  # that one and every later one have their changes computed -- so a malformed
+  # entry fails CI rather than showing up as an error line in the app.
+  rank <- .dta_template_engine_get("template_version_rank")
+  own_versions <- index_df$version[index_df$kind == "dta_creation_template" & index_df$id == id]
+  own_versions <- c(own_versions[!is.na(rank(own_versions))], if (!is.na(version) && nzchar(version)) version)
+  oldest <- if (length(own_versions) > 0) own_versions[order(rank(own_versions))][[1]]
+  prior <- .dta_template_engine_get("template_prior_versions")(path, before = oldest)
+  for (problem in prior$problems) {
+    add("error", "prior_versions_invalid", problem)
+  }
+
   # ---- party_slot_invalid --------------------------------------------------
   norm_slots <- tryCatch(
     .dta_template_engine_get("normalise_party_slots")(def[["party_slots"]] %||% list()),
@@ -1404,7 +1418,8 @@
 #' column of a dataset template that `DTAColumnSpec()` rejects, such as an
 #' example longer than its declared length), `vocabulary_invalid`,
 #' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`,
-#' `variant_invalid`, and the [lint_dta()] errors `rule_invalid`,
+#' `variant_invalid`, `prior_versions_invalid` (a malformed entry in a
+#' creation template's hand-written `prior_versions:`), and the [lint_dta()] errors `rule_invalid`,
 #' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated

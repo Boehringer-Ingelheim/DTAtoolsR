@@ -333,11 +333,86 @@ template_history_cut <- function(index, kind, id, version) {
   index[!later, , drop = FALSE]
 }
 
+# The one hand-written part of a history: `prior_versions:`, the versions a
+# template went through BEFORE it entered the library, which have no file to
+# build and so nothing to diff. Each entry is version, optional date, changes.
+#
+# Read straight from the file -- never from the merged definition -- so a
+# child never inherits its parent's past through `extends:`, and with the
+# exact scalar handlers so an unquoted `4.10` is not the number 4.1.
+#
+# `before`: a version every entry must precede (the oldest library version, or
+# the file's own). Returns list(declared, entries, problems); a problem is a
+# sentence naming the entry, and a broken entry is left out of `entries`.
+template_prior_versions <- function(path, before = NULL) {
+  res <- dta_template_read_yaml_quiet(path, handlers = dta_template_yaml_handlers())
+  raw <- if (is.list(res$value)) res$value[["prior_versions"]]
+  # `prior_versions: []` and a bare `prior_versions:` both say nothing, so
+  # neither hides what an older file declared.
+  out <- list(declared = length(raw) > 0, entries = list(), problems = character(0))
+  if (length(raw) == 0) {
+    return(out)
+  }
+  if (!is.list(raw) || !is.null(names(raw))) {
+    out$problems <- "'prior_versions' must be a sequence of entries, each with version, changes and an optional date."
+    return(out)
+  }
+  text <- function(x) {
+    if (is.null(x) || length(x) != 1 || is.na(x)) "" else trimws(as.character(x))
+  }
+  before_rank <- if (is.null(before)) NULL else template_version_rank(before)
+  seen <- character(0)
+  for (i in seq_along(raw)) {
+    e <- raw[[i]]
+    if (!is.list(e) || is.null(names(e))) {
+      out$problems <- c(out$problems, sprintf("prior_versions entry %d is not a mapping.", i))
+      next
+    }
+    # `[[`, not `$`: `$` partial-matches, so a misspelt `change:` would be read.
+    v <- text(e[["version"]])
+    label <- if (nzchar(v)) sprintf("prior_versions entry %d (%s)", i, v) else sprintf("prior_versions entry %d", i)
+    d <- text(e[["date"]])
+    changes <- text(e[["changes"]])
+    problems <- c(
+      if (length(setdiff(names(e), c("version", "date", "changes"))) > 0) {
+        sprintf(
+          "%s has unknown key(s): %s.", label,
+          paste(setdiff(names(e), c("version", "date", "changes")), collapse = ", ")
+        )
+      },
+      if (!nzchar(v)) sprintf("%s has no version.", label),
+      if (nzchar(v) && is.na(template_version_rank(v))) sprintf("%s: '%s' is not a version number.", label, v),
+      if (nzchar(v) && !is.na(template_version_rank(v)) && !is.null(before_rank) && !is.na(before_rank) &&
+        template_version_rank(v) >= before_rank) {
+        sprintf("%s is not older than %s; a version in the library has its changes computed.", label, before)
+      },
+      if (nzchar(v) && v %in% seen) sprintf("%s repeats an earlier entry.", label),
+      if (nzchar(d) && (!grepl("^\\d{4}-\\d{2}-\\d{2}$", d) || is.na(as.Date(d, optional = TRUE)))) {
+        sprintf("%s: date '%s' is not a YYYY-MM-DD date.", label, d)
+      },
+      if (!nzchar(changes)) sprintf("%s has no changes text.", label)
+    )
+    seen <- c(seen, v)
+    if (length(problems) > 0) {
+      out$problems <- c(out$problems, problems)
+      next
+    }
+    out$entries[[length(out$entries) + 1L]] <- list(version = v, date = d, changes = changes)
+  }
+  if (length(out$entries) > 0) {
+    ranks <- template_version_rank(vapply(out$entries, `[[`, "", "version"))
+    out$entries <- out$entries[order(ranks, decreasing = TRUE)]
+  }
+  out
+}
+
 # The whole history of one creation template, newest entry first. Each entry:
-#   type      "version", "initial" (the oldest version) or "upstream"
+#   type      "version", "initial" (the oldest version), "manual" (written by
+#             hand in `prior_versions:`, older than "initial") or "upstream"
 #   title     what the entry is about, e.g. "1.1 (compared with 1.0)"
 #   version   the template version the entry describes
-#   changes   template_history_compare()'s frame (empty for "initial")
+#   changes   template_history_compare()'s frame (empty for "initial"/"manual")
+#   note      a "manual" entry's free text
 #   error     NULL, or why the entry could not be computed
 #
 # Costs one build per version plus one per release of every dependency; the
@@ -373,8 +448,9 @@ template_history <- function(index, id) {
   }
   out <- rev(out)
 
+  path_of <- function(v) index$path[index$kind == kind & index$id == id & index$version == v][[1]]
   newest <- own[[length(own)]]
-  path <- index$path[index$kind == kind & index$id == id & index$version == newest][[1]]
+  path <- path_of(newest)
   for (dep in template_history_dependencies(index, path, kind, id)) {
     vers <- template_history_versions(index, dep$kind, dep$id)
     if (length(vers) < 2) {
@@ -398,6 +474,32 @@ template_history <- function(index, id) {
         out[[length(out) + 1L]] <- e
       }
     }
+  }
+
+  # Hand-written entries are older than anything above, so they come last.
+  # The newest version that declares `prior_versions:` speaks for the past, so
+  # a later release can add to or correct it without rewriting an old file.
+  for (declaring in rev(own)) {
+    prior <- template_prior_versions(path_of(declaring), before = own[[1]])
+    if (prior$declared) {
+      break
+    }
+  }
+  for (p in prior$entries) {
+    title <- if (nzchar(p$date)) {
+      sprintf("%s (%s, recorded by hand)", p$version, p$date)
+    } else {
+      sprintf("%s (recorded by hand)", p$version)
+    }
+    e <- entry("manual", title, p$version)
+    e$note <- p$changes
+    out[[length(out) + 1L]] <- e
+  }
+  if (length(prior$problems) > 0) {
+    out[[length(out) + 1L]] <- entry(
+      "manual", sprintf("Earlier versions (prior_versions in %s)", ref(declaring)), NA_character_,
+      error = paste(prior$problems, collapse = " ")
+    )
   }
   out
 }

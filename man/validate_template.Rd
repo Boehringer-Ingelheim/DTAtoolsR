@@ -83,7 +83,8 @@ The \code{code} column takes these values. Errors (these fail \code{strict = TRU
 column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
 example longer than its declared length), \code{vocabulary_invalid},
 \code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir},
-\code{variant_invalid}, and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
+\code{variant_invalid}, \code{prior_versions_invalid} (a malformed entry in a
+creation template's hand-written \verb{prior_versions:}), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
 \code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated

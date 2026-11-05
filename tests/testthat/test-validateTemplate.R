@@ -1486,3 +1486,46 @@ test_that("outside-library diagnostics tolerate malformed YAML and literal cli b
   expect_true(is.na(result$id))
   expect_error(validate_template(dir, strict = TRUE), "template_outside_library_dir")
 })
+
+# ---- prior_versions_invalid --------------------------------------------------
+
+test_that("prior_versions_invalid names each malformed entry and passes a good one", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, version_line = "version: \"5.0\"")
+  path <- file.path(dir, "clean.dta-template.yaml")
+  write(c(
+    "prior_versions:",
+    "  - { version: \"4.0\", date: 2024-03-01, changes: Fine. }",
+    "  - { version: \"6.0\", changes: Newer than the file. }",
+    "  - { version: \"3.0\", colour: red, changes: Extra key. }"
+  ), path, append = TRUE)
+
+  rows <- expect_code_row(validate_template(dir), "prior_versions_invalid", "error")
+  expect_equal(nrow(rows), 2)
+  expect_true(any(grepl("entry 2 (6.0) is not older than 5.0", rows$message, fixed = TRUE)))
+  expect_true(any(grepl("entry 3 (3.0) has unknown key(s): colour", rows$message, fixed = TRUE)))
+})
+
+test_that("a well-formed prior_versions block raises nothing", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, version_line = "version: \"5.0\"")
+  write(
+    c("prior_versions:", "  - { version: \"4.0\", changes: Fine. }"),
+    file.path(dir, "clean.dta-template.yaml"),
+    append = TRUE
+  )
+  expect_equal(nrow(validate_template(dir)), 0)
+})
+
+test_that("prior_versions must precede the template's oldest version in the directory, as in the picker", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir, filename = "v4.dta-template.yaml", version_line = "version: \"4.0\"")
+  write_clean_template(dir, filename = "v5.dta-template.yaml", version_line = "version: \"5.0\"")
+  write(
+    c("prior_versions:", "  - { version: \"4.5\", changes: Between the two. }"),
+    file.path(dir, "v5.dta-template.yaml"),
+    append = TRUE
+  )
+  rows <- expect_code_row(validate_template(dir), "prior_versions_invalid", "error")
+  expect_match(rows$message, "entry 1 (4.5) is not older than 4.0", fixed = TRUE)
+})

@@ -618,3 +618,23 @@ requirements:
       The class invariant keeps an error out of any DTA that can be built, so
       a creation template reaches the linter only with warnings; an error
       surfaces as the build failure it is.
+
+  - id: REQ-TMPL-036
+    text: >
+      A creation template's prior_versions: entry that is not a mapping, has
+      no version, a version that is not a version number, a version not older
+      than the oldest version of the same template id in the directory being
+      validated, a repeated version, a date that is not YYYY-MM-DD,
+      no changes text, or a key other than version, date and changes shall be
+      reported prior_versions_invalid at severity "error", one row per
+      problem naming the entry. A well-formed entry shall not be reported.
+    risk: low
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_history.R (template_prior_versions)
+    notes: >
+      prior_versions: records the versions a template went through before it
+      entered the library. Those have no file to diff, so the app shows the
+      author's text as written; this check keeps a malformed entry out of CI.

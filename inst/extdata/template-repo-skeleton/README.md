@@ -981,6 +981,24 @@ each combination.
 
 A new vocabulary version affects future documents that resolve to it. It does not rewrite the values already embedded in a finished DTA.
 
+### Versions from before the library: `prior_versions:`
+
+The app computes a creation template's history by comparing its library versions. Versions the template went through before its first
+file entered the library have nothing to compare, so record them by hand:
+
+```yaml
+version: "5.0"
+prior_versions:
+  - version: "4.0"
+    date: 2024-03-01          # optional, YYYY-MM-DD
+    changes: Added the PK dataset.
+  - version: "3.0"
+    changes: Moved to SDTM-style column names.
+```
+
+Each entry needs `version` and `changes`, and must be older than the template's first version in the library. The newest version that declares the
+block is the one shown, so a later release can correct it. It is not inherited through `extends:`.
+
 ## Provenance and upgrading documents
 
 When a document is built from a creation template, the app records a `metadata.template` provenance record. It can include the template ID and
@@ -1132,6 +1150,7 @@ literal severity reported in the result. A concrete template can receive `instan
 | `template_outside_library_dir` | error | A template-shaped file is at the repository root while `templates/` is the selected library. | Move it into `templates/` and update related paths. |
 | `target_invalid` | warning | An option target is unknown, malformed, or does not resolve in its dataset body. | Correct the target path and use a supported metadata or dataset field. |
 | `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
+| `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library". |
 | `party_slot_invalid` | warning | A party slot is malformed or names a profile ID not found in the library. | Check target, slot fields, role, and profile IDs. |
 | `vocab_slot_invalid` | error | A vocabulary slot is malformed, has a bad target, or has invalid selections. | Correct its target, vocabulary, mode, field, or term selections. |
 | `vocab_slot_unresolved` | warning | The slot's vocabulary reference is not found in the validated directory. | Add the vocabulary file or correct the reference. |

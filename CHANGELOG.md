@@ -223,6 +223,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- A creation template can record the versions it went through before it
+  entered the template library with a hand-written `prior_versions:` block
+  (version, optional date, free-text changes). The picker's history shows them
+  after the first library version, whose computed history has nothing earlier
+  to compare against. `validate_template()` reports a malformed entry as
+  `prior_versions_invalid`.
+
 - `lint_dta()` reports every problem in a DTA YAML file, list or object at
   once, using the codes of the check catalogue. `strict = TRUE` aborts on
   errors with the findings attached. The app runs the same check on load,

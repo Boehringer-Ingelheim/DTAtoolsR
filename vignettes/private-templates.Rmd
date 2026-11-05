@@ -916,6 +916,33 @@ below) fails an unquoted version outright, with the error code
 is checked at severity `"error"`, not merely `"warning"`, because the failure
 mode it prevents is silent and irreversible.
 
+### Versions from before the library
+
+The template picker's history is computed: each library version is built and
+compared with the one before it. A template whose first file in the library is
+5.0 therefore has no history before 5.0, however long its life on paper was.
+Record that past by hand with `prior_versions:`:
+
+```yaml
+kind: dta_creation_template
+id: biomarker_gf
+version: "5.0"
+prior_versions:
+  - version: "4.0"
+    date: 2024-03-01          # optional, YYYY-MM-DD
+    changes: Added the PK dataset.
+  - version: "3.0"
+    changes: Moved to SDTM-style column names.
+```
+
+The picker shows these entries after the first library version, newest first,
+with the text exactly as written. The newest version that declares
+`prior_versions:` with at least one entry is the one read, so a later release
+can add or correct an entry without touching an older file. The block is never
+inherited through `extends:` — a child's history is its own. Every entry must
+be older than the template's first version in the library;
+`validate_template()` reports a malformed entry as `prior_versions_invalid`.
+
 ## Parties
 
 A creation template can offer a "party slot" — a dropdown bound to
