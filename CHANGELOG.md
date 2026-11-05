@@ -221,7 +221,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   every push to `dev`; until now its OQ/PQ cases had never run in CI, because
   the scheduled workflow fires only from `master`, where it did not yet exist.
   A new `test-coverage` workflow publishes line coverage of `R/` and the list
-  of lines no test executes.
+  of lines no test executes. It also measures, separately, the coverage of the
+  package's product code by the qualification suite alone, without the unit
+  tests (75.5% at baseline, with a floor that rises toward 95%); the scope is
+  stated in the validation plan.
 
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind

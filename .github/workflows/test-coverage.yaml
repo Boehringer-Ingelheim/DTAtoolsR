@@ -99,3 +99,96 @@ jobs:
             covr-lib/**/testthat.Rout*
           if-no-files-found: ignore
           retention-days: 30
+
+  # Line coverage of R/ by the qualification suite ALONE: which code the
+  # requirement-traced IQ/OQ/PQ cases execute. Unit tests are kept out
+  # (include_unit_tests = "never") because they are not traced to requirements,
+  # so counting them would claim evidence the qualification does not hold.
+  #
+  # The denominator is product code. The runner itself and the app launcher /
+  # benchmark helpers are excluded here (and only here: the job above keeps its
+  # own denominator); running the runner is the IQ and OQ-CORE evidence, not
+  # something the suite tests. The scope is stated in validation-plan.md 4b.
+  #
+  # Baseline 2026-11-05 (Windows, R 4.5.1, quick tier): 75.5%. The floor sits
+  # 2.5 points under it and ratchets up as thoughts/shared/plans/
+  # PLAN-qualification-coverage.md is worked through (85, 92, 95).
+  qualification-coverage:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      COVERAGE_FLOOR: "73"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: r-lib/actions/setup-pandoc@v2.12.1
+
+      - uses: r-lib/actions/setup-r@v2.12.1
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2.12.1
+        with:
+          extra-packages: any::covr
+          needs: coverage
+          use-public-rspm: true
+
+      - name: Measure qualification coverage
+        shell: Rscript {0}
+        run: |
+          lib <- file.path(getwd(), "covr-lib")
+          out <- file.path(getwd(), "qualification-output")
+          dir.create(lib, showWarnings = FALSE)
+          # No try(): a run that crashes must fail this job, not report the
+          # coverage of whatever ran before the crash.
+          code <- sprintf(
+            paste0(
+              'DTAtools::run_qualification("%s", scale = "quick", formats = "md", ',
+              'include_unit_tests = "never", tester = "test-coverage workflow")'
+            ),
+            out
+          )
+          excluded <- c(
+            "R/qualification.R", "R/qualification-report.R",
+            "R/run_dta_app.R", "R/benchmarking.R"
+          )
+          cov <- covr::package_coverage(
+            type = "none", code = code, quiet = FALSE, clean = FALSE,
+            install_path = lib, line_exclusions = as.list(excluded)
+          )
+          total <- covr::percent_coverage(cov)
+          per_file <- sort(covr::coverage_to_list(cov)$filecoverage)
+          zero <- covr::zero_coverage(cov)
+          utils::write.csv(zero, "qualification-zero-coverage.csv", row.names = FALSE)
+
+          summary_file <- Sys.getenv("GITHUB_STEP_SUMMARY")
+          lines <- c(
+            sprintf("## Line coverage of R/ by the qualification suite alone: %.2f%%", total),
+            "",
+            sprintf("Excluded from the denominator: %s.", paste(excluded, collapse = ", ")),
+            sprintf("%d lines are executed by no qualification case (see the artifact).", nrow(zero)),
+            "",
+            "| File | Coverage |",
+            "| --- | ---: |",
+            sprintf("| %s | %.1f%% |", names(per_file), per_file)
+          )
+          if (nzchar(summary_file)) write(lines, summary_file, append = TRUE)
+          cat(lines, sep = "\n")
+
+          floor <- suppressWarnings(as.numeric(Sys.getenv("COVERAGE_FLOOR")))
+          if (!is.na(floor) && total < floor) {
+            stop(sprintf("Qualification coverage %.2f%% is below the floor of %.2f%%.", total, floor))
+          }
+
+      - name: Upload qualification coverage results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-coverage
+          path: |
+            qualification-zero-coverage.csv
+            qualification-output/**/SUMMARY.txt
+            qualification-output/**/run.log
+          if-no-files-found: ignore
+          retention-days: 30
