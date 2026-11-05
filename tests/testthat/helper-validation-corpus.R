@@ -17,6 +17,16 @@ vc_specs <- function(cols, rules = list()) {
   )
 }
 
+# The few tests of how the engine copes with rules that contradict their
+# columns (stale, restored or legacy specs) need a collection the class would
+# refuse to build.
+vc_specs_unchecked <- function(cols, rules = list()) {
+  unchecked_collection(
+    columns = stats::setNames(cols, vapply(cols, function(x) x@id, character(1))),
+    rules = rules
+  )
+}
+
 vc_case <- function(label, axis, specs, table) {
   list(label = label, axis = axis, specs = specs, table = table)
 }

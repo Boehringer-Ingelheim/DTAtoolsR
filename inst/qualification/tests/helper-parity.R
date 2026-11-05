@@ -95,6 +95,31 @@ qp_column_values <- function(name, n) {
   )
 }
 
+# Builds the collection a generated case validates against.
+#
+# `xkey_unique` reads XKEY, a column NO specification declares -- that is the
+# campaign's core axis (see the header). Since REQ-SPEC-027 the constructor
+# refuses a rule that names an undeclared column, so such a collection can no
+# longer be built normally; it can still reach the engines as a legacy object
+# restored from a saved session, which is deserialised without validation. So
+# the rules are attached with the check bypassed, and only when the rule set
+# really names an undeclared column. Every other case is built validated.
+qp_legacy_collection <- function(columns, rules) {
+  x <- DTAColumnSpecCollection(columns = columns)
+  # Deliberate: S7 validation would refuse the rules (rule_column_undeclared).
+  S7::prop(x, "rules", check = FALSE) <- rules
+  x
+}
+
+qp_collection <- function(columns, rules) {
+  undeclared <- any(vapply(rules, function(r) identical(r@id, "xkey_unique"), logical(1)))
+  if (undeclared) {
+    qp_legacy_collection(columns, rules)
+  } else {
+    DTAColumnSpecCollection(columns = columns, rules = rules)
+  }
+}
+
 # One to three rules, always including a uniqueness rule -- that is the axis the
 # reader contract broke.
 qp_rules <- function(chosen) {
@@ -146,10 +171,7 @@ qp_case <- function(seed) {
 
   rules <- qp_rules(chosen)
 
-  specs <- DTAColumnSpecCollection(
-    columns = pool[chosen],
-    rules = rules
-  )
+  specs <- qp_collection(pool[chosen], rules)
 
   path <- qp_write(frame, seed, sample(c("plain", "quoted", "padded"), 1))
   declared <- basename(path)
@@ -377,10 +399,7 @@ qp_case_memory <- function(seed) {
 
   list(
     frame = frame,
-    specs = DTAColumnSpecCollection(
-      columns = pool[chosen],
-      rules = qp_rules(chosen)
-    ),
+    specs = qp_collection(pool[chosen], qp_rules(chosen)),
     rows = n,
     # Small, so a 400-row case is scanned in many batches and every
     # batch-boundary decision is actually taken more than once.

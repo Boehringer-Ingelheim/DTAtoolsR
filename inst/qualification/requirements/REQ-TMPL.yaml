@@ -597,3 +597,24 @@ requirements:
       A dataset template is never built on its own, so before the check a
       column that could not be constructed stayed hidden until some creation
       template imported the dataset, and was then blamed on that template.
+
+  - id: REQ-TMPL-035
+    text: >
+      The columns and rules of a dta_dataset_template's dataset: body shall be
+      checked together, and each lint_dta() finding shall be reported as a row
+      carrying the linter's own code and severity: a rule naming a column the
+      body does not declare as rule_column_undeclared and a col_range on a
+      text column as rule_range_non_numeric, both at "error", and rules in a
+      body that declares no column as rules_without_columns at "warning",
+      which strict = TRUE shall not abort on. A creation template whose
+      instantiated dataset violates the same invariant shall be reported
+      instantiate_failed at severity "error", and not additionally under the
+      linter's code.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl, .dta_template_lint_message)
+    notes: >
+      The class invariant keeps an error out of any DTA that can be built, so
+      a creation template reaches the linter only with warnings; an error
+      surfaces as the build failure it is.

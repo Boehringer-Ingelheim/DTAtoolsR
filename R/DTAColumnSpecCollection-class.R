@@ -94,6 +94,20 @@ DTAColumnSpecCollection <- S7::new_class(
       return("All elements in 'rules' must be of class 'DTARule'")
     }
 
+    # Rules must fit the columns they name: one check function shared with
+    # lint_dta(), so an inconsistent specification can never exist as an
+    # object. Only errors block; warnings are lint_dta()'s to report.
+    if (length(self@rules) > 0) {
+      findings <- dta_specs_findings(self@columns, self@rules)
+      errs <- findings[findings$severity == "error", , drop = FALSE]
+      if (nrow(errs) > 0) {
+        return(paste0(
+          "The specification is inconsistent:\n",
+          paste0("  (", errs$code, ") ", errs$message, collapse = "\n")
+        ))
+      }
+    }
+
     NULL
   }
 )
@@ -341,6 +355,9 @@ import_specs_from_yaml <- function(file) {
   if (is.null(yaml$columns)) {
     cli::cli_abort("YAML file must contain a 'columns' section.")
   }
+
+  # Every problem at once, before any constructor stops at the first.
+  dta_lint_enforce(lint_dta(list(columns = yaml$columns, rules = yaml$rules)))
 
   columns <- yaml$columns
 

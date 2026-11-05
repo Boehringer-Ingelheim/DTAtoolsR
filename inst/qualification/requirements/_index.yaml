@@ -20,7 +20,7 @@ areas:
     min_tests: 24
   - area: SPEC
     title: Specifications, YAML and factories
-    min_tests: 26
+    min_tests: 32
   - area: TYPE
     title: Declared types and typing at read
     min_tests: 31
@@ -41,7 +41,7 @@ areas:
     min_tests: 22
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 70
+    min_tests: 72
   - area: EXPORT
     title: Document and data export
     min_tests: 49
@@ -50,7 +50,7 @@ areas:
     min_tests: 16
   - area: APP
     title: The interactive application
-    min_tests: 33
+    min_tests: 36
   - area: ROBUST
     title: Error handling, integrity and isolation
     min_tests: 16

@@ -72,6 +72,7 @@ exports:
   - import_specs_from_yaml
   - inspect
   - labels
+  - lint_dta
   - load_file
   - matches_filename
   - max_number_of_files

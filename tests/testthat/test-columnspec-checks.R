@@ -1,3 +1,8 @@
+# This file tests how the engine copes with rules that contradict their columns
+# (stale, restored or legacy specs). The class refuses to build them, so the
+# constructor is shadowed by the rule-unchecked variant for the whole file.
+DTAColumnSpecCollection <- unchecked_collection
+
 # Per-check reporting of the column spec axis.
 #
 # The defect these pin: the axis reported one lumped success line -- "Table

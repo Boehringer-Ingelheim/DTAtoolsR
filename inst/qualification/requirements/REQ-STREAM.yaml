@@ -298,6 +298,11 @@ requirements:
       kept as its own case so that a failure names the mechanism (an
       undeclared column keyed differently by the two engines) rather than
       pointing at a seed a reader has to reproduce and diagnose from scratch.
+      Since REQ-SPEC-027 the constructor refuses a rule naming an undeclared
+      column, so this scenario is a legacy, unvalidated collection (one
+      restored from a saved session); the tests build it by attaching the
+      rules with the S7 check bypassed. Engine behaviour on such an object
+      still matters, which is why the requirement stands.
 
   - id: REQ-STREAM-022
     text: >
