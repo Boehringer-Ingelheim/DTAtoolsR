@@ -581,6 +581,8 @@ server <- function(input, output, session) {
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
     then_n = 1L, # condition-builder row count (THEN ...)
+    cond_removed = integer(0), # indices of removed (not just cleared) IF rows
+    then_removed = integer(0), # indices of removed (not just cleared) THEN rows
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
     gcond_removed = integer(0), # indices of removed (not just cleared) group condition rows
@@ -1012,6 +1014,7 @@ server <- function(input, output, session) {
   file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
   gcond_rm_registry <- new.env(parent = emptyenv()) # grouped-condition remove observers
   gconstr_rm_registry <- new.env(parent = emptyenv()) # grouped-constraint remove observers
+  cond_rm_registry <- new.env(parent = emptyenv()) # IF/THEN condition remove observers
   file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
@@ -4238,6 +4241,7 @@ server <- function(input, output, session) {
     oid <- paste0(prefix, "_op_", i)
     vid <- paste0(prefix, "_val_", i)
     div(
+      id = paste0(prefix, "_row_", i),
       class = "cond-row",
       selectInput(cid, if (i == 1) "Column" else NULL,
         choices = c("(select)" = "", cols),
@@ -4250,6 +4254,13 @@ server <- function(input, output, session) {
       textInput(vid, if (i == 1) "Value" else NULL,
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
+      ),
+      actionButton(
+        paste0(prefix, "_remove_", i),
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4321,8 +4332,10 @@ server <- function(input, output, session) {
     txt
   }
   collect_cond <- function(prefix, n) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
     out <- list()
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       col <- trimws(input[[paste0(prefix, "_col_", i)]] %||% "")
       if (!nzchar(col)) next
       op <- input[[paste0(prefix, "_op_", i)]] %||% "equals"
@@ -4342,6 +4355,34 @@ server <- function(input, output, session) {
       out[[col]] <- inner
     }
     out
+  }
+  visible_cond_rows <- function(prefix) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
+    n <- isolate(rv[[paste0(prefix, "_n")]])
+    Filter(function(i) {
+      !(i %in% removed) && !is.null(input[[paste0(prefix, "_op_", i)]])
+    }, seq_len(max(1L, n)))
+  }
+  ensure_cond_remove_observer <- function(prefix, i) {
+    bid <- paste0(prefix, "_remove_", i)
+    if (isTRUE(cond_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    cond_rm_registry[[bid]] <- TRUE
+    observeEvent(input[[bid]],
+      {
+        if (length(visible_cond_rows(prefix)) <= 1) {
+          updateSelectInput(session, paste0(prefix, "_col_", i), selected = "")
+          updateSelectInput(session, paste0(prefix, "_op_", i), selected = "equals")
+          updateTextInput(session, paste0(prefix, "_val_", i), value = "")
+        } else {
+          removeUI(selector = paste0("#", prefix, "_row_", i))
+          key <- paste0(prefix, "_removed")
+          rv[[key]] <- c(isolate(rv[[key]]), i)
+        }
+      },
+      ignoreInit = TRUE
+    )
   }
 
   one_group_cond_row <- function(i, cols, pf = list(name = "", col = "", op = "equals", val = "")) {
@@ -4373,7 +4414,9 @@ server <- function(input, output, session) {
       actionButton(
         bid,
         if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4490,7 +4533,9 @@ server <- function(input, output, session) {
       actionButton(
         bid,
         if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4698,6 +4743,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     # A fresh editor starts unfiltered (see edit_cols).
@@ -4949,6 +4996,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
@@ -4979,6 +5028,8 @@ server <- function(input, output, session) {
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
     rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
     rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
@@ -5067,6 +5118,11 @@ server <- function(input, output, session) {
       where = "beforeEnd",
       ui = one_cond_row("then", isolate(rv$then_n), cols)
     )
+  })
+  observe({
+    req(identical(rv$rule_view, "form"))
+    for (i in seq_len(max(1L, rv$cond_n))) ensure_cond_remove_observer("cond", i)
+    for (i in seq_len(max(1L, rv$then_n))) ensure_cond_remove_observer("then", i)
   })
 
   observeEvent(input$gcond_add, {
@@ -5165,6 +5221,8 @@ server <- function(input, output, session) {
       rv$then_n <- 1L
       rv$gcond_n <- 1L
       rv$gconstr_n <- 1L
+      rv$cond_removed <- integer(0)
+      rv$then_removed <- integer(0)
       rv$gcond_removed <- integer(0)
       rv$gconstr_removed <- integer(0)
       rv$rule_msg <- NULL
