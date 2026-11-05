@@ -441,3 +441,21 @@ requirements:
     category: integrity
     covers: [run_dta_app, lint_dta]
     source: inst/shiny/dta_app/app.R (apply_yaml); inst/shiny/dta_app/R/utils_dta.R (dta_lint)
+  - id: REQ-APP-031
+    text: >
+      The Left/IF and Right/THEN selectors of a group-condition rule's
+      constraints shall offer exactly the distinct, non-blank names of the
+      condition rows still present in the rule editor. A condition row removed
+      with the editor's own remove control shall stop being offered as soon as
+      it is removed, by the existing constraint rows and by a constraint row
+      added afterwards.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (current_group_condition_names)
+    notes: >
+      Before the fix a removed row's name stayed selectable, because Shiny
+      keeps a removed input's last value, and choosing it made Save fail with
+      an unknown-condition error. PINNED STRUCTURALLY: the application harness
+      has no browser, so the test records the selector updates the server
+      sends instead of reading a rendered dropdown.
