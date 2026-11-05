@@ -126,6 +126,18 @@ published with the run, together with the list of lines no test executes. It is
 supporting evidence, not an acceptance criterion: it does not change this suite's
 verdict.
 
+The same workflow measures line coverage of `R/` by this suite alone, with the
+development tests excluded (`include_unit_tests = "never"`): those tests are not
+traced to requirements, so counting them would claim evidence this suite does
+not hold. The denominator is the package's product code. The suite's own runner
+(`R/qualification.R`, `R/qualification-report.R`) is excluded, because running
+it is what produces this evidence and its correct operation is established by the
+installation qualification and the OQ-CORE cases rather than by line coverage;
+so are the app launcher (`R/run_dta_app.R`) and the benchmarking helpers
+(`R/benchmarking.R`), which are not used to validate a delivery. The run fails
+below a recorded floor, which rises as coverage does. Like the figure above, it
+does not change this suite's verdict.
+
 ## 5. Acceptance criteria
 
 The run is acceptable when all of the following hold, and the verdict line of
