@@ -200,8 +200,9 @@ requirements:
   - id: REQ-SPEC-019
     text: >
       columns(), labels(), names() and colspec() shall report a specification's
-      column identifiers, their labels, and the specification of a named
-      column.
+      column identifiers, their labels, and the specification of a column
+      named or positioned, and colspec() shall raise a condition for an
+      identifier or position the specification does not contain.
     risk: medium
     category: interface
     covers: [columns, labels, names, colspec]
@@ -293,3 +294,29 @@ requirements:
       load_file() and every report would then address a dataset that is not
       there. Specifications written before datasets had an id are refused,
       not rewritten.
+
+  - id: REQ-SPEC-026
+    text: >
+      Constructing a DTAColumnSpec shall be refused, with a condition of class
+      dta_spec_value_mismatch, when a declared value or example does not fit
+      the column's own declared type, length or SAS format: a string longer
+      than the length or the $w. width, a text that is not a whole number
+      under Int (or is outside plus or minus 2^31-1), a text that is not a
+      number under Num, a number that cannot be displayed in w.d, or a date,
+      time or datetime that is not display text of its format. It shall also
+      be refused, with a condition of class dta_spec_invalid_pattern, when the
+      declared pattern is not a valid regular expression. A specification read
+      from YAML shall be refused the same way, because it is built from the
+      same class.
+    risk: high
+    category: integrity
+    covers: [DTAColumnSpec, import_specs_from_yaml]
+    source: R/DTAColumnSpec-class.R (validator); R/columnSpecChecks.R (dta_spec_value_problems)
+    notes: >
+      A specification that contradicts itself would fail every correct
+      delivery, or, for a pattern that does not compile, abort check() on the
+      first column that reached it. Refusing it at construction puts the fault
+      at the line that wrote it. Specifications written before this check that
+      carry such values no longer load. Declared values are brought to the
+      column's stored type before they are tested, so "abc" under Int is
+      reported as not an integer rather than silently becoming a missing value.

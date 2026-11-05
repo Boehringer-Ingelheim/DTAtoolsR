@@ -356,8 +356,13 @@ method(get_table, DTADataSetTabular) <- function(x, id = 1) {
   }
 
   if (is.character(id)) {
+    # `!id %in% names(tables)` on a length-2 id is a length-2 `if` condition,
+    # which R rejects with a generic error naming none of this.
+    if (length(id) != 1 || is.na(id)) {
+      cli::cli_abort("Argument 'id' must be a single table name or a single index.")
+    }
     if (!id %in% names(tables)) {
-      cli::cli_abort("No table named {id} found in the container.")
+      cli::cli_abort("No table named {.val {id}} found in the container.")
     }
     return(tables[[id]])
   }

@@ -1253,12 +1253,17 @@ dta_markdown_to_pdf <- function(lines, file) {
   ascii <- function(x) x
   opened <- FALSE
   if (isTRUE(cairo_ok)) {
+    # A cairo that reports itself available can still fail to load (macOS
+    # without XQuartz: "failed to load cairo DLL"). R signals that as a
+    # warning, not an error, and then opens no device, so the warning has to
+    # count as a failure or the PDF is never written.
     opened <- tryCatch(
       {
         grDevices::cairo_pdf(file, width = 8.27, height = 11.69, onefile = TRUE, pointsize = 10)
         TRUE
       },
-      error = function(e) FALSE
+      error = function(e) FALSE,
+      warning = function(w) FALSE
     )
   }
   if (!isTRUE(opened)) {
@@ -1551,7 +1556,10 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
 # build the DOCX first (always works via officer), then
 # convert with the best engine available and VERIFY a real PDF resulted. When no
 # external converter exists we still produce a valid PDF from the Markdown export
-# via R's own device -- so the export ALWAYS yields an openable PDF.
+# via R's own device. When even the Markdown export fails, the export FAILS: it
+# used to fall back to a title-only page saying the layout "could not be
+# generated", which opened as a valid PDF and so read as a successful export of
+# an agreement whose content was missing.
 dta_export_pdf <- function(dta, file, signature_list = NULL) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
@@ -1573,10 +1581,10 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   }
 
   # 3) Self-contained fallback: render the Markdown export to a real PDF with
-  #    R's built-in device (no external tools). Guarantees a working download.
+  #    R's built-in device (no external tools).
   md <- tempfile(fileext = ".md")
   on.exit(unlink(md), add = TRUE)
-  ok_md <- tryCatch(
+  md_error <- tryCatch(
     {
       DTAtools::write_dta(
         dta,
@@ -1584,29 +1592,36 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
         include_signatures = !is.null(signature_list),
         signature_list = signature_list, quiet = TRUE
       )
-      TRUE
+      NULL
     },
-    error = function(e) FALSE
+    error = function(e) conditionMessage(e)
   )
-  lines <- if (isTRUE(ok_md)) {
+  lines <- if (is.null(md_error)) {
     tryCatch(readLines(md, warn = FALSE), error = function(e) character(0))
   } else {
     character(0)
   }
   if (length(lines) == 0) {
-    ttl <- tryCatch(as.character(S7::prop(DTAtools::metadata(dta), "title"))[1],
-      error = function(e) NULL
-    )
-    lines <- c(
-      "# Data Transfer Agreement",
-      if (!is.null(ttl) && nzchar(ttl)) paste0("**Title:** ", ttl) else NULL,
-      paste0("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-      "",
-      "(The full document layout could not be generated on this system.)"
-    )
+    # Nothing is written to `file`: a page that only says the content is
+    # missing must not be handed out as the agreement.
+    unlink(file)
+    stop(paste0(
+      "Could not produce a PDF on this system: no LibreOffice or PDF-capable ",
+      "pandoc engine was found, and the document text for the built-in PDF ",
+      "renderer could not be generated",
+      if (!is.null(md_error)) paste0(" (", md_error, ")") else "",
+      "."
+    ))
   }
-  dta_markdown_to_pdf(lines, file)
-  if (!dta_is_pdf(file)) {
+  rendered <- tryCatch(
+    {
+      dta_markdown_to_pdf(lines, file)
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+  if (!isTRUE(rendered) || !dta_is_pdf(file)) {
+    unlink(file)
     stop(paste0(
       "Could not produce a PDF on this system (no LibreOffice, LaTeX or ",
       "PDF-capable pandoc engine, and the built-in PDF device failed)."
@@ -2285,8 +2300,8 @@ dta_to_list <- function(dta) {
 }
 
 # File name of the "Export DTA YAML" download: <title>_v<version>_<date>.yaml.
-# The version has its dots removed ("1.2.0" -> "v120") and the segment is
-# left out when the document has no version.
+# Dots in the version become underscores ("1.2.0" -> "v1_2_0", so "1.0" and
+# "10" stay distinct) and the segment is left out when there is no version.
 dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
   md <- tryCatch(DTAtools::metadata(dta), error = function(e) NULL)
   field <- function(name) {
@@ -2295,7 +2310,7 @@ dta_yaml_export_filename <- function(dta, date = Sys.Date()) {
   }
   ttl <- field("title")
   base <- if (nzchar(ttl)) gsub("[^A-Za-z0-9]+", "_", ttl) else "DTA"
-  ver <- gsub("[^A-Za-z0-9]+", "", field("version"))
+  ver <- gsub("^_+|_+$", "", gsub("[^A-Za-z0-9]+", "_", field("version")))
   paste0(base, if (nzchar(ver)) paste0("_v", ver), "_", date, ".yaml")
 }
 

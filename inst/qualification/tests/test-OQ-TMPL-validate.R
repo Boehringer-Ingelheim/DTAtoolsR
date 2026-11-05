@@ -1,5 +1,5 @@
 # validate_template(): the codes it emits, and its strict/kinds/path arguments.
-# REQ-TMPL-001 .. REQ-TMPL-018 and REQ-TMPL-031.
+# REQ-TMPL-001 .. REQ-TMPL-018, REQ-TMPL-031, REQ-TMPL-033 and REQ-TMPL-034.
 #
 # Every fixture below lives under fixtures/tpl/ and is built to trigger
 # EXACTLY the one code its test names -- verified by running validate_template()
@@ -483,4 +483,41 @@ test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reporte
   legacy <- validate_template(tmpl_fixture("codes", "dataset_legacy_shape"))
   qa_step("pre-id shape (name: with no id:): dataset_id_missing is an error", "error", tmpl_severity(legacy, "dataset_id_missing"))
   qa_step("pre-id shape: its scalar fields are not dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
+})
+
+# ---- REQ-TMPL-034: column_spec_invalid ---------------------------------------
+
+test_that("OQ-TMPL-069 | a dataset template column that cannot be built is reported, alone and by name | REQ-TMPL-034", {
+  # C1 declares length 3 and the example ABCD; C2 is the same with ABC. The
+  # first contradicts itself, the second does not.
+  result <- validate_template(tmpl_fixture("codes", "column_spec_invalid"))
+  qa_step("exactly one row is reported", "column_spec_invalid", result$code)
+  qa_step("at severity error", "error", tmpl_severity(result, "column_spec_invalid"))
+  qa_step(
+    "naming the column that cannot be built and not the one that can",
+    c(c1 = TRUE, c2 = FALSE),
+    c(
+      c1 = grepl("column 'C1'", tmpl_message(result, "column_spec_invalid"), fixed = TRUE),
+      c2 = grepl("C2", tmpl_message(result, "column_spec_invalid"), fixed = TRUE)
+    )
+  )
+
+  # The control: a dataset template whose columns all build is not reported.
+  qa_step("a dataset template with buildable columns is not reported", 0L, nrow(validate_template(tmpl_fixture("base"))))
+
+  err <- tryCatch(validate_template(tmpl_fixture("codes", "column_spec_invalid"), strict = TRUE), error = function(e) e)
+  qa_check("under strict = TRUE the finding aborts with the package's own error", inherits(err, "rlang_error"))
+  qa_check(
+    "and the abort names the code and the error count",
+    is.character(tryCatch(conditionMessage(err), error = function(e) NULL)) &&
+      grepl("Template validation found 1 error", conditionMessage(err), fixed = TRUE) &&
+      grepl("[column_spec_invalid]", conditionMessage(err), fixed = TRUE)
+  )
+})
+
+test_that("OQ-TMPL-070 | an inline column that cannot be built is an instantiate_failed, not a column_spec_invalid | REQ-TMPL-034", {
+  result <- validate_template(tmpl_fixture("codes", "column_spec_invalid_inline"))
+  qa_step("the build failure is the one row reported", "instantiate_failed", result$code)
+  qa_step("at severity error", "error", tmpl_severity(result, "instantiate_failed"))
+  qa_step("and the dataset-template code is absent", NA_character_, tmpl_severity(result, "column_spec_invalid"))
 })

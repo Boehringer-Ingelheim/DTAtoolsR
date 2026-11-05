@@ -235,6 +235,10 @@ directly to a column entry in a YAML specification.
 > **Note:** `values` and `pattern` are mutually exclusive — a column either has
 > a closed value list or a regex pattern, not both.
 
+Values must fit the declared `format` (for example, `SAS $10.` allows at most
+ten characters), but `BEST` formats are not enforced because they adapt their
+width to the value.
+
 `type` is not documentation: it decides how the column is *read*. A column
 declared `SAS Num` or `SAS Int` is stored as a number, so `"007"` in such a
 column becomes `7`; a column declared `SAS Char` is pinned to text, so `"007"`

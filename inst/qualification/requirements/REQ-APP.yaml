@@ -374,3 +374,38 @@ requirements:
     category: integrity
     covers: [run_dta_app, validate_template]
     source: inst/shiny/dta_app/R/template_core.R; inst/shiny/dta_app/app.R
+
+  - id: REQ-APP-026
+    text: >
+      Saving a column, removing a column, saving a rule or removing a rule
+      shall, for a dataset that has data bound, re-validate that data against
+      the edited specification and report the dataset as pass or fail, rather
+      than leaving it at pending. A dataset with no data bound shall stay
+      nodata and no validation shall run. Reordering columns shall not
+      re-validate. A column edit that DTAColumnSpec() refuses, because its
+      declared values cannot fit it, shall leave the document and the dataset's
+      status unchanged and report the error.
+    risk: high
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (recheck_dataset)
+    notes: >
+      Before the fix an edit reset the dataset to pending and waited for the
+      user to press check, so a dataset could read pending for data whose
+      verdict the new specification already decided. Only the columns and rules
+      editors are covered here; applying edited raw YAML re-validates by the
+      same mechanism and is exercised by the developer suite.
+
+  - id: REQ-APP-027
+    text: >
+      An IF or THEN condition row of a conditional (col_condition) rule removed
+      with the rule editor's own remove control shall be excluded from the rule
+      that results from Save, even when the row was filled in before it was
+      removed; only the rows still present shall be saved.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/app.R (cond_remove_/then_remove_ observers)
+    notes: >
+      Before this change the IF and THEN lists could grow but offered no way
+      to remove a row.

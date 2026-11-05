@@ -62,13 +62,21 @@ requirements:
   - id: REQ-VAL-005
     text: >
       A value whose JSON type does not match the declared type shall be
-      reported with the keyword "type", naming the row and the column. A
-      missing value in a column declared not nullable shall be reported the
-      same way.
+      reported with the keyword "type", naming the row and the column. In a
+      column declared Int of a table typed in R, a number that is not whole, or
+      whose magnitude exceeds 2^31-1 (2147483647), has no integer type and
+      shall be reported the same way. A missing value in a column declared not
+      nullable shall be reported the same way.
     risk: high
     category: functional
     covers: [check, messages]
     source: R/columnSpecChecks.R
+    notes: >
+      The integer-range clause concerns a table typed in R, for instance a
+      double column handed to validate_table(). A value read from a file into
+      a declared Int column never reaches this check as an out-of-range number:
+      the reader stores the column as R integer and reports such a cell as an
+      import error with the cell stored as NA (REQ-TYPE-009).
 
   - id: REQ-VAL-006
     text: >
@@ -106,10 +114,20 @@ requirements:
     text: >
       A value not matching a declared regular expression shall be reported with
       the keyword "pattern", and the expression shall be interpreted as PCRE.
+      The expression applies to numeric values as well as to text, and is
+      matched against the number's plain decimal text: an integer as written,
+      a non-integer at up to 15 significant digits, and never in scientific
+      notation, so 1000000000 is matched as "1000000000" and not as "1e+09".
     risk: high
     category: functional
     covers: [check, messages]
-    source: R/columnSpecChecks.R
+    source: R/columnSpecChecks.R (dta_check_column_spec, dta_numeric_text)
+    notes: >
+      A number is matched as the number it was typed to, not as the characters
+      the file held: 007 in a declared Int column is the number 7 and is
+      matched as "7". A code whose leading zeros matter must be declared
+      SAS Char. Before the fix a pattern declared on a numeric column was never
+      evaluated at all, so a delivery could break it without any report.
 
   - id: REQ-VAL-010
     text: >
@@ -142,7 +160,10 @@ requirements:
     text: >
       Every declared check shall report its own outcome as passed, failed,
       not_applicable or not_checked, under the labels presence, extra, format,
-      length, values and pattern.
+      length, values and pattern. The type check and the SAS format check
+      (keywords "type" and "format") are reported as separate rows under the
+      one label format, and the format row is not_applicable when no column
+      declares a format that constrains anything.
     risk: medium
     category: interface
     covers: [validation_errors]
@@ -351,3 +372,50 @@ requirements:
     notes: >
       The wording is shared with the HTML report, so a codelist violation reads
       "Must be one of: <values>." in both.
+
+  - id: REQ-VAL-031
+    text: >
+      A value in a column that declares a SAS format shall be reported with the
+      keyword "format" when it cannot be displayed in that format. For $w., a
+      string of more than w characters, counted in characters rather than
+      bytes. For w. and w.d, a number with more decimals than d, or whose
+      displayed width exceeds w, the width being its integer digits, a minus
+      sign if negative, and, when d is above zero, the decimal point with its d
+      digits; a number below one in magnitude whose width exceeds w by exactly
+      one, only for the leading zero, is displayed without that zero and fits.
+      A number with a fraction in a column that accepts integers only, in a
+      table typed in R, is reported as a type violation and not additionally as
+      a format violation; read from a file it is an import error (REQ-TYPE-009)
+      and is not reported as a format violation either.
+      For DATEw., TIMEw.d and DATETIMEw., a string that is not display text of
+      that format or is longer than w characters, ignoring spaces before and
+      after it: a date is a day from 01 to 31, an English three-letter month in
+      either case and an optional two- or four-digit year, with an optional
+      hyphen between day and month and between month and year; a time is hours
+      of one or more digits, a colon and minutes, with optional :second, and a
+      fraction of at most d digits only when d is above zero; a datetime is a
+      date, a colon and a time. The month names shall not depend on the system
+      language. The format BESTw. constrains nothing and shall never be
+      reported. A missing value shall not be reported as a format violation.
+      Where a $w. column also declares a length not exceeding w, an over-length
+      value shall be reported once, as maxLength, and not additionally as
+      format. The streaming and the in-memory engine shall report the same
+      violations.
+    risk: high
+    category: functional
+    covers: [check, messages, validation_errors]
+    source: R/columnSpecChecks.R (dta_check_column_spec, dta_sas_numeric_format_bad); R/DTAColumnSpec-class.R (as_json_schema)
+    notes: >
+      Before the fix a declared format was carried in the specification and
+      printed in the documentation but never checked: a twelve-character value
+      under $9., 1.2345 under 8.2 and a fraction under 10. all passed, and a
+      Date, Time or DateTime column with no pattern accepted any text. The
+      rendering of a number under w.d is the width SAS itself would reserve,
+      so 12345.67 fits 8.2 exactly and 123456.78 does not. Time and datetime
+      values are held as the display text the format produces; an ISO date
+      under DATE9. is therefore a violation. Hour, minute and second ranges
+      are not validated, only the shape; the day of the month is bounded to
+      01-31 but not checked against the month. SAS writes DATE11. as
+      15-AUG-2025 and right-aligns its text, hence the optional hyphens and the
+      ignored surrounding spaces. A TIME value is a duration, so 100:00:00 fits
+      TIME10.

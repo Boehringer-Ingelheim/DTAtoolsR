@@ -1,0 +1,10 @@
+kind: dta_dataset_template
+id: badcol
+version: "1.0"
+dataset:
+  id: ds1
+  type: tabular
+  files: {filename: one.tsv}
+  columns:
+    - {id: C1, type: SAS Char, length: 3, examples: [ABCD]}
+    - {id: C2, type: SAS Char, length: 3, examples: [ABC]}

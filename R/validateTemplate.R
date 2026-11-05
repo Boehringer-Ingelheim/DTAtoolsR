@@ -1037,6 +1037,32 @@
   if (!is.null(identity)) {
     add("error", identity$code, identity$message)
   }
+  # A dataset template is never instantiated on its own, so a column the
+  # DTAColumnSpec constructor rejects (an example longer than its length, a
+  # value that does not fit the type, an invalid pattern) would only surface
+  # once some creation template imports it. Build each column here instead.
+  # Keys the constructor does not take (values_from, ...) are dropped; they are
+  # resolved elsewhere.
+  #
+  # The columns are read with plain yaml::read_yaml(), as the app's own
+  # read_dataset_template() does: `def` was parsed with the version-preserving
+  # handlers that turn every integer into text, so `length: 5` would arrive as
+  # "5" and be rejected for a reason the app never sees.
+  plain <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
+  for (col in plain[["dataset"]][["columns"]] %||% list()) {
+    if (!is.list(col)) next
+    col_id <- as.character(col[["id"]] %||% "<unnamed>")
+    err <- tryCatch(
+      {
+        do.call(DTAColumnSpec, col[intersect(names(col), names(formals(DTAColumnSpec)))])
+        NULL
+      },
+      error = function(e) e
+    )
+    if (!is.null(err)) {
+      add("error", "column_spec_invalid", sprintf("column '%s': %s", col_id, conditionMessage(err)))
+    }
+  }
   rows <- c(rows, .dta_template_check_bindings(path, id, version, ds_body, index_df))
   opts <- def[["options"]] %||% list()
   if (is.list(opts)) {
@@ -1346,7 +1372,9 @@
 #' `parse_failed`, `version_unquoted`, `target_machine_owned`,
 #' `vocab_slot_invalid`, `instantiate_failed`, `values_from_pattern`,
 #' `values_from_invalid`, `values_from_terms_invalid`, `dataset_missing`,
-#' `dataset_id_missing`, `dataset_field_invalid`, `vocabulary_invalid`,
+#' `dataset_id_missing`, `dataset_field_invalid`, `column_spec_invalid` (a
+#' column of a dataset template that `DTAColumnSpec()` rejects, such as an
+#' example longer than its declared length), `vocabulary_invalid`,
 #' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`.
 #' Warnings: `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,

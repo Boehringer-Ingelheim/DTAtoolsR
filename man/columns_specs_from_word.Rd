@@ -16,13 +16,12 @@ columns_specs_from_word(
 
 \item{table_position}{Integer. Index of the table to extract.}
 
-\item{colnames}{Vector. Names assigned, in order, to the table's columns.
-The default is \code{c("id", "label", "type", "length", "format",
-  "nullable", "description")}: id (Variable Name), label (Variable Label),
-type (Type), length (Length), format (Format), nullable (Nullable; "Yes"
-or "yes" means nullable) and description (Description). All seven are
-used, so the table needs seven columns in that order unless
-\code{colnames} says otherwise.
+\item{colnames}{Character vector naming the table's columns, in order. When
+left at its default and the table's header row is the one
+\code{\link[=export_specs_table]{export_specs_table()}} writes (in either of its two layouts), columns are
+matched by their header instead, so the six-column layout without a
+Length column is read correctly too. Recognised names: \code{id}, \code{label},
+\code{type}, \code{length}, \code{format}, \code{nullable}, \code{description}; \code{id} is required.
 
 A description cell may carry markers on their own lines:
 \code{#@values: a;b;c} gives the permitted values (separated by
@@ -36,9 +35,28 @@ description.}
 A DTAColumnSpecCollection object.
 }
 \description{
-Parses a DTA Word document to extract column specifications and create a DTAColumnSpecCollection object.
+Parses a table in a Word document into a DTAColumnSpecCollection. The table
+layout is the one \code{\link[=export_specs_table]{export_specs_table()}} writes, so a specification exported
+to Word, reviewed there, and read back arrives at the same columns.
+
+A column's permitted values and pattern travel in its Description cell, on
+lines of their own: \verb{#@values: "A"; "B"} and \verb{#@pattern: ^[A-Z]\{3\}$}.
 }
 \examples{
-# No runnable example yet.
-# Word import examples are intentionally skipped until the API is reworked.
+specs <- DTAColumnSpecCollection(columns = list(
+  ARM = DTAColumnSpec(
+    id = "ARM", label = "Arm", type = "SAS Char", length = 8,
+    nullable = FALSE, values = c("Placebo", "Active")
+  ),
+  VISIT = DTAColumnSpec(
+    id = "VISIT", label = "Visit", type = "SAS Char", length = 20,
+    nullable = TRUE, pattern = "^(Screening|Baseline|Week [0-9]+)$"
+  )
+))
+docx <- tempfile(fileext = ".docx")
+export_specs_table(specs, file = docx, quiet = TRUE)
+back <- columns_specs_from_word(docx)
+back@columns$ARM@values
+back@columns$VISIT@pattern
+unlink(docx)
 }

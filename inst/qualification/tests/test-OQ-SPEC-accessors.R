@@ -74,6 +74,19 @@ test_that("OQ-SPEC-041 | the column accessors report a specification's columns |
     "and from the dataset directly",
     first, colspec(ds, first)@id
   )
+  qa_step(
+    "a column is retrievable by its position too",
+    first, colspec(collection, 1)@id
+  )
+
+  # An absent column is a condition, never NULL: a NULL here was dereferenced
+  # with `@` by the caller, far from the cause.
+  not_found <- function(id) {
+    inherits(tryCatch(colspec(collection, id), error = function(e) e), "dta_colspec_not_found")
+  }
+  qa_check("an identifier the specification does not contain raises a condition", not_found("NOT_A_COLUMN"))
+  qa_check("and so does a position out of range", not_found(length(from_dataset) + 1))
+  qa_check("and so does a fractional position", not_found(1.5))
 })
 
 test_that("OQ-SPEC-042 | a loaded table is retrievable by name and by position | REQ-SPEC-020", {

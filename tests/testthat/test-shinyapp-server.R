@@ -548,10 +548,20 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
     cols_after <- names(DTAtools::columns(DTAtools::datasets(rv$dta, "clinical_data")))
     expect_setequal(cols_after, c(cols_before, "ZZTEST"))
 
-    # Editing the spec must invalidate the result computed against the old one,
-    # otherwise the UI keeps showing a green "pass" for a spec that was never
-    # validated.
-    expect_equal(rv$status, c(clinical_data = "pending"))
+    # Editing the spec must not leave the result computed against the old one
+    # standing. The dataset has data loaded, so the edit re-runs the check at
+    # once instead of parking the dataset at "pending". It fails because
+    # clinical_data.csv has no ZZTEST column: a declared column is a required
+    # property of every row, and `nullable = TRUE` only permits null values in
+    # a column that is present, so each of the 500 rows reports "required".
+    expect_equal(rv$status, c(clinical_data = "fail"))
+    msgs <- DTAtools::messages(DTAtools::datasets(rv$dta, "clinical_data"), as_tibble = FALSE)
+    msgs <- msgs[msgs$source == "columnspec", , drop = FALSE]
+    expect_gt(nrow(msgs), 0)
+    expect_setequal(unique(msgs$keyword), "required")
+    # A missing column has no value to attach the message to, so the column
+    # field is NA and the column is named in the message instead.
+    expect_true(all(grepl("ZZTEST", msgs$message, fixed = TRUE)))
     # ... and the raw YAML view must reflect the edit.
     expect_match(rv$yaml_text, "ZZTEST", fixed = TRUE)
   })
@@ -623,6 +633,133 @@ test_that("the vocabulary picker opens on the vocabulary that names the column",
     # The column's own value is offered too, ticked, so it survives the next apply.
     expect_match(terms, 'value="OWN VALUE" checked', fixed = TRUE)
     expect_match(terms, "Not in this vocabulary", fixed = TRUE)
+  })
+})
+
+test_that("the vocabulary button says so when a vocabulary declares the column", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
+    file.path(dir, "aaa.dta-vocabulary.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: gf_test", 'version: "1.0"', "label: Genomic tests",
+      "columns:", "  - GFTESTCD", "  - id: GFTEST", "    field: label",
+      "terms:",
+      "  - code: TRNSCPTN", "    label: Transcription",
+      "  - code: METHYL", "    label: Methylation"
+    ),
+    file.path(dir, "gf_test.dta-vocabulary.yaml")
+  )
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    expect_equal(rv$col_view, "form")
+
+    # The button points at the hint's container, which always exists, so the
+    # cue is not colour alone and a screen reader reads it with the button.
+    body <- ui_text(output$col_modal_body)
+    expect_match(body, 'aria-describedby="col_vocab_hint"', fixed = TRUE)
+    expect_match(body, 'id="col_vocab_hint"', fixed = TRUE)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Typing the id of a declared column lights it up once the typing pauses.
+    session$setInputs(col_id = "gftest", col_values = "")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$elapse(600)
+    hint <- ui_text(output$col_vocab_hint)
+    expect_match(hint, "Genomic tests", fixed = TRUE)
+    expect_match(hint, "(gf_test@1.0)", fixed = TRUE)
+
+    # The picker opens on the vocabulary the hint named.
+    session$setInputs(col_vocab_open = 1)
+    expect_equal(rv$col_vocab_sug$ref, "gf_test@1.0")
+    expect_equal(rv$col_vocab_sug$reason, "declared")
+    # ... and the hint is back, from the prefill, when the form is.
+    session$setInputs(col_vocab_cancel = 1)
+    expect_equal(rv$col_view, "form")
+    expect_match(ui_text(output$col_vocab_hint), "gf_test@1.0", fixed = TRUE)
+
+    # Another column: no hint.
+    session$setInputs(col_id = "ZZZ")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Values that fit a vocabulary are a reason to PRESELECT it, not to
+    # recommend it: nothing declares this column.
+    session$setInputs(col_id = "OTHER", col_values = "X\nY")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$setInputs(col_vocab_open = 2)
+    expect_equal(rv$col_vocab_sug$ref, "aaa@1.0")
+    expect_equal(rv$col_vocab_sug$reason, "values")
+    session$setInputs(col_vocab_cancel = 2)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # A declared column whose values have drifted from the vocabulary still
+    # has a vocabulary made for it.
+    session$setInputs(col_id = "GFTESTCD", col_values = "NOPE")
+    session$elapse(600)
+    expect_match(ui_text(output$col_vocab_hint), "gf_test@1.0", fixed = TRUE)
+
+    # The hint names what the picker will open on, so a declared column whose
+    # values already belong to ANOTHER vocabulary gets none: the picker opens on
+    # that one, and a hint naming a different vocabulary would mislead.
+    session$setInputs(col_id = "GFTESTCD", col_values = "X\nY")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$setInputs(col_vocab_open = 3)
+    expect_equal(rv$col_vocab_sug$ref, "aaa@1.0")
+    session$setInputs(col_vocab_cancel = 3)
+
+    # Another column's hint must not follow into "Add column".
+    session$setInputs(col_id = "GFTESTCD", col_values = "NOPE")
+    session$elapse(600)
+    session$setInputs(col_back = 1)
+    session$setInputs(col_add = 2)
+    expect_equal(rv$col_view, "form")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Typing and leaving before the pause ends: nothing to show, nothing breaks.
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$setInputs(col_back = 2)
+    session$elapse(600)
+    expect_equal(rv$col_view, "list")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+  })
+})
+
+test_that("a library without vocabularies leaves the vocabulary button plain", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
   })
 })
 
@@ -762,6 +899,113 @@ test_that("removing a group_condition row keeps it out of the saved rule instead
     expect_equal(names(new_rule@conditions), "c1_failed")
     expect_equal(length(new_rule@constraints), 1)
     expect_equal(new_rule@constraints[[1]]$id, "keep_constraint")
+  })
+})
+
+test_that("removing an IF or THEN row keeps it out of the saved conditional rule", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(
+      rule_id = "cond_row_removed",
+      rule_desc = "IF row 1 and THEN row 2 removed before save"
+    )
+
+    # Rows are keyed by column, so every row uses a different one.
+    session$setInputs(
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F",
+      then_col_1 = "AGE", then_op_1 = "equals", then_val_1 = "12"
+    )
+    session$setInputs(cond_add = 1, then_add = 1)
+    session$setInputs(
+      cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED",
+      then_col_2 = "HEIGHT", then_op_2 = "equals", then_val_2 = "170"
+    )
+
+    session$setInputs(cond_remove_1 = 1)
+    session$setInputs(then_remove_2 = 1)
+
+    session$setInputs(rule_save = 1)
+
+    expect_null(rv$rule_msg)
+    expect_equal(rv$rule_view, "list")
+
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    expect_equal(new_rule@id, "cond_row_removed")
+    expect_equal(names(new_rule@condition), "STATUS")
+    expect_equal(names(new_rule@then), "AGE")
+  })
+})
+
+test_that("removing the only IF row empties it instead of removing it", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+
+    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F")
+
+    # The only visible row is cleared in the browser (updateSelectInput, which
+    # testServer does not apply), never recorded as removed.
+    session$setInputs(cond_remove_1 = 1)
+    expect_identical(rv$cond_removed, integer(0))
+
+    # With a second row present, the same button removes row 1 for real.
+    session$setInputs(cond_add = 1)
+    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED")
+    session$setInputs(cond_remove_1 = 2)
+    expect_identical(rv$cond_removed, 1L)
+  })
+})
+
+test_that("a row index removed in one rule form is usable again in the next", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+
+    # Rule A: add IF row 2, fill it, remove it, then leave the form unsaved.
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F")
+    session$setInputs(cond_add = 1)
+    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED")
+    session$setInputs(cond_remove_2 = 1)
+    expect_identical(rv$cond_removed, 2L)
+    session$setInputs(rule_back = 1)
+
+    # Rule B: row 2 exists again and must be saved, not skipped as removed.
+    session$setInputs(rule_add = 2)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(rule_id = "cond_row_reused", rule_desc = "Index 2 reused")
+    session$setInputs(cond_add = 2)
+    session$setInputs(
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F",
+      cond_col_2 = "AGE", cond_op_2 = "equals", cond_val_2 = "12",
+      then_col_1 = "STATUS", then_op_1 = "equals", then_val_1 = "FAILED"
+    )
+    session$setInputs(rule_save = 1)
+
+    expect_null(rv$rule_msg)
+    rules <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    new_rule <- rules[[length(rules)]]
+    expect_equal(new_rule@id, "cond_row_reused")
+    expect_setequal(names(new_rule@condition), c("GENDER", "AGE"))
   })
 })
 

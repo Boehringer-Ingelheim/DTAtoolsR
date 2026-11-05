@@ -259,6 +259,94 @@
 
 
 #' @keywords internal
+#' @title What a Validation Report Was Run Over
+#' @description
+#' One row per input a checked DTA's verdict rests on, so a filed report can be
+#' tied back to the data it describes: for a tabular dataset, every loaded
+#' table -- with the delivered file(s) a streamed Arrow dataset scans and the
+#' content-hash stamp an in-memory table carries -- and for a file dataset,
+#' every delivered path. Sizes and modification times are read from the file
+#' system; nothing is hashed here, because a delivery can be tens of gigabytes
+#' and the report must not re-read it.
+#' @param x A DTA object.
+#' @return A data frame with columns `Dataset`, `Table`, `Kind`, `Source file`,
+#'   `Size (bytes)`, `Modified (UTC)` and `Content hash`; zero rows when no
+#'   dataset has data attached.
+.report_inputs_df <- function(x) {
+  input_row <- function(dataset, table, kind, path = NA_character_, hash = NA_character_) {
+    size <- NA_character_
+    modified <- NA_character_
+    if (!is.na(path)) {
+      info <- suppressWarnings(file.info(path))
+      if (!is.na(info$size)) {
+        size <- format(info$size, scientific = FALSE, big.mark = "")
+        modified <- format(info$mtime, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+      } else {
+        size <- "file not found"
+      }
+    }
+    data.frame(
+      Dataset = dataset, Table = table, Kind = kind, `Source file` = path,
+      `Size (bytes)` = size, `Modified (UTC)` = modified, `Content hash` = hash,
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+  }
+
+  rows <- list()
+  for (ds in x@datasets) {
+    id <- ds@id
+    if (inherits(ds, "DTAtools::DTADataSetFile")) {
+      for (path in ds@file_paths) {
+        rows[[length(rows) + 1L]] <- input_row(id, NA_character_, "file", path)
+      }
+      next
+    }
+    tables <- tryCatch(ds@tables, error = function(e) list())
+    table_names <- names(tables) %||% rep("", length(tables))
+    for (k in seq_along(tables)) {
+      tbl <- tables[[k]]
+      # Every input is listed, named or not.
+      nm <- if (nzchar(table_names[[k]])) table_names[[k]] else paste0("table ", k)
+      if (inherits(tbl, "Dataset")) {
+        files <- dta_dataset_source_files(tbl)
+        if (length(files) == 0) files <- NA_character_
+        for (path in files) {
+          rows[[length(rows) + 1L]] <- input_row(id, nm, "streamed", path)
+        }
+      } else {
+        rows[[length(rows) + 1L]] <- input_row(
+          id, nm, "in memory",
+          hash = dta_table_hash_stamp(tbl) %||% NA_character_
+        )
+      }
+    }
+  }
+
+  if (length(rows) == 0) {
+    return(input_row("", "", "")[0, , drop = FALSE])
+  }
+  do.call(rbind, rows)
+}
+
+#' @keywords internal
+#' @title Build the Inputs Section of a Validation Report
+#' @param x A DTA object.
+#' @return A character string of HTML.
+.report_inputs_html <- function(x) {
+  df <- .report_inputs_df(x)
+  body <- if (nrow(df) == 0) {
+    '<p class="report-inputs-empty">No data was attached to any dataset of this transfer.</p>'
+  } else {
+    .report_kv_table_html(df)
+  }
+  paste0(
+    '<section class="report-inputs">\n  <h2>Inputs</h2>\n  ',
+    body,
+    "\n</section>"
+  )
+}
+
+#' @keywords internal
 #' @title Build Messages Table HTML Section
 #' @description
 #' Renders the messages table with filter controls and support for "show more" toggles
@@ -674,6 +762,7 @@
     enum = paste0("Must be one of: ", spec_text_prose, "."),
     const = paste0("Must be exactly: ", spec_text, "."),
     pattern = paste0("Must match the pattern: ", spec_text),
+    format = paste0("Must fit the SAS format: ", spec_text, "."),
     fallback()
   )
 }

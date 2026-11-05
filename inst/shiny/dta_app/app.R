@@ -227,9 +227,13 @@ function DTA_vocabCount(el){
 function DTA_vocabFilter(input){
   var box = input.closest('.vocab-pick');
   if (!box) return;
-  var q = input.value.trim().toLowerCase(), shown = 0;
+  // Every word must occur somewhere in the row (code, label or description,
+  // in any order): the row's text has markup whitespace between those parts, so
+  // one contiguous phrase would miss 'T002 Term'.
+  var words = input.value.toLowerCase().split(/\\s+/).filter(Boolean), shown = 0;
   box.querySelectorAll('.checkbox').forEach(function(row){
-    var hit = !q || row.textContent.toLowerCase().indexOf(q) >= 0;
+    var text = row.textContent.toLowerCase();
+    var hit = words.every(function(w){ return text.indexOf(w) >= 0; });
     row.style.display = hit ? '' : 'none';
     if (hit) shown++;
   });
@@ -253,6 +257,20 @@ function DTA_vocabCheck(link, on){
 }
 document.addEventListener('change', function(e){
   if (e.target && e.target.closest && e.target.closest('.vocab-pick')) DTA_vocabCount(e.target);
+});
+// Put the cursor in the term filter when the picker's terms appear, so typing
+// starts at once. shiny:value fires BEFORE the new HTML is inserted, hence the
+// timeout. Only when a filter exists (more than 10 terms).
+if (window.jQuery) jQuery(document).on('shiny:value', function(e){
+  if (e.name !== 'col_vocab_terms') return;
+  setTimeout(function(){
+    var f = document.querySelector('.vocab-pick-filter');
+    // Not while the user is choosing the vocabulary: picking another one
+    // re-renders the terms and must not take the focus off that control.
+    var sel = document.getElementById('col_vocab_ref');
+    var box = sel && sel.closest ? sel.closest('.shiny-input-container') : null;
+    if (f && !(box && box.contains(document.activeElement))) f.focus();
+  }, 0);
 });
 "
 
@@ -563,6 +581,8 @@ server <- function(input, output, session) {
     rule_msg = NULL, # inline rule-editor result: NULL | list(ok, error)
     cond_n = 1L, # condition-builder row count (IF ...)
     then_n = 1L, # condition-builder row count (THEN ...)
+    cond_removed = integer(0), # indices of removed (not just cleared) IF rows
+    then_removed = integer(0), # indices of removed (not just cleared) THEN rows
     gcond_n = 1L, # grouped condition row count
     gconstr_n = 1L, # grouped constraint row count
     gcond_removed = integer(0), # indices of removed (not just cleared) group condition rows
@@ -994,6 +1014,7 @@ server <- function(input, output, session) {
   file_rm_registry <- new.env(parent = emptyenv()) # button id -> TRUE once observed
   gcond_rm_registry <- new.env(parent = emptyenv()) # grouped-condition remove observers
   gconstr_rm_registry <- new.env(parent = emptyenv()) # grouped-constraint remove observers
+  cond_rm_registry <- new.env(parent = emptyenv()) # IF/THEN condition remove observers
   file_id_counter <- 0L
   get_file_id <- function(dsname, hi, table) {
     key <- paste(dsname, hi, table, sep = "\u0001")
@@ -1629,9 +1650,14 @@ server <- function(input, output, session) {
     # re-insert, and every open re-renders them fresh from the inputs Shiny is
     # still holding. The tick covers an open while already "open" -- a close
     # whose report never arrived.
+    #
+    # The search box is the one input that must NOT come back. The server
+    # owns the search text (tmpl_search_text) so that an open starts it empty
+    # no matter what the browser last reported, and no close report is needed.
     tmpl_picker_open(TRUE)
+    tmpl_search_text("")
     tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
-    showModal(modalDialog(
+    dlg <- modalDialog(
       title = "Create new from template",
       # Static, so the dialog has its picker width (theme.R) from the first
       # frame instead of jumping once the output arrives.
@@ -1652,7 +1678,14 @@ server <- function(input, output, session) {
       ),
       size = "xl",
       easyClose = TRUE
-    ))
+    )
+    # Scrollable, like the options dialog, so it fills the window height and
+    # the list grows with it (theme.R) while the buttons stay in view.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-picker-dialog"
+      )$allTags()
+    )
   }
 
   # Bumped by "Refresh templates" (below) to force the picker outputs to
@@ -1671,6 +1704,25 @@ server <- function(input, output, session) {
   # click on the backdrop never reach the server any other way.
   tmpl_picker_open <- reactiveVal(FALSE)
   observeEvent(input$template_picker_closed, tmpl_picker_open(FALSE))
+
+  # What the picker filters by. input$template_search keeps its last value
+  # after the dialog closes, so it is only copied in while the box is typing;
+  # an open resets this to "" and the freshly rendered, empty box then
+  # reports "" itself. Priority: the Enter key sends the text just before it
+  # clicks "Use this template", and that click must see it.
+  tmpl_search_text <- reactiveVal("")
+  observeEvent(input$template_search, tmpl_search_text(input$template_search %||% ""),
+    ignoreNULL = FALSE, priority = 10
+  )
+
+  # The template "Back to templates" must land on: the one whose options were
+  # just open. With the search gone, an implied selection (search + Enter, no
+  # click) would otherwise fall back to the first row. Dropped as soon as the
+  # list reports a selection, and on every fresh open.
+  tmpl_back_id <- reactiveVal(NULL)
+  observeEvent(input$template_select_name, tmpl_back_id(NULL),
+    ignoreInit = TRUE, priority = 10
+  )
 
   # One row per distinct, non-abstract creation-template id (template_picker_
   # entries(), template_index.R), plus the family/depth/lineage/search columns
@@ -1695,7 +1747,7 @@ server <- function(input, output, session) {
   })
 
   template_picker_visible <- reactive({
-    template_picker_filter(template_picker_scoped(), input$template_search %||% "")
+    template_picker_filter(template_picker_scoped(), tmpl_search_text())
   })
 
   # The user's own choice for as long as it names a row that is still visible,
@@ -1708,7 +1760,7 @@ server <- function(input, output, session) {
     if (nrow(vis) == 0) {
       return(NULL)
     }
-    chosen <- as.character(input$template_select_name %||% "")
+    chosen <- as.character(tmpl_back_id() %||% input$template_select_name %||% "")
     if (nzchar(chosen) && chosen %in% vis$id) chosen else vis$id[[1]]
   })
 
@@ -1795,7 +1847,7 @@ server <- function(input, output, session) {
       diagnostics,
       div(
         class = "tmpl-search-row",
-        template_picker_search_ui(isolate(input$template_search %||% "")),
+        template_picker_search_ui(isolate(tmpl_search_text())),
         template_picker_source_ui(
           sort(unique(rows$source_name), method = "radix"),
           isolate(input$template_select_source),
@@ -1822,10 +1874,10 @@ server <- function(input, output, session) {
     }
     rows <- template_picker_rows()
     vis <- template_picker_visible()
-    tokens <- template_picker_tokens(input$template_search %||% "")
+    tokens <- template_picker_tokens(tmpl_search_text())
     template_picker_list_ui(
       vis,
-      selected = isolate(input$template_select_name),
+      selected = isolate(tmpl_back_id() %||% input$template_select_name),
       show_source = length(unique(rows$source_name)) > 1,
       # A search result is a flat list: the matches rarely form whole
       # families, and indenting a child under a parent that was filtered out
@@ -1875,6 +1927,7 @@ server <- function(input, output, session) {
       )
       return()
     }
+    tmpl_back_id(NULL)
     show_template_picker_modal()
   })
 
@@ -1916,12 +1969,15 @@ server <- function(input, output, session) {
   outputOptions(output, "template_picker_detail", suspendWhenHidden = FALSE)
 
   # Back to step 1. show_template_picker_modal() re-renders the picker's three
-  # outputs from the inputs Shiny is still holding, so the search text and the
-  # selection come back with them -- dismissing a modal removes controls from
-  # the DOM, it does not clear their input values.
+  # outputs from the inputs Shiny is still holding, so the selection comes
+  # back with them -- dismissing a modal removes controls from the DOM, it
+  # does not clear their input values. The search text is the exception: every
+  # open starts it empty (tmpl_search_text), so the selection is pinned to the
+  # template whose options were open instead.
   observeEvent(input$template_options_back, {
     removeModal()
     show_template_picker_modal()
+    tmpl_back_id(sub("@.*$", "", rv$template_ref %||% ""))
   })
 
   observeEvent(input$template_variant_back, {
@@ -2695,7 +2751,10 @@ server <- function(input, output, session) {
   })
 
   # --- validation ---------------------------------------------------------
-  run_check <- function(dataset = NULL) {
+  # `quiet = TRUE` is for re-checks that an edit triggers rather than the user
+  # pressing Validate: status and messages update as usual, but the "Validation
+  # complete" toast and the messages dock stay out of the way of the editor.
+  run_check <- function(dataset = NULL, quiet = FALSE) {
     req(rv$dta)
     names_ds <- dta_dataset_names(rv$dta)
     targets <- if (is.null(dataset)) names_ds else intersect(dataset, names_ds)
@@ -2762,6 +2821,9 @@ server <- function(input, output, session) {
       return()
     }
     autosave()
+    if (quiet) {
+      return(invisible())
+    }
 
     # ONE reconciled summary derived from the verified status map.
     st <- unlist(rv$status)
@@ -2821,6 +2883,15 @@ server <- function(input, output, session) {
       "pending"
     }
     rv$status <- st
+  }
+  # A spec edit that can change a verdict (column or rule saved/removed) also
+  # re-validates data that is already loaded, so the status never reads
+  # "pending" for data whose result the new spec already determines. Call it
+  # AFTER sync_yaml_text(): a failing check must not hold up the YAML refresh.
+  recheck_dataset <- function(ed) {
+    if (isTRUE(dta_dataset_readiness(isolate(rv$dta), ed)$has_data)) {
+      run_check(ed, quiet = TRUE)
+    }
   }
 
   # Re-key a dataset's upload records after its file handlers were added,
@@ -3712,8 +3783,16 @@ server <- function(input, output, session) {
               textAreaInput("col_values", "Allowed values (one per line)",
                 value = g("values"), width = "100%", rows = 3
               ),
-              actionButton("col_vocab_open", "Choose from vocabulary…",
-                class = "btn btn-sm btn-outline-secondary"
+              # The hint below it is what makes the button read as
+              # "suggested" (theme.R styles the button off it), and it is the
+              # visible, non-colour half of that cue.
+              div(
+                class = "col-vocab-open",
+                actionButton("col_vocab_open", "Choose from vocabulary…",
+                  class = "btn btn-sm btn-outline-secondary",
+                  `aria-describedby` = "col_vocab_hint"
+                ),
+                uiOutput("col_vocab_hint")
               )
             ),
             textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
@@ -3820,10 +3899,85 @@ server <- function(input, output, session) {
   }
 
   # The column's current permitted values, as the form holds them: one per line.
-  col_prefill_values <- function() {
-    v <- trimws(strsplit(isolate(rv$col_prefill)$values %||% "", "\n")[[1]])
+  value_lines <- function(x) {
+    v <- trimws(strsplit(x %||% "", "\n")[[1]])
     v[nzchar(v)]
   }
+  col_prefill_values <- function() value_lines(isolate(rv$col_prefill)$values)
+
+  # --- column editor: say when a vocabulary is made for this column ---
+  #
+  # Only a DECLARED relation counts (the vocabulary's `columns:` names the
+  # column), drifted values included: the picker's other reason, "every value
+  # fits", also fires for any column already built from a vocabulary and for
+  # short code sets like Y/N, where it would be a lasting claim with nothing
+  # behind it. It is one vocabulary_suggestion() call, so the hint and the
+  # picker cannot name different vocabularies.
+  #
+  # Note: this resolves every vocabulary per call (see vocabulary_suggestion()).
+  # Memoising the resolver would have to be tied to the index BUILD, not to an
+  # equal index, or "Refresh templates" would stop re-reading edited files.
+  col_vocab_hint_for <- function(id, values) {
+    if (!nzchar(trimws(id))) {
+      return(NULL)
+    }
+    tryCatch(
+      {
+        idx <- dta_template_index_cached()
+        vocabs <- list_template_index_entries(idx, kind = "dta_vocabulary")
+        if (NROW(vocabs) == 0) {
+          return(NULL)
+        }
+        refs <- paste0(vocabs$id, "@", vocabs$version)
+        sug <- vocabulary_suggestion(id, values, refs, vocabulary_resolver(idx))
+        if (!identical(sug$reason, "declared")) {
+          return(NULL)
+        }
+        list(ref = sug$ref, label = as.character(vocabs$label[[match(sug$ref, refs)]]))
+      },
+      error = function(e) NULL
+    )
+  }
+
+  col_vocab_hint_val <- reactiveVal(NULL)
+
+  # Whenever the editor changes view or loads a column: from the prefill, which
+  # is what the form is about to show.
+  observeEvent(rv$col_token, {
+    col_vocab_hint_val(
+      if (identical(rv$col_view, "form") && editing()) {
+        pf <- rv$col_prefill %||% list()
+        col_vocab_hint_for(as.character(pf$id %||% ""), col_prefill_values())
+      }
+    )
+  })
+
+  # While the form is open: from what is typed. Created once, here, not per
+  # modal; and not while another view shows, where input$col_id still holds the
+  # removed form's last value.
+  col_form_d <- debounce(reactive(list(input$col_id, input$col_values)), 500)
+  observeEvent(col_form_d(),
+    {
+      req(identical(rv$col_view, "form"), editing())
+      col_vocab_hint_val(col_vocab_hint_for(input$col_id %||% "", value_lines(input$col_values)))
+    },
+    ignoreInit = TRUE
+  )
+
+  # No id on the paragraph: the output's own container carries col_vocab_hint,
+  # and the button's aria-describedby points at it. The label comes from a
+  # template author, so it goes through htmltools' escaping like any text.
+  output$col_vocab_hint <- renderUI({
+    rv$col_token
+    h <- col_vocab_hint_val()
+    if (is.null(h)) {
+      return(NULL)
+    }
+    p(
+      class = "msg-hint vocab-hint",
+      "Suggested vocabulary for this column: ", tags$strong(h$label), paste0(" (", h$ref, ")")
+    )
+  })
 
   observeEvent(input$col_vocab_open, {
     req(editing())
@@ -3990,6 +4144,7 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification(sprintf("Removed column \u201c%s\u201d.", ids[[idx]]), type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$col_up_click, {
@@ -4073,6 +4228,7 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification("Column saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ============================= Edit rules ===============================
@@ -4085,6 +4241,7 @@ server <- function(input, output, session) {
     oid <- paste0(prefix, "_op_", i)
     vid <- paste0(prefix, "_val_", i)
     div(
+      id = paste0(prefix, "_row_", i),
       class = "cond-row",
       selectInput(cid, if (i == 1) "Column" else NULL,
         choices = c("(select)" = "", cols),
@@ -4097,6 +4254,13 @@ server <- function(input, output, session) {
       textInput(vid, if (i == 1) "Value" else NULL,
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
+      ),
+      actionButton(
+        paste0(prefix, "_remove_", i),
+        if (i == 1) "Remove" else "×",
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4168,8 +4332,10 @@ server <- function(input, output, session) {
     txt
   }
   collect_cond <- function(prefix, n) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
     out <- list()
     for (i in seq_len(max(1L, n))) {
+      if (i %in% removed) next
       col <- trimws(input[[paste0(prefix, "_col_", i)]] %||% "")
       if (!nzchar(col)) next
       op <- input[[paste0(prefix, "_op_", i)]] %||% "equals"
@@ -4189,6 +4355,34 @@ server <- function(input, output, session) {
       out[[col]] <- inner
     }
     out
+  }
+  visible_cond_rows <- function(prefix) {
+    removed <- isolate(rv[[paste0(prefix, "_removed")]])
+    n <- isolate(rv[[paste0(prefix, "_n")]])
+    Filter(function(i) {
+      !(i %in% removed) && !is.null(input[[paste0(prefix, "_op_", i)]])
+    }, seq_len(max(1L, n)))
+  }
+  ensure_cond_remove_observer <- function(prefix, i) {
+    bid <- paste0(prefix, "_remove_", i)
+    if (isTRUE(cond_rm_registry[[bid]])) {
+      return(invisible(NULL))
+    }
+    cond_rm_registry[[bid]] <- TRUE
+    observeEvent(input[[bid]],
+      {
+        if (length(visible_cond_rows(prefix)) <= 1) {
+          updateSelectInput(session, paste0(prefix, "_col_", i), selected = "")
+          updateSelectInput(session, paste0(prefix, "_op_", i), selected = "equals")
+          updateTextInput(session, paste0(prefix, "_val_", i), value = "")
+        } else {
+          removeUI(selector = paste0("#", prefix, "_row_", i))
+          key <- paste0(prefix, "_removed")
+          rv[[key]] <- c(isolate(rv[[key]]), i)
+        }
+      },
+      ignoreInit = TRUE
+    )
   }
 
   one_group_cond_row <- function(i, cols, pf = list(name = "", col = "", op = "equals", val = "")) {
@@ -4220,7 +4414,9 @@ server <- function(input, output, session) {
       actionButton(
         bid,
         if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4337,7 +4533,9 @@ server <- function(input, output, session) {
       actionButton(
         bid,
         if (i == 1) "Remove" else "×",
-        class = "btn btn-sm btn-outline-danger"
+        class = "btn btn-sm btn-outline-danger",
+        title = "Remove this row",
+        `aria-label` = "Remove this row"
       )
     )
   }
@@ -4545,6 +4743,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     # A fresh editor starts unfiltered (see edit_cols).
@@ -4796,6 +4996,8 @@ server <- function(input, output, session) {
     rv$then_n <- 1L
     rv$gcond_n <- 1L
     rv$gconstr_n <- 1L
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
@@ -4826,6 +5028,8 @@ server <- function(input, output, session) {
     rv$then_n <- max(1L, length(cond_to_rows(f$then)))
     rv$gcond_n <- max(1L, length(flatten_group_conditions(f$conditions)))
     rv$gconstr_n <- max(1L, length(flatten_group_constraints(f$constraints)))
+    rv$cond_removed <- integer(0)
+    rv$then_removed <- integer(0)
     rv$gcond_removed <- integer(0)
     rv$gconstr_removed <- integer(0)
     rv$rule_view <- "form"
@@ -4850,6 +5054,7 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule removed.", type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$rule_up_click, {
@@ -4913,6 +5118,11 @@ server <- function(input, output, session) {
       where = "beforeEnd",
       ui = one_cond_row("then", isolate(rv$then_n), cols)
     )
+  })
+  observe({
+    req(identical(rv$rule_view, "form"))
+    for (i in seq_len(max(1L, rv$cond_n))) ensure_cond_remove_observer("cond", i)
+    for (i in seq_len(max(1L, rv$then_n))) ensure_cond_remove_observer("then", i)
   })
 
   observeEvent(input$gcond_add, {
@@ -5011,6 +5221,8 @@ server <- function(input, output, session) {
       rv$then_n <- 1L
       rv$gcond_n <- 1L
       rv$gconstr_n <- 1L
+      rv$cond_removed <- integer(0)
+      rv$then_removed <- integer(0)
       rv$gcond_removed <- integer(0)
       rv$gconstr_removed <- integer(0)
       rv$rule_msg <- NULL
@@ -5121,6 +5333,7 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ======================= Edit dataset metadata ==========================
@@ -5663,6 +5876,7 @@ server <- function(input, output, session) {
         r[["columnspec_params.pattern"]],
         r[["columnspec_columnspec"]]
       )),
+      format = paste0("fit SAS format ", .first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
@@ -6966,6 +7180,7 @@ server <- function(input, output, session) {
     old_names <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
 
     new_uploads <- list()
+    recheck <- character(0) # datasets whose data survived a changed spec
     new_status <- stats::setNames(rep("pending", length(new_names)), new_names)
     for (nm in new_names) {
       if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
@@ -6995,6 +7210,7 @@ server <- function(input, output, session) {
       )
       if (!isTRUE(tr$ok)) next
       new_dta <- tr$value
+      if (!specs_same) recheck <- c(recheck, nm)
 
       # Upload records are keyed by handler POSITION, and a re-parsed document
       # may have reordered or replaced entries as easily as appended one. Match
@@ -7081,6 +7297,8 @@ server <- function(input, output, session) {
       },
       type = "message"
     )
+    # Data kept under a changed spec is re-validated against it, once.
+    if (length(recheck) > 0) run_check(recheck)
   })
 
   # --- export -------------------------------------------------------------
