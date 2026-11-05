@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The Shiny app's "Export DTA YAML" file name keeps the dots in the version
+  (`..._v1.2.0_<date>.yaml`) instead of turning them into underscores.
 - A DTA created from a template no longer records the option answers
   (`selections:`, `vocabulary_selections:`) under `metadata.template`; they
   already appear as the field values they set. Rebasing onto a newer template
