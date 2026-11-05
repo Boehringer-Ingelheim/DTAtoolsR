@@ -13,8 +13,9 @@ dta_coerce_column(values, target)
 }
 \value{
 \code{NULL} when the column is left untouched, otherwise a list with the
-converted \code{values}, the integer indices of the \code{offending} values, and
-\code{source} -- the original input vector, from which the raw text of row \code{i}
+converted \code{values}, the integer indices of the \code{offending} values, a
+parallel \code{reason} vector (\code{"not_convertible"}, \code{"not_whole"} or
+\code{"out_of_range"}), and \code{source} -- the original input vector, from which the raw text of row \code{i}
 is \code{as.character(source[i])}, i.e. \code{\link[=dta_numeric_raw]{dta_numeric_raw()}}.
 }
 \description{
@@ -29,11 +30,11 @@ A column that is already numeric is left alone: there is nothing to parse, so
 no value can fail to parse. This is also what stops the import axis from
 inventing errors on a clean file.
 
-An \code{Int} target is narrowed to R \code{integer} only when every present value is
-whole, finite and within the integer range (\code{.Machine$integer.max}).
-Rounding a fractional value into an integer column would silently discard the
-fraction \emph{and} hide the \code{type: integer} column spec error that exists to report
-it, so a fractional value stays a double and is left to the column spec axis.
-The same holds for a value too large for an \code{integer}.
+An \code{Int} target is always stored as R \code{integer}: the declaration decides the
+storage, never the values in hand, so the same column types identically
+whether it is converted whole or batch by batch. A value that cannot be
+stored as declared -- fractional, non-finite, or outside the int32 range --
+becomes \code{NA} and is an import error (reason \code{"not_whole"} or
+\code{"out_of_range"}), with its raw text kept.
 }
 \keyword{internal}

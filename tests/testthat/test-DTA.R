@@ -876,3 +876,15 @@ test_that("print(DTA) survives braces in a dataset id", {
 
   expect_match(out, "Datasets (1): a{b}", fixed = TRUE)
 })
+
+test_that("create_example_DTA() accepts only the examples that exist", {
+  # `switch(index, `1` = ..., `2` = {}, ...)` selects by POSITION when index is
+  # numeric, so create_example_DTA(2) hit the empty `2` branch and silently
+  # returned NULL. Index 3 or more fell off the end of the switch and also
+  # returned NULL, because the abort was the last alternative.
+  expect_s3_class(create_example_DTA(1), "DTAtools::DTA")
+
+  for (bad in list(2, 3, 0, -1)) {
+    expect_error(create_example_DTA(bad), "No example found", class = "rlang_error")
+  }
+})

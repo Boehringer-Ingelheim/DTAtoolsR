@@ -231,11 +231,14 @@ test_that("OQ-VAL-026 | a specification with no columns is unspecified, not clea
   qa_step("the status says the table was not specified", "unspecified", status$status)
   qa_step("and the verdict is unknown rather than true", NA, status$ok)
 
-  # DEV-005: results() copes with such a dataset and messages() does not.
-  qa_known_deviation(
-    "DEV-005",
-    inherits(tryCatch(messages(ds), error = function(e) e), "condition") &&
-      !inherits(tryCatch(results(ds), error = function(e) e), "condition")
+  # A table with nothing to check has nothing to report: zero rows in the
+  # documented ten-column frame (REQ-VAL-023), not an abort.
+  msgs <- messages(ds, as_tibble = FALSE)
+  qa_step("messages() reports no rows for a table that had nothing to check", 0L, nrow(msgs))
+  qa_step(
+    "and still has the ten documented columns",
+    c("id", "dataset", "target", "severity", "source", "rule_id", "row", "column", "keyword", "message"),
+    names(msgs)
   )
 })
 

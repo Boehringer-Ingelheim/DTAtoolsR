@@ -160,3 +160,22 @@ test_that("every non-base package the app calls is declared or guarded", {
 
   expect_equal(unguarded, character(0))
 })
+
+test_that("run_dta_app() names shinyjs when it is the missing package", {
+  # app.R attaches shinyjs unconditionally (library(shinyjs)), so a machine
+  # without it must be turned away up front with an install hint, not handed a
+  # stack trace from inside runApp(). The guard used to list only shiny, bslib
+  # and DT.
+  local_mocked_bindings(
+    requireNamespace = function(package, ..., quietly = FALSE) !identical(package, "shinyjs"),
+    .package = "base"
+  )
+  launched <- FALSE
+  local_mocked_bindings(
+    runApp = function(...) launched <<- TRUE,
+    .package = "shiny"
+  )
+
+  expect_error(run_dta_app(launch.browser = FALSE), "shinyjs", fixed = TRUE)
+  expect_false(launched)
+})

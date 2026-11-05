@@ -684,3 +684,66 @@ test_that("as.list(DTAMetaData) keeps a deliberately blank authorized_for_correc
   # An empty receiver IS the unset state for that property, so it stays out.
   expect_false("receiver" %in% names(as.list(blank)))
 })
+
+# DEV-010: an import issue on a metadata date must survive a write and a read.
+.metadata_yaml_round_trip <- function(md) {
+  path <- tempfile(fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+  yaml::write_yaml(as.list(md), path)
+  do.call(DTAMetaData, yaml::read_yaml(path))
+}
+
+test_that("a trailing_residue transmission date keeps its issue across a round trip", {
+  md <- DTAMetaData(
+    title = "t",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  back <- .metadata_yaml_round_trip(md)
+
+  issues <- metadata_import_errors(back)
+  expect_equal(nrow(issues), 1L)
+  expect_identical(issues$reason, "trailing_residue")
+  expect_identical(issues$column, "transmission$date_last_transfer")
+  expect_identical(issues$raw, "2026-12-31 at the earliest")
+  expect_identical(back@transmission$date_last_transfer, as.Date("2026-12-31"))
+})
+
+test_that("a not_convertible top-level date keeps its issue across a round trip", {
+  md <- DTAMetaData(title = "t", date = "after approval")
+  back <- .metadata_yaml_round_trip(md)
+
+  expect_true(is.na(back@date))
+  issues <- metadata_import_errors(back)
+  expect_equal(nrow(issues), 1L)
+  expect_identical(issues$reason, "not_convertible")
+  expect_identical(issues$raw, "after approval")
+})
+
+test_that("a date changed after load is written as the new value, not the old raw text", {
+  md <- DTAMetaData(
+    title = "t",
+    transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+  )
+  md@transmission$date_last_transfer <- as.Date("2027-02-01")
+  expect_identical(as.list(md)$transmission$date_last_transfer, "2027-02-01")
+
+  back <- .metadata_yaml_round_trip(md)
+  expect_equal(nrow(metadata_import_errors(back)), 0L)
+  expect_identical(back@transmission$date_last_transfer, as.Date("2027-02-01"))
+
+  md2 <- DTAMetaData(title = "t", date = "after approval")
+  md2@date <- as.Date("2027-03-04")
+  back2 <- .metadata_yaml_round_trip(md2)
+  expect_equal(nrow(metadata_import_errors(back2)), 0L)
+  expect_identical(back2@date, as.Date("2027-03-04"))
+})
+
+test_that("a clean ISO metadata date is still written as exactly the ISO string", {
+  md <- DTAMetaData(
+    title = "t", date = "2026-01-15",
+    transmission = list(date_last_transfer = "2026-12-31")
+  )
+  out <- as.list(md)
+  expect_identical(out$date, "2026-01-15")
+  expect_identical(out$transmission$date_last_transfer, "2026-12-31")
+})

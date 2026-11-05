@@ -157,11 +157,12 @@ requirements:
 
   - id: REQ-SPEC-015
     text: >
-      A column specification collection written to JSON shall parse as JSON and
-      describe the same columns.
+      A column specification collection written to JSON shall parse as JSON,
+      and import_specs_from_json() shall read it back as the same columns and
+      rules.
     risk: medium
     category: integrity
-    covers: [write_columns_to_json]
+    covers: [write_columns_to_json, import_specs_from_json]
     source: R/DTAColumnSpecCollection-class.R
 
   # ---- the JSON schema view ------------------------------------------------------

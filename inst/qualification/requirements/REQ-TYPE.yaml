@@ -15,7 +15,7 @@ requirements:
     text: >
       A SAS format string, given without an explicit type, shall infer the
       column's type: "$w." infers Char, "w." infers Int, "w.d" infers Num,
-      "BESTw." infers Int, "DATEw." infers Date, "TIMEw." or "TIMEw.d" infers
+      "BESTw." infers Num, "DATEw." infers Date, "TIMEw." or "TIMEw.d" infers
       Time, and "DATETIMEw." infers DateTime.
     risk: high
     category: functional
@@ -23,9 +23,8 @@ requirements:
     source: R/DTAColumnSpecStructureSAS-class.R
     notes: >
       BESTw. is SAS's general numeric output format and may hold a fractional
-      value, so inferring "Int" from it is arguably wrong; that is DEV-001,
-      already bound by test-OQ-CORE-runner.R (OQ-CORE-006) and not repeated
-      here.
+      value, so it infers "Num". An explicit type of Int with a BESTw. format
+      remains valid.
 
   - id: REQ-TYPE-002
     text: >
@@ -38,8 +37,9 @@ requirements:
     covers: [load_file, check]
     source: R/importConversion.R
     notes: >
-      Currently violated for a declared Int column: DEV-004, bound in
-      test-OQ-TYPE-declared.R.
+      For a declared Int the storage type is always R integer, so batching
+      cannot change it. Each cell is judged alone; a value the declared type
+      cannot hold is an import error (see REQ-TYPE-009).
 
   - id: REQ-TYPE-003
     text: >
@@ -112,22 +112,16 @@ requirements:
 
   - id: REQ-TYPE-009
     text: >
-      A value outside plus or minus 2^31-1 in a declared Int column shall be
-      stored as double rather than integer, because the column cannot be
-      narrowed as a whole, and shall also be reported as a column-
-      specification violation with the keyword "type" (REQ-VAL-005), on that
-      value's row only. It is not an import error: the text was read
-      correctly, it simply is not an integer of this column.
+      A declared Int column shall always be stored as R integer. A value in
+      it that is outside plus or minus 2^31-1, fractional or non-finite shall
+      be an import error, stored as NA with its raw text kept.
     risk: medium
     category: functional
     covers: [load_file, check, tables]
-    source: R/importConversion.R; R/columnSpecChecks.R
+    source: R/importConversion.R
     notes: >
-      Storage and verdict are separate facts. The column stays double because
-      narrowing is all-or-nothing, so one wide value keeps the neighbouring
-      in-range values double as well; those are not reported, since each is a
-      whole number within range. Before the fix a value such as 5,000,000,000
-      in a declared Int column was accepted as a clean delivery (DEV-006).
+      -2147483648 is out of range because R reserves that bit pattern for
+      NA_integer_. The reasons recorded are "out_of_range" and "not_whole".
 
   # ---- typing at read versus typing in R --------------------------------------
 
@@ -141,6 +135,10 @@ requirements:
     category: functional
     covers: [validate_table, check]
     source: R/columnSpecChecks.R
+    notes: >
+      Compared on values the declared type can hold. A value beyond the int32
+      range in a declared Int column is an import error when read from text
+      (REQ-TYPE-009).
 
   - id: REQ-TYPE-011
     text: >

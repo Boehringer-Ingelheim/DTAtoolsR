@@ -223,8 +223,8 @@ test_that("OQ-REPORT-005 | one inspect panel exists per message, keyed by its id
   )
 })
 
-test_that("OQ-REPORT-006 | a metadata import error degrades every inspect panel in the report, not only its own | REQ-REPORT-006", {
-  # Pinned, not endorsed (see REQ-REPORT-006 notes). Two transfers, identical
+test_that("OQ-REPORT-006 | a metadata import error leaves every other inspect panel intact and has its own | REQ-REPORT-006", {
+  # Two transfers, identical
   # except for their metadata: one clean, one carrying a single trailing-
   # residue date. Both carry exactly one columnspec message, wholly unrelated
   # to metadata.
@@ -257,13 +257,24 @@ test_that("OQ-REPORT-006 | a metadata import error degrades every inspect panel 
     "inspect-badge-columnspec", qrpt_panel_badge(qrpt_raw(out_clean), id_clean)
   )
   qa_step(
-    "the identical kind of columnspec message degrades to the generic fallback once metadata carries an import issue",
-    "inspect-badge-unknown", qrpt_panel_badge(qrpt_raw(out_dirty), id_dirty)
+    "the same kind of columnspec message keeps its real badge when metadata carries an import issue",
+    "inspect-badge-columnspec", qrpt_panel_badge(qrpt_raw(out_dirty), id_dirty)
   )
-  qa_known_deviation(
-    "DEV-012",
-    identical(qrpt_panel_badge(qrpt_raw(out_clean), id_clean), "inspect-badge-columnspec") &&
-      identical(qrpt_panel_badge(qrpt_raw(out_dirty), id_dirty), "inspect-badge-unknown")
+
+  # The metadata message has detail of its own: an import panel that quotes
+  # the offending text as written.
+  id_meta <- msgs_dirty$id[msgs_dirty$target == "metadata"][[1]]
+  dirty_html <- qrpt_raw(out_dirty)
+  qa_step(
+    "the metadata message gets an import panel rather than the generic fallback",
+    "inspect-badge-import", qrpt_panel_badge(dirty_html, id_meta)
+  )
+  start <- regexpr(sprintf('id="inspect-panel-%d"', as.integer(id_meta)), dirty_html, fixed = TRUE)
+  panel <- substr(dirty_html, start, start + 3000)
+  actual_box <- regmatches(panel, regexpr('(?s)inspect-actual">.*?</div>\\s*</div>', panel, perl = TRUE))
+  qa_step(
+    "and that panel shows the value as written",
+    TRUE, length(actual_box) == 1L && grepl("2026-12-31 at the earliest", actual_box, fixed = TRUE)
   )
 })
 

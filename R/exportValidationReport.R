@@ -92,7 +92,20 @@ write_validation_report <- function(
   if (nrow(msgs) > 0) {
     inspect_all <- tryCatch(
       DTAtools::inspect(x, id = msgs$id, as_tibble = FALSE),
-      error = function(e) NULL
+      error = function(e) {
+        # Isolation: retry once per dataset group (the NA group, i.e. metadata,
+        # on its own) so one failing group loses only its own detail. Not per
+        # message id, which would bring back the O(n^2) re-collection.
+        groups <- split(msgs$id, ifelse(is.na(msgs$dataset), "\001metadata", as.character(msgs$dataset)))
+        parts <- lapply(groups, function(ids) {
+          tryCatch(
+            DTAtools::inspect(x, id = ids, as_tibble = FALSE),
+            error = function(e2) NULL
+          )
+        })
+        parts <- Filter(function(p) is.data.frame(p) && nrow(p) > 0, parts)
+        if (length(parts) == 0) NULL else dta_rbind_fill(unname(parts))
+      }
     )
     if (!is.null(inspect_all) && nrow(inspect_all) > 0 && "id" %in% names(inspect_all)) {
       inspect_index <- list(df = inspect_all, by_id = split(seq_len(nrow(inspect_all)), inspect_all$id))

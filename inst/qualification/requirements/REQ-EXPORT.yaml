@@ -9,7 +9,7 @@ title: Document and data export
 # stale, or silently truncated.
 
 requirements:
-  # ---- export_column_value_table() input validation (DEV-003) ---------------
+  # ---- export_column_value_table() input validation -------------------------
 
   - id: REQ-EXPORT-001
     text: >
@@ -20,12 +20,8 @@ requirements:
     covers: [export_column_value_table]
     source: R/exportFunctions.R
     notes: >
-      Pinned as DEV-003: the function has no input validation of its own, so a
-      plain list reaches `DTAColumnSpecCollection@columns[[id]]` and raises an
-      untranslated base R condition ("no applicable method for `@`") rather
-      than a cli condition naming the expected class, unlike the equivalent
-      guard in export_specs_table(). Recorded as observed behaviour, not
-      endorsed as correct; see deviations.yaml.
+      The failure is a classed cli condition naming the expected class, the
+      same guard export_specs_table() has. Closes DEV-003.
 
   # ---- write_dta() content ----------------------------------------------------
 
@@ -230,15 +226,12 @@ requirements:
     covers: [columns_specs_from_word, export_specs_table]
     source: R/DTAColumnSpecCollection-class.R
     notes: >
-      Pinned as observed, not endorsed: the two functions do not currently
-      pair up. export_specs_table()'s "Format" column drops the "SAS " backend
-      prefix columns_specs_from_word() requires to rebuild a structure (it
-      writes structure@format, which the factory already stripped of its
-      prefix on the way in), and a column declaring no format at all writes a
-      blank cell that makes the reconstruction abort with a low-level "No
-      prefix could be extracted from ''" error rather than treating an absent
-      format as unset. Every column in the shipped clinical_dta.yaml example
-      has no explicit format, so this is the common case, not an edge one.
+      export_specs_table() writes the Format cell with its backend prefix
+      ("SAS 8."), and leaves it blank for a column with no format.
+      columns_specs_from_word() reads a blank or NA cell as "no format", and
+      for a document written by an older version, whose Format cell carried no
+      prefix, takes the backend from the same row's Type cell. A blank Length
+      cell reads back as no length. Closes DEV-014.
 
   # ---- write_table_to_file() --------------------------------------------------
 
@@ -355,24 +348,18 @@ requirements:
 
   - id: REQ-EXPORT-029
     text: >
-      write_columns_to_json() shall write null for a column property that is
-      unset, so that a JSON round trip mirroring import_specs_from_yaml()'s
-      contract can reconstruct a DTAColumnSpecCollection from it.
+      write_columns_to_json() shall omit a column property that is unset, and
+      import_specs_from_json() shall read the written file back into a
+      DTAColumnSpecCollection with the same columns, properties and rules,
+      including an empty rules array.
     risk: medium
     category: integrity
-    covers: [write_columns_to_json]
+    covers: [write_columns_to_json, import_specs_from_json]
     source: R/DTAColumnSpecCollection-class.R
     notes: >
-      Pinned as observed, not endorsed, and violated for every column rather
-      than an edge case: an unset scalar property (label, description,
-      pattern or colclass) is written as an empty JSON object "{}" rather than
-      null, which jsonlite reads back as an empty list rather than NULL, and
-      DTAColumnSpec()'s own property types then reject it ("must be
-      <character> or S3<NULL>, not <list>"). "values", "examples" and
-      "pattern" are mutually exclusive on one column, so at least two of the
-      three are always unset -- meaning no column, however fully specified,
-      currently survives this round trip. Reported upstream as a finding
-      rather than filed as a deviation.
+      An unset property was formerly written as an empty JSON object "{}",
+      which read back as an empty list that the typed properties reject, and
+      the package had no JSON reader. Closes DEV-015.
 
   - id: REQ-EXPORT-030
     text: >

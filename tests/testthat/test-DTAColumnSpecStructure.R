@@ -229,3 +229,27 @@ test_that("print and print_info survive braces in type, format and backend", {
   out <- capture.output(print(x), type = "message")
   expect_true(any(grepl("DTAColumnSpecStructure", out, fixed = TRUE)))
 })
+
+test_that("names() on a structure does not read a column list it never had", {
+  # The method returned sapply(x@columns, ...), but a structure holds type,
+  # format, length and backend -- there is no @columns -- so names(x) raised a
+  # property-not-found error for every structure. A structure has no named
+  # members of its own, so it has no names.
+  x <- DTAColumnSpecStructure(type = "Char", backend = "SAS")
+
+  expect_no_error(names(x))
+  expect_null(names(x))
+})
+
+test_that("base names() and print() still work on ordinary objects with DTAtools loaded", {
+  # The `if (!exists("names"/"print", mode = "function"))` guards in the class
+  # files are deliberately WITHOUT `inherits = FALSE`: base always has both, so
+  # they never define a generic. Adding `inherits = FALSE` would define S7
+  # generics named `names` and `print` in the package namespace, shadowing base
+  # for the whole package and for anyone who attaches it -- an S7 generic has
+  # no method for a plain list. This pins that a plain list still works.
+  expect_identical(names(list(a = 1, b = 2)), c("a", "b"))
+  ns <- asNamespace("DTAtools")
+  expect_identical(get("names", envir = ns), base::names)
+  expect_identical(get("print", envir = ns), base::print)
+})

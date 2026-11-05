@@ -693,3 +693,26 @@ test_that("the bundled examples carry an id and, where meaningful, a name", {
   expect_identical(bare@id, "example_container_specs_without_data")
   expect_null(bare@name)
 })
+
+test_that("files() names the missing file with agreeing grammar and no stray plural", {
+  # The message read "The following datasets{?s} not found", which is a
+  # dataset message in a files() function, and with two names missing rendered
+  # as "datasetss".
+  ds <- create_example_DTADataSetTabular(2)
+
+  one <- expect_error(files(ds, "nope.csv"), class = "rlang_error")
+  expect_match(conditionMessage(one), "following file not found", fixed = TRUE)
+  expect_match(conditionMessage(one), "nope.csv", fixed = TRUE)
+
+  two <- expect_error(files(ds, c("nope.csv", "nada.csv")), class = "rlang_error")
+  expect_match(conditionMessage(two), "following files not found", fixed = TRUE)
+  expect_no_match(conditionMessage(two), "datasets", fixed = TRUE)
+})
+
+test_that("datasets() on a DTA agrees its plural with the number of names missing", {
+  dta <- create_example_DTA()
+
+  two <- expect_error(datasets(dta, c("nope", "nada")), class = "rlang_error")
+  expect_match(conditionMessage(two), "following datasets not found", fixed = TRUE)
+  expect_no_match(conditionMessage(two), "datasetss", fixed = TRUE)
+})
