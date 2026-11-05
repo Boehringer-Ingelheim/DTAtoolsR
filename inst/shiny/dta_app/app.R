@@ -553,6 +553,7 @@ server <- function(input, output, session) {
     removing_section = NULL, # stable ID named in the delete confirmation
     doc_token = 0, # bump ONLY on load/reset/restore -> re-render the main layout
     yaml_msg = NULL, # raw-YAML apply result: NULL | list(ok, error)
+    load_failure = NULL, # last refused file load: NULL | list(name, text, error, findings, nonce)
     editing_contact = NULL, # list(side, index) while a contact edit modal is open
     editing_contact_nonce = NULL, # data-dta-modal-id of that open contact dialog
     editor_dataset = NULL, # dataset name the file/column/rule editor modal targets
@@ -1096,6 +1097,27 @@ server <- function(input, output, session) {
     if (!inherits(saved, "try-error")) store$commit()
   }
 
+  # Tell the user a document that just arrived (load, example, template,
+  # restore, applied YAML) still has spec-check findings. Errors cannot get this
+  # far on the load paths -- the readers refuse them -- so this is the warning
+  # channel; the full list stays in the "Spec check" panel under the Raw YAML
+  # editor (output$spec_check), which follows rv$dta.
+  notify_spec_check <- function(dta, what = "Spec check") {
+    f <- dta_lint(dta)
+    if (nrow(f) == 0) {
+      return(invisible(f))
+    }
+    n_err <- sum(f$severity == "error")
+    showNotification(
+      sprintf(
+        "%s: %d error(s), %d warning(s) — see the Raw YAML tab.",
+        what, n_err, nrow(f) - n_err
+      ),
+      type = if (n_err > 0) "error" else "warning", duration = 10
+    )
+    invisible(f)
+  }
+
   apply_loaded <- function(dta, yaml_text, dataset_only = FALSE, is_example = FALSE,
                            wrapped_dataset = FALSE, versioned = FALSE,
                            start_editing = FALSE) {
@@ -1147,7 +1169,9 @@ server <- function(input, output, session) {
     # Edit menu without creating a version -- rv$version_locked does not
     # affect whether editing is possible.
     rv$editing <- isTRUE(start_editing)
+    rv$yaml_msg <- NULL
     autosave()
+    notify_spec_check(dta)
   }
 
   # Collect option values from the currently-open template modal.
@@ -1402,14 +1426,32 @@ server <- function(input, output, session) {
     txt <- tryCatch(paste(readLines(f$datapath, warn = FALSE), collapse = "\n"),
       error = function(e) NULL
     )
-    res <- dta_read_yaml(f$datapath)
+    finish_file_load(dta_read_yaml(f$datapath), txt, f$name)
+  })
+
+  # A load that succeeds replaces the document; one that fails changes NOTHING
+  # (document, autosave, version state) and opens a dialog that lists every
+  # finding beside the file's text, so the author can correct it and load it.
+  # Both the upload and the dialog's "Load corrected YAML" end here, so a
+  # corrected file is loaded exactly like a file that was good to begin with.
+  finish_file_load <- function(res, txt, name) {
     if (!res$ok) {
       showNotification(
         paste("Could not load DTA YAML:", res$error),
         type = "error", duration = 10
       )
-      return()
+      if (!is.null(txt) && nzchar(trimws(txt))) {
+        nonce <- (isolate(rv$load_failure$nonce) %||% 0) + 1
+        rv$load_failure <- list(
+          name = name, text = txt, error = res$error,
+          findings = res$findings, nonce = nonce
+        )
+        showModal(dta_load_failure_modal(rv$load_failure))
+      }
+      return(invisible(FALSE))
     }
+    rv$load_failure <- NULL
+    removeModal()
     apply_loaded(res$value, txt,
       dataset_only = isTRUE(res$dataset_only),
       wrapped_dataset = isTRUE(res$wrapped_dataset),
@@ -1423,6 +1465,18 @@ server <- function(input, output, session) {
       },
       type = "message"
     )
+    invisible(TRUE)
+  }
+
+  observeEvent(input$load_corrected_yaml, {
+    lf <- rv$load_failure
+    req(lf)
+    txt <- input[[paste0("load_failure_text_", lf$nonce)]] %||% lf$text
+    if (!nzchar(trimws(txt))) {
+      showNotification("The text is empty — nothing to load.", type = "warning")
+      return()
+    }
+    finish_file_load(dta_read_yaml_text(txt), txt, lf$name)
   })
 
   observeEvent(input$load_example, {
@@ -3795,7 +3849,12 @@ server <- function(input, output, session) {
                 uiOutput("col_vocab_hint")
               )
             ),
-            textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%")
+            tagList(
+              textInput("col_pattern", "Pattern (regex)", value = g("pattern"), width = "100%"),
+              textAreaInput("col_examples", "Examples (one per line)",
+                value = g("examples"), width = "100%", rows = 2
+              )
+            )
           ),
           textAreaInput("col_desc", "Description", value = g("description"), width = "100%", rows = 2)
         ),
@@ -3894,6 +3953,7 @@ server <- function(input, output, session) {
       nullable = isTRUE(input$col_nullable),
       values = input$col_values %||% "",
       pattern = input$col_pattern %||% "",
+      examples = input$col_examples %||% "",
       description = input$col_desc %||% ""
     )
   }
@@ -4215,7 +4275,14 @@ server <- function(input, output, session) {
       nullable = isTRUE(input$col_nullable),
       values = if (length(vals)) vals else NULL,
       pattern = input$col_pattern, description = input$col_desc,
-      old_id = isolate(rv$col_edit_id)
+      old_id = isolate(rv$col_edit_id),
+      # NULL (field not on the page) keeps the column's examples; otherwise
+      # exactly what the field holds, so a stale example can be cleared here.
+      examples = if (is.null(input$col_examples)) {
+        NULL
+      } else {
+        strsplit(input$col_examples, "\n", fixed = TRUE)[[1]]
+      }
     )
     if (!isTRUE(r$ok)) {
       rv$col_msg <- list(ok = FALSE, error = r$error)
@@ -4818,7 +4885,7 @@ server <- function(input, output, session) {
     } else if (identical(rt, "col_range")) {
       tagList(
         selectInput("rule_col_single", "Column",
-          choices = c("(select)" = "", cols),
+          choices = c("(select)" = "", dta_numeric_column_ids(isolate(rv$dta), ed)),
           selected = (pf$columns %||% "")[1], width = "100%"
         ),
         layout_columns(
@@ -4828,7 +4895,7 @@ server <- function(input, output, session) {
         ),
         div(
           class = "cond-hint",
-          "A range rule checks ONE column against a minimum and/or maximum."
+          "A range rule checks ONE numeric (Num or Int) column against a minimum and/or maximum."
         )
       )
     } else if (identical(rt, "col_unique")) {
@@ -7097,8 +7164,37 @@ server <- function(input, output, session) {
         " Valid — document applied."
       )
     } else {
-      div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+      # With a findings table (a refused document) list every finding on its
+      # own line; the error text alone is one wrapped paragraph.
+      if (is.data.frame(m$findings) && nrow(m$findings) > 0) {
+        div(
+          class = "yaml-valid err", HTML("&#x2716;"),
+          " Not applied — the specification has errors:",
+          dta_findings_ui(m$findings)
+        )
+      } else {
+        div(class = "yaml-valid err", HTML("&#x2716;"), " ", m$error)
+      }
     }
+  })
+
+  # The standing "Spec check": every finding of the loaded document, errors
+  # and warnings, kept current as it is edited. Follows rv$dta only -- never
+  # rv$doc_token, so it cannot rebuild output$main -- and renders NULL when
+  # clean so nothing stale is left in the DOM.
+  output$spec_check <- renderUI({
+    if (is.null(rv$dta)) {
+      return(NULL)
+    }
+    f <- dta_lint(rv$dta)
+    if (nrow(f) == 0) {
+      return(NULL)
+    }
+    div(
+      class = "spec-check",
+      div(class = "section-label", "Spec check"),
+      dta_findings_ui(f)
+    )
   })
 
   # Push text into the Raw YAML editor (Ace when available, else textarea).
@@ -7162,7 +7258,10 @@ server <- function(input, output, session) {
     }
     res <- dta_read_yaml_text(txt)
     if (!isTRUE(res$ok)) {
-      rv$yaml_msg <- list(ok = FALSE, error = res$error %||% "Invalid YAML or DTA.")
+      rv$yaml_msg <- list(
+        ok = FALSE, error = res$error %||% "Invalid YAML or DTA.",
+        findings = res$findings
+      )
       showNotification(paste("YAML not applied:", res$error), type = "error", duration = 10)
       return()
     }
@@ -7297,6 +7396,7 @@ server <- function(input, output, session) {
       },
       type = "message"
     )
+    notify_spec_check(new_dta)
     # Data kept under a changed spec is re-validated against it, once.
     if (length(recheck) > 0) run_check(recheck)
   })
@@ -8209,6 +8309,7 @@ server <- function(input, output, session) {
                 uiOutput("yaml_edit_actions")
               ),
               uiOutput("yaml_validation_msg"),
+              uiOutput("spec_check"),
               if (requireNamespace("shinyAce", quietly = TRUE)) {
                 div(
                   class = "yaml-ace-wrap",
@@ -8378,6 +8479,9 @@ server <- function(input, output, session) {
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1
     showNotification("Previous session restored.", type = "message")
+    # A restored RDS object skips every constructor, so it is checked here
+    # rather than trusted; the findings stay listed in the Spec check panel.
+    notify_spec_check(restored, "Restored session")
   })
 }
 

@@ -174,7 +174,7 @@ test_that("a DTARuleGroupCondition renders its grouping column and constraints v
     id = "block_group_condition_example",
     group_by = "SUBJID",
     conditions = list(
-      visit_v03 = list(VISIT = list(equals = "V03")),
+      visit_v03 = list(VISIT = list(equals = "V01")),
       adult = list(AGE = list(greater_equal = 18))
     ),
     constraints = list(

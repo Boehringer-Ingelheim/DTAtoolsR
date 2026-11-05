@@ -1,0 +1,9 @@
+kind: dta_dataset_template
+id: lint_c
+version: "1.0"
+dataset:
+  id: ds1
+  type: tabular
+  files: {filename: one.tsv}
+  rules:
+    - {id: r1, type: col_unique, columns: [C1]}

@@ -1141,11 +1141,15 @@ read_dta_from_yaml <- function(file) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
 
+  # Lint the file first (path form, so an unquoted `version:` is seen), so the
+  # caller gets every problem at once instead of the first constructor error.
+  dta_lint_enforce(lint_dta(file))
+
   yaml_data <- yaml::read_yaml(file)
 
   # Metadata is optional: a DTA may carry datasets without a metadata section
   # (see dta_from_list()). Do not abort here on a missing 'metadata' element.
-  dta_from_list(yaml_data)
+  dta_from_list_build(yaml_data)
 }
 
 
@@ -1166,6 +1170,12 @@ dta_from_list <- function(x) {
     cli_abort("x is not a list")
   }
 
+  dta_lint_enforce(lint_dta(x))
+  dta_from_list_build(x)
+}
+
+# The construction half of dta_from_list(); callers have linted already.
+dta_from_list_build <- function(x) {
   if (is.null(x$datasets)) {
     cli_alert_warning("No 'datasets' section found in list")
     x$datasets <- list()

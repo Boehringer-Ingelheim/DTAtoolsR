@@ -521,3 +521,45 @@ test_that("OQ-TMPL-070 | an inline column that cannot be built is an instantiate
   qa_step("at severity error", "error", tmpl_severity(result, "instantiate_failed"))
   qa_step("and the dataset-template code is absent", NA_character_, tmpl_severity(result, "column_spec_invalid"))
 })
+
+# ---- REQ-TMPL-035: the linter's findings become template rows ---------------
+
+test_that("OQ-TMPL-071 | a dataset template's rules are checked against its columns, under the linter's codes | REQ-TMPL-035", {
+  # lint_a: rule r1 names C2, but only C1 is declared.
+  # lint_b: a col_range on C1, a Char column.
+  # lint_c: a rule, but no column at all, so there is nothing to check it against.
+  result <- validate_template(tmpl_fixture("codes", "lint_rules"))
+  by_file <- function(prefix) result[startsWith(basename(result$file), prefix), , drop = FALSE]
+
+  qa_step("one row per template, three in all", 3L, nrow(result))
+  qa_step("an undeclared column is rule_column_undeclared", "rule_column_undeclared", by_file("a.")$code)
+  qa_step("at severity error", "error", by_file("a.")$severity)
+  qa_check("naming the rule and the column", grepl("r1", by_file("a.")$message, fixed = TRUE) && grepl("C2", by_file("a.")$message, fixed = TRUE))
+  qa_step("a range on a text column is rule_range_non_numeric", "rule_range_non_numeric", by_file("b.")$code)
+  qa_step("at severity error", "error", by_file("b.")$severity)
+  qa_step("rules without any column are rules_without_columns", "rules_without_columns", by_file("c.")$code)
+  qa_step("at severity warning", "warning", by_file("c.")$severity)
+
+  only_warning <- tryCatch(
+    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "c.dta-dataset-template.yaml"), strict = TRUE),
+    error = function(e) e
+  )
+  qa_check("strict = TRUE does not abort on a warning alone", is.data.frame(only_warning))
+  aborted <- tryCatch(
+    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "a.dta-dataset-template.yaml"), strict = TRUE),
+    error = function(e) e
+  )
+  qa_check("but aborts on the error", inherits(aborted, "error"))
+})
+
+test_that("OQ-TMPL-072 | a creation template whose instance breaks the invariant is instantiate_failed alone | REQ-TMPL-035", {
+  # The only dataset has column C1 and a rule on NOPE, which the collection
+  # refuses to build.
+  result <- validate_template(tmpl_fixture("codes", "lint_instance_invalid"))
+  qa_step("the build failure is the one row reported", "instantiate_failed", result$code)
+  qa_step("at severity error", "error", result$severity)
+  qa_step(
+    "and the linter's code is not reported on top of it",
+    0L, sum(result$code == "rule_column_undeclared")
+  )
+})

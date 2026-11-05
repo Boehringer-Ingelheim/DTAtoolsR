@@ -285,7 +285,7 @@ test_that("an empty-string key value no longer aborts the scan", {
 })
 
 test_that("projection leaves the verdict untouched and rules may read undeclared columns", {
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
       DTAColumnSpec(id = "AGE", type = "SAS Num", nullable = TRUE)
@@ -324,7 +324,7 @@ test_that("projection leaves the verdict untouched and rules may read undeclared
 
 test_that("a header-only file fails rules on absent columns exactly as the in-memory path", {
   rule <- DTARuleColUnique(id = "u_missing", columns = "AGE")
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = TRUE)),
     list(rule)
   )
@@ -351,7 +351,7 @@ test_that("a late unconvertible value in an undeclared column no longer kills th
   # the whole scan on the first later value that did not convert. Every
   # scanned column is now read as text, so the scan completes whatever the
   # bytes hold.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 12, nullable = FALSE)),
     # The rule is what forces the undeclared column X into the scan under
     # projection -- and X is where the inference abort used to live.
@@ -520,7 +520,7 @@ test_that("import-error counts no longer inflate when several rules read one col
   # Two rules reading the same unconvertible column used to push two copies of
   # every bad cell into the sink; dedup ran only over the retained rows, so
   # the count doubled once the cap hid the duplicates.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE)),
     list(
       DTARuleColRange(id = "r1", columns = "AGE", range = c(0, 100)),

@@ -469,8 +469,9 @@ test_that("OQ-SPEC-048 | a column specification whose own values or examples can
   from_yaml <- tryCatch(import_specs_from_yaml(path), error = function(e) e)
   qa_check("a column specification file with a value that cannot fit is refused", inherits(from_yaml, "condition"))
   qa_check(
-    "and the refusal is the mismatch condition, not a wrapper that hides it",
-    inherits(from_yaml, "dta_spec_value_mismatch") ||
-      inherits(from_yaml$parent, "dta_spec_value_mismatch")
+    "and the refusal is the linter's, carrying a column_spec_invalid finding for that column",
+    inherits(from_yaml, "dta_lint_error") &&
+      identical(from_yaml$findings$code, "column_spec_invalid") &&
+      identical(from_yaml$findings$id, "CODE")
   )
 })

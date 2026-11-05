@@ -787,7 +787,7 @@ test_that("saving a group_condition rule from the rule editor updates spec and Y
       gcond_name_1 = "c1_failed",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
 
     session$setInputs(gcond_add = 1)
@@ -850,7 +850,7 @@ test_that("removing a group_condition row keeps it out of the saved rule instead
       gcond_name_1 = "c1_failed",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
     session$setInputs(
       gconstr_id_1 = "keep_constraint",
@@ -919,12 +919,12 @@ test_that("removing an IF or THEN row keeps it out of the saved conditional rule
 
     # Rows are keyed by column, so every row uses a different one.
     session$setInputs(
-      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F",
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "Female",
       then_col_1 = "AGE", then_op_1 = "equals", then_val_1 = "12"
     )
     session$setInputs(cond_add = 1, then_add = 1)
     session$setInputs(
-      cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED",
+      cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "DROPPED",
       then_col_2 = "HEIGHT", then_op_2 = "equals", then_val_2 = "170"
     )
 
@@ -955,7 +955,7 @@ test_that("removing the only IF row empties it instead of removing it", {
     session$setInputs(rule_add = 1)
     session$setInputs(rule_type = "col_condition")
 
-    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F")
+    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "Female")
 
     # The only visible row is cleared in the browser (updateSelectInput, which
     # testServer does not apply), never recorded as removed.
@@ -964,7 +964,7 @@ test_that("removing the only IF row empties it instead of removing it", {
 
     # With a second row present, the same button removes row 1 for real.
     session$setInputs(cond_add = 1)
-    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED")
+    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "DROPPED")
     session$setInputs(cond_remove_1 = 2)
     expect_identical(rv$cond_removed, 1L)
   })
@@ -982,9 +982,9 @@ test_that("a row index removed in one rule form is usable again in the next", {
     # Rule A: add IF row 2, fill it, remove it, then leave the form unsaved.
     session$setInputs(rule_add = 1)
     session$setInputs(rule_type = "col_condition")
-    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F")
+    session$setInputs(cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "Female")
     session$setInputs(cond_add = 1)
-    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "FAILED")
+    session$setInputs(cond_col_2 = "STATUS", cond_op_2 = "equals", cond_val_2 = "DROPPED")
     session$setInputs(cond_remove_2 = 1)
     expect_identical(rv$cond_removed, 2L)
     session$setInputs(rule_back = 1)
@@ -995,9 +995,9 @@ test_that("a row index removed in one rule form is usable again in the next", {
     session$setInputs(rule_id = "cond_row_reused", rule_desc = "Index 2 reused")
     session$setInputs(cond_add = 2)
     session$setInputs(
-      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "F",
+      cond_col_1 = "GENDER", cond_op_1 = "equals", cond_val_1 = "Female",
       cond_col_2 = "AGE", cond_op_2 = "equals", cond_val_2 = "12",
-      then_col_1 = "STATUS", then_op_1 = "equals", then_val_1 = "FAILED"
+      then_col_1 = "STATUS", then_op_1 = "equals", then_val_1 = "DROPPED"
     )
     session$setInputs(rule_save = 1)
 
@@ -1030,7 +1030,7 @@ test_that("group_condition constraint selectors follow condition name changes", 
       gcond_name_1 = "old_name",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
 
     session$setInputs(gcond_add = 1)
