@@ -161,7 +161,9 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2.12.1
         with:
-          extra-packages: any::covr
+          # covr loads rstudioapi at the end of package_coverage(); without it
+          # the run measures everything and then dies (as in the job above).
+          extra-packages: any::covr, any::rstudioapi
           needs: coverage
           use-public-rspm: true
 
