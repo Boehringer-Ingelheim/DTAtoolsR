@@ -334,9 +334,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   Before release, five defects were introduced into the package one at a time
   to confirm the suite is capable of failing, and each was caught by the test
-  cases whose subject was the behaviour broken. The results, including one
-  control that did not fire and why, are recorded in section 4a of
-  `inst/qualification/docs/validation-plan.md`.
+  cases whose subject was the behaviour broken. The results are recorded in
+  section 4a of `inst/qualification/docs/validation-plan.md`, including one
+  control that at first did not fire: an equivalent mutation in the branch for
+  a lazily held table whose file has vanished, which no case exercised. That
+  branch is now covered by REQ-ROBUST-017 and OQ-ROBUST-017, and a mutation
+  that changes its behaviour is caught.
 
   The developer test suite is executed too, when the package was installed
   with its tests, and reported as supplementary evidence. It runs in a separate

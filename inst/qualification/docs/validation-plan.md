@@ -104,12 +104,17 @@ after its run.
 Each mutation was caught, and each was caught by a test case whose subject is
 the behaviour that was broken rather than by an unrelated one.
 
-One negative result is recorded with them. The same import-error count was also
-forced to zero in the separate branch that runs when a delivery's file cannot be
-read at all, and no test case failed. That branch reports its own absence
-through a different path, so the count it writes is not what any requirement
-reads. It is stated here because a control that was run and did not fire is part
-of the evidence, not something to leave out of it.
+One negative result was recorded with them, and has since been closed. The same
+import-error count was also forced to zero in the separate branch that runs
+when a lazily held table's file cannot be read at all, and no test case failed.
+Two things were behind that. The mutation was equivalent: the branch takes its
+counts from `dta_file_validation_details()`, which records an absent file as a
+rule finding and writes an import count of zero already, so forcing it to zero
+changed nothing any test could observe. And no test case exercised the branch
+at all. REQ-ROBUST-017 now states what the branch must report, and OQ-ROBUST-017
+tests it. The control was re-run against that branch with a mutation that does
+change its behaviour -- the rule count, which is what carries the absence,
+forced to zero -- and OQ-ROBUST-017 failed, as it should.
 
 ## 4b. Continuous execution and code coverage
 

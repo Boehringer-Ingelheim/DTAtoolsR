@@ -53,7 +53,7 @@ areas:
     min_tests: 33
   - area: ROBUST
     title: Error handling, integrity and isolation
-    min_tests: 16
+    min_tests: 17
   - area: PERF
     title: End-to-end workflows and behaviour at scale
     min_tests: 25
