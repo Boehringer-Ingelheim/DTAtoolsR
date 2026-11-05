@@ -1,5 +1,5 @@
 # What the package does with input it did not expect.
-# REQ-ROBUST-001 .. REQ-ROBUST-003 and REQ-ROBUST-010 .. REQ-ROBUST-015.
+# REQ-ROBUST-001 .. REQ-ROBUST-003 and REQ-ROBUST-010 .. REQ-ROBUST-017.
 #
 # The concern throughout is not that bad input is rejected. It is that bad
 # input is never accepted quietly. A delivery that cannot be read, reported as
@@ -361,4 +361,47 @@ test_that("OQ-ROBUST-016 | specification-derived text in a condition message is 
       evaluated = grepl("bad_2_version", conditionMessage(tmpl_err), fixed = TRUE)
     )
   )
+})
+
+test_that("OQ-ROBUST-017 | a lazily held table whose file has vanished fails alone | REQ-ROBUST-017", {
+  dir <- qa_tempdir()
+  kept <- file.path(dir, "kept.csv")
+  gone <- file.path(dir, "gone.csv")
+  writeLines(c("ID,AGE", "A001,40"), kept)
+  writeLines(c("ID,AGE", "A002,41"), gone)
+
+  ds <- DTADataSetTabular(
+    id = "robust", specs = ri_specs(),
+    files = list(
+      DTAFileCSV(filename = "kept.csv"),
+      DTAFileCSV(filename = "gone.csv")
+    )
+  )
+  ds <- load_file(ds, file = kept, handler_index = 1, stream = "always")
+  ds <- load_file(ds, file = gone, handler_index = 2, stream = "always")
+  unlink(gone)
+
+  checked <- tryCatch(check(ds, persist = FALSE, quiet = TRUE), error = function(e) e)
+  qa_check("check() completes although one table's file is gone", S7::S7_inherits(checked, DTADataSetTabular))
+
+  status <- validation_status(checked)
+  status <- status[order(status$table, method = "radix"), ]
+  qa_step(
+    "the table whose file is present keeps its own clean verdict",
+    TRUE, status$ok[status$table == "kept"]
+  )
+  qa_step(
+    "the vanished table is validated, not ok, with one rule finding and nothing else",
+    list(status = "validated", ok = FALSE, n_rule_errors = 1, n_columnspec_errors = 0, n_import_errors = 0),
+    with(status[status$table == "gone", ], list(
+      status = status, ok = ok,
+      n_rule_errors = as.numeric(n_rule_errors),
+      n_columnspec_errors = as.numeric(n_columnspec_errors),
+      n_import_errors = as.numeric(n_import_errors)
+    ))
+  )
+
+  msgs <- messages(checked, as_tibble = FALSE)
+  qa_step("the finding is file_presence", "file_presence", msgs$rule_id)
+  qa_check("and its message names the missing file", grepl("gone.csv", msgs$message, fixed = TRUE))
 })

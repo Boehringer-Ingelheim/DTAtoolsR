@@ -199,3 +199,24 @@ requirements:
       delivered column name, so an unescaped "{Sys.getenv('HOME')}" (or worse)
       inside it was evaluated rather than shown, on the caller's machine, the
       moment the offending rule or template was validated.
+
+  - id: REQ-ROBUST-017
+    text: >
+      A table held lazily (loaded with stream = "always") whose delivered file
+      is no longer present when check() runs shall be reported as that table's
+      own failure, without stopping the validation of any other table: its
+      verdict shall be not ok, with exactly one rule finding, "file_presence",
+      whose message names the missing file, and no column-specification or
+      import errors, since nothing was read. The other tables' verdicts shall
+      be those they reach on their own.
+    risk: high
+    category: functional
+    covers: [check, validation_status, messages]
+    source: R/DTADataSetTabular-class.R (check, dta_missing_table_files); R/DTADataSetFile-class.R (dta_file_validation_details)
+    notes: >
+      Before the fix, the Arrow scanner raised an IOError for the vanished
+      file and the whole check() aborted, so one cleaned-up delivery destroyed
+      the verdict of every table in the dataset. The absence is recorded in the
+      same file-presence shape a file dataset uses for an undelivered target.
+      Added after the section 4a mutation run: forcing this branch's import
+      count to zero was not detected, and no case exercised the branch at all.
