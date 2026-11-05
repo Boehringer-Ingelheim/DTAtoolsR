@@ -482,34 +482,56 @@ test_that("OQ-VAL-036 | values, a pattern and nullability are still checked on a
 # worked out by hand from the values written into the frame. None was read off a
 # run.
 
-test_that("OQ-VAL-039 | an integer outside plus or minus 2^31-1 is reported as a type violation | REQ-VAL-005", {
-  dir <- qa_tempdir()
+test_that("OQ-VAL-039 | an integer outside plus or minus 2^31-1 in a table typed in R is reported as a type violation | REQ-VAL-005", {
   specs <- vs_specs(list(
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
     DTAColumnSpec(id = "N", type = "SAS Int", nullable = TRUE)
   ))
+  # A table already typed in R, handed to the engine directly: N is a double, so
+  # nothing has narrowed it and the column-specification check is the only one
+  # that sees its magnitude. A file is different: the reader types a declared
+  # Int column as R integer and reports an out-of-range cell on the import axis
+  # (REQ-TYPE-009), which the last step below pins. Only the in-memory engine is
+  # exercised here, because a file always goes through the reader.
+  #
   # 2^31-1 is 2147483647. Row 1 and row 3 sit on the boundary and fit; row 2 is
   # one past it, row 4 is -2^31 (the value R reserves for a missing integer, so
   # not an integer of this column) and row 5 is far outside. Row 6 is missing in
   # a nullable column.
   frame <- data.frame(
     ID = sprintf("A%03d", 1:6),
-    N = c("2147483647", "2147483648", "-2147483647", "-2147483648", "5000000000", NA),
+    N = c(2147483647, 2147483648, -2147483647, -2147483648, 5000000000, NA),
     stringsAsFactors = FALSE
   )
-  expected <- vs_expect("columnspec", c(2, 4, 5), "N", "type")
-
-  for (engine in names(vs_engines)) {
-    ds <- vs_check(frame, specs, dir, stream = vs_engines[[engine]])
-    qa_step(
-      sprintf("only the three out-of-range rows are type violations (%s engine)", engine),
-      expected, vs_found(ds)
+  err <- validate_table_detailed(specs, frame, verbose = FALSE)$columnspec_errors$full_error
+  qa_step(
+    "only the three out-of-range rows are type violations",
+    data.frame(row = c(2L, 4L, 5L), column = "N", keyword = "type", stringsAsFactors = FALSE),
+    data.frame(
+      row = as.integer(err$row), column = as.character(err$column),
+      keyword = as.character(err$keyword), stringsAsFactors = FALSE
     )
-  }
+  )
 
   # A whole number inside the range is not a violation.
-  small <- data.frame(ID = c("A001", "A002"), N = c("7", "-7"), stringsAsFactors = FALSE)
-  qa_step("in-range whole values are valid", TRUE, validation_status(vs_check(small, specs, dir))$ok)
+  small <- data.frame(ID = c("A001", "A002"), N = c(7, -7), stringsAsFactors = FALSE)
+  qa_step(
+    "in-range whole values are valid",
+    0L, as.integer(validate_table_detailed(specs, small, verbose = FALSE)$n_columnspec_errors)
+  )
+
+  # The same out-of-range number read from a file is typed away before this
+  # check sees it: stored as NA, one import error, no column-specification error.
+  ds <- vs_check(
+    data.frame(ID = c("A001", "A002"), N = c("7", "2147483648"), stringsAsFactors = FALSE),
+    specs, qa_tempdir()
+  )
+  status <- validation_status(ds)
+  qa_step(
+    "read from a file, it is one import error and no column-specification error",
+    c(columnspec = 0L, import = 1L),
+    c(columnspec = as.integer(status$n_columnspec_errors), import = as.integer(status$n_import_errors))
+  )
 })
 
 test_that("OQ-VAL-040 | a pattern declared on a numeric column is applied to the plain decimal text of the number | REQ-VAL-009", {
@@ -640,18 +662,23 @@ test_that("OQ-VAL-042 | a number that does not fit a declared w.d or w. format i
   }
 
   # A value below one in magnitude loses its leading zero when the width is
-  # tight, and a fraction in an Int column is a type violation only.
+  # tight. A fraction in an Int column is not a format violation as well: read
+  # from a file it is an import error (REQ-TYPE-009) and nothing on the
+  # column-specification axis; in a table typed in R it is a type violation,
+  # once, and still not a format violation.
   #   G = 3.2:  0.5 -> ".50", 3 characters, fits
   #             1.5 -> "1.50", 4, no       | -0.5 -> "-.50", 4, no
   #   H = 4.2:  -0.5 -> "-.50", 4, fits    | 12.5 -> "12.50", 5, no
   #             0.5 -> "0.50", 4, fits
-  #   I = Int 5.:  12345 -> 5 fits  | 1.5 -> not a whole number: type, once
+  #   I = Int 5.:  12345 -> 5 fits  | 1.5 -> not a whole number
   #                123456 -> 6 characters, no
   tight_specs <- vs_specs(list(
     DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
     DTAColumnSpec(id = "G", type = "SAS Num", format = "SAS 3.2", nullable = FALSE),
     DTAColumnSpec(id = "H", type = "SAS Num", format = "SAS 4.2", nullable = FALSE),
-    DTAColumnSpec(id = "I", type = "SAS Int", format = "SAS 5.", nullable = FALSE)
+    # Nullable, because the cell the reader cannot type is stored as NA, and an
+    # NA in a column declared not nullable would be a type violation of its own.
+    DTAColumnSpec(id = "I", type = "SAS Int", format = "SAS 5.", nullable = TRUE)
   ))
   tight <- data.frame(
     ID = sprintf("A%03d", 1:3),
@@ -663,17 +690,35 @@ test_that("OQ-VAL-042 | a number that does not fit a declared w.d or w. format i
   tight_expected <- rbind(
     vs_expect("columnspec", 2, "G", "format"),
     vs_expect("columnspec", 2, "H", "format"),
-    vs_expect("columnspec", 2, "I", "type"),
     vs_expect("columnspec", 3, "G", "format"),
     vs_expect("columnspec", 3, "I", "format")
   )
   for (engine in names(vs_engines)) {
     ds <- vs_check(tight, tight_specs, dir, stream = vs_engines[[engine]])
+    found <- vs_found(ds)
     qa_step(
-      sprintf("a dropped leading zero fits, and a fraction under Int is not also a format violation (%s engine)", engine),
-      tight_expected, vs_found(ds)
+      sprintf("a dropped leading zero fits, and the fraction under Int is not a format violation (%s engine)", engine),
+      tight_expected, found[found$source == "columnspec", , drop = FALSE]
+    )
+    qa_step(
+      sprintf("...it is the one import error instead (%s engine)", engine),
+      1L, as.integer(validation_status(ds)$n_import_errors)
     )
   }
+
+  # Typed in R, the fraction reaches the column-specification check as a double:
+  # a type violation on row 2, once, and no format violation beside it.
+  typed <- data.frame(ID = sprintf("A%03d", 1:3), I = c(12345, 1.5, 123456), stringsAsFactors = FALSE)
+  typed_specs <- vs_specs(list(
+    DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE),
+    DTAColumnSpec(id = "I", type = "SAS Int", format = "SAS 5.", nullable = FALSE)
+  ))
+  err <- validate_table_detailed(typed_specs, typed, verbose = FALSE)$columnspec_errors$full_error
+  qa_step(
+    "typed in R: the fraction is one type violation and the six-digit value one format violation",
+    data.frame(row = c(2L, 3L), keyword = c("type", "format"), stringsAsFactors = FALSE),
+    data.frame(row = as.integer(err$row), keyword = as.character(err$keyword), stringsAsFactors = FALSE)
+  )
 })
 
 test_that("OQ-VAL-043 | a date, time or datetime that is not display text of its declared format is reported | REQ-VAL-031", {

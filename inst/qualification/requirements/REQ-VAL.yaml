@@ -63,14 +63,20 @@ requirements:
     text: >
       A value whose JSON type does not match the declared type shall be
       reported with the keyword "type", naming the row and the column. In a
-      column declared Int, a number that is not whole, or whose magnitude
-      exceeds 2^31-1 (2147483647), has no integer type and shall be reported
-      the same way. A missing value in a column declared not nullable shall be
-      reported the same way.
+      column declared Int of a table typed in R, a number that is not whole, or
+      whose magnitude exceeds 2^31-1 (2147483647), has no integer type and
+      shall be reported the same way. A missing value in a column declared not
+      nullable shall be reported the same way.
     risk: high
     category: functional
     covers: [check, messages]
     source: R/columnSpecChecks.R
+    notes: >
+      The integer-range clause concerns a table typed in R, for instance a
+      double column handed to validate_table(). A value read from a file into
+      a declared Int column never reaches this check as an out-of-range number:
+      the reader stores the column as R integer and reports such a cell as an
+      import error with the cell stored as NA (REQ-TYPE-009).
 
   - id: REQ-VAL-006
     text: >
@@ -377,8 +383,10 @@ requirements:
       sign if negative, and, when d is above zero, the decimal point with its d
       digits; a number below one in magnitude whose width exceeds w by exactly
       one, only for the leading zero, is displayed without that zero and fits.
-      A number with a fraction in a column that accepts integers only is
-      reported as a type violation and not additionally as a format violation.
+      A number with a fraction in a column that accepts integers only, in a
+      table typed in R, is reported as a type violation and not additionally as
+      a format violation; read from a file it is an import error (REQ-TYPE-009)
+      and is not reported as a format violation either.
       For DATEw., TIMEw.d and DATETIMEw., a string that is not display text of
       that format or is longer than w characters, ignoring spaces before and
       after it: a date is a day from 01 to 31, an English three-letter month in
