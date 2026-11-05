@@ -83,13 +83,10 @@ jobs:
         run: R CMD INSTALL --install-tests --build .
         shell: bash
 
+      # One line on purpose: Rscript on Windows cuts a multi-line -e at the
+      # first newline.
       - name: Run the qualification
-        run: |
-          Rscript -e 'DTAtools::run_qualification(
-            "qualification-output",
-            scale = "${{ inputs.scale || 'quick' }}",
-            tester = "GitHub Actions ${{ matrix.config.os }}"
-          )'
+        run: Rscript -e 'DTAtools::run_qualification("qualification-output", scale = "${{ inputs.scale || 'quick' }}", tester = "GitHub Actions ${{ matrix.config.os }}")'
         shell: bash
 
       # Uploaded before the verdict is enforced, so a failing run still leaves
@@ -104,14 +101,5 @@ jobs:
 
       - name: Fail on a FAIL verdict
         if: always()
-        run: |
-          Rscript -e '
-            summaries <- list.files("qualification-output", pattern = "^SUMMARY[.]txt$",
-                                    recursive = TRUE, full.names = TRUE)
-            if (length(summaries) == 0) stop("No qualification summary was produced.")
-            text <- readLines(summaries[[1]])
-            verdict <- sub("^Verdict\\s*:\\s*", "", grep("^Verdict", text, value = TRUE)[[1]])
-            cat("Verdict:", verdict, "\n")
-            if (startsWith(verdict, "FAIL")) stop("The qualification run failed.")
-          '
+        run: Rscript .github/scripts/qualification_verdict.R
         shell: bash
