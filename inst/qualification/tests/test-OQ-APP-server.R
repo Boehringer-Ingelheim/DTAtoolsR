@@ -816,3 +816,68 @@ test_that("OQ-APP-039 | raw YAML whose rules contradict its columns is refused a
     qa_step("the unaltered text applies", TRUE, isTRUE(rv$yaml_msg$ok))
   })
 })
+
+test_that("OQ-APP-040 | a group-condition name whose row was removed is no longer offered to constraints | REQ-APP-031 | tags: white-box", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("i", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+
+    # No browser here, so record what the server would send to one: the
+    # options updateSelectInput() pushes, and the markup insertUI() inserts.
+    inserted <- character(0)
+    sent <- list()
+    session$sendInsertUI <- function(selector, multiple, where, content) {
+      inserted <<- c(inserted, as.character(content$html))
+      invisible()
+    }
+    session$sendInputMessage <- function(inputId, message) {
+      sent[[inputId]] <<- message
+      invisible()
+    }
+    opt_values <- function(html) {
+      sub('^value="(.*)"$', "\\1", regmatches(html, gregexpr('value="[^"]*"', html))[[1]])
+    }
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+    session$setInputs(
+      gcond_name_1 = "c1_kept", gcond_col_1 = "STATUS",
+      gcond_op_1 = "equals", gcond_val_1 = "FAILED"
+    )
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "c2_removed", gcond_col_2 = "CONSENT_DATE",
+      gcond_op_2 = "empty", gcond_val_2 = "false"
+    )
+
+    # Shiny keeps a removed input's last value, so the removal alone has to
+    # refresh the selectors of the constraint row that already exists.
+    sent <- list()
+    session$setInputs(gcond_remove_2 = 1)
+    qa_check(
+      "the removal alone refreshes the existing constraint's selectors",
+      !is.null(sent$gconstr_left_1)
+    )
+    qa_step(
+      "Left/IF offers only the condition still present",
+      c("", "c1_kept"), sort(opt_values(sent$gconstr_left_1$options))
+    )
+    qa_step(
+      "Right/THEN offers only the condition still present",
+      c("", "c1_kept"), sort(opt_values(sent$gconstr_right_1$options))
+    )
+
+    session$setInputs(gconstr_add = 1)
+    html <- paste(inserted[grepl('id="gconstr_left_2"', inserted, fixed = TRUE)], collapse = "")
+    qa_check(
+      "a constraint row added afterwards does not offer the removed name",
+      !grepl('value="c2_removed"', html, fixed = TRUE) &&
+        grepl('value="c1_kept"', html, fixed = TRUE)
+    )
+  })
+})

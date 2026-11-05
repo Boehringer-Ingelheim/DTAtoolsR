@@ -1244,25 +1244,6 @@ test_that("vocabulary_slots merge by id across extends:", {
   expect_identical(as.character(a$target), "datasets.ds1.columns.A.values")
 })
 
-test_that("template_provenance() records vocabulary selections as a sibling of selections", {
-  prov_fn <- app_fn("template_provenance")
-
-  with_sel <- prov_fn(
-    list(id = "t", version = "1.0"), list(id = "t", version = "1.0"),
-    selections = list(opt = "x"),
-    vocab_selections = list(visit_choice = c("SCR", "EOT"))
-  )
-  expect_identical(with_sel$vocabulary_selections$visit_choice, c("SCR", "EOT"))
-  # A sibling, never an entry inside `selections`: rebase replays `selections`
-  # through the template's `options:`, where a slot id is not an option id.
-  expect_null(with_sel$selections$visit_choice)
-
-  # Omitted entirely when the template offered no slots, so an unaffected
-  # document's provenance block does not grow an empty key.
-  without <- prov_fn(list(id = "t", version = "1.0"), list(id = "t", version = "1.0"), selections = list())
-  expect_false("vocabulary_selections" %in% names(without))
-})
-
 
 # ---- Index registration ----------------------------------------------------
 

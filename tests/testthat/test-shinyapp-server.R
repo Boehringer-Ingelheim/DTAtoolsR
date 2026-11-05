@@ -1009,6 +1009,116 @@ test_that("a row index removed in one rule form is usable again in the next", {
   })
 })
 
+test_that("condition rows added after the first carry their own field labels", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # No browser here, so record what insertUI() would send to one.
+    inserted <- character(0)
+    session$sendInsertUI <- function(selector, multiple, where, content) {
+      inserted <<- c(inserted, as.character(content$html))
+      invisible()
+    }
+
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_condition")
+    session$setInputs(cond_add = 1)
+    session$setInputs(then_add = 1)
+    html <- paste(inserted, collapse = "")
+    expect_match(html, 'for="cond_col_2">Column</label>', fixed = TRUE)
+    expect_match(html, 'for="cond_op_2">Operator</label>', fixed = TRUE)
+    expect_match(html, 'for="cond_val_2">Value</label>', fixed = TRUE)
+    expect_match(html, 'for="then_col_2">Column</label>', fixed = TRUE)
+
+    inserted <- character(0)
+    session$setInputs(rule_back = 1)
+    session$setInputs(rule_add = 2)
+    session$setInputs(rule_type = "group_condition")
+    session$setInputs(gcond_add = 1)
+    session$setInputs(gconstr_add = 1)
+    html <- paste(inserted, collapse = "")
+    expect_match(html, 'for="gcond_name_2">Condition name</label>', fixed = TRUE)
+    expect_match(html, 'for="gconstr_id_2">Constraint id</label>', fixed = TRUE)
+    expect_match(html, 'for="gconstr_left_2">Left / IF</label>', fixed = TRUE)
+  })
+})
+
+test_that("condition-row labels after the first row are hidden visually, not from screen readers", {
+  css <- paste(as.character(app_fn("bi_css")()), collapse = "\n")
+  rule <- regmatches(
+    css,
+    regexpr("\\.cond-row:not\\(:first-child\\) \\.control-label \\{[^}]*\\}", css)
+  )
+
+  expect_length(rule, 1L)
+  expect_match(rule, "position: absolute;", fixed = TRUE)
+  expect_match(rule, "clip: rect(0, 0, 0, 0);", fixed = TRUE)
+  expect_no_match(rule, "display: none", fixed = TRUE)
+  expect_no_match(rule, "visibility: hidden", fixed = TRUE)
+})
+
+test_that("a removed group-condition row's name is no longer offered to constraints", {
+  clean_session_file()
+
+  shiny::testServer(app_server_dir(), {
+    # No browser here, so record what the server would send to one: the
+    # options updateSelectInput() pushes, and the markup insertUI() inserts.
+    inserted <- character(0)
+    sent <- list()
+    session$sendInsertUI <- function(selector, multiple, where, content) {
+      inserted <<- c(inserted, as.character(content$html))
+      invisible()
+    }
+    session$sendInputMessage <- function(inputId, message) {
+      sent[[inputId]] <<- message
+      invisible()
+    }
+    opt_values <- function(html) {
+      sub('^value="(.*)"$', "\\1", regmatches(html, gregexpr('value="[^"]*"', html))[[1]])
+    }
+
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+
+    session$setInputs(edit_rules = 1)
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "group_condition")
+    session$setInputs(
+      gcond_name_1 = "c1_kept", gcond_col_1 = "STATUS",
+      gcond_op_1 = "equals", gcond_val_1 = "FAILED"
+    )
+    session$setInputs(gcond_add = 1)
+    session$setInputs(
+      gcond_name_2 = "c2_removed", gcond_col_2 = "CONSENT_DATE",
+      gcond_op_2 = "empty", gcond_val_2 = "false"
+    )
+    expect_setequal(
+      opt_values(sent$gconstr_left_1$options),
+      c("", "c1_kept", "c2_removed")
+    )
+
+    # Shiny keeps a removed input's last value, so only an explicit skip
+    # drops the name; the removal alone has to refresh the selectors.
+    sent <- list()
+    session$setInputs(gcond_remove_2 = 1)
+    expect_identical(rv$gcond_removed, 2L)
+    expect_false(is.null(sent$gconstr_left_1))
+    expect_setequal(opt_values(sent$gconstr_left_1$options), c("", "c1_kept"))
+    expect_setequal(opt_values(sent$gconstr_right_1$options), c("", "c1_kept"))
+
+    # A constraint row added afterwards starts from the same list.
+    session$setInputs(gconstr_add = 1)
+    row <- inserted[grepl('id="gconstr_left_2"', inserted, fixed = TRUE)]
+    expect_length(row, 1L)
+    expect_match(row, 'value="c1_kept"', fixed = TRUE)
+    expect_no_match(row, 'value="c2_removed"', fixed = TRUE)
+  })
+})
+
 test_that("group_condition constraint selectors follow condition name changes", {
   clean_session_file()
 

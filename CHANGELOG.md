@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- A DTA created from a template no longer records the option answers
+  (`selections:`, `vocabulary_selections:`) under `metadata.template`; they
+  already appear as the field values they set. Rebasing onto a newer template
+  version reads them back from the document instead, so the answers are kept.
+  Documents that still carry `selections:` rebase exactly as before.
+- `metadata.template` now records the template's `label` and the `date` of the
+  template version (a new optional `date:` field on creation templates, never
+  inherited through `extends:`). `source_ref` holds the full file path only for
+  a local `dir:` source; for git, package and bundled templates it is the file
+  name within the source rather than a machine-specific cache path.
+- In "New DTA from template", an option with a single suggestion (and free
+  text allowed) is a text field pre-filled with that suggestion, edited in
+  place, instead of a one-entry dropdown.
+
 ### Fixed
 
 - The app's built-in PDF writer no longer produces no file where the cairo
@@ -60,6 +76,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The app's "Export DTA YAML" file name now writes version dots as underscores
   (`..._v1_0_...` instead of `..._v10_...`), so versions `1.0` and `10` no
   longer produce the same name.
+
+- In the app's rule editor, removing the first IF, THEN, grouped-condition or
+  constraint row no longer leaves the remaining rows without field labels;
+  every row now carries its labels for screen readers and the first row on
+  screen shows them; every row's remove button is now a consistent ×.
+
+- A grouped-condition row removed in the rule editor is no longer offered in
+  the constraints' Left/Right lists; choosing it used to make Save fail with
+  an unknown-condition error, and the lists were not refreshed when a row was
+  removed.
 
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
@@ -244,6 +270,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- A creation template can record the versions it went through before it
+  entered the template library with a hand-written `prior_versions:` block
+  (version, optional date, free-text changes). The picker's history shows them
+  after the first library version, whose computed history has nothing earlier
+  to compare against. `validate_template()` reports a malformed entry as
+  `prior_versions_invalid`.
+
 - `lint_dta()` reports every problem in a DTA YAML file, list or object at
   once, using the codes of the check catalogue. `strict = TRUE` aborts on
   errors with the findings attached. The app runs the same check on load,
@@ -396,9 +429,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
   Before release, five defects were introduced into the package one at a time
   to confirm the suite is capable of failing, and each was caught by the test
-  cases whose subject was the behaviour broken. The results, including one
-  control that did not fire and why, are recorded in section 4a of
-  `inst/qualification/docs/validation-plan.md`.
+  cases whose subject was the behaviour broken. The results are recorded in
+  section 4a of `inst/qualification/docs/validation-plan.md`, including one
+  control that at first did not fire: an equivalent mutation in the branch for
+  a lazily held table whose file has vanished, which no case exercised. That
+  branch is now covered by REQ-ROBUST-017 and OQ-ROBUST-017, and a mutation
+  that changes its behaviour is caught.
 
   The developer test suite is executed too, when the package was installed
   with its tests, and reported as supplementary evidence. It runs in a separate

@@ -533,12 +533,19 @@ template_history_change_item <- function(row) {
   tags$li(span(class = "msg-hint", row$area), " ", row$what, " — ", detail)
 }
 
-template_history_entry_body <- function(entry) {
+template_history_entry_body <- function(entry, has_prior = FALSE) {
   if (!is.null(entry$error)) {
-    return(p(class = "text-danger", paste0("Could not be compared: ", entry$error)))
+    lead <- if (identical(entry$type, "manual")) "Could not be read: " else "Could not be compared: "
+    return(p(class = "text-danger", paste0(lead, entry$error)))
+  }
+  if (identical(entry$type, "manual")) {
+    return(p(class = "tmpl-history-note", entry$note))
   }
   if (identical(entry$type, "initial")) {
-    return(p(class = "msg-hint", "First version of this template."))
+    return(p(
+      class = "msg-hint",
+      if (has_prior) "First version in the template library." else "First version of this template."
+    ))
   }
   if (nrow(entry$changes) == 0) {
     return(p(class = "msg-hint", "No change to what this template builds."))
@@ -554,20 +561,21 @@ template_history_ui <- function(history, selected_version) {
   if (length(history) == 0) {
     return(NULL)
   }
-  own <- Filter(function(e) e$type != "upstream" && identical(e$version, selected_version), history)
+  own <- Filter(function(e) e$type %in% c("version", "initial") && identical(e$version, selected_version), history)
+  has_prior <- any(vapply(history, function(e) identical(e$type, "manual") && is.null(e$error), logical(1)))
   div(
     class = "tmpl-history",
     div(class = "section-label", "History"),
     if (length(own) > 0) {
       tagList(
         tags$strong(paste0("What changed in ", selected_version)),
-        template_history_entry_body(own[[1]])
+        template_history_entry_body(own[[1]], has_prior)
       )
     },
     tags$details(
       tags$summary(sprintf("Full history (%d entries)", length(history))),
       lapply(history, function(e) {
-        tagList(tags$strong(e$title), template_history_entry_body(e))
+        tagList(tags$strong(e$title), template_history_entry_body(e, has_prior))
       })
     )
   )
@@ -647,6 +655,7 @@ render_template_option_input <- function(opt, base_metadata = list()) {
   }
 
   ch <- if (typ %in% c("boolean", "textarea", "number")) character(0) else dta_template_choices(opt)
+  single_text <- length(ch) == 1 && dta_template_allow_custom(opt, default = !identical(typ, "select"))
   # The controls carry no label of their own: tmpl_field_row() puts the label
   # and the help text in the row's left column, so every control starts on the
   # same vertical line however long its help is.
@@ -698,7 +707,14 @@ render_template_option_input <- function(opt, base_metadata = list()) {
       iid, NULL,
       value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
     ),
-    if (length(ch) > 0) {
+    if (single_text) {
+      # One suggestion and free text allowed: a dropdown of one is pointless,
+      # so the suggestion is simply the field's starting text, edited in place.
+      textInput(iid, NULL,
+        value = if (is.null(def)) unname(ch[[1]]) else as.character(def)[[1]],
+        width = "100%"
+      )
+    } else if (length(ch) > 0) {
       combobox(ch)
     } else {
       textInput(iid, NULL,
@@ -711,7 +727,7 @@ render_template_option_input <- function(opt, base_metadata = list()) {
   tmpl_field_row(
     # selectize hides the <select> and types into "<id>-selectized"; the label
     # has to point at the element that actually takes focus.
-    for_id = if (length(ch) > 0) paste0(iid, "-selectized") else iid,
+    for_id = if (length(ch) > 0 && !single_text) paste0(iid, "-selectized") else iid,
     label = label,
     hints = if (nzchar(help)) div(class = "msg-hint tmpl-help", help),
     control = ctl,

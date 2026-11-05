@@ -2,6 +2,7 @@ kind: dta_creation_template
 id: biomarker_gf_acme
 label: Biomarker GF DTS (ACME Labs)
 version: "1.0"
+date: "2026-11-05"
 # `@latest` rather than a pinned `@1.0`, deliberately: a supplier deviation
 # should follow the current standard, so publishing biomarker_gf 1.1 does not
 # require editing every supplier's file to pick it up. `biomarker_gf` on its

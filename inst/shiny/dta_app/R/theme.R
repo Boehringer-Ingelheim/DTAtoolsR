@@ -825,6 +825,10 @@ bi_css <- function() {
     .cond-builder .cond-title { font-weight: 600; font-size: .78rem; text-transform: none; letter-spacing: 0; color: var(--bi-grey); margin-bottom: 6px; }
     .cond-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 4px; }
     .cond-row .form-group { margin-bottom: 0; flex: 1 1 auto; }
+    /* Every condition row carries its field labels, so whichever row is first
+       after a removal still shows them. Later rows keep theirs for screen
+       readers only (the visually-hidden clip technique, not display:none). */
+    .cond-row:not(:first-child) .control-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
     /* Metadata: section titles + clickable (editable) contact rows. */
     .md-section-title { font-size: 1.0625rem; font-weight: 600; color: var(--bi-green-dark); margin: 4px 0 10px; }

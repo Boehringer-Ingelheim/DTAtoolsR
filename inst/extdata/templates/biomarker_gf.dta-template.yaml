@@ -2,6 +2,7 @@ kind: dta_creation_template
 id: biomarker_gf
 label: Biomarker GF DTS
 version: "1.0"
+date: "2026-11-05"
 description: >-
   Creates a new DTA for Biomarker GF transfer specifications using the
   bundled GF dataset structure, then applies option-driven metadata fields.

@@ -40,10 +40,9 @@ files <- sort(files, method = "radix")
 hashes <- unname(vapply(file.path("inst", files), hash_fun, character(1)))
 lines <- c(
   sprintf(
-    "# %s of every file under inst/, except qualification/baseline/ and the",
+    "# %s of every file under inst/, except qualification/baseline/.",
     algorithm
   ),
-  "# app's own generated manifest.json (see the script for why).",
   "# Regenerate with: Rscript .github/scripts/sync_qualification_manifest.R",
   sprintf("%s  %s", hashes, files)
 )
