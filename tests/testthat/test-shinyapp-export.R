@@ -664,6 +664,21 @@ test_that("dta_markdown_to_pdf() renders a long document onto several pages", {
   expect_gt(pages, 1)
 })
 
+test_that("dta_markdown_to_pdf() falls back to pdf() when cairo only warns that it cannot load", {
+  # macOS without XQuartz: capabilities("cairo") is TRUE, cairo_pdf() warns
+  # "failed to load cairo DLL" and opens no device.
+  testthat::local_mocked_bindings(
+    cairo_pdf = function(...) {
+      warning("failed to load cairo DLL")
+      invisible(NULL)
+    },
+    .package = "grDevices"
+  )
+  out <- withr::local_tempfile(fileext = ".pdf")
+  app_fn("dta_markdown_to_pdf")(c("# Heading", "", "Some body text."), out)
+  expect_true(app_fn("dta_is_pdf")(out))
+})
+
 test_that("without LibreOffice or pandoc, the PDF is rendered from the full Markdown export", {
   env <- app_env()
   rendered <- NULL

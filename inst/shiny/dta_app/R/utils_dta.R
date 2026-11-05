@@ -1253,12 +1253,17 @@ dta_markdown_to_pdf <- function(lines, file) {
   ascii <- function(x) x
   opened <- FALSE
   if (isTRUE(cairo_ok)) {
+    # A cairo that reports itself available can still fail to load (macOS
+    # without XQuartz: "failed to load cairo DLL"). R signals that as a
+    # warning, not an error, and then opens no device, so the warning has to
+    # count as a failure or the PDF is never written.
     opened <- tryCatch(
       {
         grDevices::cairo_pdf(file, width = 8.27, height = 11.69, onefile = TRUE, pointsize = 10)
         TRUE
       },
-      error = function(e) FALSE
+      error = function(e) FALSE,
+      warning = function(w) FALSE
     )
   }
   if (!isTRUE(opened)) {

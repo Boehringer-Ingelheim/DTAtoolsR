@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The app's built-in PDF writer no longer produces no file where the cairo
+  graphics library is installed but cannot be loaded (macOS without XQuartz).
+  R reports that as a warning and opens no device; it now falls back to the
+  base PDF device like any other cairo failure.
+
 - The app's Markdown export with "Export as PDF" ticked wrote its Markdown
   into a file named `.pdf` and then asked Pandoc to read and write that one
   path. When no PDF could be made, the Markdown text was delivered under a
