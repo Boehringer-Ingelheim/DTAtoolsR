@@ -8,6 +8,58 @@
 #' @keywords internal
 .tv_is_region_marker <- function(token) token %in% .tv_region_markers()
 
+#' Write a value's braces as private-use stand-ins, and put them back
+#'
+#' `.tv_protect_braces()` replaces `{` and `}` in a character value with U+E000
+#' and U+E001, two code points from the Unicode Private Use Area that no
+#' placeholder grammar matches and no real document text uses.
+#' [.tv_expand_regions()] protects every dataset value it substitutes into a
+#' region copy, and [.tv_restore_braces_in_xml()] restores them once every
+#' later pass has run. Non-character values are returned unchanged.
+#' @param x A placeholder value.
+#' @return `x`, with its braces replaced (or restored).
+#' @keywords internal
+.tv_protect_braces <- function(x) {
+  if (!is.character(x)) {
+    return(x)
+  }
+  gsub("}", intToUtf8(0xE001), gsub("{", intToUtf8(0xE000), x, fixed = TRUE), fixed = TRUE)
+}
+
+#' Put back the braces [.tv_protect_braces()] replaced
+#' @param x A character vector.
+#' @return `x`, with U+E000/U+E001 turned back into `{`/`}`.
+#' @keywords internal
+.tv_restore_braces <- function(x) {
+  gsub(intToUtf8(0xE001), "}", gsub(intToUtf8(0xE000), "{", x, fixed = TRUE), fixed = TRUE)
+}
+
+#' Restore protected braces in every text node of a document part
+#' @param xml_path Character. Path to the XML part, rewritten in place only when
+#'   it held a stand-in.
+#' @return Invisibly, `TRUE` when the part was rewritten.
+#' @keywords internal
+.tv_restore_braces_in_xml <- function(xml_path) {
+  doc <- tryCatch(xml2::read_xml(xml_path), error = function(e) NULL)
+  if (is.null(doc)) {
+    return(invisible(FALSE))
+  }
+  nodes <- xml2::xml_find_all(doc, ".//*[local-name()='t']")
+  texts <- xml2::xml_text(nodes)
+  hit <- (grepl(intToUtf8(0xE000), texts, fixed = TRUE) | grepl(intToUtf8(0xE001), texts, fixed = TRUE))
+  if (!any(hit)) {
+    return(invisible(FALSE))
+  }
+  # A character-for-character swap, so the node's whitespace -- and therefore
+  # whether it needs xml:space="preserve" -- is unchanged; set the text in
+  # place rather than rebuilding the run, which may hold several w:t nodes.
+  for (k in which(hit)) {
+    xml2::xml_text(nodes[[k]]) <- .tv_restore_braces(texts[[k]])
+  }
+  xml2::write_xml(doc, xml_path)
+  invisible(TRUE)
+}
+
 #' Region markers, with a one-line description, for the placeholder catalogue
 #' @keywords internal
 .tv_region_catalog <- function() {
@@ -181,25 +233,29 @@
 #' @param dta A [DTA] object.
 #' @param nonce Character. This export's nonce, from [.tv_block_nonce()].
 #' @param variables Named list of caller-supplied placeholder values.
-#' @return A list with two elements. `blocks`: a named character vector,
+#' A dataset value substituted into a copy is document data, not markup, so its
+#' braces are written as the private-use stand-ins of [.tv_protect_braces()]:
+#' neither block stamping nor pass 1's inline substitution can then read a
+#' value that spells `{SIGNATURES_TABLE}` or `{DTA_TITLE}` as a placeholder.
+#' [.replace_docx_placeholders()] puts the braces back once both passes are
+#' done.
+#'
+#' @return A list with one element, `blocks`: a named character vector,
 #'   sentinel to `"{NAME:dataset}"`, for every dataset block a region copy
 #'   bound -- to be added to the `blocks` argument of [.tv_render_blocks()].
-#'   `literal`: a character vector of every block-token spelling produced by
-#'   substituting a dataset value into a region copy, for
-#'   [.tv_mark_block_paragraphs()]'s `literal` argument. Both `character(0)`
-#'   when nothing was expanded.
+#'   `character(0)` when nothing was expanded.
 #' @keywords internal
 .tv_expand_regions <- function(xml_path, dta, nonce, variables = list()) {
   doc <- tryCatch(xml2::read_xml(xml_path), error = function(e) NULL)
   if (is.null(doc)) {
-    return(list(blocks = character(0), literal = character(0)))
+    return(list(blocks = character(0)))
   }
   body <- xml2::xml_find_first(
     doc,
     "/*[local-name()='document']/*[local-name()='body']"
   )
   if (inherits(body, "xml_missing")) {
-    return(list(blocks = character(0), literal = character(0)))
+    return(list(blocks = character(0)))
   }
 
   markers <- .tv_region_markers()
@@ -208,7 +264,6 @@
   }
 
   found <- character(0)
-  literal <- character(0)
   changed <- FALSE
   from <- 1L
   repeat {
@@ -236,6 +291,17 @@
     for (nm in ds_names) {
       ds_vars <- .tv_dataset_variables(dta@datasets[[nm]])
       ds_vars <- ds_vars[!names(ds_vars) %in% names(variables)]
+      # A value substituted here is document data, not markup. Outside a
+      # region that holds by construction -- pass 1 substitutes every token in
+      # one scan and never reads its own output -- but a region copy is
+      # substituted HERE and then read again by block stamping and by pass 1,
+      # after a write and a re-read of document.xml that leaves no paragraph
+      # identity to tell "a value wrote this" from "the template wrote this".
+      # So the braces of a value are written as private-use stand-ins that no
+      # later pass can read as a token, and put back after the last one: a
+      # dataset described as "{SIGNATURES_TABLE}" or "Title is {DTA_TITLE}"
+      # renders as exactly that text (DEV-016, closed).
+      ds_vars <- lapply(ds_vars, .tv_protect_braces)
       if (is.null(region)) {
         next
       }
@@ -244,36 +310,7 @@
         copy <- xml2::xml_find_first(close, "preceding-sibling::*[1]")
         found <- c(found, .tv_bind_region_block(copy, nm, nonce, length(found) + 1L, variables))
         copy_paras <- xml2::xml_find_all(copy, "descendant-or-self::*[local-name()='p']")
-        before <- vapply(seq_along(copy_paras), function(k) trimws(xml2::xml_text(copy_paras[[k]])), character(1))
         .tv_substitute_paragraphs(copy_paras, ds_vars)
-        # A value just substituted above is document data, not markup: a
-        # dataset description of exactly "{SIGNATURES_TABLE}" leaves this
-        # paragraph reading a block token it never asked to be. Outside a
-        # region that is already left as written --
-        # .tv_mark_block_paragraphs() skips any token a `variables` value
-        # spelled -- and a region copy deserves the same treatment, not a
-        # table it never asked for. The difference is that by the time pass 1
-        # runs, the document has already been written and re-read: there is
-        # no paragraph identity left to hand this off by, only the token's
-        # spelling. So that is what gets handed off, as `literal`, for pass 1
-        # to leave alone.
-        #
-        # Only a paragraph the substitution above actually rewrote counts --
-        # comparing its text before and after is what tells "a value was
-        # just written here" apart from "this paragraph already read like a
-        # block token and .tv_substitute_paragraphs() had nothing to do with
-        # it", e.g. an explicit `{COLUMN_SPECS:vitals}` deliberately left
-        # untouched by .tv_bind_region_block() above, which pass 1 must still
-        # be free to stamp in every repetition.
-        #
-        # The known cost of a spelling-based hand-off: a template that uses
-        # this same token spelling elsewhere as an actual block placeholder
-        # is left unrendered there too. That fails toward literal text rather
-        # than toward rendering the wrong thing, and the leftover scan at the
-        # end of .tv_render_blocks() reports it, same as any other
-        # placeholder left unrendered.
-        after <- vapply(seq_along(copy_paras), function(k) trimws(xml2::xml_text(copy_paras[[k]])), character(1))
-        literal <- c(literal, Filter(.tv_is_block_token, after[after != before]))
         .tv_renumber_drawings(copy, doc)
       }
     }
@@ -291,5 +328,5 @@
   if (changed) {
     xml2::write_xml(doc, xml_path)
   }
-  list(blocks = found, literal = unique(literal))
+  list(blocks = found)
 }

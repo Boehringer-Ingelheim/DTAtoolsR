@@ -1551,7 +1551,10 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
 # build the DOCX first (always works via officer), then
 # convert with the best engine available and VERIFY a real PDF resulted. When no
 # external converter exists we still produce a valid PDF from the Markdown export
-# via R's own device -- so the export ALWAYS yields an openable PDF.
+# via R's own device. When even the Markdown export fails, the export FAILS: it
+# used to fall back to a title-only page saying the layout "could not be
+# generated", which opened as a valid PDF and so read as a successful export of
+# an agreement whose content was missing.
 dta_export_pdf <- function(dta, file, signature_list = NULL) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
@@ -1573,10 +1576,10 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   }
 
   # 3) Self-contained fallback: render the Markdown export to a real PDF with
-  #    R's built-in device (no external tools). Guarantees a working download.
+  #    R's built-in device (no external tools).
   md <- tempfile(fileext = ".md")
   on.exit(unlink(md), add = TRUE)
-  ok_md <- tryCatch(
+  md_error <- tryCatch(
     {
       DTAtools::write_dta(
         dta,
@@ -1584,29 +1587,36 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
         include_signatures = !is.null(signature_list),
         signature_list = signature_list, quiet = TRUE
       )
-      TRUE
+      NULL
     },
-    error = function(e) FALSE
+    error = function(e) conditionMessage(e)
   )
-  lines <- if (isTRUE(ok_md)) {
+  lines <- if (is.null(md_error)) {
     tryCatch(readLines(md, warn = FALSE), error = function(e) character(0))
   } else {
     character(0)
   }
   if (length(lines) == 0) {
-    ttl <- tryCatch(as.character(S7::prop(DTAtools::metadata(dta), "title"))[1],
-      error = function(e) NULL
-    )
-    lines <- c(
-      "# Data Transfer Agreement",
-      if (!is.null(ttl) && nzchar(ttl)) paste0("**Title:** ", ttl) else NULL,
-      paste0("**Generated:** ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-      "",
-      "(The full document layout could not be generated on this system.)"
-    )
+    # Nothing is written to `file`: a page that only says the content is
+    # missing must not be handed out as the agreement.
+    unlink(file)
+    stop(paste0(
+      "Could not produce a PDF on this system: no LibreOffice or PDF-capable ",
+      "pandoc engine was found, and the document text for the built-in PDF ",
+      "renderer could not be generated",
+      if (!is.null(md_error)) paste0(" (", md_error, ")") else "",
+      "."
+    ))
   }
-  dta_markdown_to_pdf(lines, file)
-  if (!dta_is_pdf(file)) {
+  rendered <- tryCatch(
+    {
+      dta_markdown_to_pdf(lines, file)
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+  if (!isTRUE(rendered) || !dta_is_pdf(file)) {
+    unlink(file)
     stop(paste0(
       "Could not produce a PDF on this system (no LibreOffice, LaTeX or ",
       "PDF-capable pandoc engine, and the built-in PDF device failed)."

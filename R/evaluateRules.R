@@ -511,7 +511,7 @@ dta_normalize_conditions <- function(conditions, arg = "condition") {
 
   clause_names <- names(conditions)
   if (!is.null(clause_names) && all(nzchar(clause_names))) {
-    return(conditions)
+    return(dta_check_condition_arity(conditions, arg))
   }
 
   # YAML sequence form: fold the sequence of single-column mappings into one
@@ -554,7 +554,82 @@ dta_normalize_conditions <- function(conditions, arg = "condition") {
     }
   }
 
-  out
+  dta_check_condition_arity(out, arg)
+}
+
+#' @title Check How Many Values Each Condition Operator Was Given
+#' @description
+#' The comparison operators are applied element-wise by R, so a value of the
+#' wrong length is never an error at evaluation time -- it is a silently wrong
+#' verdict. `equals: [A, B]` compared `x == c("A", "B")` with recycling, so the
+#' rows alternated between the two values and the outcome depended on row
+#' order; `range: [0, 100, 5]` dropped the third bound; `range: 25` compared
+#' against `NA` and flagged every row; a vector `pattern` used its first
+#' element only. Every construction and evaluation path goes through
+#' [dta_normalize_conditions()], so checking here rejects such a clause when the
+#' rule is built, before any data is read.
+#'
+#' Unknown operators are left to [dta_condition_mask()], which already aborts
+#' on them with the list of supported ones.
+#' @param conditions A named list of column conditions, as returned by
+#'   [dta_normalize_conditions()].
+#' @param arg Name of the clause, used in error messages.
+#' @return `conditions`, unchanged.
+#' @keywords internal
+dta_check_condition_arity <- function(conditions, arg = "condition") {
+  single <- c(
+    "equals", "equal", "not_equals", "not_equal",
+    "greater", "less", "greater_equal", "less_equal",
+    "min", "max", "pattern"
+  )
+
+  for (column_name in names(conditions)) {
+    clause <- conditions[[column_name]]
+    if (!is.list(clause) || is.null(names(clause))) {
+      next
+    }
+    for (operator in names(clause)) {
+      value <- clause[[operator]]
+      flat <- if (is.list(value)) unlist(value, use.names = FALSE) else value
+      n <- length(flat)
+      missing <- n > 0L && anyNA(flat)
+
+      problem <- if (operator %in% single) {
+        if (n != 1L || missing) "exactly one non-missing value" else NULL
+      } else if (identical(operator, "range")) {
+        if (n != 2L || missing) "exactly two non-missing values, the lower and upper bound" else NULL
+      } else if (operator %in% c("in", "not_in")) {
+        # A missing member is allowed: `in: [A, ~]` deliberately selects the
+        # rows that are A or missing, through `%in%`'s own NA matching.
+        if (n < 1L) "one or more values" else NULL
+      } else if (identical(operator, "empty")) {
+        if (!(isTRUE(flat) || isFALSE(flat))) "a single TRUE or FALSE" else NULL
+      } else {
+        NULL
+      }
+
+      if (!is.null(problem)) {
+        got <- if (n == 0L) "no value" else paste0(n, if (n == 1L) " value" else " values")
+        hint <- if (operator %in% c("equals", "equal") && n > 1L) {
+          c(i = "To accept any of several values, use {.code in:} instead of {.code {operator}:}.")
+        } else if (operator %in% c("not_equals", "not_equal") && n > 1L) {
+          c(i = "To reject several values, use {.code not_in:} instead of {.code {operator}:}.")
+        } else {
+          NULL
+        }
+        cli::cli_abort(
+          c(
+            "{.arg {arg}}: operator {.field {operator}} on column {.field {column_name}} needs {problem}.",
+            x = "It was given {got}.",
+            hint
+          ),
+          class = "dta_condition_arity_error"
+        )
+      }
+    }
+  }
+
+  conditions
 }
 
 #' @title Evaluate one operator of a column condition

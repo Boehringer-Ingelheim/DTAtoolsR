@@ -13,16 +13,19 @@
 
 \item{nonce}{Character. This export's nonce, from \code{\link[=.tv_block_nonce]{.tv_block_nonce()}}.}
 
-\item{variables}{Named list of caller-supplied placeholder values.}
+\item{variables}{Named list of caller-supplied placeholder values.
+A dataset value substituted into a copy is document data, not markup, so its
+braces are written as the private-use stand-ins of \code{\link[=.tv_protect_braces]{.tv_protect_braces()}}:
+neither block stamping nor pass 1's inline substitution can then read a
+value that spells \code{{SIGNATURES_TABLE}} or \code{{DTA_TITLE}} as a placeholder.
+\code{\link[=.replace_docx_placeholders]{.replace_docx_placeholders()}} puts the braces back once both passes are
+done.}
 }
 \value{
-A list with two elements. \code{blocks}: a named character vector,
+A list with one element, \code{blocks}: a named character vector,
 sentinel to \code{"{NAME:dataset}"}, for every dataset block a region copy
 bound -- to be added to the \code{blocks} argument of \code{\link[=.tv_render_blocks]{.tv_render_blocks()}}.
-\code{literal}: a character vector of every block-token spelling produced by
-substituting a dataset value into a region copy, for
-\code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}}'s \code{literal} argument. Both \code{character(0)}
-when nothing was expanded.
+\code{character(0)} when nothing was expanded.
 }
 \description{
 Runs as "pass 0", before \code{\link[=.tv_mark_block_paragraphs]{.tv_mark_block_paragraphs()}}, directly on the

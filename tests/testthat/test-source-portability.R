@@ -5,11 +5,8 @@
 # later and only on CI; this test moves it into the local suite.
 
 testthat::test_that("R sources use only ASCII outside comments", {
-  r_dir <- testthat::test_path("..", "..", "R")
-  testthat::skip_if_not(dir.exists(r_dir), "package source not available")
-
-  files <- list.files(r_dir, pattern = "\\.[RrSsq]$", full.names = TRUE)
-  testthat::expect_gt(length(files), 0)
+  files <- source_r_files("[.][RrSsq]$")
+  testthat::skip_if(length(files) == 0, "package source not available")
 
   # Comments are exempt (R CMD check tolerates them), so the file is parsed and
   # only non-COMMENT tokens are inspected. Working on tokens rather than raw

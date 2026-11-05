@@ -1,4 +1,5 @@
-# The condition operator vocabulary. REQ-RULE-001 .. REQ-RULE-010.
+# The condition operator vocabulary. REQ-RULE-001 .. REQ-RULE-010, and the
+# number of values each operator takes, REQ-RULE-033.
 #
 # One test case per operator. Each builds a table holding a row the operator
 # selects, a row it does not, and a row whose value is missing, so that the
@@ -229,4 +230,23 @@ test_that("OQ-RULE-014 | a text column keeps its leading zeros in a comparison |
     "only the exact text matches",
     1L, as.integer(sub("^.*: ([0-9]+) rows.*$", "\\1", result$message))
   )
+})
+
+test_that("OQ-RULE-050 | an operator given the wrong number of values is rejected when the rule is built | REQ-RULE-033", {
+  rejects <- function(operator, value) {
+    err <- tryCatch(ro_rule(operator, value), error = function(e) e)
+    inherits(err, "dta_condition_arity_error")
+  }
+  qa_check("equals with two values is rejected", rejects("equals", c("A", "B")))
+  qa_check("not_equals with two values is rejected", rejects("not_equals", c("A", "B")))
+  qa_check("greater with two values is rejected", rejects("greater", c(1, 2)))
+  qa_check("pattern with two patterns is rejected", rejects("pattern", c("^A", "^B")))
+  qa_check("min with a missing value is rejected", rejects("min", NA))
+  qa_check("range with one value is rejected", rejects("range", 25))
+  qa_check("range with three values is rejected", rejects("range", c(0, 100, 5)))
+  qa_check("in with no values is rejected", rejects("in", character(0)))
+  qa_check("empty with a non-logical value is rejected", rejects("empty", "yes"))
+
+  qa_step("in with two values is accepted and selects both", 2L, ro_selected("in", c("A", "B"), c("A", "B", "C")))
+  qa_step("range with two values is accepted", 3L, ro_selected("range", c(2, 4), c(1, 2, 3, 4, 5)))
 })

@@ -7,12 +7,22 @@
 # package on three operating systems rather than only against a source tree on
 # one developer's machine.
 #
-# Pull requests are gated by tests/testthat/test-qualification.R instead, which
-# is fast and needs no installation.
+# It also runs on every pull request into dev or master and on every push to
+# dev. The schedule and the manual trigger only ever fire from the default
+# branch (master), and this file did not exist there, so until these triggers
+# were added the OQ/PQ cases had never run in CI at all: the one PR-time check,
+# tests/testthat/test-qualification.R, calls the runner with
+# `stages = character(0)` and so executes none of them. A `pull_request`
+# workflow runs from the pull request's own copy of this file, so it works
+# before the file reaches master.
 
 name: qualification
 
 on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev]
   workflow_dispatch:
     inputs:
       scale:

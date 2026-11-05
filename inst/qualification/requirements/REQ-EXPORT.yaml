@@ -210,7 +210,9 @@ requirements:
       columns_specs_from_word() shall reconstruct a DTAColumnSpecCollection
       from a Word table whose id, type, length, nullable and description
       cells match the collection it is given, arriving at the same column
-      identifiers and types.
+      identifiers and types, and shall read the permitted values and the
+      pattern written on #@values: and #@pattern: lines of a Description
+      cell, each up to the end of its own line.
     risk: high
     category: functional
     covers: [columns_specs_from_word]

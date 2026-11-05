@@ -200,8 +200,9 @@ requirements:
   - id: REQ-SPEC-019
     text: >
       columns(), labels(), names() and colspec() shall report a specification's
-      column identifiers, their labels, and the specification of a named
-      column.
+      column identifiers, their labels, and the specification of a column
+      named or positioned, and colspec() shall raise a condition for an
+      identifier or position the specification does not contain.
     risk: medium
     category: interface
     covers: [columns, labels, names, colspec]
