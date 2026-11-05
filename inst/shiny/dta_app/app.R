@@ -4303,6 +4303,9 @@ server <- function(input, output, session) {
   # a single text box whose meaning depends on the operator (see the hint under
   # the builder). Values come from the prefill only (fresh renders happen on
   # token bumps where prefill is authoritative; insertUI rows keep DOM state).
+  # Labels are rendered on every row; theme.R hides all but the first row's
+  # visually (screen readers keep them), so the first remaining row shows them
+  # after a removal.
   one_cond_row <- function(prefix, i, cols, pf = list(col = "", op = "equals", val = "")) {
     cid <- paste0(prefix, "_col_", i)
     oid <- paste0(prefix, "_op_", i)
@@ -4310,21 +4313,21 @@ server <- function(input, output, session) {
     div(
       id = paste0(prefix, "_row_", i),
       class = "cond-row",
-      selectInput(cid, if (i == 1) "Column" else NULL,
+      selectInput(cid, "Column",
         choices = c("(select)" = "", cols),
         selected = pf$col %||% "", width = "100%"
       ),
-      selectInput(oid, if (i == 1) "Operator" else NULL,
+      selectInput(oid, "Operator",
         choices = dta_condition_operators(),
         selected = pf$op %||% "equals", width = "100%"
       ),
-      textInput(vid, if (i == 1) "Value" else NULL,
+      textInput(vid, "Value",
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
       ),
       actionButton(
         paste0(prefix, "_remove_", i),
-        if (i == 1) "Remove" else "×",
+        "×",
         class = "btn btn-sm btn-outline-danger",
         title = "Remove this row",
         `aria-label` = "Remove this row"
@@ -4462,25 +4465,25 @@ server <- function(input, output, session) {
     div(
       id = rid,
       class = "cond-row",
-      textInput(nid, if (i == 1) "Condition name" else NULL,
+      textInput(nid, "Condition name",
         value = pf$name %||% "", width = "100%",
         placeholder = "c1_failed"
       ),
-      selectInput(cid, if (i == 1) "Column" else NULL,
+      selectInput(cid, "Column",
         choices = c("(select)" = "", cols),
         selected = pf$col %||% "", width = "100%"
       ),
-      selectInput(oid, if (i == 1) "Operator" else NULL,
+      selectInput(oid, "Operator",
         choices = dta_condition_operators(),
         selected = pf$op %||% "equals", width = "100%"
       ),
-      textInput(vid, if (i == 1) "Value" else NULL,
+      textInput(vid, "Value",
         value = pf$val %||% "", width = "100%",
         placeholder = "5 | a, b | 0, 99 | true"
       ),
       actionButton(
         bid,
-        if (i == 1) "Remove" else "×",
+        "×",
         class = "btn btn-sm btn-outline-danger",
         title = "Remove this row",
         `aria-label` = "Remove this row"
@@ -4565,41 +4568,41 @@ server <- function(input, output, session) {
     div(
       id = rowid,
       class = "cond-row",
-      textInput(cid, if (i == 1) "Constraint id" else NULL,
+      textInput(cid, "Constraint id",
         value = pf$id %||% "", width = "100%",
         placeholder = paste0("constraint_", i)
       ),
-      selectInput(tid, if (i == 1) "Type" else NULL,
+      selectInput(tid, "Type",
         choices = c("mutually_exclusive", "requires"),
         selected = ctype,
         width = "100%"
       ),
-      selectInput(lid, if (i == 1) "Left / IF" else NULL,
+      selectInput(lid, "Left / IF",
         choices = c("(select)" = "", cond_names),
         selected = left_name,
         width = "100%"
       ),
-      selectInput(rid, if (i == 1) "Right / THEN" else NULL,
+      selectInput(rid, "Right / THEN",
         choices = c("(select)" = "", cond_names),
         selected = right_name,
         width = "100%"
       ),
-      selectInput(lsid, if (i == 1) "Left/IF scope" else NULL,
+      selectInput(lsid, "Left/IF scope",
         choices = c("any", "all"),
         selected = pf$left_scope %||% pf$if_scope %||% "any",
         width = "100%"
       ),
-      selectInput(rsid, if (i == 1) "Right/THEN scope" else NULL,
+      selectInput(rsid, "Right/THEN scope",
         choices = c("any", "all"),
         selected = pf$right_scope %||% pf$then_scope %||% "any",
         width = "100%"
       ),
-      textInput(mid, if (i == 1) "Message" else NULL,
+      textInput(mid, "Message",
         value = pf$message %||% "", width = "100%"
       ),
       actionButton(
         bid,
-        if (i == 1) "Remove" else "×",
+        "×",
         class = "btn btn-sm btn-outline-danger",
         title = "Remove this row",
         `aria-label` = "Remove this row"
@@ -4629,6 +4632,19 @@ server <- function(input, output, session) {
       }
     }
     out
+  }
+
+  # Distinct non-blank names of the grouped-condition rows still on screen,
+  # offered by the constraint Left/Right selectors. Removed rows are skipped
+  # explicitly: Shiny keeps a removed input's last value, so without the skip
+  # a removed row's name stays selectable and Save rejects it as an unknown
+  # condition. rv$gcond_n and rv$gcond_removed are read reactively on purpose
+  # (unlike visible_group_condition_rows(), which isolates), so the observer
+  # that refreshes the selectors re-runs when a row is removed.
+  current_group_condition_names <- function() {
+    rows <- setdiff(seq_len(max(1L, rv$gcond_n)), rv$gcond_removed)
+    nms <- vapply(rows, function(i) trimws(input[[paste0("gcond_name_", i)]] %||% ""), character(1))
+    unique(nms[nzchar(nms)])
   }
 
   find_condition_dependencies <- function(condition_name, excluding_row) {
@@ -5204,16 +5220,10 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$gconstr_add, {
-    cond_names <- character(0)
-    for (i in seq_len(max(1L, isolate(rv$gcond_n)))) {
-      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      if (nzchar(nm)) cond_names <- c(cond_names, nm)
-    }
-    cond_names <- unique(cond_names)
     rv$gconstr_n <- isolate(rv$gconstr_n) + 1L
     insertUI("#gconstr_rows",
       where = "beforeEnd",
-      ui = one_group_constraint_row(isolate(rv$gconstr_n), cond_names)
+      ui = one_group_constraint_row(isolate(rv$gconstr_n), current_group_condition_names())
     )
   })
 
@@ -5228,12 +5238,7 @@ server <- function(input, output, session) {
       ensure_gconstr_remove_observer(i)
     }
 
-    cond_names <- character(0)
-    for (i in seq_len(max(1L, rv$gcond_n))) {
-      nm <- trimws(input[[paste0("gcond_name_", i)]] %||% "")
-      if (nzchar(nm)) cond_names <- c(cond_names, nm)
-    }
-    cond_names <- unique(cond_names)
+    cond_names <- current_group_condition_names()
 
     for (i in seq_len(max(1L, rv$gconstr_n))) {
       left_id <- paste0("gconstr_left_", i)

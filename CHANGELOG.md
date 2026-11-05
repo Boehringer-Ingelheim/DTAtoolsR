@@ -61,6 +61,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   (`..._v1_0_...` instead of `..._v10_...`), so versions `1.0` and `10` no
   longer produce the same name.
 
+- In the app's rule editor, removing the first IF, THEN, grouped-condition or
+  constraint row no longer leaves the remaining rows without field labels;
+  every row now carries its labels for screen readers and the first row on
+  screen shows them; every row's remove button is now a consistent ×.
+
+- A grouped-condition row removed in the rule editor is no longer offered in
+  the constraints' Left/Right lists; choosing it used to make Save fail with
+  an unknown-condition error, and the lists were not refreshed when a row was
+  removed.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain
