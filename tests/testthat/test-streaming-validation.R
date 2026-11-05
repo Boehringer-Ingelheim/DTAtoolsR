@@ -1868,7 +1868,7 @@ test_that("import errors from both axes are counted once each, cap or no cap", {
   # bypassed it and could report more import errors than `import_errors` had
   # rows. Nothing else in the suite populates BOTH sinks at once, which is
   # exactly the combination that broke.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
       DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
@@ -1909,7 +1909,7 @@ test_that("the import-typing axis is reported on its own alongside the merged fr
   # produce. A streamed table has no such moment, so check() took the merged
   # frame instead and put a wider axis in the same property: the same file
   # showed one set of import issues loaded eagerly and another streamed.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "NUMCOL", type = "SAS Num", nullable = TRUE),
       DTAColumnSpec(id = "TEXTCOL", type = "SAS Char", length = 8, nullable = TRUE)
@@ -1972,7 +1972,7 @@ test_that("a file with no typing failures reports an EMPTY typing frame, not non
 test_that("rule-time import errors alone leave the typing axis empty", {
   # The axis a materialising load records at import time is the TYPING axis, and
   # a Char column a rule happens to compare numerically produces none of it.
-  specs <- vc_specs(
+  specs <- vc_specs_unchecked(
     list(
       DTAColumnSpec(id = "ID", type = "SAS Char", length = 4, nullable = FALSE),
       DTAColumnSpec(id = "TXT", type = "SAS Char", length = 8, nullable = TRUE)

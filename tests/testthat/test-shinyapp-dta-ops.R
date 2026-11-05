@@ -374,15 +374,14 @@ test_that("dta_set_column parses backend/type/format/length out of their string 
   expect_equal(as.numeric(st@length), 8)
 })
 
-test_that("dta_set_column silently drops a non-numeric length instead of storing it", {
+test_that("dta_set_column refuses a non-numeric length instead of dropping it", {
   fn <- app_fn("dta_set_column")
   dta <- app_fixture_dta()
 
   res <- fn(dta, "clinical_data", id = "BADLEN", type = "Char", length = "not-a-number")
 
-  expect_true(res$ok)
-  st <- datasets(res$value, "clinical_data")@specs@columns[["BADLEN"]]@structure
-  expect_null(st@length)
+  expect_false(res$ok)
+  expect_match(res$error, "Length must be a whole number", fixed = TRUE)
 })
 
 test_that("dta_set_column returns ok=FALSE without throwing for an id containing whitespace", {
@@ -453,10 +452,11 @@ test_that("dta_remove_column drops the column from the id order", {
   dta <- app_fixture_dta()
   before <- ids_fn(dta, "clinical_data")
 
-  res <- fn(dta, "clinical_data", "AGE")
+  # BMI is named by no rule; a column a rule uses is refused (test-shinyapp-lint.R).
+  res <- fn(dta, "clinical_data", "BMI")
 
   expect_true(res$ok)
-  expect_equal(ids_fn(res$value, "clinical_data"), setdiff(before, "AGE"))
+  expect_equal(ids_fn(res$value, "clinical_data"), setdiff(before, "BMI"))
 })
 
 test_that("dta_remove_column returns ok=FALSE without throwing for a nonexistent dataset", {

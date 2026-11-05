@@ -105,6 +105,7 @@ Collate:
     'exportTemplateRegions.R'
     'exportValidationReport.R'
     'formattingHelpers.R'
+    'lintDTA.R'
     'qualification-report.R'
     'qualification.R'
     'reportRendering.R'

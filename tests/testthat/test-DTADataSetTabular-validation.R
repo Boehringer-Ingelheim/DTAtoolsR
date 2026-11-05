@@ -1,3 +1,8 @@
+# This file tests how the engine copes with rules that contradict their columns
+# (stale, restored or legacy specs). The class refuses to build them, so the
+# constructor is shadowed by the rule-unchecked variant for the whole file.
+DTAColumnSpecCollection <- unchecked_collection
+
 test_that("DTADataSetTabular stores validation state per table", {
   ds <- create_example_DTADataSetTabular(2)
 

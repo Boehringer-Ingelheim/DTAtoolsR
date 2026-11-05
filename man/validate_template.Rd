@@ -82,8 +82,16 @@ The \code{code} column takes these values. Errors (these fail \code{strict = TRU
 \code{dataset_id_missing}, \code{dataset_field_invalid}, \code{column_spec_invalid} (a
 column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
 example longer than its declared length), \code{vocabulary_invalid},
-\code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir}.
-Warnings: \code{kind_unknown}, \code{id_missing}, \code{version_missing},
+\code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir},
+\code{variant_invalid}, and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
+\code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
+\code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
+\code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
+operators raise no finding), \code{group_constraint_unknown_condition}.
+The linter codes come from the columns and rules of a dataset template's
+body, and from every instantiated variant of a creation template.
+Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} and
+\code{format_narrower_than_length}, plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
 \code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
 \code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
 \code{extends_unresolved}, \code{extends_cycle}, \code{sealed_violation},

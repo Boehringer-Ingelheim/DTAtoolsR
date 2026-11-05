@@ -118,18 +118,37 @@ forced to zero -- and OQ-ROBUST-017 failed, as it should.
 
 ## 4b. Continuous execution and code coverage
 
-The quick tier of this suite runs in CI on every pull request into `dev` or
-`master` and on every push to `dev` (`.github/workflows/qualification.yml`), on
-Linux, Windows and macOS, so that a change cannot reach a release having broken a
-qualified behaviour unseen. A run on the target system remains the qualification
-of record.
+This suite runs in CI (`.github/workflows/qualification.yml`) in two tiers, so
+that a change cannot reach a release having broken a qualified behaviour unseen:
+
+- On a pull request into `dev`, the quick scale runs on Linux, and only when the
+  change touches `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`.
+- On a pull request into `master` (a release), the standard scale runs on Linux,
+  Windows and macOS. The same run happens every night on `dev`, on a pull
+  request labelled `full-ci`, and on manual dispatch.
+
+So every release is qualified on all three operating systems before it is
+merged, and `dev` is never more than a day from its last three-platform run. A
+run on the target system remains the qualification of record.
 
 Requirement coverage says that every requirement has a test; it does not say
 which code those tests execute. Line coverage of `R/` by the development suite is
-measured on the same triggers (`.github/workflows/test-coverage.yaml`) and
+measured on the release tier above (`.github/workflows/test-coverage.yaml`) and
 published with the run, together with the list of lines no test executes. It is
 supporting evidence, not an acceptance criterion: it does not change this suite's
 verdict.
+
+The same workflow measures line coverage of `R/` by this suite alone, with the
+development tests excluded (`include_unit_tests = "never"`): those tests are not
+traced to requirements, so counting them would claim evidence this suite does
+not hold. The denominator is the package's product code. The suite's own runner
+(`R/qualification.R`, `R/qualification-report.R`) is excluded, because running
+it is what produces this evidence and its correct operation is established by the
+installation qualification and the OQ-CORE cases rather than by line coverage;
+so are the app launcher (`R/run_dta_app.R`) and the benchmarking helpers
+(`R/benchmarking.R`), which are not used to validate a delivery. The run fails
+below a recorded floor, which rises as coverage does. Like the figure above, it
+does not change this suite's verdict.
 
 ## 5. Acceptance criteria
 

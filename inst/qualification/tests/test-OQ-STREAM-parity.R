@@ -85,10 +85,7 @@ test_that("OQ-STREAM-023 | the eager and streaming engines agree on a file with 
     case <- list(
       path = path,
       declared = basename(path),
-      specs = DTAColumnSpecCollection(
-        columns = qp_column_pool()[c("ID", "AGE")],
-        rules = qp_rules(c("ID", "AGE"))
-      ),
+      specs = qp_collection(qp_column_pool()[c("ID", "AGE")], qp_rules(c("ID", "AGE"))),
       rows = n
     )
 
@@ -165,10 +162,7 @@ test_that("OQ-STREAM-026 | the eager and streaming engines agree on an R-typed t
     )
     case <- list(
       frame = as.data.frame(columns, stringsAsFactors = FALSE),
-      specs = DTAColumnSpecCollection(
-        columns = qp_memory_pool()[c("ID", "AGE")],
-        rules = qp_rules(c("ID", "AGE"))
-      ),
+      specs = qp_collection(qp_memory_pool()[c("ID", "AGE")], qp_rules(c("ID", "AGE"))),
       rows = n,
       batch_rows = 3L,
       seed = 900L + n
@@ -195,7 +189,9 @@ test_that("OQ-STREAM-027 | an undeclared column read by a rule is keyed identica
   path <- file.path(dir, "undeclared_key.csv")
   writeLines(c("ID,XKEY", "A001,1.5", "A002,1.50", "A003,2"), path)
 
-  specs <- DTAColumnSpecCollection(
+  # Construction now refuses this (REQ-SPEC-027); a legacy object restored
+  # from a saved session is not validated, so the engines must still agree.
+  specs <- qp_legacy_collection(
     columns = list(
       ID = DTAColumnSpec(id = "ID", type = "SAS Char", length = 8, nullable = FALSE)
     ),

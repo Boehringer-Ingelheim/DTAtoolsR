@@ -342,7 +342,7 @@ test_that("OQ-SPEC-046 | a dataset entry without an id is refused | REQ-SPEC-025
   )
   qa_check(
     "a single dataset file without an id is refused",
-    grepl("needs an `id`", refusal(read_dataset_from_yaml(single)), fixed = TRUE)
+    grepl("dataset_id_missing", refusal(read_dataset_from_yaml(single)), fixed = TRUE)
   )
 
   mixed <- file.path(dir, "mixed.yaml")
@@ -364,7 +364,7 @@ test_that("OQ-SPEC-046 | a dataset entry without an id is refused | REQ-SPEC-025
   )
   qa_check(
     "a specification with one id-less entry among valid ones is refused as a whole",
-    grepl("needs an `id`", refusal(read_dta_from_yaml(mixed)), fixed = TRUE)
+    grepl("dataset_id_missing", refusal(read_dta_from_yaml(mixed)), fixed = TRUE)
   )
 
   current <- file.path(dir, "current.yaml")

@@ -409,3 +409,35 @@ requirements:
     notes: >
       Before this change the IF and THEN lists could grow but offered no way
       to remove a row.
+
+  - id: REQ-APP-028
+    text: >
+      Removing a column from the column editor shall be refused, and the
+      document left unchanged, while any rule of the dataset uses that column.
+      A column no rule uses shall still be removed.
+    risk: high
+    category: integrity
+    covers: [run_dta_app]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_remove_column); inst/shiny/dta_app/app.R (col_del_click)
+
+  - id: REQ-APP-029
+    text: >
+      Saving a column under a new id from the column editor shall rename the
+      column in every rule of the dataset that uses it, in the same save, so
+      that the saved document has no rule naming the old id and lint_dta()
+      reports nothing for it.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, lint_dta]
+    source: inst/shiny/dta_app/R/utils_dta.R (dta_set_column)
+
+  - id: REQ-APP-030
+    text: >
+      Applying edited raw YAML whose rules contradict its columns shall be
+      refused: the document held by the application shall be unchanged, the
+      refusal shall carry the lint_dta() error findings, and the same text
+      with the contradiction removed shall apply.
+    risk: high
+    category: integrity
+    covers: [run_dta_app, lint_dta]
+    source: inst/shiny/dta_app/app.R (apply_yaml); inst/shiny/dta_app/R/utils_dta.R (dta_lint)

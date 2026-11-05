@@ -176,6 +176,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- CI is tiered. A pull request into `dev` runs `R CMD check` on
+  `ubuntu-latest (release)` only, the qualification quick scale on Linux only
+  (and only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`
+  changed), and no coverage jobs; style, pre-commit and manifest sync run as
+  before. A pull request into `master`, one labelled `full-ci`, a manual
+  dispatch and a new nightly run on `dev` get the full suite: all five
+  `R CMD check` legs, the qualification standard scale on three operating
+  systems, and both coverage jobs with their floors. The tier is decided once,
+  in `.github/workflows/ci-tier.yml`, which absorbs R-CMD-check's inert-diff
+  classifier. The `push: dev` runs of the qualification and coverage workflows,
+  which repeated the pull request's own run, are gone.
+
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
@@ -188,7 +200,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   corrected (for example an ISO date example under `DATE9.`, or `TIME8.2` with
   a fractional-seconds example that needs 11 characters).
 
+- A column specification set whose rules name an undeclared column, repeat a
+  rule id, put a range on a non-numeric column, or compare against a value the
+  column cannot hold is now refused when it is built. Older YAML with such
+  rules no longer loads; `lint_dta()` lists what to fix.
+
+- In the app, deleting a column that rules use is blocked, and renaming a
+  column renames it inside its rules.
+
+- A non-integer `length` in the column form is rejected instead of being
+  silently dropped.
+
 ### Added
+
+- `lint_dta()` reports every problem in a DTA YAML file, list or object at
+  once, using the codes of the check catalogue. `strict = TRUE` aborts on
+  errors with the findings attached. The app runs the same check on load,
+  apply and restore, and shows a spec-check list under the YAML editor.
 
 - Column specifications reject `values` and `examples` that do not fit the
   declared type, length, format or pattern. `validate_template()` reports
@@ -221,7 +249,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   every push to `dev`; until now its OQ/PQ cases had never run in CI, because
   the scheduled workflow fires only from `master`, where it did not yet exist.
   A new `test-coverage` workflow publishes line coverage of `R/` and the list
-  of lines no test executes.
+  of lines no test executes. It also measures, separately, the coverage of the
+  package's product code by the qualification suite alone, without the unit
+  tests (75.5% at baseline, with a floor that rises toward 95%); the scope is
+  stated in the validation plan.
 
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind
