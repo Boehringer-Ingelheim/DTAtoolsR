@@ -191,7 +191,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the column already holds that the vocabulary lacks are listed as "Not in this
   vocabulary" and stay ticked, so adding a term no longer drops them. In the
   "Create new from template" dialog, a vocabulary choice with hundreds of terms
-  selected now scrolls inside its box instead of growing the dialog. The shipped `gf_test`,
+  selected now scrolls inside its box instead of growing the dialog. When a
+  vocabulary's `columns:` names the column being edited, the "Choose from
+  vocabulary…" button is highlighted and a line under it says which vocabulary
+  (it follows the column ID as you type; a column whose values already belong
+  to a different vocabulary is not highlighted, because the picker opens on that one). The term filter now matches every
+  word you type, in any order, and takes the cursor as soon as the terms
+  appear, so picking a few terms out of 300 needs no scrolling. The shipped `gf_test`,
   `gf_tstdtl` and `starter_terms` vocabularies declare their columns.
   `validate_template()` reports a malformed `columns:` entry as
   `vocabulary_invalid`.

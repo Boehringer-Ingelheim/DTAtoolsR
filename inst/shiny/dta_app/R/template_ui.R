@@ -991,7 +991,9 @@ vocab_term_checklist <- function(id, terms, selected, extras = character(0)) {
       tags$input(
         type = "search", class = "form-control form-control-sm vocab-pick-filter",
         placeholder = sprintf("Filter %d terms by code, label or description", length(values)),
-        `aria-label` = "Filter terms", oninput = "DTA_vocabFilter(this)"
+        `aria-label` = "Filter terms", oninput = "DTA_vocabFilter(this)",
+        # Escape in a type=search field clears it and fires `search` only.
+        onsearch = "DTA_vocabFilter(this)"
       )
     },
     div(

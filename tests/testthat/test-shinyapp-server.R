@@ -636,6 +636,133 @@ test_that("the vocabulary picker opens on the vocabulary that names the column",
   })
 })
 
+test_that("the vocabulary button says so when a vocabulary declares the column", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
+    file.path(dir, "aaa.dta-vocabulary.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: gf_test", 'version: "1.0"', "label: Genomic tests",
+      "columns:", "  - GFTESTCD", "  - id: GFTEST", "    field: label",
+      "terms:",
+      "  - code: TRNSCPTN", "    label: Transcription",
+      "  - code: METHYL", "    label: Methylation"
+    ),
+    file.path(dir, "gf_test.dta-vocabulary.yaml")
+  )
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    expect_equal(rv$col_view, "form")
+
+    # The button points at the hint's container, which always exists, so the
+    # cue is not colour alone and a screen reader reads it with the button.
+    body <- ui_text(output$col_modal_body)
+    expect_match(body, 'aria-describedby="col_vocab_hint"', fixed = TRUE)
+    expect_match(body, 'id="col_vocab_hint"', fixed = TRUE)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Typing the id of a declared column lights it up once the typing pauses.
+    session$setInputs(col_id = "gftest", col_values = "")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$elapse(600)
+    hint <- ui_text(output$col_vocab_hint)
+    expect_match(hint, "Genomic tests", fixed = TRUE)
+    expect_match(hint, "(gf_test@1.0)", fixed = TRUE)
+
+    # The picker opens on the vocabulary the hint named.
+    session$setInputs(col_vocab_open = 1)
+    expect_equal(rv$col_vocab_sug$ref, "gf_test@1.0")
+    expect_equal(rv$col_vocab_sug$reason, "declared")
+    # ... and the hint is back, from the prefill, when the form is.
+    session$setInputs(col_vocab_cancel = 1)
+    expect_equal(rv$col_view, "form")
+    expect_match(ui_text(output$col_vocab_hint), "gf_test@1.0", fixed = TRUE)
+
+    # Another column: no hint.
+    session$setInputs(col_id = "ZZZ")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Values that fit a vocabulary are a reason to PRESELECT it, not to
+    # recommend it: nothing declares this column.
+    session$setInputs(col_id = "OTHER", col_values = "X\nY")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$setInputs(col_vocab_open = 2)
+    expect_equal(rv$col_vocab_sug$ref, "aaa@1.0")
+    expect_equal(rv$col_vocab_sug$reason, "values")
+    session$setInputs(col_vocab_cancel = 2)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # A declared column whose values have drifted from the vocabulary still
+    # has a vocabulary made for it.
+    session$setInputs(col_id = "GFTESTCD", col_values = "NOPE")
+    session$elapse(600)
+    expect_match(ui_text(output$col_vocab_hint), "gf_test@1.0", fixed = TRUE)
+
+    # The hint names what the picker will open on, so a declared column whose
+    # values already belong to ANOTHER vocabulary gets none: the picker opens on
+    # that one, and a hint naming a different vocabulary would mislead.
+    session$setInputs(col_id = "GFTESTCD", col_values = "X\nY")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+    session$setInputs(col_vocab_open = 3)
+    expect_equal(rv$col_vocab_sug$ref, "aaa@1.0")
+    session$setInputs(col_vocab_cancel = 3)
+
+    # Another column's hint must not follow into "Add column".
+    session$setInputs(col_id = "GFTESTCD", col_values = "NOPE")
+    session$elapse(600)
+    session$setInputs(col_back = 1)
+    session$setInputs(col_add = 2)
+    expect_equal(rv$col_view, "form")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+
+    # Typing and leaving before the pause ends: nothing to show, nothing breaks.
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$setInputs(col_back = 2)
+    session$elapse(600)
+    expect_equal(rv$col_view, "list")
+    expect_equal(ui_text(output$col_vocab_hint), "")
+  })
+})
+
+test_that("a library without vocabularies leaves the vocabulary button plain", {
+  clean_session_file()
+  dir <- withr::local_tempdir()
+  withr::local_envvar(c(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  ))
+  withr::local_options(list(DTAtools.template_dir = NULL))
+  app_fn("dta_template_index_invalidate")()
+  withr::defer(app_fn("dta_template_index_invalidate")())
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    unlock_editing(session)
+    session$setInputs(edit_cols = 1)
+    session$setInputs(col_add = 1)
+    session$setInputs(col_id = "GFTEST", col_values = "")
+    session$elapse(600)
+    expect_equal(ui_text(output$col_vocab_hint), "")
+  })
+})
+
 test_that("saving a group_condition rule from the rule editor updates spec and YAML", {
   clean_session_file()
 
