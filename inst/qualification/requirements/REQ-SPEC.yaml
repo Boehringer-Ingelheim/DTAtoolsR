@@ -305,8 +305,9 @@ requirements:
       time or datetime that is not display text of its format. It shall also
       be refused, with a condition of class dta_spec_invalid_pattern, when the
       declared pattern is not a valid regular expression. A specification read
-      from YAML shall be refused the same way, because it is built from the
-      same class.
+      from YAML shall be refused for the same cause, reported as a
+      dta_lint_error that carries a column_spec_invalid finding naming the
+      column.
     risk: high
     category: integrity
     covers: [DTAColumnSpec, import_specs_from_yaml]
@@ -319,3 +320,71 @@ requirements:
       carry such values no longer load. Declared values are brought to the
       column's stored type before they are tested, so "abc" under Int is
       reported as not an integer rather than silently becoming a missing value.
+
+  - id: REQ-SPEC-027
+    text: >
+      A DTAColumnSpecCollection shall be refused, at construction and again
+      whenever its columns or rules are assigned, when a rule contradicts the
+      columns beside it: two rules sharing an id, a rule naming a column the
+      collection does not declare (when it declares at least one), a
+      col_range on a declared column whose type is not Num or Int, or an
+      equals/in operand that is not in the column's declared values list. The
+      refusal shall name every such error, each by its lint_dta() code, and a
+      refused assignment shall leave the collection as it was. A collection
+      whose only finding is a warning, such as rules with no declared column,
+      shall be accepted.
+    risk: high
+    category: integrity
+    covers: [DTAColumnSpecCollection]
+    source: R/DTAColumnSpecCollection-class.R (validator); R/lintDTA.R (dta_specs_findings)
+    notes: >
+      Enforced in the class itself so that YAML, JSON and Word import,
+      template instantiation, the application's editors and programmatic code
+      meet the same check. A rule that can never match, or names a column that
+      is not there, would otherwise make every delivery pass or fail for a
+      reason the specification does not state.
+
+  - id: REQ-SPEC-028
+    text: >
+      lint_dta() shall report every problem of a specification in one pass as
+      a data frame with columns dataset, object, id, severity, code and
+      message, sorted, with zero rows when the specification is clean. For a
+      list holding columns and rules it shall report, one row each and under
+      these codes at severity error: rule_id_duplicate,
+      rule_column_undeclared, rule_range_non_numeric,
+      rule_condition_operator_invalid, rule_condition_numeric_on_text,
+      rule_condition_value_unfit, rule_condition_value_outside_values,
+      group_constraint_unknown_condition, column_spec_invalid, rule_invalid,
+      column_id_duplicate, and for a document dataset_id_missing,
+      dataset_id_duplicate and metadata_invalid. It shall report
+      rules_without_columns and format_narrower_than_length at severity
+      warning, and version_unquoted at warning for an unquoted numeric
+      metadata.version in a file. The bundled clinical specification shall
+      lint with zero rows. An equals/in operand outside a values list is an
+      error; a not_equals/not_in operand outside it shall not be an error.
+    risk: high
+    category: functional
+    covers: [lint_dta]
+    source: R/lintDTA.R
+    notes: >
+      A column or rule that cannot be built is reported rather than thrown, so
+      one broken entry does not hide the others; a broken column still counts
+      as declared, so the rules naming it are not additionally reported as
+      dangling.
+
+  - id: REQ-SPEC-029
+    text: >
+      lint_dta(strict = TRUE) shall raise a condition of class dta_lint_error
+      carrying the findings as its findings element when any finding has
+      severity error, and shall not raise when the only findings are
+      warnings. read_dta_from_yaml() and import_specs_from_yaml() shall check
+      the parsed document first and, when it has errors, raise a condition of
+      class dta_lint_error that names every error, instead of stopping at the
+      first constructor error.
+    risk: high
+    category: integrity
+    covers: [lint_dta, read_dta_from_yaml, import_specs_from_yaml]
+    source: R/lintDTA.R (dta_lint_enforce); R/DTA-class.R; R/DTAColumnSpecCollection-class.R
+    notes: >
+      Specifications written before the cross-object check that carry
+      dangling rules no longer load; lint_dta() on the file lists what to fix.

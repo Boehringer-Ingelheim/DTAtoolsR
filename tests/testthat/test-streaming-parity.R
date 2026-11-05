@@ -1,3 +1,8 @@
+# This file tests how the engine copes with rules that contradict their columns
+# (stale, restored or legacy specs). The class refuses to build them, so the
+# constructor is shadowed by the rule-unchecked variant for the whole file.
+DTAColumnSpecCollection <- unchecked_collection
+
 # Randomised parity between the in-memory and the streaming path.
 #
 # `stream = "always"` is a memory profile, not a different answer. Everything

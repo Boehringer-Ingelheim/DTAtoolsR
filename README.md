@@ -539,6 +539,20 @@ write_table_to_file(
 )
 ```
 
+### Linting a DTA
+
+`lint_dta()` reports every problem in a DTA definition at once, instead of
+stopping at the first one. It takes a YAML path, a parsed list, or a `DTA`,
+`DTADataSet` or column-spec collection object:
+
+```r
+lint_dta(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+```
+
+Each finding has a `severity` of `error` or `warning` and a `code`. A clean
+definition gives zero rows. With `strict = TRUE`, the call aborts when there
+are errors.
+
 ## Additional features
 
 ### Export Spec Table to Word

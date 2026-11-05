@@ -660,7 +660,7 @@ test_that("saving a group_condition rule from the rule editor updates spec and Y
       gcond_name_1 = "c1_failed",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
 
     session$setInputs(gcond_add = 1)
@@ -723,7 +723,7 @@ test_that("removing a group_condition row keeps it out of the saved rule instead
       gcond_name_1 = "c1_failed",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
     session$setInputs(
       gconstr_id_1 = "keep_constraint",
@@ -796,7 +796,7 @@ test_that("group_condition constraint selectors follow condition name changes", 
       gcond_name_1 = "old_name",
       gcond_col_1 = "STATUS",
       gcond_op_1 = "equals",
-      gcond_val_1 = "FAILED"
+      gcond_val_1 = "DROPPED"
     )
 
     session$setInputs(gcond_add = 1)

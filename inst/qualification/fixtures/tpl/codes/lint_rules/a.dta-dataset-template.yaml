@@ -1,0 +1,11 @@
+kind: dta_dataset_template
+id: lint_a
+version: "1.0"
+dataset:
+  id: ds1
+  type: tabular
+  files: {filename: one.tsv}
+  columns:
+    - {id: C1, type: SAS Char, length: 3}
+  rules:
+    - {id: r1, type: col_unique, columns: [C2]}

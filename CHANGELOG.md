@@ -132,7 +132,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   corrected (for example an ISO date example under `DATE9.`, or `TIME8.2` with
   a fractional-seconds example that needs 11 characters).
 
+- A column specification set whose rules name an undeclared column, repeat a
+  rule id, put a range on a non-numeric column, or compare against a value the
+  column cannot hold is now refused when it is built. Older YAML with such
+  rules no longer loads; `lint_dta()` lists what to fix.
+
+- In the app, deleting a column that rules use is blocked, and renaming a
+  column renames it inside its rules.
+
+- A non-integer `length` in the column form is rejected instead of being
+  silently dropped.
+
 ### Added
+
+- `lint_dta()` reports every problem in a DTA YAML file, list or object at
+  once, using the codes of the check catalogue. `strict = TRUE` aborts on
+  errors with the findings attached. The app runs the same check on load,
+  apply and restore, and shows a spec-check list under the YAML editor.
 
 - Column specifications reject `values` and `examples` that do not fit the
   declared type, length, format or pattern. `validate_template()` reports

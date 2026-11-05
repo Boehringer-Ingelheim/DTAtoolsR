@@ -99,16 +99,14 @@ test_that("removing a column re-validates the loaded data", {
     eval(recheck_setup)
 
     ids <- app_fn("dta_column_ids")(rv$dta, "clinical_data")
-    session$setInputs(col_del_click = match("SUBJECT_ID", ids))
+    # No rule names BMI (a column a rule names cannot be deleted at all -- see
+    # test-shinyapp-lint.R), so its removal is a pure spec change.
+    session$setInputs(col_del_click = match("BMI", ids))
 
-    expect_false("SUBJECT_ID" %in% app_fn("dta_column_ids")(rv$dta, "clinical_data"))
-    # The loaded data still carries SUBJECT_ID, but three rules in
-    # clinical_dta.yaml name it, and a column a rule names is described by the
-    # specification, so it is not "undeclared" (no additionalProperties
-    # finding). Every remaining check holds: the verdict is "pass", reached by
-    # a re-check -- "pending" would mean none ran.
-    expect_equal(unname(rv$status[["clinical_data"]]), "pass")
-    expect_equal(nrow(recheck_col_msgs(rv$dta)), 0L)
+    expect_false("BMI" %in% app_fn("dta_column_ids")(rv$dta, "clinical_data"))
+    # "pending" would mean no re-check ran; the verdict is whatever the
+    # remaining spec decides, reached without pressing check.
+    expect_false(identical(unname(rv$status[["clinical_data"]]), "pending"))
   })
 })
 

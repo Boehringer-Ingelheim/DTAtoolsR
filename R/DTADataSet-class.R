@@ -274,6 +274,9 @@ read_dataset_from_yaml <- function(file) {
     cli_abort("YAML file does not exist: {.file {file}}")
   }
 
+  # Lint first, as read_dta_from_yaml() does: every problem at once.
+  dta_lint_enforce(lint_dta(file))
+
   yaml_data <- yaml::read_yaml(file)
 
   dta_dataset_from_list(yaml_data)

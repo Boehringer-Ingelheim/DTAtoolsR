@@ -644,6 +644,94 @@ test_that("strict = TRUE aborts on a column_spec_invalid error", {
   expect_error(validate_template(dir, strict = TRUE), "Template validation found")
 })
 
+# ---- linter codes (lint_dta) ------------------------------------------------
+
+write_rule_dataset_tpl <- function(dir, rule_lines) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: ruled",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: COL1, type: SAS Char}",
+      "    - {id: BOUND, type: SAS Char, values_from: {vocabulary: nowhere}}",
+      "  rules:",
+      rule_lines
+    ),
+    file.path(dir, "ruled.dta-dataset-template.yaml")
+  )
+}
+
+test_that("a dataset template rule on an undeclared column is a rule_column_undeclared error", {
+  dir <- withr::local_tempdir()
+  write_rule_dataset_tpl(dir, "    - {id: r1, type: col_unique, columns: [MISSING]}")
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "rule_column_undeclared", "error")
+  expect_equal(nrow(rows), 1)
+  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+})
+
+test_that("a dataset template with rules on declared columns, including a values_from column, is clean", {
+  dir <- withr::local_tempdir()
+  write_rule_dataset_tpl(dir, c(
+    "    - {id: r1, type: col_unique, columns: [COL1]}",
+    "    - {id: r2, type: col_unique, columns: [BOUND]}"
+  ))
+  # The deliberately unresolvable binding warns on its own; what matters is that
+  # it is neither a column_spec_invalid nor a rule finding.
+  result <- validate_template(dir)
+  expect_equal(result$code, "values_from_unresolved")
+})
+
+test_that("a creation template whose dataset repeats a rule id fails to instantiate", {
+  # The DTAColumnSpecCollection class invariant now rejects the duplicate id at
+  # construction, so the build itself fails: instantiate_failed is the expected
+  # code, and lint_dta() is never reached for it (no rule_id_duplicate row).
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: dup_rules",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Dup",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: COL1, type: SAS Char}",
+      "    rules:",
+      "      - {id: r1, type: col_unique, columns: [COL1]}",
+      "      - {id: r1, type: col_unique, columns: [COL1]}"
+    ),
+    file.path(dir, "dup_rules.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_code_row(result, "instantiate_failed", "error")
+  expect_no_code_row(result, "rule_id_duplicate")
+})
+
+test_that("a clean creation template, with and without rules, raises none of the linter codes", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  result <- validate_template(dir)
+  linter_codes <- c(
+    "rule_invalid", "rule_id_duplicate", "rule_column_undeclared",
+    "rule_range_non_numeric", "rule_condition_operator_invalid",
+    "rule_condition_numeric_on_text", "rule_condition_value_unfit",
+    "rule_condition_value_outside_values", "group_constraint_unknown_condition",
+    "rules_without_columns", "rule_not_checkable", "format_narrower_than_length"
+  )
+  expect_false(any(result$code %in% linter_codes))
+  expect_equal(nrow(result), 0)
+})
+
 test_that("an inline creation-template column the spec rejects still surfaces as instantiate_failed", {
   dir <- withr::local_tempdir()
   writeLines(

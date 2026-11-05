@@ -767,15 +767,35 @@
           index = index_df,
           vocab_selections = .dta_template_vocab_dry_selections(selected_def, index_df)
         )
+        prefix <- if (is.null(spec)) "" else paste0("[", selection[[spec[["id"]]]], "] ")
         if (!isTRUE(build_res$ok)) {
-          prefix <- if (is.null(spec)) "" else paste0("[", selection[[spec[["id"]]]], "] ")
           add("error", "instantiate_failed", paste0(prefix, build_res$error))
+        } else {
+          # Lint only what built: a failed build is already instantiate_failed.
+          # The class invariant keeps errors out of a built DTA, so in practice
+          # these are the linter's warnings.
+          lint <- tryCatch(lint_dta(build_res$value), error = function(e) NULL)
+          for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
+            add(
+              lint$severity[[i]], lint$code[[i]],
+              .dta_template_lint_message(prefix, lint[i, , drop = FALSE])
+            )
+          }
         }
       }
     }
   }
 
   rows
+}
+
+# One lint_dta() row as a template-row message: "[variant] dataset/object id: text".
+.dta_template_lint_message <- function(prefix, row) {
+  where <- paste(
+    c(if (nzchar(row$dataset)) row$dataset, row$object, if (!is.na(row$id)) row$id),
+    collapse = " "
+  )
+  paste0(prefix, where, ": ", row$message)
 }
 
 # Structural checks for a creation template's `vocabulary_slots:`.
@@ -1048,20 +1068,28 @@
   # read_dataset_template() does: `def` was parsed with the version-preserving
   # handlers that turn every integer into text, so `length: 5` would arrive as
   # "5" and be rejected for a reason the app never sees.
+  #
+  # Columns and rules go through lint_dta() together, so a rule naming an
+  # undeclared column is caught here too. lint_dta() builds columns with
+  # do.call(), so the keys the constructor does not take are dropped first.
   plain <- tryCatch(yaml::read_yaml(path), error = function(e) NULL)
-  for (col in plain[["dataset"]][["columns"]] %||% list()) {
-    if (!is.list(col)) next
-    col_id <- as.character(col[["id"]] %||% "<unnamed>")
-    err <- tryCatch(
-      {
-        do.call(DTAColumnSpec, col[intersect(names(col), names(formals(DTAColumnSpec)))])
-        NULL
-      },
-      error = function(e) e
+  plain_ds <- plain[["dataset"]]
+  cols <- Filter(is.list, plain_ds[["columns"]] %||% list())
+  cols <- lapply(cols, function(col) col[intersect(names(col), names(formals(DTAColumnSpec)))])
+  lint <- tryCatch(
+    lint_dta(list(columns = cols, rules = plain_ds[["rules"]] %||% list())),
+    error = function(e) NULL
+  )
+  for (i in seq_len(if (is.null(lint)) 0L else nrow(lint))) {
+    row <- lint[i, , drop = FALSE]
+    add(
+      row$severity, row$code,
+      if (identical(row$code, "column_spec_invalid")) {
+        sprintf("column '%s': %s", row$id, row$message)
+      } else {
+        .dta_template_lint_message("", row)
+      }
     )
-    if (!is.null(err)) {
-      add("error", "column_spec_invalid", sprintf("column '%s': %s", col_id, conditionMessage(err)))
-    }
   }
   rows <- c(rows, .dta_template_check_bindings(path, id, version, ds_body, index_df))
   opts <- def[["options"]] %||% list()
@@ -1375,8 +1403,16 @@
 #' `dataset_id_missing`, `dataset_field_invalid`, `column_spec_invalid` (a
 #' column of a dataset template that `DTAColumnSpec()` rejects, such as an
 #' example longer than its declared length), `vocabulary_invalid`,
-#' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`.
-#' Warnings: `kind_unknown`, `id_missing`, `version_missing`,
+#' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`,
+#' `variant_invalid`, and the [lint_dta()] errors `rule_invalid`,
+#' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
+#' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
+#' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
+#' operators raise no finding), `group_constraint_unknown_condition`.
+#' The linter codes come from the columns and rules of a dataset template's
+#' body, and from every instantiated variant of a creation template.
+#' Warnings: the linter's `rules_without_columns`, `rule_not_checkable` and
+#' `format_narrower_than_length`, plus `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
 #' `extends_unresolved`, `extends_cycle`, `sealed_violation`,

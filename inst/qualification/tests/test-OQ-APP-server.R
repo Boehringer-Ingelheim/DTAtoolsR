@@ -1,4 +1,4 @@
-# The application's server logic. REQ-APP-001 .. REQ-APP-013 and REQ-APP-026.
+# The application's server logic. REQ-APP-001 .. REQ-APP-013, REQ-APP-026 and REQ-APP-027 .. REQ-APP-029.
 #
 # A user of the application never sees check()'s return value. They see a
 # coloured status against a dataset name and act on it, so a difference between
@@ -507,7 +507,7 @@ test_that("OQ-APP-028 | a group-condition row removed with the rule editor's own
 
     # Row 1 of each: the row expected to survive.
     session$setInputs(
-      gcond_name_1 = "c1_failed", gcond_col_1 = "STATUS", gcond_op_1 = "equals", gcond_val_1 = "FAILED"
+      gcond_name_1 = "c1_failed", gcond_col_1 = "STATUS", gcond_op_1 = "equals", gcond_val_1 = "DROPPED"
     )
     session$setInputs(
       gconstr_id_1 = "keep_constraint", gconstr_type_1 = "mutually_exclusive",
@@ -668,5 +668,102 @@ test_that("OQ-APP-035 | a column edit whose values cannot fit is refused and cha
     qa_step("naming it", TRUE, nzchar(rv$col_msg$error))
     qa_step("the document is untouched", TRUE, identical(rv$dta, before))
     qa_step("and so is the dataset's verdict", "pass", as_status(rv$status, "clinical_data"))
+  })
+})
+
+# ---- REQ-APP-027 .. REQ-APP-029: the editors keep rules and columns consistent --
+
+# The bundled clinical specification declares AGE, used by a range rule and a
+# conditional rule, and SUBJECT_ID, used by a uniqueness rule; BMI is used by
+# no rule.
+qapp_clinical_columns <- function(rv) {
+  names(DTAtools::datasets(rv$dta, "clinical_data")@specs@columns)
+}
+
+test_that("OQ-APP-036 | a column a rule uses cannot be removed, one no rule uses can | REQ-APP-027", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("n", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_cols = 1)
+    before_dta <- rv$dta
+    before <- qapp_clinical_columns(rv)
+
+    session$setInputs(col_del_click = match("AGE", before))
+    qa_step("removing a column a rule uses leaves the columns as they were", before, qapp_clinical_columns(rv))
+    qa_check("and the document itself is untouched", identical(rv$dta, before_dta))
+
+    session$setInputs(col_del_click = match("BMI", before))
+    qa_step(
+      "removing a column no rule uses removes exactly that column",
+      setdiff(before, "BMI"), qapp_clinical_columns(rv)
+    )
+  })
+})
+
+test_that("OQ-APP-037 | renaming a column in the editor renames it in the rules that use it | REQ-APP-028", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("o", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_cols = 1)
+    ids <- qapp_clinical_columns(rv)
+    session$setInputs(col_edit_click = match("AGE", ids))
+
+    # Only the id differs from the stored column.
+    form <- qapp_fn("dta_column_fields")(rv$dta, "clinical_data", "AGE")
+    do.call(session$setInputs, list(
+      col_id = "PATIENT_AGE", col_label = form$label, col_backend = form$backend,
+      col_type = form$type, col_format = form$format, col_length = form$length,
+      col_nullable = form$nullable, col_values = form$values,
+      col_pattern = form$pattern, col_examples = form$examples,
+      col_desc = form$description
+    ))
+    session$setInputs(col_save = 1)
+
+    after <- qapp_clinical_columns(rv)
+    qa_step("the column carries its new id and not the old", c(new = TRUE, old = FALSE), c(new = "PATIENT_AGE" %in% after, old = "AGE" %in% after))
+    rl <- DTAtools::datasets(rv$dta, "clinical_data")@specs@rules
+    range_rule <- rl[[which(vapply(rl, function(r) r@id, character(1)) == "rule_range_example")]]
+    qa_step("the range rule on it follows the rename", "PATIENT_AGE", range_rule@columns)
+    qa_step("and the linter finds nothing left dangling", 0L, nrow(DTAtools::lint_dta(rv$dta)))
+  })
+})
+
+test_that("OQ-APP-038 | raw YAML whose rules contradict its columns is refused and the same text repaired applies | REQ-APP-029", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("p", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+    good <- rv$yaml_text
+    before_dta <- rv$dta
+
+    # The uniqueness rule's column list "SUBJECT_ID, VISIT" gets a column the
+    # specification does not declare.
+    bad <- sub("- SUBJECT_ID(\\s+)- VISIT", "- NOPE\\1- VISIT", good)
+    qa_check("the contradiction was introduced", !identical(bad, good))
+
+    session$setInputs(raw_yaml_editor = bad)
+    session$setInputs(apply_yaml = 1)
+    qa_step("the apply is refused", FALSE, isTRUE(rv$yaml_msg$ok))
+    qa_check(
+      "with the undeclared column among the linter's findings",
+      "rule_column_undeclared" %in% rv$yaml_msg$findings$code
+    )
+    qa_step("and every finding is an error", "error", unique(rv$yaml_msg$findings$severity[rv$yaml_msg$findings$code == "rule_column_undeclared"]))
+    qa_check("the document the application holds is unchanged", identical(rv$dta, before_dta))
+
+    session$setInputs(raw_yaml_editor = good)
+    session$setInputs(apply_yaml = 2)
+    qa_step("the unaltered text applies", TRUE, isTRUE(rv$yaml_msg$ok))
   })
 })

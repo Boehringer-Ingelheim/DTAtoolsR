@@ -39,8 +39,150 @@
 dta_try <- function(expr) {
   tryCatch(
     list(ok = TRUE, value = force(expr), error = NULL),
-    error = function(e) list(ok = FALSE, value = NULL, error = conditionMessage(e))
+    error = function(e) {
+      out <- list(ok = FALSE, value = NULL, error = conditionMessage(e))
+      # A `dta_lint_error` carries EVERY finding as a data.frame; keep it so the
+      # UI can list them one per line instead of one wrapped paragraph.
+      if (is.data.frame(e$findings) && nrow(e$findings) > 0) out$findings <- e$findings
+      out
+    }
   )
+}
+
+# ---- Spec check (linter) ---------------------------------------------------
+
+dta_empty_findings <- function() {
+  data.frame(
+    dataset = character(0), object = character(0), id = character(0),
+    severity = character(0), code = character(0), message = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Findings of DTAtools::lint_dta() for a DTA object (or YAML path / list). Never
+# throws, and never reports a crashed linter as a clean document: a failure
+# becomes one `lint_failed` error finding, so the Spec check panel shows it.
+dta_lint <- function(x) {
+  if (is.null(x)) {
+    return(dta_empty_findings())
+  }
+  out <- tryCatch(suppressWarnings(DTAtools::lint_dta(x)), error = function(e) e)
+  if (inherits(out, "error")) {
+    return(data.frame(
+      dataset = NA_character_, object = NA_character_, id = NA_character_,
+      severity = "error", code = "lint_failed",
+      message = conditionMessage(out), stringsAsFactors = FALSE
+    ))
+  }
+  if (!is.data.frame(out) || nrow(out) == 0) dta_empty_findings() else out
+}
+
+# One display line per finding: "[dataset / object id] message".
+dta_finding_lines <- function(f) {
+  if (!is.data.frame(f) || nrow(f) == 0) {
+    return(character(0))
+  }
+  where <- vapply(seq_len(nrow(f)), function(i) {
+    parts <- c(f$dataset[[i]], f$id[[i]])
+    paste(parts[!is.na(parts) & nzchar(parts)], collapse = " / ")
+  }, character(1))
+  ifelse(nzchar(where), paste0(where, ": ", f$message), f$message)
+}
+
+# The same findings as a <ul>, errors first. NULL when there are none.
+dta_findings_ui <- function(f) {
+  if (!is.data.frame(f) || nrow(f) == 0) {
+    return(NULL)
+  }
+  f <- f[order(f$severity != "error"), , drop = FALSE]
+  tags$ul(
+    class = "spec-findings",
+    lapply(seq_len(nrow(f)), function(i) {
+      tags$li(
+        class = paste0("spec-finding ", f$severity[[i]]),
+        tags$strong(paste0(f$severity[[i]], " ", f$code[[i]], ": ")),
+        dta_finding_lines(f[i, , drop = FALSE])
+      )
+    })
+  )
+}
+
+# The dialog shown when a file could not be loaded: every finding, and the
+# file's text in an editable box. The text box id carries `lf$nonce`, new on
+# every open, so a re-shown dialog never inherits the cached value of an
+# earlier one (the modal output cache trap).
+dta_load_failure_modal <- function(lf) {
+  modalDialog(
+    title = paste("Could not load", lf$name %||% "the file"),
+    tags$p(lf$error %||% "The file is not a valid specification."),
+    dta_findings_ui(lf$findings),
+    textAreaInput(paste0("load_failure_text_", lf$nonce), "Edit the YAML and load it again",
+      value = lf$text, rows = 16, width = "100%"
+    ),
+    footer = tagList(
+      modalButton("Cancel"),
+      actionButton("load_corrected_yaml", "Load corrected YAML", class = "btn btn-primary")
+    ),
+    size = "l", easyClose = FALSE
+  )
+}
+
+# ---- Rules <-> columns (list form) -------------------------------------------
+
+# Every column a rule (as dta_rule_to_list() returns it) refers to.
+dta_rule_list_columns <- function(l) {
+  cols <- switch(l$type %||% "",
+    col_range = ,
+    col_unique = as.character(unlist(l$columns)),
+    col_condition = c(names(l$condition), names(l$then)),
+    group_condition = c(
+      as.character(unlist(l$group_by)),
+      unlist(lapply(l$conditions, names), use.names = FALSE)
+    ),
+    character(0)
+  )
+  unique(as.character(cols))
+}
+
+# Rules of a dataset that use column `id`: ids, in rule order.
+dta_rules_using_column <- function(dta, dataset, id) {
+  ds <- dta_get_dataset(dta, dataset)
+  rules <- tryCatch(ds@specs@rules, error = function(e) NULL) %||% list()
+  hit <- vapply(rules, function(r) {
+    l <- dta_rule_to_list(r)
+    !is.null(l) && id %in% dta_rule_list_columns(l)
+  }, logical(1))
+  vapply(rules[hit], function(r) as.character(r@id), character(1))
+}
+
+# A rule list with column `old` renamed to `new` wherever the rule refers to it.
+dta_rule_list_rename <- function(l, old, new) {
+  sw <- function(x) {
+    x[x %in% old] <- new
+    x
+  }
+  rn <- function(x) {
+    if (!is.null(names(x))) names(x) <- sw(names(x))
+    x
+  }
+  # Exact [[ throughout: `$` would let `condition` partial-match `conditions`.
+  if (!is.null(l[["columns"]])) l[["columns"]] <- sw(as.character(unlist(l[["columns"]])))
+  if (!is.null(l[["group_by"]])) l[["group_by"]] <- sw(as.character(unlist(l[["group_by"]])))
+  if (!is.null(l[["condition"]])) l[["condition"]] <- rn(l[["condition"]])
+  if (!is.null(l[["then"]])) l[["then"]] <- rn(l[["then"]])
+  if (!is.null(l[["conditions"]])) l[["conditions"]] <- lapply(l[["conditions"]], rn)
+  l
+}
+
+# Ids of the columns a range rule may target: numeric ones only.
+dta_numeric_column_ids <- function(dta, dataset) {
+  ds <- dta_get_dataset(dta, dataset)
+  cols <- tryCatch(ds@specs@columns, error = function(e) NULL) %||% list()
+  keep <- vapply(cols, function(c) {
+    ty <- tryCatch(as.character(c@structure@type)[1], error = function(e) "")
+    isTRUE(ty %in% c("Num", "Int"))
+  }, logical(1))
+  names(cols)[keep]
 }
 
 # ---- Loading -------------------------------------------------------------
@@ -2574,6 +2716,7 @@ dta_column_fields <- function(dta, dataset, id) {
     nullable = isTRUE(l$nullable),
     values = if (!is.null(l$values)) paste(unlist(l$values), collapse = "\n") else "",
     pattern = l$pattern %||% "",
+    examples = if (!is.null(l$examples)) paste(unlist(l$examples), collapse = "\n") else "",
     description = l$description %||% ""
   )
 }
@@ -2594,7 +2737,7 @@ dta_column_fields <- function(dta, dataset, id) {
 dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
                            type = NULL, format = NULL, length = NULL,
                            nullable = NULL, values = NULL, pattern = NULL,
-                           description = NULL, old_id = NULL) {
+                           description = NULL, old_id = NULL, examples = NULL) {
   dta_try({
     id <- trimws(as.character(id)[1] %||% "")
     if (!nzchar(id)) stop("A column id is required.")
@@ -2614,9 +2757,13 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     type_arg <- if (!is.null(type) && nzchar(type)) paste(bk, type) else NULL
     format_arg <- if (!is.null(format) && nzchar(format)) paste(bk, format) else NULL
     len_arg <- NULL
-    if (!is.null(length) && length(length) && nzchar(as.character(length))) {
-      len_arg <- suppressWarnings(as.integer(length))
-      if (is.na(len_arg)) len_arg <- NULL
+    len_txt <- trimws(as.character(length)[1])
+    if (!is.null(length) && length(length) && !is.na(len_txt) && nzchar(len_txt)) {
+      # A length that is not a whole number is refused, never silently dropped:
+      # the column would save without the width the author asked for.
+      len_arg <- if (grepl("^[0-9]+$", len_txt)) suppressWarnings(as.integer(len_txt)) else NA_integer_
+      if (is.na(len_arg)) stop("Length must be a whole number.")
+      if (len_arg < 1L) stop("Length must be a whole number of at least 1.")
     }
     vals <- NULL
     if (!is.null(values) && length(values) > 0) {
@@ -2627,16 +2774,49 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
     patt <- if (!is.null(pattern) && nzchar(pattern)) pattern else NULL
     lbl <- if (!is.null(label) && nzchar(label)) label else NULL
     desc <- if (!is.null(description) && nzchar(description)) description else NULL
+    # `examples`: NULL keeps the column's own (callers without the field);
+    # a character vector replaces them, and an empty one clears them.
+    ex <- if (is.null(examples)) {
+      if (!is.null(existing)) existing@examples else NULL
+    } else {
+      e <- trimws(as.character(examples))
+      if (any(nzchar(e))) e[nzchar(e)] else NULL
+    }
     spec <- DTAtools::DTAColumnSpec(
       id = id, label = lbl, type = type_arg, format = format_arg,
       length = len_arg, nullable = nullable, pattern = patt, values = vals,
       description = desc,
-      examples = if (!is.null(existing)) existing@examples else NULL,
+      examples = ex,
       colclass = if (!is.null(existing)) existing@colclass else NULL
     )
-    if (renaming) cols[[old_id]] <- NULL
-    cols[[id]] <- spec
-    specs@columns <- cols
+    if (renaming) {
+      # A rename carries the column's name into the dataset's rules in the same
+      # save. The new column is added next to the old one first, so every
+      # intermediate object still satisfies the rules-vs-columns invariant:
+      # old+new columns with the old rules, then old+new with the renamed
+      # rules, then the old column removed.
+      rl <- specs@rules %||% list()
+      new_rules <- lapply(rl, function(r) {
+        l <- dta_rule_to_list(r)
+        if (is.null(l) || !(old_id %in% dta_rule_list_columns(l))) {
+          return(r)
+        }
+        do.call(dta_build_rule, dta_rule_list_rename(l, old_id, id))
+      })
+      pos <- match(old_id, names(cols))
+      both <- c(cols, stats::setNames(list(spec), id))
+      specs@columns <- both
+      if (length(new_rules) > 0) specs@rules <- new_rules
+      final <- both[names(both) != old_id]
+      if (!is.na(pos)) {
+        ord <- append(setdiff(names(final), id), id, after = pos - 1L)
+        final <- final[ord]
+      }
+      specs@columns <- final
+    } else {
+      cols[[id]] <- spec
+      specs@columns <- cols
+    }
     ds@specs <- specs
     dta@datasets[[dataset]] <- ds
     dta
@@ -2645,6 +2825,15 @@ dta_set_column <- function(dta, dataset, id, label = NULL, backend = "SAS",
 
 dta_remove_column <- function(dta, dataset, id) {
   dta_try({
+    # A column a rule still uses stays: removing it would leave the rule
+    # pointing at nothing, which the spec invariant rejects anyway.
+    used <- dta_rules_using_column(dta, dataset, id)
+    if (length(used) > 0) {
+      stop(sprintf(
+        "Column %s is used by rule(s) %s -- remove or edit them first",
+        id, paste(used, collapse = ", ")
+      ))
+    }
     ds <- DTAtools::datasets(dta, dataset)
     specs <- ds@specs
     cols <- specs@columns %||% list()
