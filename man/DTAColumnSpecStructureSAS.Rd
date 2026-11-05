@@ -27,9 +27,9 @@ stored in that spelling. The accepted formats are \code{$w.}, \code{w.},
 \code{w.d}, \code{BESTw.}, \code{DATEw.}, \code{TIMEw.} (optionally
 \code{TIMEw.d}) and \code{DATETIMEw.}, and a format must be compatible with
 the type. When \code{type} is omitted it is inferred from the format
-(\code{$w.} gives \code{Char}, \code{w.d} gives \code{Num}, \code{w.} and
-\code{BESTw.} give \code{Int}, and the date and time formats give their
-namesakes). A character format written \code{$w} is normalised to
+(\code{$w.} gives \code{Char}, \code{w.d} and \code{BESTw.} give
+\code{Num}, \code{w.} gives \code{Int}, and the date and time formats give
+their namesakes). A character format written \code{$w} is normalised to
 \code{$w.}.
 }
 \examples{

@@ -28,7 +28,7 @@ The app is shipped inside the package under \code{inst/shiny/dta_app}.
 }
 \details{
 Requires the suggested packages \strong{shiny}, \strong{bslib}, \strong{DT} and
-\strong{shinyjs} (the app attaches it unconditionally on start-up). If \strong{shiny},
+\strong{shinyjs} (the app attaches it unconditionally on start-up). If any of \strong{shiny},
 \strong{bslib} or \strong{DT} is missing, an informative error explains what to
 install. The packages \strong{shinyAce} (YAML editor tab) and \strong{writexl} (Excel
 download of the message table) are optional; the corresponding feature is

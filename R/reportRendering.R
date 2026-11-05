@@ -1138,7 +1138,11 @@
     } else {
       ""
     }
-    actual <- "(see technical detail below)"
+    actual <- if (identical(type, "unknown")) {
+      "Detail could not be generated for this message; only the validation message itself is available."
+    } else {
+      "(see technical detail below)"
+    }
   }
 
   # Technical detail: the first row's raw columns, key/value.

@@ -130,3 +130,20 @@ test_that("check() on a bare DTARule refuses to run", {
     fixed = TRUE
   )
 })
+
+test_that("print() of a column-condition rule names the columns and keeps the operators", {
+  # The loop walked names(x@condition[[i]]) -- the OPERATORS ("equals") -- as
+  # if they were column names, so the column was never printed and the value
+  # appeared under a heading that was really an operator.
+  rule <- DTARuleColCondition(
+    id = "adult_status",
+    condition = list(AGE = list(greater = 17), SEX = list(equals = "F")),
+    then = list(STATUS = list(equals = "adult"))
+  )
+
+  out <- paste(cli::cli_fmt(print(rule)), collapse = "\n")
+
+  expect_match(out, "'AGE' > '17'", fixed = TRUE)
+  expect_match(out, "'SEX' = 'F'", fixed = TRUE)
+  expect_match(out, "'STATUS' = 'adult'", fixed = TRUE)
+})

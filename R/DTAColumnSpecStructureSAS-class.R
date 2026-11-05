@@ -47,7 +47,11 @@
   if (grepl("^[0-9]+\\.[0-9]+$", format_trimmed)) {
     return("Num")
   }
-  if (grepl("^(?:BEST[0-9]+\\.|[0-9]+\\.)$", format_upper)) {
+  # BESTw. is SAS's general numeric format: it shows decimals and exponents.
+  if (grepl("^BEST[0-9]+\\.$", format_upper)) {
+    return("Num")
+  }
+  if (grepl("^[0-9]+\\.$", format_trimmed)) {
     return("Int")
   }
 
@@ -100,9 +104,9 @@
 #' \code{w.d}, \code{BESTw.}, \code{DATEw.}, \code{TIMEw.} (optionally
 #' \code{TIMEw.d}) and \code{DATETIMEw.}, and a format must be compatible with
 #' the type. When \code{type} is omitted it is inferred from the format
-#' (\code{$w.} gives \code{Char}, \code{w.d} gives \code{Num}, \code{w.} and
-#' \code{BESTw.} give \code{Int}, and the date and time formats give their
-#' namesakes). A character format written \code{$w} is normalised to
+#' (\code{$w.} gives \code{Char}, \code{w.d} and \code{BESTw.} give
+#' \code{Num}, \code{w.} gives \code{Int}, and the date and time formats give
+#' their namesakes). A character format written \code{$w} is normalised to
 #' \code{$w.}.
 #' @import S7
 #' @importFrom stringr str_glue

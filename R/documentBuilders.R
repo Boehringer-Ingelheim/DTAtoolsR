@@ -67,21 +67,32 @@ NULL
   officer::body_add_par(doc, text, style = style)
 }
 
-#' Open the bundled numbered reference template so document headings 1-4
-#' auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
-#' when the document is edited). Falls back to officer's default template if
-#' the bundled asset cannot be located; that template defines only headings
-#' 1-3, so a level-4 heading would then fail.
-#' @keywords internal
-.new_numbered_docx <- function() {
-  path <- system.file(
+# Location of the bundled numbered template; "" when it is not installed. A
+# function of its own so a test can simulate the missing asset without
+# mocking base::system.file, which officer calls internally as well.
+.numbered_docx_path <- function() {
+  system.file(
     "extdata", "templates", "dta_numbered_template.docx",
     package = "DTAtools"
   )
-  if (nzchar(path) && file.exists(path)) {
-    return(officer::read_docx(path = path))
+}
+
+#' Open the bundled numbered reference template so document headings 1-4
+#' auto-number as 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word list fields that renumber
+#' when the document is edited). There is no fallback: officer's stock template
+#' has no 'heading 4' style, so an export would fail later, on its first level-4
+#' heading, with an error about a style. A missing bundled asset is a broken
+#' installation and is reported as one.
+#' @keywords internal
+.new_numbered_docx <- function() {
+  path <- .numbered_docx_path()
+  if (!nzchar(path) || !file.exists(path)) {
+    cli::cli_abort(c(
+      "The bundled numbered Word template is missing.",
+      "i" = "Reinstall {.pkg DTAtools}."
+    ))
   }
-  officer::read_docx()
+  officer::read_docx(path = path)
 }
 
 #' Append the machine-readable YAML specification as a final, very small-font

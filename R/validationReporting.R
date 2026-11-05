@@ -301,12 +301,17 @@ dta_import_error_messages <- function(import_errors) {
     return(character(0))
   }
 
+  reason <- as.character(import_errors$reason)
+  detail <- ifelse(
+    reason == "not_whole", "not a whole number",
+    ifelse(reason == "out_of_range", "outside the 32-bit integer range", reason)
+  )
   sprintf(
     "value '%s' in column '%s' cannot be represented as declared type '%s' (%s); imported as NA",
     as.character(import_errors$raw),
     as.character(import_errors$column),
     as.character(import_errors$declared_type),
-    as.character(import_errors$reason)
+    detail
   )
 }
 
@@ -376,7 +381,9 @@ dta_collect_messages_for_dataset <- function(x, tables = NULL, source = c("auto"
 
   out <- lapply(target_tables, function(table_name) {
     entry <- x@validation_index[[table_name]]
-    if (is.null(entry)) {
+    # "unspecified" (a spec with no columns) records no artifact and no store
+    # entry, so there is nothing to collect; validation_errors() would abort.
+    if (is.null(entry) || identical(entry$status, "unspecified")) {
       return(dta_empty_messages())
     }
 
@@ -1500,6 +1507,33 @@ S7::method(inspect, DTADataSet) <- function(
   cli::cli_abort("inspect() is currently implemented for DTADataSetTabular and DTADataSetFile subclasses.")
 }
 
+# Inspect record for one metadata import message: an "import" record whose
+# import_matches carry the matching import_issues row (same field and reason),
+# in the shape the report renders for per-table import errors.
+#' @keywords internal
+dta_inspect_metadata_message <- function(metadata, msg_row) {
+  errors <- metadata_import_errors(metadata)
+  hit <- which(errors$column %in% as.character(msg_row$column) &
+    errors$reason %in% as.character(msg_row$keyword))
+  matches <- errors[utils::head(hit, 1), , drop = FALSE]
+  rownames(matches) <- NULL
+  list(
+    id = as.integer(msg_row$id),
+    dataset = NA_character_,
+    target = "metadata",
+    source = "import",
+    severity = as.character(msg_row$severity),
+    type = "import",
+    headline = sprintf("[metadata] %s", msg_row$message),
+    why = paste(
+      "A metadata value could not be fully interpreted, so the value",
+      "recorded differs from what was written."
+    ),
+    message = as.character(msg_row$message),
+    import_matches = matches
+  )
+}
+
 #' @export
 S7::method(inspect, DTA) <- function(
   x,
@@ -1513,6 +1547,9 @@ S7::method(inspect, DTA) <- function(
 
   records <- lapply(seq_len(nrow(msg_rows)), function(i) {
     msg_row <- msg_rows[i, , drop = FALSE]
+    if (is.na(msg_row$dataset) && identical(as.character(msg_row$target), "metadata")) {
+      return(dta_inspect_metadata_message(x@metadata, msg_row))
+    }
     dataset_name <- as.character(msg_row$dataset)
     ds <- x@datasets[[dataset_name]]
     if (is.null(ds) || !inherits(ds, "DTAtools::DTADataSet")) {

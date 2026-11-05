@@ -68,6 +68,7 @@ exports:
   - get_table
   - get_transmission_dates
   - get_version_history_df
+  - import_specs_from_json
   - import_specs_from_yaml
   - inspect
   - labels

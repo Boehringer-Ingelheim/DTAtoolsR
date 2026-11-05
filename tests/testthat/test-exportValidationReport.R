@@ -495,3 +495,91 @@ test_that("no inspect panel branch ever falls back to the generic '(see technica
     expect_false(grepl("see technical detail below", html, fixed = TRUE))
   }
 })
+
+
+# ---------------------------------------------------------------------------
+# A metadata import issue must not strip inspect detail from the report
+# ---------------------------------------------------------------------------
+
+make_dta_with_metadata_issue <- function() {
+  ds <- create_example_DTADataSetTabular(2)
+  ds <- check(ds, tab = "tab1", force = TRUE, persist = FALSE, quiet = TRUE)
+  DTA(
+    datasets = list(demographics = ds),
+    metadata = DTAMetaData(
+      title = "dirty",
+      transmission = list(date_last_transfer = "2026-12-31 at the earliest")
+    )
+  )
+}
+
+panel_badge <- function(doc, id) {
+  node <- xml2::xml_find_first(doc, sprintf("//*[@id='inspect-panel-%d']//span[contains(@class,'inspect-badge')]", id))
+  regmatches(cls <- xml2::xml_attr(node, "class"), regexpr("inspect-badge-[a-z]+", cls))
+}
+
+test_that("inspect() answers a metadata message instead of aborting, alone or mixed with dataset ids", {
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_length(meta_id, 1L)
+
+  rec <- inspect(dta, id = meta_id, as_tibble = FALSE)
+  expect_equal(nrow(rec), 1L)
+  expect_equal(rec$type, "import")
+  expect_equal(rec$import_raw, "2026-12-31 at the earliest")
+
+  mixed <- inspect(dta, id = msgs$id, as_tibble = FALSE)
+  expect_setequal(unique(mixed$id), msgs$id)
+})
+
+test_that("a metadata import issue leaves the other report panels typed and has detail of its own", {
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  col_id <- msgs$id[msgs$source == "columnspec"][[1]]
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_equal(panel_badge(doc, col_id), "inspect-badge-columnspec")
+  expect_equal(panel_badge(doc, meta_id), "inspect-badge-import")
+  for (id in msgs$id) {
+    expect_false(identical(panel_badge(doc, id), "inspect-badge-unknown"))
+  }
+})
+
+test_that("a failing inspect() for one dataset's ids costs only that dataset its detail", {
+  # No faithful real failure can be built for a single group, so inspect() is
+  # mocked to abort whenever the requested ids include the dataset's.
+  dta <- make_dta_with_metadata_issue()
+  msgs <- messages(dta, as_tibble = FALSE)
+  ds_ids <- msgs$id[!is.na(msgs$dataset)]
+  real_inspect <- inspect
+
+  testthat::local_mocked_bindings(
+    inspect = function(x, id = NULL, ...) {
+      if (any(id %in% ds_ids)) {
+        cli::cli_abort("simulated inspect failure")
+      }
+      real_inspect(x, id = id, ...)
+    },
+    .package = "DTAtools"
+  )
+
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out, quiet = TRUE)
+  doc <- xml2::read_html(out)
+
+  meta_id <- msgs$id[msgs$target == "metadata"]
+  expect_equal(panel_badge(doc, meta_id), "inspect-badge-import")
+  failed <- ds_ids[[1]]
+  expect_equal(panel_badge(doc, failed), "inspect-badge-unknown")
+  expect_match(
+    xml2::xml_text(xml2::xml_find_first(doc, sprintf("//*[@id='inspect-panel-%d']", failed))),
+    "Detail could not be generated for this message",
+    fixed = TRUE
+  )
+})

@@ -392,7 +392,7 @@ method(files, DTADataSet) <- function(x, name = NULL) {
 
   missing <- setdiff(name, names(all_files))
   if (length(missing) > 0) {
-    cli_abort("The following datasets{?s} not found: {.field {missing}}")
+    cli_abort("The following file{?s} not found: {.field {missing}}")
   }
 
   return(all_files[[name]])

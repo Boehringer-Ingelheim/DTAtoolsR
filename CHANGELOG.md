@@ -8,6 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The app's Markdown export with "Export as PDF" ticked wrote its Markdown
+  into a file named `.pdf` and then asked Pandoc to read and write that one
+  path. When no PDF could be made, the Markdown text was delivered under a
+  `.pdf` name that no PDF viewer can open. The working file is now always
+  Markdown, the PDF is derived from it, and the download is renamed to `.pdf`
+  only once a PDF exists; otherwise the Markdown arrives as `.md`.
+
+- Exported rule text (Word and Markdown) now reads every condition operator in
+  words. `greater`, `less`, `equal`, `not_equal` and `pattern` were printed as
+  the raw key ("'AGE' greater '18'"), and `range` was printed as
+  "one of ('1', '5')", which says something different from an interval.
+  `print()` of a column-condition rule listed operator names where column names
+  belong; it now prints each clause with its column and operator.
+
+- `run_dta_app()` now checks for **shinyjs** up front, with the install hint,
+  instead of failing inside the app, which attaches it unconditionally.
+
+- `print_info()` of an "any" file handler no longer errors when the number of
+  files has no upper (or lower) bound; it prints "unbounded", as the other file
+  handlers do.
+
+- `create_example_DTA()` aborts for an index with no example. Index 2 used to
+  return `NULL` without a message, as did any index past the last example.
+  `get_arrow_type()` now raises package (cli) errors like the rest of the API.
+  `names()` of a column-spec structure no longer fails by reading a `columns`
+  property it does not have. The "not found" error from `files()` named
+  datasets, and `datasets()` printed "datasetss" for two missing names.
+
+- The numbered Word base template no longer silently falls back to a stock
+  template without a 'heading 4' style, which made the export fail later on its
+  first level-4 heading. A missing bundled template now aborts with a
+  reinstall hint. The qualification report's "Evidence inventory" section no
+  longer promises a list of files "below" that it never contained.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain
@@ -18,10 +52,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   metadata defaults, option effects or dataset replacement. Unchanged
   ancestor-authored choices retain their existing seal exemption.
 
-- Integer columns now reject values outside the 32-bit integer range (DEV-006),
-  `pattern` is applied to numeric columns (it was silently skipped before),
-  declared SAS formats are checked, and an invalid regex no longer aborts
-  `check()` later on; it is reported when the specification is built.
+- `pattern` is now applied to numeric columns (it was silently skipped before),
+  declared SAS formats are checked, a whole value beyond the 32-bit integer
+  range in an Int column of a table typed in R is reported as a `type`
+  violation, and an invalid regex no longer aborts `check()` later on; it is
+  reported when the specification is built.
+
+- **All ten open defects in the qualification register are fixed**
+  (DEV-001, 003, 004, 005, 006, 007, 010, 012, 014, 015). Each register entry
+  is closed and its pinning test now asserts the correct behaviour.
+
+- A declared `SAS Int` column no longer silently accepts values outside the
+  32-bit integer range: `5000000000` used to validate completely clean, so a
+  receiving system could narrow and corrupt it with nothing in the transfer
+  record. Such a value is now an import error (`out_of_range`), stored as `NA`
+  with its raw text kept; the column-specification integer check enforces the
+  range too (DEV-006).
+
+- A declared `SAS Int` column is now always stored as an R `integer`. The
+  storage type used to depend on the values in hand, so the in-memory and
+  streaming engines could type the same file differently depending only on how
+  it was batched (DEV-004). **Behaviour change:** a fractional or non-finite
+  value in a declared Int column (e.g. `8.5`) is now an import error
+  (`not_whole`) and becomes `NA` in the typed table. It used to keep the
+  column as a double and be reported only on the column-specification axis.
+
+- A `BESTw.` SAS format with no explicit type now infers `Num` instead of
+  `Int`. `BESTw.` is SAS's general numeric format, and the generated JSON
+  schema used to reject a legitimate decimal such as `1.25` (DEV-001). An
+  explicit `type: Int` with a `BESTw.` format is still accepted.
+
+- `messages()` no longer aborts for a dataset whose specification declares no
+  columns; it returns zero rows. Any loop collecting messages across datasets
+  used to fail outright on such a dataset, with an error that blamed
+  `persist = TRUE` (DEV-005).
+
+- The HTML validation report keeps its click-to-inspect detail when the
+  transfer has a metadata issue. One metadata import error used to strip the
+  detail from every message in the report. Metadata messages now get detail
+  of their own, a failure to build detail for one dataset no longer affects
+  the others, and a message whose detail could not be built says so (DEV-012).
+
+- A questionable metadata date (such as `2026-12-31 at the earliest`, or a
+  top-level date such as `after approval`) no longer turns into a clean one
+  after a single save and reload. The original text is written back, so the
+  import issue is still reported, unless the field has been changed since it
+  was read (DEV-010).
+
+- `export_column_value_table()` now aborts with a package error naming the
+  expected class when given something other than a column specification
+  collection, instead of a raw base R error (DEV-003).
+
+- `write_table_to_file()` now returns `md5sum` as the single checksum string
+  it documents (`NA_character_` when no checksum is requested), plus `n_rows`
+  and `n_cols`. A transfer-integrity check written to the documented contract,
+  such as `if (!is.na(res$md5sum))`, used to fail on a three-element list
+  (DEV-007).
+
+- The Word specification exchange now completes. `export_specs_table()` writes
+  each format with its backend prefix, and `columns_specs_from_word()` accepts
+  an empty Format or Length cell and, for documents written by earlier
+  versions, an unprefixed format. A specification exported to Word could not
+  be read back by the package that wrote it (DEV-014).
+
+- A specification written with `write_columns_to_json()` no longer contains
+  `{}` for unset properties, so it can be read back (DEV-015).
 
 ### Changed
 
@@ -43,6 +138,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   declared type, length, format or pattern. `validate_template()` reports
   `column_spec_invalid` for such columns, and the app re-validates loaded data
   after a column or rule edit.
+
+- `import_specs_from_json()` reads a specification written by
+  `write_columns_to_json()`, rules included, so JSON is no longer a
+  write-only format.
 
 - **"Authorized for corrections" is now a picker in the app.** The Metadata
   tab offers the Receiver and Supplier contacts to choose from, accepts any

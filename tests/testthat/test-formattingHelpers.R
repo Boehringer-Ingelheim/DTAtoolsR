@@ -328,3 +328,69 @@ test_that("all constraints of a multi-constraint group rule are described", {
     expect_match(txt, paste0("\"", nm, "\": a row where"), fixed = TRUE)
   }
 })
+
+# ---- .format_column_constraint() -------------------------------------------
+#
+# The switch used to spell the bounds `greater_than`/`less_than`, which no rule
+# can carry (the engine's operators are `greater`/`less`), and had no branch at
+# all for `equal`, `not_equal`, `range` or `pattern`. Every one of those fell
+# through to the default "'col' <operator> <value>" line, so an exported
+# agreement read "'AGE' greater '18'" or, for a range, "'AGE' range one of
+# ('1', '5')".
+
+test_that(".format_column_constraint renders every engine operator in words", {
+  # Expected strings are written out from the rule semantics (evaluateRules.R:
+  # `x > value`, `x < value`, ...), not copied from the function's output.
+  f <- .format_column_constraint
+
+  expect_equal(f("AGE", list(greater = 18)), "'AGE' > '18'")
+  expect_equal(f("AGE", list(less = 65)), "'AGE' < '65'")
+  expect_equal(f("AGE", list(greater_equal = 18)), "'AGE' \u2265 '18'")
+  expect_equal(f("AGE", list(less_equal = 65)), "'AGE' \u2264 '65'")
+  expect_equal(f("AGE", list(min = 18)), "'AGE' \u2265 '18'")
+  expect_equal(f("AGE", list(max = 65)), "'AGE' \u2264 '65'")
+
+  expect_equal(f("SEX", list(equals = "F")), "'SEX' = 'F'")
+  expect_equal(f("SEX", list(equal = "F")), "'SEX' = 'F'")
+  expect_equal(f("SEX", list(not_equals = "F")), "'SEX' \u2260 'F'")
+  expect_equal(f("SEX", list(not_equal = "F")), "'SEX' \u2260 'F'")
+})
+
+test_that(".format_column_constraint renders range as one interval, not a value list", {
+  # `range` carries TWO numbers that are the ends of one interval; the generic
+  # multi-value branch would call them "one of ('1', '5')", which is a different
+  # statement (1 and 5 only).
+  out <- .format_column_constraint("AGE", list(range = c(1, 5)))
+
+  expect_equal(out, "'AGE' is between '1' and '5'")
+  expect_false(grepl("one of", out, fixed = TRUE))
+})
+
+test_that(".format_column_constraint renders pattern as a match, and keeps set and empty operators", {
+  f <- .format_column_constraint
+
+  expect_equal(f("ID", list(pattern = "^S[0-9]+$")), "'ID' matches pattern '^S[0-9]+$'")
+  expect_equal(f("SEX", list(`in` = c("F", "M"))), "'SEX' is one of ('F', 'M')")
+  expect_equal(f("SEX", list(not_in = c("F", "M"))), "'SEX' is NOT one of ('F', 'M')")
+  expect_equal(f("NOTE", list(empty = TRUE)), "'NOTE' is empty/absent")
+  expect_equal(f("NOTE", list(empty = FALSE)), "'NOTE' is present")
+})
+
+test_that(".format_column_constraint joins several operators on one column with AND", {
+  out <- .format_column_constraint("AGE", list(greater_equal = 18, less = 65))
+
+  expect_equal(out, "'AGE' \u2265 '18' AND 'AGE' < '65'")
+})
+
+test_that("a column-condition rule description reads its operators, not their key names", {
+  rule <- DTARuleColCondition(
+    id = "adult_status",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+
+  expect_equal(
+    translate_rule_to_human(rule),
+    "IF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
+  )
+})

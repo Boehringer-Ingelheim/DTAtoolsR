@@ -114,14 +114,14 @@ test_that("OQ-FILE-042 | get_md5sum matches tools::md5sum, and the sidecar recor
 
   res <- write_table_to_file(ds, table = "tab1", filename = p, sep = ",", arrange_by = NULL, quiet = TRUE)
 
-  qa_step("the computed checksum equals tools::md5sum() of the written file", unname(tools::md5sum(p)), res$md5sum$md5sum)
-  qa_step("the recorded column count matches what was written", 4L, res$md5sum$n_cols)
-  qa_step("the recorded row count matches what was written", 3L, res$md5sum$n_rows)
+  qa_step("the computed checksum equals tools::md5sum() of the written file", unname(tools::md5sum(p)), res$md5sum)
+  qa_step("the recorded column count matches what was written", 4L, res$n_cols)
+  qa_step("the recorded row count matches what was written", 3L, res$n_rows)
 
   qa_step(
     "the sidecar file holds exactly the checksum, column count and row count, one per line",
     c(
-      paste0("md5sum: ", res$md5sum$md5sum),
+      paste0("md5sum: ", res$md5sum),
       "Number of Columns: 4",
       "Number of Rows: 3"
     ),
@@ -129,35 +129,26 @@ test_that("OQ-FILE-042 | get_md5sum matches tools::md5sum, and the sidecar recor
   )
 })
 
-test_that("OQ-FILE-043 | the returned md5sum is a list, not the bare checksum string, when get_md5sum is TRUE | REQ-FILE-027", {
+test_that("OQ-FILE-043 | the returned md5sum is the bare checksum string when get_md5sum is TRUE | REQ-FILE-027", {
   dir <- qa_tempdir()
   ds <- create_example_DTADataSetTabular(2)
 
   p1 <- file.path(dir, "with_md5.csv")
   res1 <- write_table_to_file(ds, table = "tab1", filename = p1, sep = ",", arrange_by = NULL, get_md5sum = TRUE, quiet = TRUE)
-  qa_step("get_md5sum = TRUE: the md5sum element is a list, not a character scalar", "list", class(res1$md5sum))
-  qa_step("...carrying the checksum under its own md5sum name", unname(tools::md5sum(p1)), res1$md5sum$md5sum)
+  qa_step("get_md5sum = TRUE: the md5sum element is a character scalar", "character", class(res1$md5sum))
+  qa_step("...holding the checksum of the file on disk", unname(tools::md5sum(p1)), res1$md5sum)
 
-  # The practical trap this creates: the function's own documentation
-  # describes md5sum as "the checksum, or NA when get_md5sum = FALSE" -- which
-  # reads as a bare, comparable value. A caller following that literally hits
-  # R's own "condition has length > 1" instead of the intended branch, because
-  # is.na() on a 3-element list yields a 3-element logical. The message is
-  # base R's own and therefore locale-dependent, so only the fact that it
-  # raises a condition is asserted, not its text.
-  trap <- tryCatch(
-    {
-      if (!is.na(res1$md5sum)) NULL
-    },
-    error = function(e) e,
-    warning = function(w) w
+  # The documented idiom must run cleanly and take the intended branch.
+  idiom <- tryCatch(
+    if (!is.na(res1$md5sum)) "checksum present" else "no checksum",
+    error = function(e) "condition raised"
   )
-  qa_check("the documented if (!is.na(result$md5sum)) idiom does not run cleanly for get_md5sum = TRUE", inherits(trap, "condition"))
-  qa_known_deviation("DEV-007", !is.character(res1$md5sum) && inherits(trap, "condition"))
+  qa_step("the documented if (!is.na(result$md5sum)) idiom takes the checksum branch", "checksum present", idiom)
 
   p2 <- file.path(dir, "without_md5.csv")
   res2 <- write_table_to_file(ds, table = "tab1", filename = p2, sep = ",", arrange_by = NULL, get_md5sum = FALSE, quiet = TRUE)
-  qa_step("get_md5sum = FALSE: md5sum is exactly NA, matching the documentation for this branch", NA, res2$md5sum)
+  qa_step("get_md5sum = FALSE: md5sum is exactly NA_character_", NA_character_, res2$md5sum)
+  qa_step("...and the idiom takes the no-checksum branch", "no checksum", if (!is.na(res2$md5sum)) "checksum present" else "no checksum")
   qa_check("...and no sidecar file is written", !file.exists(paste0(p2, ".md5")))
 })
 
