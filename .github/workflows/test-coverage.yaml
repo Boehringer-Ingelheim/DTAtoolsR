@@ -15,19 +15,42 @@
 # the package. Its helpers are unit tested through the app_env() harness in
 # tests/testthat/helper-shinyapp.R.
 
+# TIERS (decided by ci-tier.yml, shared with R-CMD-check.yaml): both jobs are
+# skipped on a pull request into dev, and run -- with their floors -- on a pull
+# request into master, one labelled `full-ci`, a manual dispatch, and the
+# nightly schedule on dev. A pull request whose every path is inert for R CMD
+# check skips them on any tier: no line of R/ can have changed. There is no
+# `push: dev` trigger; the nightly run covers dev.
+
 name: test-coverage
 
 on:
   pull_request:
     branches: [master, dev]
-  push:
-    branches: [dev]
+    # `labeled` so that adding `full-ci` runs coverage at once.
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    # Nightly, on dev (must match the checkout `ref:` below).
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 permissions: read-all
 
+concurrency:
+  group: test-coverage-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-tier.yml
+
   coverage:
+    needs: changes
+    # Negated comparisons and `!cancelled()`: a failed tier job runs coverage
+    # rather than skipping it; see ci-tier.yml.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.tier != 'fast'
+      && needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -38,6 +61,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
       - uses: r-lib/actions/setup-pandoc@v2.12.1
 
@@ -114,6 +139,10 @@ jobs:
   # 2.5 points under it and ratchets up as thoughts/shared/plans/
   # PLAN-qualification-coverage.md is worked through (85, 92, 95).
   qualification-coverage:
+    needs: changes
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.tier != 'fast'
+      && needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -121,6 +150,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
       - uses: r-lib/actions/setup-pandoc@v2.12.1
 
