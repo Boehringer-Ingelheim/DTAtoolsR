@@ -940,6 +940,8 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   # the other direction.
   merged$id <- def$id
   merged$version <- def$version
+  # The date belongs to a version, so it is the child's own or none at all.
+  merged$date <- def$date
   # `abstract` is not inherited either. It says that THIS file exists only to
   # be extended; a child of an abstract base is concrete unless it says
   # otherwise. Inheriting the flag would make every deviation of an abstract

@@ -135,7 +135,7 @@ build_demo_current <- function(idx, lineage = "grandparent_ct@1.0") {
   loaded <- load_fn("demo_ct@1.0", index = idx)
   testthat::expect_true(loaded$ok)
 
-  prov <- prov_fn(loaded$value$def, loaded$value, selections = list())
+  prov <- prov_fn(loaded$value$def, loaded$value)
   built <- create_fn(loaded$value$def, loaded$value$path, selections = list(), index = idx, provenance = prov)
   testthat::expect_true(built$ok)
 
@@ -346,24 +346,108 @@ test_that("rebase_plan() gives a clear error for a document with no template pro
   expect_match(flat_message(plan$error), "template provenance", ignore.case = TRUE)
 })
 
-test_that("rebase_plan() names the missing field for a partial provenance record", {
-  root <- withr::local_tempdir()
-  setup_demo_family(root)
-  idx <- index_over(root)
+test_that("rebase_option_answer() inverts single-path, value-keyed and boolean options", {
+  answer <- app_fn("rebase_option_answer")
+  md <- list(
+    header = "Mine", blank = character(0),
+    transmission = list(blinded = TRUE, blinded_description = "Kept blind")
+  )
 
+  expect_identical(answer(list(id = "h", target = "metadata.header"), md), "Mine")
+  # Nothing to read back: the option falls back to its default.
+  expect_null(answer(list(id = "b", target = "metadata.blank"), md))
+  expect_null(answer(list(id = "m", target = "metadata.missing"), md))
+
+  toggle <- list(
+    id = "blind", type = "boolean",
+    effects = list(
+      "TRUE" = list(
+        list(path = "metadata.transmission.blinded", value = TRUE),
+        list(path = "metadata.transmission.blinded_description", value = "Kept blind")
+      ),
+      "FALSE" = list(
+        list(path = "metadata.transmission.blinded", value = FALSE),
+        list(path = "metadata.transmission.blinded_description", value = "")
+      )
+    )
+  )
+  expect_identical(answer(toggle, md), TRUE)
+  md$transmission <- list(blinded = FALSE, blinded_description = "")
+  expect_identical(answer(toggle, md), FALSE)
+  # A document matching neither key cannot be told apart: default.
+  md$transmission <- list(blinded = TRUE, blinded_description = "Edited")
+  expect_null(answer(toggle, md))
+})
+
+test_that("rebase_derive_selections() reads options a variant choice contributes", {
+  derive <- app_fn("rebase_derive_selections")
+  def <- list(
+    id = "v", version = "1.0", options = list(),
+    variants = list(id = "platform", label = "Platform", choices = list(
+      list(value = "a", label = "A", datasets = list("a.yaml"), options = list(
+        list(id = "hdr", type = "text", target = "metadata.header")
+      )),
+      list(value = "b", label = "B", datasets = list("b.yaml"))
+    ))
+  )
   dta <- app_fixture_dta()
   md <- DTAtools::metadata(dta)
-  # id/version alone: DTAMetaData's own validator requires BOTH whenever
-  # @template is non-empty, so this is the only "partial" record that can
-  # exist as a legitimate object -- `selections` is not validated there and
-  # is the field this test actually exercises being reported as missing.
-  S7::prop(md, "template") <- list(id = "demo_ct", version = "1.0")
+  S7::prop(md, "header") <- "Variant header"
   dta@metadata <- md
+  prov <- list(id = "v", version = "1.0", variant = list(id = "platform", value = "a"))
 
-  plan <- app_fn("rebase_plan")(dta, "1.1", index = idx)
+  sel <- derive(dta, prov, list(def))
+  expect_identical(sel$hdr, "Variant header")
+  expect_identical(sel$platform, "a")
 
-  expect_false(plan$ok)
-  expect_match(flat_message(plan$error), "selections", ignore.case = TRUE)
+  # A document still carrying recorded selections replays exactly those.
+  expect_identical(derive(dta, c(prov, list(selections = list(hdr = "old"))), list(def)), list(hdr = "old"))
+})
+
+test_that("rebase_plan() re-derives option answers from the document, so they survive a rebase", {
+  root <- withr::local_tempdir()
+  # An option writing `header`, whose default moves between the versions.
+  for (v in c("1.0", "1.1")) {
+    writeLines(c(
+      "kind: dta_creation_template",
+      "id: opt_ct",
+      sprintf('version: "%s"', v),
+      "base:",
+      "  metadata:",
+      '    title: "T"',
+      '    version: "1.0"',
+      "datasets:",
+      "  - id: mini_ds",
+      "    type: file",
+      "    files: { filename: mini.csv, type: csv }",
+      "options:",
+      "  - id: hdr",
+      "    type: text",
+      "    target: metadata.header",
+      sprintf('    default: "Default %s"', v)
+    ), file.path(root, paste0("opt_ct_", sub(".", "_", v, fixed = TRUE), ".dta-template.yaml")))
+  }
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("opt_ct@1.0", index = idx)
+  expect_true(loaded$ok)
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
+  built <- app_fn("create_dta_from_template")(
+    loaded$value$def, loaded$value$path,
+    selections = list(hdr = "Chosen header"), index = idx, provenance = prov
+  )
+  expect_true(built$ok)
+  expect_false("selections" %in% names(DTAtools::metadata(built$value)@template))
+
+  plan <- app_fn("rebase_plan")(built$value, "1.1", index = idx)
+  expect_true(plan$ok)
+  # The author's answer is neither overwritten by 1.1's default nor a conflict.
+  expect_false("header" %in% plan$conflicts$key)
+  expect_false("header" %in% plan$changes$key[plan$changes$resolution == "take_template"])
+
+  applied <- app_fn("rebase_apply")(built$value, plan, resolutions = list())
+  expect_true(applied$ok)
+  expect_identical(DTAtools::metadata(applied$value)@header, "Chosen header")
 })
 
 # ---- rebase_plan(): missing-ancestor degradation -----------------------------
@@ -581,7 +665,7 @@ write_vh_ct <- function(root, version, header) {
 build_vh_current <- function(idx) {
   loaded <- app_fn("load_template_definition")("vh_ct@1.0", index = idx)
   testthat::expect_true(loaded$ok)
-  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value, selections = list())
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
   built <- app_fn("create_dta_from_template")(
     loaded$value$def, loaded$value$path,
     selections = list(), index = idx, provenance = prov

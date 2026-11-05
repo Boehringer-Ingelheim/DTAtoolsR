@@ -2,6 +2,7 @@ kind: dta_creation_template
 id: starter
 label: Starter DTS
 version: "1.0"
+date: "2026-11-05"
 description: >-
   A minimal creation template that ties the other three skeleton files
   together: it imports starter_dataset as its one dataset and offers

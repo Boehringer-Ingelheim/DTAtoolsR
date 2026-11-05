@@ -44,7 +44,7 @@ atomic_rebase_family <- function(ancestor, target, .local_envir = parent.frame()
   index <- app_fn("build_template_index")()
   loaded <- app_fn("load_template_definition")("atomic_agreement@1.0", index)
   expect_true(loaded$ok, info = loaded$error)
-  provenance <- app_fn("template_provenance")(loaded$value$def, loaded$value, selections = list())
+  provenance <- app_fn("template_provenance")(loaded$value$def, loaded$value)
   current <- app_fn("create_dta_from_template")(
     loaded$value$def, loaded$value$path, index = index, provenance = provenance
   )

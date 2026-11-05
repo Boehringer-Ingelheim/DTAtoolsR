@@ -655,6 +655,7 @@ render_template_option_input <- function(opt, base_metadata = list()) {
   }
 
   ch <- if (typ %in% c("boolean", "textarea", "number")) character(0) else dta_template_choices(opt)
+  single_text <- length(ch) == 1 && dta_template_allow_custom(opt, default = !identical(typ, "select"))
   # The controls carry no label of their own: tmpl_field_row() puts the label
   # and the help text in the row's left column, so every control starts on the
   # same vertical line however long its help is.
@@ -706,7 +707,14 @@ render_template_option_input <- function(opt, base_metadata = list()) {
       iid, NULL,
       value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
     ),
-    if (length(ch) > 0) {
+    if (single_text) {
+      # One suggestion and free text allowed: a dropdown of one is pointless,
+      # so the suggestion is simply the field's starting text, edited in place.
+      textInput(iid, NULL,
+        value = if (is.null(def)) unname(ch[[1]]) else as.character(def)[[1]],
+        width = "100%"
+      )
+    } else if (length(ch) > 0) {
       combobox(ch)
     } else {
       textInput(iid, NULL,
@@ -719,7 +727,7 @@ render_template_option_input <- function(opt, base_metadata = list()) {
   tmpl_field_row(
     # selectize hides the <select> and types into "<id>-selectized"; the label
     # has to point at the element that actually takes focus.
-    for_id = if (length(ch) > 0) paste0(iid, "-selectized") else iid,
+    for_id = if (length(ch) > 0 && !single_text) paste0(iid, "-selectized") else iid,
     label = label,
     hints = if (nzchar(help)) div(class = "msg-hint tmpl-help", help),
     control = ctl,

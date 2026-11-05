@@ -302,7 +302,8 @@ test_that("the server requires platform selection before collecting its options"
     if (!is.null(rv$dta)) {
       expect_identical(names(rv$dta@datasets[[1]]@specs@columns), "SUBJECT")
       expect_identical(rv$dta@metadata@transmission$method, "CDB")
-      expect_identical(rv$dta@metadata@template$selections$trial_platform, "veeva")
+      expect_identical(rv$dta@metadata@template$variant$value, "veeva")
+      expect_null(rv$dta@metadata@template$selections)
     }
   })
 })

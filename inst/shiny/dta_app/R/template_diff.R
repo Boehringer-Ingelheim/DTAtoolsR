@@ -302,13 +302,111 @@ dta_diff <- function(a, b) {
 
 # ---- Rebuilding a template's own output --------------------------------------
 
+# The option answers to rebuild ancestor and target with. A document records
+# none (template_provenance() leaves them out of the YAML), so they are read
+# back from the document itself: each option that writes one metadata field
+# takes that field's CURRENT value, and a value-keyed option the key its
+# effects still match (rebase_option_answer()). Ancestor and target then both
+# carry the document's own value there, so the field classifies as unchanged
+# and the author's answer survives the rebase. An option whose answer cannot be
+# told falls back to its default. The variant comes from the recorded
+# `variant` block.
+#
+# `prov$selections`, when present, still wins: documents written before the
+# field was dropped keep replaying exactly what they recorded.
+rebase_derive_selections <- function(current, prov, defs) {
+  if (!is.null(prov$selections)) {
+    return(prov$selections)
+  }
+  md <- as.list(DTAtools::metadata(current))
+  variant <- prov$variant
+  variant_sel <- list()
+  if (!is.null(variant$id) && !is.null(variant$value)) {
+    variant_sel[[as.character(variant$id)]] <- variant$value
+  }
+  out <- list()
+  for (def in defs) {
+    if (is.null(def)) next
+    # A variant choice can add or override options, so read the options of
+    # the variant this document was built with, not the unresolved family.
+    if (!is.null(def$variants)) {
+      def <- tryCatch(resolve_template_variant(def, variant_sel), error = function(e) def)
+    }
+    for (opt in def$options %||% list()) {
+      oid <- as.character(opt$id %||% "")
+      if (!nzchar(oid) || oid %in% names(out)) next
+      v <- rebase_option_answer(opt, md)
+      if (!is.null(v)) out[[oid]] <- v
+    }
+  }
+  c(out, variant_sel)
+}
+
+# One option's answer, read back from the document's metadata list `md`, or
+# NULL when it cannot be told (the option then falls back to its default).
+#
+# A single-path option (`target:` or a `__selection__` effect) answers with the
+# field's current scalar value. An option whose `effects:` are keyed by value
+# (`yes:`/`no:`, or one key per choice) answers with the key whose every
+# checkable operation the document still matches -- the inverse of
+# collect_option_effects().
+rebase_option_answer <- function(opt, md) {
+  doc_value <- function(path) {
+    keys <- strsplit(as.character(path %||% ""), ".", fixed = TRUE)[[1]]
+    if (length(keys) < 2 || !identical(keys[[1]], "metadata")) {
+      return(NULL)
+    }
+    list_get_path(md, keys[-1])
+  }
+  path <- dta_template_option_path(opt)
+  if (nzchar(path)) {
+    v <- doc_value(path)
+    if (is.atomic(v) && length(v) == 1L && !is.na(v)) {
+      return(v)
+    }
+    return(NULL)
+  }
+
+  eff <- opt[["effects"]] %||% list()
+  for (k in setdiff(names(eff), c("", "__selection__", "path", "set", "value"))) {
+    ops <- eff[[k]]
+    if (!is.list(ops)) next
+    if (!is.null(ops$path) || !is.null(ops$set)) ops <- list(ops)
+    checked <- 0L
+    matches <- TRUE
+    for (op in ops) {
+      pairs <- if (is.list(op$set)) op$set else stats::setNames(list(op$value), as.character(op$path %||% ""))
+      for (p in names(pairs)) {
+        want <- pairs[[p]]
+        if (is.character(want) && identical(want, "__selection__")) next
+        got <- doc_value(p)
+        if (is.null(got) && !grepl("^metadata\\.", p)) next # not a metadata field: cannot check
+        checked <- checked + 1L
+        if (!identical(as.character(unlist(got)), as.character(unlist(want)))) matches <- FALSE
+      }
+    }
+    if (checked > 0L && matches) {
+      if (identical(tolower(as.character(opt$type %||% "")), "boolean")) {
+        if (k %in% c("TRUE", "yes", "true", "1")) {
+          return(TRUE)
+        }
+        if (k %in% c("FALSE", "no", "false", "0")) {
+          return(FALSE)
+        }
+      }
+      return(k)
+    }
+  }
+  NULL
+}
+
 # Rebuild the DTA that `ref` ("id", "id@version" or "id@latest") WOULD
 # produce, given `selections` and `index` -- i.e. load_template_definition()
 # followed by create_dta_from_template(), exactly the pair every "Create new
 # from template" flow already calls, just without a Shiny session around it.
 #
-# This is how rebase_plan() reconstructs the ancestor (from the version and
-# selections recorded in the document's own provenance) and the target (from
+# This is how rebase_plan() reconstructs the ancestor (from the recorded
+# version and rebase_derive_selections()) and the target (from
 # the version being rebased TO, with the SAME selections) -- both are, by
 # definition, "what this template ref would build", nothing more specific
 # than that.
@@ -547,12 +645,10 @@ rebase_plan <- function(current, to_version, index = NULL) {
 
     tpl_id <- as.character(prov$id %||% "")
     from_version <- as.character(prov$version %||% "")
-    selections <- prov$selections
 
     missing_fields <- c(
       if (!nzchar(tpl_id)) "id",
-      if (!nzchar(from_version)) "version",
-      if (is.null(selections)) "selections"
+      if (!nzchar(from_version)) "version"
     )
     if (length(missing_fields) > 0) {
       stop(sprintf(
@@ -576,6 +672,14 @@ rebase_plan <- function(current, to_version, index = NULL) {
     if (!isTRUE(target_loaded$ok)) {
       stop(sprintf("Could not resolve target template '%s': %s", target_ref, target_loaded$error))
     }
+    ancestor_loaded <- load_template_definition(ancestor_ref, index = index)
+    selections <- rebase_derive_selections(
+      current, prov,
+      list(
+        target_loaded$value$def,
+        if (isTRUE(ancestor_loaded$ok)) ancestor_loaded$value$def
+      )
+    )
     target_built <- create_dta_from_template(
       target_loaded$value$def, target_loaded$value$path,
       selections = selections, index = index
@@ -596,7 +700,7 @@ rebase_plan <- function(current, to_version, index = NULL) {
     # by which template version it happens to be rebased onto.
     target_provenance <- template_provenance(
       target_loaded$value$def, target_loaded$value,
-      selections = selections, lineage = prov$lineage %||% character(0)
+      lineage = prov$lineage %||% character(0)
     )
 
     # A missing ancestor -- e.g. 1.0 was pruned from the source after this

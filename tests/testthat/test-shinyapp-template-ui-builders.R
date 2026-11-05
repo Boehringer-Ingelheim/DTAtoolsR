@@ -590,6 +590,25 @@ test_that("allow_custom follows the template, in both directions", {
   )
 })
 
+test_that("a single free-text choice is a text field holding it, ready to edit", {
+  render <- app_fn("render_template_option_input")
+
+  html <- html_of(render(list(id = "header", type = "text", choices = "Alpha")))
+  expect_match(html, '<input id="tmpl_opt_header" type="text"', fixed = TRUE)
+  expect_match(html, 'value="Alpha"', fixed = TRUE)
+  expect_false(grepl("selectize", html, fixed = TRUE))
+  # The label points at the input itself, not a selectize proxy.
+  expect_match(html, 'for="tmpl_opt_header"', fixed = TRUE)
+
+  # A declared default is still what the field starts with.
+  with_default <- html_of(render(list(id = "header", type = "text", choices = "Alpha", default = "Beta")))
+  expect_match(with_default, 'value="Beta"', fixed = TRUE)
+
+  # A strict select keeps its dropdown: typing is not allowed there.
+  strict <- html_of(render(list(id = "header", type = "select", choices = "Alpha")))
+  expect_match(strict, '"create":false', fixed = TRUE)
+})
+
 test_that("a default that is not among the choices is added and selected", {
   opt <- list(
     id = "header", type = "text", choices = c("Alpha", "Beta"),
