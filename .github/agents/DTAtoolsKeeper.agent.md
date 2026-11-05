@@ -136,7 +136,9 @@ checks, docs) says it's done.
 
 ## CI reality check
 
-- `R-CMD-check.yaml` runs on pull requests to `master`/`dev` (plus a weekly
+- `R-CMD-check.yaml` runs on pull requests to `master`/`dev` (one ubuntu leg on
+  PRs into `dev`, the full matrix on PRs into `master` or with the `full-ci`
+  label; plus nightly-on-dev and weekly-on-master
   schedule) as a five-leg matrix: macOS release, Windows release, and Ubuntu
   devel/release/oldrel-1. Dependencies come from released packages via
   `setup-r-dependencies`; it does not install S7 from GitHub.

@@ -2,60 +2,79 @@
 #
 # A real qualification run happens by hand on the target system: that is the
 # whole point of it, and its evidence bundle is the deliverable. What runs here
-# is the quick tier, on a schedule, so that the suite cannot rot unnoticed
-# between deployments -- and so that it is exercised against an *installed*
-# package on three operating systems rather than only against a source tree on
-# one developer's machine.
+# keeps the suite from rotting unnoticed between deployments, exercised against
+# an *installed* package rather than only against a source tree on one
+# developer's machine. tests/testthat/test-qualification.R, the one check in the
+# developer suite, calls the runner with `stages = character(0)` and so executes
+# none of the OQ/PQ cases; this workflow is where they run in CI.
 #
-# It also runs on every pull request into dev or master and on every push to
-# dev. The schedule and the manual trigger only ever fire from the default
-# branch (master), and this file did not exist there, so until these triggers
-# were added the OQ/PQ cases had never run in CI at all: the one PR-time check,
-# tests/testthat/test-qualification.R, calls the runner with
-# `stages = character(0)` and so executes none of them. A `pull_request`
-# workflow runs from the pull request's own copy of this file, so it works
-# before the file reaches master.
+# TIERS (decided by ci-tier.yml, shared with R-CMD-check.yaml):
+#   fast    a pull request into dev: the quick scale on ubuntu only, and only
+#           when the diff touches R/, inst/, tests/, DESCRIPTION or NAMESPACE.
+#   release a pull request into master, one labelled `full-ci`, a manual
+#           dispatch, or the nightly schedule: the standard scale on Linux,
+#           Windows and macOS.
+#
+# No `push: dev` trigger: the pull request run already tested the merge commit
+# that lands on dev, and the nightly run covers dev as a whole. The schedule
+# runs master's copy of this file, so it checks out dev explicitly. A
+# `pull_request` run uses the pull request's own copy of this file.
 
 name: qualification
 
 on:
   pull_request:
     branches: [dev, master]
-  push:
-    branches: [dev]
+    # `labeled` so that adding `full-ci` re-runs at the release tier at once.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:
       scale:
         description: Scale tier
         required: false
-        default: quick
+        default: standard
         type: choice
         options: [quick, standard, full]
   schedule:
-    # Weekly, on Monday, after the R-CMD-check run.
-    - cron: "0 6 * * 1"
+    # Nightly, on dev (must match the checkout `ref:` below).
+    - cron: "0 2 * * *"
 
 permissions:
   contents: read
+  # ci-tier.yml lists the pull request's files.
+  pull-requests: read
+
+concurrency:
+  group: qualification-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-tier.yml
+
   qualify:
-    runs-on: ${{ matrix.config.os }}
-    name: ${{ matrix.config.os }}
+    needs: changes
+    # `!cancelled()` and the negated comparisons make a failed tier job run
+    # everything rather than nothing; see ci-tier.yml.
+    if: >-
+      ${{ !cancelled() && (needs.changes.outputs.tier != 'fast'
+      || needs.changes.outputs.code != 'false') }}
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - { os: ubuntu-latest }
-          - { os: windows-latest }
-          - { os: macos-latest }
+        os: ${{ fromJSON(needs.changes.outputs.tier != 'fast' && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      SCALE: ${{ inputs.scale || (needs.changes.outputs.tier != 'fast' && 'standard' || 'quick') }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
       - uses: r-lib/actions/setup-pandoc@v2
         with:
@@ -86,7 +105,7 @@ jobs:
       # One line on purpose: Rscript on Windows cuts a multi-line -e at the
       # first newline.
       - name: Run the qualification
-        run: Rscript -e 'DTAtools::run_qualification("qualification-output", scale = "${{ inputs.scale || 'quick' }}", tester = "GitHub Actions ${{ matrix.config.os }}")'
+        run: Rscript -e 'DTAtools::run_qualification("qualification-output", scale = Sys.getenv("SCALE"), tester = "GitHub Actions ${{ matrix.os }}")'
         shell: bash
 
       # Uploaded before the verdict is enforced, so a failing run still leaves
@@ -95,7 +114,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qualification-${{ matrix.config.os }}
+          name: qualification-${{ matrix.os }}
           path: qualification-output
           retention-days: 30
 

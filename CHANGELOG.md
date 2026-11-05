@@ -176,6 +176,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- CI is tiered. A pull request into `dev` runs `R CMD check` on
+  `ubuntu-latest (release)` only, the qualification quick scale on Linux only
+  (and only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`
+  changed), and no coverage jobs; style, pre-commit and manifest sync run as
+  before. A pull request into `master`, one labelled `full-ci`, a manual
+  dispatch and a new nightly run on `dev` get the full suite: all five
+  `R CMD check` legs, the qualification standard scale on three operating
+  systems, and both coverage jobs with their floors. The tier is decided once,
+  in `.github/workflows/ci-tier.yml`, which absorbs R-CMD-check's inert-diff
+  classifier. The `push: dev` runs of the qualification and coverage workflows,
+  which repeated the pull request's own run, are gone.
+
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
