@@ -64,11 +64,11 @@
         "RemoteRepo": "DTAtoolsR",
         "RemoteUsername": "Boehringer-Ingelheim",
         "RemoteRef": "dev",
-        "RemoteSha": "536c8a8116462fe76a51ecb29ee5d0b942440f00",
+        "RemoteSha": "aa1679c72ccfaec5d0be278b2edfc58276ffab74",
         "GithubRepo": "DTAtoolsR",
         "GithubUsername": "Boehringer-Ingelheim",
         "GithubRef": "dev",
-        "GithubSHA1": "536c8a8116462fe76a51ecb29ee5d0b942440f00",
+        "GithubSHA1": "aa1679c72ccfaec5d0be278b2edfc58276ffab74",
         "NeedsCompilation": "no",
         "Author": "Thomas Schwarzl [aut, cre] (ORCID:\n    <https://orcid.org/0000-0001-7697-7000>),\n  Daniel Schreyer [aut, ctb]"
       }
@@ -3127,7 +3127,7 @@
       "checksum": "c5b0fe2a5a1b8d14570f3fd991e7f88e"
     },
     "R/template_history.R": {
-      "checksum": "d8543de2dbe5030a0d218eb64422e665"
+      "checksum": "ad2e637b46fa2d40151763cbea1701c3"
     },
     "R/template_index.R": {
       "checksum": "d4b4f746ced08344be51d149131f2ed7"
@@ -3139,7 +3139,7 @@
       "checksum": "bb41f8115c584e7a3b6dd3500e2807fc"
     },
     "R/template_ui.R": {
-      "checksum": "769a40012c367f75517390783ea98637"
+      "checksum": "c1f63cab9fd598fe6ef7995754fc046e"
     },
     "R/theme.R": {
       "checksum": "c2bfcfcb048cd016668338251c763dd2"
