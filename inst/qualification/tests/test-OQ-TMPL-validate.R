@@ -563,3 +563,17 @@ test_that("OQ-TMPL-072 | a creation template whose instance breaks the invariant
     0L, sum(result$code == "rule_column_undeclared")
   )
 })
+
+# ---- REQ-TMPL-036: prior_versions_invalid ----------------------------------
+
+test_that("OQ-TMPL-073 | a malformed prior_versions entry is prior_versions_invalid, a good one is not | REQ-TMPL-036", {
+  # Entry 1 (4.0) is well formed; entry 2 (3.0) has no changes; entry 3 (5.0)
+  # is not older than the file's own version 5.0.
+  result <- validate_template(tmpl_fixture("codes", "prior_versions_invalid"))
+  rows <- result[result$code == "prior_versions_invalid", , drop = FALSE]
+  qa_step("one row per malformed entry", 2L, nrow(rows))
+  qa_step("at severity error", "error", unique(rows$severity))
+  qa_check("the entry without changes is named", any(grepl("entry 2 (3.0)", rows$message, fixed = TRUE)))
+  qa_check("the entry not older than 5.0 is named", any(grepl("entry 3 (5.0)", rows$message, fixed = TRUE)))
+  qa_check("the well-formed entry is not reported", !any(grepl("(4.0)", rows$message, fixed = TRUE)))
+})
