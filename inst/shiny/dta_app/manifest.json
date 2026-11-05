@@ -3121,25 +3121,25 @@
       "checksum": "4fc79489f0b2f627fdefb8233040d475"
     },
     "R/template_create.R": {
-      "checksum": "d63308e0bae881d5252cf108a7afb526"
+      "checksum": "1e8223a0efb78e77e8145c8ad9738e71"
     },
     "R/template_diff.R": {
-      "checksum": "c5b0fe2a5a1b8d14570f3fd991e7f88e"
+      "checksum": "45e7d2dd002d1034ed993d28063b7f0b"
     },
     "R/template_history.R": {
-      "checksum": "d8543de2dbe5030a0d218eb64422e665"
+      "checksum": "ad2e637b46fa2d40151763cbea1701c3"
     },
     "R/template_index.R": {
       "checksum": "d4b4f746ced08344be51d149131f2ed7"
     },
     "R/template_inherit.R": {
-      "checksum": "fe6ce2856e45f1cd598a29a3ddc45518"
+      "checksum": "8778bbdda1318586356bb781fe83f162"
     },
     "R/template_sources.R": {
       "checksum": "bb41f8115c584e7a3b6dd3500e2807fc"
     },
     "R/template_ui.R": {
-      "checksum": "769a40012c367f75517390783ea98637"
+      "checksum": "19a2b56c0fe0be6c9e71d23f815c298e"
     },
     "R/theme.R": {
       "checksum": "c2bfcfcb048cd016668338251c763dd2"
@@ -3163,7 +3163,7 @@
       "checksum": "b1a6d1e5f678f5bb9c59a2d5327d3cd5"
     },
     "app.R": {
-      "checksum": "dd041a9df07ed3e16a23b1f15cbb25c7"
+      "checksum": "7bce7473f1f2700dfc918a1fea9b3207"
     },
     "www/dtatools_logo_small.png": {
       "checksum": "84aafa2f128dbbbe768fb530e4e0179a"

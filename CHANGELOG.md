@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- A DTA created from a template no longer records the option answers
+  (`selections:`, `vocabulary_selections:`) under `metadata.template`; they
+  already appear as the field values they set. Rebasing onto a newer template
+  version reads them back from the document instead, so the answers are kept.
+  Documents that still carry `selections:` rebase exactly as before.
+- `metadata.template` now records the template's `label` and the `date` of the
+  template version (a new optional `date:` field on creation templates, never
+  inherited through `extends:`). `source_ref` holds the full file path only for
+  a local `dir:` source; for git, package and bundled templates it is the file
+  name within the source rather than a machine-specific cache path.
+- In "New DTA from template", an option with a single suggestion (and free
+  text allowed) is a text field pre-filled with that suggestion, edited in
+  place, instead of a one-entry dropdown.
+
 ### Fixed
 
 - The app's built-in PDF writer no longer produces no file where the cairo

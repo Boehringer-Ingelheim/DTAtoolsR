@@ -2092,10 +2092,9 @@ server <- function(input, output, session) {
     }
 
     prov <- template_provenance(
-      loaded$value$def, loaded$value, sels,
+      loaded$value$def, loaded$value,
       lineage = loaded$value$lineage,
-      carried_over_from = co$carried_over_from,
-      vocab_selections = vocab_sel
+      carried_over_from = co$carried_over_from
     )
 
     created <- create_dta_from_template(

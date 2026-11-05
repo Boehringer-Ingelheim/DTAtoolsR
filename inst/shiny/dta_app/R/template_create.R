@@ -409,13 +409,12 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # a fast CHANGE DETECTOR, not a cryptographic digest -- labelling it as one
 # would overstate what it actually guarantees.
 #
-# `selections` is NEVER omitted, even when it is an empty list(): the rebase
-# feature reconstructs the ancestor definition's effective state FROM this
-# field, and an omitted key is indistinguishable from "this document predates
-# recording selections at all" -- which cannot be trusted the same way as
-# "this document recorded that zero options were overridden."
+# Option answers (selections, vocabulary selections) are deliberately NOT
+# recorded: they are already visible as the field values they produced, and
+# repeating them under metadata.template is noise in the user's document.
+# rebase_plan() (template_diff.R) re-derives them from the document itself.
 #
-# Every other field is omitted rather than written empty (see
+# Every field is omitted rather than written empty (see
 # .template_provenance_is_empty()), so a document built from a plain local
 # "dir:" source -- no lineage, no dataset-template entries, no ancestor -- gets
 # a clean, minimal provenance block instead of a wall of NA/empty keys.
@@ -430,40 +429,48 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # template that genuinely extends nothing. An explicit `lineage =` still wins,
 # which is what rebase_plan() relies on to keep a document's OWN trail rather
 # than adopting the target template's.
-template_provenance <- function(def, meta, selections,
+template_provenance <- function(def, meta,
                                 lineage = meta$lineage %||% character(0),
-                                ds_provenance = list(), carried_over_from = NULL,
-                                vocab_selections = NULL) {
+                                ds_provenance = list(), carried_over_from = NULL) {
+  # The date of THIS template version (its own `date:`, never inherited --
+  # see resolve_template_inheritance()). yaml reads an unquoted date as Date.
+  date <- def$date
+  if (inherits(date, "Date")) date <- format(date)
   full <- list(
     id = as.character(meta$id %||% def$id %||% ""),
+    label = def$label,
     version = as.character(meta$version %||% def$version %||% ""),
+    date = if (is.null(date)) NULL else as.character(date),
     source = meta$source_name,
     source_kind = meta$source_kind,
-    # The resolved file path is the most specific "which file, exactly" trace
-    # available at this point -- more useful for tracking down a provenance
-    # question than re-stating the id@version already recorded above.
-    source_ref = meta$path,
+    source_ref = template_provenance_source_ref(meta),
     resolved_commit = meta$resolved_commit,
     content_hash = paste0("hash:", rlang::hash(def)),
     created = Sys.Date(),
     lineage = if (length(lineage) > 0) as.character(lineage) else NULL,
-    selections = selections %||% list(),
-    # A SIBLING of `selections`, not an entry inside it. Rebase reconstructs
-    # an ancestor by replaying `selections` through the template's `options:`,
-    # and a differently-shaped key smuggled into that map would be replayed as
-    # an option id that does not exist. Omitted entirely when the template
-    # offered no vocabulary slots, so an unaffected document's provenance
-    # block does not grow an empty key.
-    vocabulary_selections = if (length(vocab_selections %||% list()) > 0) vocab_selections else NULL,
     datasets = if (length(ds_provenance) > 0) ds_provenance else NULL,
     carried_over_from = carried_over_from
   )
 
-  protected <- c("id", "version", "created", "content_hash", "selections")
+  protected <- c("id", "version", "created", "content_hash")
   keep <- vapply(
     names(full),
     function(nm) nm %in% protected || !.template_provenance_is_empty(full[[nm]]),
     logical(1)
   )
   full[keep]
+}
+
+# Which file, exactly. A full path only means something for a `dir:` source
+# the user configured themselves; a git clone, an installed package or the
+# bundled templates sit at a machine-specific path, so those record the file
+# name -- which IS its path within the source, because a library directory is
+# scanned non-recursively (build_template_index()).
+template_provenance_source_ref <- function(meta) {
+  path <- meta$path
+  if (.template_provenance_is_empty(path)) {
+    return(NULL)
+  }
+  user_dir <- identical(meta$source_kind, "dir") && !identical(meta$source_name, "builtin")
+  if (user_dir) path else basename(path)
 }
