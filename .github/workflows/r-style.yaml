@@ -40,13 +40,7 @@ jobs:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      # fetch-depth: 0 (full history, not the default shallow depth-1 clone) is
-      # load-bearing for check_manifest.R's SHA-vs-tag verification below: it
-      # runs `git rev-parse <ref>^{commit}`, which needs the release tags to
-      # actually be present in the checkout, not just the tip commit.
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - uses: r-lib/actions/setup-r@v2.12.1
         with:
@@ -86,25 +80,18 @@ jobs:
         run: source(".github/scripts/check_deps_in_desc.R")
 
       # Covers every file that records the version, not just the Shiny VERSION
-      # file: DESCRIPTION, inst/shiny/dta_app/VERSION, the two version-carrying
-      # entries in the app's manifest.json, and the badge/footer in
+      # file: DESCRIPTION, inst/shiny/dta_app/VERSION, and the badge/footer in
       # docs/index.html. See .github/scripts/bump_version.R for the site list and
       # for the command that resyncs them.
       - name: Check every version site matches DESCRIPTION Version
         shell: Rscript {0}
         run: source(".github/scripts/check_version_sync.R")
 
-      # The version check above can only cover lines that carry a version. This
-      # covers the rest of the app's manifest.json -- the file list, every
-      # checksum, and the fields that must stay deleted. Six of the eight
-      # checksums were verified by nothing at all until this was added, which is
-      # how release 0.16.0 shipped with the wrong md5 for app.R.
-      #
-      # This step FAILS; it does not repair. The repair runs in the separate
-      # manifest-sync workflow, which pushes to the PR branch -- so on a normal
-      # PR this step is a backstop that should already be green by the time it
-      # runs.
-      - name: Check the app manifest describes the app
+      # The root manifest.json is what Posit Connect deploys. This checks it
+      # lists every package DESCRIPTION and the app need, carries no DTAtools
+      # entry, and has a live app.R checksum. FAILS; it does not repair -- a
+      # stale checksum is fixed with `bump_version.R --sync-manifest`.
+      - name: Check the Connect manifest can deploy the app
         shell: Rscript {0}
         run: source(".github/scripts/check_manifest.R")
 

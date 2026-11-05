@@ -31,7 +31,7 @@ Check, in this order:
    `renv.lock`. A *missing* version bump is never a finding: bumps happen only
    when explicitly requested. An *unrequested* version bump is a finding —
    flag any change to `DESCRIPTION` `Version:`, `inst/shiny/dta_app/VERSION`,
-   the app's `manifest.json`, `docs/index.html`, or a dated `CHANGELOG.md`
+   `docs/index.html`, or a dated `CHANGELOG.md`
    release heading that the task did not ask for.
 5. **Attribution** — the diff contains no `Co-Authored-By: Claude ...`,
    "Generated with Claude Code", 🤖, or any other mention of Claude,

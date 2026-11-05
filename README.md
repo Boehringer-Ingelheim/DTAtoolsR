@@ -704,6 +704,11 @@ the suggested packages **shiny**, **bslib** and **DT**.
 run_dta_app()
 ```
 
+To host it on Posit Connect, create Git-backed content from this repository's
+**root** directory (`/`). The root `app.R` installs the deployed checkout's
+DTAtools and serves the app bundled with it, so the app and the package always
+come from the same commit.
+
 ### Private templates
 
 The `dta-template.yaml` files packaged in `inst/extdata/templates` are

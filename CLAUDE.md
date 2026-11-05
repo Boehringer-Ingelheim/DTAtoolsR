@@ -103,7 +103,7 @@ contract.
 - **Merging PRs**: Never call `gh pr merge --auto` or `gh pr merge` immediately
   assuming GitHub will wait. Instead, explicitly poll and wait with `gh pr checks`
   or `gh run list --branch` until **all** CI workflows (`R-CMD-check` on all OS
-  matrix targets, `manifest-sync`, `r-style`, `pre-commit`) have finished and
+  matrix targets, `r-style`, `pre-commit`) have finished and
   reported passing status (`pass` / `completed success`) before initiating a merge.
 - Graphify is installed but produces nothing here: its extractor has no `.R`
   parser, so a build reports "No code files found". Use `Explore`, not a graph.
@@ -180,8 +180,8 @@ from the software.** Never paste observed output in as an expectation.
   entry, not a version bump.
 - Never bump the version unless I ask for it. A bump is a release step of its
   own, not a side effect of a feature branch: `Version:` in `DESCRIPTION` moves
-  together with `inst/shiny/dta_app/VERSION`, the two version entries in the
-  app's `manifest.json`, the badge and footer in `docs/index.html`, and the
+  together with `inst/shiny/dta_app/VERSION`, the badge and footer in
+  `docs/index.html`, and the
   `CHANGELOG.md` heading — all rewritten by
   `Rscript .github/scripts/bump_version.R <version>` (or the **Bump version**
   workflow), and checked by `check_version_sync.R` in CI. A stray bump also

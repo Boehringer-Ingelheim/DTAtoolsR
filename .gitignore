@@ -65,3 +65,4 @@ dta-templates/
 /step3_examples.R
 /step4_usage_and_aliases.R
 /check_output.txt
+.dtatools-lib/

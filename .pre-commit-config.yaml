@@ -45,9 +45,9 @@ repos:
         exclude: '(\.Rd$|^inst/extdata/|^tests/testthat/_snaps/)'
       - id: detect-private-key
       - id: check-ast
-      # inst/shiny/dta_app/manifest.json is patched line-by-line by
-      # .github/scripts/bump_version.R rather than round-tripped through a JSON
-      # parser (see the header comment there for why). A textual patch can
+      # manifest.json (the Posit Connect manifest) has its "files" block spliced
+      # in textually by .github/scripts/bump_version.R --sync-manifest rather
+      # than round-tripped through a JSON parser. A textual patch can
       # produce a file that is no longer valid JSON, and nothing else in the
       # repo parses it -- so a broken manifest would be committed, pass CI, and
       # only surface at deploy time. This hook is the parse check, and it is
