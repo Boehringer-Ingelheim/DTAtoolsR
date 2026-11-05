@@ -42,6 +42,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   reinstall hint. The qualification report's "Evidence inventory" section no
   longer promises a list of files "below" that it never contained.
 
+- The "Create new from template" dialogs now use the full window height. The
+  template list and its details grow with the window instead of stopping at a
+  fixed height, and both steps open at the same size, no longer hanging low
+  with a wide gap above them.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain

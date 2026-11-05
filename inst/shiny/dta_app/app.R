@@ -1631,7 +1631,7 @@ server <- function(input, output, session) {
     # whose report never arrived.
     tmpl_picker_open(TRUE)
     tmpl_picker_open_tick(tmpl_picker_open_tick() + 1)
-    showModal(modalDialog(
+    dlg <- modalDialog(
       title = "Create new from template",
       # Static, so the dialog has its picker width (theme.R) from the first
       # frame instead of jumping once the output arrives.
@@ -1652,7 +1652,14 @@ server <- function(input, output, session) {
       ),
       size = "xl",
       easyClose = TRUE
-    ))
+    )
+    # Scrollable, like the options dialog, so it fills the window height and
+    # the list grows with it (theme.R) while the buttons stay in view.
+    showModal(
+      htmltools::tagQuery(dlg)$find(".modal-dialog")$addClass(
+        "modal-dialog-scrollable tmpl-picker-dialog"
+      )$allTags()
+    )
   }
 
   # Bumped by "Refresh templates" (below) to force the picker outputs to
