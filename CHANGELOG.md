@@ -52,6 +52,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   search text came back and silently narrowed the list. "Back to templates"
   still returns to the template whose options were open.
 
+- The app's "Export DTA YAML" file name now writes version dots as underscores
+  (`..._v1_0_...` instead of `..._v10_...`), so versions `1.0` and `10` no
+  longer produce the same name.
+
 - Platform templates now work with explicit dataset identities. The picker
   describes the required platform choice rather than reporting no datasets,
   and multiline suggestion callbacks close correctly so suggestions remain
