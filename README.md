@@ -747,7 +747,8 @@ Column specifications can contain:
   date/time types keep the text as written and validate it by pattern. A
   value that does not fit is an import error — see
   [The Three Validation Axes](#the-three-validation-axes).
-- `format`: (optional) a SAS format string, e.g. `SAS 10.`, `SAS $10.`
+- `format`: (optional) a SAS format string, e.g. `SAS 10.`, `SAS $10.`. Values
+  must fit the declared format; `BEST` formats are not enforced.
 - `length`: (optional) maximum character length
 - `nullable`: (mandatory) whether the column may be empty (`true`/`false` or
   `Yes`/`No`)

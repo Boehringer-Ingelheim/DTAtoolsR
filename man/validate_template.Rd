@@ -79,7 +79,9 @@ The \code{code} column takes these values. Errors (these fail \code{strict = TRU
 \code{parse_failed}, \code{version_unquoted}, \code{target_machine_owned},
 \code{vocab_slot_invalid}, \code{instantiate_failed}, \code{values_from_pattern},
 \code{values_from_invalid}, \code{values_from_terms_invalid}, \code{dataset_missing},
-\code{dataset_id_missing}, \code{dataset_field_invalid}, \code{vocabulary_invalid},
+\code{dataset_id_missing}, \code{dataset_field_invalid}, \code{column_spec_invalid} (a
+column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
+example longer than its declared length), \code{vocabulary_invalid},
 \code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir}.
 Warnings: \code{kind_unknown}, \code{id_missing}, \code{version_missing},
 \code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},

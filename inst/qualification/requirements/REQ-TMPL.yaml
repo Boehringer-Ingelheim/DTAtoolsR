@@ -577,3 +577,23 @@ requirements:
     category: functional
     covers: [validate_template]
     source: R/validateTemplate.R (.dta_template_dataset_identity_issue)
+
+  - id: REQ-TMPL-034
+    text: >
+      A column of a dta_dataset_template's dataset: body that DTAColumnSpec()
+      refuses to construct, such as an example longer than its declared
+      length, a value that does not fit its declared type or format, or an
+      invalid pattern, shall be reported column_spec_invalid at severity
+      "error", in a row of its own naming that column and not any column that
+      constructs. A dataset template whose columns all construct shall not be
+      reported. A column of a creation template's inline dataset that
+      DTAColumnSpec() refuses shall be reported instantiate_failed, as for any
+      other build failure, and not additionally as column_spec_invalid.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_dataset_tpl)
+    notes: >
+      A dataset template is never built on its own, so before the check a
+      column that could not be constructed stayed hidden until some creation
+      template imported the dataset, and was then blamed on that template.

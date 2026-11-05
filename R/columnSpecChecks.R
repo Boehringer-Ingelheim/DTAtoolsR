@@ -3,8 +3,8 @@
 # This replaces the chunk -> jsonlite::toJSON -> ajv-on-V8 loop that previously
 # dominated validation cost (~95% of total runtime, measured; see
 # benchmarks/bench_validation.R). The constraint vocabulary the package can
-# emit is only seven keywords wide -- type, maxLength, enum, const, pattern,
-# required and additionalProperties -- so the validator was doing a
+# emit is only eight keywords wide -- type, format, maxLength, enum, const,
+# pattern, required and additionalProperties -- so the validator was doing a
 # general-purpose job for a closed, small problem.
 #
 # Constraint DERIVATION is deliberately unchanged: each column's constraints
@@ -130,7 +130,13 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
   text_column <- NULL
   string_text <- function() {
     if (is.null(text_column)) {
-      text_column <<- if (is.character(x)) x else as.character(x)
+      text_column <<- if (is.character(x)) {
+        x
+      } else if (is.numeric(x)) {
+        dta_numeric_text(x)
+      } else {
+        as.character(x)
+      }
     }
     text_column
   }
@@ -151,7 +157,9 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
       integer(0)
     } else {
       ok <- if (elementwise) {
-        is.finite(x) & x == trunc(x)
+        # Whole AND representable: an integer column is stored as int32, so a
+        # whole value beyond +-(2^31 - 1) is not an integer of this column.
+        is.finite(x) & x == trunc(x) & abs(x) <= .Machine$integer.max
       } else {
         rep(type_ok, n)
       }
@@ -227,19 +235,85 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
   }
 
   # pattern -------------------------------------------------------------------
-  # Applies to strings only. The generated schema's patterns were previously
-  # evaluated as ECMAScript regex; PCRE is used here, which agrees for the
-  # character-class and anchor constructs these specs use.
+  # Applies to strings, and to numbers through their plain decimal text (see
+  # dta_numeric_text()); booleans are skipped. The generated schema's patterns
+  # were previously evaluated as ECMAScript regex; PCRE is used here, which
+  # agrees for the character-class and anchor constructs these specs use.
   pattern <- col_spec$pattern
-  if (!is.null(pattern) && !is.na(pattern) && base_type == "string") {
-    present <- if (has_na) !na_mask() else rep(TRUE, n)
-    matched <- rep(FALSE, n)
-    matched[present] <- grepl(pattern, string_text()[present], perl = TRUE)
-    bad <- which(present & !matched)
+  if (!is.null(pattern) && !is.na(pattern) &&
+    base_type %in% c("string", "integer", "number")) {
+    present <- if (has_na) which(!na_mask()) else seq_len(n)
+    # Evaluated once per DISTINCT value and mapped back: identifiers and codes
+    # repeat down a column, and the regex (and, for numbers, the text
+    # conversion) is the dominant cost of this check.
+    matched <- if (base_type == "string") {
+      dta_map_unique(string_text()[present], function(u) grepl(pattern, u, perl = TRUE))
+    } else {
+      dta_map_unique(
+        x[present],
+        function(u) grepl(pattern, dta_numeric_text(u), perl = TRUE)
+      )
+    }
+    bad <- present[!matched]
     parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
       bad, column_name, "pattern",
       paste0("must match pattern \"", pattern, "\""),
       pattern,
+      as_text(bad)
+    )
+  }
+
+  # format --------------------------------------------------------------------
+  # A SAS display format: the value must be representable in it. BESTw. never
+  # reaches here (as_json_schema() does not emit it), and is skipped regardless.
+  fmt <- col_spec$format
+  fmt_parts <- if (!is.null(fmt) && length(fmt) == 1 && !is.na(fmt)) {
+    dta_sas_format_parts(fmt)
+  }
+  if (!is.null(fmt_parts) && fmt_parts$family != "best") {
+    numeric_column <- base_type %in% c("integer", "number")
+    # Date/POSIXt vectors are serialised as strings but carry no display text.
+    text_column_ok <- base_type == "string" &&
+      !inherits(x, "Date") && !inherits(x, "POSIXt")
+    w <- fmt_parts$w
+
+    bad <- if (fmt_parts$family == "char" && text_column_ok) {
+      # Bytes first, characters only for what survives: see maxLength above.
+      txt <- string_text()
+      within_bytes <- nchar(txt, type = "bytes") <= w
+      candidates <- if (has_na) {
+        which(!within_bytes & !na_mask())
+      } else {
+        which(!within_bytes)
+      }
+      if (length(candidates) == 0) {
+        integer(0)
+      } else {
+        candidates[nchar(txt[candidates], type = "chars") > w]
+      }
+    } else if (fmt_parts$family == "num" && numeric_column) {
+      # A column that takes integers only reports a fraction under `type`
+      # already; repeating it as a format violation would be one fault twice.
+      integer_only <- !is.null(allowed) && !("number" %in% allowed)
+      dta_sas_numeric_format_bad(x, w, fmt_parts$d, decimals = !integer_only)
+    } else if (fmt_parts$family %in% c("date", "time", "datetime") && text_column_ok) {
+      present <- if (has_na) which(!na_mask()) else seq_len(n)
+      re <- dta_sas_temporal_regex(fmt_parts$family, fmt_parts$d)
+      # SAS right-aligns display text, so surrounding spaces are not part of it;
+      # the width is enforced on what is left.
+      fits <- dta_map_unique(string_text()[present], function(u) {
+        u <- gsub("^ +| +$", "", u)
+        grepl(re, u, perl = TRUE, ignore.case = TRUE) & nchar(u, type = "chars") <= w
+      })
+      present[!fits]
+    } else {
+      integer(0)
+    }
+
+    parts[[length(parts) + 1]] <- dta_columnspec_error_rows(
+      bad, column_name, "format",
+      paste0("must fit format \"", fmt, "\""),
+      as.character(fmt),
       as_text(bad)
     )
   }
@@ -249,6 +323,180 @@ dta_check_column_spec <- function(column_name, col_spec, x) {
     return(NULL)
   }
   do.call(rbind, parts)
+}
+
+# ---- numeric text, SAS format helpers ----------------------------------------
+
+#' @title Evaluate a Function Once per Distinct Value
+#' @description
+#' `fun(unique(v))` mapped back onto every element of `v`. For the per-value
+#' tests of a column (a regex, a text conversion) whose values repeat, this turns
+#' a cost proportional to the rows into one proportional to the distinct values.
+#' It carries no state across calls, so a streaming batch stays self-contained.
+#' @param v A vector without missing values.
+#' @param fun A function of a vector returning one element per element.
+#' @return `fun(v)`, computed from the distinct values.
+#' @keywords internal
+dta_map_unique <- function(v, fun) {
+  u <- unique(v)
+  fun(u)[match(v, u)]
+}
+
+#' @title Plain Decimal Text of a Numeric Vector
+#' @description
+#' The text a numeric value is matched against a `pattern` as, never in
+#' scientific notation -- `as.character(1e9)` is `"1e+09"`, which would fail a
+#' ten-digit pattern the value satisfies. Integers are written as they are; a
+#' whole double of magnitude below 1e15 is written in full; any other double is
+#' `as.character()`'s rendering (15 significant digits), re-expanded without an
+#' exponent when that rendering has one. A whole value of 1e15 or more is thus
+#' written out in full (`1e16` is `"10000000000000000"`), exactly as the double
+#' holds it rather than rounded to 15 digits.
+#' @param x A numeric vector.
+#' @return A character vector, `NA` where `x` is `NA`.
+#' @keywords internal
+dta_numeric_text <- function(x) {
+  if (is.integer(x)) {
+    return(as.character(x))
+  }
+  txt <- rep(NA_character_, length(x))
+  whole <- is.finite(x) & abs(x) < 1e15 & x == trunc(x)
+  # `+ 0` turns a negative zero into zero, which "%.0f" would print as "-0".
+  txt[whole] <- sprintf("%.0f", x[whole] + 0)
+  rest <- which(!whole)
+  if (length(rest) > 0) {
+    r <- as.character(x[rest])
+    sci <- which(grepl("e", r, fixed = TRUE))
+    if (length(sci) > 0) {
+      # "fg" pads to the digit count, hence the trim.
+      r[sci] <- trimws(formatC(x[rest][sci], digits = 15, format = "fg", decimal.mark = "."))
+    }
+    txt[rest] <- r
+  }
+  txt
+}
+
+#' @title Width and Decimals of a SAS Format
+#' @param format A SAS format string such as `"$12."`, `"8.2"` or `"DATE9."`.
+#' @return `NULL` for an unrecognised format, otherwise a list of `family`
+#'   (`"char"`, `"num"`, `"date"`, `"time"`, `"datetime"` or `"best"`), `w` (the
+#'   width) and `d` (decimals, `NA` when the format declares none).
+#' @keywords internal
+dta_sas_format_parts <- function(format) {
+  f <- toupper(trimws(as.character(format)))
+  num <- function(s) if (nzchar(s)) as.integer(s) else NA_integer_
+  hit <- function(re) {
+    m <- regmatches(f, regexec(re, f))[[1]]
+    if (length(m) == 0) NULL else m
+  }
+
+  if (!is.null(m <- hit("^\\$([0-9]+)\\.$"))) {
+    return(list(family = "char", w = num(m[[2]]), d = NA_integer_))
+  }
+  if (!is.null(m <- hit("^BEST([0-9]+)\\.$"))) {
+    return(list(family = "best", w = num(m[[2]]), d = NA_integer_))
+  }
+  if (!is.null(m <- hit("^DATETIME([0-9]+)\\.$"))) {
+    return(list(family = "datetime", w = num(m[[2]]), d = NA_integer_))
+  }
+  if (!is.null(m <- hit("^DATE([0-9]+)\\.$"))) {
+    return(list(family = "date", w = num(m[[2]]), d = NA_integer_))
+  }
+  if (!is.null(m <- hit("^TIME([0-9]+)\\.([0-9]*)$"))) {
+    return(list(family = "time", w = num(m[[2]]), d = num(m[[3]])))
+  }
+  if (!is.null(m <- hit("^([0-9]+)\\.([0-9]*)$"))) {
+    d <- num(m[[3]])
+    return(list(family = "num", w = num(m[[2]]), d = if (is.na(d)) 0L else d))
+  }
+  NULL
+}
+
+# Hard-coded English month abbreviations: strptime()/%b follow the system
+# locale, which would make the same data pass on one machine and fail on another.
+`__DTAtools_sas_month_re__` <- "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+
+dta_sas_temporal_regex <- function(family, d) {
+  # A day is 01-31; SAS writes DATE11. with hyphens (15-AUG-2025), so a hyphen
+  # may stand between day, month and year.
+  date_core <- paste0(
+    "(?:0[1-9]|[12][0-9]|3[01])-?(?:", `__DTAtools_sas_month_re__`,
+    ")(?:-?(?:[0-9]{2}|[0-9]{4}))?"
+  )
+  fraction <- if (!is.na(d) && d > 0) paste0("(?:\\.[0-9]{1,", d, "})?") else ""
+  # Hours are not capped at two digits: a TIME value is a duration (100:00:00).
+  time_core <- paste0("[0-9]+:[0-9]{2}(?::[0-9]{2}", fraction, ")?")
+  paste0(
+    "^",
+    switch(family,
+      date = date_core,
+      time = time_core,
+      datetime = paste0(date_core, ":", time_core)
+    ),
+    "$"
+  )
+}
+
+#' @title The Format a Column Schema Carries
+#' @description
+#' The `format` keyword `as_json_schema()` emits for a column, or `NULL` when it
+#' emits none. A format is emitted only for a SAS structure, never for `BESTw.`
+#' (adaptive width, so it constrains nothing), and for `$w.` only when the
+#' declared `length` is absent or larger than `w` -- otherwise `maxLength`
+#' already rejects everything the format would, and the streaming engine need
+#' not pay for a second length pass.
+#' @param x A `DTAColumnSpec`.
+#' @return A length-1 character, or `NULL`.
+#' @keywords internal
+dta_columnspec_emitted_format <- function(x) {
+  s <- x@structure
+  if (is.null(s) || !identical(s@backend, "SAS") || !.structure_value_is_set(s@format)) {
+    return(NULL)
+  }
+  parts <- dta_sas_format_parts(s@format)
+  if (is.null(parts) || parts$family == "best") {
+    return(NULL)
+  }
+  if (parts$family == "char" && !is.null(s@length) && !is.na(s@length) && s@length <= parts$w) {
+    return(NULL)
+  }
+  as.character(s@format)
+}
+
+#' @title Values a Numeric SAS Format Cannot Display
+#' @description
+#' Indices of the finite values of `x` that do not fit the format `w.d`: more
+#' decimals than `d`, or a rendered width -- integer digits, sign, and the
+#' decimal point with its `d` digits -- beyond `w`.
+#'
+#' SAS drops the leading zero of a value below one in magnitude when the width
+#' is tight (`0.5` under `3.2` shows `.50`), so a width exceeding `w` by exactly
+#' one is accepted for such a value when `d` is above zero.
+#' @param x A numeric vector.
+#' @param w,d Width and decimals of the format.
+#' @param decimals Logical. Whether to test the number of decimals. `FALSE` for a
+#'   column that takes integers only, where a fraction is the `type` check's
+#'   finding.
+#' @return Integer indices into `x`.
+#' @keywords internal
+dta_sas_numeric_format_bad <- function(x, w, d, decimals = TRUE) {
+  v <- as.numeric(x)
+  idx <- which(is.finite(v))
+  y <- v[idx]
+  scaled <- y * 10^d
+  too_precise <- decimals & is.finite(scaled) &
+    abs(scaled - round(scaled)) > 1e-9 * pmax(1, abs(scaled))
+
+  r <- abs(round(y, d))
+  a <- pmax(r, 1)
+  digits <- floor(log10(a)) + 1
+  # log10() can land a hair either side of an exact power of ten.
+  digits <- digits + (a >= 10^digits) - (digits > 1 & a < 10^(digits - 1))
+  width <- digits + (y < 0) + (d > 0) * (1 + d)
+  # The dropped leading zero: ".50" for 0.5, "-.50" for -0.5.
+  tight <- d > 0 & r < 1 & width == w + 1
+
+  idx[too_precise | (width > w & !tight)]
 }
 
 # ---- compiled specs ---------------------------------------------------------
@@ -524,10 +772,12 @@ dta_summarise_columnspec_errors <- function(full_error) {
 #' @keywords internal
 dta_columnspec_check_kinds <- function() {
   data.frame(
-    check = c("presence", "extra", "format", "length", "values", "values", "pattern"),
+    check = c(
+      "presence", "extra", "format", "format", "length", "values", "values", "pattern"
+    ),
     keyword = c(
       "required", "additionalProperties",
-      "type", "maxLength", "enum", "const", "pattern"
+      "type", "format", "maxLength", "enum", "const", "pattern"
     ),
     stringsAsFactors = FALSE
   )
@@ -591,6 +841,7 @@ dta_columnspec_declared_columns <- function(schemas) {
   # found anything: a spec naming no column cannot call any column unexpected.
   out$additionalProperties <- unique(column_names[named])
   out$type <- declares(function(s) !is.null(s$type))
+  out$format <- declares(function(s) !is.null(s$format))
   out$maxLength <- declares(function(s) !is.null(s$maxLength) && !anyNA(s$maxLength))
   out$enum <- declares(function(s) !is.null(s$enum))
   # The `else if` in `dta_check_column_spec()`: `enum` wins when a schema
@@ -805,7 +1056,7 @@ dta_columnspec_check_summary <- function(schemas,
   # Same reason, different consequence: a collection declaring no column cannot
   # name one missing, and equally cannot call one unexpected.
   extra = "the specs declare no columns",
-  format = "no column spec declares a type",
+  format = "no column spec declares a type or format",
   length = "no column spec declares a length",
   values = "no column spec declares a value list",
   pattern = "no column spec declares a pattern"
@@ -840,17 +1091,22 @@ dta_report_columnspec_checks <- function(checks,
     rows <- checks[checks$check == label, , drop = FALSE]
     title <- `__DTAtools_columnspec_check_labels__`[[label]]
 
-    n_declared <- sum(rows$columns_declared)
-    n_checked <- sum(rows$columns_checked)
+    # `type` and `format` share the "format" label but, unlike enum/const, one
+    # column declares both (a SAS format implies its type), so summing would
+    # count that column twice. The format declarers are a subset of the type
+    # declarers, which makes the larger of the two the exact column count.
+    pool <- if (identical(label, "format")) max else sum
+    n_declared <- pool(rows$columns_declared)
+    n_checked <- pool(rows$columns_checked)
     n_errors <- sum(rows$n_errors)
-    n_columns <- sum(rows$columns_failed)
     # `as.character()` rather than the bare `unlist()`: unlisting an empty list
     # yields NULL, and `cli::cli_vec(NULL)` fails trying to set an attribute on
     # it -- on the passing checks, which is every check of a clean table.
-    failed_columns <- as.character(unlist(
+    failed_columns <- unique(as.character(unlist(
       strsplit(as.character(stats::na.omit(rows$failed_columns)), ", ", fixed = TRUE),
       use.names = FALSE
-    ))
+    )))
+    n_columns <- length(failed_columns)
 
     if (any(rows$status == "failed")) {
       outcome[[i]] <- "failed"
@@ -961,4 +1217,87 @@ dta_report_columnspec_checks <- function(checks,
   }
 
   invisible(NULL)
+}
+
+# ---- a spec checked against itself --------------------------------------------
+
+#' @title Declared Values and Examples That Do Not Fit Their Own Column
+#' @description
+#' Runs a column spec's `values` and `examples` through the same evaluator the
+#' data goes through, so a spec cannot enumerate a value its own type, length or
+#' format would reject. `pattern` and `enum`/`const` are left out: a pattern is
+#' checked against the examples by the `DTAColumnSpec` validator itself, and
+#' testing an enumeration against itself proves nothing.
+#'
+#' Values are brought to the column's stored type first, exactly as an import
+#' would, so `"abc"` under an `Int` column is reported as not being an integer
+#' rather than silently becoming `NA`.
+#' @param spec A `DTAColumnSpec`.
+#' @return A character vector of problems, empty when the spec is clean.
+#' @keywords internal
+dta_spec_value_problems <- function(spec) {
+  structure <- spec@structure
+  target <- if (is.null(structure)) {
+    "character"
+  } else {
+    tryCatch(as_r_type(structure), error = function(e) "character")
+  }
+  declared <- if (!is.null(structure) && .structure_value_is_set(structure@type)) {
+    structure@type
+  } else {
+    target
+  }
+
+  # A structure that cannot say how it validates (as_json_schema_type() aborts
+  # for a bare backend) has no constraints to test against; the column is then
+  # reported where it always was, by dta_compile_columnspec_schemas().
+  schema <- tryCatch(
+    Filter(Negate(is.null), list(
+      type = as_json_schema_type(spec),
+      maxLength = as_json_schema_length(spec),
+      format = dta_columnspec_emitted_format(spec)
+    )),
+    error = function(e) NULL
+  )
+  if (is.null(schema)) {
+    return(character(0))
+  }
+
+  problems <- character(0)
+  for (field in c("values", "examples")) {
+    raw <- if (field == "values") spec@values else spec@examples
+    if (is.null(raw)) {
+      next
+    }
+    raw <- raw[!is.na(raw)]
+    if (length(raw) == 0) {
+      next
+    }
+
+    x <- raw
+    if (target %in% c("double", "integer")) {
+      coerced <- dta_coerce_column(as.character(raw), target)
+      bad <- if (is.null(coerced)) integer(0) else coerced$offending
+      if (length(bad) > 0) {
+        problems <- c(problems, sprintf(
+          "%s '%s' is not a valid %s", field, as.character(raw[bad]), declared
+        ))
+      }
+      x <- if (is.null(coerced)) raw else coerced$values[setdiff(seq_along(raw), bad)]
+    } else if (!inherits(raw, c("Date", "POSIXt"))) {
+      # Date/POSIXt values carry no display text, exactly like a temporal data
+      # column: the evaluator skips their format and so do we.
+      x <- as.character(raw)
+    }
+    if (length(x) == 0) {
+      next
+    }
+
+    errs <- dta_check_column_spec(spec@id, schema, x)
+    if (!is.null(errs)) {
+      problems <- c(problems, sprintf("%s '%s' %s", field, errs$data, errs$message))
+    }
+  }
+
+  unique(problems)
 }

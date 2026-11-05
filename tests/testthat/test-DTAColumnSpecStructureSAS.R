@@ -172,7 +172,7 @@ test_that("enum/const values keep correct types across conversion", {
   spec_time <- DTAColumnSpec(
     id = "TIMEV",
     type = "SAS Time",
-    format = "SAS TIME8.2",
+    format = "SAS TIME11.2",
     values = list("01:02:03.50"),
     nullable = FALSE
   )
@@ -199,7 +199,7 @@ test_that("validate_table preserves mixed typed values during conversion", {
       INTV = DTAColumnSpec(id = "INTV", type = "SAS Int", format = "SAS 8.", nullable = TRUE),
       NUMV = DTAColumnSpec(id = "NUMV", type = "SAS Num", format = "SAS 8.2", nullable = TRUE),
       DATEV = DTAColumnSpec(id = "DATEV", type = "SAS Date", format = "SAS DATE9.", nullable = TRUE),
-      TIMEV = DTAColumnSpec(id = "TIMEV", type = "SAS Time", format = "SAS TIME8.2", nullable = TRUE),
+      TIMEV = DTAColumnSpec(id = "TIMEV", type = "SAS Time", format = "SAS TIME11.2", nullable = TRUE),
       DTV = DTAColumnSpec(id = "DTV", type = "SAS DateTime", format = "SAS DATETIME20.", nullable = TRUE)
     )
   )

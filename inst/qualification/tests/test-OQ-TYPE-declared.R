@@ -293,10 +293,10 @@ test_that("OQ-TYPE-022 | an integer64 column reaches the same rule verdict as it
     rules = list(DTARuleColRange(id = "qty_range", columns = "QTY", range = c(1, 10)))
   )
 
-  # 5,000,000,000 is a valid integer64 value, far outside the 32-bit range a
-  # declared Int narrows to (REQ-TYPE-009) and outside the declared range
-  # rule -- exercising both an unusual R storage type and the rule axis in
-  # the same value.
+  # 5,000,000,000 is a valid integer64 value, far outside the 32-bit range of
+  # a declared Int (REQ-VAL-005: one type violation) and outside the declared
+  # range rule (one rule error) -- exercising both an unusual R storage type
+  # and two axes in the same value.
   df_r <- data.frame(ID = c("A001", "A002"), stringsAsFactors = FALSE)
   df_r$QTY <- bit64::as.integer64(c(5, 5000000000))
   det_r <- validate_table_detailed(specs, df_r, verbose = FALSE)
@@ -305,11 +305,11 @@ test_that("OQ-TYPE-022 | an integer64 column reaches the same rule verdict as it
   ds <- td_check(c("ID,QTY", "A001,5", "A002,5000000000"), specs, dir)
 
   qa_step(
-    "an out-of-range integer64 value costs the same one rule error as the same text from a file",
-    c(ok = FALSE, columnspec = 0L, rule = 1L, import = 0L),
+    "an out-of-range integer64 value costs the same one type error and one rule error as the same text from a file",
+    c(ok = FALSE, columnspec = 1L, rule = 1L, import = 0L),
     c(ok = det_r$ok, columnspec = det_r$n_columnspec_errors, rule = det_r$n_rule_errors, import = det_r$n_import_errors)
   )
-  qa_step("...and the file path agrees", c(ok = FALSE, columnspec = 0L, rule = 1L, import = 0L), td_axis(ds))
+  qa_step("...and the file path agrees", c(ok = FALSE, columnspec = 1L, rule = 1L, import = 0L), td_axis(ds))
 })
 
 test_that("OQ-TYPE-023 | a native logical column fails the type check against every declarable column type | REQ-TYPE-011", {
@@ -342,7 +342,7 @@ test_that("OQ-TYPE-023 | a native logical column fails the type check against ev
 
 # ---- Int narrowing ------------------------------------------------------------
 
-test_that("OQ-TYPE-024 | a value outside the 32-bit integer range is stored as double, on no axis | REQ-TYPE-009", {
+test_that("OQ-TYPE-024 | a value outside the 32-bit integer range is stored as double and reported as a type violation | REQ-TYPE-009", {
   dir <- qa_tempdir()
   specs <- DTAColumnSpecCollection(columns = list(
     N = DTAColumnSpec(id = "N", type = "SAS Int", nullable = TRUE)
@@ -351,32 +351,55 @@ test_that("OQ-TYPE-024 | a value outside the 32-bit integer range is stored as d
   # An all-whole, in-range column narrows to integer storage, for contrast.
   ds_clean <- td_check(c("N", "1", "2", "3"), specs, dir)
   qa_step("an all-whole, in-range column narrows to R integer", "integer", class(td_column(ds_clean, "N")))
+  qa_step(
+    "and is a clean delivery on every axis",
+    c(ok = TRUE, columnspec = 0L, rule = 0L, import = 0L),
+    td_axis(ds_clean)
+  )
 
   # One value one past the 32-bit signed range (2^31), everything else
   # ordinary. `.Machine$integer.max` is 2^31 - 1.
   ds_wide <- td_check(c("N", "1", "2", "2147483648"), specs, dir)
   qa_step(
-    "the whole column stays double instead, because it cannot be narrowed as a whole",
+    "the whole column stays double, because it cannot be narrowed as a whole",
     "numeric", class(td_column(ds_wide, "N"))
   )
+  # Storage and verdict are separate (REQ-TYPE-009): the neighbours 1 and 2 are
+  # whole and in range, so exactly the one wide value, on row 3, is reported.
+  wide_msgs <- td_messages(ds_wide)
+  wide_msgs <- wide_msgs[wide_msgs$source == "columnspec", ]
   qa_step(
-    "and this is reported on no axis at all -- a silent narrowing failure, pinned as REQ-TYPE-009",
-    c(ok = TRUE, columnspec = 0L, rule = 0L, import = 0L),
+    "and the wide value, on its own row, is a column-specification type violation",
+    list(row = 3L, column = "N", keyword = "type"),
+    list(
+      row = wide_msgs$row, column = as.character(wide_msgs$column),
+      keyword = as.character(wide_msgs$keyword)
+    )
+  )
+  qa_step(
+    "so the delivery is invalid through that one error, on no other axis",
+    c(ok = FALSE, columnspec = 1L, rule = 0L, import = 0L),
     td_axis(ds_wide)
   )
-  # Bound to the register: when the package starts reporting an out-of-range
-  # value on the import axis, this stops reproducing and the run fails until
-  # DEV-006 is closed and the two steps above are rewritten as the pass they
-  # should have been.
-  qa_known_deviation(
-    "DEV-006",
-    all(td_axis(ds_wide)[c("columnspec", "rule", "import")] == 0L)
+
+  # The boundary itself: 2^31 - 1 is the largest integer, in either sign, and
+  # the value R keeps for NA_integer_ (-2^31) is therefore out of range too.
+  ds_edge <- td_check(
+    c("N", "2147483647", "-2147483647", "-2147483648", "5000000000"),
+    specs, dir
   )
-  # The most-negative value R would need is one further out than +2^31-1,
-  # because .Machine$integer.max is checked against abs(); the same failure
-  # to narrow, at the other end.
-  ds_neg <- td_check(c("N", "1", "-2147483648"), specs, dir)
-  qa_step("the same holds at the negative boundary", "numeric", class(td_column(ds_neg, "N")))
+  qa_step("the same column is stored as double at the negative boundary too", "numeric", class(td_column(ds_edge, "N")))
+  edge_msgs <- td_messages(ds_edge)
+  qa_step(
+    "+-(2^31 - 1) are accepted; -2^31 and 5e9 are reported, each on its own row",
+    c(3L, 4L),
+    edge_msgs$row[edge_msgs$keyword == "type"]
+  )
+  qa_step(
+    "and nothing else is reported on any axis",
+    c(ok = FALSE, columnspec = 2L, rule = 0L, import = 0L),
+    td_axis(ds_edge)
+  )
 })
 
 test_that("OQ-TYPE-025 | the whole-column and per-batch engines can type the same declared Int column differently | REQ-TYPE-002", {

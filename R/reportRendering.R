@@ -674,6 +674,7 @@
     enum = paste0("Must be one of: ", spec_text_prose, "."),
     const = paste0("Must be exactly: ", spec_text, "."),
     pattern = paste0("Must match the pattern: ", spec_text),
+    format = paste0("Must fit the SAS format: ", spec_text, "."),
     fallback()
   )
 }

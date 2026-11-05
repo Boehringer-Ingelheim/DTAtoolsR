@@ -391,3 +391,86 @@ test_that("OQ-SPEC-047 | a DTA whose list name for a dataset differs from that d
     inherits(reassigned, "condition") && grepl("keyed by its dataset", flat(reassigned), fixed = TRUE)
   )
 })
+
+test_that("OQ-SPEC-048 | a column specification whose own values or examples cannot fit it is refused | REQ-SPEC-026", {
+  mismatch <- function(...) {
+    e <- tryCatch(DTAColumnSpec(...), error = function(e) e)
+    inherits(e, "dta_spec_value_mismatch")
+  }
+
+  # Each refusal below is worked out from the rule: the declared value is longer
+  # than the width, not a whole number, outside 2^31-1, not displayable, or not
+  # display text.
+  qa_check(
+    "a codelist value longer than the declared length",
+    mismatch(id = "X", type = "SAS Char", length = 3, values = "ABCD")
+  )
+  qa_check(
+    "an example longer than the declared length",
+    mismatch(id = "X", type = "SAS Char", length = 3, examples = "ABCD")
+  )
+  qa_check(
+    "a codelist value longer than the $w. width, with no length declared",
+    mismatch(id = "X", type = "SAS Char", format = "SAS $3.", values = c("AB", "ABCD"))
+  )
+  qa_check("text under Int", mismatch(id = "X", type = "SAS Int", values = "abc"))
+  qa_check("a fraction under Int", mismatch(id = "X", type = "SAS Int", values = "1.5"))
+  qa_check("2^31 under Int", mismatch(id = "X", type = "SAS Int", values = "2147483648"))
+  qa_check("text under Num", mismatch(id = "X", type = "SAS Num", examples = "n/a"))
+  qa_check(
+    "three decimals under 8.2",
+    mismatch(id = "X", type = "SAS Num", format = "SAS 8.2", values = c("1.5", "1.234"))
+  )
+  qa_check(
+    "an ISO date under DATE9.",
+    mismatch(id = "X", type = "SAS Date", format = "SAS DATE9.", examples = "2025-08-15")
+  )
+
+  # Controls: the same shapes with values that do fit are accepted, so the
+  # refusals above are about the values and not about the construction.
+  fits <- list(
+    list(id = "X", type = "SAS Char", length = 3, values = c("AB", "ABC")),
+    list(id = "X", type = "SAS Int", values = c("1", "2147483647", "-2147483647")),
+    list(id = "X", type = "SAS Num", format = "SAS 8.2", values = c("1.5", "12345.67")),
+    list(id = "X", type = "SAS Date", format = "SAS DATE9.", examples = c("15AUG2025", "15aug25"))
+  )
+  accepted <- vapply(
+    fits, function(args) !inherits(tryCatch(do.call(DTAColumnSpec, args), error = function(e) e), "condition"),
+    logical(1)
+  )
+  qa_step("values that fit construct without complaint", rep(TRUE, length(fits)), accepted)
+
+  # An invalid regular expression is its own refusal, found at construction
+  # rather than on the first value it meets.
+  bad_pattern <- tryCatch(
+    DTAColumnSpec(id = "X", type = "SAS Char", length = 8, pattern = "(["),
+    error = function(e) e
+  )
+  qa_check("an unterminated character class is refused as an invalid pattern", inherits(bad_pattern, "dta_spec_invalid_pattern"))
+  qa_check(
+    "and it is not mistaken for a value mismatch",
+    !inherits(bad_pattern, "dta_spec_value_mismatch")
+  )
+
+  # A specification file goes through the same constructor.
+  dir <- qa_tempdir()
+  path <- file.path(dir, "columns.yaml")
+  writeLines(
+    c(
+      "columns:",
+      "  CODE:",
+      "    id: CODE",
+      "    type: SAS Char",
+      "    length: 3",
+      "    values: [AB, ABCD]"
+    ),
+    path
+  )
+  from_yaml <- tryCatch(import_specs_from_yaml(path), error = function(e) e)
+  qa_check("a column specification file with a value that cannot fit is refused", inherits(from_yaml, "condition"))
+  qa_check(
+    "and the refusal is the mismatch condition, not a wrapper that hides it",
+    inherits(from_yaml, "dta_spec_value_mismatch") ||
+      inherits(from_yaml$parent, "dta_spec_value_mismatch")
+  )
+})

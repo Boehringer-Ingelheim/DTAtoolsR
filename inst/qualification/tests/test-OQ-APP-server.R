@@ -1,4 +1,4 @@
-# The application's server logic. REQ-APP-001 .. REQ-APP-013.
+# The application's server logic. REQ-APP-001 .. REQ-APP-013 and REQ-APP-026.
 #
 # A user of the application never sees check()'s return value. They see a
 # coloured status against a dataset name and act on it, so a difference between
@@ -546,5 +546,127 @@ test_that("OQ-APP-028 | a group-condition row removed with the rule editor's own
       list(n = 1L, id = "keep_constraint"),
       list(n = length(new_rule@constraints), id = new_rule@constraints[[1]]$id)
     )
+  })
+})
+
+# ---- REQ-APP-026: a spec edit re-validates loaded data ------------------------
+
+# The inputs the column editor form carries for SUBJECT_ID (SAS Char, not
+# nullable) with only `length` and `values` varying. The bundled delivery holds
+# ids such as SUBJ0001: eight characters each.
+qapp_subject_id_form <- function(length = "", values = "") {
+  list(
+    col_id = "SUBJECT_ID", col_label = "Subject Identifier",
+    col_backend = "SAS", col_type = "Char", col_format = "",
+    col_length = length, col_nullable = FALSE, col_values = values,
+    col_pattern = "", col_desc = "Unique subject ID"
+  )
+}
+
+test_that("OQ-APP-033 | saving a column re-validates the loaded data without pressing check | REQ-APP-026", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("i", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = qapp_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    qa_step("the delivery passes before any edit", "pass", as_status(rv$status, "clinical_data"))
+
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_cols = 1)
+
+    # A length of 20 holds an eight-character id: the verdict is re-reached, and
+    # it is still a pass rather than a pending that would say nothing ran.
+    do.call(session$setInputs, qapp_subject_id_form(length = "20"))
+    session$setInputs(col_save = 1)
+    qa_step("a column save the data satisfies keeps the dataset passing", "pass", as_status(rv$status, "clinical_data"))
+
+    # A length of 5 cannot hold eight characters.
+    do.call(session$setInputs, qapp_subject_id_form(length = "5"))
+    session$setInputs(col_save = 2)
+    qa_step(
+      "a column save the data breaks fails the dataset without pressing check",
+      "fail", as_status(rv$status, "clinical_data")
+    )
+    found <- DTAtools::messages(DTAtools::datasets(rv$dta, "clinical_data"), as_tibble = FALSE)
+    found <- found[found$source == "columnspec", , drop = FALSE]
+    qa_step(
+      "and the dataset's messages are the over-length ones, in the edited column only",
+      list(keywords = "maxLength", columns = "SUBJECT_ID"),
+      list(
+        keywords = sort(unique(as.character(found$keyword))),
+        columns = sort(unique(as.character(found$column)))
+      )
+    )
+  })
+})
+
+test_that("OQ-APP-034 | saving or removing a rule re-validates, and a dataset without data is left alone | REQ-APP-026", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("j", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = qapp_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_rules = 1)
+    n_before <- nrow(qapp_fn("dta_rules_overview")(rv$dta, "clinical_data"))
+
+    # GENDER takes three values over 500 rows, so a uniqueness rule on it must
+    # fail on the data already loaded.
+    session$setInputs(rule_add = 1)
+    session$setInputs(rule_type = "col_unique")
+    session$setInputs(rule_id = "gender_unique", rule_desc = "", rule_cols = "GENDER")
+    session$setInputs(rule_save = 1)
+    qa_step("a rule save the data breaks fails the dataset", "fail", as_status(rv$status, "clinical_data"))
+
+    overview <- qapp_fn("dta_rules_overview")(rv$dta, "clinical_data")
+    qa_step("the rule was added", n_before + 1L, nrow(overview))
+    session$setInputs(rule_del_click = nrow(overview))
+    qa_step(
+      "removing it restores the pass, again without pressing check",
+      "pass", as_status(rv$status, "clinical_data")
+    )
+  })
+
+  qapp_clean_session_files()
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("k", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_cols = 1)
+
+    # No delivery has been offered, so there is nothing to validate against.
+    do.call(session$setInputs, qapp_subject_id_form(length = "5"))
+    session$setInputs(col_save = 1)
+    qa_step("a dataset with no data stays nodata after a column save", "nodata", as_status(rv$status, "clinical_data"))
+  })
+})
+
+test_that("OQ-APP-035 | a column edit whose values cannot fit is refused and changes nothing | REQ-APP-026", {
+  app <- qapp_skip_unless_app_installed()
+  qapp_clean_session_files()
+
+  shiny::testServer(app, {
+    session$setInputs(dta_client_id = strrep("l", 32))
+    session$setInputs(dta_file = qapp_file_input("clinical_dta.yaml"))
+    session$setInputs(up_1_1 = qapp_file_input("clinical_data.csv"))
+    session$setInputs(check_all = 1)
+    qapp_enter_edit_mode(session)
+    session$setInputs(edit_cols = 1)
+    before <- rv$dta
+
+    # "ABCD" is four characters in a column of three.
+    do.call(session$setInputs, qapp_subject_id_form(length = "3", values = "ABCD"))
+    session$setInputs(col_save = 1)
+
+    qa_step("the save reports an error", FALSE, isTRUE(rv$col_msg$ok))
+    qa_step("naming it", TRUE, nzchar(rv$col_msg$error))
+    qa_step("the document is untouched", TRUE, identical(rv$dta, before))
+    qa_step("and so is the dataset's verdict", "pass", as_status(rv$status, "clinical_data"))
   })
 })

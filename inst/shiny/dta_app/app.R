@@ -2695,7 +2695,10 @@ server <- function(input, output, session) {
   })
 
   # --- validation ---------------------------------------------------------
-  run_check <- function(dataset = NULL) {
+  # `quiet = TRUE` is for re-checks that an edit triggers rather than the user
+  # pressing Validate: status and messages update as usual, but the "Validation
+  # complete" toast and the messages dock stay out of the way of the editor.
+  run_check <- function(dataset = NULL, quiet = FALSE) {
     req(rv$dta)
     names_ds <- dta_dataset_names(rv$dta)
     targets <- if (is.null(dataset)) names_ds else intersect(dataset, names_ds)
@@ -2762,6 +2765,9 @@ server <- function(input, output, session) {
       return()
     }
     autosave()
+    if (quiet) {
+      return(invisible())
+    }
 
     # ONE reconciled summary derived from the verified status map.
     st <- unlist(rv$status)
@@ -2821,6 +2827,15 @@ server <- function(input, output, session) {
       "pending"
     }
     rv$status <- st
+  }
+  # A spec edit that can change a verdict (column or rule saved/removed) also
+  # re-validates data that is already loaded, so the status never reads
+  # "pending" for data whose result the new spec already determines. Call it
+  # AFTER sync_yaml_text(): a failing check must not hold up the YAML refresh.
+  recheck_dataset <- function(ed) {
+    if (isTRUE(dta_dataset_readiness(isolate(rv$dta), ed)$has_data)) {
+      run_check(ed, quiet = TRUE)
+    }
   }
 
   # Re-key a dataset's upload records after its file handlers were added,
@@ -3990,6 +4005,7 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification(sprintf("Removed column \u201c%s\u201d.", ids[[idx]]), type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$col_up_click, {
@@ -4073,6 +4089,7 @@ server <- function(input, output, session) {
     rv$col_token <- rv$col_token + 1
     sync_yaml_text()
     showNotification("Column saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ============================= Edit rules ===============================
@@ -4850,6 +4867,7 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule removed.", type = "message")
+    recheck_dataset(ed)
   })
 
   observeEvent(input$rule_up_click, {
@@ -5121,6 +5139,7 @@ server <- function(input, output, session) {
     rv$rule_token <- rv$rule_token + 1
     sync_yaml_text()
     showNotification("Rule saved.", type = "message")
+    recheck_dataset(ed)
   })
 
   # ======================= Edit dataset metadata ==========================
@@ -5663,6 +5682,7 @@ server <- function(input, output, session) {
         r[["columnspec_params.pattern"]],
         r[["columnspec_columnspec"]]
       )),
+      format = paste0("fit SAS format ", .first_nonempty(r[["columnspec_columnspec"]])),
       required = "the value must be present (not missing)",
       additionalProperties = "no such column to be present: the specs do not declare it",
       .first_nonempty(r[["columnspec_message"]], r[["message"]], "(see message)")
@@ -6966,6 +6986,7 @@ server <- function(input, output, session) {
     old_names <- if (is.null(old_dta)) character(0) else dta_dataset_names(old_dta)
 
     new_uploads <- list()
+    recheck <- character(0) # datasets whose data survived a changed spec
     new_status <- stats::setNames(rep("pending", length(new_names)), new_names)
     for (nm in new_names) {
       if (!(nm %in% old_names)) next # brand-new dataset -> fresh, pending
@@ -6995,6 +7016,7 @@ server <- function(input, output, session) {
       )
       if (!isTRUE(tr$ok)) next
       new_dta <- tr$value
+      if (!specs_same) recheck <- c(recheck, nm)
 
       # Upload records are keyed by handler POSITION, and a re-parsed document
       # may have reordered or replaced entries as easily as appended one. Match
@@ -7081,6 +7103,8 @@ server <- function(input, output, session) {
       },
       type = "message"
     )
+    # Data kept under a changed spec is re-validated against it, once.
+    if (length(recheck) > 0) run_check(recheck)
   })
 
   # --- export -------------------------------------------------------------

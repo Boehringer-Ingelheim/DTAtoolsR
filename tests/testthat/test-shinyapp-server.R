@@ -548,10 +548,20 @@ test_that("saving a new column updates the spec, the YAML view and clears valida
     cols_after <- names(DTAtools::columns(DTAtools::datasets(rv$dta, "clinical_data")))
     expect_setequal(cols_after, c(cols_before, "ZZTEST"))
 
-    # Editing the spec must invalidate the result computed against the old one,
-    # otherwise the UI keeps showing a green "pass" for a spec that was never
-    # validated.
-    expect_equal(rv$status, c(clinical_data = "pending"))
+    # Editing the spec must not leave the result computed against the old one
+    # standing. The dataset has data loaded, so the edit re-runs the check at
+    # once instead of parking the dataset at "pending". It fails because
+    # clinical_data.csv has no ZZTEST column: a declared column is a required
+    # property of every row, and `nullable = TRUE` only permits null values in
+    # a column that is present, so each of the 500 rows reports "required".
+    expect_equal(rv$status, c(clinical_data = "fail"))
+    msgs <- DTAtools::messages(DTAtools::datasets(rv$dta, "clinical_data"), as_tibble = FALSE)
+    msgs <- msgs[msgs$source == "columnspec", , drop = FALSE]
+    expect_gt(nrow(msgs), 0)
+    expect_setequal(unique(msgs$keyword), "required")
+    # A missing column has no value to attach the message to, so the column
+    # field is NA and the column is named in the message instead.
+    expect_true(all(grepl("ZZTEST", msgs$message, fixed = TRUE)))
     # ... and the raw YAML view must reflect the edit.
     expect_match(rv$yaml_text, "ZZTEST", fixed = TRUE)
   })

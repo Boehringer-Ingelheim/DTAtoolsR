@@ -18,12 +18,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   metadata defaults, option effects or dataset replacement. Unchanged
   ancestor-authored choices retain their existing seal exemption.
 
+- Integer columns now reject values outside the 32-bit integer range (DEV-006),
+  `pattern` is applied to numeric columns (it was silently skipped before),
+  declared SAS formats are checked, and an invalid regex no longer aborts
+  `check()` later on; it is reported when the specification is built.
+
 ### Changed
 
 - The bundled Biomarker GF creation template now uses the latest source DTS
   version, 5.0 (2025-11-28), with a single matching version-history entry.
 
+- Data that passed before may now fail the `format` or `pattern` checks,
+  including numeric columns with a pattern.
+
+- A column spec whose declared `values` or `examples` do not fit its own type,
+  length, format or pattern is now refused when it is built, so older YAML or
+  Word specs and saved sessions with such values no longer load until they are
+  corrected (for example an ISO date example under `DATE9.`, or `TIME8.2` with
+  a fractional-seconds example that needs 11 characters).
+
 ### Added
+
+- Column specifications reject `values` and `examples` that do not fit the
+  declared type, length, format or pattern. `validate_template()` reports
+  `column_spec_invalid` for such columns, and the app re-validates loaded data
+  after a column or rule edit.
 
 - **"Authorized for corrections" is now a picker in the app.** The Metadata
   tab offers the Receiver and Supplier contacts to choose from, accepts any

@@ -153,9 +153,30 @@ DTAColumnSpec <- S7::new_class(
       if (!is.null(self@values)) {
         cli_abort("{self@id}: 'values' cannot be set if pattern is provided.")
       }
+
+      # The data is matched with PCRE (dta_check_column_spec()), so the pattern
+      # must compile as PCRE: an invalid one would otherwise abort the whole
+      # check() much later, on the first column that reaches it.
+      if (!is.na(self@pattern)) {
+        compiles <- tryCatch(
+          {
+            suppressWarnings(grepl(self@pattern, "", perl = TRUE))
+            TRUE
+          },
+          error = function(e) FALSE
+        )
+        if (!compiles) {
+          cli_abort(
+            "{self@id}: 'pattern' '{self@pattern}' is not a valid regular expression.",
+            class = "dta_spec_invalid_pattern"
+          )
+        }
+      }
+
       if (!is.null(self@examples)) {
         for (ex in self@examples) {
-          if (!grepl(ex, pattern = self@pattern)) {
+          ex_text <- if (is.numeric(ex)) dta_numeric_text(ex) else as.character(ex)
+          if (!is.na(ex_text) && !grepl(self@pattern, ex_text, perl = TRUE)) {
             cli_abort(
               "{self@id}: example '{ex}' must conform to the pattern '{self@pattern}' provided."
             )
@@ -181,6 +202,17 @@ DTAColumnSpec <- S7::new_class(
           "'colclass' must be one of: {paste(valid_colclasses, collapse = ', ')}"
         )
       }
+    }
+
+    # Declared values and examples must themselves fit the column's type,
+    # length and format, or the spec contradicts itself. Last, so the cheaper
+    # structural checks above report first.
+    problems <- dta_spec_value_problems(self)
+    if (length(problems) > 0) {
+      cli_abort(
+        c("{self@id}: declared values/examples do not fit the column.", .cli_escape(problems)),
+        class = "dta_spec_value_mismatch"
+      )
     }
   }
 )
@@ -492,7 +524,10 @@ method(as_json_schema_length, DTAColumnSpec) <- function(x) {
 #' @title JSON Schema for a Column Specification
 #' @description
 #' Renders a column specification as JSON Schema: the type, and the length,
-#' pattern and permitted-value constraints the specification declares. The
+#' pattern, permitted-value and format constraints the specification declares.
+#' A SAS \code{format} is emitted as a \code{format} keyword and checked against
+#' the data, except \code{BESTw.} (adaptive width, so it constrains nothing) and
+#' a \code{$w.} that the declared \code{length} already covers. The
 #' single-column methods return the schema fragment as a list; the
 #' \code{\link{DTAColumnSpecCollection}} method assembles those fragments into
 #' a whole schema and serialises it.
@@ -595,6 +630,8 @@ method(as_json_schema, DTAColumnSpec) <- function(x) {
   if (!is.null(x@pattern) && !is.na(x@pattern)) {
     schema$pattern <- x@pattern
   }
+
+  schema$format <- dta_columnspec_emitted_format(x)
 
   return(schema)
 }

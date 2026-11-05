@@ -133,7 +133,7 @@ deviations:
 
   - id: DEV-006
     title: A declared integer column silently accepts values outside the integer range
-    status: open
+    status: closed
     severity: major
     affects: [REQ-TYPE-009]
     observed: >
@@ -153,7 +153,7 @@ deviations:
     workaround: Declare such a column as SAS Num, which imposes no integer bound.
     reference: inst/qualification/tests/test-OQ-TYPE-declared.R
     opened: 2026-09-09
-    closed: null
+    closed: 2026-11-05
 
   - id: DEV-007
     title: write_table_to_file() returns a list where it documents a checksum

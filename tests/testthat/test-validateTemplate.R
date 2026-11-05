@@ -588,6 +588,84 @@ test_that("a well-formed dta_dataset_template with a proper 'dataset:' body vali
   expect_equal(nrow(result), 0, info = paste(utils::capture.output(print(result)), collapse = "\n"))
 })
 
+# ---- column_spec_invalid -----------------------------------------------------
+
+write_column_tpl <- function(dir, col_line) {
+  writeLines(
+    c(
+      "kind: dta_dataset_template",
+      "id: colspec",
+      "version: \"1.0\"",
+      "dataset:",
+      "  id: ds1",
+      "  type: tabular",
+      "  files: {filename: x.csv, type: csv}",
+      "  columns:",
+      "    - {id: GOOD, type: SAS Char, length: 5, examples: [abc]}",
+      paste0("    - ", col_line)
+    ),
+    file.path(dir, "colspec.dta-dataset-template.yaml")
+  )
+}
+
+test_that("column_spec_invalid fires, as an error naming the column, when DTAColumnSpec rejects a column", {
+  # An example that breaks the column's own pattern: rejected by the validator
+  # today, independent of any newer value-vs-type checks.
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}")
+  rows <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_match(rows$message, "BADPAT", fixed = TRUE)
+  expect_false(any(grepl("GOOD", rows$message, fixed = TRUE)))
+})
+
+test_that("column_spec_invalid fires for a dataset template column whose example is longer than its length", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: TOOLONG, type: SAS Char, length: 3, examples: [abcdef]}")
+  rows <- expect_code_row(validate_template(dir), "column_spec_invalid", "error")
+  expect_match(rows$message, "TOOLONG", fixed = TRUE)
+})
+
+test_that("a dataset template whose columns all fit validates with no column_spec_invalid row", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: FITS, type: SAS Char, length: 5, examples: [abc]}")
+  expect_no_code_row(validate_template(dir), "column_spec_invalid")
+})
+
+test_that("a column with a values_from binding is built without the binding key tripping column_spec_invalid", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BOUND, type: SAS Char, values_from: {vocabulary: nowhere}}")
+  expect_no_code_row(validate_template(dir), "column_spec_invalid")
+})
+
+test_that("strict = TRUE aborts on a column_spec_invalid error", {
+  dir <- withr::local_tempdir()
+  write_column_tpl(dir, "{id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}")
+  expect_error(validate_template(dir, strict = TRUE), "Template validation found")
+})
+
+test_that("an inline creation-template column the spec rejects still surfaces as instantiate_failed", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: inline_bad",
+      "version: \"1.0\"",
+      "base:",
+      "  metadata:",
+      "    title: Inline bad",
+      "datasets:",
+      "  - id: ds1",
+      "    type: tabular",
+      "    files: {filename: x.csv, type: csv}",
+      "    columns:",
+      "      - {id: BADPAT, type: SAS Char, pattern: \"^[0-9]+$\", examples: [abc]}"
+    ),
+    file.path(dir, "inline_bad.dta-template.yaml")
+  )
+  expect_code_row(validate_template(dir), "instantiate_failed", "error")
+})
+
 test_that("a dta_creation_template's own 'datasets:' key is correct and must not trip dataset_missing", {
   # The guard against over-firing: 'datasets:' (plural) is the CORRECT,
   # documented key for a dta_creation_template -- dataset_missing is scoped to

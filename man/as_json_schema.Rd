@@ -28,7 +28,10 @@ per column.
 }
 \description{
 Renders a column specification as JSON Schema: the type, and the length,
-pattern and permitted-value constraints the specification declares. The
+pattern, permitted-value and format constraints the specification declares.
+A SAS \code{format} is emitted as a \code{format} keyword and checked against
+the data, except \code{BESTw.} (adaptive width, so it constrains nothing) and
+a \code{$w.} that the declared \code{length} already covers. The
 single-column methods return the schema fragment as a list; the
 \code{\link{DTAColumnSpecCollection}} method assembles those fragments into
 a whole schema and serialises it.
