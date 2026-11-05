@@ -17,7 +17,7 @@ areas:
     min_tests: 11
   - area: ENV
     title: Installed system and environment
-    min_tests: 24
+    min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
     min_tests: 32

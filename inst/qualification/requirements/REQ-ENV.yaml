@@ -183,17 +183,6 @@ requirements:
     covers: [run_qualification]
     source: inst/qualification/baseline/inst-files.sha256
 
-  - id: REQ-ENV-017
-    text: >
-      Every file listed in the Shiny application's manifest.json shall be
-      present under inst/shiny/dta_app and shall match its recorded
-      checksum, so that the application deployed to Posit Connect is provably
-      the one the checksum manifest describes.
-    risk: medium
-    category: integrity
-    covers: [run_dta_app]
-    source: inst/shiny/dta_app/manifest.json
-
   - id: REQ-ENV-018
     text: >
       Every symbol exported by the package's namespace shall have a

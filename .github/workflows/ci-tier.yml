@@ -39,18 +39,11 @@ jobs:
   # argument: a path has to be named here to be treated as inert, so a file
   # nobody has classified runs the full matrix by default. Most entries are
   # ones `.Rbuildignore` already keeps out of the built tarball -- ^docs$,
-  # ^thoughts$, ^\.claude$, ^CLAUDE\.md$, ^CLAUDE\.local\.md$ and the
-  # unanchored CHANGELOG.md line -- so the check never sees them at all. Two
-  # entries do ship, and have to earn their place on different grounds:
-  #
-  #   inst/shiny/dta_app/manifest.json is a Posit Connect deployment
-  #   descriptor, consumed entirely outside the package: nothing in R/,
-  #   inst/shiny/dta_app/, tests/, man/ or vignettes/ reads it, and no roxygen
-  #   example or vignette chunk mentions it. The thing that actually validates
-  #   it is check_manifest.R, which runs in r-style.yaml -- gated by none of
-  #   this, and still running on every pull request. So a manifest-only PR is
-  #   still fully checked by the workflow that can meaningfully check it, and
-  #   only by that one.
+  # ^thoughts$, ^\.claude$, ^CLAUDE\.md$, ^CLAUDE\.local\.md$, ^manifest\.json$
+  # and the unanchored CHANGELOG.md line -- so the check never sees them at
+  # all. (The root manifest.json is the Posit Connect deployment descriptor; it
+  # is validated by check_manifest.R in r-style.yaml, which none of this gates.)
+  # One entry does ship, and has to earn its place:
   #
   #   README.md is read by `R CMD check` only under --as-cran, and only to be
   #   scanned for URLs, which is reported as a NOTE. check-r-package defaults
@@ -145,7 +138,7 @@ jobs:
                 continue
               fi
               case "$file" in
-                inst/shiny/dta_app/manifest.json) ;;
+                manifest.json) ;;
                 docs/*|thoughts/*|.claude/*) ;;
                 CLAUDE.md|CLAUDE.local.md|README.md|CHANGELOG.md) ;;
                 *)

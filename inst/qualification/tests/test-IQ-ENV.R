@@ -267,40 +267,6 @@ test_that("IQ-ENV-016 | installed inst/ files match the baseline sha256 manifest
   )
 })
 
-test_that("IQ-ENV-017 | the shiny app's files match manifest.json checksums | REQ-ENV-017", {
-  app_dir <- system.file("shiny", "dta_app", package = "DTAtools")
-  if (!nzchar(app_dir) || !dir.exists(app_dir)) {
-    testthat::skip("the shiny app directory is not part of this installation")
-  }
-  manifest_path <- file.path(app_dir, "manifest.json")
-  if (!file.exists(manifest_path)) {
-    testthat::skip("the shiny app has no manifest.json to check against")
-  }
-
-  qa_requires("jsonlite")
-  files <- jsonlite::read_json(manifest_path)$files
-  qa_check("the app manifest lists at least one file", length(files) > 0)
-
-  has_checksums <- length(files) > 0 && !is.null(files[[1]]$checksum)
-  if (has_checksums) {
-    mismatched <- character(0)
-    for (rel in names(files)) {
-      want <- files[[rel]]$checksum
-      got <- unname(tools::md5sum(file.path(app_dir, rel)))
-      if (!identical(want, got)) mismatched <- c(mismatched, rel)
-    }
-    qa_step(
-      sprintf("all %d files listed in manifest.json match their recorded checksum", length(files)),
-      character(0), mismatched
-    )
-  } else {
-    # Fallback for a manifest shape without per-file checksums: the only
-    # claim such a manifest supports is that the files it names exist.
-    missing <- names(files)[!file.exists(file.path(app_dir, names(files)))]
-    qa_step("every file listed in manifest.json exists", character(0), missing)
-  }
-})
-
 test_that("IQ-ENV-018 | every exported symbol has a documented alias | REQ-ENV-018", {
   db <- tryCatch(tools::Rd_db("DTAtools"), error = function(e) NULL)
   if (is.null(db) || length(db) == 0) {

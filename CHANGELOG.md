@@ -202,11 +202,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Posit Connect now deploys the repository root, and the app runs the
+  DTAtools of the same commit.** Before, Connect deployed
+  `inst/shiny/dta_app/` and installed DTAtools separately from GitHub, at a
+  SHA pinned in that folder's `manifest.json`. The pin was set to the pull
+  request's *base*, so the deployed package never included the change that
+  deployed it. The new root `app.R` installs the deployed checkout with
+  `R CMD INSTALL` (base R only), then serves the app bundled inside that
+  install. The install is cached in the bundle directory under a hash of the
+  package sources, so only the first worker after a deploy pays for it
+  (45–60 s on a Windows dev machine, 2 s warm). That is at Connect's default
+  60 s initial timeout, so raise it in the content's Runtime settings (for
+  example to 180 s).
+  The root `manifest.json` carries no DTAtools entry. `check_manifest.R` now
+  checks that it lists every `Depends`/`Imports` package, because a missing
+  one fails the install on Connect. On Connect (`POSIT_PRODUCT=CONNECT`),
+  `.Rprofile` skips renv activation and turns off Shiny's `R/` autoloading;
+  otherwise Shiny would source the package's `R/` loose before `app.R` runs.
+  `app.R` turns autoloading back on for the app's own helpers.
+  **Migration, once per Connect instance:** create a new Git-backed content
+  item from the repository root (`/`), on `master` and `dev` respectively. Move
+  the vanity URL and content variables (`DTATOOLS_TEMPLATE_*`, …) across, then
+  delete the old item. Connect cannot repoint an existing item to another
+  directory, and the old items stop updating once their manifest is gone.
+- The deploy-pin machinery is gone: `bump_version.R --set-deploy-sha`,
+  `--set-deploy-ref` and `--set-release-sha`, `ref_shape.R`, the
+  `manifest-release-sha` and `manifest-sync` workflows, and the manual pin PR
+  that finished every release. A release no longer touches the manifest, so
+  the recurring `manifest.json` conflict between `master` and `dev` cannot
+  occur. The manifest's only checksum is `app.R`'s: run
+  `bump_version.R --sync-manifest` after editing it, which `r-style` enforces.
+  REQ-ENV-017 (app files match the app manifest) is retired with its test.
+  The app files are still covered by the IQ-ENV-016 baseline.
 - CI is tiered. A pull request into `dev` runs `R CMD check` on
   `ubuntu-latest (release)` only, the qualification quick scale on Linux only
   (and only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`
-  changed), and no coverage jobs; style, pre-commit and manifest sync run as
-  before. A pull request into `master`, one labelled `full-ci`, a manual
+  changed), and no coverage jobs; style and pre-commit run as before. A pull request into `master`, one labelled `full-ci`, a manual
   dispatch and a new nightly run on `dev` get the full suite: all five
   `R CMD check` legs, the qualification standard scale on three operating
   systems, and both coverage jobs with their floors. The tier is decided once,

@@ -81,8 +81,6 @@ jobs:
 
             - `DESCRIPTION` — `Version:`
             - `inst/shiny/dta_app/VERSION`
-            - `inst/shiny/dta_app/manifest.json` — the DTAtools `Version` and the
-              recorded md5 of the `VERSION` file
             - `docs/index.html` — version badge and footer
             - `CHANGELOG.md` — `[Unreleased]` promoted to this version, or a new
               stanza inserted

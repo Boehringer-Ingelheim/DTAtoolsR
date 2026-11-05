@@ -16,16 +16,15 @@
 # leaves out is caught within a day rather than at release time.
 #
 # WHY THE SKIP BELOW IS A JOB-LEVEL CONDITIONAL AND NOT `paths-ignore`. Some
-# pull requests cannot possibly change what `R CMD check` reports. The
-# release-finishing pin is four lines of inst/shiny/dta_app/manifest.json, and
-# #124 spent 91 minutes of matrix time establishing that four lines of JSON had
-# not broken the package on five platforms. The obvious fix -- a `paths-ignore`
-# on the trigger above -- is not merely imperfect here, it is worse than the
-# waste. The five matrix legs are required status checks in the `master`
-# ruleset, and a workflow skipped by path filtering never reports its contexts
-# at all: they sit at Pending and the pull request can never be merged. Since
-# every release ends in a manifest-only PR into master, that would deadlock the
-# release process itself.
+# pull requests cannot possibly change what `R CMD check` reports: #124, a
+# release-finishing pin of four lines of the then app manifest, spent 91
+# minutes of matrix time establishing that four lines of JSON had not broken
+# the package on five platforms. The obvious fix -- a `paths-ignore` on the
+# trigger above -- is not merely imperfect here, it is worse than the waste.
+# The five matrix legs are required status checks in the `master` ruleset, and
+# a workflow skipped by path filtering never reports its contexts at all: they
+# sit at Pending and a docs-only pull request into master could never be
+# merged.
 #
 # GitHub's documented escape is the opposite mechanism -- "if a job within a
 # workflow is skipped due to a conditional, it will report its status as
