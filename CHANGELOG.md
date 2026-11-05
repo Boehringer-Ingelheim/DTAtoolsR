@@ -132,6 +132,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - A specification written with `write_columns_to_json()` no longer contains
   `{}` for unset properties, so it can be read back (DEV-015).
 
+- **A conditional rule whose operator has the wrong number of values is now
+  rejected when it is built.** `equals: [A, B]` used to be compared row by row
+  with recycling, so the verdict depended on row order; `range: [0, 100, 5]`
+  silently dropped the third bound, `range: 25` flagged every row, and a vector
+  `pattern` used only its first element. Such a rule now aborts with a
+  `dta_condition_arity_error` naming the column and operator (and pointing a
+  multi-value `equals` at `in:`). A missing value no longer counts as a
+  bound for the single-value operators or `range`, and `empty:` must be
+  `true` or `false` (any other value used to mean "not empty" silently). A
+  missing member of `in`/`not_in` remains allowed. Specifications that load
+  today are unaffected unless they contain one of these clauses.
+
+- **`columns_specs_from_word()` no longer truncates patterns.** A `#@pattern:`
+  was cut at its first letter "n" (`^(Screening|Baseline)$` came back as
+  `^(Scree`), because the regex's `[^\\n]` excludes the letter, not the line
+  break. The export's six-column layout (no Length column) is now matched by
+  header, and the function is stricter about what it reads. A Nullable cell starting with yes, y
+  or true (in any case) means nullable, and a blank one leaves it unset rather
+  than reading as "no". A table or `colnames` of the wrong width, or a Length
+  cell that is not a number, is an error instead of a misaligned or silent read.
+
+- **A dataset value inside a `{#DATASETS}` region is no longer read as a
+  placeholder** (DEV-016). A description of "Title is {DTA_TITLE}" or
+  "{YAML_EMBEDDED}" now renders as that text. A real block placeholder
+  elsewhere in the template that shares a value's spelling now renders too;
+  it used to be left as text.
+
+- `colspec()` now raises a `dta_colspec_not_found` error for a column name or
+  position the specification does not contain. It used to return `NULL` for an
+  unknown name, silently truncate a fractional position and leak a raw
+  subscript error for one past the end. `get_table()` now rejects a name vector
+  longer than one with its own message, and `column_preview()` reports an empty
+  specification as "not set" and validates `n`.
+
+- The app's "Export as PDF" no longer hands out a title-only page when the
+  document text cannot be generated: the export now fails with the reason.
+
 ### Changed
 
 - The bundled Biomarker GF creation template now uses the latest source DTS
@@ -166,6 +203,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   field unset). A document whose `authorized_for_corrections` is a list is now
   shown in full instead of only its first entry, in edit and read-only mode
   alike. A single comma-separated string stays one entry.
+
+- **The validation report now records what it was run over.** The header shows
+  the generation time with its UTC offset, the DTAtools and R versions and the
+  specification's version, and a new Inputs section lists every table and file
+  the verdict rests on: a streamed or file dataset's delivered files with
+  their size and modification time, and an in-memory table's content-hash
+  stamp. Nothing is re-read to produce it.
+
+- **The qualification suite and code coverage now run in CI.** The quick
+  qualification tier runs on every pull request into `dev` or `master` and on
+  every push to `dev`; until now its OQ/PQ cases had never run in CI, because
+  the scheduled workflow fires only from `master`, where it did not yet exist.
+  A new `test-coverage` workflow publishes line coverage of `R/` and the list
+  of lines no test executes.
 
 - **A computed version history for every creation template.** The app's
   template picker now shows what changed in the selected version and, behind

@@ -155,20 +155,29 @@ test_that("print_short_info includes the dataset id", {
   expect_match(out, "1 file", fixed = TRUE)
 })
 
-test_that("colspec() errors for out-of-bounds numeric index", {
+test_that("colspec() rejects an id or position that is not in the specification", {
   ds <- create_example_DTADataSetTabular(2)
+  n <- length(columns(ds))
 
-  # A bare expect_error() accepts ANY error, including a typo in the call
-  # itself. Assert the *kind* of error rather than its text: base R messages
-  # are translated (this machine reports them in German), so matching the
-  # English wording would make the test locale-dependent.
-  #
-  # DEFECT, pinned rather than endorsed: unlike get_table(), which aborts with
-  # a cli message ("Index {id} is out of bounds."), colspec() has no bounds
-  # check and leaks a raw base R subscript error. When a cli_abort is added
-  # this expectation SHOULD fail -- change it to
-  # expect_error(colspec(ds, 999), class = "rlang_error").
-  expect_error(colspec(ds, 999), class = "subscriptOutOfBoundsError")
+  # Each of these used to leak a raw base subscript error (999), silently
+  # truncate (1.9 returned column 1), or return NULL (an unknown name).
+  for (bad in list(999, 0, -1, n + 1, 1.9, NA_real_, c(1, 2), "NOPE", NA_character_, c("STUDYID", "AGE"), TRUE)) {
+    expect_error(colspec(ds, bad), class = "dta_colspec_not_found", info = deparse(bad))
+  }
+
+  # The message names the problem in the package's own words.
+  expect_error(colspec(ds, 999), "out of bounds")
+  expect_error(colspec(ds, "NOPE"), "NOPE", fixed = TRUE)
+})
+
+test_that("colspec() returns the same column by name and by position", {
+  ds <- create_example_DTADataSetTabular(2)
+  ids <- names(columns(ds))
+  for (i in seq_along(ids)) {
+    expect_identical(colspec(ds, i)@id, ids[[i]])
+    expect_identical(colspec(ds, ids[[i]])@id, ids[[i]])
+    expect_identical(colspec(specs(ds), i), colspec(ds, ids[[i]]))
+  }
 })
 
 test_that("labels() is exported, not left to base::labels' silent fallback", {

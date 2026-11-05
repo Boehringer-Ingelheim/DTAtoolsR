@@ -29,8 +29,8 @@ test_that("the package still loads when a non-generic `check` is attached", {
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
   skip_if(
-    !file.exists(file.path(pkg, "DESCRIPTION")),
-    "not running from a package source tree (R CMD check runs from the install)"
+    length(source_r_files()) == 0,
+    "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
   rscript <- file.path(
@@ -82,11 +82,8 @@ test_that("every generic-existence guard in R/ is scoped correctly", {
   # account.
   unscoped_names <- c("names", "print", "labels")
 
-  r_dir <- testthat::test_path("..", "..", "R")
-  testthat::skip_if_not(dir.exists(r_dir), "package source not available")
-
-  r_files <- list.files(r_dir, pattern = "\\.R$", full.names = TRUE)
-  expect_gt(length(r_files), 0)
+  r_files <- source_r_files()
+  testthat::skip_if(length(r_files) == 0, "package source not available")
 
   guard_pattern <- 'exists\\("([a-zA-Z_.]+)",\\s*mode\\s*=\\s*"function"'
 
@@ -145,8 +142,8 @@ test_that("the package still loads when a non-generic `read_file` is attached", 
 
   pkg <- normalizePath(testthat::test_path("..", ".."), winslash = "/", mustWork = FALSE)
   skip_if(
-    !file.exists(file.path(pkg, "DESCRIPTION")),
-    "not running from a package source tree (R CMD check runs from the install)"
+    length(source_r_files()) == 0,
+    "not running from a package source tree (R CMD check and covr run from the install)"
   )
 
   rscript <- file.path(

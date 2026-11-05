@@ -583,3 +583,98 @@ test_that("a failing inspect() for one dataset's ids costs only that dataset its
     fixed = TRUE
   )
 })
+# ---- traceability: what the report was run over ------------------------------
+
+test_that("the report header records the offset, both versions and the spec version", {
+  ds <- check(create_example_DTADataSetTabular(2), persist = FALSE, quiet = TRUE)
+  dta <- DTA(datasets = list(demographics = ds), metadata = DTAMetaData(title = "T", version = "2.1"))
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+
+  metas <- xml2::xml_text(xml2::xml_find_all(xml2::read_html(out), "//*[contains(@class,'report-meta')]"))
+  expect_match(metas[[1]], "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}")
+  expect_match(metas[[1]], paste0("DTAtools ", utils::packageVersion("DTAtools")), fixed = TRUE)
+  expect_match(metas[[1]], paste0("R ", getRversion()), fixed = TRUE)
+  expect_match(metas[[2]], "Specification version 2.1", fixed = TRUE)
+
+  dta_nov <- DTA(datasets = list(demographics = ds), metadata = DTAMetaData(title = "T"))
+  out2 <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta_nov, out2, quiet = TRUE)
+  metas2 <- xml2::xml_text(xml2::xml_find_all(xml2::read_html(out2), "//*[contains(@class,'report-meta')]"))
+  expect_match(metas2[[2]], "Specification version not set", fixed = TRUE)
+})
+
+test_that("the Inputs section lists in-memory tables with their content hash", {
+  ds <- DTADataSetTabular(
+    id = "dm",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(t1 = data.frame(STUDYID = "S1", SUBJID = "001", VISIT = "V1", AGE = 30, stringsAsFactors = FALSE))
+  )
+  dta <- DTA(datasets = list(dm = ds), metadata = DTAMetaData(title = "T"))
+  inputs <- .report_inputs_df(dta)
+
+  expect_identical(inputs$Dataset, "dm")
+  expect_identical(inputs$Table, "t1")
+  expect_identical(inputs$Kind, "in memory")
+  expect_identical(inputs$`Content hash`, dta_table_hash_stamp(ds@tables[["t1"]]))
+  expect_false(is.na(inputs$`Content hash`))
+  expect_true(is.na(inputs$`Source file`))
+
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  section <- xml2::xml_find_first(xml2::read_html(out), "//section[contains(@class,'report-inputs')]")
+  expect_false(inherits(section, "xml_missing"))
+  expect_match(xml2::xml_text(section), inputs$`Content hash`, fixed = TRUE)
+})
+
+test_that("the Inputs section lists streamed and file sources with size and UTC mtime", {
+  dir <- withr::local_tempdir()
+  csv <- file.path(dir, "dm.csv")
+  writeLines(c("STUDYID,SUBJID", "S1,001", "S1,002"), csv)
+  ds <- DTADataSetTabular(id = "dm", specs = create_example_DTAColumnSpecCollection(1))
+  ds@tables <- list(dm = arrow::open_dataset(csv, format = "csv"))
+  pdf_path <- file.path(dir, "protocol.pdf")
+  writeBin(charToRaw("%PDF-1.4 tiny"), pdf_path)
+  files_ds <- DTADataSetFile(id = "docs", paths = c(pdf_path, file.path(dir, "missing.pdf")))
+  dta <- DTA(datasets = list(dm = ds, docs = files_ds), metadata = DTAMetaData(title = "T"))
+
+  inputs <- .report_inputs_df(dta)
+  streamed <- inputs[inputs$Kind == "streamed", , drop = FALSE]
+  expect_identical(nrow(streamed), 1L)
+  expect_identical(normalizePath(streamed$`Source file`, winslash = "/"), normalizePath(csv, winslash = "/"))
+  expect_identical(streamed$`Size (bytes)`, as.character(file.size(csv)))
+  expect_identical(
+    streamed$`Modified (UTC)`,
+    format(file.mtime(csv), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  )
+
+  files <- inputs[inputs$Kind == "file", , drop = FALSE]
+  expect_identical(files$Dataset, c("docs", "docs"))
+  expect_identical(files$`Size (bytes)`, c(as.character(file.size(pdf_path)), "file not found"))
+})
+
+test_that("a transfer with no data attached says so instead of an empty table", {
+  dta <- DTA(datasets = list(example_container_specs_without_data = create_example_DTADataSetTabular(1)), metadata = DTAMetaData(title = "T"))
+  expect_identical(nrow(.report_inputs_df(dta)), 0L)
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  expect_match(
+    xml2::xml_text(xml2::xml_find_first(xml2::read_html(out), "//section[contains(@class,'report-inputs')]")),
+    "No data was attached",
+    fixed = TRUE
+  )
+})
+
+test_that("input names are HTML-escaped in the report", {
+  ds <- DTADataSetTabular(
+    id = "dm",
+    specs = create_example_DTAColumnSpecCollection(1),
+    tables = list(`<b>x</b>` = data.frame(STUDYID = "S1", SUBJID = "001", VISIT = "V1", AGE = 30, stringsAsFactors = FALSE))
+  )
+  dta <- DTA(datasets = list(dm = ds), metadata = DTAMetaData(title = "T"))
+  out <- withr::local_tempfile(fileext = ".html")
+  write_validation_report(dta, out, quiet = TRUE)
+  html <- paste(readLines(out, warn = FALSE), collapse = "\n")
+  expect_false(grepl("<b>x</b>", html, fixed = TRUE))
+  expect_true(grepl("&lt;b&gt;x&lt;/b&gt;", html, fixed = TRUE))
+})
