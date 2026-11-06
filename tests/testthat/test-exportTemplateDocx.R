@@ -859,3 +859,49 @@ test_that("the free-text transmission fields resolve and the bundled clinical te
   expect_match(txt, "title: embedded", fixed = TRUE)
   expect_false(grepl("{TRANSMISSION_", txt, fixed = TRUE))
 })
+
+test_that("document and organisation placeholders default, and write_dta fills them", {
+  dta <- create_example_DTA()
+  vars <- .extract_template_variables(dta)
+  expect_equal(vars[["{DOCUMENT_NAME}"]], "Data Transfer Agreement")
+  expect_equal(vars[["{DOCUMENT_ABBREVIATION}"]], "DTA")
+  expect_equal(vars[["{ORGANISATION_NAME}"]], "")
+  expect_equal(vars[["{ORGANISATION_UNIT}"]], "")
+
+  template <- .make_template(c(
+    "Doc: {DOCUMENT_NAME} ({DOCUMENT_ABBREVIATION})",
+    "Org: {ORGANISATION_NAME} / {ORGANISATION_UNIT}"
+  ))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+
+  write_dta(dta, out,
+    template = template, quiet = TRUE,
+    document_name = "Data Transmission Specification", document_abbreviation = "DTS",
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  text <- .docx_text(out)
+  expect_match(text, "Doc: Data Transmission Specification (DTS)", fixed = TRUE)
+  expect_match(text, "Org: Acme Pharma / Biometrics", fixed = TRUE)
+})
+
+test_that("user template_variables still override the document placeholders", {
+  dta <- create_example_DTA()
+  template <- .make_template("Doc: {DOCUMENT_ABBREVIATION}")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+  write_dta(dta, out,
+    template = template, quiet = TRUE, document_abbreviation = "DTS",
+    template_variables = list(DOCUMENT_ABBREVIATION = "OVERRIDE")
+  )
+  expect_match(.docx_text(out), "Doc: OVERRIDE", fixed = TRUE)
+})
+
+test_that("export_with_template called directly uses the default document placeholders", {
+  dta <- create_example_DTA()
+  template <- .make_template("Doc: {DOCUMENT_NAME} / {DOCUMENT_ABBREVIATION}")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+  expect_match(.docx_text(out), "Doc: Data Transfer Agreement / DTA", fixed = TRUE)
+})

@@ -475,3 +475,129 @@ test_that("dta_app_config() warns about extra config files and falls back to def
   expect_no_warning(plain <- fn())
   expect_identical(plain, app_fn("dta_app_config_defaults")())
 })
+
+# ---- document: what the library calls its documents ---------------------------
+
+test_that("document defaults keep every label as it is today", {
+  d <- app_fn("dta_app_config_defaults")()$document
+  expect_identical(d$names, "Data Transfer Agreement")
+  expect_identical(d$abbreviations, "DTA")
+  expect_identical(d$label, "Data Transfer Agreement")
+  expect_identical(d$abbr, "DTA")
+  expect_false(d$custom)
+})
+
+test_that("document accepts a string, and joins a list with ' / ' and '/'", {
+  one <- parse_cfg(c("document:", "  name: Data Transmission Specification", "  abbreviation: DTS"))
+  expect_equal(nrow(one$problems), 0)
+  expect_identical(one$config$document$names, "Data Transmission Specification")
+  expect_identical(one$config$document$abbr, "DTS")
+  expect_true(one$config$document$custom)
+
+  both <- parse_cfg(c(
+    "document:",
+    "  name: [Data Transfer Agreement, Data Transmission Specification]",
+    "  abbreviation: [DTA, DTS]"
+  ))
+  expect_equal(nrow(both$problems), 0)
+  expect_identical(
+    both$config$document$label,
+    "Data Transfer Agreement / Data Transmission Specification"
+  )
+  expect_identical(both$config$document$abbr, "DTA/DTS")
+  expect_identical(both$config$document$abbreviations, c("DTA", "DTS"))
+})
+
+test_that("a bad document value is reported by key and the default is kept", {
+  bad <- function(lines) parse_cfg(lines)
+
+  empty <- bad(c("document:", "  name: \"\""))
+  expect_identical(problem_keys(empty, "error"), "document.name")
+  expect_identical(empty$config$document$label, "Data Transfer Agreement")
+
+  num <- bad(c("document:", "  abbreviation: 42"))
+  expect_identical(problem_keys(num, "error"), "document.abbreviation")
+  expect_identical(num$config$document$abbr, "DTA")
+
+  too_many <- bad(c("document:", "  name: [a, b, c, d]"))
+  expect_identical(problem_keys(too_many, "error"), "document.name")
+
+  long <- bad(c("document:", "  abbreviation: ABCDEFGHIJKLM"))
+  expect_identical(problem_keys(long, "error"), "document.abbreviation")
+  ok12 <- bad(c("document:", "  abbreviation: ABCDEFGHIJKL"))
+  expect_equal(nrow(ok12$problems), 0)
+
+  blank_entry <- bad(c("document:", "  name: [A, \"\"]"))
+  expect_identical(problem_keys(blank_entry, "error"), "document.name")
+})
+
+test_that("two document lists of different length are rejected on the abbreviation", {
+  res <- parse_cfg(c(
+    "document:",
+    "  name: [Data Transfer Agreement, Data Transmission Specification]",
+    "  abbreviation: [DTA, DTS, X]"
+  ))
+  expect_identical(problem_keys(res, "error"), "document.abbreviation")
+  # The name was fine and is kept; the abbreviation falls back.
+  expect_identical(res$config$document$abbr, "DTA")
+  expect_identical(res$config$document$names, c("Data Transfer Agreement", "Data Transmission Specification"))
+
+  # A single abbreviation beside a list of names is not a length clash.
+  one <- parse_cfg(c("document:", "  name: [A, B]", "  abbreviation: AB"))
+  expect_equal(nrow(one$problems), 0)
+  expect_identical(one$config$document$abbr, "AB")
+})
+
+test_that("an unknown key under document is a warning and document itself is a known section", {
+  res <- parse_cfg(c("document:", "  nme: Oops"))
+  expect_identical(problem_keys(res, "warning"), "document.nme")
+  expect_false(res$config$document$custom)
+})
+
+test_that("dta_app_export_args hands the writers the label, abbreviation and a non-empty organisation", {
+  cfg <- app_fn("dta_app_config_defaults")()
+  args <- app_fn("dta_app_export_args")(cfg)
+  expect_identical(args$document_name, "Data Transfer Agreement")
+  expect_identical(args$document_abbreviation, "DTA")
+  expect_null(args$organisation)
+  expect_null(args$organisation_unit)
+
+  cfg$organisation <- list(name = "Acme", unit = "Biometrics")
+  cfg$document$label <- "A / B"
+  args <- app_fn("dta_app_export_args")(cfg)
+  expect_identical(args$organisation, "Acme")
+  expect_identical(args$organisation_unit, "Biometrics")
+  expect_identical(args$document_name, "A / B")
+})
+
+test_that("editing: false forces raw_yaml_editable off, and the parser validates the flag", {
+  forced <- parse_cfg(c("features:", "  editing: false", "  raw_yaml_editable: true"))
+  expect_false(forced$config$features$raw_yaml_editable)
+
+  off <- parse_cfg("features: {raw_yaml_editable: false}")
+  expect_false(off$config$features$raw_yaml_editable)
+  expect_true(off$config$features$editing)
+  expect_equal(nrow(off$problems), 0)
+
+  bad <- parse_cfg("features: {raw_yaml_editable: maybe}")
+  expect_identical(problem_keys(bad, "error"), "features.raw_yaml_editable")
+  expect_true(bad$config$features$raw_yaml_editable)
+
+  expect_true(app_fn("dta_app_config_defaults")()$features$raw_yaml_editable)
+})
+
+test_that("document and organisation text is collapsed to one line", {
+  res <- parse_cfg(c(
+    "kind: dta_app_config",
+    "organisation:",
+    "  name: \"Acme\n## Injected\"",
+    "  unit: \"Unit\r\n  Two\"",
+    "document:",
+    "  name: \"Doc\n# Evil\"",
+    "  abbreviation: \"A\nB\""
+  ))
+  expect_identical(nrow(res$problems), 0L)
+  expect_identical(res$config$organisation, list(name = "Acme ## Injected", unit = "Unit Two"))
+  expect_identical(res$config$document$names, "Doc # Evil")
+  expect_identical(res$config$document$abbreviations, "A B")
+})

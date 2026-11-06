@@ -559,3 +559,52 @@ test_that("OQ-REPORT-017 | the document records the versions and the inputs its 
   qa_check("the in-memory table carries a content-hash stamp", is.character(stamp) && nzchar(stamp))
   qa_check("and the report shows it", grepl(stamp, inputs, fixed = TRUE))
 })
+
+test_that("OQ-REPORT-018 | the document name is the main heading, with the title beneath and the organisation in the header | REQ-REPORT-016", {
+  dir <- qa_tempdir()
+  ds <- qrpt_clean_dataset(dir, "ok")
+  dta <- DTA(datasets = list(ok = ds), metadata = DTAMetaData(title = "Metadata Title"))
+
+  out <- file.path(dir, "named.html")
+  write_validation_report(dta, out,
+    quiet = TRUE,
+    document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Example <Institute>", organisation_unit = "Data Management"
+  )
+  doc <- xml2::read_html(out)
+  qa_step(
+    "the heading is the joined document name",
+    "Data Transmission Specification / Data Transfer Agreement",
+    xml2::xml_text(xml2::xml_find_first(doc, "//h1"))
+  )
+  qa_step(
+    "the report's title sits beneath it",
+    "Metadata Title", xml2::xml_text(xml2::xml_find_first(doc, "//*[@class='report-subtitle']"))
+  )
+  qa_step(
+    "the organisation is shown escaped, unit after it",
+    "Example <Institute> · Data Management",
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[contains(@class,'report-org')]"))
+  )
+  qa_step("the page title is still the report's title (REQ-REPORT-012)", "Metadata Title", qrpt_doc_title(out))
+
+  plain <- file.path(dir, "plain.html")
+  write_validation_report(dta, plain, quiet = TRUE)
+  pdoc <- xml2::read_html(plain)
+  qa_step(
+    "without arguments the heading is Data Transfer Agreement", "Data Transfer Agreement",
+    xml2::xml_text(xml2::xml_find_first(pdoc, "//h1"))
+  )
+  qa_step(
+    "and no organisation block is rendered", 0L,
+    length(xml2::xml_find_all(pdoc, "//*[contains(@class,'report-org')]"))
+  )
+
+  bad_file <- file.path(dir, "bad.html")
+  bad <- tryCatch(write_validation_report(dta, bad_file, organisation = c("a", "b")), error = function(e) e)
+  qa_check(
+    "a non-scalar organisation is rejected, naming the argument",
+    inherits(bad, "error") && grepl("organisation", conditionMessage(bad), fixed = TRUE)
+  )
+  qa_check("and no file was written", !file.exists(bad_file))
+})

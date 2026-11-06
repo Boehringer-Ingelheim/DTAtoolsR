@@ -496,3 +496,43 @@ requirements:
     category: functional
     covers: [write_dta, write_dataset_metadata]
     source: R/formattingHelpers.R; R/documentBuilders.R
+
+  - id: REQ-EXPORT-037
+    text: >
+      write_dta() and write_dataset_metadata() shall take an optional
+      document_name (a character vector is joined with " / ") and show it as
+      the main title of the document: the first title paragraph of the
+      DOCX/PDF cover and the first heading of the Markdown file. Without it
+      the name shall be "Data Transfer Agreement". write_dta() shall put the
+      transfer's own title directly beneath the document name and, when the
+      transfer has none, omit it, leaving the document name alone. Given
+      organisation and organisation_unit, the organisation (unit after it,
+      separated by " · ") shall appear on the DOCX/PDF cover and in the header
+      block of the Markdown file, and write_dta() shall also put it in the
+      running header of every DOCX/PDF page after the cover. When both are
+      NULL or empty, no organisation text shall appear. An argument that is
+      not NULL or a character string (a single one, except document_name)
+      shall be rejected with a condition naming it before anything is
+      written.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/exportDocuments.R; R/documentBuilders.R
+    notes: >
+      Replaces the former fixed "Data Transfer Agreement Metadata" Markdown
+      heading and the cover that led with the transfer's title.
+
+  - id: REQ-EXPORT-038
+    text: >
+      A Word template filled through write_dta(template =) shall resolve the
+      placeholders {DOCUMENT_NAME}, {DOCUMENT_ABBREVIATION},
+      {ORGANISATION_NAME} and {ORGANISATION_UNIT} from the arguments
+      document_name, document_abbreviation, organisation and
+      organisation_unit. Without those arguments they shall resolve to
+      "Data Transfer Agreement", "DTA", and two empty strings. A value in
+      template_variables of the same name shall win. All four shall be
+      reported by dta_template_placeholders() as inline placeholders.
+    risk: low
+    category: interface
+    covers: [write_dta, export_with_template, dta_template_placeholders]
+    source: R/exportTemplateDocx.R; R/exportDocuments.R

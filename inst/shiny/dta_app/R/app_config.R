@@ -38,6 +38,14 @@ dta_app_config_defaults <- function() {
   list(
     source = NA_character_,
     organisation = list(name = "", unit = ""),
+    # What the library calls its documents. `label` / `abbr` are derived (names
+    # joined with " / ", abbreviations with "/"); `custom` is TRUE once the
+    # file sets either key, so wording that is deliberately broader by default
+    # (the landing drop zone accepts both DTA and DTS files) can narrow.
+    document = list(
+      names = "Data Transfer Agreement", abbreviations = "DTA",
+      label = "Data Transfer Agreement", abbr = "DTA", custom = FALSE
+    ),
     branding = list(
       app_title = "DTAtools",
       app_subtitle = "Validation and authoring of Data Transfer Agreements (DTA) and Data Transmission Specifications (DTS)",
@@ -82,6 +90,7 @@ dta_app_config_defaults <- function() {
       create_from_template = TRUE,
       create_blank = TRUE,
       raw_yaml_tab = TRUE,
+      raw_yaml_editable = TRUE,
       dataset_yaml_download = TRUE,
       dta_yaml_download = TRUE,
       editing = TRUE
@@ -114,6 +123,12 @@ dta_app_config_defaults <- function() {
   if (.cfg_is_scalar_chr(v)) .cfg_ok(v) else .cfg_bad("must be a single string.")
 }
 
+# A single-line string: whitespace runs (newlines included) collapse to one
+# space, so a value cannot start a new Markdown block in an export.
+.cfg_line <- function(v) {
+  if (.cfg_is_scalar_chr(v)) .cfg_ok(trimws(gsub("\\s+", " ", v))) else .cfg_bad("must be a single string.")
+}
+
 .cfg_bool <- function(v) {
   if (is.logical(v) && length(v) == 1 && !is.na(v)) {
     .cfg_ok(v)
@@ -141,6 +156,25 @@ dta_app_config_defaults <- function() {
     .cfg_ok(v)
   } else {
     .cfg_bad("must be an http(s):// or mailto: URL without spaces or quotes, or false to hide it.")
+  }
+}
+
+# One to three non-empty plain-text strings, as a single string or a list.
+# `max_chars` caps each entry's length (abbreviations).
+.cfg_doc_strings <- function(max_chars = Inf) {
+  function(v) {
+    if (is.list(v) && is.null(names(v)) && length(v) > 0 && all(vapply(v, .cfg_is_scalar_chr, logical(1)))) {
+      v <- unlist(v, use.names = FALSE)
+    }
+    if (!is.character(v) || anyNA(v) || length(v) < 1 || length(v) > 3 ||
+      !all(nzchar(trimws(v)))) {
+      return(.cfg_bad("must be a non-empty string, or a list of one to three non-empty strings."))
+    }
+    v <- trimws(gsub("\\s+", " ", v))
+    if (any(nchar(v) > max_chars)) {
+      return(.cfg_bad(paste0("entries must be at most ", max_chars, " characters.")))
+    }
+    .cfg_ok(v)
   }
 }
 
@@ -283,13 +317,36 @@ parse_dta_app_config <- function(path) {
     }
   }
 
-  top <- c("kind", "organisation", "branding", "colors", "links", "features", "exports")
+  top <- c("kind", "organisation", "document", "branding", "colors", "links", "features", "exports")
   for (u in setdiff(names(raw), top)) {
     add("warning", u, "is not a known setting and is ignored.", type = "unknown_key")
   }
 
   org <- section(raw[["organisation"]], "organisation", c("name", "unit"))
-  fill("organisation", org, list(name = .cfg_str, unit = .cfg_str))
+  fill("organisation", org, list(name = .cfg_line, unit = .cfg_line))
+
+  dsec <- section(raw[["document"]], "document", c("name", "abbreviation"))
+  doc_names <- doc_abbrs <- NULL
+  if (!is.null(dsec[["name"]])) {
+    r <- .cfg_doc_strings()(dsec[["name"]])
+    if (r$ok) doc_names <- r$value else add("error", "document.name", r$msg)
+  }
+  if (!is.null(dsec[["abbreviation"]])) {
+    r <- .cfg_doc_strings(12)(dsec[["abbreviation"]])
+    if (r$ok) doc_abbrs <- r$value else add("error", "document.abbreviation", r$msg)
+  }
+  if (length(doc_names) > 1 && length(doc_abbrs) > 1 && length(doc_names) != length(doc_abbrs)) {
+    add(
+      "error", "document.abbreviation",
+      "must list as many entries as document.name when both are lists."
+    )
+    doc_abbrs <- NULL
+  }
+  if (!is.null(doc_names)) cfg$document$names <- doc_names
+  if (!is.null(doc_abbrs)) cfg$document$abbreviations <- doc_abbrs
+  cfg$document$label <- paste(cfg$document$names, collapse = " / ")
+  cfg$document$abbr <- paste(cfg$document$abbreviations, collapse = "/")
+  cfg$document$custom <- !is.null(doc_names) || !is.null(doc_abbrs)
 
   br_keys <- c(
     "app_title", "app_subtitle", "window_title", "footer_label", "logo",
@@ -318,7 +375,7 @@ parse_dta_app_config <- function(path) {
 
   ft <- section(
     raw[["features"]], "features",
-    c("start", "raw_yaml_tab", "dataset_yaml_download", "dta_yaml_download", "editing")
+    c("start", "raw_yaml_tab", "raw_yaml_editable", "dataset_yaml_download", "dta_yaml_download", "editing")
   )
   start_keys <- c("load_example", "create_from_template", "create_blank")
   start <- section(ft[["start"]], "features.start", start_keys)
@@ -326,7 +383,7 @@ parse_dta_app_config <- function(path) {
     "features", start, stats::setNames(lapply(start_keys, function(k) .cfg_bool), start_keys),
     prefix = "features.start"
   )
-  flat <- c("raw_yaml_tab", "dataset_yaml_download", "dta_yaml_download", "editing")
+  flat <- c("raw_yaml_tab", "raw_yaml_editable", "dataset_yaml_download", "dta_yaml_download", "editing")
   fill("features", ft, stats::setNames(lapply(flat, function(k) .cfg_bool), flat))
 
   ex <- section(
@@ -421,6 +478,8 @@ parse_dta_app_config <- function(path) {
       add("warning", "features.start.create_blank", "has no effect while features.editing is false.")
     }
     cfg$features$create_blank <- FALSE
+    # Nothing can be applied either, so the Raw YAML tab is read-only.
+    cfg$features$raw_yaml_editable <- FALSE
   }
 
   finish()
@@ -497,4 +556,18 @@ dta_app_config_invalidate <- function() {
   .dta_app_config_cache$config <- NULL
   .dta_app_config_cache$built_at <- NA_real_
   invisible(NULL)
+}
+
+# ---- Export arguments ----------------------------------------------------------
+
+# The document-naming and organisation arguments every DTAtools writer takes,
+# from the app config. An unset organisation is NULL (shown nowhere), not "".
+dta_app_export_args <- function(cfg) {
+  nz <- function(x) if (is.character(x) && length(x) == 1 && nzchar(x)) x else NULL
+  list(
+    document_name = cfg$document$label,
+    document_abbreviation = cfg$document$abbr,
+    organisation = nz(cfg$organisation$name),
+    organisation_unit = nz(cfg$organisation$unit)
+  )
 }

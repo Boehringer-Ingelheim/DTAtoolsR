@@ -58,6 +58,12 @@ and reported via a warning.
 
 \describe{
 \item{Agreement}{\code{{DTA_TITLE}}, \code{{DTA_VERSION}}, \code{{DTA_DATE}}, \code{{DTA_HEADER}}}
+\item{Document and organisation}{\code{{DOCUMENT_NAME}} (default "Data Transfer
+Agreement"), \code{{DOCUMENT_ABBREVIATION}} (default "DTA"),
+\code{{ORGANISATION_NAME}} and \code{{ORGANISATION_UNIT}} (empty by default). Called
+directly, \code{\link[=export_with_template]{export_with_template()}} uses these defaults; \code{\link[=write_dta]{write_dta()}}
+fills them from its \code{document_name}, \code{document_abbreviation},
+\code{organisation} and \code{organisation_unit} arguments.}
 \item{Study}{\code{{STUDY_ID}}, \code{{PROTOCOL_ID}}}
 \item{Supplier}{\code{{SUPPLIER_NAME}}, \code{{SUPPLIER_COUNTRY}}, \code{{SUPPLIER_ADDRESS}},
 \code{{SUPPLIER_EMAIL}}, \code{{SUPPLIER_PHONE}}, \code{{SUPPLIER_CONTACTS}}}

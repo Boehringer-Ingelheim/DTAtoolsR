@@ -825,3 +825,116 @@ test_that("OQ-EXPORT-051 | each rule's definition in the Word and Markdown docum
   names(from_meta) <- tbl_meta$col1[-1]
   qa_step("each dataset-metadata definition parses to the declared rule", expected, et_sort_keys(from_meta))
 })
+
+# ---- document name and organisation (REQ-EXPORT-037, REQ-EXPORT-038) ----------
+#
+# Expected values below are written from the requirement text: the document
+# name is the first title, the transfer's own title follows it, and the
+# organisation is "<name> · <unit>".
+
+test_that("OQ-EXPORT-052 | the Markdown file leads with the document name, then the title and the organisation | REQ-EXPORT-037", {
+  dir <- qa_tempdir()
+  out <- file.path(dir, "named.md")
+  write_dta(et_dta(),
+    file = out, format = "md", quiet = TRUE,
+    document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Example Institute", organisation_unit = "Data Management"
+  )
+  lines <- readLines(out, warn = FALSE)
+  qa_step(
+    "the first line is the joined document name as a top-level heading",
+    "# Data Transmission Specification / Data Transfer Agreement", lines[[1]]
+  )
+  qa_check("the transfer's own title is in the header block", "**Title:** Clinical Data Specification" %in% lines)
+  qa_check(
+    "the organisation and unit are in the header block",
+    "**Organisation:** Example Institute · Data Management" %in% lines
+  )
+
+  plain <- file.path(dir, "plain.md")
+  write_dta(et_dta(), file = plain, format = "md", quiet = TRUE)
+  plain_lines <- readLines(plain, warn = FALSE)
+  qa_step("without arguments the name is Data Transfer Agreement", "# Data Transfer Agreement", plain_lines[[1]])
+  qa_check("and no organisation text appears", !any(grepl("Organisation", plain_lines, fixed = TRUE)))
+})
+
+test_that("OQ-EXPORT-053 | the Word cover and the later pages' running header carry the document name and organisation | REQ-EXPORT-037", {
+  dir <- qa_tempdir()
+  out <- file.path(dir, "named.docx")
+  write_dta(et_dta(),
+    file = out, quiet = TRUE,
+    document_name = "Data Transmission Specification",
+    organisation = "Example Institute", organisation_unit = "Data Management"
+  )
+  paras <- Filter(nzchar, qa_docx_summary(out)$text)
+  qa_step(
+    "the cover's first three paragraphs are document name, transfer title, organisation",
+    c("Data Transmission Specification", "Clinical Data Specification", "Example Institute · Data Management"),
+    paras[1:3]
+  )
+
+  tmp <- file.path(dir, "unzipped")
+  utils::unzip(out, exdir = tmp)
+  headers <- list.files(file.path(tmp, "word"), pattern = "^header.*[.]xml$", full.names = TRUE)
+  texts <- vapply(headers, function(p) {
+    paste(xml2::xml_text(xml2::xml_find_all(xml2::read_xml(p), ".//*[local-name()='t']")), collapse = "")
+  }, character(1))
+  qa_check("there are running headers", length(texts) > 0)
+  qa_check(
+    "every running header names the organisation and unit",
+    all(grepl("Example Institute · Data Management", texts, fixed = TRUE))
+  )
+
+  ds_out <- file.path(dir, "dataset.docx")
+  write_dataset_metadata(et_dta()[["clinical_data"]],
+    file = ds_out, quiet = TRUE,
+    document_name = "Data Transmission Specification", organisation = "Example Institute"
+  )
+  ds_paras <- Filter(nzchar, qa_docx_summary(ds_out)$text)
+  qa_step("the dataset document leads with the document name", "Data Transmission Specification", ds_paras[[1]])
+  qa_step("followed by the dataset specification title", TRUE, grepl("^Dataset Specification: ", ds_paras[[2]]))
+  qa_step("and the organisation", "Example Institute", ds_paras[[3]])
+
+  bad_file <- file.path(dir, "bad.md")
+  bad <- tryCatch(
+    write_dta(et_dta(), file = bad_file, format = "md", organisation = c("a", "b")),
+    error = function(e) e
+  )
+  qa_check(
+    "a non-scalar organisation is rejected, naming the argument",
+    inherits(bad, "error") && grepl("organisation", conditionMessage(bad), fixed = TRUE)
+  )
+  qa_check("and nothing was written", !file.exists(bad_file))
+})
+
+test_that("OQ-EXPORT-054 | the document and organisation placeholders are filled from write_dta's arguments, defaulted otherwise, and overridable | REQ-EXPORT-038", {
+  dir <- qa_tempdir()
+  template <- et_write_template("{DOCUMENT_NAME}|{DOCUMENT_ABBREVIATION}|{ORGANISATION_NAME}|{ORGANISATION_UNIT}", dir)
+
+  filled <- file.path(dir, "filled.docx")
+  write_dta(et_dta(),
+    file = filled, template = template, quiet = TRUE,
+    document_name = "Data Transmission Specification", document_abbreviation = "DTS",
+    organisation = "Example Institute", organisation_unit = "Data Management"
+  )
+  qa_step(
+    "each placeholder takes its argument",
+    "Data Transmission Specification|DTS|Example Institute|Data Management", qa_docx_text(filled)
+  )
+
+  defaulted <- file.path(dir, "defaulted.docx")
+  write_dta(et_dta(), file = defaulted, template = template, quiet = TRUE)
+  qa_step("without arguments the defaults apply", "Data Transfer Agreement|DTA||", qa_docx_text(defaulted))
+
+  overridden <- file.path(dir, "overridden.docx")
+  write_dta(et_dta(),
+    file = overridden, template = template, quiet = TRUE, document_abbreviation = "DTS",
+    template_variables = list(DOCUMENT_ABBREVIATION = "MINE")
+  )
+  qa_step("a template_variables entry wins", "Data Transfer Agreement|MINE||", qa_docx_text(overridden))
+
+  described <- dta_template_placeholders()
+  tokens <- c("{DOCUMENT_NAME}", "{DOCUMENT_ABBREVIATION}", "{ORGANISATION_NAME}", "{ORGANISATION_UNIT}")
+  qa_check("all four are reported", all(tokens %in% names(described)))
+  qa_step("as inline placeholders", rep("inline", 4), unname(attr(described, "kind")[tokens]))
+})

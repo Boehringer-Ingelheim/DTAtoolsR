@@ -645,8 +645,12 @@ requirements:
       library directory) shall not be treated as a template. When it holds a
       value the app would reject -- a colour that is not a #RGB or #RRGGBB hex
       value, a link that is not an http(s) or mailto URL, a missing logo or
-      Word template file, a path that leaves the library folder, a wrong kind
-      or YAML that does not parse -- validate_template() shall report
+      Word template file, a path that leaves the library folder, a
+      document.name or document.abbreviation that is not one to three
+      non-empty strings (an abbreviation of at most 12 characters each, and
+      the same number of entries as the name when both are lists), a feature
+      flag such as features.raw_yaml_editable that is not true or false, a
+      wrong kind or YAML that does not parse -- validate_template() shall report
       app_config_invalid at severity "error", one row per rejected value naming
       its key. A key the app does not know shall be reported
       app_config_unknown_key at severity "warning". An app configuration file

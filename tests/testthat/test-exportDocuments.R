@@ -14,7 +14,9 @@ test_that("write_dta validates inputs and exports markdown/docx", {
   write_dta(dta, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("^# Data Transfer Agreement Metadata", md_lines)))
+  # The document name is the top heading; the DTA title follows it.
+  expect_equal(md_lines[1], "# Data Transfer Agreement")
+  expect_true("**Title:** Example DTA" %in% md_lines)
   expect_true(any(grepl("^## Datasets", md_lines)))
 
   out_docx <- tempfile(fileext = ".docx")
@@ -70,8 +72,9 @@ test_that("write_dta exports docx when title contains regex metacharacters", {
   body <- .read_docx_body_xml(out_docx)
   expect_match(body, "<w:t[^>]*>Study \\(Phase 3</w:t>")
 
-  paragraphs <- .docx_paragraphs(out_docx)
-  expect_equal(Filter(nzchar, paragraphs)[1], "Study (Phase 3")
+  # The document name leads; the supplied title follows it, unreplaced.
+  paragraphs <- Filter(nzchar, .docx_paragraphs(out_docx))
+  expect_equal(paragraphs[1:2], c("Data Transfer Agreement", "Study (Phase 3"))
 })
 
 test_that("write_dataset_metadata and alias export metadata documents", {
@@ -99,7 +102,8 @@ test_that("write_dataset_metadata and alias export metadata documents", {
   write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   expect_true(file.exists(out_md))
   md_lines <- readLines(out_md, warn = FALSE)
-  expect_true(any(grepl("^# Dataset Specification", md_lines)))
+  expect_equal(md_lines[1], "# Data Transfer Agreement")
+  expect_true(any(grepl("^## +Demographics", md_lines)))
   expect_true(any(grepl("^### Approval & Signatures", md_lines)))
 
   out_docx <- tempfile(fileext = ".docx")
@@ -1565,4 +1569,153 @@ test_that("a rule id containing backticks keeps an intact Markdown label", {
     expect_identical(md[[i + 1L]], "")
     expect_match(md[[i + 2L]], "^`{3,}yaml$")
   }
+})
+
+# ---- document_name, document_abbreviation, organisation -----------------------
+
+test_that("write_dta puts document_name first in Markdown, with the DTA title and organisation beneath", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".md")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out,
+    format = "md", quiet = TRUE,
+    document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  lines <- readLines(out, warn = FALSE)
+  expect_equal(lines[1], "# Data Transmission Specification / Data Transfer Agreement")
+  title_at <- match("**Title:** Example DTA", lines)
+  org_at <- match("**Organisation:** Acme Pharma · Biometrics", lines)
+  expect_false(is.na(title_at))
+  expect_false(is.na(org_at))
+  # Both sit in the header block, before the first section.
+  expect_lt(max(title_at, org_at), match("## Document Information", lines))
+})
+
+test_that("write_dta shows nothing for a NULL or empty organisation", {
+  dta <- create_example_DTA()
+  plain <- tempfile(fileext = ".md")
+  blank <- tempfile(fileext = ".md")
+  on.exit(unlink(c(plain, blank), force = TRUE), add = TRUE)
+  write_dta(dta, plain, format = "md", quiet = TRUE)
+  write_dta(dta, blank, format = "md", quiet = TRUE, organisation = "", organisation_unit = "  ")
+  strip <- function(p) grep("^[*]Generated on:", readLines(p, warn = FALSE), invert = TRUE, value = TRUE)
+  expect_identical(strip(blank), strip(plain))
+  expect_false(any(grepl("Organisation", strip(plain), fixed = TRUE)))
+})
+
+test_that("the Word cover leads with the document name, then the DTA title, then the organisation", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out,
+    format = "docx", quiet = TRUE,
+    document_name = "Data Transmission Specification",
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  paras <- Filter(nzchar, .docx_paragraphs(out))
+  expect_equal(paras[1:3], c(
+    "Data Transmission Specification", "Example DTA",
+    "Acme Pharma · Biometrics"
+  ))
+})
+
+test_that("the Word cover shows only the document name when the DTA has no title", {
+  dta <- DTA(datasets = create_example_DTADataSetTabular(1))
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_dta(dta, out, format = "docx", quiet = TRUE, document_name = "Data Transmission Specification")
+  paras <- Filter(nzchar, .docx_paragraphs(out))
+  expect_equal(paras[1], "Data Transmission Specification")
+  expect_false("Data Transfer Agreement" %in% paras[1:2])
+})
+
+test_that("the organisation is in the running header of the pages after the cover, only when given", {
+  dta <- create_example_DTA()
+  with_org <- tempfile(fileext = ".docx")
+  without <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(with_org, without), force = TRUE), add = TRUE)
+  write_dta(dta, with_org, format = "docx", quiet = TRUE, organisation = "Acme Pharma", organisation_unit = "Biometrics")
+  write_dta(dta, without, format = "docx", quiet = TRUE)
+  headers <- .docx_part_texts(with_org, "^header")
+  expect_gt(length(headers), 0)
+  expect_true(all(grepl("Acme Pharma · Biometrics", headers, fixed = TRUE)))
+  expect_false(any(grepl("Acme Pharma", .docx_part_texts(without, "^header"), fixed = TRUE)))
+})
+
+test_that("write_dta validates the document and organisation arguments", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".md")
+  expect_error(write_dta(dta, out, format = "md", organisation = c("a", "b")), "organisation")
+  expect_error(write_dta(dta, out, format = "md", organisation = 1), "organisation")
+  expect_error(write_dta(dta, out, format = "md", document_name = NA_character_), "document_name")
+  expect_error(write_dta(dta, out, format = "md", document_abbreviation = c("a", "b")), "document_abbreviation")
+  expect_false(file.exists(out))
+})
+
+test_that("export context does not leak from one export into the next", {
+  dta <- create_example_DTA()
+  first <- tempfile(fileext = ".md")
+  second <- tempfile(fileext = ".md")
+  on.exit(unlink(c(first, second), force = TRUE), add = TRUE)
+  write_dta(dta, first, format = "md", quiet = TRUE, document_name = "Named", organisation = "Acme")
+  write_dta(dta, second, format = "md", quiet = TRUE)
+  expect_equal(readLines(second, warn = FALSE)[1], "# Data Transfer Agreement")
+  expect_false(any(grepl("Acme", readLines(second, warn = FALSE), fixed = TRUE)))
+
+  # The context itself is cleared on return ...
+  expect_identical(dta_template_placeholders(dta)[["{ORGANISATION_NAME}"]], "")
+  expect_identical(dta_template_placeholders(dta)[["{DOCUMENT_NAME}"]], "Data Transfer Agreement")
+
+  # ... and when the writer aborts after the context was set (bad format).
+  expect_error(
+    write_dta(dta, first, format = "xyz", quiet = TRUE, organisation = "Acme", document_name = "Named"),
+    "'format' must be"
+  )
+  expect_identical(dta_template_placeholders(dta)[["{ORGANISATION_NAME}"]], "")
+  expect_identical(dta_template_placeholders(dta)[["{DOCUMENT_NAME}"]], "Data Transfer Agreement")
+})
+
+test_that("newlines in export text are collapsed, so they cannot inject Markdown", {
+  dta <- create_example_DTA()
+  md <- tempfile(fileext = ".md")
+  on.exit(unlink(md, force = TRUE), add = TRUE)
+  write_dta(dta, md, format = "md", quiet = TRUE, organisation = "Acme\n## Injected", document_name = "Doc\r\n# Evil")
+  lines <- readLines(md, warn = FALSE)
+  expect_false(any(grepl("^#+ (Injected|Evil)", lines)))
+  expect_equal(lines[1], "# Doc \\# Evil") # the inline # is escaped, not a heading
+  expect_true(any(grepl("^\\*\\*Organisation:\\*\\* Acme (\\\\)?#(\\\\)?# Injected$", lines)))
+
+  ds <- tempfile(fileext = ".md")
+  on.exit(unlink(ds, force = TRUE), add = TRUE)
+  write_dataset_metadata(create_example_DTADataSetTabular(), ds,
+    format = "md", quiet = TRUE,
+    organisation = "Acme\n## Injected"
+  )
+  dlines <- readLines(ds, warn = FALSE)
+  expect_false(any(grepl("^## Injected", dlines)))
+  expect_equal(dlines[3], "**Dataset Specification**")
+})
+
+test_that("write_dataset_metadata leads with document_name and shows the organisation", {
+  ds <- create_example_DTADataSetTabular()
+  md <- tempfile(fileext = ".md")
+  docx <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(md, docx), force = TRUE), add = TRUE)
+  write_dataset_metadata(ds, md,
+    format = "md", quiet = TRUE,
+    document_name = "Data Transmission Specification", organisation = "Acme Pharma"
+  )
+  lines <- readLines(md, warn = FALSE)
+  expect_equal(lines[1], "# Data Transmission Specification")
+  expect_true("**Organisation:** Acme Pharma" %in% lines)
+
+  write_dataset_metadata(ds, docx,
+    format = "docx", quiet = TRUE,
+    document_name = "Data Transmission Specification", organisation = "Acme Pharma"
+  )
+  paras <- Filter(nzchar, .docx_paragraphs(docx))
+  expect_equal(paras[1], "Data Transmission Specification")
+  expect_match(paras[2], "^Dataset Specification: ")
+  expect_equal(paras[3], "Acme Pharma")
 })

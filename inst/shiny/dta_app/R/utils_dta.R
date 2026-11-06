@@ -1252,22 +1252,25 @@ dta_inspect <- function(dta, dataset, id) {
 
 # ---- Export --------------------------------------------------------------
 
-dta_export <- function(dta, file, format, signature_list = NULL) {
+dta_export <- function(dta, file, format, signature_list = NULL, doc_args = list()) {
   format <- tolower(format %||% "")
   # PDF gets a dedicated, robust path (see dta_export_pdf); other formats go
   # straight to the package writer.
   if (identical(format, "pdf")) {
-    return(dta_try(dta_export_pdf(dta, file, signature_list)))
+    return(dta_try(dta_export_pdf(dta, file, signature_list, doc_args)))
   }
-  dta_try(DTAtools::write_dta(
-    dta,
-    file = file,
-    format = format,
-    overwrite = TRUE,
-    include_signatures = !is.null(signature_list),
-    signature_list = signature_list,
-    quiet = TRUE
-  ))
+  dta_try(do.call(DTAtools::write_dta, c(
+    list(
+      dta,
+      file = file,
+      format = format,
+      overwrite = TRUE,
+      include_signatures = !is.null(signature_list),
+      signature_list = signature_list,
+      quiet = TRUE
+    ),
+    doc_args
+  )))
 }
 
 # Does `file` exist and begin with the %PDF- magic bytes? Used to VERIFY a
@@ -1702,15 +1705,18 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
 # used to fall back to a title-only page saying the layout "could not be
 # generated", which opened as a valid PDF and so read as a successful export of
 # an agreement whose content was missing.
-dta_export_pdf <- function(dta, file, signature_list = NULL) {
+dta_export_pdf <- function(dta, file, signature_list = NULL, doc_args = list()) {
   docx <- tempfile(fileext = ".docx")
   on.exit(unlink(docx), add = TRUE)
-  DTAtools::write_dta(
-    dta,
-    file = docx, format = "docx", overwrite = TRUE,
-    include_signatures = !is.null(signature_list),
-    signature_list = signature_list, quiet = TRUE
-  )
+  do.call(DTAtools::write_dta, c(
+    list(
+      dta,
+      file = docx, format = "docx", overwrite = TRUE,
+      include_signatures = !is.null(signature_list),
+      signature_list = signature_list, quiet = TRUE
+    ),
+    doc_args
+  ))
 
   # 1) LibreOffice / soffice (best fidelity to the DOCX layout).
   soffice <- dta_find_soffice()
@@ -1728,12 +1734,15 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
   on.exit(unlink(md), add = TRUE)
   md_error <- tryCatch(
     {
-      DTAtools::write_dta(
-        dta,
-        file = md, format = "md", overwrite = TRUE,
-        include_signatures = !is.null(signature_list),
-        signature_list = signature_list, quiet = TRUE
-      )
+      do.call(DTAtools::write_dta, c(
+        list(
+          dta,
+          file = md, format = "md", overwrite = TRUE,
+          include_signatures = !is.null(signature_list),
+          signature_list = signature_list, quiet = TRUE
+        ),
+        doc_args
+      ))
       NULL
     },
     error = function(e) conditionMessage(e)
@@ -1779,7 +1788,8 @@ dta_export_pdf <- function(dta, file, signature_list = NULL) {
 # Distinct from DTAtools::write_validation_report(), which the Validation
 # messages dock offers as "Report": that one lists the individual validation
 # messages, this one certifies the overall per-dataset outcome.
-dta_build_validation_report <- function(dta, status = NULL) {
+dta_build_validation_report <- function(dta, status = NULL, document_name = NULL,
+                                        organisation = NULL, organisation_unit = NULL) {
   esc <- function(x) htmltools::htmlEscape(as.character(x %||% ""))
   ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
@@ -1896,6 +1906,10 @@ dta_build_validation_report <- function(dta, status = NULL) {
   } else {
     ""
   }
+  # The document name is the main heading; the DTA's title sits beneath it.
+  doc_name <- paste(document_name %||% "Data Transfer Agreement", collapse = " / ")
+  org_line <- paste(Filter(nzchar, trimws(c(organisation, organisation_unit))), collapse = " · ")
+  org_html <- if (nzchar(org_line)) paste0("<div class='subtitle'>", esc(org_line), "</div>") else ""
 
   css <- paste0(
     "body{font-family:Segoe UI,Arial,sans-serif;color:#222;margin:32px}",
@@ -1918,7 +1932,8 @@ dta_build_validation_report <- function(dta, status = NULL) {
   paste0(
     "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
     "<title>DTA Validation Summary</title><style>", css, "</style></head><body>",
-    "<h1>DTA Validation Summary</h1>", subtitle,
+    "<h1>", esc(doc_name), "</h1>",
+    "<div class='subtitle'>Validation Summary</div>", subtitle, org_html,
     "<div class='meta'>Generated ", esc(ts), "</div>",
     "<div class='banner ", banner_cls, "'>", banner_txt, "</div>",
     "<div class='summary'>", esc(summary_line), "</div>", caveat,

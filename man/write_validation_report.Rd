@@ -10,7 +10,10 @@ write_validation_report(
   max_repeats = 5,
   overwrite = FALSE,
   quiet = FALSE,
-  title = NULL
+  title = NULL,
+  document_name = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 )
 }
 \arguments{
@@ -30,8 +33,17 @@ Default \code{FALSE}.}
 \code{FALSE}.}
 
 \item{title}{Optional character scalar used as the report's page title
-and heading. Defaults to the DTA's metadata title (\code{metadata(x)@title})
-when available, else \code{"Validation Report"}.}
+and, beneath the document name, its subtitle. Defaults to the DTA's
+metadata title (\code{metadata(x)@title}) when available, else
+\code{"Validation Report"}.}
+
+\item{document_name}{Optional character: what this kind of document is
+called, shown as the report's main heading above \code{title}. A vector is
+joined with \code{" / "}. \code{NULL} (the default) uses "Data Transfer Agreement".}
+
+\item{organisation, organisation_unit}{Optional single strings naming the
+organisation (and unit within it) issuing the report; shown in the header
+block when given. \code{NULL} or empty (the default) shows nothing.}
 }
 \value{
 Invisibly returns \code{file}.

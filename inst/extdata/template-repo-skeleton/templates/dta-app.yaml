@@ -22,6 +22,16 @@ kind: dta_app_config
 #   name: ""                  # Organisation shown in the footer; empty shows none.
 #   unit: ""                  # Department or group, appended to the name.
 
+# --- document: what this library calls its documents -------------------------
+# Each key is one plain-text string, or a list of one to three strings. The
+# name appears as the main title of every export; the abbreviation replaces
+# "DTA" in the app's buttons and messages. A library that offers both kinds
+# lists them in the same order (the two lists must then be the same length).
+# Abbreviations are at most 12 characters.
+# document:
+#   name: Data Transfer Agreement          # or [Data Transfer Agreement, Data Transmission Specification]
+#   abbreviation: DTA                      # or [DTA, DTS]
+
 # --- branding: titles, logo and landing-page text ---------------------------
 # branding:
 #   app_title: DTAtools       # Name shown in the brand bar.
@@ -73,6 +83,7 @@ kind: dta_app_config
 #     create_from_template: true  # Start-page button: create from a template.
 #     create_blank: true          # Start-page button: create a blank document (forced off when editing is false).
 #   raw_yaml_tab: true            # Tab with the raw YAML editor.
+#   raw_yaml_editable: true       # false: the raw YAML tab is shown but read-only (no "Apply changes").
 #   dataset_yaml_download: true   # Download button for a single dataset's YAML.
 #   dta_yaml_download: true       # Download button for the whole DTA YAML.
 #   editing: true                 # false makes the app read-only: no edit menu, no editing at all.

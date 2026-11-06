@@ -30,8 +30,15 @@
 #' @param quiet Logical. If `TRUE`, suppresses the success message. Default
 #'   `FALSE`.
 #' @param title Optional character scalar used as the report's page title
-#'   and heading. Defaults to the DTA's metadata title (`metadata(x)@title`)
-#'   when available, else `"Validation Report"`.
+#'   and, beneath the document name, its subtitle. Defaults to the DTA's
+#'   metadata title (`metadata(x)@title`) when available, else
+#'   `"Validation Report"`.
+#' @param document_name Optional character: what this kind of document is
+#'   called, shown as the report's main heading above `title`. A vector is
+#'   joined with `" / "`. `NULL` (the default) uses "Data Transfer Agreement".
+#' @param organisation,organisation_unit Optional single strings naming the
+#'   organisation (and unit within it) issuing the report; shown in the header
+#'   block when given. `NULL` or empty (the default) shows nothing.
 #' @return Invisibly returns `file`.
 #' @export
 #' @examples
@@ -40,12 +47,15 @@
 #' out <- tempfile(fileext = ".html")
 #' write_validation_report(dta, out)
 write_validation_report <- function(
-  x, file, max_repeats = 5, overwrite = FALSE, quiet = FALSE, title = NULL
+  x, file, max_repeats = 5, overwrite = FALSE, quiet = FALSE, title = NULL,
+  document_name = NULL, organisation = NULL, organisation_unit = NULL
 ) {
   # Validate input
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("'x' must be a DTA object.")
   }
+
+  .set_export_ctx(document_name, organisation, organisation_unit)
 
   # Check file overwrite
   if (file.exists(file) && !overwrite) {
@@ -187,6 +197,14 @@ write_validation_report <- function(
   pkg_version <- as.character(utils::packageVersion("DTAtools"))
   r_version <- as.character(getRversion())
   escaped_title <- .report_html_escape(title)
+  # The document name is the main heading; the title sits beneath it.
+  escaped_name <- .report_html_escape(.export_document_name())
+  org_line <- .export_org_line()
+  org_html <- if (nzchar(org_line)) {
+    paste0('<div class="report-meta report-org">', .report_html_escape(org_line), "</div>")
+  } else {
+    ""
+  }
   # The specification version the verdict was reached against -- the report is
   # a statement about this version of the agreement, not about the agreement.
   spec_version <- tryCatch(DTAtools::metadata(x)@version, error = function(e) NULL)
@@ -209,7 +227,9 @@ write_validation_report <- function(
 </head>
 <body>
 <header class="report-header">
-  <h1>{escaped_title}</h1>
+  <h1>{escaped_name}</h1>
+  <div class="report-subtitle">{escaped_title}</div>
+  {org_html}
   <div class="report-meta">Generated {timestamp} &middot; DTAtools {pkg_version} &middot; R {r_version}</div>
   <div class="report-meta report-meta-spec">Specification version {spec_version}</div>
 </header>

@@ -13,7 +13,10 @@ write_dataset_metadata(
   include_file_specs = TRUE,
   include_rules = TRUE,
   signature_list = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  document_name = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 )
 }
 \arguments{
@@ -42,6 +45,17 @@ which always includes them.}
 and optionally \code{organization} (or \code{org}) fields.}
 
 \item{quiet}{Logical. If TRUE, suppresses console output. Default is FALSE.}
+
+\item{document_name}{Optional character: what this kind of document is
+called, shown as the main title of the export; the dataset specification
+follows beneath it. A vector is joined with \code{" / "}. \code{NULL} (the default)
+uses "Data Transfer Agreement".}
+
+\item{organisation, organisation_unit}{Optional single strings naming the
+organisation (and unit within it) issuing the document. When given they are
+shown on the title page (Word/PDF) or in the top header block (Markdown);
+the dataset document has no running header. \code{NULL} or empty (the default)
+shows nothing.}
 }
 \value{
 Invisibly \code{NULL}. The document is written to \code{file}.

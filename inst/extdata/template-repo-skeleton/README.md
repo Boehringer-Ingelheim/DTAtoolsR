@@ -1138,6 +1138,15 @@ The value of `kind:` must be `dta_app_config` when present. Each section is a ma
 | `name` | empty | Owner of the deployment. With no name, no organisation is shown anywhere in the app. |
 | `unit` | empty | Department or group, shown after the name. |
 
+`document`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `name` | `Data Transfer Agreement` | What the library calls its documents: one string, or a list of one to three (for example `[Data Transfer Agreement, Data Transmission Specification]`). Shown as the main title of every export, with the document's own title beneath it, and available to Word templates as `{DOCUMENT_NAME}`. Several names are joined with ` / `. |
+| `abbreviation` | `DTA` | Short form used in the app's labels ("Create DTA", "Export DTA") and as `{DOCUMENT_ABBREVIATION}`: one string, or a list of one to three, each at most 12 characters. When both keys are lists they must have the same length. Several abbreviations are joined with `/` ("Create DTA/DTS"). |
+
+Both are plain text. The organisation (`organisation.name`, `organisation.unit`) is added to the front page and the running header of Word and PDF exports, and to the header block of Markdown and HTML exports; as Word-template placeholders it is `{ORGANISATION_NAME}` and `{ORGANISATION_UNIT}`.
+
 `branding`
 
 | Key | Default | Meaning |
@@ -1185,6 +1194,7 @@ Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes.
 | `start.create_from_template` | "Create new from template" button. |
 | `start.create_blank` | "Create new" button (a blank document). Forced off while `editing` is `false`. |
 | `raw_yaml_tab` | The tab that shows and edits the raw YAML. |
+| `raw_yaml_editable` | Whether the raw YAML can be edited and applied. `false` keeps the tab but makes it read-only and refuses applying server-side. Forced to `false` by `editing: false`. Default `true`. |
 | `dataset_yaml_download` | Download of a single dataset's YAML. |
 | `dta_yaml_download` | Download of the whole DTA's YAML. |
 | `editing` | `false` makes the app read-only: no edit menu and no editing at all. |

@@ -2,13 +2,15 @@
 % Please edit documentation in R/documentBuilders.R
 \name{.dta_display_title}
 \alias{.dta_display_title}
-\title{The display title of a DTA: its title, or "Data Transfer Agreement" when it
-has none (a DTA may carry datasets without metadata).}
+\title{The display title of a DTA: its title, or the document name ("Data Transfer
+Agreement" unless the caller supplied one) when it has none (a DTA may carry
+datasets without metadata).}
 \usage{
-.dta_display_title(title)
+.dta_display_title(title, fallback = .export_document_name())
 }
 \description{
-The display title of a DTA: its title, or "Data Transfer Agreement" when it
-has none (a DTA may carry datasets without metadata).
+The display title of a DTA: its title, or the document name ("Data Transfer
+Agreement" unless the caller supplied one) when it has none (a DTA may carry
+datasets without metadata).
 }
 \keyword{internal}

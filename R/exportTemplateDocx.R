@@ -23,6 +23,12 @@
 #'
 #' \describe{
 #'   \item{Agreement}{`{DTA_TITLE}`, `{DTA_VERSION}`, `{DTA_DATE}`, `{DTA_HEADER}`}
+#'   \item{Document and organisation}{`{DOCUMENT_NAME}` (default "Data Transfer
+#'     Agreement"), `{DOCUMENT_ABBREVIATION}` (default "DTA"),
+#'     `{ORGANISATION_NAME}` and `{ORGANISATION_UNIT}` (empty by default). Called
+#'     directly, [export_with_template()] uses these defaults; [write_dta()]
+#'     fills them from its `document_name`, `document_abbreviation`,
+#'     `organisation` and `organisation_unit` arguments.}
 #'   \item{Study}{`{STUDY_ID}`, `{PROTOCOL_ID}`}
 #'   \item{Supplier}{`{SUPPLIER_NAME}`, `{SUPPLIER_COUNTRY}`, `{SUPPLIER_ADDRESS}`,
 #'     `{SUPPLIER_EMAIL}`, `{SUPPLIER_PHONE}`, `{SUPPLIER_CONTACTS}`}
@@ -200,6 +206,10 @@ export_with_template <- function(
     "{DTA_VERSION}" = "Agreement version",
     "{DTA_DATE}" = "Agreement date (ISO 8601)",
     "{DTA_HEADER}" = "Document header line",
+    "{DOCUMENT_NAME}" = "Name of this kind of document (default: Data Transfer Agreement)",
+    "{DOCUMENT_ABBREVIATION}" = "Abbreviation of the document name (default: DTA)",
+    "{ORGANISATION_NAME}" = "Name of the organisation issuing the document (empty if not set)",
+    "{ORGANISATION_UNIT}" = "Unit within the organisation (empty if not set)",
     "{STUDY_ID}" = "Study identifier",
     "{PROTOCOL_ID}" = "Protocol identifier",
     "{SUPPLIER_NAME}" = "Supplier organisation name",
@@ -391,6 +401,10 @@ dta_template_placeholders <- function(dta = NULL) {
     "{DTA_VERSION}" = .tv_scalar(meta@version),
     "{DTA_DATE}" = .tv_scalar(meta@date),
     "{DTA_HEADER}" = .tv_scalar(meta@header),
+    "{DOCUMENT_NAME}" = .export_document_name(),
+    "{DOCUMENT_ABBREVIATION}" = .export_ctx$document_abbreviation %||% "DTA",
+    "{ORGANISATION_NAME}" = .export_ctx$organisation %||% "",
+    "{ORGANISATION_UNIT}" = .export_ctx$organisation_unit %||% "",
     "{STUDY_ID}" = .tv_scalar(meta@study$id),
     "{PROTOCOL_ID}" = .tv_scalar(meta@study$protocol_id),
     "{SUPPLIER_NAME}" = .tv_scalar(.tv_get(supplier, "affiliation", "name")),

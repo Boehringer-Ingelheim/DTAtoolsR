@@ -39,6 +39,20 @@
 #' @param template_variables Optional named list of additional or overriding
 #'   placeholder values passed to [export_with_template()] when `template` is
 #'   supplied. Default: `NULL`.
+#' @param document_name Optional character: what this kind of document is
+#'   called, shown as the main title of the export (Word/PDF cover, Markdown
+#'   heading); the DTA's own title follows beneath it. A vector is joined with
+#'   `" / "`. `NULL` (the default) uses "Data Transfer Agreement". Also fills
+#'   the `{DOCUMENT_NAME}` template placeholder.
+#' @param document_abbreviation Optional single string, the abbreviation of
+#'   `document_name`. `NULL` (the default) uses "DTA". Fills the
+#'   `{DOCUMENT_ABBREVIATION}` template placeholder.
+#' @param organisation,organisation_unit Optional single strings naming the
+#'   organisation (and unit within it) issuing the document. When given they are
+#'   shown on the cover and in the running header of every later page (Word/PDF)
+#'   or in the top header block (Markdown), and fill the `{ORGANISATION_NAME}`
+#'   and `{ORGANISATION_UNIT}` template placeholders. `NULL` or empty (the
+#'   default) shows nothing.
 #'
 #' @return Invisibly. For `format = "docx"` or `"pdf"` with the built-in layout,
 #'   the `officer` `rdocx` document object; when a `template` is used, the
@@ -65,6 +79,18 @@
 #' write_dta(dta, file = out_from_template, template = template, quiet = TRUE)
 #' file.exists(out_from_template)
 #' unlink(c(template, out_from_template))
+#'
+#' # Name the document and the organisation issuing it
+#' out_named <- tempfile(fileext = ".md")
+#' write_dta(
+#'   dta,
+#'   file = out_named, quiet = TRUE,
+#'   document_name = "Data Transmission Specification",
+#'   document_abbreviation = "DTS",
+#'   organisation = "Example Pharma", organisation_unit = "Biometrics"
+#' )
+#' readLines(out_named, n = 3)
+#' unlink(out_named)
 write_dta <- function(
   x,
   file,
@@ -76,11 +102,16 @@ write_dta <- function(
   include_yaml = FALSE,
   yaml_text = NULL,
   template = NULL,
-  template_variables = NULL
+  template_variables = NULL,
+  document_name = NULL,
+  document_abbreviation = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 ) {
   if (!inherits(x, "DTAtools::DTA")) {
     cli::cli_abort("'x' must be a DTA object.")
   }
+  .set_export_ctx(document_name, organisation, organisation_unit, document_abbreviation)
 
   if (is.null(format)) {
     format <- tolower(tools::file_ext(file))
@@ -359,10 +390,12 @@ write_dta <- function(
 .write_dta_markdown <- function(dta, file, include_signatures = TRUE, signature_list = NULL) {
   meta <- dta@metadata
 
+  # The document name is the main heading; the DTA's own title follows it.
   lines <- c(
-    "# Data Transfer Agreement Metadata",
+    paste("#", .plain_text_to_md(.export_document_name())),
     "",
-    paste("**Title:**", meta@title),
+    if (nzchar(.dta_display_title(meta@title, fallback = ""))) paste("**Title:**", meta@title),
+    if (nzchar(.export_org_line())) paste("**Organisation:**", .plain_text_to_md(.export_org_line())),
     if (!is.null(meta@version)) paste("**Version:**", meta@version) else "",
     if (!is.null(meta@date)) paste("**Date:**", format(meta@date, "%Y-%m-%d")) else "",
     if (!is.null(meta@header)) paste("**Header:**", meta@header) else "",
@@ -928,6 +961,15 @@ dta_pdf_backend <- function() {
 #' @param signature_list List of signatories, each a list with `name`, `role`
 #'   and optionally `organization` (or `org`) fields.
 #' @param quiet Logical. If TRUE, suppresses console output. Default is FALSE.
+#' @param document_name Optional character: what this kind of document is
+#'   called, shown as the main title of the export; the dataset specification
+#'   follows beneath it. A vector is joined with `" / "`. `NULL` (the default)
+#'   uses "Data Transfer Agreement".
+#' @param organisation,organisation_unit Optional single strings naming the
+#'   organisation (and unit within it) issuing the document. When given they are
+#'   shown on the title page (Word/PDF) or in the top header block (Markdown);
+#'   the dataset document has no running header. `NULL` or empty (the default)
+#'   shows nothing.
 #'
 #' @return Invisibly `NULL`. The document is written to `file`.
 #'
@@ -947,11 +989,15 @@ write_dataset_metadata <- function(
   include_file_specs = TRUE,
   include_rules = TRUE,
   signature_list = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  document_name = NULL,
+  organisation = NULL,
+  organisation_unit = NULL
 ) {
   if (!inherits(x, c("DTAtools::DTADataSet", "DTAtools::DTADataSetTabular", "DTAtools::DTADataSetFile"))) {
     cli::cli_abort("'x' must be a DTADataSet, DTADataSetTabular, or DTADataSetFile object.")
   }
+  .set_export_ctx(document_name, organisation, organisation_unit)
 
   if (is.null(format)) {
     format <- tolower(tools::file_ext(file))
@@ -994,8 +1040,8 @@ write_dataset_metadata <- function(
   # Title section
   doc <- .add_title_section(
     doc,
-    title = paste0("Dataset Specification: ", dta_dataset_heading(dataset)),
-    subtitle = "Data Transfer Agreement - Dataset Metadata",
+    title = .export_document_name(),
+    subtitle = paste0("Dataset Specification: ", dta_dataset_heading(dataset)),
     date = Sys.Date(),
     version = dataset@template_version
   )
@@ -1039,7 +1085,11 @@ write_dataset_metadata <- function(
 #' @keywords internal
 .write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL) {
   lines <- c(
-    "# Dataset Specification",
+    paste("#", .plain_text_to_md(.export_document_name())),
+    "",
+    paste0("**", .plain_text_to_md("Dataset Specification"), "**"),
+    if (nzchar(.export_org_line())) c("", paste("**Organisation:**", .plain_text_to_md(.export_org_line()))),
+    "",
     paste("## ", .plain_text_to_md(dta_dataset_heading(dataset))),
     "",
     "### Overview",

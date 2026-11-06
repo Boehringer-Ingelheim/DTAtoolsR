@@ -89,7 +89,8 @@ test_that("write_file_specification() writes what write_dataset_metadata() write
   strip_stamp <- function(path) grep("^\\*Generated on:", readLines(path, warn = FALSE), invert = TRUE, value = TRUE)
   alias_lines <- strip_stamp(via_alias)
   expect_identical(alias_lines, strip_stamp(direct))
-  expect_true(any(grepl("^# Dataset Specification", alias_lines)))
+  expect_equal(alias_lines[1], "# Data Transfer Agreement")
+  expect_true(any(grepl("^## ", alias_lines)))
   expect_true(any(grepl("STUDYID", alias_lines, fixed = TRUE)))
 
   # It refuses to overwrite unless told to, as the function it aliases does.

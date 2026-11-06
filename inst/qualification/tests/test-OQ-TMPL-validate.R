@@ -617,3 +617,35 @@ test_that("OQ-TMPL-077 | a dta-app.yaml left at the root of a templates/ layout 
   result <- validate_template(tmpl_fixture("appconfig", "outside"))
   qa_step("severity", "error", tmpl_severity(result, "app_config_outside_library_dir"))
 })
+
+test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yaml is app_config_invalid naming its key | REQ-TMPL-037", {
+  lib <- file.path(qa_tempdir(), "doclib")
+  dir.create(lib)
+  file.copy(tmpl_fixture("appconfig", "invalid", "t.dta-template.yaml"), lib)
+  writeLines(c(
+    "kind: dta_app_config",
+    "document:",
+    "  name: [A, B, C, D]",
+    "  abbreviation: ABCDEFGHIJKLM",
+    "features:",
+    "  raw_yaml_editable: maybe"
+  ), file.path(lib, "dta-app.yaml"))
+  result <- validate_template(lib)
+  rows <- result[result$code == "app_config_invalid", , drop = FALSE]
+  qa_step("one row per rejected value", 3L, nrow(rows))
+  qa_step("at severity error", "error", unique(rows$severity))
+  qa_check("naming features.raw_yaml_editable", any(grepl("features.raw_yaml_editable", rows$message, fixed = TRUE)))
+  qa_check("naming document.name", any(grepl("document.name", rows$message, fixed = TRUE)))
+  qa_check("naming document.abbreviation", any(grepl("document.abbreviation", rows$message, fixed = TRUE)))
+
+  ok <- file.path(qa_tempdir(), "doclib_ok")
+  dir.create(ok)
+  file.copy(tmpl_fixture("appconfig", "invalid", "t.dta-template.yaml"), ok)
+  writeLines(c(
+    "kind: dta_app_config",
+    "document:",
+    "  name: [Data Transfer Agreement, Data Transmission Specification]",
+    "  abbreviation: [DTA, DTS]"
+  ), file.path(ok, "dta-app.yaml"))
+  qa_step("a valid pair of lists adds no rows", 0L, nrow(validate_template(ok)))
+})

@@ -41,13 +41,13 @@ areas:
     min_tests: 22
   - area: TMPL
     title: Templates, inheritance and controlled vocabulary
-    min_tests: 76
+    min_tests: 77
   - area: EXPORT
     title: Document and data export
-    min_tests: 51
+    min_tests: 54
   - area: REPORT
     title: The standalone HTML validation report
-    min_tests: 16
+    min_tests: 17
   - area: APP
     title: The interactive application
     min_tests: 37
