@@ -305,14 +305,14 @@ test_that("a handler change is visible in the handlers signature", {
 
 # ---- Export file name -------------------------------------------------------
 
-test_that("the YAML export file name turns version dots into underscores", {
+test_that("the YAML export file name keeps the dots in the version", {
   fn <- app_fn("dta_yaml_export_filename")
   date <- as.Date("2026-11-04")
 
   # The bundled spec is titled "Clinical Data Specification", version "0.1".
   expect_identical(
     fn(app_fixture_dta(), date),
-    "Clinical_Data_Specification_v0_1_2026-11-04.yaml"
+    "Clinical_Data_Specification_v0.1_2026-11-04.yaml"
   )
 
   # A multi-part version keeps every part, so "1.0" can never collide with "10".
@@ -321,7 +321,7 @@ test_that("the YAML export file name turns version dots into underscores", {
   dta <- app_fn("dta_read_yaml_text")(paste(lines, collapse = "\n"))$value
   expect_identical(
     fn(dta, date),
-    "Clinical_Data_Specification_v1_2_10_2026-11-04.yaml"
+    "Clinical_Data_Specification_v1.2.10_2026-11-04.yaml"
   )
 })
 
