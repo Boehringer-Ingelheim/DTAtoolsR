@@ -147,6 +147,8 @@ Creation templates may use:
 - `sealed` to prevent descendants from changing selected template paths.
 - `mixins` to compose the template from abstract, flat building blocks; see Mixins below.
 - `required` to require selected paths to be filled before a document is created.
+- `prior_versions` to record, by hand, the template's own versions from before its first file entered the library. Later history is computed;
+  see "Template version history" below.
 
 Vocabularies may use `extends` to build on another vocabulary, with the vocabulary-specific `add_terms` and `remove_terms` operations described
 below. Do not confuse that vocabulary extension with the creation-template merge rules.
@@ -306,6 +308,10 @@ base:
         date: "${today}"
         changes: Initial template-generated version
 ```
+
+`base.metadata.version_history` is the history of the *document* the template creates, and it is copied into every new DTA. It says
+nothing about the template's own versions: those are listed in the template picker, computed from the library (see "Template version
+history" below). Do not record template changes here.
 
 `${today}` and `${version}` are not general-purpose environment-variable substitution. Do not invent other `${...}` tokens and expect the app to
 resolve them.
@@ -1047,10 +1053,19 @@ each combination.
 
 A new vocabulary version affects future documents that resolve to it. It does not rewrite the values already embedded in a finished DTA.
 
+### Template version history
+
+The template picker shows a creation template's history. It is computed, not written: each library version is built with its defaults and
+compared with the one before it, across the template's own interface (label, description, lineage, mixins, options, slots, `required`, `sealed`),
+the metadata and the datasets it builds. A dependency the template follows unpinned (a bare `id` or `id@latest` in `extends:`, a
+`datasets:` import, a vocabulary) gets its own entry when it publishes a version that changes what the template builds. A pinned dependency
+does not. Because every published version is its own immutable file, there is no changelog to keep in step for library versions.
+
+This is unrelated to `base.metadata.version_history`, which is the history of the created document.
+
 ### Versions from before the library: `prior_versions:`
 
-The app computes a creation template's history by comparing its library versions. Versions the template went through before its first
-file entered the library have nothing to compare, so record them by hand:
+Versions the template went through before its first file entered the library have nothing to compare, so record them by hand:
 
 ```yaml
 version: "5.0"
@@ -1380,7 +1395,7 @@ literal severity reported in the result. A concrete template can receive `instan
 | `template_outside_library_dir` | error | A template-shaped file is at the repository root while `templates/` is the selected library. | Move it into `templates/` and update related paths. |
 | `target_invalid` | warning | An option target is unknown, malformed, or does not resolve in its dataset body. | Correct the target path and use a supported metadata or dataset field. |
 | `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
-| `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library". |
+| `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library: `prior_versions:`". |
 | `party_slot_invalid` | warning | A party slot is malformed or names a profile ID not found in the library. | Check target, slot fields, role, and profile IDs. |
 | `vocab_slot_invalid` | error | A vocabulary slot is malformed, has a bad target, or has invalid selections. | Correct its target, vocabulary, mode, field, or term selections. |
 | `vocab_slot_unresolved` | warning | The slot's vocabulary reference is not found in the validated directory. | Add the vocabulary file or correct the reference. |
