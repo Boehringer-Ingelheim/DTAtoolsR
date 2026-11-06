@@ -4,7 +4,7 @@
 \alias{.add_study_section}
 \title{Add study identity, sharing the built-in and template-block layout}
 \usage{
-.add_study_section(doc, study, heading = .add_heading)
+.add_study_section(doc, study, heading = .add_heading, level = 2)
 }
 \description{
 Add study identity, sharing the built-in and template-block layout

@@ -254,15 +254,86 @@
   }
 }
 
+#' Text width, in inches, of the section a table added at the cursor lands in
+#'
+#' `officer::docx_dim()` cannot be used for this: its XPath ends in a
+#' `//w:sectPr` alternative, which matches every section and so always yields
+#' the document's *first* one, wherever the cursor is. The section is therefore
+#' looked up here. officer adds a block directly after the cursor's body child
+#' (`/w:document/w:body/*[which]`), and a section is ended by the paragraph
+#' whose `w:pPr` carries its `w:sectPr` (the last section by the body-level
+#' `w:sectPr`), so the table belongs to the first section break after the
+#' cursor.
+#'
+#' Columns are honoured: the width of a table inside a `w:cols num = "n"`
+#' section is that of one column, `(w - (n - 1) * space) / n`. Unequal columns
+#' (`w:col` children or `w:equalWidth = "0"`) have no single width.
+#' @param doc An `rdocx`.
+#' @return The width in inches, or `NA_real_` when the section has no page size
+#'   or margins, or has unequal columns.
+#' @keywords internal
+.tv_cursor_text_width <- function(doc) {
+  cursor <- doc$officer_cursor$which
+  after <- if (length(cursor) == 1L && !is.na(cursor)) cursor else 0L
+  later <- paste0("/*[local-name()='document']/*[local-name()='body']/*[position() > ", after, "]")
+  sect <- xml2::xml_find_first(
+    officer::docx_body_xml(doc),
+    paste0(
+      "(", later, "/self::*[local-name()='sectPr']",
+      " | ", later, "/*[local-name()='pPr']/*[local-name()='sectPr'])[1]"
+    )
+  )
+  if (inherits(sect, "xml_missing")) {
+    return(NA_real_)
+  }
+  num <- function(node, attr) suppressWarnings(as.numeric(xml2::xml_attr(node, attr)))
+  child <- function(name) xml2::xml_find_first(sect, paste0("./*[local-name()='", name, "']"))
+  page <- num(child("pgSz"), "w")
+  margin <- c(num(child("pgMar"), "left"), num(child("pgMar"), "right"))
+  if (anyNA(c(page, margin))) {
+    return(NA_real_)
+  }
+  twips <- page - sum(margin)
+  cols <- child("cols")
+  n <- num(cols, "num")
+  if (!is.na(n) && n > 1) {
+    unequal <- length(xml2::xml_find_all(cols, "./*[local-name()='col']")) > 0 ||
+      xml2::xml_attr(cols, "equalWidth") %in% c("0", "false")
+    if (unequal) {
+      return(NA_real_)
+    }
+    space <- num(cols, "space")
+    twips <- (twips - (n - 1) * (if (is.na(space)) 720 else space)) / n
+  }
+  twips / 1440
+}
+
 #' Fit a table to the template's text column rather than a fixed inch width
 #'
 #' The built-in layout gives its widest tables landscape pages of their own.
 #' A user template's page geometry is not ours to change -- inserting section
-#' breaks would re-orient content that is not ours -- so the table is set to
-#' 100% of whatever text column the template has.
+#' breaks would re-orient content that is not ours -- so the builder's column
+#' widths are scaled, in proportion, to the text width of the section the table
+#' lands in (see [.tv_cursor_text_width()]). The layout is fixed so Word keeps
+#' those widths: an autofit table is written without a column grid and Word
+#' sizes the columns from their content, which squeezes a narrow column beside
+#' a long one.
+#'
+#' When that section's width cannot be determined the table keeps the
+#' width-adaptive layout (100% of the text column), which suits any page
+#' geometry but leaves the column sizing to Word.
+#' @param ft A flextable.
+#' @param doc The `rdocx` the table is going into; the table is added at its
+#'   cursor.
 #' @keywords internal
-.tv_block_fit <- function(ft) {
-  flextable::set_table_properties(ft, layout = "autofit", width = 1)
+.tv_block_fit <- function(ft, doc) {
+  text_w <- .tv_cursor_text_width(doc)
+  if (is.na(text_w)) {
+    return(flextable::set_table_properties(ft, layout = "autofit", width = 1))
+  }
+  w <- dim(ft)$widths
+  ft <- flextable::width(ft, width = w * text_w / sum(w))
+  flextable::set_table_properties(ft, layout = "fixed")
 }
 
 #' Add a flextable fitted to the page, or an italic note when there is none
@@ -271,7 +342,7 @@
   if (is.null(ft)) {
     doc <- .add_body_par(doc, empty_note, italic = TRUE, color = THEME_COLORS$gray_mid)
   } else {
-    doc <- flextable::body_add_flextable(doc, .tv_block_fit(ft))
+    doc <- flextable::body_add_flextable(doc, .tv_block_fit(ft, doc))
   }
   .add_spacer(doc)
 }
@@ -310,7 +381,7 @@
       doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_column_specs_table(sets[[nm]]@specs),
+      doc, .build_column_specs_table(sets[[nm]]@specs, width = NULL),
       "No column specifications available."
     )
   }
@@ -330,7 +401,7 @@
       doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_rules_table(sets[[nm]]@specs@rules),
+      doc, .build_rules_table(sets[[nm]]@specs@rules, width = NULL),
       "No validation rules specified."
     )
   }
@@ -350,7 +421,7 @@
       doc <- .tv_block_heading(doc, paste0("Files \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_file_specs_table(sets[[nm]]@files),
+      doc, .build_file_specs_table(sets[[nm]]@files, width = NULL),
       "No files specified."
     )
   }
@@ -379,17 +450,17 @@
     }
 
     doc <- .tv_block_heading(doc, "Files", level = 3)
-    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files), "No files specified.")
+    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL), "No files specified.")
 
     if (inherits(ds, "DTAtools::DTADataSetTabular")) {
       doc <- .tv_block_heading(doc, "Column Specifications", level = 3)
       doc <- .tv_block_table(
-        doc, .build_column_specs_table(ds@specs),
+        doc, .build_column_specs_table(ds@specs, width = NULL),
         "No column specifications available."
       )
       doc <- .tv_block_heading(doc, "Validation Rules", level = 3)
       doc <- .tv_block_table(
-        doc, .build_rules_table(ds@specs@rules),
+        doc, .build_rules_table(ds@specs@rules, width = NULL),
         "No validation rules specified."
       )
     }

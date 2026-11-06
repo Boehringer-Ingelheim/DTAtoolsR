@@ -4,7 +4,7 @@
 \alias{.add_agreement_sections}
 \title{Add ordered agreement clauses as literal headings and narrative paragraphs}
 \usage{
-.add_agreement_sections(doc, sections, heading = .add_heading)
+.add_agreement_sections(doc, sections, heading = .add_heading, level = 2)
 }
 \description{
 Add ordered agreement clauses as literal headings and narrative paragraphs

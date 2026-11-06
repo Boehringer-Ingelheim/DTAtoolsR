@@ -39,7 +39,8 @@ requirements:
     text: >
       write_dta() shall render, for every dataset the transfer declares, a
       column-specifications table naming every declared column's id, label,
-      type, nullability and permitted-values-or-pattern text, in the order the
+      type (with its declared length, when one is declared), nullability and
+      permitted-values-or-pattern text, in the order the
       specification declares them.
     risk: high
     category: functional
@@ -467,3 +468,31 @@ requirements:
     category: functional
     covers: [export_with_template, dta_template_placeholders]
     source: R/exportTemplateDocx.R; R/exportTemplateBlocks.R
+
+  - id: REQ-EXPORT-035
+    text: >
+      Every page of a default write_dta Word document after the cover page
+      shall carry a running header naming the DTA title, the study identifier
+      when one is supplied, and the page number with the total page count, and
+      a running footer naming the document, its version, the ISO 8601 date of the
+      current version, and the
+      template the document was generated from with that template's version
+      and date, or the built-in layout and package version when the document
+      records no template. The cover page shall carry neither.
+    risk: medium
+    category: functional
+    covers: [write_dta]
+    source: R/exportDocuments.R; R/documentBuilders.R
+
+  - id: REQ-EXPORT-036
+    text: >
+      write_dta() (docx and md) and write_dataset_metadata() shall render, for
+      every declared validation rule, a YAML definition that, parsed, equals
+      the rule's type and every declared parameter - columns, bounds,
+      operators and values, grouping columns, named conditions, and each
+      constraint's id, condition names, scopes and message - independently of
+      its description.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/formattingHelpers.R; R/documentBuilders.R

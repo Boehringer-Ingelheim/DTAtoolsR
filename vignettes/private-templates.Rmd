@@ -410,7 +410,7 @@ base:
     error_handling: >-
       Format or content errors are reported by email to the authorized
       contacts and corrected in a follow-up transfer.
-    authorized_for_corrections: TDM
+    authorized_for_corrections: Trial Data Manager (TDM)
 
 options:
   - id: title
@@ -501,12 +501,14 @@ Word template without those tokens is not automatically modified.
 ### How options are asked for
 
 Every entry in `options:` becomes one control in the "Create new from
-template" dialog, chosen from its `type:` and whether it lists `choices:`. An
-option with `choices:` is a combobox: pick one of the suggestions or type a
-value of your own. Whether typing is allowed follows `allow_custom:` — for
+template" dialog, chosen from its `type:` and whether it lists `choices:`. A
+text option with `choices:` is a field you can type into, with a "Choose a
+suggestion" picker that fills it: pick one of the suggestions or type a value
+of your own. Whether typing is allowed follows `allow_custom:` — for
 `type: text` it is allowed unless the template sets `allow_custom: false`;
 for `type: select` it is forbidden unless the template sets
-`allow_custom: true`. "(leave blank)" is always offered alongside the
+`allow_custom: true`. Where typing is not allowed the option is a plain
+dropdown of its choices (a `type: textarea` option is always free text). "(leave blank)" is always offered alongside the
 suggestions and writes an empty value.
 
 ```yaml
@@ -520,8 +522,8 @@ suggestions and writes an empty value.
     - Example Pharma Inc.
 ```
 
-A `default:` that is not itself one of the `choices` is added to the list and
-pre-selected rather than silently dropped. That is how the ACME deviation
+A `default:` that is not itself one of the `choices` is pre-filled in the field
+and added to the picker, pre-selected, rather than silently dropped. That is how the ACME deviation
 later in this vignette pre-fills `header:` with "ACME Labs" — a value the
 option above never suggests.
 

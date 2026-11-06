@@ -127,7 +127,6 @@ test_that("OQ-EXPORT-002 | write_dta docx names the transfer title, version, sup
   text <- qa_docx_text(out)
   for (expected in c(
     "Clinical Data Specification", # metadata@title
-    "Version: 0.1", # metadata@version
     "Test Company 2", # metadata@supplier$affiliation$name
     "Test Company" # metadata@receiver$affiliation$name
   )) {
@@ -136,6 +135,10 @@ test_that("OQ-EXPORT-002 | write_dta docx names the transfer title, version, sup
       TRUE, grepl(expected, text, fixed = TRUE)
     )
   }
+  # The version is a labelled cell of the cover and Document Information
+  # tables, and is repeated in the running footer.
+  cells <- qa_docx_summary(out)$text
+  qa_step("the Version label is followed by the declared version", "0.1", cells[match("Version", cells) + 1L])
 })
 
 test_that("OQ-EXPORT-003 | write_dta docx names every dataset and its declared columns | REQ-EXPORT-002 REQ-EXPORT-003", {
@@ -179,7 +182,7 @@ test_that("OQ-EXPORT-004 | write_dta docx column specification table matches the
   studyid <- tbl[tbl$col1 == "STUDYID", ]
   qa_step(
     "the STUDYID row carries its declared label, type, nullability and permitted value",
-    c("Study Identifier", "SAS Char", "No", "1234-5678"),
+    c("Study Identifier", "SAS Char (10)", "No", "1234-5678"),
     c(studyid$col2, studyid$col3, studyid$col4, studyid$col5)
   )
 
@@ -692,4 +695,133 @@ test_that("OQ-EXPORT-044 | a document export that fails leaves an existing desti
     "existing.pdf",
     basename(list.files(dir))
   )
+})
+
+# ---- rule definitions are exact ---------------------------------------------
+
+# Parsed YAML maps carry no meaningful key order, so both sides are compared
+# with every map's keys sorted.
+et_sort_keys <- function(x) {
+  if (!is.list(x)) {
+    return(x)
+  }
+  x <- lapply(x, et_sort_keys)
+  if (!is.null(names(x))) x <- x[order(names(x))]
+  x
+}
+
+test_that("OQ-EXPORT-051 | each rule's definition in the Word and Markdown documents parses to the declared rule | REQ-EXPORT-036", {
+  # One rule of each type. Every value is written here from the parameter
+  # documentation of the rule classes, not read back from an export.
+  conds <- list(
+    c1_failed = list(GFSTAT = list(equals = "FAILED")),
+    c2_reported = list(GFORRES = list(empty = FALSE)),
+    c3_not_done = list(GFSTAT = list(equals = "NOT DONE"))
+  )
+  ds <- DTADataSetTabular(
+    id = "rules_demo",
+    specs = DTAColumnSpecCollection(
+      # Rules may only name declared columns.
+      columns = stats::setNames(
+        lapply(
+          c("AGE", "CONSENT", "USUBJID", "VISIT", "GFSTAT", "GFORRES"),
+          function(nm) {
+            if (nm == "AGE") {
+              DTAColumnSpec(id = nm, type = "SAS Num", nullable = TRUE)
+            } else {
+              DTAColumnSpec(id = nm, type = "SAS Char", length = 8, nullable = TRUE)
+            }
+          }
+        ),
+        c("AGE", "CONSENT", "USUBJID", "VISIT", "GFSTAT", "GFORRES")
+      ),
+      rules = list(
+        DTARuleColCondition(
+          id = "r_cond", description = "Same description for all",
+          condition = list(AGE = list(greater = 18L, less = 65L)),
+          then = list(CONSENT = list(empty = FALSE))
+        ),
+        DTARuleColRange(id = "r_range", description = "Same description for all", columns = "AGE", min = 0L, max = 120L),
+        DTARuleColUnique(id = "r_unique", description = "Same description for all", columns = c("USUBJID", "VISIT")),
+        DTARuleGroupCondition(
+          id = "r_group", description = "Same description for all",
+          group_by = c("USUBJID", "VISIT"), conditions = conds,
+          constraints = list(
+            list(type = "mutually_exclusive", left = "c1_failed", right = "c2_reported"),
+            list(
+              type = "requires", id = "needs_not_done", `if` = "c1_failed", then = "c3_not_done",
+              if_scope = "all", message = "A failure needs NOT DONE"
+            )
+          )
+        )
+      )
+    )
+  )
+  dta <- DTA(datasets = list(ds), metadata = DTAMetaData(title = "Rule definitions", version = "1.0"))
+
+  # Per the DTARuleGroupCondition constraints documentation: an omitted id is
+  # constraint_<i>, an omitted scope is "any", and an omitted message is absent.
+  expected <- list(
+    r_cond = list(
+      type = "col_condition",
+      condition = list(AGE = list(greater = 18L, less = 65L)),
+      then = list(CONSENT = list(empty = FALSE))
+    ),
+    r_range = list(type = "col_range", columns = "AGE", min = 0L, max = 120L),
+    r_unique = list(type = "col_unique", columns = c("USUBJID", "VISIT")),
+    r_group = list(
+      type = "group_condition",
+      group_by = c("USUBJID", "VISIT"),
+      conditions = conds,
+      constraints = list(
+        list(
+          id = "constraint_1", type = "mutually_exclusive", left = "c1_failed", right = "c2_reported",
+          left_scope = "any", right_scope = "any"
+        ),
+        list(
+          id = "needs_not_done", type = "requires", `if` = "c1_failed", then = "c3_not_done",
+          if_scope = "all", then_scope = "any", message = "A failure needs NOT DONE"
+        )
+      )
+    )
+  )
+  expected <- et_sort_keys(expected)
+  dir <- qa_tempdir()
+
+  docx <- file.path(dir, "rules.docx")
+  write_dta(dta, file = docx, quiet = TRUE)
+  tbl <- et_docx_table(docx, "Rule ID")
+  qa_check("the rules table is found", !is.null(tbl))
+  qa_step("the table has a third Definition column", "Definition", tbl$col3[[1]])
+  # Indentation in Word/PDF cells is U+00A0 (pandoc strips ordinary leading spaces).
+  nbsp_to_space <- function(x) gsub("\u00a0", " ", x, fixed = TRUE)
+  from_docx <- lapply(nbsp_to_space(tbl$col3[-1]), yaml::yaml.load)
+  names(from_docx) <- tbl$col1[-1]
+  qa_step("each Word definition parses to the declared rule", expected, et_sort_keys(from_docx))
+
+  md <- file.path(dir, "rules.md")
+  write_dta(dta, file = md, format = "md", quiet = TRUE)
+  lines <- readLines(md, warn = FALSE)
+  qa_check("the Markdown carries an exact-definitions heading", "**Exact rule definitions**" %in% lines)
+  after <- lines[-seq_len(match("**Exact rule definitions**", lines))]
+  from_md <- list()
+  i <- 1L
+  while (i <= length(after)) {
+    if (grepl("^`[^`]+`$", after[[i]])) {
+      id <- gsub("`", "", after[[i]], fixed = TRUE)
+      start <- i + 3L # id line, blank line, opening fence
+      last <- start + match("```", after[start:length(after)]) - 2L
+      from_md[[id]] <- yaml::yaml.load(paste(after[start:last], collapse = "\n"))
+      i <- last + 1L
+    }
+    i <- i + 1L
+  }
+  qa_step("each Markdown definition parses to the declared rule", expected, et_sort_keys(from_md))
+
+  meta <- file.path(dir, "rules_meta.docx")
+  write_dataset_metadata(ds, file = meta, quiet = TRUE)
+  tbl_meta <- et_docx_table(meta, "Rule ID")
+  from_meta <- lapply(nbsp_to_space(tbl_meta$col3[-1]), yaml::yaml.load)
+  names(from_meta) <- tbl_meta$col1[-1]
+  qa_step("each dataset-metadata definition parses to the declared rule", expected, et_sort_keys(from_meta))
 })

@@ -328,14 +328,14 @@ The app supports these input types:
 
 | Type | Input behavior |
 | --- | --- |
-| `text` | Single-line text control; with `choices`, a choice box that can accept custom text by default. |
+| `text` | Single-line text field; with `choices`, a "Choose a suggestion" picker that fills it, and custom text is accepted by default. |
 | `select` | Choice-oriented control; custom entries are disabled by default. Supply `choices` for a bounded set. |
 | `boolean` | Checkbox; its selected value is a logical. |
-| `textarea` | Multi-line text control. |
+| `textarea` | Multi-line text field; with `choices`, the same suggestion picker above it. |
 | `number` | Numeric input. |
 
 If `type` is omitted, the option is treated as `text`. `choices` may be a list of values or a list of `{value, label}` mappings. A `default`
-outside the supplied choices is retained and displayed as the selected value.
+outside the supplied choices is retained: it is pre-filled in the field and added to the suggestion picker as the selected value.
 
 These option fields are supported:
 
@@ -345,7 +345,7 @@ These option fields are supported:
 - `choices` supplies suggested or selectable values.
 - `default` preselects a value. When a direct metadata `target` has no explicit default, the value already in `base.metadata` can supply it.
 - `help` displays explanatory text beneath the control.
-- `allow_custom` controls whether a choice box accepts typed values. The default is true for `text` and false for `select`.
+- `allow_custom` controls whether the option accepts typed values; when false it is a plain dropdown of its choices (a `textarea` is always free text). The default is true for `text` and false for `select`.
 - `target` names the field that receives the value, such as `metadata.title` or `metadata.header`.
 - `effects` maps selected values to one or more `{path, value}` operations.
 - `effects_all` adds operations that apply regardless of the selected value.

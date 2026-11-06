@@ -118,7 +118,9 @@ test_that("custom study blocks share Word rendering without interpreting metadat
   )
   expect_true(all(expected %in% text))
   expect_true(all(diff(match(expected, text)) > 0))
-  expect_identical(sum(summary$content_type == "table cell"), 6L)
+  # The study table is a key/value table without a header row: two rows
+  # (study id, protocol id) of label and value.
+  expect_identical(sum(summary$content_type == "table cell"), 4L)
   expect_false(any(text == "Datasets"))
 })
 

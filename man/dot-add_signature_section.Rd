@@ -4,7 +4,7 @@
 \alias{.add_signature_section}
 \title{Add signature approval section.}
 \usage{
-.add_signature_section(doc, signatories = NULL)
+.add_signature_section(doc, signatories = NULL, level = 2)
 }
 \value{
 The document, unchanged when there is nothing to sign.

@@ -1154,13 +1154,12 @@ server <- function(input, output, session) {
   # and covers a restored autosave, or any caller still setting the input by
   # its former string value.
   #
-  # Everything else arrives as the literal string the option's combobox holds
-  # -- picked from the suggestions or typed in place, indistinguishable by
-  # design, which is why there is no longer a "__custom__" sentinel or a
-  # companion text field to read it from. Only "(leave blank)" still needs
-  # translating: it is a real, selectable row precisely so that "no value" is
-  # a deliberate choice rather than an empty box the author may just not have
-  # reached yet.
+  # Everything else arrives as the literal string the option's field holds --
+  # picked from its suggestions or typed in place, indistinguishable by
+  # design, which is why there is no "__custom__" sentinel to read. Only a
+  # strict dropdown's "(leave blank)" row still needs translating: it is a
+  # real, selectable row precisely so that "no value" is a deliberate choice
+  # rather than an empty box the author may just not have reached yet.
   collect_template_selections <- function(def) {
     out <- list()
     opts <- def$options %||% list()
@@ -1182,10 +1181,9 @@ server <- function(input, output, session) {
 
   # Collect a user's slot -> profile-id choices from the currently-open
   # options modal. Mirrors collect_template_selections() exactly: an unset
-  # (or "(use template default)") control contributes NOTHING to the returned
-  # list -- apply_party_selections() (party_profiles.R) already treats a
-  # missing entry as "leave this slot's target untouched", which is exactly
-  # what "(use template default)" is supposed to mean.
+  # control, or one still on the template's own party (the "" row), contributes
+  # NOTHING to the returned list -- apply_party_selections() (party_profiles.R)
+  # already treats a missing entry as "leave this slot's target untouched".
   collect_party_selections <- function(def) {
     slots <- normalise_party_slots(def$party_slots)
     out <- list()

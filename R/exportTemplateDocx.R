@@ -30,7 +30,10 @@
 #'     `{RECEIVER_EMAIL}`, `{RECEIVER_PHONE}`, `{RECEIVER_CONTACTS}`}
 #'   \item{Transmission}{`{TRANSMISSION_TYPE}`, `{TRANSMISSION_FREQUENCY}`,
 #'     `{TRANSMISSION_NOTIFICATION}`, `{TRANSMISSION_FIRST_TRANSFER}`,
-#'     `{TRANSMISSION_LAST_TRANSFER}`, `{TEST_UPLOAD}`, `{BLINDED_TRANSFER}`}
+#'     `{TRANSMISSION_LAST_TRANSFER}`, `{TEST_UPLOAD}`, `{BLINDED_TRANSFER}`,
+#'     `{TRANSMISSION_EXTENT}`, `{TRANSMISSION_SCOPE}`, `{TRANSMISSION_PACKAGING}`,
+#'     `{TRANSMISSION_SECURITY}`, `{TRANSMISSION_CHECKSUM}`,
+#'     `{TRANSMISSION_TEST_REQUIREMENTS}`, `{TRANSMISSION_BLINDING_REQUIREMENTS}`}
 #'   \item{Data content}{`{DATASET_COUNT}`, `{DATASET_IDS}`, `{DATASET_NAMES}`
 #'     (each dataset's name, or its id where no name is set),
 #'     `{DATASET_TYPES}`, `{TOTAL_COLUMNS}`, `{TOTAL_RULES}`}
@@ -218,6 +221,13 @@ export_with_template <- function(
     "{TRANSMISSION_LAST_TRANSFER}" = "Date or phrase for the last transfer",
     "{TEST_UPLOAD}" = "Whether a test upload is required (Yes/No; blank if unspecified)",
     "{BLINDED_TRANSFER}" = "Whether the transfer is blinded (Yes/No; blank if unspecified)",
+    "{TRANSMISSION_EXTENT}" = "Extent of the data transferred",
+    "{TRANSMISSION_SCOPE}" = "Scope of the transfer",
+    "{TRANSMISSION_PACKAGING}" = "How the transferred files are packaged",
+    "{TRANSMISSION_SECURITY}" = "Security measures for the transfer",
+    "{TRANSMISSION_CHECKSUM}" = "Checksum or integrity-check procedure",
+    "{TRANSMISSION_TEST_REQUIREMENTS}" = "Requirements a test transfer must meet",
+    "{TRANSMISSION_BLINDING_REQUIREMENTS}" = "Blinding requirements for the transfer",
     "{DATASET_COUNT}" = "Number of datasets",
     "{DATASET_IDS}" = "Identifiers of all datasets",
     "{DATASET_NAMES}" = "Names of all datasets (the identifier where no name is set)",
@@ -402,6 +412,13 @@ dta_template_placeholders <- function(dta = NULL) {
     "{TRANSMISSION_LAST_TRANSFER}" = .tv_scalar(.tv_get(trans, "date_last_transfer")),
     "{TEST_UPLOAD}" = .tv_scalar(.tv_get(trans, "test_upload")),
     "{BLINDED_TRANSFER}" = .tv_scalar(.tv_get(trans, "blinded_transfer")),
+    "{TRANSMISSION_EXTENT}" = .tv_scalar(.tv_get(trans, "extent")),
+    "{TRANSMISSION_SCOPE}" = .tv_scalar(.tv_get(trans, "scope")),
+    "{TRANSMISSION_PACKAGING}" = .tv_scalar(.tv_get(trans, "packaging")),
+    "{TRANSMISSION_SECURITY}" = .tv_scalar(.tv_get(trans, "security")),
+    "{TRANSMISSION_CHECKSUM}" = .tv_scalar(.tv_get(trans, "checksum")),
+    "{TRANSMISSION_TEST_REQUIREMENTS}" = .tv_scalar(.tv_get(trans, "test_requirements")),
+    "{TRANSMISSION_BLINDING_REQUIREMENTS}" = .tv_scalar(.tv_get(trans, "blinding_requirements")),
     "{DATASET_COUNT}" = as.character(length(datasets)),
     "{DATASET_IDS}" = dataset_ids,
     "{DATASET_NAMES}" = dataset_names,

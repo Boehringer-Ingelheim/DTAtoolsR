@@ -103,42 +103,141 @@ FONT_SIZES <- list(
 #' Applying one function to all of them is the point: before this, each table
 #' set its own font size, header fill and padding, so the document showed
 #' several table designs at once.
+#'
+#' The style is deliberately light: a tinted header row closed by a brand-green
+#' rule, hairlines between body rows and no zebra fill. Solid dark header bars
+#' and alternating stripes made every table shout equally loud.
 #' @param ft A flextable.
 #' @param center_cols Integer column indices to centre; all others are left
 #'   aligned.
 #' @keywords internal
 .style_table <- function(ft, center_cols = integer(0)) {
   hairline <- officer::fp_border(color = THEME_COLORS$gray_border, width = 0.5)
+  rule <- officer::fp_border(color = THEME_COLORS$primary_dark, width = 1)
 
   ft <- flextable::font(ft, fontname = FONTS$primary, part = "all")
   ft <- flextable::fontsize(ft, size = FONT_SIZES$table_body, part = "body")
   ft <- flextable::fontsize(ft, size = FONT_SIZES$table_header, part = "header")
   ft <- flextable::color(ft, color = THEME_COLORS$gray_dark, part = "body")
   ft <- flextable::bg(ft, bg = THEME_COLORS$white, part = "body")
-  ft <- flextable::bg(ft, bg = THEME_COLORS$primary_dark, part = "header")
-  ft <- flextable::color(ft, color = THEME_COLORS$white, part = "header")
+  ft <- flextable::bg(ft, bg = THEME_COLORS$primary_light, part = "header")
+  ft <- flextable::color(ft, color = THEME_COLORS$primary_dark, part = "header")
   ft <- flextable::bold(ft, bold = TRUE, part = "header")
-
-  # Zebra striping on even body rows, for legibility on the wide tables.
-  body_rows <- nrow(ft$body$dataset)
-  if (!is.null(body_rows) && body_rows >= 2) {
-    even <- seq(2, body_rows, by = 2)
-    ft <- flextable::bg(ft, i = even, bg = THEME_COLORS$gray_light, part = "body")
-  }
 
   ft <- flextable::border_remove(ft)
   ft <- flextable::hline(ft, border = hairline, part = "body")
+  ft <- flextable::hline_bottom(ft, border = rule, part = "header")
   ft <- flextable::valign(ft, valign = "top", part = "all")
   ft <- flextable::align(ft, align = "left", part = "all")
   if (length(center_cols) > 0) {
     ft <- flextable::align(ft, j = center_cols, align = "center", part = "all")
   }
   ft <- flextable::padding(ft,
-    padding.top = 3, padding.bottom = 3,
-    padding.left = 5, padding.right = 5, part = "all"
+    padding.top = 4, padding.bottom = 4,
+    padding.left = 6, padding.right = 6, part = "all"
   )
 
   ft
+}
+
+# Usable text width of the bundled template's A4 page (2.5 cm margins), in
+# inches. Tables are scaled to exactly this width so every table in a section
+# shares the same left and right edge.
+TEXT_WIDTH <- list(portrait = 6.3, landscape = 9.7)
+
+#' Scale a flextable's column widths proportionally to a total width
+#'
+#' `width = NULL` leaves the table as built: user templates passed to
+#' `export_with_template()` have page geometry the package cannot assume.
+#' @keywords internal
+.fit_table_width <- function(ft, width = TEXT_WIDTH$portrait) {
+  if (is.null(width)) {
+    return(ft)
+  }
+  # Per-column widths; flextable_dim() only reports their sum.
+  w <- ft$body$colwidths
+  if (is.null(w) || length(w) == 0 || sum(w) <= 0) {
+    w <- rep(1, ncol(ft$body$dataset))
+  }
+  flextable::width(ft, j = seq_along(w), width = w * width / sum(w))
+}
+
+#' A borderless-header key/value table: muted label column, value column.
+#'
+#' Used for every "fact" table of the built-in layout (document information,
+#' study, affiliation, transmission, dataset facts). A header row reading
+#' "Item | Details" carried no information, so there is none.
+#' @param pairs A data.frame with columns `key` and `value`.
+#' @keywords internal
+.kv_table <- function(pairs, width = TEXT_WIDTH$portrait, label_width = 1.9) {
+  pairs <- data.frame(key = pairs$key, value = pairs$value, stringsAsFactors = FALSE)
+  ft <- flextable::flextable(pairs)
+  ft <- flextable::delete_part(ft, part = "header")
+  ft <- flextable::width(ft, j = 1, width = label_width)
+  ft <- flextable::width(ft, j = 2, width = width - label_width)
+  hairline <- officer::fp_border(color = THEME_COLORS$gray_border, width = 0.5)
+  ft <- flextable::border_remove(ft)
+  ft <- flextable::hline(ft, border = hairline, part = "body")
+  ft <- flextable::hline_top(ft, border = hairline, part = "body")
+  ft <- flextable::font(ft, fontname = FONTS$primary, part = "all")
+  ft <- flextable::fontsize(ft, size = FONT_SIZES$table_body, part = "all")
+  ft <- flextable::color(ft, j = 1, color = THEME_COLORS$gray_mid, part = "body")
+  ft <- flextable::color(ft, j = 2, color = THEME_COLORS$gray_dark, part = "body")
+  ft <- flextable::bold(ft, j = 1, bold = TRUE, part = "body")
+  ft <- flextable::bg(ft, j = 1, bg = THEME_COLORS$gray_light, part = "body")
+  ft <- flextable::bg(ft, j = 2, bg = THEME_COLORS$white, part = "body")
+  ft <- flextable::valign(ft, valign = "top", part = "all")
+  ft <- flextable::align(ft, align = "left", part = "all")
+  flextable::padding(ft,
+    padding.top = 4, padding.bottom = 4,
+    padding.left = 6, padding.right = 6, part = "all"
+  )
+}
+
+#' Render any metadata value -- scalar, vector or nested list -- as display text
+#'
+#' `.format_scalar_value()` collapses a list to its names, which silently drops
+#' structured extension values. This keeps every leaf: named elements become
+#' `name: value` lines, unnamed ones bullet lines, nested levels indented.
+#' @keywords internal
+.format_any_value <- function(val, indent = "") {
+  if (!is.list(val)) {
+    return(.format_scalar_value(val, truncate = FALSE))
+  }
+  if (length(val) == 0) {
+    return(MISSING_VALUE_DISPLAY)
+  }
+  nms <- names(val) %||% rep("", length(val))
+  lines <- vapply(seq_along(val), function(i) {
+    sub <- .format_any_value(val[[i]], indent = paste0(indent, "    "))
+    if (is.list(val[[i]])) sub <- paste0("\n", sub)
+    label <- if (nzchar(nms[[i]])) paste0(.title_case_field(nms[[i]]), ": ") else paste0(intToUtf8(0x2022), " ")
+    paste0(indent, label, sub)
+  }, character(1))
+  paste(lines, collapse = "\n")
+}
+
+#' Reader-facing labels for the transmission fields the class documents.
+#' Unknown (extension) keys fall back to `.title_case_field()`.
+#' @keywords internal
+.transmission_label <- function(key) {
+  labels <- c(
+    type = "Transfer method",
+    frequency = "Frequency",
+    notification = "Notification",
+    test_upload = "Test upload",
+    blinded_transfer = "Blinded transfer",
+    date_first_transfer = "First transfer",
+    date_last_transfer = "Last transfer",
+    extent = "Extent",
+    scope = "Scope",
+    packaging = "Packaging",
+    security = "Security",
+    checksum = "Checksum",
+    test_requirements = "Test requirements",
+    blinding_requirements = "Blinding requirements"
+  )
+  unname(ifelse(key %in% names(labels), labels[key], vapply(key, .title_case_field, character(1))))
 }
 
 #' @keywords internal
@@ -329,14 +428,18 @@ FONT_SIZES <- list(
 
 #' @keywords internal
 .format_rule_description.DTARuleColCondition <- function(rule) {
-  if (!is.null(rule@description) && nzchar(rule@description)) {
-    return(rule@description)
-  }
-
   if_str <- .format_condition_map(rule@condition)
   then_str <- .format_condition_map(rule@then)
 
-  paste0("IF ", if_str, " \u2192 THEN ", then_str)
+  expansion <- paste0("IF ", if_str, " \u2192 THEN ", then_str)
+
+  # Same shape as the group formatter: the author's summary first, the
+  # mechanical reading below it, so a description never hides the condition.
+  if (!is.null(rule@description) && nzchar(rule@description)) {
+    return(paste(rule@description, expansion, sep = "\n"))
+  }
+
+  expansion
 }
 
 #' Describe a group-condition scope ("any"/"all") in words.
@@ -465,6 +568,64 @@ translate_rule_to_human <- function(rule) {
       }
     }
   )
+}
+
+# Inline Markdown code span that survives backticks in its text: the fence is
+# the shortest backtick run absent from the text, padded with a space when the
+# text starts or ends with a backtick (rule ids cannot contain whitespace).
+.md_code_span <- function(text) {
+  runs <- nchar(regmatches(text, gregexpr("`+", text))[[1]])
+  n <- 1L
+  while (n %in% runs) n <- n + 1L
+  tick <- strrep("`", n)
+  pad <- if (grepl("^`|`$", text)) " " else ""
+  paste0(tick, pad, text, pad, tick)
+}
+
+#' Exact, machine-readable definition of a rule as YAML text
+#'
+#' The mapping holds every property of the rule except `id` and `description`
+#' (which exported documents show in their own columns), in the same syntax a
+#' specification file uses, so `yaml::yaml.load()` plus [DTARuleFactory()]
+#' rebuilds the rule. Unlike [translate_rule_to_human()] it is lossless.
+#' @param rule A `DTARule` object.
+#' @return A single string, lines separated by `"\n"`, no trailing newline.
+#' @keywords internal
+.rule_definition_yaml <- function(rule) {
+  def <- as.list(rule)
+  def <- def[setdiff(names(def), c("id", "description"))]
+  # Unset constraint fields (e.g. a missing message) are noise; the normaliser
+  # puts them back when the definition is read in again.
+  if (is.list(def$constraints)) {
+    def$constraints <- lapply(def$constraints, function(cst) Filter(Negate(is.null), cst))
+  }
+  # verbatim_logical: plain as.yaml() writes TRUE as `yes`, which reads as the string.
+  # as.yaml()'s own number formatting is unusable here: its default (7 digits)
+  # rounds a bound such as 0.123456789, and `precision = 15` counts decimals, so
+  # it prints 99999.998999999996158 and still cuts 0.0001234567890123.
+  # Shortest of %.15g / %.17g that reads back identically; ".0" keeps a whole
+  # double a double (a bare `18` would be read back as an integer).
+  fmt_num <- function(x) {
+    vapply(x, function(v) {
+      if (is.na(v)) {
+        return(if (is.nan(v)) ".nan" else ".na.real")
+      }
+      if (is.infinite(v)) {
+        return(if (v > 0) ".inf" else "-.inf")
+      }
+      s <- sprintf("%.15g", v)
+      if (!identical(as.numeric(s), v)) s <- sprintf("%.17g", v)
+      if (!grepl("[.]", s)) s <- sub("^(-?[0-9]+)(e|$)", "\\1.0\\2", s)
+      s
+    }, character(1))
+  }
+  sub("\n$", "", yaml::as.yaml(
+    def,
+    handlers = list(
+      logical = yaml::verbatim_logical,
+      numeric = function(x) structure(fmt_num(x), class = "verbatim")
+    )
+  ))
 }
 
 # The single display string used for every missing/unset value. NULL, NA (of
@@ -979,7 +1140,18 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
           check.names = FALSE
         ))
       }
-      lines <- c(lines, .df_to_md_table(rule_data), "")
+      lines <- c(lines, .df_to_md_table(rule_data), "", "**Exact rule definitions**", "")
+      # Fenced blocks, not table cells: a cell cannot hold a code block, and
+      # Markdown would interpret `\*`, `_` and leading spaces inside it.
+      for (rule in rules) {
+        def <- .rule_definition_yaml(rule)
+        ticks <- regmatches(def, gregexpr("`+", def))[[1]]
+        fence <- strrep("`", max(3L, nchar(ticks) + 1L))
+        lines <- c(
+          lines, .md_code_span(rule@id), "",
+          paste0(fence, "yaml"), strsplit(def, "\n", fixed = TRUE)[[1]], fence, ""
+        )
+      }
     } else {
       lines <- c(lines, "No validation rules specified.", "")
     }

@@ -659,10 +659,10 @@ test_that("export_with_template falls back to the standard layout on failure", {
   # metadata/spec tables.
   paragraphs <- .docx_paragraphs(out)
   expect_true("Example DTA" %in% paragraphs)
-  expect_true("Data Transfer Agreement Metadata" %in% paragraphs)
-  expect_true("Dataset Specifications" %in% paragraphs)
+  expect_true("Document Information" %in% paragraphs)
+  expect_true("Column Specifications" %in% paragraphs)
   summary <- officer::docx_summary(officer::read_docx(out))
-  expect_true(all(paste("heading", 1:4) %in% summary$style_name))
+  expect_true(all(paste("heading", 1:3) %in% summary$style_name))
   expect_true(any(!is.na(summary$table_index)))
 
   # quiet = FALSE: the fallback must be announced as a real warning CONDITION
@@ -823,4 +823,39 @@ test_that("template variables are extracted from a bundled YAML fixture", {
   )
   expect_equal(vars[["{TOTAL_RULES}"]], "8")
   expect_equal(vars[["{TOTAL_COLUMNS}"]], "14")
+})
+
+test_that("the free-text transmission fields resolve and the bundled clinical template prints every one of them", {
+  # These seven fields had no placeholder at all, so no template could carry
+  # them; the bundled template is meant to capture the whole metadata block.
+  fields <- c(
+    extent = "Full study data", scope = "All randomised subjects",
+    packaging = "One gzip archive per transfer", security = "SFTP with key authentication",
+    checksum = "SHA-256 manifest", test_requirements = "Dummy file must validate",
+    blinding_requirements = "Treatment codes withheld until unblinding"
+  )
+  dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
+  md <- dta@metadata
+  md@transmission <- utils::modifyList(md@transmission, as.list(fields))
+  dta@metadata <- md
+
+  vars <- .extract_template_variables(dta)
+  for (f in names(fields)) {
+    expect_identical(vars[[paste0("{TRANSMISSION_", toupper(f), "}")]], fields[[f]])
+  }
+
+  tmpl <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(
+    dta, tmpl, out,
+    variables = list(YAML_EMBEDDED = "metadata:\n  title: embedded"),
+    quiet = TRUE, fallback = FALSE
+  )
+  txt <- .docx_text(out)
+  for (value in fields) {
+    expect_match(txt, value, fixed = TRUE)
+  }
+  expect_match(txt, "title: embedded", fixed = TRUE)
+  expect_false(grepl("{TRANSMISSION_", txt, fixed = TRUE))
 })

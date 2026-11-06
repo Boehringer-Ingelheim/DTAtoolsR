@@ -1329,7 +1329,7 @@ bi_css <- function(colors = dta_app_config_defaults()$colors) {
     .tmpl-field-control .form-group, .tmpl-field-control .shiny-input-container { margin-bottom: 0; }
     .tmpl-field-control .shiny-input-container:not(.shiny-input-container-inline) { width: 100%; }
     .tmpl-field-control textarea { min-height: 5.5rem; }
-    /* A textarea option with suggestions: the picker above it is a helper,
+    /* A text or textarea option with suggestions: the picker is a helper,
        so its label is a quiet caption rather than a second field label. */
     .tmpl-field-control .control-label { font-size: .8125rem; font-weight: 500; color: var(--bi-grey); margin-bottom: 4px; }
     .tmpl-field-control .form-group + .form-group { margin-top: 10px; }
