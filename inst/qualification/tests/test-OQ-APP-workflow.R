@@ -229,7 +229,7 @@ test_that("OQ-APP-025 | a template that extends another carries the parent forwa
   })
 })
 
-test_that("OQ-APP-031 | narrative template suggestions preserve editable input | REQ-APP-024", {
+test_that("OQ-APP-031 | template suggestions preserve editable input | REQ-APP-024", {
   qapp_skip_unless_app_installed()
   html <- paste(as.character(qapp_fn("render_template_option_input")(list(
     id = "scope", label = "Delivery scope", type = "textarea",
@@ -237,6 +237,34 @@ test_that("OQ-APP-031 | narrative template suggestions preserve editable input |
     choices = c("Complete data", "Incremental data"),
     default = "Complete data"
   ))), collapse = "")
+
+  # A one-line text option that permits custom values has the same shape, with
+  # a text input in place of the textarea.
+  text_html <- paste(as.character(qapp_fn("render_template_option_input")(list(
+    id = "freq", label = "Transfer frequency", type = "text",
+    choices = c("weekly", "monthly"),
+    default = "weekly"
+  ))), collapse = "")
+
+  qa_step(
+    "suggested one-line controls retain the original editable text input and map blank to empty",
+    c(
+      text_input = TRUE, suggestions = TRUE, blank = TRUE,
+      bubbling_input = TRUE, sentinel_not_stored = TRUE
+    ),
+    c(
+      text_input = grepl('<input id="tmpl_opt_freq" type="text"', text_html, fixed = TRUE) &&
+        grepl('value="weekly"', text_html, fixed = TRUE),
+      suggestions = grepl('id="tmpl_opt_freq_suggestion"', text_html, fixed = TRUE) &&
+        grepl("weekly", text_html, fixed = TRUE) &&
+        grepl("monthly", text_html, fixed = TRUE),
+      blank = grepl("(leave blank)", text_html, fixed = TRUE),
+      bubbling_input = grepl("dispatchEvent(new Event('input', { bubbles: true }))", text_html, fixed = TRUE),
+      sentinel_not_stored = grepl("__blank__", text_html, fixed = TRUE) &&
+        grepl("value ===", text_html, fixed = TRUE) &&
+        grepl("? '' :", text_html, fixed = TRUE)
+    )
+  )
 
   qa_step(
     "suggested narrative controls retain the original editable multiline input and map blank to empty",

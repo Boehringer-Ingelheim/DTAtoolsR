@@ -25,7 +25,7 @@ Goal:
 | metadata.header | string | Example Pharma Inc. |
 | metadata.version_history[] | array<object> | [{version: "1.0", date: "2026-07-29", changes: "Initial trial version"}] |
 | metadata.error_handling | string | Format or content errors are reported by email and corrected in a follow-up transfer |
-| metadata.authorized_for_corrections | string \| array<string> | TDM |
+| metadata.authorized_for_corrections | string \| array<string> | Trial Data Manager (TDM) |
 
 ## Canonical `DTAMetaData` fields — Parties
 | Field | Type | Example |
@@ -53,27 +53,28 @@ These are the `metadata.transmission.*` keys this template sets. `DTAMetaData` a
 ## Template option → field mapping (`biomarker_gf.dta-template.yaml`)
 | Option id | Control | Target field |
 |---|---|---|
-| title | text combo | metadata.title |
+| title | text + suggestions | metadata.title |
 | version | text | metadata.version |
-| header | text combo | metadata.header |
-| transmission_type | text combo | metadata.transmission.type |
-| transmission_frequency | text combo | metadata.transmission.frequency |
-| transmission_notification | text combo | metadata.transmission.notification |
+| header | text + suggestions | metadata.header |
+| transmission_type | text + suggestions | metadata.transmission.type |
+| transmission_frequency | text + suggestions | metadata.transmission.frequency |
+| transmission_notification | text + suggestions | metadata.transmission.notification |
 | test_upload | checkbox | metadata.transmission.test_upload |
 | blinded_transfer | checkbox | metadata.transmission.blinded_transfer |
-| date_first_transfer | text combo | metadata.transmission.date_first_transfer |
-| date_last_transfer | text combo | metadata.transmission.date_last_transfer |
-| error_handling | text combo | metadata.error_handling |
-| authorized_for_corrections | text combo | metadata.authorized_for_corrections |
+| date_first_transfer | text + suggestions | metadata.transmission.date_first_transfer |
+| date_last_transfer | text + suggestions | metadata.transmission.date_last_transfer |
+| error_handling | textarea + suggestions | metadata.error_handling |
+| authorized_for_corrections | text + suggestions | metadata.authorized_for_corrections |
 | gf_detail (vocabulary slot, `gf_tstdtl@1.0`) | closed vocabulary choice | datasets.gf_data_specs_pattern.columns.GFTSTDTL.values |
 | supplier (party slot) | party profile | metadata.supplier |
 | receiver (party slot) | party profile | metadata.receiver |
 
-"text combo" options show the suggested values in a searchable dropdown: pick
-one, choose "(leave blank)", or type your own value (this template's text
-options all allow it). The ACME deviation's `header` default appears
-pre-selected in that dropdown even though it is not one of the suggestions
-listed above.
+"text + suggestions" options are a field you can type into, with a "Choose a
+suggestion" picker that fills it: pick one, choose "(leave blank)" to empty the
+field, or type your own value (this template's text options all allow it). The
+ACME deviation's `header` default appears pre-filled in the field and
+pre-selected in the picker even though it is not one of the suggestions listed
+above.
 
 ## Appendix — GF concepts not modeled in `DTAMetaData`
 These appeared in the source `.docx` but have no first-class `DTAMetaData`

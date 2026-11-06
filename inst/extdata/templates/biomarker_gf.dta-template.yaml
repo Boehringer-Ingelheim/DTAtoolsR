@@ -39,7 +39,7 @@ base:
     error_handling: >-
       Format or content errors are reported by email to the authorized
       contacts and corrected in a follow-up transfer.
-    authorized_for_corrections: TDM
+    authorized_for_corrections: Trial Data Manager (TDM)
 
 options:
   # Every option writes to a REAL DTAMetaData field via `target:`, so its value
@@ -51,8 +51,8 @@ options:
   # between `base` and the option -- a duplication nothing enforced, and which
   # the option silently won whenever the two drifted apart.
   #
-  # Text options offer suggestions in a dropdown AND accept a typed custom
-  # value. Use the longhand `effects:` block only when one choice has to set
+  # Text options are a field you can type into, with a "Choose a suggestion"
+  # picker that fills it. Use the longhand `effects:` block only when one choice has to set
   # several fields at once.
 
   - id: title
@@ -143,7 +143,7 @@ options:
 
   - id: error_handling
     label: Error handling
-    type: text
+    type: textarea
     target: metadata.error_handling
     help: How data/format errors are handled and communicated.
     choices:
@@ -156,9 +156,8 @@ options:
     target: metadata.authorized_for_corrections
     help: Contact(s) authorized to request corrections.
     choices:
-      - TDM
-      - SciMo
       - Trial Data Manager (TDM)
+      - SciMo
 
 
 datasets:
