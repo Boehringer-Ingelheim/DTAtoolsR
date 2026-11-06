@@ -84,7 +84,12 @@ column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
 example longer than its declared length), \code{vocabulary_invalid},
 \code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir},
 \code{variant_invalid}, \code{prior_versions_invalid} (a malformed entry in a
-creation template's hand-written \verb{prior_versions:}), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
+creation template's hand-written \verb{prior_versions:}), the app-configuration
+errors \code{app_config_invalid} (a bad value in \code{dta-app.yaml}, or a missing
+logo or Word template it names), \code{app_config_duplicate} (both
+\code{dta-app.yaml} and \code{dta-app.yml} in the library) and
+\code{app_config_outside_library_dir} (a \code{dta-app.yaml} at the repository root
+while \verb{templates/} is the library folder), and the \code{\link[=lint_dta]{lint_dta()}} errors \code{rule_invalid},
 \code{rule_id_duplicate}, \code{rule_column_undeclared}, \code{rule_range_non_numeric},
 \code{rule_condition_operator_invalid}, \code{rule_condition_numeric_on_text},
 \code{rule_condition_value_unfit}, \code{rule_condition_value_outside_values} (only for \code{equals}/\verb{in}; the negated
@@ -97,7 +102,10 @@ Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} a
 \code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
 \code{extends_unresolved}, \code{extends_cycle}, \code{sealed_violation},
 \code{sealed_path_unknown}, \code{values_and_values_from}, \code{values_from_unresolved},
-\code{vocabulary_unresolved}, \code{duplicate_id_version}, \code{template_in_subdirectory}.
+\code{vocabulary_unresolved}, \code{duplicate_id_version}, \code{template_in_subdirectory}, plus the
+app-configuration warnings \code{app_config_unknown_key} and
+\code{app_config_warning}. The app-configuration checks run on every directory
+scan regardless of \code{kinds}.
 }
 \examples{
 issues <- validate_template(system.file("extdata", "templates", package = "DTAtools"))

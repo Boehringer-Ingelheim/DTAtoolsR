@@ -354,15 +354,30 @@ test_that("the bundled template-repo-skeleton directory is itself clean", {
 })
 
 
-test_that("the scaffold keeps README at root and all four templates in templates/", {
+test_that("the scaffold keeps README at root and the templates plus dta-app.yaml in templates/", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = FALSE)
   expect_true(file.exists(file.path(dir, "README.md")))
   expect_setequal(list.files(dir, pattern = "[.]dta-.*[.]ya?ml$"), character(0))
   expect_setequal(list.files(file.path(dir, "templates")), c(
     "starter.dta-template.yaml", "starter_dataset.dta-dataset-template.yaml",
-    "starter_supplier.dta-party.yaml", "starter_terms.dta-vocabulary.yaml"
+    "starter_supplier.dta-party.yaml", "starter_terms.dta-vocabulary.yaml",
+    "dta-app.yaml"
   ))
+})
+
+test_that("dta-app.yaml is scaffolded with the examples, is not a template, and parses with no problems", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, ci = FALSE)
+  cfg <- file.path(dir, "templates", "dta-app.yaml")
+  expect_true(file.exists(cfg))
+  expect_equal(yaml::read_yaml(cfg)$kind, "dta_app_config")
+  parsed <- DTAtools:::.dta_template_engine_get("parse_dta_app_config")(cfg)
+  expect_equal(nrow(parsed$problems), 0)
+
+  bare <- withr::local_tempdir()
+  create_template_repo(bare, ci = FALSE, examples = FALSE)
+  expect_false(file.exists(file.path(bare, "templates", "dta-app.yaml")))
 })
 
 test_that("the scaffold README is byte-identical to the complete skeleton README", {

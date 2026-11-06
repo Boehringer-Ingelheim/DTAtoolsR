@@ -69,6 +69,7 @@ at the root and the starter templates under \verb{templates/}:
 <path>/templates/starter_dataset.dta-dataset-template.yaml
 <path>/templates/starter_supplier.dta-party.yaml
 <path>/templates/starter_terms.dta-vocabulary.yaml
+<path>/templates/dta-app.yaml                  (app configuration, all commented out)
 <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 <path>/Jenkinsfile                             (ci = "jenkins")
