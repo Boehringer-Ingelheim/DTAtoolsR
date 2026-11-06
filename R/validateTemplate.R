@@ -691,6 +691,20 @@
   # base can never be built, regardless of what lives outside this directory)
   # are raised together.
   abstract <- isTRUE(def[["abstract"]])
+  # A malformed `mixins:` value fails inside the READER, whose dta_try() turns
+  # the classed condition into a plain string -- so without this check the
+  # validator could only say instantiate_failed, and nothing at all for an
+  # abstract template. Ask the same shape check directly, on the raw file.
+  mixins_shape <- tryCatch(
+    {
+      .dta_template_engine_get("dta_template_mixin_refs")(def)
+      NULL
+    },
+    error = function(e) e
+  )
+  if (inherits(mixins_shape, "error")) {
+    add("error", "mixin_invalid", conditionMessage(mixins_shape))
+  }
   read_res <- .dta_template_engine_get("read_dta_creation_template")(path)
   if (!isTRUE(read_res$ok)) {
     if (!abstract) {
@@ -703,7 +717,18 @@
     )
     if (inherits(resolved, "error")) {
       msg <- conditionMessage(resolved)
-      code <- if (grepl("cycle detected", msg, fixed = TRUE) || grepl("exceeds the depth limit", msg, fixed = TRUE)) {
+      # Mixin conditions are told apart by CLASS, and first: a mixin message
+      # names author-supplied ids, so a text test could be fooled by an id that
+      # happens to contain "cycle detected". An unresolvable mixin is a warning
+      # for the same reason extends_unresolved is (the library may live
+      # elsewhere); an invalid or conflicting one is the author's own error.
+      code <- if (inherits(resolved, "dta_template_mixin_unresolved")) {
+        "mixin_unresolved"
+      } else if (inherits(resolved, "dta_template_mixin_invalid")) {
+        "mixin_invalid"
+      } else if (inherits(resolved, "dta_template_mixin_conflict")) {
+        "mixin_conflict"
+      } else if (grepl("cycle detected", msg, fixed = TRUE) || grepl("exceeds the depth limit", msg, fixed = TRUE)) {
         "extends_cycle"
       } else if (inherits(resolved, "dta_template_sealed_violation")) {
         # A seal violation is not an unresolvable reference: the chain resolved
@@ -714,7 +739,7 @@
       } else {
         "extends_unresolved"
       }
-      add("warning", code, msg)
+      add(if (code %in% c("mixin_invalid", "mixin_conflict")) "error" else "warning", code, msg)
       if (!abstract) {
         add("error", "instantiate_failed", msg)
       }
@@ -1480,7 +1505,10 @@
 #' example longer than its declared length), `vocabulary_invalid`,
 #' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`,
 #' `variant_invalid`, `prior_versions_invalid` (a malformed entry in a
-#' creation template's hand-written `prior_versions:`), the app-configuration
+#' creation template's hand-written `prior_versions:`), `mixin_invalid` (a
+#' malformed `mixins:` value, or a named template that is not a valid mixin),
+#' `mixin_conflict` (a key contributed twice, or a mixin an ancestor already
+#' mixes in), the app-configuration
 #' errors `app_config_invalid` (a bad value in `dta-app.yaml`, or a missing
 #' logo or Word template it names), `app_config_duplicate` (both
 #' `dta-app.yaml` and `dta-app.yml` in the library) and
@@ -1496,7 +1524,9 @@
 #' `format_narrower_than_length`, plus `kind_unknown`, `id_missing`, `version_missing`,
 #' `version_unparseable`, `target_invalid`, `party_slot_invalid`,
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
-#' `extends_unresolved`, `extends_cycle`, `sealed_violation`,
+#' `extends_unresolved`, `extends_cycle`, `mixin_unresolved` (a `mixins:`
+#' reference that does not resolve within the directory; a warning for the
+#' same reason as `extends_unresolved`), `sealed_violation`,
 #' `sealed_path_unknown`, `values_and_values_from`, `values_from_unresolved`,
 #' `vocabulary_unresolved`, `duplicate_id_version`, `template_in_subdirectory`, plus the
 #' app-configuration warnings `app_config_unknown_key` and

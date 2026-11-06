@@ -49,6 +49,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `{TRANSMISSION_SECURITY}`, `{TRANSMISSION_CHECKSUM}`,
   `{TRANSMISSION_TEST_REQUIREMENTS}` and
   `{TRANSMISSION_BLINDING_REQUIREMENTS}`.
+- Creation templates can compose reusable building blocks with a new
+  `mixins:` key: a list of abstract, flat, add-only templates whose options,
+  datasets, slots and `base:` content are folded in next to the `extends:`
+  parent. Anything contributed twice is an error the child resolves by writing
+  the value itself, so the order of the list never matters. A template that
+  uses only mixins may omit `base:` and `datasets:`. Provenance records the
+  mixins, and `validate_template()` reports `mixin_unresolved` (warning),
+  `mixin_invalid` and `mixin_conflict` (errors).
 
 ### Changed
 

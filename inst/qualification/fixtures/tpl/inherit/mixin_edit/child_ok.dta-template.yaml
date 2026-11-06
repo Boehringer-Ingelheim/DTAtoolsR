@@ -1,0 +1,26 @@
+kind: dta_creation_template
+id: me_ok
+version: "1.0"
+mixins: [me_m@1.0]
+base:
+  metadata:
+    title: Edit
+    version: "1.0"
+    date: "2026-01-01"
+    header: QA Org
+    receiver:
+      affiliation:
+        name: Our org
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+datasets:
+  - id: obs
+    columns:
+      - id: SUBJID
+        type: SAS Char
+        format: SAS $10.
+        nullable: No
+  - id: extra
+    remove: true

@@ -498,7 +498,7 @@ test_that("ordinary history builds retain their original result and comparison s
 
   expect_true(a$ok, info = a$error)
   expect_true(b$ok, info = b$error)
-  expect_identical(names(a$value), c("def", "lineage", "dta"))
+  expect_identical(names(a$value), c("def", "lineage", "mixins", "dta"))
   ch <- app_fn("template_history_compare")(a$value, b$value)
   expect_identical(names(ch), c("area", "what", "change", "from", "to"))
   expect_equal(nrow(ch), 0)

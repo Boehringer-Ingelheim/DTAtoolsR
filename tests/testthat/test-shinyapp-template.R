@@ -1129,3 +1129,51 @@ test_that("every unfilled required path is named at once, not one per run", {
   expect_match(result$error, "base.metadata.header", fixed = TRUE)
   expect_match(result$error, "options.header.default", fixed = TRUE)
 })
+
+# ---- mixins at read time -----------------------------------------------------
+
+read_yaml_text <- function(lines) {
+  tmp <- tempfile(fileext = ".yaml")
+  writeLines(lines, tmp)
+  withr::defer(unlink(tmp, force = TRUE), envir = parent.frame())
+  app_fn("read_dta_creation_template")(tmp)
+}
+
+test_that("read_dta_creation_template() lets a mixins-only template omit base and datasets", {
+  res <- read_yaml_text(c(
+    "kind: dta_creation_template",
+    "id: only_mixins",
+    "mixins: [a@1.0, b]"
+  ))
+
+  expect_true(res$ok, info = res$error)
+  expect_identical(res$value$mixins, c("a@1.0", "b"))
+})
+
+test_that("read_dta_creation_template() accepts a single mixin string", {
+  res <- read_yaml_text(c("kind: dta_creation_template", "id: t", "mixins: a@1.0"))
+  expect_true(res$ok, info = res$error)
+})
+
+test_that("read_dta_creation_template() still demands base when there are neither extends nor mixins", {
+  res <- read_yaml_text(c("kind: dta_creation_template", "id: t", "mixins: []"))
+  expect_false(res$ok)
+  expect_equal(res$error, "Template must contain a 'base' section.")
+})
+
+test_that("read_dta_creation_template() rejects malformed mixins: values", {
+  bad <- list(
+    number = "mixins: 7",
+    mapping = c("mixins:", "  a: b"),
+    nested = c("mixins:", "  - [a, b]"),
+    blank = c("mixins:", "  - a", "  - ''"),
+    duplicate = "mixins: [a@1.0, a@1.0]"
+  )
+  for (nm in names(bad)) {
+    res <- read_yaml_text(c(
+      "kind: dta_creation_template", "id: t", "base: {}", "datasets: [x]", bad[[nm]]
+    ))
+    expect_false(res$ok, info = nm)
+    expect_match(res$error, "mixins", fixed = TRUE, info = nm)
+  }
+})

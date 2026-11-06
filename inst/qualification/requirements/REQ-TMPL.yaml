@@ -308,7 +308,7 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:632-671;
-      inst/shiny/dta_app/R/template_inherit.R:826-873 (resolve_template_inheritance)
+      inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
 
   - id: REQ-TMPL-020
     text: >
@@ -320,7 +320,8 @@ requirements:
       template marked abstract: true shall be exempt from this and from the
       dry-run build entirely, whether or not its own extends chain resolves.
       An abstract base may omit datasets and provide shared metadata only;
-      it must still provide a base mapping unless inherited. A concrete child
+      it must still provide a base mapping unless it inherits through
+      extends: or mixins:. A concrete child
       that supplies or inherits at least one valid dataset shall be buildable
       from that base. A concrete template with no datasets after inheritance
       resolves shall be reported instantiate_failed at severity "error",
@@ -364,8 +365,8 @@ requirements:
     covers: [validate_template]
     source: >
       R/validateTemplate.R:672-694;
-      inst/shiny/dta_app/R/template_inherit.R:686-745 (dta_template_check_sealed),
-      542-558 (dta_template_path_get), 588-661 (dta_template_entry_metadata_paths,
+      inst/shiny/dta_app/R/template_inherit.R:690-749 (dta_template_check_sealed),
+      546-565 (dta_template_path_get), 592-665 (dta_template_entry_metadata_paths,
       dta_template_entry_seal_paths, dta_template_paths_overlap)
 
   - id: REQ-TMPL-022
@@ -383,8 +384,8 @@ requirements:
     category: functional
     covers: [validate_template]
     source: >
-      inst/shiny/dta_app/R/template_inherit.R:267-293 (dta_template_section_state),
-      646-673 (dta_template_merge_collection_section)
+      inst/shiny/dta_app/R/template_inherit.R:285-297 (dta_template_section_state),
+      814-828 (dta_template_merge_collection_section)
     notes: >
       PINNED, not endorsed: for a collection section, validate_template() and
       the dry-run build it drives currently cannot tell "explicit null" apart
@@ -411,7 +412,7 @@ requirements:
     risk: medium
     category: functional
     covers: [validate_template]
-    source: inst/shiny/dta_app/R/template_inherit.R:866-873
+    source: inst/shiny/dta_app/R/template_inherit.R:1087-1274 (resolve_template_inheritance)
 
   # ---- controlled vocabulary: extends, cycles, term algebra ------------------
 
@@ -670,3 +671,75 @@ requirements:
       rule the app applies at start-up. The app itself never fails over a
       bad value: it warns and keeps that key's default. This check exists so
       the mistake fails CI instead of being found in production.
+
+  # ---- mixins: composition ---------------------------------------------------
+
+  - id: REQ-TMPL-038
+    text: >
+      A creation template may list mixins:, a sequence of distinct, non-empty
+      template references (a single string counts as a one-element list). A
+      mixin shall be an abstract template that contains none of the keys
+      extends, mixins, sealed, required, variants or order, writes its
+      options, datasets, party_slots and vocabulary_slots only as plain
+      sequences with no entry carrying remove, and has no null in a content
+      section or inside base:. Only a mixin's base, options, datasets,
+      party_slots and vocabulary_slots shall be contributed; its label,
+      description, date, id, version and abstract flag shall not be copied. The
+      mixins shall be folded, in the order listed, into the resolved extends:
+      parent (or into nothing when there is none) before the template's own
+      content is merged over the result. The fold is add-only: two mappings
+      under the same base: key merge recursively, but any other collision under
+      one base: path, and any two collection entries with the same key (the
+      id of an option or slot, the identifying key of a dataset), shall be an error and never an override,
+      whichever of the extends chain or another mixin contributed first. A
+      mixin that an ancestor in the extends chain already mixes in shall be
+      an error when listed again. The template itself may modify or remove any
+      entry a mixin contributed, as for any inherited entry. Descendants
+      shall inherit the folded content but not the mixins: key itself, so a
+      descendant's own mixins: apply at its own level only. A template that
+      inherits only through mixins: may omit base: and datasets:.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      inst/shiny/dta_app/R/template_inherit.R:849-878 (dta_template_mixin_refs),
+      890-938 (dta_template_check_mixin_shape), 954-974
+      (dta_template_merge_disjoint), 984-1078 (dta_template_fold_mixins),
+      1087-1274 (resolve_template_inheritance)
+    notes: >
+      Observable through validate_template() as: a composed template that is
+      concrete is valid only if the fold supplied everything it needs (the
+      dataset requirement in REQ-TMPL-020), so OQ-TMPL-079 pairs the composed
+      child with the same parent without mixins. The conflict case is
+      OQ-TMPL-080 and the invalid-mixin case OQ-TMPL-081. Child modification
+      and removal of mixin entries is OQ-TMPL-084, and re-listing an
+      ancestor's mixin is OQ-TMPL-085.
+
+  - id: REQ-TMPL-039
+    text: >
+      validate_template() shall report a mixins: reference that does not
+      resolve within the directory as mixin_unresolved at severity "warning";
+      a mixins: value that is malformed (not a list of distinct non-empty
+      strings) or a named template that is not a valid mixin as mixin_invalid,
+      and an overlap or a re-listed ancestor mixin as mixin_conflict, each
+      at severity "error". For a creation template that is
+      not abstract each of the three shall additionally be reported
+      instantiate_failed at severity "error"; a template marked abstract: true
+      shall get no instantiate_failed row for any of them, but a malformed
+      mixins: value in its own file is still reported mixin_invalid. Mixin
+      content that reaches a path an ancestor sealed, directly or through the
+      target or effects of an option the mixin adds, shall be reported
+      sealed_violation as for any descendant (REQ-TMPL-021), not as a mixin
+      code.
+    risk: high
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_creation);
+      inst/shiny/dta_app/R/template_inherit.R:984-1078
+      (dta_template_fold_mixins), 1087-1274 (resolve_template_inheritance);
+      inst/extdata/template-repo-skeleton/README.md (issue-code table)
+    notes: >
+      The condition is classified by its class, before any text test, so an
+      author-chosen id such as "cycle detected" cannot turn a mixin error into
+      extends_cycle.

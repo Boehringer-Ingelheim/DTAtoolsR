@@ -113,6 +113,7 @@ load_template_definition <- function(ref, index = NULL, kind = "dta_creation_tem
     list(
       def = def,
       lineage = resolved$lineage,
+      mixins = resolved$mixins,
       path = row$path[[1]],
       source_name = row$source_name[[1]],
       source_kind = row$source_kind[[1]],
@@ -431,6 +432,7 @@ apply_metadata_carry_over <- function(dta, source_meta, fields) {
 # than adopting the target template's.
 template_provenance <- function(def, meta,
                                 lineage = meta$lineage %||% character(0),
+                                mixins = meta$mixins %||% character(0),
                                 ds_provenance = list(), carried_over_from = NULL) {
   # The date of THIS template version (its own `date:`, never inherited --
   # see resolve_template_inheritance()). yaml reads an unquoted date as Date.
@@ -448,6 +450,7 @@ template_provenance <- function(def, meta,
     content_hash = paste0("hash:", rlang::hash(def)),
     created = Sys.Date(),
     lineage = if (length(lineage) > 0) as.character(lineage) else NULL,
+    mixins = if (length(mixins) > 0) as.character(mixins) else NULL,
     datasets = if (length(ds_provenance) > 0) ds_provenance else NULL,
     carried_over_from = carried_over_from
   )

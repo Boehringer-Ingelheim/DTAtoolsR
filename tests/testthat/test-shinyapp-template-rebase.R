@@ -738,3 +738,51 @@ test_that("rebase_apply() leaves the existing version history intact and appends
   # No stub entry named "1" -- the corruption pinned above did not occur.
   expect_null(names(after))
 })
+
+test_that("rebase keeps the document's own mixins, as it keeps its lineage", {
+  root <- withr::local_tempdir()
+  setup_demo_family(root)
+  idx <- index_over(root)
+
+  current <- build_demo_current(idx)
+  md <- DTAtools::metadata(current)
+  tpl <- S7::prop(md, "template")
+  # The target templates (1.0 and 1.1) have no mixins at all, so anything the
+  # document keeps can only have come from the document.
+  tpl$mixins <- c("doc_mixin_a@1.0", "doc_mixin_b@2.0")
+  S7::prop(md, "template") <- tpl
+  current@metadata <- md
+
+  plan <- app_fn("rebase_plan")(current, "1.1", index = idx)
+  expect_true(plan$ok)
+  expect_identical(
+    plan$target_provenance$mixins,
+    c("doc_mixin_a@1.0", "doc_mixin_b@2.0")
+  )
+
+  applied <- app_fn("rebase_apply")(
+    current, plan,
+    resolutions = list("supplier.affiliation.name" = "target")
+  )
+  expect_true(applied$ok)
+  rebased <- DTAtools::metadata(applied$value)@template
+  expect_identical(rebased$version, "1.1")
+  expect_identical(rebased$mixins, c("doc_mixin_a@1.0", "doc_mixin_b@2.0"))
+  expect_identical(rebased$lineage, "grandparent_ct@1.0")
+})
+
+test_that("a document without mixins rebases to one without a mixins key", {
+  root <- withr::local_tempdir()
+  setup_demo_family(root)
+  idx <- index_over(root)
+
+  current <- build_demo_current(idx)
+  plan <- app_fn("rebase_plan")(current, "1.1", index = idx)
+  expect_true(plan$ok)
+  applied <- app_fn("rebase_apply")(
+    current, plan,
+    resolutions = list("supplier.affiliation.name" = "target")
+  )
+  expect_true(applied$ok)
+  expect_false("mixins" %in% names(DTAtools::metadata(applied$value)@template))
+})

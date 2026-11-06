@@ -967,3 +967,109 @@ test_that("create_dta_from_template() with none of the four new arguments behave
   # No @template written when `provenance` is not supplied.
   expect_length(DTAtools::metadata(result$value)@template, 0)
 })
+
+# ---- mixins: load_template_definition() and template_provenance() -----------
+
+write_mixin_fixture <- function(root) {
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: mx_privacy",
+      'version: "1.0"',
+      "label: Privacy block",
+      "abstract: true",
+      "base: {}",
+      "options:",
+      "  - id: privacy_opt",
+      "    label: Privacy",
+      "    target: metadata.title"
+    ),
+    file.path(root, "mx_privacy.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: mx_assay",
+      'version: "1.0"',
+      "abstract: true",
+      "base: {}",
+      "datasets:",
+      "  - id: mini_ds",
+      "    type: file",
+      "    files: { filename: mini.csv, type: csv }"
+    ),
+    file.path(root, "mx_assay.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template",
+      "id: mx_child",
+      'version: "1.0"',
+      "label: Mixin child",
+      "mixins: [mx_privacy@1.0, mx_assay]",
+      "base:",
+      "  metadata:",
+      "    title: T"
+    ),
+    file.path(root, "mx_child.dta-template.yaml")
+  )
+}
+
+test_that("load_template_definition() carries the resolved mixins, in listed order", {
+  root <- withr::local_tempdir()
+  write_mixin_fixture(root)
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("mx_child", index = idx)
+
+  expect_true(loaded$ok, info = loaded$error)
+  expect_identical(loaded$value$mixins, c("mx_privacy@1.0", "mx_assay@1.0"))
+  expect_identical(loaded$value$lineage, character(0))
+  expect_identical(vapply(loaded$value$def$options, function(o) o$id, character(1)), "privacy_opt")
+  expect_false("mixins" %in% names(loaded$value$def))
+})
+
+test_that("load_template_definition() reports a conflicting mixin as a non-throwing error", {
+  root <- withr::local_tempdir()
+  write_mixin_fixture(root)
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: mx_clash", 'version: "1.0"', "abstract: true",
+      "base: {}", "options:", "  - id: privacy_opt"
+    ),
+    file.path(root, "mx_clash.dta-template.yaml")
+  )
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: mx_bad_child", 'version: "1.0"',
+      "mixins: [mx_privacy, mx_clash]", "base:", "  metadata:", "    title: T"
+    ),
+    file.path(root, "mx_bad_child.dta-template.yaml")
+  )
+  idx <- index_over(root)
+
+  loaded <- app_fn("load_template_definition")("mx_bad_child", index = idx)
+
+  expect_false(loaded$ok)
+  expect_match(flat_message(loaded$error), "privacy_opt", fixed = TRUE)
+})
+
+test_that("template_provenance() records the mixins next to the lineage, and omits them when none", {
+  fn <- app_fn("template_provenance")
+  def <- list(id = "t1", version = "1.0")
+  meta <- list(
+    id = "t1", version = "1.0", lineage = "base@1.0",
+    mixins = c("m1@1.0", "m2@2.0")
+  )
+
+  result <- fn(def, meta)
+  expect_identical(result$mixins, c("m1@1.0", "m2@2.0"))
+  expect_identical(result$lineage, "base@1.0")
+  expect_identical(
+    which(names(result) == "mixins"), which(names(result) == "lineage") + 1L
+  )
+
+  expect_identical(fn(def, meta, mixins = "x@1.0")$mixins, "x@1.0")
+  expect_false("mixins" %in% names(fn(def, list(id = "t1", version = "1.0"))))
+  expect_false("mixins" %in% names(fn(def, meta, mixins = character(0))))
+})

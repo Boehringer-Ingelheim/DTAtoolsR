@@ -2070,6 +2070,7 @@ server <- function(input, output, session) {
     prov <- template_provenance(
       loaded$value$def, loaded$value,
       lineage = loaded$value$lineage,
+      mixins = loaded$value$mixins,
       carried_over_from = co$carried_over_from
     )
 
