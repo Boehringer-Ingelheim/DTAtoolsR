@@ -1056,3 +1056,45 @@ test_that("values the vocabulary does not have are listed first and counted", {
   expect_lt(regexpr('value="OWN"', html, fixed = TRUE), regexpr('value="T001"', html, fixed = TRUE))
   expect_match(html, "2 of 3 selected", fixed = TRUE)
 })
+
+# ---- Mixins text -----------------------------------------------------------
+
+test_that("template_mixins_text() lists mixins in LISTED order with labels from the index", {
+  dir <- withr::local_tempdir()
+  write_chain_files(dir) # root_tpl "Root Template", mid_tpl "Mid Template"
+  local_clean_template_env(
+    DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
+    DTATOOLS_TEMPLATE_INCLUDE_BUILTIN = ""
+  )
+  idx <- fixture_index()
+  mixins_text <- app_fn("template_mixins_text")
+
+  expect_identical(mixins_text(character(0), idx), "")
+  expect_identical(mixins_text(NULL, idx), "")
+
+  # Not reversed, unlike a lineage: mixins are siblings, so the order read
+  # is the order the template lists them in.
+  txt <- mixins_text(c("mid_tpl@1.0", "root_tpl@1.0"), idx)
+  expect_identical(
+    txt,
+    "mixes in Mid Template (mid_tpl@1.0), Root Template (root_tpl@1.0)"
+  )
+
+  # A mixin the index does not know falls back to its raw id.
+  expect_identical(mixins_text("ghost@9.9", idx), "mixes in ghost (ghost@9.9)")
+})
+
+test_that("the detail panel shows the mixins line only when the template has mixins", {
+  detail_ui <- app_fn("template_picker_detail_ui")
+  versions <- stats::setNames("1.0", "1.0")
+  def <- demo_def(datasets = list(list(as = "gf_data")))
+
+  plain <- html_of(detail_ui(demo_loaded(def), versions, "1.0", NULL))
+  expect_false(grepl("mixes in", plain, fixed = TRUE))
+
+  loaded <- demo_loaded(def)
+  loaded$value$mixins <- c("m1@1.0", "m2@2.0")
+  html <- html_of(detail_ui(loaded, versions, "1.0", NULL))
+  expect_match(html, "mixes in m1 (m1@1.0), m2 (m2@2.0)", fixed = TRUE)
+  expect_match(html, 'class="tmpl-lineage msg-hint"', fixed = TRUE)
+})

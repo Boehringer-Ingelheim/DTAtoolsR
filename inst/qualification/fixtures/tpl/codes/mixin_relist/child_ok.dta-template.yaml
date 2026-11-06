@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: rl_ok
+version: "1.0"
+extends: rl_p@1.0

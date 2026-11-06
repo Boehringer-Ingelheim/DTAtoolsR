@@ -1,0 +1,12 @@
+kind: dta_creation_template
+id: mx_privacy
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    authorized_for_corrections: Data Manager
+options:
+  - id: set_header
+    label: Set header
+    type: text
+    target: metadata.header

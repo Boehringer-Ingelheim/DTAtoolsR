@@ -1,0 +1,19 @@
+kind: dta_creation_template
+id: mx_parent
+version: "1.0"
+abstract: true
+base:
+  metadata:
+    title: MX Parent
+    version: "1.0"
+    date: "2026-01-01"
+    header: QA Org
+    receiver:
+      affiliation:
+        name: Our org
+      contacts: []
+    transmission:
+      type: Secure EDT server (SSH sFTP)
+      frequency: one-time
+      notification: email
+    error_handling: Errors are reported by email.

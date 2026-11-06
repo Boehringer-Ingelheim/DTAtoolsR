@@ -1529,3 +1529,122 @@ test_that("prior_versions must precede the template's oldest version in the dire
   rows <- expect_code_row(validate_template(dir), "prior_versions_invalid", "error")
   expect_match(rows$message, "entry 1 (4.5) is not older than 4.0", fixed = TRUE)
 })
+
+# ---- mixin_unresolved / mixin_invalid / mixin_conflict ----------------------
+
+write_mixin_file <- function(dir, id, body, abstract_line = "abstract: true") {
+  writeLines(
+    c(
+      "kind: dta_creation_template", sprintf("id: %s", id), "version: \"1.0\"",
+      abstract_line, "base: {}", body
+    ),
+    file.path(dir, paste0(id, ".dta-template.yaml"))
+  )
+}
+
+write_mixin_user <- function(dir, id, mixins, abstract = FALSE) {
+  writeLines(
+    c(
+      "kind: dta_creation_template", sprintf("id: %s", id), "version: \"1.0\"",
+      if (abstract) "abstract: true",
+      sprintf("mixins: [%s]", mixins),
+      "base:", "  metadata:", "    title: T"
+    ),
+    file.path(dir, paste0(id, ".dta-template.yaml"))
+  )
+}
+
+mixin_dataset_lines <- c(
+  "datasets:", "  - id: ds1", "    type: tabular",
+  "    files: {filename: x.csv, type: csv}", "    columns:", "      - {id: COL1, type: SAS Char}"
+)
+
+test_that("a template composed of valid disjoint mixins validates clean", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", mixin_dataset_lines)
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: opt_b", "    target: metadata.title"))
+  write_mixin_user(dir, "composed", "mx_a, mx_b")
+
+  result <- validate_template(dir)
+
+  expect_equal(nrow(result), 0)
+})
+
+test_that("mixin_unresolved is a warning, and instantiate_failed only for a concrete template", {
+  dir <- withr::local_tempdir()
+  write_mixin_user(dir, "concrete_user", "no_such_mixin")
+  write_mixin_user(dir, "abstract_user", "no_such_mixin", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_unresolved", "warning")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+  expect_no_code_row(result, "extends_unresolved")
+  expect_no_code_row(result, "extends_cycle")
+})
+
+test_that("mixin_conflict is an error, and instantiate_failed only for a concrete template", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", c("options:", "  - id: same", "    target: metadata.title"))
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: same", "    target: metadata.header"))
+  write_mixin_user(dir, "concrete_user", "mx_a, mx_b")
+  write_mixin_user(dir, "abstract_user", "mx_a, mx_b", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_conflict", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("mixin_invalid is an error when a listed mixin is not abstract", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_concrete", mixin_dataset_lines, abstract_line = "abstract: false")
+  write_mixin_user(dir, "concrete_user", "mx_concrete")
+  write_mixin_user(dir, "abstract_user", "mx_concrete", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_invalid", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("a malformed mixins: value in the validated file is mixin_invalid, abstract or not", {
+  # The reader rejects the shape inside dta_try(), which flattens the classed
+  # condition to a string -- so this is the only route by which an ABSTRACT
+  # template with a broken `mixins:` gets any diagnostic at all.
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", mixin_dataset_lines)
+  write_mixin_user(dir, "concrete_user", "mx_a, mx_a")
+  write_mixin_user(dir, "abstract_user", "mx_a, mx_a", abstract = TRUE)
+
+  result <- validate_template(dir)
+
+  rows <- expect_code_row(result, "mixin_invalid", "error")
+  expect_setequal(rows$id, c("concrete_user", "abstract_user"))
+  failed <- expect_code_row(result, "instantiate_failed", "error")
+  expect_identical(failed$id, "concrete_user")
+})
+
+test_that("an id that merely contains 'cycle detected' is still classified by condition class", {
+  dir <- withr::local_tempdir()
+  write_mixin_file(dir, "mx_a", c("options:", "  - id: same", "    target: metadata.title"))
+  write_mixin_file(dir, "mx_b", c("options:", "  - id: same", "    target: metadata.header"))
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: cycle detected", "version: \"1.0\"",
+      "abstract: true", "mixins: [mx_a, mx_b]", "base: {metadata: {}}"
+    ),
+    file.path(dir, "odd.dta-template.yaml")
+  )
+
+  result <- validate_template(dir)
+
+  expect_code_row(result, "mixin_conflict", "error")
+  expect_no_code_row(result, "extends_cycle")
+})

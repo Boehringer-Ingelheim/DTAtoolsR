@@ -1,0 +1,5 @@
+kind: dta_creation_template
+id: mc_c
+version: "1.0"
+mixins: [mc_a@1.0, mc_b@1.0]
+base: {}

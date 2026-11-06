@@ -84,7 +84,10 @@ column of a dataset template that \code{DTAColumnSpec()} rejects, such as an
 example longer than its declared length), \code{vocabulary_invalid},
 \code{vocabulary_extends_failed}, \code{no_templates}, \code{template_outside_library_dir},
 \code{variant_invalid}, \code{prior_versions_invalid} (a malformed entry in a
-creation template's hand-written \verb{prior_versions:}), the app-configuration
+creation template's hand-written \verb{prior_versions:}), \code{mixin_invalid} (a
+malformed \verb{mixins:} value, or a named template that is not a valid mixin),
+\code{mixin_conflict} (a key contributed twice, or a mixin an ancestor already
+mixes in), the app-configuration
 errors \code{app_config_invalid} (a bad value in \code{dta-app.yaml}, or a missing
 logo or Word template it names), \code{app_config_duplicate} (both
 \code{dta-app.yaml} and \code{dta-app.yml} in the library) and
@@ -100,7 +103,9 @@ Warnings: the linter's \code{rules_without_columns}, \code{rule_not_checkable} a
 \code{format_narrower_than_length}, plus \code{kind_unknown}, \code{id_missing}, \code{version_missing},
 \code{version_unparseable}, \code{target_invalid}, \code{party_slot_invalid},
 \code{vocab_slot_unresolved}, \code{dataset_template_unresolved}, \code{patch_incoherent},
-\code{extends_unresolved}, \code{extends_cycle}, \code{sealed_violation},
+\code{extends_unresolved}, \code{extends_cycle}, \code{mixin_unresolved} (a \verb{mixins:}
+reference that does not resolve within the directory; a warning for the
+same reason as \code{extends_unresolved}), \code{sealed_violation},
 \code{sealed_path_unknown}, \code{values_and_values_from}, \code{values_from_unresolved},
 \code{vocabulary_unresolved}, \code{duplicate_id_version}, \code{template_in_subdirectory}, plus the
 app-configuration warnings \code{app_config_unknown_key} and

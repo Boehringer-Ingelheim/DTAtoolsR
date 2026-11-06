@@ -98,7 +98,12 @@ read_dta_creation_template <- function(template_path) {
     # as "replace the parent's with nothing" -- silently wiping every field the
     # parent set. Absent and empty must stay distinguishable, so absent has to
     # be legal here.
-    inherits_from <- nzchar(as.character(def$extends %||% ""))
+    #
+    # Listing `mixins:` counts as inheriting for the same reason: the mixins
+    # supply the sections. dta_template_mixin_refs() also enforces the list
+    # shape here, so a malformed `mixins:` is a read error, not a late surprise.
+    inherits_from <- nzchar(as.character(def$extends %||% "")) ||
+      length(dta_template_mixin_refs(def)) > 0
 
     if (!is.list(def$base) && !inherits_from) {
       stop("Template must contain a 'base' section.")

@@ -1,0 +1,6 @@
+kind: dta_creation_template
+id: mu_abstract
+version: "1.0"
+abstract: true
+mixins: [nonexistent_mixin@1.0]
+base: {}
