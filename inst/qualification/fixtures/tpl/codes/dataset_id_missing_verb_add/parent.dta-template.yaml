@@ -1,0 +1,17 @@
+kind: dta_creation_template
+id: verb_parent
+version: "1.0"
+base:
+  metadata:
+    title: Parent of a verb-form child
+datasets:
+  - id: ds0
+    type: tabular
+    files: {filename: a.csv, type: csv}
+    columns:
+      - {id: COL1, type: SAS Char}
+  - id: ds1
+    type: tabular
+    files: {filename: b.csv, type: csv}
+    columns:
+      - {id: COL1, type: SAS Char}

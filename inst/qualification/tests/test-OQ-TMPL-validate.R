@@ -483,6 +483,13 @@ test_that("OQ-TMPL-068 | a dataset with no id, or a list for a field, is reporte
   legacy <- validate_template(tmpl_fixture("codes", "dataset_legacy_shape"))
   qa_step("pre-id shape (name: with no id:): dataset_id_missing is an error", "error", tmpl_severity(legacy, "dataset_id_missing"))
   qa_step("pre-id shape: its scalar fields are not dataset_field_invalid", NA_character_, tmpl_severity(legacy, "dataset_field_invalid"))
+
+  verbs <- validate_template(tmpl_fixture("codes", "dataset_verb_form"))
+  qa_step("verb-form datasets: with ids under add:/modify:: no row is reported", 0L, nrow(verbs))
+
+  verb_add <- validate_template(tmpl_fixture("codes", "dataset_id_missing_verb_add"))
+  qa_step("verb-form add: entry without id: exactly one dataset_id_missing row", 1L, sum(verb_add$code == "dataset_id_missing"))
+  qa_step("verb-form add: entry without id: severity is error", "error", tmpl_severity(verb_add, "dataset_id_missing"))
 })
 
 # ---- REQ-TMPL-034: column_spec_invalid ---------------------------------------
