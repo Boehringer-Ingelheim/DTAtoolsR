@@ -904,6 +904,24 @@ test_that(".pandoc_pdf_engine and .find_soffice return scalar strings", {
   }
 })
 
+test_that(".tinytex_docx_to_pdf typesets a character pdflatex cannot (retry with xelatex)", {
+  skip_if(!nzchar(.tinytex_bin_dir()))
+  skip_if_not(rmarkdown::pandoc_available())
+  old_path <- Sys.getenv("PATH")
+  if (!nzchar(Sys.which("latexmk")) && !nzchar(Sys.which("pdflatex"))) {
+    Sys.setenv(PATH = paste(.tinytex_bin_dir(), old_path, sep = .Platform$path.sep))
+    on.exit(Sys.setenv(PATH = old_path), add = TRUE)
+  }
+  docx <- tempfile(fileext = ".docx")
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(docx, pdf), force = TRUE), add = TRUE)
+  doc <- officer::body_add_par(officer::read_docx(), "a ≠ b")
+  print(doc, target = docx)
+
+  .tinytex_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+})
+
 test_that(".is_pdf_file recognises the PDF signature and nothing else", {
   pdf <- tempfile(fileext = ".pdf")
   on.exit(unlink(pdf, force = TRUE), add = TRUE)

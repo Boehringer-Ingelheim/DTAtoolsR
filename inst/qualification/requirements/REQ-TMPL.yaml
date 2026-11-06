@@ -746,3 +746,15 @@ requirements:
       The condition is classified by its class, before any text test, so an
       author-chosen id such as "cycle detected" cannot turn a mixin error into
       extends_cycle.
+
+  - id: REQ-TMPL-040
+    text: >
+      write_template_guide() shall write a DOCX document for a template
+      library in which, for every creation template, each option's label and
+      its pre-filled answer appear as text, and each column a dataset template
+      adds appears; an existing output file shall not be replaced unless
+      overwrite = TRUE, and a format other than docx or pdf shall be refused.
+    risk: medium
+    category: functional
+    covers: [write_template_guide]
+    source: "R/templateGuide.R; R/templateGuide-collect.R"

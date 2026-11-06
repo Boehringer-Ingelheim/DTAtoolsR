@@ -772,7 +772,36 @@ dta_pdf_backend <- function() {
   # latexmk resolves \includegraphics paths relative to the working directory.
   old_wd <- setwd(work_dir)
   on.exit(setwd(old_wd), add = TRUE, after = FALSE)
-  produced <- tinytex::latexmk(basename(tex_file), engine = "pdflatex")
+  # pdflatex cannot typeset characters outside its font encodings -- the
+  # rule translator's "≠", for one -- so a document using them is retried
+  # with xelatex, which reads UTF-8 natively. pdflatex stays first because it
+  # is the faster engine and every document it can compile is unchanged.
+  # Only an encoding failure is worth the retry; any other failure is re-raised.
+  produced <- tryCatch(
+    tinytex::latexmk(basename(tex_file), engine = "pdflatex"),
+    error = function(e) {
+      log_file <- file.path(work_dir, sub("\\.tex$", ".log", basename(tex_file)))
+      log_text <- if (file.exists(log_file)) {
+        paste(readLines(log_file, warn = FALSE), collapse = "\n")
+      } else {
+        ""
+      }
+      if (!grepl("Unicode character|inputenc", paste(conditionMessage(e), log_text), useBytes = TRUE)) {
+        rlang::cnd_signal(e)
+      }
+      unlink(list.files(work_dir, pattern = "\\.(aux|toc|out)$", full.names = TRUE))
+      tryCatch(
+        tinytex::latexmk(basename(tex_file), engine = "xelatex"),
+        error = function(e2) {
+          cli::cli_abort(c(
+            "Neither pdflatex nor xelatex could compile the document.",
+            i = "pdflatex: {conditionMessage(e)}",
+            i = "xelatex: {conditionMessage(e2)}"
+          ))
+        }
+      )
+    }
+  )
 
   produced <- file.path(work_dir, basename(produced))
   if (!file.exists(produced)) {
