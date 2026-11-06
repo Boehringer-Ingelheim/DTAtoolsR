@@ -19,6 +19,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   bad value falls back to its default with a warning instead of stopping the
   app. With several template sources the first `dta-app.yaml` wins as a whole.
   Every key is optional, and a library without the file looks as before.
+- `dta-app.yaml` can say what the library calls its documents: `document.name`
+  and `document.abbreviation`, each one string or a list of one to three (for
+  example `Data Transfer Agreement` / `DTA`, or both it and `Data Transmission
+  Specification` / `DTS`). The app's labels and notifications ("Create DTA",
+  "Export DTA", "Untitled DTA", ...) use the abbreviation.
+- `write_dta()`, `write_dataset_metadata()` and `write_validation_report()` take
+  `organisation` and `organisation_unit`, and `write_dta()` and
+  `write_dataset_metadata()` take `document_name`
+  (`write_dta()` also `document_abbreviation`). The organisation is shown on the
+  front page and in the running header of Word/PDF exports and in the header
+  block of Markdown and HTML exports. Four new Word template placeholders,
+  `{DOCUMENT_NAME}`, `{DOCUMENT_ABBREVIATION}`, `{ORGANISATION_NAME}` and
+  `{ORGANISATION_UNIT}`, are filled from them. All default to `NULL`.
+- `features.raw_yaml_editable` (default `true`) in `dta-app.yaml`: `false`
+  keeps the Raw YAML tab but makes it read-only, with no "Apply changes"
+  button, and the server refuses applying edited YAML. `features.editing:
+  false` implies it.
 - `validate_template()` checks `dta-app.yaml` with the app's own parser and
   reports `app_config_invalid` (error), `app_config_unknown_key` and
   `app_config_warning` (warnings), `app_config_duplicate` (error, both `.yaml`
@@ -35,6 +52,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The document name is now the main title of every document-style export, with
+  the DTA's own title beneath it: the Word/PDF cover, the Markdown top
+  heading (`# Data Transfer Agreement`, formerly `# Data Transfer Agreement
+  Metadata`), the dataset specification document, the HTML validation report
+  (`<h1>`; the page `<title>` is unchanged) and the app's validation summary.
+  Without `document_name` the name is "Data Transfer Agreement". A DTA without
+  a title no longer prints an empty `**Title:**` line in Markdown.
+- The app's validation summary heading is now the document name, with
+  "Validation Summary" beneath it.
 - In the template options dialog, a free-text option with exactly one
   suggestion is now a vertically resizable text box instead of a one-line
   field.

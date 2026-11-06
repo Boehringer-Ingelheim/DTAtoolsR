@@ -37,9 +37,11 @@ test_that("write_validation_report happy path with capping", {
 
   doc <- xml2::read_html(out)
 
-  # Assert title in page
+  # The document name is the main heading; the DTA title sits beneath it.
   h1 <- xml2::xml_find_first(doc, "//h1")
-  expect_equal(xml2::xml_text(h1), "Test DTA")
+  expect_equal(xml2::xml_text(h1), "Data Transfer Agreement")
+  sub_title <- xml2::xml_find_first(doc, "//*[@class='report-subtitle']")
+  expect_equal(xml2::xml_text(sub_title), "Test DTA")
 
   # Assert 1 summary row with fail status
   summary_rows <- xml2::xml_find_all(doc, "//tr[@data-status]")
@@ -161,8 +163,8 @@ test_that("write_validation_report escapes HTML in metadata title", {
 
   # Parse HTML and verify the title round-trips correctly
   # xml2::xml_text() will un-escape the entities back to the original text
-  h1 <- xml2::xml_find_first(doc, "//h1")
-  expect_equal(xml2::xml_text(h1), "A & B <Co>")
+  sub_title <- xml2::xml_find_first(doc, "//*[@class='report-subtitle']")
+  expect_equal(xml2::xml_text(sub_title), "A & B <Co>")
 })
 
 test_that("write_validation_report handles zero messages (all-pass)", {
@@ -677,4 +679,53 @@ test_that("input names are HTML-escaped in the report", {
   html <- paste(readLines(out, warn = FALSE), collapse = "\n")
   expect_false(grepl("<b>x</b>", html, fixed = TRUE))
   expect_true(grepl("&lt;b&gt;x&lt;/b&gt;", html, fixed = TRUE))
+})
+
+test_that("write_validation_report leads with document_name and shows the organisation in the header", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".html")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  write_validation_report(dta, out,
+    quiet = TRUE, document_name = c("Data Transmission Specification", "Data Transfer Agreement"),
+    organisation = "Acme Pharma", organisation_unit = "Biometrics"
+  )
+  doc <- xml2::read_html(out)
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//h1")),
+    "Data Transmission Specification / Data Transfer Agreement"
+  )
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[@class='report-subtitle']")),
+    "Example DTA"
+  )
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[contains(@class,'report-org')]")),
+    "Acme Pharma · Biometrics"
+  )
+  # The page <title> is the report's title and is unchanged by the document name.
+  expect_equal(xml2::xml_text(xml2::xml_find_first(doc, "//title")), "Example DTA")
+})
+
+test_that("write_validation_report shows no organisation block when none is given and escapes it when given", {
+  dta <- create_example_DTA()
+  plain <- tempfile(fileext = ".html")
+  hostile <- tempfile(fileext = ".html")
+  on.exit(unlink(c(plain, hostile), force = TRUE), add = TRUE)
+  write_validation_report(dta, plain, quiet = TRUE)
+  expect_length(xml2::xml_find_all(xml2::read_html(plain), "//*[contains(@class,'report-org')]"), 0)
+
+  write_validation_report(dta, hostile, quiet = TRUE, organisation = "<script>x</script>")
+  doc <- xml2::read_html(hostile)
+  expect_equal(
+    xml2::xml_text(xml2::xml_find_first(doc, "//*[contains(@class,'report-org')]")),
+    "<script>x</script>"
+  )
+})
+
+test_that("write_validation_report validates the document and organisation arguments", {
+  dta <- create_example_DTA()
+  out <- tempfile(fileext = ".html")
+  expect_error(write_validation_report(dta, out, organisation = c("a", "b")), "organisation")
+  expect_error(write_validation_report(dta, out, document_name = 1), "document_name")
+  expect_false(file.exists(out))
 })

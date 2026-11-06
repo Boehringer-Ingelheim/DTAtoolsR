@@ -96,7 +96,9 @@ test_that("chapters are top-level headings and the title opens the cover", {
   out <- .layout_docx()
   on.exit(unlink(out), add = TRUE)
   s <- officer::docx_summary(officer::read_docx(out))
-  expect_identical(Filter(nzchar, s$text[s$content_type == "paragraph"])[1], "Clinical Data Specification")
+  cover <- Filter(nzchar, s$text[s$content_type == "paragraph"])
+  expect_identical(cover[1], "Data Transfer Agreement") # the document name
+  expect_identical(cover[2], "Clinical Data Specification") # the DTA title beneath it
   h1 <- s$text[s$style_name %in% "heading 1"]
   expect_identical(
     h1,

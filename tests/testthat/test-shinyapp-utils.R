@@ -1109,8 +1109,11 @@ test_that("the summary is titled apart from the message-level validation report"
 
   # The Validation messages dock offers a "Report"; this one must not be
   # confusable with it.
-  expect_true(grepl("<h1>DTA Validation Summary</h1>", html, fixed = TRUE))
-  expect_false(grepl("DTA Validation Report", html, fixed = TRUE))
+  # The document name is the heading; "Validation Summary" keeps it apart from
+  # the message-level report.
+  expect_true(grepl("<h1>Data Transfer Agreement</h1>", html, fixed = TRUE))
+  expect_true(grepl("Validation Summary", html, fixed = TRUE))
+  expect_false(grepl("Validation Report", html, fixed = TRUE))
 })
 
 test_that("dta_export_stem puts the version between the title and the date", {
@@ -1206,4 +1209,16 @@ test_that("dta_authorized_choices groups contacts and keeps unmatched values", {
   only_sup <- ch(auth_dta(supplier = "Cy"))
   expect_named(only_sup, "Supplier")
   expect_named(ch(auth_dta(authorized = "Zed")), "Entered manually")
+})
+
+test_that("the validation summary leads with the document name and shows the organisation", {
+  dta <- app_fixture_dta()
+  html <- app_fn("dta_build_validation_report")(
+    dta, c(clinical_data = "pass"),
+    document_name = "Data Transmission Specification",
+    organisation = "Acme <Pharma>", organisation_unit = "Biometrics"
+  )
+  expect_true(grepl("<h1>Data Transmission Specification</h1>", html, fixed = TRUE))
+  expect_true(grepl("Acme &lt;Pharma&gt; · Biometrics", html, fixed = TRUE))
+  expect_false(grepl("<h1>Data Transfer Agreement</h1>", html, fixed = TRUE))
 })

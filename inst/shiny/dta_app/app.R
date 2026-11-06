@@ -1255,7 +1255,7 @@ server <- function(input, output, session) {
     } else {
       f <- input$tmpl_carry_file
       if (is.null(f) || is.null(f$datapath) || !nzchar(f$datapath)) {
-        return(list(ok = FALSE, error = "Choose a DTA YAML file to carry metadata over from."))
+        return(list(ok = FALSE, error = paste("Choose a", cfg$document$abbr, "YAML file to carry metadata over from.")))
       }
       res <- dta_read_yaml(f$datapath)
       if (!isTRUE(res$ok)) {
@@ -1364,19 +1364,20 @@ server <- function(input, output, session) {
     }
     dlg <- modalDialog(
       title = tagList(
-        span(class = "tmpl-eyebrow", "New DTA from template"),
+        span(class = "tmpl-eyebrow", paste("New", cfg$document$abbr, "from template")),
         as.character(def$label %||% def$id %||% "template")
       ),
       template_options_modal_body(
         def, loaded, index, vocab_specs,
-        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui
+        has_open_doc = !is.null(rv$dta), aside_extra = variant_ui,
+        doc_abbr = cfg$document$abbr
       ),
       footer = tagList(
         actionButton("template_options_back", "← Back to templates",
           class = "btn btn-link tmpl-back"
         ),
         modalButton("Cancel"),
-        actionButton("template_create_confirm", "Create DTA", class = "btn btn-primary")
+        actionButton("template_create_confirm", paste("Create", cfg$document$abbr), class = "btn btn-primary")
       ),
       size = "xl",
       easyClose = FALSE
@@ -1408,7 +1409,7 @@ server <- function(input, output, session) {
   finish_file_load <- function(res, txt, name) {
     if (!res$ok) {
       showNotification(
-        paste("Could not load DTA YAML:", res$error),
+        paste("Could not load", cfg$document$abbr, "YAML:", res$error),
         type = "error", duration = 10
       )
       if (!is.null(txt) && nzchar(trimws(txt))) {
@@ -1430,9 +1431,9 @@ server <- function(input, output, session) {
     )
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset loaded into a new DTA \u2014 add metadata to complete it."
+        paste0("Dataset loaded into a new ", cfg$document$abbr, " \u2014 add metadata to complete it.")
       } else {
-        "DTA loaded."
+        paste(cfg$document$abbr, "loaded.")
       },
       type = "message"
     )
@@ -1458,7 +1459,7 @@ server <- function(input, output, session) {
       return()
     }
     showModal(modalDialog(
-      title = "Load example DTA",
+      title = paste("Load example", cfg$document$abbr),
       radioButtons("example_dta_choice",
         "Choose a bundled example specification:",
         choices = files, selected = files[[1]]
@@ -1534,12 +1535,12 @@ server <- function(input, output, session) {
     rv$create_new_msg <- NULL
     rv$create_new_token <- rv$create_new_token + 1
     showModal(modalDialog(
-      title = "Create a new DTA",
+      title = paste("Create a new", cfg$document$abbr),
       uiOutput("create_new_body"),
       easyClose = TRUE,
       footer = tagList(
         modalButton("Cancel"),
-        actionButton("create_new_confirm", "Create DTA", class = "btn btn-primary")
+        actionButton("create_new_confirm", paste("Create", cfg$document$abbr), class = "btn btn-primary")
       )
     ))
   })
@@ -1560,7 +1561,7 @@ server <- function(input, output, session) {
       textInput("create_new_version_value", "Version", value = "1.0", width = "100%"),
       div(
         class = "msg-hint",
-        HTML("The new DTA starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab.")
+        HTML(paste0("The new ", htmltools::htmlEscape(cfg$document$abbr), " starts with <b>no datasets</b>. Add them with <b>+ Add dataset</b> once the workspace opens, and fill in the rest of the metadata on the Metadata tab."))
       ),
       uiOutput("create_new_msg")
     )
@@ -1610,7 +1611,7 @@ server <- function(input, output, session) {
       versioned = FALSE, start_editing = TRUE
     )
     showNotification(
-      sprintf("New DTA \u201c%s\u201d created.", title),
+      sprintf("New %s \u201c%s\u201d created.", cfg$document$abbr, title),
       type = "message"
     )
   })
@@ -2079,7 +2080,7 @@ server <- function(input, output, session) {
       vocab_selections = vocab_sel
     )
     if (!isTRUE(created$ok)) {
-      showNotification(paste("Could not create DTA from template:", created$error),
+      showNotification(paste("Could not create", cfg$document$abbr, "from template:", created$error),
         type = "error", duration = 10
       )
       return() # LEAVE THE MODAL OPEN so the user does not lose their choices
@@ -2099,7 +2100,7 @@ server <- function(input, output, session) {
       start_editing = TRUE
     )
     showNotification(
-      paste0("New DTA created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
+      paste0("New ", cfg$document$abbr, " created from template \"", as.character(def$label %||% def$id %||% ""), "\"."),
       type = "message"
     )
   })
@@ -5836,7 +5837,10 @@ server <- function(input, output, session) {
     content = function(file) {
       req(msgs_any_checked(), "html" %in% cfg$exports$validation_messages)
       tryCatch(
-        DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+        do.call(DTAtools::write_validation_report, c(
+          list(rv$dta, file, overwrite = TRUE, quiet = TRUE),
+          dta_app_export_args(cfg)[c("document_name", "organisation", "organisation_unit")]
+        )),
         error = function(e) {
           showNotification(
             paste("Could not build the validation report:", conditionMessage(e)),
@@ -7203,8 +7207,16 @@ server <- function(input, output, session) {
   # The Raw YAML tab is a full-document write path, so it is gated like every
   # other editing surface: the buttons are not rendered, the Ace editor is put
   # into readOnly, and the apply observer re-checks.
+  yaml_editable <- reactive(editing() && isTRUE(cfg$features$raw_yaml_editable))
+
   output$yaml_edit_hint <- renderUI({
-    if (!editing()) {
+    if (!yaml_editable()) {
+      if (editing()) {
+        return(div(
+          class = "msg-hint",
+          HTML("The raw YAML is <b>read-only</b> in this deployment.")
+        ))
+      }
       return(div(
         class = "msg-hint",
         HTML("This document is <b>read-only</b>. Turn on <b>Edit mode</b> (top right) to change it.")
@@ -7217,7 +7229,7 @@ server <- function(input, output, session) {
   })
 
   output$yaml_edit_actions <- renderUI({
-    if (!editing()) {
+    if (!yaml_editable()) {
       return(NULL)
     }
     div(
@@ -7228,7 +7240,7 @@ server <- function(input, output, session) {
   })
 
   observe({
-    ro <- !editing()
+    ro <- !yaml_editable()
     if (requireNamespace("shinyAce", quietly = TRUE)) {
       shinyAce::updateAceEditor(session, "raw_yaml_editor", readOnly = ro)
     } else if (ro) {
@@ -7239,7 +7251,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$apply_yaml, {
-    req(editing(), cfg$features$raw_yaml_tab)
+    req(editing(), cfg$features$raw_yaml_tab, isTRUE(cfg$features$raw_yaml_editable))
     txt <- input$raw_yaml_editor %||% ""
     if (!nzchar(trimws(txt))) {
       rv$yaml_msg <- list(ok = FALSE, error = "The editor is empty — nothing to apply.")
@@ -7379,9 +7391,9 @@ server <- function(input, output, session) {
     rv$yaml_msg <- list(ok = TRUE, error = NULL)
     showNotification(
       if (isTRUE(res$wrapped_dataset)) {
-        "Dataset YAML wrapped into a new DTA (loaded files kept where a slot remains for them)."
+        paste0("Dataset YAML wrapped into a new ", cfg$document$abbr, " (loaded files kept where a slot remains for them).")
       } else {
-        "DTA YAML applied (loaded files kept where a slot remains for them)."
+        paste(cfg$document$abbr, "YAML applied (loaded files kept where a slot remains for them).")
       },
       type = "message"
     )
@@ -7464,7 +7476,7 @@ server <- function(input, output, session) {
     content = function(file) {
       # No button points here, but the URL is reachable: honour the export gate.
       req(rv$dta, export_choices$allowed("word", word_mode = "builtin"))
-      res <- dta_export(export_dta(), file, "docx")
+      res <- dta_export(export_dta(), file, "docx", doc_args = dta_app_export_args(cfg))
       if (!res$ok) {
         showNotification(paste("Word export failed:", res$error), type = "error", duration = 10)
         stop(res$error)
@@ -7509,7 +7521,7 @@ server <- function(input, output, session) {
       # header, so an h4 repeating those words printed the dialog name twice,
       # one line above the other. Every other modal here relies on `title`
       # alone.
-      p("Choose the format and options for your DTA export."),
+      p(paste0("Choose the format and options for your ", cfg$document$abbr, " export.")),
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
         choices = export_choices$format_choices,
@@ -7622,7 +7634,10 @@ server <- function(input, output, session) {
           own("export", output_file)
 
           # write_dta() throws on error (caught below); it does not return $ok.
-          DTAtools::write_dta(doc, output_file, format = "md", overwrite = TRUE, quiet = TRUE)
+          do.call(DTAtools::write_dta, c(
+            list(doc, output_file, format = "md", overwrite = TRUE, quiet = TRUE),
+            dta_app_export_args(cfg)
+          ))
 
           # The YAML is embedded as an HTML comment, which only a .md file
           # can hide: the PDF routes read with raw HTML disabled, so the
@@ -7755,7 +7770,11 @@ server <- function(input, output, session) {
             # would silently undo this feature for the app.
             variables <- list(
               "{DATASETS_SUMMARY}" = format_datasets_summary(doc),
-              "{YAML_EMBEDDED}" = ""
+              "{YAML_EMBEDDED}" = "",
+              "{DOCUMENT_NAME}" = cfg$document$label,
+              "{DOCUMENT_ABBREVIATION}" = cfg$document$abbr,
+              "{ORGANISATION_NAME}" = cfg$organisation$name,
+              "{ORGANISATION_UNIT}" = cfg$organisation$unit
             )
 
             # Add YAML if requested
@@ -7784,11 +7803,14 @@ server <- function(input, output, session) {
               res_yaml <- dta_to_yaml_text(doc)
               if (isTRUE(res_yaml$ok)) yaml_text <- res_yaml$value
             }
-            DTAtools::write_dta(
-              doc, output_file,
-              format = "docx", overwrite = TRUE, quiet = TRUE,
-              include_yaml = !is.null(yaml_text), yaml_text = yaml_text
-            )
+            do.call(DTAtools::write_dta, c(
+              list(
+                doc, output_file,
+                format = "docx", overwrite = TRUE, quiet = TRUE,
+                include_yaml = !is.null(yaml_text), yaml_text = yaml_text
+              ),
+              dta_app_export_args(cfg)
+            ))
           }
 
           export_state$file_path <- output_file
@@ -7865,7 +7887,12 @@ server <- function(input, output, session) {
     },
     content = function(file) {
       req(rv$dta, cfg$exports$validation_summary)
-      html <- dta_build_validation_report(rv$dta, rv$status)
+      args <- dta_app_export_args(cfg)
+      html <- dta_build_validation_report(
+        rv$dta, rv$status,
+        document_name = args$document_name, organisation = args$organisation,
+        organisation_unit = args$organisation_unit
+      )
       writeLines(html, file, useBytes = TRUE)
     }
   )
@@ -7874,7 +7901,7 @@ server <- function(input, output, session) {
   observeEvent(input$reset_app, {
     showModal(modalDialog(
       title = "Start over?",
-      "This clears the loaded DTA and all uploads from this session.",
+      paste("This clears the loaded", cfg$document$abbr, "and all uploads from this session."),
       footer = tagList(
         modalButton("Cancel"),
         actionButton("confirm_reset", "Start over", class = "btn btn-danger")
@@ -8024,7 +8051,7 @@ server <- function(input, output, session) {
       title <- if (dataset_only) {
         dta_dataset_names(rv$dta)[1] %||% "Dataset"
       } else {
-        "Untitled DTA"
+        paste("Untitled", cfg$document$abbr)
       }
     }
     version <- getf("version")
@@ -8299,7 +8326,7 @@ server <- function(input, output, session) {
         div(
           class = "landing-drop",
           HTML(landing_drop_glyph),
-          tags$h2(class = "landing-drop-title", "Load a DTA / DTS specification file"),
+          tags$h2(class = "landing-drop-title", if (isTRUE(cfg$document$custom)) paste("Load a", cfg$document$abbr, "file") else "Load a DTA / DTS specification file"),
           div(
             class = "landing-drop-hint",
             "A full DTA with metadata or a standalone dataset specification is accepted. A dataset-only file opens without a Metadata section."
@@ -8332,10 +8359,10 @@ server <- function(input, output, session) {
           tags$hr(),
           div(class = "section-label", "Export"),
           if (cfg$features$dta_yaml_download) {
-            downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100")
+            downloadButton("dl_yaml", paste("Export", cfg$document$abbr, "YAML"), class = "btn btn-outline-primary w-100")
           },
           if (export_choices$any) {
-            actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100")
+            actionButton("export_modal_open", paste("Export", cfg$document$abbr), class = "btn btn-primary w-100")
           },
           uiOutput("validation_report_ui"),
           tags$hr(),
@@ -8378,7 +8405,7 @@ server <- function(input, output, session) {
                       # input id that does not exist yet the first time it runs
                       # -- this editor lives inside output$main, which is still
                       # showing the landing card at server start.
-                      readOnly = !isolate(editing())
+                      readOnly = !isolate(yaml_editable())
                     )
                   )
                 } else {
@@ -8394,7 +8421,7 @@ server <- function(input, output, session) {
                     label = NULL,
                     value = isolate(rv$yaml_text), width = "100%", rows = 28
                   )
-                  if (isolate(editing())) ta else shinyjs::disabled(ta)
+                  if (isolate(yaml_editable())) ta else shinyjs::disabled(ta)
                 }
               )
             }

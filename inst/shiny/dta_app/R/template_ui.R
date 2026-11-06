@@ -1141,7 +1141,7 @@ template_options_scripts <- function() {
 # app.R read them by name. `aside_extra` is a sidebar block the server builds
 # (the chosen platform and its "Change platform" button).
 template_options_modal_body <- function(def, loaded, index, vocab_specs, has_open_doc = FALSE,
-                                        aside_extra = NULL) {
+                                        aside_extra = NULL, doc_abbr = "DTA") {
   value <- loaded$value
   source_name <- as.character(value$source_name %||% "")
   version <- as.character(value$version %||% def$version %||% "")
@@ -1267,7 +1267,7 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
   if (isTRUE(has_open_doc)) {
     carry_choices <- c(carry_choices, stats::setNames("open", "The open document"))
   }
-  carry_choices <- c(carry_choices, stats::setNames("file", "A DTA file"))
+  carry_choices <- c(carry_choices, stats::setNames("file", paste("A", doc_abbr, "file")))
   carry_default <- if (isTRUE(has_open_doc)) "open" else "none"
   fields <- dta_template_metadata_fields()
   field_labels <- tmpl_humanise(fields)
@@ -1276,7 +1276,7 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
 
   carry_sec <- tmpl_section(
     "carry", "Carry over metadata",
-    "Start from an existing DTA's parties, transfer details or study instead of the template's values.",
+    paste0("Start from an existing ", doc_abbr, "'s parties, transfer details or study instead of the template's values."),
     tmpl_field_row(
       for_id = "tmpl_carry_source",
       label = "Copy from", group = TRUE,
@@ -1291,7 +1291,7 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
       condition = "input.tmpl_carry_source == 'file'",
       tmpl_field_row(
         for_id = "tmpl_carry_file",
-        label = "DTA file",
+        label = paste(doc_abbr, "file"),
         hints = div(class = "msg-hint tmpl-help", "The YAML file to carry metadata over from."),
         control = fileInput("tmpl_carry_file", NULL, accept = c(".yaml", ".yml"), width = "100%")
       )

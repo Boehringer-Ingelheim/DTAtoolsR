@@ -10,7 +10,7 @@ NULL
   # safe display string so we never pass a zero-length or NA value to officer.
   title_chr <- if (is.null(title) || length(title) == 0) "" else as.character(title)[1]
   if (is.na(title_chr)) title_chr <- ""
-  display_title <- if (nzchar(title_chr)) title_chr else "Data Transfer Agreement"
+  display_title <- if (nzchar(title_chr)) title_chr else .export_document_name()
 
   for (i in seq_len(6)) {
     doc <- .add_spacer(doc)
@@ -45,6 +45,12 @@ NULL
       size = FONT_SIZES$subtitle, color = THEME_COLORS$gray_mid
     )
   }
+  if (nzchar(.export_org_line())) {
+    doc <- .add_body_par(
+      doc, .export_org_line(),
+      bold = TRUE, color = THEME_COLORS$gray_dark
+    )
+  }
 
   doc <- .add_spacer(doc)
 
@@ -60,12 +66,70 @@ NULL
   doc
 }
 
-#' The display title of a DTA: its title, or "Data Transfer Agreement" when it
-#' has none (a DTA may carry datasets without metadata).
+#' The display title of a DTA: its title, or the document name ("Data Transfer
+#' Agreement" unless the caller supplied one) when it has none (a DTA may carry
+#' datasets without metadata).
 #' @keywords internal
-.dta_display_title <- function(title) {
+.dta_display_title <- function(title, fallback = .export_document_name()) {
   title_chr <- if (is.null(title) || length(title) == 0) "" else as.character(title)[1]
-  if (is.na(title_chr) || !nzchar(trimws(title_chr))) "Data Transfer Agreement" else title_chr
+  if (is.na(title_chr) || !nzchar(trimws(title_chr))) fallback else title_chr
+}
+
+# Document naming and organisation for one export. The writers set these once
+# (see .set_export_ctx) and the builders read them, so the values reach the
+# cover, the running header and the footer without being threaded through every
+# builder signature. ponytail: process-global state, fine because R is
+# single-threaded and the context is cleared when the writer returns.
+# Known limitation: writers do not nest. An inner writer overwrites the outer
+# context and its on.exit clears it, so the outer export would finish with
+# defaults. The only nested path today is export_with_template(fallback = TRUE).
+.export_ctx <- new.env(parent = emptyenv())
+
+.export_document_name <- function() .export_ctx$document_name %||% "Data Transfer Agreement"
+
+# "Organisation (middle dot) Unit", either part optional; "" when neither is given.
+.export_org_line <- function(organisation = .export_ctx$organisation,
+                             unit = .export_ctx$organisation_unit) {
+  parts <- trimws(c(organisation, unit))
+  paste(parts[nzchar(parts)], collapse = paste0(" ", intToUtf8(0xB7), " "))
+}
+
+# Validate one optional export text argument: NULL, or a single non-NA string
+# (a character vector when `several`, joined with " / "). Blank means NULL.
+.check_export_text <- function(x, arg, several = FALSE, call = rlang::caller_env()) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  ok <- is.character(x) && length(x) >= 1 && !anyNA(x) && (several || length(x) == 1)
+  if (!ok) {
+    cli::cli_abort(
+      "{.arg {arg}} must be {if (several) 'a character vector' else 'a single string'} or {.code NULL}.",
+      call = call
+    )
+  }
+  x <- trimws(gsub("\\s+", " ", x)) # one line: a newline would start a Markdown block
+  x <- x[nzchar(x)]
+  if (length(x) == 0) NULL else paste(x, collapse = " / ")
+}
+
+# Validate the three arguments and install them for the calling writer; they
+# are cleared again when that writer returns.
+.set_export_ctx <- function(document_name = NULL, organisation = NULL, organisation_unit = NULL,
+                            document_abbreviation = NULL, frame = parent.frame()) {
+  document_name <- .check_export_text(document_name, "document_name", several = TRUE, call = frame)
+  organisation <- .check_export_text(organisation, "organisation", call = frame)
+  organisation_unit <- .check_export_text(organisation_unit, "organisation_unit", call = frame)
+  document_abbreviation <- .check_export_text(document_abbreviation, "document_abbreviation", call = frame)
+  .export_ctx$document_name <- document_name
+  .export_ctx$document_abbreviation <- document_abbreviation
+  .export_ctx$organisation <- organisation
+  .export_ctx$organisation_unit <- organisation_unit
+  do.call(
+    base::on.exit,
+    list(quote(rm(list = ls(.export_ctx), envir = .export_ctx)), TRUE),
+    envir = frame
+  )
+  invisible(NULL)
 }
 
 #' Date of the current document version: `metadata@date`, else the date of the
@@ -130,11 +194,16 @@ NULL
   if (nzchar(study)) {
     right <- c(list(officer::ftext(paste0("Study ", study, "    |    "), muted)), right)
   }
-  header <- officer::block_list(do.call(officer::fpar, c(
+  header_blocks <- list(do.call(officer::fpar, c(
     list(officer::ftext(title, ink), officer::run_tab()),
     right,
     list(fp_p = officer::fp_par(tabs = tabs, border.bottom = hairline, padding.bottom = 4))
   )))
+  org_line <- .export_org_line()
+  if (nzchar(org_line)) {
+    header_blocks <- c(list(officer::fpar(officer::ftext(org_line, tiny))), header_blocks)
+  }
+  header <- do.call(officer::block_list, header_blocks)
 
   version_bits <- c(
     if (!is.null(meta@version) && nzchar(meta@version)) paste("Version", meta@version),
@@ -161,7 +230,9 @@ NULL
 #' running header or footer.
 #' @keywords internal
 .add_cover_page <- function(doc, meta) {
-  title <- .dta_display_title(meta@title)
+  # The document name is the main title; the DTA's own title sits beneath it.
+  title <- .export_document_name()
+  dta_title <- .dta_display_title(meta@title, fallback = "")
   for (i in seq_len(6)) {
     doc <- .add_spacer(doc)
   }
@@ -176,8 +247,11 @@ NULL
       )
     )
   )
-  if (!identical(title, "Data Transfer Agreement")) {
-    doc <- .add_body_par(doc, "Data Transfer Agreement", size = FONT_SIZES$subtitle, color = THEME_COLORS$gray_mid)
+  if (nzchar(dta_title)) {
+    doc <- .add_body_par(doc, dta_title, size = FONT_SIZES$subtitle, color = THEME_COLORS$gray_mid)
+  }
+  if (nzchar(.export_org_line())) {
+    doc <- .add_body_par(doc, .export_org_line(), size = FONT_SIZES$body, bold = TRUE, color = THEME_COLORS$gray_dark)
   }
   if (!is.null(meta@header) && nzchar(meta@header)) {
     doc <- .add_body_par(doc, meta@header, size = FONT_SIZES$body, bold = TRUE, color = THEME_COLORS$gray_dark)

@@ -286,6 +286,7 @@ links:
 features:
   editing: false          # read-only; also removes "Create new"
   raw_yaml_tab: false
+  raw_yaml_editable: false  # already implied by editing: false
 exports:
   document: [word_template]
   bundled_word_templates: false
@@ -293,6 +294,11 @@ exports:
     - file: our_dta.docx  # a .docx; {DTA_TITLE}-style markers are filled in
       label: Our DTA template
 ```
+
+`document.name` and `document.abbreviation` rename what the app calls its
+documents (for example `DTS` instead of `DTA`); the name becomes the main title
+of every export, with the document's own title beneath it, and the organisation
+appears on the front page and in the running header.
 
 Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
 files in the library folder, named by a relative path that must not leave it.

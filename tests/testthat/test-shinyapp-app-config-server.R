@@ -349,3 +349,153 @@ test_that("with the start flags on (the default) the example and blank confirms 
     expect_s3_class(rv$dta, "DTAtools::DTA")
   })
 })
+
+# ---- document.name / document.abbreviation reach the app's wording -------------
+
+# Run create-new and an export-modal open under the current library and return
+# what the user would read: the create modal, the "created" notification, and
+# the sidebar once a document is open.
+# Replace the first `title:` line of a YAML text.
+yaml_retitle <- function(x, title) {
+  lines <- strsplit(x, "\n", fixed = TRUE)[[1]]
+  i <- grep("^ *title:", lines)[1]
+  lines[i] <- sub("title:.*", paste0("title: ", title), lines[i])
+  paste(lines, collapse = "\n")
+}
+
+document_wording <- function(.env = parent.frame()) {
+  out <- new.env()
+  out$modals <- character()
+  out$notices <- character()
+  testthat::local_mocked_bindings(
+    showModal = function(ui, ...) {
+      out$modals <- c(out$modals, paste(as.character(ui), collapse = ""))
+      invisible(NULL)
+    },
+    showNotification = function(ui, ...) {
+      out$notices <- c(out$notices, as.character(ui))
+      invisible(NULL)
+    },
+    .package = "shiny",
+    .env = .env
+  )
+  out
+}
+
+test_that("a configured abbreviation replaces DTA in the buttons and the created notification", {
+  with_app_library(c(
+    "document:",
+    "  name: Data Transmission Specification",
+    "  abbreviation: DTS"
+  ))
+
+  shiny::testServer(app_server_dir(), {
+    landing <- ui_text(output$main)
+    expect_no_match(landing, "Create DTA", fixed = TRUE)
+    # Narrowed once the library names its documents: the default wording
+    # "DTA / DTS" is deliberately broader because the uploader takes both.
+    expect_match(landing, "Load a DTS file", fixed = TRUE)
+
+    seen <- document_wording()
+    session$setInputs(create_new = 1)
+    expect_match(seen$modals[[1]], "Create a new DTS", fixed = TRUE)
+    expect_match(seen$modals[[1]], "Create DTS", fixed = TRUE)
+
+    session$setInputs(create_new_title = "Real", create_new_version_value = "1.0")
+    session$setInputs(create_new_confirm = 1)
+    expect_s3_class(rv$dta, "DTAtools::DTA")
+    expect_true(any(grepl("New DTS", seen$notices, fixed = TRUE)))
+    expect_false(any(grepl("New DTA", seen$notices, fixed = TRUE)))
+
+    workspace <- ui_text(output$main)
+    expect_match(workspace, "Export DTS", fixed = TRUE)
+    expect_no_match(workspace, "Export DTA", fixed = TRUE)
+  })
+})
+
+test_that("with both kinds configured the buttons carry both abbreviations", {
+  with_app_library(c(
+    "document:",
+    "  name: [Data Transfer Agreement, Data Transmission Specification]",
+    "  abbreviation: [DTA, DTS]"
+  ))
+
+  shiny::testServer(app_server_dir(), {
+    seen <- document_wording()
+    session$setInputs(create_new = 1)
+    expect_match(seen$modals[[1]], "Create DTA/DTS", fixed = TRUE)
+  })
+})
+
+test_that("a hostile abbreviation is escaped in the rendered page", {
+  with_app_library(c(
+    "document:",
+    "  abbreviation: \"<b>X</b>\""
+  ))
+
+  shiny::testServer(app_server_dir(), {
+    seen <- document_wording()
+    session$setInputs(create_new = 1)
+    expect_match(seen$modals[[1]], "Create &lt;b&gt;X&lt;/b&gt;", fixed = TRUE)
+    expect_no_match(seen$modals[[1]], "<b>X</b>", fixed = TRUE)
+  })
+})
+
+test_that("without a document section the wording is unchanged", {
+  with_app_library("# all defaults")
+
+  shiny::testServer(app_server_dir(), {
+    landing <- ui_text(output$main)
+    expect_match(landing, "Load a DTA / DTS specification file", fixed = TRUE)
+    seen <- document_wording()
+    session$setInputs(create_new = 1)
+    expect_match(seen$modals[[1]], "Create DTA", fixed = TRUE)
+    session$setInputs(create_new_title = "Real", create_new_version_value = "1.0")
+    session$setInputs(create_new_confirm = 1)
+    expect_true(any(grepl("New DTA", seen$notices, fixed = TRUE)))
+  })
+})
+
+# ---- features.raw_yaml_editable --------------------------------------------------
+
+test_that("raw_yaml_editable: false keeps the tab read-only and refuses a forged apply_yaml", {
+  with_app_library("features: {raw_yaml_editable: false}")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    expect_match(ui_text(output$main), "Raw YAML", fixed = TRUE)
+
+    enter_edit_mode(session)
+    expect_true(editing())
+    # The rest of the app is still editable, only the raw tab is not.
+    expect_false(yaml_editable())
+    expect_no_match(ui_text(output$yaml_edit_actions), "apply_yaml", fixed = TRUE)
+    expect_no_match(ui_text(output$yaml_edit_hint), "Apply changes", fixed = TRUE)
+
+    loaded <- rv$dta
+    yaml_before <- rv$yaml_text
+    edited <- yaml_retitle(yaml_before, "Forged title")
+    expect_false(identical(edited, yaml_before))
+    session$setInputs(raw_yaml_editor = edited, apply_yaml = 1)
+
+    expect_identical(rv$dta, loaded)
+    expect_identical(rv$yaml_text, yaml_before)
+    expect_null(rv$yaml_msg)
+  })
+})
+
+test_that("with the default config the apply button is rendered and apply_yaml applies", {
+  with_app_library("# all defaults")
+
+  shiny::testServer(app_server_dir(), {
+    session$setInputs(dta_file = app_file_input("clinical_dta.yaml"))
+    enter_edit_mode(session)
+    expect_true(yaml_editable())
+    expect_match(ui_text(output$yaml_edit_actions), "apply_yaml", fixed = TRUE)
+
+    edited <- yaml_retitle(rv$yaml_text, "Edited title")
+    session$setInputs(raw_yaml_editor = edited, apply_yaml = 1)
+    expect_true(rv$yaml_msg$ok, info = rv$yaml_msg$error)
+    expect_identical(DTAtools::metadata(rv$dta)@title, "Edited title")
+  })
+})

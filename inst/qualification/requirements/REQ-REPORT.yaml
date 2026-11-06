@@ -199,3 +199,20 @@ requirements:
       data it describes is not evidence of anything in particular. Inputs are
       fingerprinted from the file system rather than hashed: a delivery can be
       tens of gigabytes, and the report must not re-read it.
+
+  - id: REQ-REPORT-016
+    text: >
+      write_validation_report() shall take an optional document_name (a
+      character vector is joined with " / ") and show it as the document's
+      main heading, with the report's title directly beneath it; without it
+      the heading shall be "Data Transfer Agreement". The page title in the
+      document head shall remain the report's title, as REQ-REPORT-012 sets
+      it. Given organisation and organisation_unit it shall show them
+      (unit after the organisation, separated by " · ") in the header block,
+      HTML-escaped, and with both NULL or empty it shall show no organisation
+      text. An argument that is not NULL or a character string shall be
+      rejected with a condition naming it, before a file is written.
+    risk: low
+    category: functional
+    covers: [write_validation_report]
+    source: R/exportValidationReport.R
