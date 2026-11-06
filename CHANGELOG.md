@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
+  `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
+  rule its exact definition, not only a description: a monospace YAML
+  `Definition` column in Word/PDF and a fenced YAML block per rule in
+  Markdown. The YAML carries every parameter of the rule and reads back into
+  the same rule. In Word and PDF the nesting is indented with non-breaking
+  spaces (pandoc drops ordinary leading spaces); replace them with spaces
+  before pasting a definition into a YAML file.
+- A column-condition rule that has a description now also shows its
+  `IF ... -> THEN ...` reading in the `Description` column, as group-condition
+  rules already did.
+- Tables written into a user's Word template by block placeholders such as
+  `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
+  the template's text width. Before, Word sized the columns from their
+  content, which squeezed the `Rule ID` column next to the long `Definition`
+  column in portrait templates. A template with several sections keeps tables
+  at 100% of the text column, as before.
+
 ### Fixed
 
 - The app's built-in PDF writer no longer produces no file where the cairo

@@ -394,3 +394,294 @@ test_that("a column-condition rule description reads its operators, not their ke
     "IF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
   )
 })
+
+test_that("a column-condition rule with a description keeps the condition below it", {
+  # The description is the author's summary; the IF/THEN reading is appended on
+  # a new line so a description never hides what the rule actually tests.
+  rule <- DTARuleColCondition(
+    id = "adult_status",
+    description = "Adults are marked as such",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+
+  expect_identical(
+    translate_rule_to_human(rule),
+    "Adults are marked as such\nIF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
+  )
+
+  # An empty description counts as none: only the condition is shown.
+  blank <- DTARuleColCondition(
+    id = "adult_status",
+    description = "",
+    condition = list(AGE = list(greater = 17)),
+    then = list(STATUS = list(equal = "adult"))
+  )
+  expect_identical(
+    translate_rule_to_human(blank),
+    "IF 'AGE' > '17' \u2192 THEN 'STATUS' = 'adult'"
+  )
+})
+
+# ---- .rule_definition_yaml() -----------------------------------------------
+#
+# The exact definition is only worth printing if it is lossless, so most of
+# these tests rebuild the rule from the text and compare it with the original.
+# Expected values are the rule objects built here, or literals written out from
+# YAML syntax -- never the function's own output.
+
+# What a reader of the exported document would do with a Definition cell.
+.rt_rebuild <- function(rule, definition) {
+  do.call(
+    DTARuleFactory,
+    c(list(id = rule@id, description = rule@description), yaml::yaml.load(definition))
+  )
+}
+
+.rt_rule <- function(rule) {
+  .rt_rebuild(rule, .rule_definition_yaml(rule))
+}
+
+.rt_rules <- function() {
+  list(
+    col_condition = DTARuleColCondition(
+      id = "adult_status",
+      description = "Adults are marked as such",
+      condition = list(AGE = list(greater = 17)),
+      then = list(STATUS = list(equal = "adult"))
+    ),
+    col_range = DTARuleColRange(id = "age_range", columns = "AGE", min = 18, max = 65),
+    col_unique = DTARuleColUnique(id = "unique_keys", columns = c("A", "B")),
+    group_condition = DTARuleGroupCondition(
+      id = "visit_logic",
+      group_by = c("SUBJECT_ID", "VISIT"),
+      conditions = list(
+        a = list(X = list(empty = FALSE)),
+        b = list(Y = list(equals = "Z"))
+      ),
+      constraints = list(
+        list(type = "requires", `if` = "a", `then` = "b")
+      )
+    )
+  )
+}
+
+test_that(".rule_definition_yaml rebuilds a rule of every type unchanged", {
+  for (rule in .rt_rules()) {
+    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@type)
+  }
+})
+
+test_that("the definition leaves out nothing a rule class stores", {
+  # as.list() is what the definition is built from; a property it forgot would
+  # be silently missing from every exported definition.
+  for (rule in .rt_rules()) {
+    expect_identical(
+      setdiff(S7::prop_names(rule), names(as.list(rule))),
+      character(0),
+      info = rule@type
+    )
+  }
+})
+
+test_that(".rule_definition_yaml writes the specification syntax, without id or description", {
+  rules <- .rt_rules()
+
+  expect_identical(
+    .rule_definition_yaml(rules$col_range),
+    "type: col_range\ncolumns: AGE\nmin: 18.0\nmax: 65.0"
+  )
+  expect_identical(
+    .rule_definition_yaml(rules$col_unique),
+    "type: col_unique\ncolumns:\n- A\n- B"
+  )
+  expect_identical(
+    .rule_definition_yaml(rules$col_condition),
+    "type: col_condition\ncondition:\n  AGE:\n    greater: 17.0\nthen:\n  STATUS:\n    equal: adult"
+  )
+
+  # Unset constraint fields (here: no message) are not written; the explicit
+  # id, the "all" scopes and a message containing ": " are, the latter quoted.
+  grouped <- DTARuleGroupCondition(
+    id = "g",
+    group_by = "S",
+    conditions = list(
+      a = list(X = list(empty = FALSE)),
+      b = list(X = list(empty = TRUE))
+    ),
+    constraints = list(
+      list(
+        type = "mutually_exclusive", left = "a", right = "b",
+        left_scope = "all", right_scope = "all", id = "cx", message = "bad: both"
+      )
+    )
+  )
+  expect_identical(
+    .rule_definition_yaml(grouped),
+    paste0(
+      "type: group_condition\ngroup_by: S\nconditions:\n  a:\n    X:\n      empty: false\n",
+      "  b:\n    X:\n      empty: true\nconstraints:\n- id: cx\n  type: mutually_exclusive\n",
+      "  left: a\n  right: b\n  left_scope: all\n  right_scope: all\n  message: 'bad: both'"
+    )
+  )
+  expect_identical(as.list(.rt_rule(grouped)), as.list(grouped))
+})
+
+test_that(".rule_definition_yaml survives values that YAML would otherwise reinterpret", {
+  # Each of these is a way plain YAML writing loses information: infinity, a
+  # long list cut short, regex metacharacters and both quote kinds, the strings
+  # yes/no/N that YAML 1.1 reads as booleans, and a value with a line break.
+  hard <- list(
+    DTARuleColRange(id = "open_low", columns = "AGE", min = -Inf, max = 65),
+    DTARuleColRange(id = "open_high", columns = "AGE", min = 0, max = Inf),
+    # More than 7 significant digits: the YAML writer's default precision cut these.
+    DTARuleColRange(id = "long_decimals", columns = "AGE", min = 0.123456789, max = 99999.999),
+    DTARuleColCondition(
+      id = "big_threshold",
+      condition = list(AGE = list(greater = 123456789.123)),
+      then = list(FLAG = list(equals = "Y"))
+    ),
+    DTARuleColCondition(
+      id = "thirty_values",
+      condition = list(VISIT = list(`in` = sprintf("V%02d", 1:30))),
+      then = list(FLAG = list(equals = "Y"))
+    ),
+    DTARuleColCondition(
+      id = "numeric_list",
+      condition = list(VISIT = list(not_in = c(1, 2, 3))),
+      then = list(FLAG = list(equals = "N"))
+    ),
+    DTARuleColCondition(
+      id = "pattern_chars",
+      condition = list(CODE = list(pattern = "^(a|b)\\d+'x\"y$")),
+      then = list(NOTE = list(empty = TRUE))
+    ),
+    DTARuleColCondition(
+      id = "yes_and_no",
+      condition = list(ANSWER = list(equals = "yes")),
+      then = list(ANSWER2 = list(not_equals = "no"), N = list(equals = "N"))
+    ),
+    DTARuleColCondition(
+      id = "multi_line",
+      condition = list(NOTE = list(equals = "line1\nline2")),
+      then = list(NOTE2 = list(empty = FALSE))
+    ),
+    DTARuleColCondition(
+      id = "two_operators",
+      condition = list(AGE = list(greater_equal = 18, less = 65)),
+      then = list(NOTE = list(empty = FALSE))
+    ),
+    DTARuleColCondition(
+      id = "three_ticks",
+      condition = list(CODE = list(pattern = "a```b")),
+      then = list(NOTE = list(empty = TRUE))
+    ),
+    DTARuleColUnique(id = "yes_column", columns = c("yes", "no", "007", "1e3")),
+    DTARuleGroupCondition(
+      id = "all_scopes",
+      description = "Every row of a group",
+      group_by = c("SUBJECT_ID", "N"),
+      conditions = list(
+        a = list(X = list(empty = FALSE)),
+        b = list(Y = list(equals = "yes"))
+      ),
+      constraints = list(
+        list(
+          type = "requires", `if` = "a", `then` = "b",
+          if_scope = "all", then_scope = "all", id = "needs_b", message = "a needs b: always"
+        ),
+        list(type = "mutually_exclusive", left = "a", right = "b")
+      )
+    )
+  )
+
+  for (rule in hard) {
+    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@id)
+  }
+
+  # The 30 values are all still there, not "... and 25 more".
+  thirty <- .rt_rule(hard[[which(vapply(hard, function(r) r@id, "") == "thirty_values")]])
+  expect_identical(thirty@condition$VISIT$`in`, sprintf("V%02d", 1:30))
+})
+
+test_that(".rule_definition_yaml works for a rule without a description", {
+  for (rule in .rt_rules()[c("col_range", "col_unique", "group_condition")]) {
+    expect_null(rule@description)
+    expect_identical(as.list(.rt_rule(rule)), as.list(rule), info = rule@type)
+    expect_false(grepl("description", .rule_definition_yaml(rule), fixed = TRUE), info = rule@type)
+    expect_false(grepl("(^|\n)id:", .rule_definition_yaml(rule)), info = rule@type)
+  }
+})
+
+test_that(".rule_definition_yaml prints doubles at full precision, as YAML numbers", {
+  # Pinned as literals. The yaml writer's `precision = 15` used to print
+  # 99999.999 as 99999.998999999996158 and cut 0.0001234567890123 short.
+  range <- DTARuleColRange(id = "r", columns = "AGE", min = 0.123456789, max = 99999.999)
+  lines <- strsplit(.rule_definition_yaml(range), "\n", fixed = TRUE)[[1]]
+  expect_true("min: 0.123456789" %in% lines)
+  expect_true("max: 99999.999" %in% lines)
+
+  big <- DTARuleColCondition(
+    id = "big",
+    condition = list(AGE = list(greater = 123456789.123)),
+    then = list(FLAG = list(equals = "Y"))
+  )
+  expect_true(
+    "    greater: 123456789.123" %in%
+      strsplit(.rule_definition_yaml(big), "\n", fixed = TRUE)[[1]]
+  )
+
+  # A whole double keeps its ".0" (so it reads back as a double); an integer
+  # does not.
+  whole <- function(v) {
+    strsplit(
+      .rule_definition_yaml(DTARuleColRange(id = "w", columns = "AGE", min = v, max = 100)),
+      "\n",
+      fixed = TRUE
+    )[[1]]
+  }
+  expect_true("min: 18.0" %in% whole(18))
+  expect_true("min: 18" %in% whole(18L))
+  expect_false("min: 18.0" %in% whole(18L))
+})
+
+test_that(".rule_definition_yaml rebuilds awkward numbers exactly", {
+  # Each value is chosen to break a fixed-precision writer: more than 15
+  # significant digits, a sum that is not its decimal spelling, a repeating
+  # fraction, integers beyond 1e15, and tiny magnitudes.
+  values <- list(
+    0.0001234567890123,
+    -0.000123456789012345,
+    0.1 + 0.2,
+    1 / 3,
+    12345678901234567,
+    1e15,
+    1e-9,
+    2^53,
+    .Machine$integer.max
+  )
+  for (v in values) {
+    rule <- DTARuleColCondition(
+      id = "awkward",
+      condition = list(AGE = list(greater = v)),
+      then = list(FLAG = list(equals = "Y"))
+    )
+    expect_identical(
+      as.list(.rt_rule(rule)),
+      as.list(rule),
+      info = paste(format(v, digits = 17), "->", .rule_definition_yaml(rule))
+    )
+  }
+
+  # A vector-valued list of mixed doubles.
+  listed <- DTARuleColCondition(
+    id = "mixed_list",
+    condition = list(AGE = list(`in` = c(0.1, 2.5, 1e-9))),
+    then = list(FLAG = list(equals = "Y"))
+  )
+  expect_identical(
+    as.list(.rt_rule(listed)),
+    as.list(listed),
+    info = .rule_definition_yaml(listed)
+  )
+})

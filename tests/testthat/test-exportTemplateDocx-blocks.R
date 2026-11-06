@@ -20,18 +20,42 @@
   summary$text[summary$content_type == "table cell"]
 }
 
-# Given a docx_summary() that contains exactly one "Rule ID" / "Description"
-# table (the shape .build_rules_table() always produces), return the
-# Description text keyed by Rule ID. The header row is dropped positionally
+# Given a docx_summary() that contains exactly one "Rule ID" / "Description" /
+# "Definition" table (the shape .build_rules_table() always produces), return
+# the Description text keyed by Rule ID. The header row is dropped positionally
 # rather than by matching its label text, because a rule id or description
 # could legitimately equal the header text itself.
 .block_rule_table_descriptions <- function(summary) {
   cells <- .block_table_cells(summary)
-  data_cells <- cells[-c(1, 2)]
-  ids <- data_cells[c(TRUE, FALSE)]
-  descriptions <- data_cells[c(FALSE, TRUE)]
+  data_cells <- cells[-(1:3)]
+  ids <- data_cells[c(TRUE, FALSE, FALSE)]
+  descriptions <- data_cells[c(FALSE, TRUE, FALSE)]
   names(descriptions) <- ids
   descriptions
+}
+
+# Same table, the Definition column (exact YAML) keyed by Rule ID.
+.block_rule_table_definitions <- function(summary) {
+  cells <- .block_table_cells(summary)
+  data_cells <- cells[-(1:3)]
+  definitions <- data_cells[c(FALSE, FALSE, TRUE)]
+  names(definitions) <- data_cells[c(TRUE, FALSE, FALSE)]
+  definitions
+}
+
+# The Definition text of every rules table in the document (found by its
+# "Rule ID" first cell, so other tables in the same document are ignored),
+# keyed by Rule ID, in document order.
+.block_all_rule_definitions <- function(summary) {
+  cells <- summary[summary$content_type == "table cell", ]
+  out <- character(0)
+  for (ti in unique(cells$table_index)) {
+    text <- cells$text[cells$table_index == ti]
+    if (!identical(text[[1]], "Rule ID")) next
+    body <- text[-(1:3)]
+    out <- c(out, stats::setNames(body[c(FALSE, FALSE, TRUE)], body[c(TRUE, FALSE, FALSE)]))
+  }
+  out
 }
 
 # Build a template whose header (not body) contains header_text as its whole
@@ -131,18 +155,111 @@ test_that("{COLUMN_SPECS} renders a real table in place, between the surrounding
   expect_false(grepl("{COLUMN_SPECS}", .docx_text(out), fixed = TRUE))
 })
 
-test_that("the column specs table is sized as a percentage of the text column, not fixed inches", {
-  template <- .make_template("{COLUMN_SPECS}")
-  on.exit(unlink(template, force = TRUE), add = TRUE)
+# Per body-level table of a docx: its layout type, its column grid (dxa) and
+# its first cell's text, plus the text width (dxa) of the document's final
+# section -- taken from the file's own page size and margins, not from the
+# renderer under test.
+.block_table_grids <- function(path) {
+  doc <- xml2::read_xml(.read_docx_body_xml(path))
+  body <- xml2::xml_find_first(doc, ".//*[local-name()='body']")
+  sect <- xml2::xml_find_first(body, "./*[local-name()='sectPr']")
+  num <- function(node, attr) as.numeric(xml2::xml_attr(node, attr))
+  pg <- xml2::xml_find_first(sect, "./*[local-name()='pgSz']")
+  mar <- xml2::xml_find_first(sect, "./*[local-name()='pgMar']")
+  tables <- xml2::xml_find_all(body, "./*[local-name()='tbl']")
+  list(
+    text_dxa = num(pg, "w") - num(mar, "left") - num(mar, "right"),
+    tables = lapply(tables, function(tbl) {
+      layout <- xml2::xml_find_first(tbl, "./*[local-name()='tblPr']/*[local-name()='tblLayout']")
+      list(
+        layout = xml2::xml_attr(layout, "type"),
+        grid = as.numeric(xml2::xml_attr(
+          xml2::xml_find_all(tbl, "./*[local-name()='tblGrid']/*[local-name()='gridCol']"),
+          "w"
+        )),
+        first = xml2::xml_text(xml2::xml_find_first(tbl, ".//*[local-name()='tc']"))
+      )
+    })
+  )
+}
 
-  dta <- create_example_DTA()
+test_that("block tables use a fixed grid that fills the template's text column", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- list(DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65))
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  template <- .make_template("{DATASETS}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
-
   export_with_template(dta, template, out, quiet = TRUE)
 
-  xml <- .read_docx_body_xml(out)
-  expect_match(xml, 'w:type="pct"', fixed = TRUE)
+  g <- .block_table_grids(out)
+  expect_gt(length(g$tables), 1L)
+  for (tb in g$tables) {
+    expect_identical(tb$layout, "fixed")
+    # Rounding to whole twips may lose at most one per column.
+    expect_lte(sum(tb$grid), g$text_dxa)
+    expect_gte(sum(tb$grid), g$text_dxa - length(tb$grid))
+  }
+  rules <- Filter(function(tb) identical(tb$first, "Rule ID"), g$tables)
+  expect_length(rules, 1L)
+  # The id column must stay readable beside the long Definition column.
+  expect_gte(rules[[1]]$grid[[1]], 1440)
+})
+
+test_that("block tables in a multi-section template stay 100% wide instead of baking in one section's width", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- list(DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65))
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  # A landscape first section followed by a portrait body: the first section's
+  # width must not be applied to tables that land in the portrait section.
+  doc <- officer::body_add_par(officer::read_docx(), "cover")
+  doc <- officer::body_end_section_landscape(doc)
+  doc <- officer::body_add_par(doc, "{VALIDATION_RULES}")
+  template <- tempfile(fileext = ".docx")
+  print(doc, target = template)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+
+  xml <- xml2::read_xml(.read_docx_body_xml(out))
+  tables <- xml2::xml_find_all(xml, ".//*[local-name()='tbl']")
+  expect_gte(length(tables), 1L)
+  for (tbl in tables) {
+    width <- xml2::xml_find_first(tbl, "./*[local-name()='tblPr']/*[local-name()='tblW']")
+    expect_identical(xml2::xml_attr(width, "type"), "pct")
+    expect_identical(xml2::xml_attr(width, "w"), "5000")
+  }
+})
+
+test_that("block tables follow the template's own margins", {
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- list(DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65))
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  narrow <- officer::body_add_par(
+    officer::body_set_default_section(
+      officer::read_docx(),
+      officer::prop_section(page_margins = officer::page_mar(left = 2, right = 2))
+    ),
+    "{VALIDATION_RULES}"
+  )
+  narrow_path <- tempfile(fileext = ".docx")
+  print(narrow, target = narrow_path)
+  wide_path <- .make_template("{VALIDATION_RULES}")
+  on.exit(unlink(c(narrow_path, wide_path), force = TRUE), add = TRUE)
+
+  widths <- vapply(c(narrow_path, wide_path), function(tpl) {
+    out <- tempfile(fileext = ".docx")
+    on.exit(unlink(out, force = TRUE), add = TRUE)
+    export_with_template(dta, tpl, out, quiet = TRUE)
+    g <- .block_table_grids(out)
+    expect_lte(sum(g$tables[[1]]$grid), g$text_dxa)
+    sum(g$tables[[1]]$grid)
+  }, numeric(1))
+  expect_lt(widths[[1]], widths[[2]])
 })
 
 test_that("{VALIDATION_RULES} renders each rule's translate_rule_to_human() description", {
@@ -198,6 +315,67 @@ test_that("a DTARuleGroupCondition renders its grouping column and constraints v
   expect_match(cell_text, "SUBJID", fixed = TRUE)
   expect_match(cell_text, "must hold", fixed = TRUE)
   expect_identical(unname(cell_text), translate_rule_to_human(rule))
+})
+
+test_that("{VALIDATION_RULES} and {DATASETS} carry each rule's exact definition", {
+  # The Definition cell must rebuild the rule it was written from. The expected
+  # value is the rule object put in, not anything the renderer produced.
+  rules <- list(
+    DTARuleColRange(id = "age_range_check", columns = "AGE", min = -Inf, max = 65),
+    DTARuleColUnique(id = "unique_subj_visit", columns = c("SUBJID", "VISIT")),
+    DTARuleColCondition(
+      id = "visit_needs_age",
+      description = "Baseline visits need an age",
+      condition = list(VISIT = list(equals = "V01")),
+      then = list(AGE = list(empty = FALSE))
+    ),
+    DTARuleGroupCondition(
+      id = "subject_has_visit",
+      group_by = "SUBJID",
+      conditions = list(
+        v01 = list(VISIT = list(equals = "V01")),
+        old = list(AGE = list(greater_equal = 18))
+      ),
+      constraints = list(
+        list(type = "requires", `if` = "v01", `then` = "old", then_scope = "all", message = "v01: needs adult")
+      )
+    )
+  )
+  ds <- create_example_DTADataSetTabular(2)
+  ds@specs@rules <- rules
+  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+
+  for (token in c("{VALIDATION_RULES}", "{DATASETS}")) {
+    template <- .make_template(token)
+    out <- tempfile(fileext = ".docx")
+    export_with_template(dta, template, out, quiet = TRUE)
+    unlink(template, force = TRUE)
+
+    definitions <- .block_all_rule_definitions(.block_docx_summary(out))
+    unlink(out, force = TRUE)
+
+    expect_identical(names(definitions), vapply(rules, function(r) r@id, character(1)), info = token)
+    for (rule in rules) {
+      rebuilt <- do.call(
+        DTARuleFactory,
+        c(list(id = rule@id, description = rule@description), yaml::yaml.load(gsub("\u00a0", " ", definitions[[rule@id]], fixed = TRUE)))
+      )
+      expect_identical(as.list(rebuilt), as.list(rule), info = paste(token, rule@id))
+    }
+  }
+
+  # The single-table helpers read the same third column.
+  template <- .make_template("{VALIDATION_RULES}")
+  on.exit(unlink(template, force = TRUE), add = TRUE)
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  export_with_template(dta, template, out, quiet = TRUE)
+  summary <- .block_docx_summary(out)
+  expect_identical(names(.block_rule_table_definitions(summary)), names(.block_rule_table_descriptions(summary)))
+  expect_identical(
+    unname(.block_rule_table_definitions(summary)),
+    unname(.block_all_rule_definitions(summary))
+  )
 })
 
 test_that("dataset block headings carry the name and keep the id visible beside it", {

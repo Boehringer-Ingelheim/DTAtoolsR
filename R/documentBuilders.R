@@ -552,24 +552,35 @@ NULL
   rule_data <- data.frame(
     `Rule ID` = character(),
     `Description` = character(),
+    `Definition` = character(),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
 
   for (rule in rules) {
-    human_desc <- translate_rule_to_human(rule)
     rule_data <- rbind(rule_data, data.frame(
       `Rule ID` = rule@id,
-      `Description` = human_desc,
+      `Description` = translate_rule_to_human(rule),
+      # Leading spaces become non-breaking spaces: pandoc (the PDF path) strips
+      # ordinary leading whitespace, which would flatten the YAML nesting. Replace
+      # U+00A0 with a space before pasting the cell into a YAML file.
+      `Definition` = {
+        def_lines <- strsplit(.rule_definition_yaml(rule), "\n", fixed = TRUE)[[1]]
+        lead <- attr(regexpr("^ *", def_lines), "match.length")
+        paste(paste0(strrep("\u00a0", lead), substring(def_lines, lead + 1)), collapse = "\n")
+      },
       stringsAsFactors = FALSE,
       check.names = FALSE
     ))
   }
 
   ft <- flextable::flextable(rule_data)
-  ft <- flextable::width(ft, j = 1, width = 1.2)
-  ft <- flextable::width(ft, j = 2, width = 5.0)
+  ft <- flextable::width(ft, j = 1, width = 1.4)
+  ft <- flextable::width(ft, j = 2, width = 3.3)
+  ft <- flextable::width(ft, j = 3, width = 3.7)
   ft <- .style_table(ft)
+  ft <- flextable::font(ft, j = 3, fontname = FONTS$monospace, part = "body")
+  ft <- flextable::fontsize(ft, j = 3, size = FONT_SIZES$table_body - 1, part = "body")
   ft
 }
 
@@ -746,38 +757,6 @@ NULL
   ft <- flextable::fontsize(ft, size = FONT_SIZES$table_body - 1, part = "body")
 
   ft
-}
-
-#' Format validation rules as a professional list
-#' @keywords internal
-.build_validation_rules_section <- function(doc, rules_collection) {
-  if (is.null(rules_collection) || length(rules_collection) == 0) {
-    doc <- .add_body_par(doc, "No validation rules specified.", italic = TRUE, color = THEME_COLORS$gray_mid)
-    return(doc)
-  }
-
-  rules <- rules_collection
-
-  # Create a list of rules
-  for (rule in rules) {
-    # Rule ID as sub-heading
-    doc <- officer::body_add_par(
-      doc,
-      rule@id,
-      style = "List Bullet"
-    )
-
-    # Rule description
-    human_desc <- translate_rule_to_human(rule)
-    doc <- officer::body_add_par(
-      doc,
-      human_desc,
-      style = "List Bullet 2"
-    )
-  }
-
-  doc <- .add_spacer(doc)
-  doc
 }
 
 #' Add a closing paragraph with generation time and version metadata

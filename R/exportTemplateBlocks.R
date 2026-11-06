@@ -258,11 +258,32 @@
 #'
 #' The built-in layout gives its widest tables landscape pages of their own.
 #' A user template's page geometry is not ours to change -- inserting section
-#' breaks would re-orient content that is not ours -- so the table is set to
-#' 100% of whatever text column the template has.
+#' breaks would re-orient content that is not ours -- so the builder's column
+#' widths are scaled, in proportion, to the page width minus the margins of the
+#' template's section. The layout is fixed so Word keeps those widths: an
+#' autofit table is written without a column grid and Word sizes the columns
+#' from their content, which squeezes a narrow column beside a long one.
+#'
+#' `officer::docx_dim()` always measures the document's first section, whatever
+#' section the table lands in. A template with several sections therefore keeps
+#' the width-adaptive layout (100% of the text column of the section it lands
+#' in), because widths baked in from the wrong section could run off the page.
+#' @param ft A flextable.
+#' @param doc The `rdocx` the table is going into.
 #' @keywords internal
-.tv_block_fit <- function(ft) {
-  flextable::set_table_properties(ft, layout = "autofit", width = 1)
+.tv_block_fit <- function(ft, doc) {
+  sections <- xml2::xml_find_all(
+    officer::docx_body_xml(doc),
+    "//*[local-name()='sectPr']"
+  )
+  if (length(sections) != 1L) {
+    return(flextable::set_table_properties(ft, layout = "autofit", width = 1))
+  }
+  d <- officer::docx_dim(doc)
+  text_w <- d$page[["width"]] - d$margins[["left"]] - d$margins[["right"]]
+  w <- dim(ft)$widths
+  ft <- flextable::width(ft, width = w * text_w / sum(w))
+  flextable::set_table_properties(ft, layout = "fixed")
 }
 
 #' Add a flextable fitted to the page, or an italic note when there is none
@@ -271,7 +292,7 @@
   if (is.null(ft)) {
     doc <- .add_body_par(doc, empty_note, italic = TRUE, color = THEME_COLORS$gray_mid)
   } else {
-    doc <- flextable::body_add_flextable(doc, .tv_block_fit(ft))
+    doc <- flextable::body_add_flextable(doc, .tv_block_fit(ft, doc))
   }
   .add_spacer(doc)
 }
