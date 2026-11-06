@@ -1,12 +1,17 @@
 # -----------------------------------------------------------------------------
 # A template's version history, COMPUTED rather than written.
 #
-# Nobody types a changelog here. Every published version is its own immutable
-# file in the library (the versioning convention the rebase already depends
-# on), so "what changed in 1.1" is answered by building 1.0 and 1.1 exactly as
-# the "Create new from template" flow would and diffing the two -- with the
-# same engine rebase_plan() uses (template_diff.R). A forgotten or wrong hand-
-# written note cannot make the history lie, because there is no such note.
+# Nobody types a changelog for a library version. (The one hand-written part,
+# `prior_versions:`, covers only versions from BEFORE the library -- see
+# template_prior_versions() below. `base.metadata.version_history` is the
+# created DOCUMENT's history and plays no part here.)
+#
+# Every published version is its own immutable file in the library (the
+# versioning convention the rebase already depends on), so "what changed in
+# 1.1" is answered by building 1.0 and 1.1 exactly as the "Create new from
+# template" flow would and diffing the two -- with the same engine
+# rebase_plan() uses (template_diff.R). A forgotten or wrong hand-written note
+# cannot make a library version's history lie, because there is no such note.
 #
 # Three kinds of entry ("initial", below, is the oldest version with nothing
 # to compare against):

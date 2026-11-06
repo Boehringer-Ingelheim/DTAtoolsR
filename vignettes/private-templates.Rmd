@@ -1006,6 +1006,11 @@ inherited through `extends:` — a child's history is its own. Every entry must
 be older than the template's first version in the library;
 `validate_template()` reports a malformed entry as `prior_versions_invalid`.
 
+Neither the computed history nor `prior_versions:` has anything to do with
+`base.metadata.version_history`: that is the history of the *document* a
+template creates, copied into every new DTA, and the template's own changes do
+not belong there.
+
 ## Parties
 
 A creation template can offer a "party slot" — a dropdown bound to
