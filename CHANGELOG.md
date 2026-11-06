@@ -148,6 +148,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- `validate_template()` no longer rejects a creation template that writes
+  `datasets:` in the verb form (`add:` / `modify:` / `remove:` / `order:`). It
+  walked the verb keys as if they were datasets and reported
+  `dataset_id_missing` for a valid template, so a library using the explicit
+  form could not pass CI. It now checks the entries under `add:` and `modify:`
+  and leaves the ids under `remove:` and `order:` alone.
 - The app's Markdown export with "store as PDF" now always delivers a PDF. On
   a server with neither a LaTeX engine nor Chrome/Edge it used to give up with
   "neither produced a PDF. Exporting Markdown instead."; it now falls back to

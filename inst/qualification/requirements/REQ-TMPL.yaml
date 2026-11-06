@@ -573,7 +573,10 @@ requirements:
       scalar (a YAML sequence or mapping, or a missing value) shall be
       reported dataset_field_invalid at severity "error", with a message
       naming that key. A dataset with name: but no id: shall be reported
-      dataset_id_missing like any other dataset without an id.
+      dataset_id_missing like any other dataset without an id. When a
+      creation template writes datasets: in the verb form, the entries under
+      add: and modify: shall be checked as datasets, and the verb keys
+      themselves, and the ids under remove: and order:, shall not.
     risk: medium
     category: functional
     covers: [validate_template]

@@ -564,6 +564,68 @@ test_that("an inline dataset with no id is a dataset_id_missing error, even in a
   expect_match(rows$message, "Inline dataset", fixed = TRUE)
 })
 
+test_that("a verb-form datasets: section checks its add:/modify: entries, not its verb keys", {
+  # The verb form is a MAPPING (add/modify/remove/order); walking it as a list
+  # of entries once reported dataset_id_missing for every verb key.
+  write_verb_child <- function(dir, added_id_line) {
+    writeLines(
+      c(
+        "kind: dta_creation_template",
+        "id: parent_tpl",
+        "version: \"1.0\"",
+        "base:",
+        "  metadata:",
+        "    title: Parent",
+        "datasets:",
+        "  - id: ds0",
+        "    type: tabular",
+        "    files: {filename: a.csv, type: csv}",
+        "    columns:",
+        "      - {id: COL1, type: SAS Char}",
+        "  - id: ds1",
+        "    type: tabular",
+        "    files: {filename: b.csv, type: csv}",
+        "    columns:",
+        "      - {id: COL1, type: SAS Char}"
+      ),
+      file.path(dir, "parent.dta-template.yaml")
+    )
+    writeLines(
+      c(
+        "kind: dta_creation_template",
+        "id: child_tpl",
+        "version: \"1.0\"",
+        "extends: parent_tpl@1.0",
+        "datasets:",
+        "  remove: [ds0]",
+        "  add:",
+        added_id_line,
+        "      type: tabular",
+        "      files: {filename: c.csv, type: csv}",
+        "      columns:",
+        "        - {id: COL1, type: SAS Char}",
+        "  modify:",
+        "    - {id: ds1, description: Modified}",
+        "  order: [ds2, ds1]"
+      ),
+      file.path(dir, "child.dta-template.yaml")
+    )
+  }
+
+  dir <- withr::local_tempdir()
+  write_verb_child(dir, "    - id: ds2")
+  result <- validate_template(dir)
+  expect_no_code_row(result, "dataset_id_missing")
+  expect_no_code_row(result, "dataset_field_invalid")
+
+  # The add: entries really are checked: one without an id is still reported,
+  # exactly once (not once per verb key).
+  dir2 <- withr::local_tempdir()
+  write_verb_child(dir2, "    - description: No identifier")
+  rows <- expect_code_row(validate_template(dir2), "dataset_id_missing", "error")
+  expect_equal(nrow(rows), 1L)
+})
+
 test_that("a well-formed dta_dataset_template with a proper 'dataset:' body validates clean", {
   # The positive control for the guard above: dataset_missing must not fire
   # (or anything else) for a template that correctly uses the singular key,

@@ -620,6 +620,14 @@
 
   # ---- dataset_template_unresolved / patch_incoherent ---------------------
   ds_entries <- def[["datasets"]] %||% def[["base"]][["datasets"]] %||% list()
+  # A child may write the section in the verb form, a mapping of
+  # inherit/add/modify/remove/order (dta_template_parse_collection()). Only
+  # add: and modify: hold entries; the rest hold ids. Variant choices cannot
+  # use the verb form (dta_template_validate_variants() rejects it).
+  if (.dta_template_engine_get("dta_template_is_mapping")(ds_entries)) {
+    verb_entries <- .dta_template_engine_get("dta_template_verb_entries")
+    ds_entries <- c(verb_entries(ds_entries[["add"]]), verb_entries(ds_entries[["modify"]]))
+  }
   if (is.list(variant_choices)) {
     ds_entries <- c(ds_entries, unlist(lapply(variant_choices, function(choice) {
       if (is.list(choice)) choice[["datasets"]] %||% list() else list()
