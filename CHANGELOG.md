@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- In the template options dialog, a free-text option with exactly one
+  suggestion is now a vertically resizable text box instead of a one-line
+  field.
 - Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
   `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
   rule its exact definition, not only a description: a monospace YAML
