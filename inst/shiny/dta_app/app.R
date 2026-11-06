@@ -14,36 +14,8 @@ options(shiny.maxRequestSize = 1024 * 1024^2) # 1 GB
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
-brandbar <- div(
-  class = "app-brandbar",
-  tags$img(class = "brand-logo", src = "dtatools_logo_small.png", alt = "DTAtools logo"),
-  div(
-    div(class = "brand-title", "DTAtools"),
-    div(class = "brand-sub", "Validation and authoring of Data Transfer Agreements (DTA) and Data Transmission Specifications (DTS)")
-  ),
-  div(
-    class = "app-actions",
-    uiOutput("edit_gate", inline = TRUE),
-    tags$a(
-      class = "brand-link",
-      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/issues",
-      target = "_blank", rel = "noopener noreferrer",
-      "Report issues"
-    ),
-    tags$a(
-      class = "brand-link",
-      href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR#credits",
-      target = "_blank", rel = "noopener noreferrer",
-      "About"
-    ) # ,
-    # tags$a(
-    #  class = "brand-link",
-    #  href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR/blob/master/doc/DTAtools.html",
-    #  target = "_blank", rel = "noopener noreferrer",
-    #  "Documentation"
-    # )
-  )
-)
+# The brand bar and footer are built per request from the library's app config
+# (brandbar_ui()/app_footer_ui() in R/ui_components.R).
 
 # Landing drop target glyph: the logo's document-and-tick motif as an outline,
 # in the brand greens. Inline SVG so it inherits the sheet's colours and needs
@@ -132,18 +104,6 @@ dta_version_label <- function() {
 }
 
 dta_pkg_version <- dta_version_label()
-app_footer <- tags$footer(
-  class = "app-footer",
-  tags$span(class = "foot-name", "DTAtools"),
-  if (nzchar(dta_pkg_version)) tags$span(class = "foot-ver", dta_pkg_version),
-  tags$span(class = "foot-sep", `aria-hidden` = "true"),
-  tags$span("Boehringer Ingelheim"),
-  tags$span(class = "foot-sep", `aria-hidden` = "true"),
-  tags$a(
-    href = "https://github.com/Boehringer-Ingelheim/DTAtoolsR",
-    target = "_blank", rel = "noopener noreferrer", "GitHub repository"
-  )
-)
 
 # Clear a fileInput's text field after an upload is processed (so the control
 # reads empty and is ready for the next drop). Triggered from the server via
@@ -491,49 +451,62 @@ yaml_ace_resize_js <- "
 })();
 "
 
-ui <- bslib::page_fluid(
-  theme = bi_theme(),
-  shinyjs::useShinyjs(),
-  tags$head(
-    tags$style(bi_css()),
-    tags$script(shiny::HTML(reset_fileinput_js)),
-    tags$script(shiny::HTML(msgs_dock_js)),
-    tags$script(shiny::HTML(vocab_set_js)),
-    tags$script(shiny::HTML(download_trigger_js)),
-    tags$script(shiny::HTML(client_id_js)),
-    tags$script(shiny::HTML(yaml_ace_resize_js)),
-    tags$script(shiny::HTML(modal_unsuspend_js)),
-    tags$script(shiny::HTML(modal_state_js)),
-    # Unlike the eight above, this one is a function in R/ui_components.R
-    # rather than a string here, because its behaviour is worth testing
-    # separately -- see click_guard_script() there, and the test file, for why
-    # double-click protection cannot live on the server at all. Its position
-    # in this list is not load-bearing: it installs a capture-phase listener
-    # on `document`, which runs ahead of every element's own handler whenever
-    # it was registered.
-    click_guard_script()
-  ),
-  brandbar,
-  div(style = "padding: 18px;", uiOutput("main")),
-  app_footer,
-  uiOutput("floating_msgs"),
-  # Off-screen (but still RENDERED) download button for the export modal. It is
-  # triggered programmatically via download_trigger_js. A display:none element
-  # cannot be reliably .click()ed to start a browser download in every browser,
-  # so it is moved off-screen instead of being hidden with display:none.
-  div(
-    style = paste(
-      "position: absolute; left: -9999px; top: -9999px;",
-      "width: 1px; height: 1px; overflow: hidden;"
+# The page is built per request from the library's app config, so a library can
+# retitle, recolour and re-brand it (see R/app_config.R).
+ui_page <- function(cfg) {
+  bslib::page_fluid(
+    theme = bi_theme(cfg$colors),
+    shinyjs::useShinyjs(),
+    tags$head(
+      tags$title(cfg$branding$window_title),
+      tags$style(bi_css(cfg$colors)),
+      tags$script(shiny::HTML(reset_fileinput_js)),
+      tags$script(shiny::HTML(msgs_dock_js)),
+      tags$script(shiny::HTML(vocab_set_js)),
+      tags$script(shiny::HTML(download_trigger_js)),
+      tags$script(shiny::HTML(client_id_js)),
+      tags$script(shiny::HTML(yaml_ace_resize_js)),
+      tags$script(shiny::HTML(modal_unsuspend_js)),
+      tags$script(shiny::HTML(modal_state_js)),
+      # Unlike the eight above, this one is a function in R/ui_components.R
+      # rather than a string here, because its behaviour is worth testing
+      # separately -- see click_guard_script() there, and the test file, for why
+      # double-click protection cannot live on the server at all. Its position
+      # in this list is not load-bearing: it installs a capture-phase listener
+      # on `document`, which runs ahead of every element's own handler whenever
+      # it was registered.
+      click_guard_script()
     ),
-    downloadButton("export_trigger_download", "")
+    brandbar_ui(cfg),
+    div(style = "padding: 18px;", uiOutput("main")),
+    app_footer_ui(cfg, dta_pkg_version),
+    uiOutput("floating_msgs"),
+    # Off-screen (but still RENDERED) download button for the export modal. It is
+    # triggered programmatically via download_trigger_js. A display:none element
+    # cannot be reliably .click()ed to start a browser download in every browser,
+    # so it is moved off-screen instead of being hidden with display:none.
+    div(
+      style = paste(
+        "position: absolute; left: -9999px; top: -9999px;",
+        "width: 1px; height: 1px; overflow: hidden;"
+      ),
+      downloadButton("export_trigger_download", "")
+    )
   )
-)
+}
+
+ui <- function(req) ui_page(dta_app_config())
 
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 server <- function(input, output, session) {
+  # The deployment's app config (dta-app.yaml in the template library), read once
+  # per session. Every feature gate below is enforced here on the server, not
+  # only by hiding the control: an input that is not on screen can still be
+  # driven over the websocket.
+  cfg <- dta_app_config()
+
   # --- reactive state (single source of truth) ---------------------------
   rv <- reactiveValues(
     dta = NULL, # the DTA S7 object
@@ -643,7 +616,7 @@ server <- function(input, output, session) {
   # version first -- "Enable edit mode" is a deliberate route to exactly
   # that, recording nothing in the version history when no version entry is
   # open.
-  editing <- reactive(isTRUE(rv$editing))
+  editing <- reactive(isTRUE(rv$editing) && cfg$features$editing)
 
   # Is the landing page showing? rv$structure is NULL there, and a list once a
   # document is open -- often an EMPTY list, for a document with no datasets,
@@ -703,7 +676,7 @@ server <- function(input, output, session) {
   # load/reset/restore.
   output$edit_gate <- renderUI({
     rv$doc_token
-    if (isolate(on_landing())) {
+    if (!cfg$features$editing || isolate(on_landing())) {
       NULL
     } else {
       tagList(
@@ -723,7 +696,7 @@ server <- function(input, output, session) {
   # and closes it. See rv$add_ds_msg / output$add_ds_body for the pattern
   # this mirrors.
   observeEvent(input$create_new_version, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$new_version_msg <- NULL
     current <- tryCatch(S7::prop(DTAtools::metadata(rv$dta), "version"), error = function(e) NULL)
     showModal(modalDialog(
@@ -746,7 +719,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$new_version_confirm, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     v <- trimws(as.character(input$new_version_value %||% ""))
     if (!nzchar(v)) {
       rv$new_version_msg <- list(ok = FALSE, error = "Enter a version.")
@@ -844,7 +817,7 @@ server <- function(input, output, session) {
   # the websocket. The guard is gone and the row now follows rv$editing; see
   # the WHY comment on edit_menu() (ui_components.R).
   observeEvent(input$enable_edit_mode, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$version_locked <- FALSE
     # rv$version_baseline_yaml is deliberately LEFT ALONE. Clearing it looked
     # harmless -- with no entry open, export_dta() writes no summary on this
@@ -877,7 +850,7 @@ server <- function(input, output, session) {
   # closing the modal (leaving what the author typed on screen) or commits
   # and closes it.
   observeEvent(input$create_new_document, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     rv$new_document_msg <- NULL
     md <- tryCatch(DTAtools::metadata(rv$dta), error = function(e) NULL)
     cur_v <- tryCatch(S7::prop(md, "version"), error = function(e) NULL)
@@ -902,7 +875,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_document_confirm, {
-    req(rv$dta)
+    req(rv$dta, cfg$features$editing)
     v <- trimws(as.character(input$new_document_version %||% ""))
     if (!nzchar(v)) {
       rv$new_document_msg <- list(ok = FALSE, error = "Enter a version.")
@@ -1168,7 +1141,7 @@ server <- function(input, output, session) {
     # the default and arrives read-only; it can still be unlocked from the
     # Edit menu without creating a version -- rv$version_locked does not
     # affect whether editing is possible.
-    rv$editing <- isTRUE(start_editing)
+    rv$editing <- isTRUE(start_editing) && cfg$features$editing
     rv$yaml_msg <- NULL
     autosave()
     notify_spec_check(dta)
@@ -1478,6 +1451,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$load_example, {
+    req(cfg$features$load_example)
     files <- dta_example_yaml_files()
     if (length(files) == 0) {
       showNotification("No example specifications found.", type = "error")
@@ -1498,6 +1472,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$example_dta_load, {
+    req(isTRUE(cfg$features$load_example))
     sel <- input$example_dta_choice
     if (is.null(sel) || length(sel) == 0 || !nzchar(sel)) {
       showNotification("Choose an example specification first.", type = "warning")
@@ -1555,7 +1530,7 @@ server <- function(input, output, session) {
   # sequence a user can actually perform.
 
   observeEvent(input$create_new, {
-    req(on_landing())
+    req(on_landing(), cfg$features$create_blank)
     rv$create_new_msg <- NULL
     rv$create_new_token <- rv$create_new_token + 1
     showModal(modalDialog(
@@ -1600,7 +1575,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_new_confirm, {
-    req(on_landing())
+    req(on_landing(), isTRUE(cfg$features$create_blank))
     title <- trimws(as.character(input$create_new_title %||% "")[1])
     version <- trimws(as.character(input$create_new_version_value %||% "")[1])
     # Every failure below leaves the modal open with what the user typed still
@@ -1964,6 +1939,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$create_from_template, {
+    req(cfg$features$create_from_template)
     idx <- dta_template_index_cached()
     entries <- template_picker_entries(idx)
     if (nrow(entries) == 0 && !dta_template_private_configured()) {
@@ -1984,6 +1960,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$template_select_next, {
+    req(isTRUE(cfg$features$create_from_template))
     # The definition the detail panel is already showing -- NULL only when no
     # row is visible to select, which is what a search matching nothing looks
     # like from here.
@@ -2063,7 +2040,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$template_create_confirm, {
-    req(rv$template_ref)
+    req(isTRUE(cfg$features$create_from_template), rv$template_ref)
     idx <- rv$template_index
 
     loaded <- load_template_definition(rv$template_ref, index = idx)
@@ -5683,29 +5660,39 @@ server <- function(input, output, session) {
       )
     }
 
+    # Only the formats the library's config allows get a button.
+    fmt_on <- function(f) f %in% cfg$exports$validation_messages
     tagList(
-      dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as CSV", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
-      dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as TSV", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
-      dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
-        sprintf("Download the validation messages for %s as XLSX", ds)
-      } else {
-        sprintf("Run a check on %s first -- there are no results to export yet", ds)
-      }),
+      if (fmt_on("csv")) {
+        dl_btn("dl_msgs_csv", "CSV", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as CSV", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
+      if (fmt_on("tsv")) {
+        dl_btn("dl_msgs_tsv", "TSV", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as TSV", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
+      if (fmt_on("xlsx")) {
+        dl_btn("dl_msgs_xlsx", "XLSX", active_ok, if (active_ok) {
+          sprintf("Download the validation messages for %s as XLSX", ds)
+        } else {
+          sprintf("Run a check on %s first -- there are no results to export yet", ds)
+        })
+      },
       # Named apart from the sidebar's "Validation summary": this is the
       # message-level report, that one is the per-dataset outcome.
-      dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
-        "Download the full validation message report"
-      } else {
-        "Run a check first -- there are no results to report yet"
-      })
+      if (fmt_on("html")) {
+        dl_btn("dl_msgs_html", "Report", any_ok, if (any_ok) {
+          "Download the full validation message report"
+        } else {
+          "Run a check first -- there are no results to report yet"
+        })
+      }
     )
   })
 
@@ -5803,14 +5790,14 @@ server <- function(input, output, session) {
   output$dl_msgs_csv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".csv"),
     content = function(file) {
-      req(msgs_active_checked())
+      req(msgs_active_checked(), "csv" %in% cfg$exports$validation_messages)
       utils::write.csv(csv_formula_safe(msgs_dl_df()), file, row.names = FALSE, na = "")
     }
   )
   output$dl_msgs_tsv <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".tsv"),
     content = function(file) {
-      req(msgs_active_checked())
+      req(msgs_active_checked(), "tsv" %in% cfg$exports$validation_messages)
       utils::write.table(
         csv_formula_safe(msgs_dl_df()), file,
         sep = "\t", row.names = FALSE, na = "", qmethod = "double"
@@ -5820,7 +5807,7 @@ server <- function(input, output, session) {
   output$dl_msgs_xlsx <- downloadHandler(
     filename = function() paste0(msgs_dl_base(), ".xlsx"),
     content = function(file) {
-      req(msgs_active_checked())
+      req(msgs_active_checked(), "xlsx" %in% cfg$exports$validation_messages)
       if (!requireNamespace("writexl", quietly = TRUE)) {
         showNotification(
           "XLSX export needs the 'writexl' package. Install it, or use CSV / TSV.",
@@ -5847,7 +5834,7 @@ server <- function(input, output, session) {
   output$dl_msgs_html <- downloadHandler(
     filename = function() paste0(report_dl_base(), ".html"),
     content = function(file) {
-      req(msgs_any_checked())
+      req(msgs_any_checked(), "html" %in% cfg$exports$validation_messages)
       tryCatch(
         DTAtools::write_validation_report(rv$dta, file, overwrite = TRUE, quiet = TRUE),
         error = function(e) {
@@ -7252,7 +7239,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$apply_yaml, {
-    req(editing())
+    req(editing(), cfg$features$raw_yaml_tab)
     txt <- input$raw_yaml_editor %||% ""
     if (!nzchar(trimws(txt))) {
       rv$yaml_msg <- list(ok = FALSE, error = "The editor is empty — nothing to apply.")
@@ -7446,7 +7433,7 @@ server <- function(input, output, session) {
   output$dl_yaml <- downloadHandler(
     filename = function() dta_yaml_export_filename(rv$dta),
     content = function(file) {
-      req(rv$dta)
+      req(rv$dta, cfg$features$dta_yaml_download)
       res <- dta_to_yaml_text(export_dta())
       if (!res$ok) {
         showNotification(paste("YAML export failed:", res$error), type = "error", duration = 10)
@@ -7461,7 +7448,7 @@ server <- function(input, output, session) {
       paste0(gsub("[^A-Za-z0-9]+", "_", nm), "_", Sys.Date(), ".yaml")
     },
     content = function(file) {
-      req(rv$dta, rv$active)
+      req(rv$dta, rv$active, cfg$features$dataset_yaml_download)
       res <- dta_dataset_to_yaml_text(rv$dta, rv$active)
       if (!res$ok) {
         showNotification(paste("Dataset YAML export failed:", res$error),
@@ -7475,7 +7462,8 @@ server <- function(input, output, session) {
   output$dl_docx <- downloadHandler(
     filename = function() paste0("DTA_", Sys.Date(), ".docx"),
     content = function(file) {
-      req(rv$dta)
+      # No button points here, but the URL is reachable: honour the export gate.
+      req(rv$dta, export_choices$allowed("word", word_mode = "builtin"))
       res <- dta_export(export_dta(), file, "docx")
       if (!res$ok) {
         showNotification(paste("Word export failed:", res$error), type = "error", duration = 10)
@@ -7491,10 +7479,30 @@ server <- function(input, output, session) {
     file_name = NULL
   )
 
+  # What the library's config lets the export dialog offer, and the one place
+  # the dialog's inputs are turned into an effective choice. The server does
+  # not trust the client to have honoured the dialog: a missing input (control
+  # not rendered) falls back to the configured default, and a forced PDF is
+  # forced here, not only in the markup.
+  export_choices <- export_document_options(cfg)
+  export_selection <- function() {
+    list(
+      format = input$export_format %||% export_choices$default_format,
+      as_pdf = if (export_choices$pdf_forced) {
+        TRUE
+      } else if (export_choices$pdf_choice) {
+        isTRUE(input$export_as_pdf)
+      } else {
+        FALSE
+      },
+      word_mode = input$export_word_mode %||% export_choices$default_mode
+    )
+  }
+
   # Open export modal
   observeEvent(input$export_modal_open, {
-    req(rv$dta)
-    templates <- list_available_templates()
+    req(rv$dta, export_choices$any)
+    templates <- export_choices$templates
 
     modal_content <- div(
       # No heading here: modalDialog() renders `title` as the dialog's own
@@ -7504,15 +7512,22 @@ server <- function(input, output, session) {
       p("Choose the format and options for your DTA export."),
       h5("Format", class = "text-muted"),
       radioButtons("export_format", NULL,
-        choices = c("Markdown" = "markdown", "Word Document" = "word"),
-        selected = "word"
+        choices = export_choices$format_choices,
+        selected = export_choices$default_format
       ),
       # Markdown options
       conditionalPanel(
         condition = "input.export_format == 'markdown'",
         hr(),
         h5("Markdown Options", class = "text-muted"),
-        checkboxInput("export_as_pdf", "Export as PDF (via Pandoc)", value = FALSE),
+        if (export_choices$pdf_choice) {
+          checkboxInput("export_as_pdf", "Export as PDF (via Pandoc)", value = export_choices$default_pdf)
+        } else {
+          # One kind only: keep the input (the YAML option below reads it) but
+          # do not offer a choice. export_selection() decides server-side.
+          shinyjs::hidden(checkboxInput("export_as_pdf", NULL, value = export_choices$pdf_forced))
+        },
+        if (export_choices$pdf_forced) p("The document is exported as PDF (via Pandoc).", class = "text-muted"),
         # A PDF cannot hide the YAML (see export_do), so the option is only
         # offered for a Markdown file.
         conditionalPanel(
@@ -7526,16 +7541,16 @@ server <- function(input, output, session) {
         hr(),
         h5("Word Document Options", class = "text-muted"),
         radioButtons("export_word_mode", NULL,
-          choices = c("Use built-in template" = "builtin", "Use custom template" = "custom"),
-          selected = "builtin"
+          choices = export_choices$mode_choices,
+          selected = export_choices$default_mode
         ),
         conditionalPanel(
           condition = "input.export_word_mode == 'custom'",
           if (length(templates) > 0) {
             selectInput("export_template_select",
               "Available templates:",
-              choices = stats::setNames(templates, templates),
-              selected = templates[1]
+              choices = templates,
+              selected = templates[[1]]
             )
           } else {
             p("No custom templates available.", class = "text-muted")
@@ -7562,8 +7577,9 @@ server <- function(input, output, session) {
   # Export filename preview
   output$export_filename_preview <- renderText({
     req(rv$dta)
-    ext <- if (input$export_format == "markdown") {
-      if (isTRUE(input$export_as_pdf)) ".pdf" else ".md"
+    sel <- export_selection()
+    ext <- if (identical(sel$format, "markdown")) {
+      if (sel$as_pdf) ".pdf" else ".md"
     } else {
       ".docx"
     }
@@ -7578,6 +7594,11 @@ server <- function(input, output, session) {
   # Execute export
   observeEvent(input$export_do, {
     req(rv$dta)
+    sel <- export_selection()
+    if (!isTRUE(export_choices$allowed(sel$format, sel$as_pdf, sel$word_mode))) {
+      showNotification("This export format is not available in this deployment.", type = "error")
+      return()
+    }
 
     stem <- dta_export_stem(rv$dta)
     # Computed ONCE: export_dta() re-parses the version baseline and runs a
@@ -7587,7 +7608,7 @@ server <- function(input, output, session) {
 
     tryCatch(
       {
-        if (input$export_format == "markdown") {
+        if (identical(sel$format, "markdown")) {
           # Markdown export
           # Named for what is delivered: Markdown unless a PDF is actually
           # produced below, which renames it.
@@ -7609,7 +7630,7 @@ server <- function(input, output, session) {
           # is therefore not offered alongside PDF, and a value it kept from
           # before PDF was ticked is ignored -- also when the PDF falls back
           # to Markdown.
-          if (isTRUE(input$export_include_yaml_md) && !isTRUE(input$export_as_pdf)) {
+          if (isTRUE(input$export_include_yaml_md) && !sel$as_pdf) {
             md_text <- readLines(output_file, warn = FALSE)
             md_text <- paste(md_text, collapse = "\n")
             md_text <- embed_yaml_markdown(md_text, doc)
@@ -7623,7 +7644,7 @@ server <- function(input, output, session) {
           #      LaTeX and no extra R packages, just an installed browser.
           #   3. R's own PDF device - needs nothing, so it always runs.
           # Only if all three fail is the Markdown file delivered instead.
-          if (isTRUE(input$export_as_pdf)) {
+          if (sel$as_pdf) {
             pdf_file <- sub("\\.md$", ".pdf", output_file)
             own("export", pdf_file)
             pdf_ok <- FALSE
@@ -7693,6 +7714,12 @@ server <- function(input, output, session) {
               output_file <- pdf_file
               filename <- sub("\\.md$", ".pdf", filename)
             } else {
+              # Only PDF is offered here (exports.document has markdown_pdf but not
+              # markdown): delivering a .md would hand out a format the
+              # deployment chose not to offer, so nothing is delivered.
+              if (!"markdown" %in% cfg$exports$document) {
+                cli::cli_abort("Could not produce a PDF on this server, and plain Markdown is not available in this deployment.")
+              }
               showNotification(
                 "Could not produce a PDF on this server. Exporting Markdown instead.",
                 type = "warning",
@@ -7710,9 +7737,9 @@ server <- function(input, output, session) {
           output_file <- tempfile(pattern = "dta-export-", fileext = ".docx")
           own("export", output_file)
 
-          if (input$export_word_mode == "custom") {
+          if (identical(sel$word_mode, "custom")) {
             template_name <- input$export_template_select
-            template_path <- get_template_path(template_name)
+            template_path <- get_template_path(template_name, cfg)
             if (is.null(template_path)) {
               cli::cli_abort("Template file not found. It may have been deleted.")
             }
@@ -7810,7 +7837,7 @@ server <- function(input, output, session) {
     st <- unlist(rv$status)
     validated <- names(st)[st %in% c("pass", "fail")]
     ok <- length(validated) > 0 && all(st[validated] == "pass")
-    if (!isTRUE(ok)) {
+    if (!isTRUE(ok) || !cfg$exports$validation_summary) {
       return(NULL)
     }
     complete <- length(validated) == length(st)
@@ -7837,7 +7864,7 @@ server <- function(input, output, session) {
       paste0("validation_summary_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".html")
     },
     content = function(file) {
-      req(rv$dta)
+      req(rv$dta, cfg$exports$validation_summary)
       html <- dta_build_validation_report(rv$dta, rv$status)
       writeLines(html, file, useBytes = TRUE)
     }
@@ -8185,10 +8212,12 @@ server <- function(input, output, session) {
         # dataset (req(!is.null(s)) above), so this reads it rather than
         # re-deriving the type from rv$active/rv$dta a second time.
         if (editing()) ds_edit_menu(s$type),
-        downloadButton("dl_ds_yaml", "Export DataSet YAML",
-          class = "btn btn-outline-primary",
-          title = "Download this dataset's specification as YAML"
-        )
+        if (cfg$features$dataset_yaml_download) {
+          downloadButton("dl_ds_yaml", "Export DataSet YAML",
+            class = "btn btn-outline-primary",
+            title = "Download this dataset's specification as YAML"
+          )
+        }
       ),
       # div(
       #  class = "msg-hint", style = "margin:-6px 0 12px;",
@@ -8241,15 +8270,31 @@ server <- function(input, output, session) {
         sf <- session_file()
         !is.null(sf) && file.exists(sf)
       }
+      # The row exists only if the library offers at least one way to start
+      # (restoring a session is core, not configurable).
+      start_buttons <- list(
+        if (cfg$features$create_blank) {
+          actionButton("create_new", "Create new", class = "btn btn-outline-primary")
+        },
+        if (cfg$features$create_from_template) {
+          actionButton("create_from_template", "Create new from template", class = "btn btn-primary")
+        },
+        if (cfg$features$load_example) {
+          actionButton("load_example", "Load example", class = "btn btn-outline-primary")
+        },
+        if (restore_available) {
+          actionButton("restore_session", "Restore previous session",
+            class = "btn btn-outline-secondary"
+          )
+        }
+      )
+      start_buttons <- Filter(Negate(is.null), start_buttons)
       div(
         class = "landing",
         div(
           class = "landing-hero",
-          tags$h1(class = "landing-title", "Check a data transfer against its specification."),
-          p(
-            class = "landing-lede",
-            "Open a DTA or DTS YAML file, load the data files it expects, run the checks, and export the agreement."
-          )
+          tags$h1(class = "landing-title", cfg$branding$landing_headline),
+          p(class = "landing-lede", cfg$branding$landing_lede)
         ),
         div(
           class = "landing-drop",
@@ -8266,21 +8311,13 @@ server <- function(input, output, session) {
             )
           )
         ),
-        div(
-          class = "landing-alt",
-          span(class = "landing-alt-label", "Other ways to start"),
+        if (length(start_buttons) > 0) {
           div(
-            class = "landing-alt-actions",
-            actionButton("create_new", "Create new", class = "btn btn-outline-primary"),
-            actionButton("create_from_template", "Create new from template", class = "btn btn-primary"),
-            actionButton("load_example", "Load example", class = "btn btn-outline-primary"),
-            if (restore_available) {
-              actionButton("restore_session", "Restore previous session",
-                class = "btn btn-outline-secondary"
-              )
-            }
+            class = "landing-alt",
+            span(class = "landing-alt-label", "Other ways to start"),
+            div(class = "landing-alt-actions", start_buttons)
           )
-        )
+        }
       )
     } else {
       # Workspace
@@ -8294,8 +8331,12 @@ server <- function(input, output, session) {
           actionButton("check_all", "Check all datasets", class = "btn btn-primary w-100"),
           tags$hr(),
           div(class = "section-label", "Export"),
-          downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100"),
-          actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100"),
+          if (cfg$features$dta_yaml_download) {
+            downloadButton("dl_yaml", "Export DTA YAML", class = "btn btn-outline-primary w-100")
+          },
+          if (export_choices$any) {
+            actionButton("export_modal_open", "Export DTA", class = "btn btn-primary w-100")
+          },
           uiOutput("validation_report_ui"),
           tags$hr(),
           actionButton("reset_app", "Start over", class = "btn btn-outline-danger w-100")
@@ -8306,55 +8347,57 @@ server <- function(input, output, session) {
           panels <- list(
             nav_panel("Datasets", uiOutput("dataset_detail")),
             nav_panel("Metadata", uiOutput("metadata_editor")),
-            nav_panel(
-              "Raw YAML",
-              div(
-                class = "yaml-edit-bar",
-                uiOutput("yaml_edit_hint"),
-                uiOutput("yaml_edit_actions")
-              ),
-              uiOutput("yaml_validation_msg"),
-              uiOutput("spec_check"),
-              if (requireNamespace("shinyAce", quietly = TRUE)) {
+            if (cfg$features$raw_yaml_tab) {
+              nav_panel(
+                "Raw YAML",
                 div(
-                  class = "yaml-ace-wrap",
-                  shinyAce::aceEditor(
-                    "raw_yaml_editor",
-                    value = isolate(rv$yaml_text) %||% "",
-                    mode = "yaml", theme = "tomorrow_night",
-                    # The CSS (.yaml-ace-wrap, theme.R) is what actually governs
-                    # the rendered height once the wrapper is draggable -- see
-                    # yaml_ace_resize_js above -- but this stays a realistic
-                    # initial value in its own right, matching it, rather than
-                    # relying entirely on the !important override.
-                    height = "70vh", fontSize = 13,
-                    showLineNumbers = TRUE, wordWrap = FALSE,
-                    debounce = 100, autoComplete = "disabled",
-                    # Born in the correct state: the observe() below only
-                    # fires on later editing() changes (it is not
-                    # re-triggered by loading a document), and it messages an
-                    # input id that does not exist yet the first time it runs
-                    # -- this editor lives inside output$main, which is still
-                    # showing the landing card at server start.
-                    readOnly = !isolate(editing())
+                  class = "yaml-edit-bar",
+                  uiOutput("yaml_edit_hint"),
+                  uiOutput("yaml_edit_actions")
+                ),
+                uiOutput("yaml_validation_msg"),
+                uiOutput("spec_check"),
+                if (requireNamespace("shinyAce", quietly = TRUE)) {
+                  div(
+                    class = "yaml-ace-wrap",
+                    shinyAce::aceEditor(
+                      "raw_yaml_editor",
+                      value = isolate(rv$yaml_text) %||% "",
+                      mode = "yaml", theme = "tomorrow_night",
+                      # The CSS (.yaml-ace-wrap, theme.R) is what actually governs
+                      # the rendered height once the wrapper is draggable -- see
+                      # yaml_ace_resize_js above -- but this stays a realistic
+                      # initial value in its own right, matching it, rather than
+                      # relying entirely on the !important override.
+                      height = "70vh", fontSize = 13,
+                      showLineNumbers = TRUE, wordWrap = FALSE,
+                      debounce = 100, autoComplete = "disabled",
+                      # Born in the correct state: the observe() below only
+                      # fires on later editing() changes (it is not
+                      # re-triggered by loading a document), and it messages an
+                      # input id that does not exist yet the first time it runs
+                      # -- this editor lives inside output$main, which is still
+                      # showing the landing card at server start.
+                      readOnly = !isolate(editing())
+                    )
                   )
-                )
-              } else {
-                # A plain <textarea> is natively resizable (a drag handle in
-                # the bottom-right corner, no CSS needed), unlike Ace -- so
-                # this fallback only needs the taller starting point. Same
-                # born-in-the-correct-state reasoning as the Ace editor above:
-                # the observe() that calls shinyjs::disable()/enable() only
-                # reacts to later editing() changes, and messages an input id
-                # that is not in the DOM yet the first time it runs -- so this
-                # has to start disabled itself when not editing.
-                ta <- textAreaInput("raw_yaml_editor",
-                  label = NULL,
-                  value = isolate(rv$yaml_text), width = "100%", rows = 28
-                )
-                if (isolate(editing())) ta else shinyjs::disabled(ta)
-              }
-            )
+                } else {
+                  # A plain <textarea> is natively resizable (a drag handle in
+                  # the bottom-right corner, no CSS needed), unlike Ace -- so
+                  # this fallback only needs the taller starting point. Same
+                  # born-in-the-correct-state reasoning as the Ace editor above:
+                  # the observe() that calls shinyjs::disable()/enable() only
+                  # reacts to later editing() changes, and messages an input id
+                  # that is not in the DOM yet the first time it runs -- so this
+                  # has to start disabled itself when not editing.
+                  ta <- textAreaInput("raw_yaml_editor",
+                    label = NULL,
+                    value = isolate(rv$yaml_text), width = "100%", rows = 28
+                  )
+                  if (isolate(editing())) ta else shinyjs::disabled(ta)
+                }
+              )
+            }
           )
           do.call(navset_card_tab, Filter(Negate(is.null), panels))
         }
@@ -8479,7 +8522,7 @@ server <- function(input, output, session) {
     # before this field existed: isTRUE(NULL) is FALSE, so an absent
     # saved$editing restores as not-editing for free -- the conservative
     # default, with no explicit is.null() check needed.
-    rv$editing <- isTRUE(saved$editing)
+    rv$editing <- isTRUE(saved$editing) && cfg$features$editing
     rv$md_token <- rv$md_token + 1
     rv$contacts_token <- rv$contacts_token + 1
     rv$doc_token <- rv$doc_token + 1

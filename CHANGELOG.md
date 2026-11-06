@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- A template library can customise the Shiny app that serves it with a
+  `dta-app.yaml` in the library directory: organisation name and unit, app and
+  window title, footer text, a logo, the colour scheme, the report-issue, about,
+  repository and documentation links, which start buttons, the raw YAML tab and
+  YAML downloads are offered, a read-only mode (`features.editing: false`),
+  which export formats and validation downloads are offered, and the library's
+  own Word templates for "Export DTA". Disabled features are refused by the
+  server, not only hidden. Colours, links and file paths are validated, and a
+  bad value falls back to its default with a warning instead of stopping the
+  app. With several template sources the first `dta-app.yaml` wins as a whole.
+  Every key is optional, and a library without the file looks as before.
+- `validate_template()` checks `dta-app.yaml` with the app's own parser and
+  reports `app_config_invalid` (error), `app_config_unknown_key` and
+  `app_config_warning` (warnings), `app_config_duplicate` (error, both `.yaml`
+  and `.yml` present) and `app_config_outside_library_dir` (error, for a copy
+  left at the repository root).
+- `create_template_repo()` scaffolds a `templates/dta-app.yaml` with every key
+  commented out next to its default, and its README documents the file.
 - Seven Word template placeholders for the free-text `transmission` fields,
   which no template could reach before: `{TRANSMISSION_EXTENT}`,
   `{TRANSMISSION_SCOPE}`, `{TRANSMISSION_PACKAGING}`,
@@ -20,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - In the template options dialog, a free-text option with exactly one
   suggestion is now a vertically resizable text box instead of a one-line
   field.
+- The app's footer no longer shows "Boehringer Ingelheim" by default. Set
+  `organisation.name` (or `branding.footer_label`) in the library's
+  `dta-app.yaml` to show an organisation.
 - Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
   `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
   rule its exact definition, not only a description: a monospace YAML

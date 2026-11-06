@@ -251,13 +251,12 @@ test_that("the export modal defaults to Word with the YAML specification embedde
   # sees each time.
   app_code <- paste(readLines(file.path(.shiny_app_dir(), "app.R"), warn = FALSE), collapse = "\n")
 
-  fmt <- regmatches(
-    app_code,
-    regexpr('(?s)radioButtons\\("export_format".{0,300}?selected = "[a-z]+"', app_code, perl = TRUE)
-  )
-  expect_length(fmt, 1)
-  expect_match(fmt, 'selected = "word"', fixed = TRUE)
-  expect_false(grepl('selected = "markdown"', fmt, fixed = TRUE))
+  # The selection is no longer a literal in app.R: it comes from the library's
+  # app config via export_document_options() (dta-app.yaml `default_document`),
+  # whose stock default is Word. Pin both halves -- the dialog reads the option,
+  # and the default option is Word.
+  expect_match(app_code, "selected = export_choices$default_format", fixed = TRUE)
+  expect_identical(app_fn("export_document_options")()$default_format, "word")
 
   yaml_box <- regmatches(
     app_code,
@@ -757,4 +756,170 @@ test_that("when the Markdown export fails too, the PDF export fails instead of w
   expect_match(res$error, "Could not produce a PDF", fixed = TRUE)
   expect_match(res$error, "markdown writer exploded", fixed = TRUE)
   expect_false(file.exists(out))
+})
+
+# ---- Library word templates and the config-driven export options -------------
+
+app_fixture_template <- function() {
+  path <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  expect_true(nzchar(path))
+  path
+}
+
+# A normalised app config built from a real dta-app.yaml in a temp library that
+# holds a copy of the packaged Word template as "our_dta.docx".
+library_cfg <- function(yaml_lines, .local_envir = parent.frame()) {
+  lib <- withr::local_tempdir(.local_envir = .local_envir)
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "our_dta.docx")))
+  writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
+  list(dir = lib, cfg = app_fn("parse_dta_app_config")(file.path(lib, "dta-app.yaml"))$config)
+}
+
+# A normalised config from `exports:` lines alone.
+exports_cfg <- function(..., .local_envir = parent.frame()) {
+  f <- withr::local_tempfile(fileext = ".yaml", .local_envir = .local_envir)
+  writeLines(c("exports:", paste0("  ", c(...))), f)
+  app_fn("parse_dta_app_config")(f)$config
+}
+
+test_that("list_available_templates adds library templates after the bundled ones, with config labels", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  word_templates:",
+    "    - file: our_dta.docx",
+    "      label: Our DTA template"
+  ))
+  got <- app_fn("list_available_templates")(lc$cfg)
+
+  expect_true("clinical_dta_template.docx" %in% got)
+  expect_identical(unname(got[["Our DTA template"]]), "library:our_dta.docx")
+  expect_identical(names(got)[[length(got)]], "Our DTA template")
+})
+
+test_that("bundled_word_templates: false leaves only the library templates", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: our_dta.docx"
+  ))
+  got <- app_fn("list_available_templates")(lc$cfg)
+
+  expect_identical(unname(got), "library:our_dta.docx")
+  expect_null(app_fn("get_template_path")("clinical_dta_template.docx", lc$cfg))
+})
+
+test_that("get_template_path resolves a library template inside the library and still refuses traversal", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: our_dta.docx"
+  ))
+  get_path <- app_fn("get_template_path")
+
+  path <- get_path("library:our_dta.docx", lc$cfg)
+  expect_identical(
+    normalizePath(path, winslash = "/"),
+    normalizePath(file.path(lc$dir, "our_dta.docx"), winslash = "/")
+  )
+  # Not offered by the stock config, so not resolvable there.
+  expect_null(get_path("library:our_dta.docx"))
+  # The client may send anything over the websocket.
+  expect_null(get_path("library:../../DESCRIPTION", lc$cfg))
+  expect_null(get_path("library:other.docx", lc$cfg))
+  expect_null(get_path("../our_dta.docx", lc$cfg))
+  expect_null(get_path("our_dta.docx", lc$cfg))
+  expect_null(get_path(file.path(lc$dir, "our_dta.docx"), lc$cfg))
+})
+
+test_that("export_document_options offers only what exports.document allows", {
+  stock <- app_fn("export_document_options")()
+  expect_true(stock$any)
+  expect_identical(unname(stock$format_choices), c("markdown", "word"))
+  expect_true(stock$pdf_choice)
+  expect_identical(unname(stock$mode_choices), c("builtin", "custom"))
+
+  pdf_only <- app_fn("export_document_options")(exports_cfg("document: [markdown_pdf]"))
+  expect_identical(unname(pdf_only$format_choices), "markdown")
+  expect_false(pdf_only$pdf_choice)
+  expect_true(pdf_only$pdf_forced)
+  expect_true(pdf_only$allowed("markdown", as_pdf = TRUE))
+  expect_false(pdf_only$allowed("markdown", as_pdf = FALSE))
+  expect_false(pdf_only$allowed("word"))
+
+  md_only <- app_fn("export_document_options")(exports_cfg("document: [markdown]"))
+  expect_false(md_only$pdf_choice)
+  expect_false(md_only$pdf_forced)
+  expect_true(md_only$allowed("markdown", as_pdf = FALSE))
+  expect_false(md_only$allowed("markdown", as_pdf = TRUE))
+
+  word_only <- app_fn("export_document_options")(exports_cfg("document: [word]"))
+  expect_identical(unname(word_only$format_choices), "word")
+  expect_identical(unname(word_only$mode_choices), "builtin")
+  expect_true(word_only$allowed("word", word_mode = "builtin"))
+  expect_false(word_only$allowed("word", word_mode = "custom"))
+
+  none <- app_fn("export_document_options")(exports_cfg("document: []"))
+  expect_false(none$any)
+  expect_false(none$allowed("word"))
+  expect_false(none$allowed("markdown"))
+})
+
+test_that("word_template counts as offered only when a template exists to pick", {
+  lc <- library_cfg(c(
+    "exports:",
+    "  document: [word_template]",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - file: our_dta.docx"
+  ))
+  o <- app_fn("export_document_options")(lc$cfg)
+  expect_identical(unname(o$mode_choices), "custom")
+  expect_identical(o$default_mode, "custom")
+  expect_true(o$allowed("word", word_mode = "custom"))
+  expect_false(o$allowed("word", word_mode = "builtin"))
+
+  # Same selection with nothing to pick: not offered at all.
+  cfg <- lc$cfg
+  cfg$exports$word_templates <- cfg$exports$word_templates[0, ]
+  expect_false(app_fn("export_document_options")(cfg)$any)
+})
+
+test_that("default_document picks the preselected format, mode and PDF state", {
+  o <- app_fn("export_document_options")(exports_cfg("default_document: markdown_pdf"))
+  expect_identical(o$default_format, "markdown")
+  expect_true(o$default_pdf)
+
+  o <- app_fn("export_document_options")(exports_cfg("default_document: markdown"))
+  expect_identical(o$default_format, "markdown")
+  expect_false(o$default_pdf)
+})
+
+test_that("two library Word templates with one file name: the first is offered and the duplicate is named in a warning", {
+  lib <- withr::local_tempdir()
+  dir.create(file.path(lib, "a"))
+  dir.create(file.path(lib, "b"))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "a", "same.docx")))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "b", "same.docx")))
+  writeLines(c(
+    "exports:",
+    "  bundled_word_templates: false",
+    "  word_templates:",
+    "    - {file: a/same.docx, label: First}",
+    "    - {file: b/same.docx, label: Second}"
+  ), file.path(lib, "dta-app.yaml"))
+  cfg <- app_fn("parse_dta_app_config")(file.path(lib, "dta-app.yaml"))$config
+
+  expect_warning(
+    got <- app_fn("list_available_templates")(cfg),
+    "same.docx",
+    fixed = TRUE
+  )
+  expect_identical(got, c(First = "library:same.docx"))
+  expect_match(
+    normalizePath(app_fn("get_template_path")("library:same.docx", cfg), winslash = "/"),
+    "/a/same.docx",
+    fixed = TRUE
+  )
 })

@@ -99,7 +99,7 @@ test_that("the snippet is registered in the app's head", {
   # A snippet that is never rendered into the page fixes nothing, and the
   # symptom is identical to not having written it.
   src <- app_source("app.R")
-  head_block <- sub("(?s)^.*?tags\\$head\\((.*?)\\n  \\),.*$", "\\1", src, perl = TRUE)
+  head_block <- sub("(?s)^.*?tags\\$head\\((.*?)\\n *\\),.*$", "\\1", src, perl = TRUE)
 
   expect_false(identical(head_block, src)) # the head block was actually found
   expect_match(head_block, "modal_unsuspend_js", fixed = TRUE)

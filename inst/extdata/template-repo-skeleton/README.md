@@ -43,6 +43,7 @@ Use this structure for a template library (only the CI file of each chosen provi
 repository/
 ├── README.md
 ├── templates/
+│   ├── dta-app.yaml
 │   ├── starter.dta-template.yaml
 │   ├── starter_dataset.dta-dataset-template.yaml
 │   ├── starter_supplier.dta-party.yaml
@@ -54,7 +55,8 @@ repository/
 └── Jenkinsfile
 ```
 
-Only template-library files and files referenced by their `source:` entries belong in `templates/`. Keep README, CI files, scripts, tests, Docker
+Only template-library files, the optional `dta-app.yaml` app configuration, and files referenced by their `source:` entries (or by
+`dta-app.yaml`, such as a logo or Word template) belong in `templates/`. Keep README, CI files, scripts, tests, Docker
 files, charts, and deployment configuration at the repository root or in their own repository folders.
 
 ### Keep the library flat
@@ -1097,6 +1099,160 @@ directory. These are useful for a developer's local copy and do not replace the 
 To test the source resolution without changing deployment settings, configure a local `dir:` source for the clone and run the app with that
 environment value. Remember that earlier DTAtools releases need the `dir:` locator to point directly at `<checkout>/templates`.
 
+## App configuration (`dta-app.yaml`)
+
+A library can also describe the app that serves it: who runs it, how it looks, which links and features it offers, and which Word templates it
+exports to. Put one file named `dta-app.yaml` (or `dta-app.yml`) in the library directory, next to the templates. It is not a template kind, so
+the template scan ignores it and it never appears in the picker. Every key is optional; an absent file, or one that only holds comments, means
+"the stock app". The scaffolded `templates/dta-app.yaml` lists every key, commented out, with its default.
+
+```yaml
+kind: dta_app_config
+organisation:
+  name: Example Institute
+  unit: Data Management
+branding:
+  logo: logo.png
+colors:
+  primary: "#1F4E79"
+links:
+  report_issue: mailto:dm-support@example.org
+  about: false
+features:
+  editing: false
+exports:
+  document: [word_template]
+  word_templates:
+    - file: our_dta.docx
+      label: Our DTA template
+```
+
+The value of `kind:` must be `dta_app_config` when present. Each section is a mapping of `key: value` pairs.
+
+### Key reference
+
+`organisation`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `name` | empty | Owner of the deployment. With no name, no organisation is shown anywhere in the app. |
+| `unit` | empty | Department or group, shown after the name. |
+
+`branding`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `app_title` | `DTAtools` | Title in the brand bar. |
+| `app_subtitle` | the stock tag line | Line under the title. |
+| `window_title` | the value of `app_title` | Browser tab title. |
+| `footer_label` | `<name> · <unit>`, or empty without a name | Text in the footer. `""` hides it. |
+| `logo` | the DTAtools logo | Image file in the library directory (see "Files the configuration refers to"). |
+| `logo_alt` | `<app_title> logo` | Alternative text for the logo. |
+| `landing_headline` | the stock headline | Heading on the start page. |
+| `landing_lede` | the stock paragraph | Paragraph under the heading on the start page. |
+
+`colors` takes a quoted hex value, `#RGB` or `#RRGGBB`, for each of the keys below. The default is the stock DTAtools scheme.
+
+| Key | Used for |
+| --- | --- |
+| `primary`, `primary_dark`, `primary_light` | Brand bar, buttons, links and their tints. |
+| `accent` | Highlights and focus rings. |
+| `text`, `muted` | Body text and secondary text. |
+| `page_background`, `surface` | Page and card backgrounds. |
+| `warning`, `warning_dark` | Warning states. |
+| `nodata_border` | Border of the "no data" status chip. |
+| `unknown` | Marker for files whose import was never checked. |
+| `pass`, `pass_bg`, `pass_border` | Passing validation results. |
+| `fail`, `fail_bg`, `fail_border` | Failing validation results. |
+| `pending`, `pending_bg`, `pending_border` | Results not yet computed. |
+
+`links`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `report_issue` | the DTAtools issue tracker | Target of the "Report issues" link. |
+| `about` | the DTAtools credits | Target of the "About" link. |
+| `repository` | the DTAtools repository | Footer link. |
+| `documentation` | hidden | Adds a documentation link when set. |
+
+Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes. `false` hides the link.
+
+`features` (all default to `true`)
+
+| Key | Meaning |
+| --- | --- |
+| `start.load_example` | "Load example" button on the start page. |
+| `start.create_from_template` | "Create new from template" button. |
+| `start.create_blank` | "Create new" button (a blank document). Forced off while `editing` is `false`. |
+| `raw_yaml_tab` | The tab that shows and edits the raw YAML. |
+| `dataset_yaml_download` | Download of a single dataset's YAML. |
+| `dta_yaml_download` | Download of the whole DTA's YAML. |
+| `editing` | `false` makes the app read-only: no edit menu and no editing at all. |
+
+`exports`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `document` | `[markdown, markdown_pdf, word, word_template]` | Formats offered by "Export DTA". `[]` hides the button. |
+| `default_document` | `word` | Format preselected in the export dialog. It must be offered; otherwise the first listed format is used (with a warning if you set it explicitly). |
+| `word_templates` | none | List of `{file, label}` entries naming `.docx` templates in the library directory. `label` defaults to the file name without extension. |
+| `bundled_word_templates` | `true` | Keep the Word templates shipped with DTAtools in the list next to yours. |
+| `validation_messages` | `[csv, tsv, xlsx, html]` | Download buttons for the validation messages. `[]` removes them. |
+| `validation_summary` | `true` | The "Validation summary" HTML download. |
+
+`markdown_pdf` is Markdown delivered as a PDF; `word` is the default Word layout; `word_template` lets the user pick one of the Word templates
+described below.
+
+### Rules
+
+- **Quote every hex colour.** An unquoted `#00625B` is a YAML comment, so the key would be read as empty.
+- **Features are enforced by the server**, not only by hiding the button: a disabled feature cannot be reached by other means.
+  `editing: false` also removes "Create new", because an empty document that cannot be edited is of no use.
+- **A bad value never stops the app.** The app warns, ignores that value and keeps the key's default. The validator reports the same problem as
+  an error so CI fails first (see "Validating the configuration").
+- **A file that cannot be used fails open.** If the file is not valid YAML, is not a mapping, or has a `kind:` other than `dta_app_config`, the
+  app warns and uses the defaults for everything. Restrictions such as `editing: false` or a shortened `exports.document` are then not
+  enforced. Run `validate_template()` before deploying.
+- **Unknown keys** are ignored with a warning; this catches a misspelled section such as `colours:`.
+
+### Files the configuration refers to
+
+The logo and the Word templates are files in the library directory, referenced by a relative path. An absolute path, a drive letter, `~`, `..`,
+or a path that resolves (for example through a symbolic link) outside the library directory is rejected. The library folder itself is never
+served over HTTP.
+
+- **Logo:** `png`, `jpg`, `jpeg`, `gif`, `svg` or `webp`, at most 1 MB. It is embedded into the page.
+- **Word template:** a `.docx` file. The app does not check library files for markers (it does check the ones shipped with DTAtools): markers are
+  replaced wherever they appear, and a file without any is exported with nothing substituted. A marker is
+  an upper-case name in single braces, for example `{DTA_TITLE}` or `{SUPPLIER_NAME}`, and `{#DATASETS}` ... `{/DATASETS}` repeats a span once
+  per dataset. In R, `?DTAtools::export_with_template` documents the full set and `DTAtools::dta_template_placeholders()` lists it. The
+  `.docx` files are not template-library files and do not appear in the creation-template picker.
+
+### Several libraries
+
+With more than one source in `DTATOOLS_TEMPLATE_SOURCES`, the first library, in the order the sources are listed, that has a `dta-app.yaml`
+supplies the **whole** configuration. Keys are not merged across libraries. Any further `dta-app.yaml` is ignored and the app warns about it.
+Packaged example sources have no configuration and give the defaults. If that first library's source is unreachable,
+the next library with a `dta-app.yaml` supplies the configuration, or the defaults apply when none does, so a restriction set only in the
+unreachable library is not enforced.
+
+### When a change takes effect
+
+The app reads the configuration together with the template index: after "Refresh templates", or once
+`DTATOOLS_TEMPLATE_REFRESH_SECONDS` (default 900) have passed. Reload the page to see the new look.
+
+### Validating the configuration
+
+`validate_template()` checks the file with the same parser the app uses, so the two cannot disagree:
+
+| Code | Severity | Meaning |
+| --- | --- | --- |
+| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library directory. |
+| `app_config_unknown_key` | warning | A key the app does not know. |
+| `app_config_warning` | warning | A value the app accepts but adjusts, such as `create_blank: true` with `editing: false`. |
+| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library directory. Keep one. |
+| `app_config_outside_library_dir` | error | A `dta-app.yaml` at the repository root while `templates/` is the library directory. Move it into `templates/`. |
+
 ## Validating
 
 Run validation from the repository root after changing any template file:
@@ -1173,6 +1329,11 @@ literal severity reported in the result. A concrete template can receive `instan
 | `sealed_path_unknown` | warning | A sealed path does not match a value in the resolved template. | Correct the path or remove the ineffective seal. |
 | `variant_invalid` | error | A creation template's `variants:` block is malformed: missing id or choices, an invalid or repeated choice value, a choice without datasets, or an id that collides with an option id. | Correct the block as described under `variants:`. |
 | `instantiate_failed` | error | A concrete creation template cannot be built with its resolved defaults and minimum slot selections (for each `variants:` choice, if it has any). | Fix the template, referenced data, dataset definition, or required choices. |
+| `app_config_invalid` | error | The library's `dta-app.yaml` holds a value the app would reject. | Correct the named key; see "App configuration". |
+| `app_config_unknown_key` | warning | `dta-app.yaml` holds a key the app does not know. | Fix the spelling or remove the key. |
+| `app_config_warning` | warning | `dta-app.yaml` holds a value the app adjusts. | Make the setting say what the app will do. |
+| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` exist in the library directory. | Delete one of them. |
+| `app_config_outside_library_dir` | error | A `dta-app.yaml` sits at the repository root while `templates/` is the library. | Move it into `templates/`. |
 
 A validator code names a detected issue; the message column adds the actual file, path, or reference involved. For warnings on unresolved
 references, remember that validation is scoped to the directory passed to the validator. A reference available only in a separate app source may
@@ -1301,9 +1462,10 @@ writable cache if cold-start availability is required.
 
 ### The Word export template is missing
 
-Word `.docx` export templates are not a template-library feature. The library's four indexed kinds are creation templates, dataset templates,
-party profiles, and vocabularies. Word export uses the DTAtools package's own packaged export templates through `write_dta(template = ...)`;
-adding a `.docx` to this repository does not add it to the app's template catalogue.
+Word `.docx` export templates are not template kinds: the library's four indexed kinds are creation templates, dataset templates, party
+profiles, and vocabularies, and a `.docx` in `templates/` is not scanned. To offer one in the app, list it under `exports.word_templates` in
+`dta-app.yaml` (see "App configuration"), keep `word_template` in `exports.document`, and run `validate_template()`; a missing or misplaced file is
+reported as `app_config_invalid`.
 
 ## Migrating a root-layout repository
 

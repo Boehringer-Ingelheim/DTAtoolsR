@@ -188,6 +188,7 @@ my-templates/
   README.md
   .gitignore
   templates/
+    dta-app.yaml
     starter.dta-template.yaml
     starter_dataset.dta-dataset-template.yaml
     starter_supplier.dta-party.yaml
@@ -258,6 +259,60 @@ become a template library just because it has the same folder name.
 A dataset entry's `source:` is relative to the creation-template file's
 folder and cannot escape it. Move supporting files referenced by `source:`
 inside `templates/` too, preserving their relative paths.
+
+### Customising the app from the library
+
+A library can carry the look and feature set of the app that serves it. Put a
+`dta-app.yaml` next to the templates in `templates/`; it is not a template, so
+the scan ignores it. Every key is optional, and with no file the app looks as
+it always did, except that no organisation name appears until you set
+`organisation.name`. A realistic example for a read-only deployment that exports
+only to the institute's own Word template:
+
+```yaml
+kind: dta_app_config
+organisation:
+  name: Example Institute
+  unit: Data Management
+branding:
+  app_title: DTA Viewer
+  logo: logo.png          # a file in templates/, at most 1 MB
+colors:
+  primary: "#1F4E79"      # always quote a hex colour: a bare # starts a comment
+  primary_dark: "#12304D"
+links:
+  report_issue: mailto:dm-support@example.org
+  about: false            # false hides a link
+features:
+  editing: false          # read-only; also removes "Create new"
+  raw_yaml_tab: false
+exports:
+  document: [word_template]
+  bundled_word_templates: false
+  word_templates:
+    - file: our_dta.docx  # a .docx; {DTA_TITLE}-style markers are filled in
+      label: Our DTA template
+```
+
+Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
+files in the library folder, named by a relative path that must not leave it.
+Disabled features are refused by the server, not merely hidden. A bad value
+never stops the app: it warns and keeps that key's default, and
+`validate_template()` reports the same problem as `app_config_invalid` (an
+unknown key is `app_config_unknown_key`, a warning). A file that cannot be
+parsed at all (invalid YAML, not a mapping, or a `kind:` other than
+`dta_app_config`) is different: the app warns and falls back to the defaults for
+everything, so restrictions such as `editing: false` are not enforced. Run
+`validate_template()` before deploying. When several sources
+define a `dta-app.yaml`, the first one in `DTATOOLS_TEMPLATE_SOURCES` order
+wins as a whole and the others are ignored with a warning. If that source is unreachable, a lower
+library's config or the defaults apply instead. Changes are picked up
+with the template index, that is after "Refresh templates" or
+`DTATOOLS_TEMPLATE_REFRESH_SECONDS`.
+
+The scaffolded `templates/dta-app.yaml` lists every key, commented out with its
+default, and the scaffolded `README.md` section "App configuration
+(`dta-app.yaml`)" is the full key reference.
 
 ### Migrating an existing repository
 
