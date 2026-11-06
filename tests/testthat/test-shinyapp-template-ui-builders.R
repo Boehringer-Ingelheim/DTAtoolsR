@@ -642,19 +642,28 @@ test_that("a strict dropdown still shows a default that is not among its choices
   expect_match(html, '<option value="Gamma" selected>Gamma</option>', fixed = TRUE)
 })
 
-test_that("a single free-text choice is a text field holding it, ready to edit", {
+test_that("a single free-text choice is a resizable textarea holding it, ready to edit", {
   render <- app_fn("render_template_option_input")
+  field <- function(html, tag) {
+    xml2::xml_find_first(
+      xml2::read_html(html),
+      sprintf("//%s[@id='tmpl_opt_header']", tag)
+    )
+  }
 
   html <- html_of(render(list(id = "header", type = "text", choices = "Alpha")))
-  expect_match(html, '<input id="tmpl_opt_header" type="text"', fixed = TRUE)
-  expect_match(html, 'value="Alpha"', fixed = TRUE)
+  area <- field(html, "textarea")
+  expect_identical(xml2::xml_text(area), "Alpha")
+  expect_match(xml2::xml_attr(area, "style"), "resize: *vertical")
+  # Not a one-line input any more.
+  expect_true(is.na(xml2::xml_attr(field(html, "input"), "id")))
   expect_false(grepl("selectize", html, fixed = TRUE))
-  # The label points at the input itself, not a selectize proxy.
+  # The label points at the field itself, not a selectize proxy.
   expect_match(html, 'for="tmpl_opt_header"', fixed = TRUE)
 
   # A declared default is still what the field starts with.
   with_default <- html_of(render(list(id = "header", type = "text", choices = "Alpha", default = "Beta")))
-  expect_match(with_default, 'value="Beta"', fixed = TRUE)
+  expect_identical(xml2::xml_text(field(with_default, "textarea")), "Beta")
 
   # A strict select keeps its dropdown: typing is not allowed there.
   strict <- html_of(render(list(id = "header", type = "select", choices = "Alpha")))

@@ -732,10 +732,12 @@ render_template_option_input <- function(opt, base_metadata = list()) {
       strict_select(ch)
     } else if (length(ch) == 1) {
       # One suggestion and free text allowed: a picker of one is pointless, so
-      # the suggestion is simply the field's starting text, edited in place.
-      textInput(iid, NULL,
+      # the suggestion is simply the field's starting text, edited in place in a
+      # textarea the author can drag taller (vertical only: the control sits in
+      # a fixed grid column that a wider box would overflow).
+      textAreaInput(iid, NULL,
         value = if (is.null(def)) unname(ch[[1]]) else def_chr,
-        width = "100%"
+        width = "100%", resize = "vertical"
       )
     } else if (length(ch) > 1) {
       with_suggestions(
