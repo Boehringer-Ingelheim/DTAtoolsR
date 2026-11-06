@@ -17,6 +17,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Word, PDF and Markdown exports (including the `{VALIDATION_RULES}` and
+  `{DATASETS}` template blocks and `write_dataset_metadata()`) now give every
+  rule its exact definition, not only a description: a monospace YAML
+  `Definition` column in Word/PDF and a fenced YAML block per rule in
+  Markdown. The YAML carries every parameter of the rule and reads back into
+  the same rule. In Word and PDF the nesting is indented with non-breaking
+  spaces (pandoc drops ordinary leading spaces); replace them with spaces
+  before pasting a definition into a YAML file.
+- A column-condition rule that has a description now also shows its
+  `IF ... -> THEN ...` reading in the `Description` column, as group-condition
+  rules already did.
+- Tables written into a user's Word template by block placeholders such as
+  `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
+  the template's text width. Before, Word sized the columns from their
+  content, which squeezed the `Rule ID` column next to the long `Definition`
+  column in portrait templates. In a template with several sections, the grid
+  is scaled to the section the table lands in (one column's width in a section
+  of equal columns); a section whose width cannot be determined, such as one
+  with unequal columns, keeps tables at 100% of the text column.
 - The built-in Word/PDF layout of `write_dta()` is redesigned. Every page after
   the cover carries a running header (DTA title, study ID, "Page X of Y") and
   footer (document name, version, date of the current version, and in small

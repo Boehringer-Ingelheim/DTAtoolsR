@@ -483,3 +483,16 @@ requirements:
     category: functional
     covers: [write_dta]
     source: R/exportDocuments.R; R/documentBuilders.R
+
+  - id: REQ-EXPORT-036
+    text: >
+      write_dta() (docx and md) and write_dataset_metadata() shall render, for
+      every declared validation rule, a YAML definition that, parsed, equals
+      the rule's type and every declared parameter - columns, bounds,
+      operators and values, grouping columns, named conditions, and each
+      constraint's id, condition names, scopes and message - independently of
+      its description.
+    risk: medium
+    category: functional
+    covers: [write_dta, write_dataset_metadata]
+    source: R/formattingHelpers.R; R/documentBuilders.R
