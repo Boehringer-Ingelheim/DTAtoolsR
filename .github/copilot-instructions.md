@@ -167,14 +167,12 @@ Located in `.github/workflows/`:
 
 - **`ci-tier.yml`** — Reusable: decides the CI tier (fast for PRs into `dev`; release for PRs into `master`, the `full-ci` label, dispatch and schedules) and which paths a PR touches. Called by the three workflows below.
 - **`R-CMD-check.yaml`** — `R CMD check` on PRs to `master`/`dev`: `ubuntu-latest (release)` only on the fast tier, the 5-leg matrix (macOS/Windows release, Ubuntu devel/release/oldrel-1) on the release tier; nightly on `dev`, weekly on `master`, manual dispatch.
-- **`r-style.yaml`** — PRs to `master`/`dev`: the `check_*.R` scripts (R sanity, deps-in-DESCRIPTION, version sync, app manifest), `sync_qualification_manifest.R --check`, `style.R --check`, and `roxygen2::roxygenise()`; fails on any diff (does not auto-fix).
+- **`r-style.yaml`** — PRs to `master`/`dev`: the `check_*.R` scripts (R sanity, deps-in-DESCRIPTION, version sync, the root Connect `manifest.json`), `sync_qualification_manifest.R --check`, `style.R --check`, and `roxygen2::roxygenise()`; fails on any diff (does not auto-fix).
 - **`pre-commit.yml`** — PRs to `master`/`dev`: fast language-agnostic checks (whitespace, merge conflicts, private keys).
-- **`manifest-sync.yml`** — PRs to `master`/`dev`: syncs the Shiny app `manifest.json` checksums/refs via `bump_version.R --sync-manifest`.
 - **`qualification.yml`** — Qualification suite. Fast tier: quick scale on ubuntu, only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE` changed. Release tier (PRs into `master`, `full-ci` label, nightly on `dev`, dispatch with a scale input): standard scale on three operating systems.
 - **`test-coverage.yaml`** — covr line coverage of `R/` by the tests and by the qualification suite alone; release tier only.
 - **`bump-version.yml`** — Manual dispatch: runs `bump_version.R` and opens a version-bump PR.
 - **`release.yml`** — On a published release (or manual dispatch with a tag): builds the package tarball and attaches it to the release.
-- **`manifest-release-sha.yml`** — On a published release (or manual dispatch): opens a PR pinning the app manifest to the release tag's commit.
 - **`pages.yml`** — Pushes to `master` that touch `docs/**` (or manual dispatch): deploys `docs/` to GitHub Pages.
 
 **Before pushing:** Always run `Rscript .github/scripts/style.R` and `Rscript -e "roxygen2::roxygenise()"` yourself. CI is strict.

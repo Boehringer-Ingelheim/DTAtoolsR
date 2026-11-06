@@ -123,7 +123,7 @@ test_that("bundled numbered template ships a 'heading 4' style", {
   expect_true("heading 4" %in% si$style_name)
 })
 
-test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
+test_that("write_dta docx uses numbered heading hierarchy", {
   dta <- create_example_DTA()
   out_docx <- tempfile(fileext = ".docx")
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
@@ -136,21 +136,23 @@ test_that("write_dta docx uses numbered heading hierarchy incl. heading 4", {
   # .add_heading() (R/documentBuilders.R:61-64) requests "heading <level>", and
   # that is the locale-independent contract worth pinning.
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  for (nm in c("heading 1", "heading 2", "heading 3", "heading 4")) {
+  for (nm in c("heading 1", "heading 2", "heading 3")) {
     expect_true(nm %in% summary$style_name)
   }
 
-  # The Datasets -> <dataset> -> Files / Dataset Specifications hierarchy must
-  # be carried by those heading levels, not by bold body paragraphs.
+  # The Datasets -> <dataset> -> Files / Column Specifications hierarchy must
+  # be carried by those heading levels, not by bold body paragraphs. Each
+  # chapter is a top-level heading; there is no wrapper chapter above them.
   headings <- summary[summary$style_name %in% paste("heading", 1:4), ]
-  expect_equal(headings$style_name[headings$text == "Datasets"], "heading 2")
+  expect_equal(headings$style_name[headings$text == "Datasets"], "heading 1")
   # A dataset with a name is headed "<name> (<id>)".
   expect_equal(
     unique(headings$style_name[headings$text == "Demographics (demographics)"]),
-    "heading 3"
+    "heading 2"
   )
-  expect_equal(unique(headings$style_name[headings$text == "Dataset Specifications"]), "heading 4")
-  expect_true("Data Transfer Agreement" %in% summary$text)
+  expect_equal(unique(headings$style_name[headings$text == "Column Specifications"]), "heading 3")
+  expect_false("Dataset Specifications" %in% headings$text)
+  expect_false("Data Transfer Agreement" %in% headings$text)
 })
 
 # A dataset is headed by its name with the id beside it ("Demographics
@@ -297,9 +299,9 @@ test_that("write_dta docx places Process Information before Datasets", {
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  heading2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx_process <- heading2$doc_index[which(heading2$text == "Process Information")[1]]
-  idx_datasets <- heading2$doc_index[which(heading2$text == "Datasets")[1]]
+  heading1 <- summary[summary$style_name %in% "heading 1", c("doc_index", "text")]
+  idx_process <- heading1$doc_index[which(heading1$text == "Process Information")[1]]
+  idx_datasets <- heading1$doc_index[which(heading1$text == "Datasets")[1]]
   expect_true(length(idx_process) == 1 && length(idx_datasets) == 1)
   expect_true(idx_process < idx_datasets)
 })
@@ -321,15 +323,17 @@ test_that("write_dta docx puts ONLY the specs and rules tables in landscape", {
   # the table and not merely its heading.
   expect_identical(.docx_orientation_of(out_docx, "Variable Name"), "landscape")
 
-  # Everything around them stays portrait: the title page, the metadata
-  # narrative, the dataset heading, and the trailing footer.
+  # Everything around them stays portrait: the cover, the metadata narrative,
+  # the dataset heading and its Files table.
   expect_identical(.docx_orientation_of(out_docx, "Data Transfer Agreement"), "portrait")
   expect_identical(.docx_orientation_of(out_docx, "Document Information"), "portrait")
   expect_identical(.docx_orientation_of(out_docx, "Datasets"), "portrait")
-  expect_identical(.docx_orientation_of(out_docx, "Dataset Specifications"), "portrait")
+  expect_identical(.docx_orientation_of(out_docx, "^Files$", fixed = FALSE), "portrait")
 
+  # The specs headings sit inside the landscape section, so they can never be
+  # orphaned at the foot of a portrait page.
   blocks <- .docx_blocks_with_orientation(out_docx)
-  expect_identical(blocks$orientation[nrow(blocks)], "portrait")
+  expect_identical(blocks$orientation[match("Column Specifications", blocks$text)], "landscape")
 
   # A landscape run must not swallow the rest of the document.
   expect_true(any(blocks$orientation == "landscape"))
@@ -933,10 +937,14 @@ test_that("exported document dates are ISO 8601 under any LC_TIME", {
   on.exit(unlink(out_docx, force = TRUE), add = TRUE)
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
-  paragraphs <- .docx_paragraphs(out_docx)
-  expect_true("Date: 2026-01-15" %in% paragraphs)
-  # No localized month name may survive anywhere in the document.
-  expect_false(any(grepl("Januar|January|janvier", paragraphs)))
+  # The cover and Document Information tables carry the date as a cell.
+  cells <- officer::docx_summary(officer::read_docx(out_docx))$text
+  expect_true("2026-01-15" %in% cells)
+  # The running footer carries it too, and no localized month name may survive
+  # anywhere in the document.
+  footer <- paste(.docx_part_texts(out_docx, "^footer[0-9]+[.]xml$"), collapse = " ")
+  expect_match(footer, "2026-01-15", fixed = TRUE)
+  expect_false(any(grepl("Januar|January|janvier", c(cells, footer))))
 })
 
 test_that("write_dta docx opens with the signature block, before any other chapter", {
@@ -948,11 +956,11 @@ test_that("write_dta docx opens with the signature block, before any other chapt
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx <- function(txt) h2$doc_index[which(h2$text == txt)[1]]
+  h1 <- summary[summary$style_name %in% "heading 1", c("doc_index", "text")]
+  idx <- function(txt) h1$doc_index[which(h1$text == txt)[1]]
 
-  expect_false(is.na(idx("Approval & Signatures")))
-  for (later in c("Document Information", "Receiver Information", "Supplier Information", "Datasets")) {
+  expect_identical(h1$text[[1]], "Approval & Signatures")
+  for (later in c("Document Information", "Parties", "Datasets")) {
     expect_lt(idx("Approval & Signatures"), idx(later))
   }
 
@@ -1020,7 +1028,8 @@ test_that("write_dta docx uses one font family and one table header fill through
   )))
   expect_setequal(fonts, c(FONTS$primary, FONTS$monospace))
 
-  # Every table header cell is filled with the single house navy.
+  # Every table header cell is filled with the single light house tint; key/value
+  # label columns use the light grey.
   fills <- unique(unlist(regmatches(
     xml, gregexpr('(?<=<w:shd )[^>]*w:fill="[^"]+', xml, perl = TRUE)
   )))
@@ -1028,7 +1037,7 @@ test_that("write_dta docx uses one font family and one table header fill through
   fills <- setdiff(fills, c("AUTO", "FFFFFF"))
   expect_setequal(
     fills,
-    toupper(sub("^#", "", c(THEME_COLORS$primary_dark, THEME_COLORS$gray_light)))
+    toupper(sub("^#", "", c(THEME_COLORS$primary_light, THEME_COLORS$gray_light)))
   )
 })
 
@@ -1042,9 +1051,9 @@ test_that("write_dta docx introduces the supplier before the receiver", {
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   summary <- officer::docx_summary(officer::read_docx(out_docx))
-  h2 <- summary[summary$style_name == "heading 2", c("doc_index", "text")]
-  idx_sup <- h2$doc_index[which(h2$text == "Supplier Information")[1]]
-  idx_rec <- h2$doc_index[which(h2$text == "Receiver Information")[1]]
+  h2 <- summary[summary$style_name %in% "heading 2", c("doc_index", "text")]
+  idx_sup <- h2$doc_index[which(h2$text == "Supplier")[1]]
+  idx_rec <- h2$doc_index[which(h2$text == "Receiver")[1]]
   expect_false(is.na(idx_sup))
   expect_false(is.na(idx_rec))
   expect_lt(idx_sup, idx_rec)

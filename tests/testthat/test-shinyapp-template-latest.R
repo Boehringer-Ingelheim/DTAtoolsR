@@ -163,7 +163,7 @@ test_that("a document built from an @latest deviation records the concrete paren
   idx <- index_over(root)
 
   loaded <- app_fn("load_template_definition")("acme_ct@1.0", index = idx)
-  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value, selections = list())
+  prov <- app_fn("template_provenance")(loaded$value$def, loaded$value)
   built <- app_fn("create_dta_from_template")(
     loaded$value$def, loaded$value$path,
     selections = list(), index = idx, provenance = prov

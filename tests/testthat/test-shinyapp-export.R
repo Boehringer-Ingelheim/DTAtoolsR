@@ -525,14 +525,35 @@ run_markdown_pdf_export <- function() {
   out
 }
 
+test_that("a PDF export without pandoc, LaTeX or a browser still delivers a PDF", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("bslib")
+  skip_if_not_installed("DT")
+  skip_if_not_installed("shinyjs")
+  skip_if_not_installed("rmarkdown")
+  # No pandoc rules out routes 1 and 2; R's own device must still deliver.
+  local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+
+  res <- run_markdown_pdf_export()
+
+  expect_equal(tolower(tools::file_ext(res$name)), "pdf")
+  expect_equal(tolower(tools::file_ext(res$path)), "pdf")
+  expect_equal(res$head, "%PDF-")
+})
+
 test_that("a PDF export that cannot make a PDF delivers Markdown under a .md name", {
   skip_if_not_installed("shiny")
   skip_if_not_installed("bslib")
   skip_if_not_installed("DT")
   skip_if_not_installed("shinyjs")
   skip_if_not_installed("rmarkdown")
-  # No pandoc means neither PDF route is attempted: the documented fallback.
+  # No pandoc, and R's own PDF devices fail too: the documented fallback.
   local_mocked_bindings(pandoc_available = function(...) FALSE, .package = "rmarkdown")
+  local_mocked_bindings(
+    cairo_pdf = function(...) stop("no device"),
+    pdf = function(...) stop("no device"),
+    .package = "grDevices"
+  )
 
   res <- run_markdown_pdf_export()
 

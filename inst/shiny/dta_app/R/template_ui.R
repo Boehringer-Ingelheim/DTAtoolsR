@@ -603,22 +603,24 @@ template_variant_input <- function(def) {
 
 # Build one input control for a creation-template option.
 #
-# An option with `choices:` is ONE combobox rather than a dropdown padded with
-# sentinel rows and a companion text field: selectize's `create` lets the author
-# type a value in place, so "pick a suggestion, or type your own" needs one
-# control instead of two that had to be reconciled. "(leave blank)" survives as
-# a real row -- its `__blank__` sentinel is what collect_template_selections()
-# already reads as an empty value.
+# An option that takes free text AND has `choices:` is a visible field plus a
+# separate "Choose a suggestion" picker that fills it. A lone dropdown with
+# typing hidden inside it reads as a closed list, so the field is the thing the
+# row's label points at and the picker is a helper beside it. "(leave blank)"
+# stays a real picker row: its `__blank__` sentinel empties the field.
+#
+# An option that only accepts its choices (`type: select`, or
+# `allow_custom: false`) is a strict dropdown with the same "(leave blank)" row;
+# collect_template_selections() reads that sentinel as an empty value.
 #
 # Whether typing is allowed follows the template, not the widget:
 # `dta_template_allow_custom(opt, default = typ != "select")` means `type: text`
 # permits it unless the template says otherwise, and `type: select` forbids it
-# unless the template opts in -- the flag the old dialog parsed and then
-# ignored.
+# unless the template opts in.
 #
 # A default that is NOT among the choices (a vendor deviation overriding its
-# base's suggestion) is added to the list, so it can be shown as selected
-# instead of silently vanishing.
+# base's suggestion) is added to the picker, so it is shown as selected instead
+# of silently vanishing.
 render_template_option_input <- function(opt, base_metadata = list()) {
   oid <- as.character(opt$id %||% "")
   if (!nzchar(oid)) {
@@ -630,10 +632,13 @@ render_template_option_input <- function(opt, base_metadata = list()) {
   def <- dta_template_default(opt, base_metadata)
   help <- as.character(opt$help %||% "")
   blank_val <- "__blank__"
+  allow <- dta_template_allow_custom(opt, default = !identical(typ, "select"))
+  def_chr <- if (is.null(def)) "" else as.character(def)[[1]]
 
-  combobox <- function(ch) {
-    allow <- dta_template_allow_custom(opt, default = !identical(typ, "select"))
-    def_chr <- if (is.null(def)) "" else as.character(def)[[1]]
+  # The picker's rows -- "(leave blank)", the default when it is not itself a
+  # suggestion, then the suggestions -- and the selection a strict dropdown
+  # starts on. A suggestion picker starts on nothing (see with_suggestions()).
+  picker_choices <- function(ch) {
     extra <- character(0)
     selected <- blank_val
     if (nzchar(def_chr)) {
@@ -642,19 +647,61 @@ render_template_option_input <- function(opt, base_metadata = list()) {
         extra <- stats::setNames(def_chr, def_chr)
       }
     }
-    selectizeInput(
-      iid, NULL,
+    list(
       choices = c(stats::setNames(blank_val, "(leave blank)"), extra, ch),
-      selected = selected, multiple = FALSE, width = "100%",
-      options = list(
-        create = allow,
-        createOnBlur = allow,
-        placeholder = if (allow) "Pick a suggestion or type your own" else "Pick a value"
-      )
+      selected = selected
     )
   }
 
+  # A strict dropdown: the value must be one of the choices.
+  strict_select <- function(ch) {
+    pc <- picker_choices(ch)
+    selectizeInput(
+      iid, NULL,
+      choices = pc$choices, selected = pc$selected, multiple = FALSE, width = "100%",
+      options = list(create = FALSE, placeholder = "Pick a value")
+    )
+  }
+
+  # The field `value_tag` (id `iid`) with a picker that writes into it. The
+  # picker's label names its field for screen readers, so the pickers of a
+  # whole dialog are not a column of identical "Choose a suggestion"s. A
+  # textarea has the picker above it; a one-line field has it below, so the
+  # field -- what the row's label points at -- comes first in tab order.
+  with_suggestions <- function(value_tag, ch, picker_first) {
+    pc <- picker_choices(ch)
+    on_change <- sprintf(
+      paste0(
+        "function(value) {",
+        "var target = document.getElementById(%s);",
+        "if (target) {",
+        "target.value = value === %s ? '' : (value || '');",
+        "target.dispatchEvent(new Event('input', { bubbles: true }));",
+        "}",
+        # Back to empty after every pick: selectize fires nothing for the
+        # item that is already selected, so a picker left on the default
+        # could never put the default (or "(leave blank)") back after typing.
+        "this.clear(true);",
+        "}"
+      ),
+      jsonlite::toJSON(iid, auto_unbox = TRUE),
+      jsonlite::toJSON(blank_val, auto_unbox = TRUE)
+    )
+    picker <- selectizeInput(
+      paste0(iid, "_suggestion"),
+      tagList("Choose a suggestion", span(class = "visually-hidden", paste0(" for ", label))),
+      choices = pc$choices, multiple = FALSE, width = "100%",
+      options = list(
+        create = FALSE, placeholder = "Pick to fill the field",
+        onInitialize = I("function() { this.clear(true); }"),
+        onChange = I(on_change)
+      )
+    )
+    if (picker_first) tagList(picker, value_tag) else tagList(value_tag, picker)
+  }
+
   ch <- if (typ %in% c("boolean", "textarea", "number")) character(0) else dta_template_choices(opt)
+  strict <- length(ch) > 0 && !allow
   # The controls carry no label of their own: tmpl_field_row() puts the label
   # and the help text in the row's left column, so every control starts on the
   # same vertical line however long its help is.
@@ -666,60 +713,49 @@ render_template_option_input <- function(opt, base_metadata = list()) {
       checkboxInput(iid, NULL, value = identical(def, TRUE) || identical(def, "yes"))
     ),
     textarea = {
-      # Its own `ch`, not the outer one: the row's label must keep pointing at
-      # the textarea, which is what holds the value, not at the suggestion box.
-      ch <- dta_template_choices(opt)
-      def_chr <- as.character(def %||% "")[[1]]
+      suggestions <- dta_template_choices(opt)
       value <- textAreaInput(
         iid, NULL,
         value = def_chr, rows = 3, width = "100%"
       )
-      if (length(ch) == 0) {
+      if (length(suggestions) == 0) {
         value
       } else {
-        suggestion_id <- paste0(iid, "_suggestion")
-        selected <- if (def_chr %in% unname(ch)) def_chr else blank_val
-        on_change <- sprintf(
-          paste0(
-            "function(value) {",
-            "var target = document.getElementById(%s);",
-            "if (target) {",
-            "target.value = value === %s ? '' : (value || '');",
-            "target.dispatchEvent(new Event('input', { bubbles: true }));",
-            "}}"
-          ),
-          jsonlite::toJSON(iid, auto_unbox = TRUE),
-          jsonlite::toJSON(blank_val, auto_unbox = TRUE)
-        )
-        tagList(
-          selectizeInput(
-            suggestion_id, "Choose a suggestion",
-            choices = c(stats::setNames(blank_val, "(leave blank)"), ch),
-            selected = selected, multiple = FALSE, width = "100%",
-            options = list(create = FALSE, onChange = I(on_change))
-          ),
-          value
-        )
+        with_suggestions(value, suggestions, picker_first = TRUE)
       }
     },
     number = numericInput(
       iid, NULL,
       value = suppressWarnings(as.numeric(def %||% 0)), width = "100%"
     ),
-    if (length(ch) > 0) {
-      combobox(ch)
+    if (strict) {
+      strict_select(ch)
+    } else if (length(ch) == 1) {
+      # One suggestion and free text allowed: a picker of one is pointless, so
+      # the suggestion is simply the field's starting text, edited in place.
+      textInput(iid, NULL,
+        value = if (is.null(def)) unname(ch[[1]]) else def_chr,
+        width = "100%"
+      )
+    } else if (length(ch) > 1) {
+      with_suggestions(
+        textInput(iid, NULL, value = def_chr, width = "100%"),
+        ch,
+        picker_first = FALSE
+      )
     } else {
       textInput(iid, NULL,
-        value = as.character(def %||% ""),
+        value = def_chr,
         placeholder = "Type a value", width = "100%"
       )
     }
   )
 
   tmpl_field_row(
-    # selectize hides the <select> and types into "<id>-selectized"; the label
-    # has to point at the element that actually takes focus.
-    for_id = if (length(ch) > 0) paste0(iid, "-selectized") else iid,
+    # Only a strict dropdown hides its <select> and types into
+    # "<id>-selectized"; everywhere else the row's label points at the field
+    # that holds the value.
+    for_id = if (strict) paste0(iid, "-selectized") else iid,
     label = label,
     hints = if (nzchar(help)) div(class = "msg-hint tmpl-help", help),
     control = ctl,
@@ -1147,23 +1183,35 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
       "parties", "Parties",
       "Keep the template's party, or replace it with a saved profile.",
       div(class = "tmpl-opts-grid", lapply(slots, function(slot) {
-        # The template's own default is named rather than described: "(use
-        # template default)" told the author nothing about what they would get
-        # if they left it alone.
-        base_name <- as.character(
-          def$base$metadata[[slot$role]][["affiliation"]][["name"]] %||% ""
-        )
-        placeholder <- if (nzchar(base_name)) {
-          paste0("(template default: ", base_name, ")")
+        # The first row is the template's own party, shown by name and
+        # selected: the author sees what they get if they leave it alone. Its
+        # value stays "", which collect_party_selections() reads as "leave the
+        # slot's target untouched". With no party block in the template the
+        # row says so, because leaving it empties the slot.
+        party_block <- def$base$metadata[[slot$role]]
+        base_name <- as.character(party_block[["affiliation"]][["name"]] %||% "")
+        first_label <- if (nzchar(base_name)) {
+          base_name
+        } else if (is.null(party_block)) {
+          "(none)"
         } else {
-          "(template default)"
+          "(as in template)"
         }
-        choices <- stats::setNames("", placeholder)
+        choices <- stats::setNames("", first_label)
         eligible <- party_profiles_for_slot(profiles, slot)
         if (length(eligible) > 0) {
+          profile_labels <- vapply(
+            eligible, function(p) as.character(p$label %||% p$id), character(1)
+          )
+          # A saved profile that shares the template party's name would be a
+          # second identical row.
+          if (nzchar(base_name)) {
+            same <- profile_labels == base_name
+            profile_labels[same] <- paste0(profile_labels[same], " (saved profile)")
+          }
           choices <- c(choices, stats::setNames(
             vapply(eligible, function(p) as.character(p$id), character(1)),
-            vapply(eligible, function(p) as.character(p$label %||% p$id), character(1))
+            profile_labels
           ))
         }
         iid <- paste0("tmpl_party_", slot$id)
@@ -1181,8 +1229,8 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
           ),
           # A plain <select>, not selectize: selectize drops an option whose
           # value is "" (its allowEmptyOption is off), and that is exactly the
-          # template-default row -- the control would open naming nothing,
-          # with no way back to the default once a profile had been picked.
+          # template's-own-party row -- the control would open naming nothing,
+          # with no way back to it once a profile had been picked.
           control = selectInput(iid, NULL,
             choices = choices, selected = "", selectize = FALSE, width = "100%"
           ),

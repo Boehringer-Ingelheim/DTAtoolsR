@@ -17,7 +17,7 @@ areas:
     min_tests: 11
   - area: ENV
     title: Installed system and environment
-    min_tests: 24
+    min_tests: 23
   - area: SPEC
     title: Specifications, YAML and factories
     min_tests: 32
@@ -44,7 +44,7 @@ areas:
     min_tests: 72
   - area: EXPORT
     title: Document and data export
-    min_tests: 50
+    min_tests: 51
   - area: REPORT
     title: The standalone HTML validation report
     min_tests: 16

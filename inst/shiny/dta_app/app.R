@@ -1181,13 +1181,12 @@ server <- function(input, output, session) {
   # and covers a restored autosave, or any caller still setting the input by
   # its former string value.
   #
-  # Everything else arrives as the literal string the option's combobox holds
-  # -- picked from the suggestions or typed in place, indistinguishable by
-  # design, which is why there is no longer a "__custom__" sentinel or a
-  # companion text field to read it from. Only "(leave blank)" still needs
-  # translating: it is a real, selectable row precisely so that "no value" is
-  # a deliberate choice rather than an empty box the author may just not have
-  # reached yet.
+  # Everything else arrives as the literal string the option's field holds --
+  # picked from its suggestions or typed in place, indistinguishable by
+  # design, which is why there is no "__custom__" sentinel to read. Only a
+  # strict dropdown's "(leave blank)" row still needs translating: it is a
+  # real, selectable row precisely so that "no value" is a deliberate choice
+  # rather than an empty box the author may just not have reached yet.
   collect_template_selections <- function(def) {
     out <- list()
     opts <- def$options %||% list()
@@ -1209,10 +1208,9 @@ server <- function(input, output, session) {
 
   # Collect a user's slot -> profile-id choices from the currently-open
   # options modal. Mirrors collect_template_selections() exactly: an unset
-  # (or "(use template default)") control contributes NOTHING to the returned
-  # list -- apply_party_selections() (party_profiles.R) already treats a
-  # missing entry as "leave this slot's target untouched", which is exactly
-  # what "(use template default)" is supposed to mean.
+  # control, or one still on the template's own party (the "" row), contributes
+  # NOTHING to the returned list -- apply_party_selections() (party_profiles.R)
+  # already treats a missing entry as "leave this slot's target untouched".
   collect_party_selections <- function(def) {
     slots <- normalise_party_slots(def$party_slots)
     out <- list()
@@ -2092,10 +2090,9 @@ server <- function(input, output, session) {
     }
 
     prov <- template_provenance(
-      loaded$value$def, loaded$value, sels,
+      loaded$value$def, loaded$value,
       lineage = loaded$value$lineage,
-      carried_over_from = co$carried_over_from,
-      vocab_selections = vocab_sel
+      carried_over_from = co$carried_over_from
     )
 
     created <- create_dta_from_template(
@@ -7619,14 +7616,13 @@ server <- function(input, output, session) {
             writeLines(enc2utf8(md_text), output_file, useBytes = TRUE)
           }
 
-          # Convert to PDF if requested, trying two routes so it works with or
-          # without a LaTeX install:
+          # Convert to PDF if requested, best route first:
           #   1. pandoc + a real PDF engine (LaTeX/TinyTeX/wkhtmltopdf) - best
           #      typography when it is available.
           #   2. headless Chrome/Edge printing the rendered HTML - needs no
           #      LaTeX and no extra R packages, just an installed browser.
-          # If neither route yields a PDF, fall back to delivering the Markdown
-          # file so the export still succeeds (and still downloads).
+          #   3. R's own PDF device - needs nothing, so it always runs.
+          # Only if all three fail is the Markdown file delivered instead.
           if (isTRUE(input$export_as_pdf)) {
             pdf_file <- sub("\\.md$", ".pdf", output_file)
             own("export", pdf_file)
@@ -7675,14 +7671,21 @@ server <- function(input, output, session) {
                   markdown_to_pdf_via_chrome(output_file, pdf_file, chrome = chrome)
                   file.exists(pdf_file) && file.info(pdf_file)$size > 0
                 },
-                error = function(e) {
-                  showNotification(
-                    paste0("Browser-based PDF failed (", conditionMessage(e), ")."),
-                    type = "warning",
-                    duration = 8
-                  )
-                  FALSE
-                }
+                error = function(e) FALSE
+              )
+            }
+
+            # Route 3: R's own PDF device (dta_markdown_to_pdf(), the same
+            # renderer dta_export_pdf() falls back to). Needs no external
+            # tool, so a server with neither LaTeX nor a browser -- Posit
+            # Connect, typically -- still gets a PDF, in a simpler layout.
+            if (!isTRUE(pdf_ok)) {
+              pdf_ok <- tryCatch(
+                {
+                  dta_markdown_to_pdf(readLines(output_file, warn = FALSE), pdf_file)
+                  dta_is_pdf(pdf_file)
+                },
+                error = function(e) FALSE
               )
             }
 
@@ -7691,10 +7694,7 @@ server <- function(input, output, session) {
               filename <- sub("\\.md$", ".pdf", filename)
             } else {
               showNotification(
-                paste0(
-                  "PDF export needs a LaTeX engine or a Chrome/Edge browser, ",
-                  "and neither produced a PDF. Exporting Markdown instead."
-                ),
+                "Could not produce a PDF on this server. Exporting Markdown instead.",
                 type = "warning",
                 duration = 10
               )

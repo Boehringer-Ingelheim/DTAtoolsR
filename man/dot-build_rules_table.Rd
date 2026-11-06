@@ -5,10 +5,12 @@
 \title{Build a validation rules table (flextable). Shared by write_dataset_metadata()
 and write_dta()'s per-dataset sections.}
 \usage{
-.build_rules_table(rules_collection)
+.build_rules_table(rules_collection, width = TEXT_WIDTH$landscape)
 }
 \arguments{
 \item{rules_collection}{A list of DTARule objects (e.g. \code{specs@rules}) or \code{NULL}.}
+
+\item{width}{Total table width in inches, or \code{NULL} to keep the built widths.}
 }
 \description{
 Build a validation rules table (flextable). Shared by write_dataset_metadata()

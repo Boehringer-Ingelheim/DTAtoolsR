@@ -2,8 +2,8 @@
 
 # CI guard: every file that records the package version must agree with
 # DESCRIPTION. Replaces check_shiny_version_file.R, which covered only
-# inst/shiny/dta_app/VERSION -- the two sites it did not cover, manifest.json and
-# docs/index.html, had both drifted behind by the time this was written.
+# inst/shiny/dta_app/VERSION -- the sites it did not cover had drifted behind
+# by the time this was written.
 #
 # The comparison itself lives in bump_version.R's `--check` mode, so the checker
 # and the writer cannot disagree about what the sites are or what counts as

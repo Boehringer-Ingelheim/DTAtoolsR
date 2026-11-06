@@ -659,10 +659,10 @@ test_that("export_with_template falls back to the standard layout on failure", {
   # metadata/spec tables.
   paragraphs <- .docx_paragraphs(out)
   expect_true("Example DTA" %in% paragraphs)
-  expect_true("Data Transfer Agreement Metadata" %in% paragraphs)
-  expect_true("Dataset Specifications" %in% paragraphs)
+  expect_true("Document Information" %in% paragraphs)
+  expect_true("Column Specifications" %in% paragraphs)
   summary <- officer::docx_summary(officer::read_docx(out))
-  expect_true(all(paste("heading", 1:4) %in% summary$style_name))
+  expect_true(all(paste("heading", 1:3) %in% summary$style_name))
   expect_true(any(!is.na(summary$table_index)))
 
   # quiet = FALSE: the fallback must be announced as a real warning CONDITION

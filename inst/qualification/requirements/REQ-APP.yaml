@@ -342,11 +342,12 @@ requirements:
 
   - id: REQ-APP-024
     text: >
-      A creation-template textarea option with source suggestions shall remain
-      editable as multiline text and render a separate suggestion selector
-      including "(leave blank)". Selecting a suggestion or blank shall update
-      the original option input and dispatch its bubbling input event so the
-      existing option-collection path receives the selected text or empty
+      A creation-template text or textarea option with source suggestions that
+      permits custom values shall remain editable as free text (a one-line text
+      input, or multiline text for a textarea) and render a separate suggestion
+      selector including "(leave blank)". Selecting a suggestion or blank shall
+      update the original option input and dispatch its bubbling input event so
+      the existing option-collection path receives the selected text or empty
       value, never the UI sentinel.
     risk: medium
     category: functional
@@ -354,10 +355,10 @@ requirements:
     source: inst/shiny/dta_app/R/template_ui.R render_template_option_input()
     notes: >
       PINNED AS STRUCTURAL, NOT BROWSER-DRIVEN: the application test harness
-      has no JavaScript engine. The rendered selector, original textarea ID,
-      blank mapping, and bubbling input event are checked structurally; the
-      developer suite separately verifies the rendered control's source
-      suggestions and editable multiline input.
+      has no JavaScript engine. The rendered selector, original text or
+      textarea input ID, blank mapping, and bubbling input event are checked
+      structurally; the developer suite separately verifies the rendered
+      control's source suggestions and editable input.
 
   - id: REQ-APP-025
     text: >

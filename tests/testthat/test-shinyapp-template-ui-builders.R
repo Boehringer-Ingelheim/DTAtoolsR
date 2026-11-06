@@ -550,54 +550,132 @@ test_that("an unusable template reports why and STILL offers the version control
 
 # ---- Option controls -------------------------------------------------------
 
-test_that("an option with choices is one combobox that allows typing by default", {
+test_that("an option with choices is a typeable field plus a suggestion picker", {
   opt <- list(
     id = "header", label = "Header", type = "text",
     choices = c("Alpha", "Beta")
   )
   html <- html_of(app_fn("render_template_option_input")(opt))
+  doc <- xml2::read_html(html)
 
-  expect_match(html, 'id="tmpl_opt_header"', fixed = TRUE)
-  expect_match(html, '"create":true', fixed = TRUE)
-  # No default, so the blank sentinel collect_template_selections() already
-  # understands is what the control starts on.
-  expect_match(html, '<option value="__blank__" selected>(leave blank)</option>', fixed = TRUE)
-  # The sentinel row and the companion text field of the old dialog are gone.
+  # The value lives in a real text input, which the row's label points at ...
+  field <- xml2::xml_find_first(doc, "//input[@id='tmpl_opt_header']")
+  expect_identical(xml2::xml_attr(field, "type"), "text")
+  expect_match(html, 'for="tmpl_opt_header"', fixed = TRUE)
+  # ... and the picker is a separate control that comes AFTER it, so the field
+  # is the first stop in tab order.
+  expect_identical(
+    xml2::xml_attr(xml2::xml_find_first(doc, "//select"), "id"),
+    "tmpl_opt_header_suggestion"
+  )
+  expect_lt(
+    regexpr('id="tmpl_opt_header"', html, fixed = TRUE),
+    regexpr('id="tmpl_opt_header_suggestion"', html, fixed = TRUE)
+  )
+  # No default, so the field starts empty. The picker starts on nothing: a
+  # picker sitting on an item cannot fire for that same item, so "(leave blank)"
+  # (or the default) could not be re-picked after typing.
+  expect_true(xml2::xml_attr(field, "value") %in% c("", NA_character_))
+  # (Shiny's markup still flags the first row `selected`; the script below
+  # clears it on initialisation, which is what the user sees.)
+  expect_match(html, "(leave blank)", fixed = TRUE)
+  picker_config <- jsonlite::fromJSON(xml2::xml_text(xml2::xml_find_first(
+    doc, "//script[@data-for='tmpl_opt_header_suggestion']"
+  )))
+  expect_match(picker_config$onInitialize, "this.clear(true)", fixed = TRUE)
+  expect_match(html, "Alpha", fixed = TRUE)
+  expect_match(html, "Beta", fixed = TRUE)
+  # The picker cannot create values: typing happens in the field.
+  expect_false(grepl('"create":true', html, fixed = TRUE))
+  # Its label names the field for screen readers.
+  expect_match(html, "Choose a suggestion", fixed = TRUE)
+  expect_match(html, 'class="visually-hidden"> for Header', fixed = TRUE)
   expect_false(grepl("__custom__", html, fixed = TRUE))
-  expect_false(grepl("tmpl_opt_header_custom", html, fixed = TRUE))
+})
+
+test_that("the field starts on the default and the picker script writes into the field", {
+  html <- html_of(app_fn("render_template_option_input")(list(
+    id = "header", type = "text", choices = c("Alpha", "Beta"), default = "Beta"
+  )))
+  doc <- xml2::read_html(html)
+
+  expect_identical(
+    xml2::xml_attr(xml2::xml_find_first(doc, "//input[@id='tmpl_opt_header']"), "value"),
+    "Beta"
+  )
+  config <- xml2::xml_text(xml2::xml_find_first(
+    doc, "//script[@data-for='tmpl_opt_header_suggestion']"
+  ))
+  expect_match(
+    jsonlite::fromJSON(config)$onChange,
+    'document.getElementById("tmpl_opt_header")',
+    fixed = TRUE
+  )
 })
 
 test_that("allow_custom follows the template, in both directions", {
   render <- app_fn("render_template_option_input")
   ch <- c("Alpha", "Beta")
 
-  # type: select forbids typing unless the template opts in.
-  expect_match(
-    html_of(render(list(id = "x", type = "select", choices = ch))),
-    '"create":false',
-    fixed = TRUE
-  )
-  expect_match(
-    html_of(render(list(id = "x", type = "select", choices = ch, allow_custom = TRUE))),
-    '"create":true',
-    fixed = TRUE
-  )
+  # type: select forbids typing unless the template opts in: a strict dropdown,
+  # with no field to type into.
+  strict <- html_of(render(list(id = "x", type = "select", choices = ch)))
+  expect_match(strict, '"create":false', fixed = TRUE)
+  expect_false(grepl("tmpl_opt_x_suggestion", strict, fixed = TRUE))
+  expect_match(strict, 'for="tmpl_opt_x-selectized"', fixed = TRUE)
+
+  opted_in <- html_of(render(list(id = "x", type = "select", choices = ch, allow_custom = TRUE)))
+  expect_match(opted_in, 'id="tmpl_opt_x_suggestion"', fixed = TRUE)
+  expect_match(opted_in, 'for="tmpl_opt_x"', fixed = TRUE)
+
   # type: text permits it unless the template says otherwise.
-  expect_match(
-    html_of(render(list(id = "x", type = "text", choices = ch, allow_custom = FALSE))),
-    '"create":false',
-    fixed = TRUE
-  )
+  closed <- html_of(render(list(id = "x", type = "text", choices = ch, allow_custom = FALSE)))
+  expect_match(closed, '"create":false', fixed = TRUE)
+  expect_false(grepl("tmpl_opt_x_suggestion", closed, fixed = TRUE))
 })
 
-test_that("a default that is not among the choices is added and selected", {
+test_that("a strict dropdown still shows a default that is not among its choices", {
+  html <- html_of(app_fn("render_template_option_input")(list(
+    id = "x", type = "select", choices = c("Alpha", "Beta"), default = "Gamma"
+  )))
+
+  expect_match(html, '<option value="Gamma" selected>Gamma</option>', fixed = TRUE)
+})
+
+test_that("a single free-text choice is a text field holding it, ready to edit", {
+  render <- app_fn("render_template_option_input")
+
+  html <- html_of(render(list(id = "header", type = "text", choices = "Alpha")))
+  expect_match(html, '<input id="tmpl_opt_header" type="text"', fixed = TRUE)
+  expect_match(html, 'value="Alpha"', fixed = TRUE)
+  expect_false(grepl("selectize", html, fixed = TRUE))
+  # The label points at the input itself, not a selectize proxy.
+  expect_match(html, 'for="tmpl_opt_header"', fixed = TRUE)
+
+  # A declared default is still what the field starts with.
+  with_default <- html_of(render(list(id = "header", type = "text", choices = "Alpha", default = "Beta")))
+  expect_match(with_default, 'value="Beta"', fixed = TRUE)
+
+  # A strict select keeps its dropdown: typing is not allowed there.
+  strict <- html_of(render(list(id = "header", type = "select", choices = "Alpha")))
+  expect_match(strict, '"create":false', fixed = TRUE)
+})
+
+test_that("a default that is not among the choices fills the field and is offered in the picker", {
   opt <- list(
     id = "header", type = "text", choices = c("Alpha", "Beta"),
     default = "ACME Labs"
   )
   html <- html_of(app_fn("render_template_option_input")(opt))
 
-  expect_match(html, '<option value="ACME Labs" selected>ACME Labs</option>', fixed = TRUE)
+  # Offered as a row so it can be put back after typing, but not pre-selected.
+  expect_match(html, '<option value="ACME Labs">ACME Labs</option>', fixed = TRUE)
+  expect_identical(
+    xml2::xml_attr(
+      xml2::xml_find_first(xml2::read_html(html), "//input[@id='tmpl_opt_header']"), "value"
+    ),
+    "ACME Labs"
+  )
 })
 
 test_that("boolean is a checkbox, textarea spans the grid, and help is rendered", {
@@ -647,7 +725,9 @@ test_that("a textarea suggestion is selectable without losing multiline editing"
     "if (target) {",
     "target.value = value === \"__blank__\" ? '' : (value || '');",
     "target.dispatchEvent(new Event('input', { bubbles: true }));",
-    "}}"
+    "}",
+    "this.clear(true);",
+    "}"
   ))
 })
 
@@ -793,14 +873,43 @@ test_that("a party slot names the template's own default and marks required slot
   ))
 
   expect_match(html, 'id="tmpl_party_supplier"', fixed = TRUE)
-  # Named, not the opaque "(use template default)" the old dialog showed.
-  expect_match(
-    html, '<option value="" selected>(template default: External Supplier)</option>',
-    fixed = TRUE
-  )
+  # The template's own party is the selected row, shown by its name -- no
+  # "template default" wording.
+  expect_match(html, '<option value="" selected>External Supplier</option>', fixed = TRUE)
+  expect_false(grepl("template default", html, fixed = TRUE))
   expect_match(html, '<span class="tmpl-req">Required</span>', fixed = TRUE)
   # The eligible profile from the index is offered alongside it.
   expect_match(html, '<option value="supplier_acme">ACME Labs</option>', fixed = TRUE)
+})
+
+test_that("a party row is never two identical rows, and says so when the template has no party", {
+  idx <- local_modal_index()
+  slot <- list(id = "supplier", target = "metadata.supplier", label = "Supplier")
+  body <- function(def) {
+    html_of(app_fn("template_options_modal_body")(
+      def, demo_loaded(def), idx, list(slots = list(), error = NULL)
+    ))
+  }
+
+  # A saved profile that shares the template party's name is told apart.
+  same <- demo_def(party_slots = list(slot))
+  same$base$metadata$supplier$affiliation$name <- "ACME Labs"
+  html <- body(same)
+  expect_match(html, '<option value="" selected>ACME Labs</option>', fixed = TRUE)
+  expect_match(
+    html, '<option value="supplier_acme">ACME Labs (saved profile)</option>',
+    fixed = TRUE
+  )
+
+  # No party block at all: leaving the row empties the slot, so the row says "(none)".
+  none <- demo_def(party_slots = list(slot))
+  none$base$metadata$supplier <- NULL
+  expect_match(body(none), '<option value="" selected>(none)</option>', fixed = TRUE)
+
+  # A block without a name is still the template's party.
+  unnamed <- demo_def(party_slots = list(slot))
+  unnamed$base$metadata$supplier <- list(contacts = list())
+  expect_match(body(unnamed), '<option value="" selected>(as in template)</option>', fixed = TRUE)
 })
 
 test_that("the header names id, version, source and lineage, and options land in a grid", {

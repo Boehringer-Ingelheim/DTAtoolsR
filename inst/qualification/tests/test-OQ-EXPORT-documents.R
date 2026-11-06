@@ -127,7 +127,6 @@ test_that("OQ-EXPORT-002 | write_dta docx names the transfer title, version, sup
   text <- qa_docx_text(out)
   for (expected in c(
     "Clinical Data Specification", # metadata@title
-    "Version: 0.1", # metadata@version
     "Test Company 2", # metadata@supplier$affiliation$name
     "Test Company" # metadata@receiver$affiliation$name
   )) {
@@ -136,6 +135,10 @@ test_that("OQ-EXPORT-002 | write_dta docx names the transfer title, version, sup
       TRUE, grepl(expected, text, fixed = TRUE)
     )
   }
+  # The version is a labelled cell of the cover and Document Information
+  # tables, and is repeated in the running footer.
+  cells <- qa_docx_summary(out)$text
+  qa_step("the Version label is followed by the declared version", "0.1", cells[match("Version", cells) + 1L])
 })
 
 test_that("OQ-EXPORT-003 | write_dta docx names every dataset and its declared columns | REQ-EXPORT-002 REQ-EXPORT-003", {
@@ -179,7 +182,7 @@ test_that("OQ-EXPORT-004 | write_dta docx column specification table matches the
   studyid <- tbl[tbl$col1 == "STUDYID", ]
   qa_step(
     "the STUDYID row carries its declared label, type, nullability and permitted value",
-    c("Study Identifier", "SAS Char", "No", "1234-5678"),
+    c("Study Identifier", "SAS Char (10)", "No", "1234-5678"),
     c(studyid$col2, studyid$col3, studyid$col4, studyid$col5)
   )
 
@@ -707,7 +710,7 @@ et_sort_keys <- function(x) {
   x
 }
 
-test_that("OQ-EXPORT-050 | each rule's definition in the Word and Markdown documents parses to the declared rule | REQ-EXPORT-035", {
+test_that("OQ-EXPORT-051 | each rule's definition in the Word and Markdown documents parses to the declared rule | REQ-EXPORT-036", {
   # One rule of each type. Every value is written here from the parameter
   # documentation of the rule classes, not read back from an export.
   conds <- list(

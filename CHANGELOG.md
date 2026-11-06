@@ -25,9 +25,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   content, which squeezed the `Rule ID` column next to the long `Definition`
   column in portrait templates. A template with several sections keeps tables
   at 100% of the text column, as before.
+- The built-in Word/PDF layout of `write_dta()` is redesigned. Every page after
+  the cover carries a running header (DTA title, study ID, "Page X of Y") and
+  footer (document name, version, date of the current version, and in small
+  print the template the document was generated from, e.g. "Template: Biomarker
+  GF DTS (biomarker_gf) · version 1.0 · 2026-11-05"). Headings are numbered
+  flush left (`1`, `1.1`, `1.1.1`) and each chapter is a top-level heading, so
+  datasets no longer sink to `1.10.1.2`. The cover shows a summary of version,
+  date, study, parties and template. Tables share one width and a lighter
+  style, key/value tables lose their "Item | Details" header row, and each
+  party's contacts form one table. The trailing "Generated: …" line is gone.
+- The Word export now shows data it used to drop: template provenance, every
+  contact field (address, company, …), dataset type and template
+  source/version/date, how each tabular file is to be parsed (delimiter,
+  header row, quote, missing values, encoding, line breaks in values), column
+  length, SAS format and R class, every allowed value (no longer cut off after
+  ten), and nested transmission extension values. Transmission fields carry
+  readable labels ("First transfer" rather than `date_first_transfer`).
+
+- The Shiny app's "Export DTA YAML" file name keeps the dots in the version
+  (`..._v1.2.0_<date>.yaml`) instead of turning them into underscores.
+- A DTA created from a template no longer records the option answers
+  (`selections:`, `vocabulary_selections:`) under `metadata.template`; they
+  already appear as the field values they set. Rebasing onto a newer template
+  version reads them back from the document instead, so the answers are kept.
+  Documents that still carry `selections:` rebase exactly as before.
+- `metadata.template` now records the template's `label` and the `date` of the
+  template version (a new optional `date:` field on creation templates, never
+  inherited through `extends:`). `source_ref` holds the full file path only for
+  a local `dir:` source; for git, package and bundled templates it is the file
+  name within the source rather than a machine-specific cache path.
+- In "New DTA from template", an option with a single suggestion (and free
+  text allowed) is a text field pre-filled with that suggestion, edited in
+  place, instead of a one-entry dropdown.
+- In "New DTA from template", a text option with several suggestions is now an
+  editable text field with a "Choose a suggestion" picker that fills it, instead
+  of one dropdown that hid the fact that you could type your own value. The
+  bundled Biomarker GF template's "Error handling" is a multi-line field, and its
+  "Authorized for corrections" offers only "Trial Data Manager (TDM)" (the
+  duplicate "TDM" choice is gone, and it is the new default).
+- In the same dialog, a party dropdown starts on the template's own party,
+  shown by its name, instead of a "(template default: …)" row.
 
 ### Fixed
 
+- The app's Markdown export with "store as PDF" now always delivers a PDF. On
+  a server with neither a LaTeX engine nor Chrome/Edge it used to give up with
+  "neither produced a PDF. Exporting Markdown instead."; it now falls back to
+  the app's built-in PDF writer, in a simpler layout.
 - The app's built-in PDF writer no longer produces no file where the cairo
   graphics library is installed but cannot be loaded (macOS without XQuartz).
   R reports that as a warning and opens no device; it now falls back to the
@@ -206,11 +251,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Posit Connect now deploys the repository root, and the app runs the
+  DTAtools of the same commit.** Before, Connect deployed
+  `inst/shiny/dta_app/` and installed DTAtools separately from GitHub, at a
+  SHA pinned in that folder's `manifest.json`. The pin was set to the pull
+  request's *base*, so the deployed package never included the change that
+  deployed it. The new root `app.R` installs the deployed checkout with
+  `R CMD INSTALL` (base R only), then serves the app bundled inside that
+  install. The install is cached in the bundle directory under a hash of the
+  package sources, so only the first worker after a deploy pays for it
+  (45–60 s on a Windows dev machine, 2 s warm). That is at Connect's default
+  60 s initial timeout, so raise it in the content's Runtime settings (for
+  example to 180 s).
+  The root `manifest.json` carries no DTAtools entry. `check_manifest.R` now
+  checks that it lists every `Depends`/`Imports` package, because a missing
+  one fails the install on Connect. On Connect (`POSIT_PRODUCT=CONNECT`),
+  `.Rprofile` skips renv activation and turns off Shiny's `R/` autoloading;
+  otherwise Shiny would source the package's `R/` loose before `app.R` runs.
+  `app.R` turns autoloading back on for the app's own helpers.
+  **Migration, once per Connect instance:** create a new Git-backed content
+  item from the repository root (`/`), on `master` and `dev` respectively. Move
+  the vanity URL and content variables (`DTATOOLS_TEMPLATE_*`, …) across, then
+  delete the old item. Connect cannot repoint an existing item to another
+  directory, and the old items stop updating once their manifest is gone.
+- The deploy-pin machinery is gone: `bump_version.R --set-deploy-sha`,
+  `--set-deploy-ref` and `--set-release-sha`, `ref_shape.R`, the
+  `manifest-release-sha` and `manifest-sync` workflows, and the manual pin PR
+  that finished every release. A release no longer touches the manifest, so
+  the recurring `manifest.json` conflict between `master` and `dev` cannot
+  occur. The manifest's only checksum is `app.R`'s: run
+  `bump_version.R --sync-manifest` after editing it, which `r-style` enforces.
+  REQ-ENV-017 (app files match the app manifest) is retired with its test.
+  The app files are still covered by the IQ-ENV-016 baseline.
 - CI is tiered. A pull request into `dev` runs `R CMD check` on
   `ubuntu-latest (release)` only, the qualification quick scale on Linux only
   (and only when `R/`, `inst/`, `tests/`, `DESCRIPTION` or `NAMESPACE`
-  changed), and no coverage jobs; style, pre-commit and manifest sync run as
-  before. A pull request into `master`, one labelled `full-ci`, a manual
+  changed), and no coverage jobs; style and pre-commit run as before. A pull request into `master`, one labelled `full-ci`, a manual
   dispatch and a new nightly run on `dev` get the full suite: all five
   `R CMD check` legs, the qualification standard scale on three operating
   systems, and both coverage jobs with their floors. The tier is decided once,

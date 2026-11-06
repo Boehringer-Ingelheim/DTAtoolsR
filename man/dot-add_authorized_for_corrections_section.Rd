@@ -4,7 +4,11 @@
 \alias{.add_authorized_for_corrections_section}
 \title{Add "Authorized for Corrections" section}
 \usage{
-.add_authorized_for_corrections_section(doc, authorized_for_corrections)
+.add_authorized_for_corrections_section(
+  doc,
+  authorized_for_corrections,
+  level = 2
+)
 }
 \description{
 Add "Authorized for Corrections" section

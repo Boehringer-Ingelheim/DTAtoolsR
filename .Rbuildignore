@@ -62,3 +62,6 @@ CHANGELOG.md
 
 # Planning directory — never part of the shipped package
 ^thoughts$
+^app\.R$
+^manifest\.json$
+^\.dtatools-lib$

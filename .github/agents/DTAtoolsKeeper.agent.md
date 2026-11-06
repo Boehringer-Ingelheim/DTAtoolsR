@@ -144,9 +144,8 @@ checks, docs) says it's done.
   `setup-r-dependencies`; it does not install S7 from GitHub.
 - Other workflows in `.github/workflows/`: `r-style.yaml` (the `check_*.R`
   scripts, `sync_qualification_manifest.R --check`, `style.R --check`, and a
-  `roxygenise()` diff check), `pre-commit.yml`, `manifest-sync.yml`,
-  `qualification.yml`, `bump-version.yml`, `release.yml`,
-  `manifest-release-sha.yml` and `pages.yml` — don't break them.
+  `roxygenise()` diff check), `pre-commit.yml`, `qualification.yml`,
+  `bump-version.yml`, `release.yml` and `pages.yml` — don't break them.
 - Locally you cannot run the full OS matrix, but you can and should run the
   R-native equivalents (see Workflow below) before considering work done.
 

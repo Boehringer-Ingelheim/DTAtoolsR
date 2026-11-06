@@ -4,7 +4,7 @@
 \alias{.build_column_specs_table}
 \title{Format column specifications as a professional table}
 \usage{
-.build_column_specs_table(specs_collection)
+.build_column_specs_table(specs_collection, width = TEXT_WIDTH$landscape)
 }
 \description{
 Format column specifications as a professional table

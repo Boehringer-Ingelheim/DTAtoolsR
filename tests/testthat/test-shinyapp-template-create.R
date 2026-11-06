@@ -675,7 +675,7 @@ test_that("apply_metadata_carry_over() leaves an already-empty source field unto
 
 # ---- template_provenance() --------------------------------------------------
 
-test_that("template_provenance() always includes id/version/created/content_hash/selections, and omits empty fields", {
+test_that("template_provenance() always includes id/version/created/content_hash, and omits empty fields", {
   fn <- app_fn("template_provenance")
   def <- list(id = "t1", version = "1.0", base = list())
   meta <- list(
@@ -684,16 +684,18 @@ test_that("template_provenance() always includes id/version/created/content_hash
     path = "/x/t1.yaml", resolved_commit = NA_character_
   )
 
-  result <- fn(def, meta, selections = list())
+  result <- fn(def, meta)
 
   expect_equal(result$id, "t1")
   expect_equal(result$version, "1.0")
   expect_s3_class(result$created, "Date")
   expect_match(result$content_hash, "^hash:")
-  expect_equal(result$selections, list())
-  # source_ref = meta$path is NOT empty, so it survives.
-  expect_equal(result$source_ref, "/x/t1.yaml")
+  # Option answers are never recorded: they already sit in the fields they set.
+  expect_false("selections" %in% names(result))
+  expect_false("vocabulary_selections" %in% names(result))
   # NA/absent fields are omitted, not written as empty/NA keys.
+  expect_false("label" %in% names(result))
+  expect_false("date" %in% names(result))
   expect_false("source" %in% names(result))
   expect_false("source_kind" %in% names(result))
   expect_false("resolved_commit" %in% names(result))
@@ -709,7 +711,6 @@ test_that("template_provenance() includes lineage/datasets/carried_over_from whe
 
   result <- fn(
     def, meta,
-    selections = list(opt1 = "x"),
     lineage = c("base@1.0"),
     ds_provenance = list(list(name = "ds1")),
     carried_over_from = list(id = "old", version = "0.9")
@@ -723,12 +724,42 @@ test_that("template_provenance() includes lineage/datasets/carried_over_from whe
   expect_equal(result$carried_over_from, list(id = "old", version = "0.9"))
 })
 
+test_that("template_provenance() records label and the template version's own date", {
+  fn <- app_fn("template_provenance")
+  meta <- list(id = "t1", version = "2.0")
+  # yaml reads an unquoted date as a Date; it is written as plain text.
+  def <- list(id = "t1", version = "2.0", label = "Trial DTA", date = as.Date("2026-03-04"))
+
+  result <- fn(def, meta)
+
+  expect_identical(result$label, "Trial DTA")
+  expect_identical(result$date, "2026-03-04")
+})
+
+test_that("template_provenance() keeps a full source_ref only for a user's own dir: source", {
+  fn <- app_fn("template_provenance")
+  def <- list(id = "t1", version = "1.0")
+  ref_for <- function(kind, name) {
+    fn(def, list(
+      id = "t1", version = "1.0", source_kind = kind, source_name = name,
+      path = "C:/cache/clone-abc/templates/t1.dta-template.yaml"
+    ))$source_ref
+  }
+
+  # A git clone, an installed package or the bundled templates sit at a
+  # machine-specific path: only the file within the source is recorded.
+  expect_identical(ref_for("git", "lib"), "t1.dta-template.yaml")
+  expect_identical(ref_for("pkg", "lib"), "t1.dta-template.yaml")
+  expect_identical(ref_for("dir", "builtin"), "t1.dta-template.yaml")
+  expect_identical(ref_for("dir", "mine"), "C:/cache/clone-abc/templates/t1.dta-template.yaml")
+})
+
 test_that("template_provenance()'s content_hash changes when the underlying definition changes", {
   fn <- app_fn("template_provenance")
   meta <- list(id = "t1", version = "1.0")
 
-  h1 <- fn(list(id = "t1", version = "1.0", base = list(x = 1)), meta, selections = list())$content_hash
-  h2 <- fn(list(id = "t1", version = "1.0", base = list(x = 2)), meta, selections = list())$content_hash
+  h1 <- fn(list(id = "t1", version = "1.0", base = list(x = 1)), meta)$content_hash
+  h2 <- fn(list(id = "t1", version = "1.0", base = list(x = 2)), meta)$content_hash
 
   expect_false(identical(h1, h2))
   # Labelled "hash:", NEVER "sha256:" -- rlang::hash() is xxhash128, a change
@@ -739,7 +770,7 @@ test_that("template_provenance()'s content_hash changes when the underlying defi
 
 # ---- create_dta_from_template(): provenance round trip ----------------------
 
-test_that("provenance round-trips through dta_to_yaml_text() -> dta_read_yaml_text(), including selections", {
+test_that("provenance round-trips through dta_to_yaml_text() -> dta_read_yaml_text(), without selections", {
   def <- list(
     base = list(metadata = list(title = "Roundtrip Title", version = "1.0")),
     datasets = list(mini_dataset_entry())
@@ -748,7 +779,7 @@ test_that("provenance round-trips through dta_to_yaml_text() -> dta_read_yaml_te
 
   meta <- list(id = "roundtrip_tpl", version = "1.0", source_name = "local", source_kind = "dir", path = template_path, resolved_commit = NA_character_)
   prov_fn <- app_fn("template_provenance")
-  prov <- prov_fn(def, meta, selections = list(opt1 = "chosen"), lineage = c("parent_tpl@1.0"))
+  prov <- prov_fn(def, meta, lineage = c("parent_tpl@1.0"))
 
   create_fn <- app_fn("create_dta_from_template")
   res <- create_fn(def, template_path, selections = list(opt1 = "chosen"), provenance = prov)
@@ -764,7 +795,8 @@ test_that("provenance round-trips through dta_to_yaml_text() -> dta_read_yaml_te
   rt_template <- round$value@metadata@template
   expect_equal(rt_template$id, "roundtrip_tpl")
   expect_equal(rt_template$version, "1.0")
-  expect_equal(rt_template$selections, list(opt1 = "chosen"))
+  expect_false("selections" %in% names(rt_template))
+  expect_false(grepl("selections", serialized$value, fixed = TRUE))
   expect_equal(rt_template$lineage, "parent_tpl@1.0")
   expect_equal(rt_template$source, "local")
   expect_equal(rt_template$content_hash, prov$content_hash)
