@@ -24,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The app's Markdown export with "store as PDF" now always delivers a PDF. On
+  a server with neither a LaTeX engine nor Chrome/Edge it used to give up with
+  "neither produced a PDF. Exporting Markdown instead."; it now falls back to
+  the app's built-in PDF writer, in a simpler layout.
 - The app's built-in PDF writer no longer produces no file where the cairo
   graphics library is installed but cannot be loaded (macOS without XQuartz).
   R reports that as a warning and opens no device; it now falls back to the

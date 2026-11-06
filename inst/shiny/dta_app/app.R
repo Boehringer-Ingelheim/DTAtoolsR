@@ -7618,14 +7618,13 @@ server <- function(input, output, session) {
             writeLines(enc2utf8(md_text), output_file, useBytes = TRUE)
           }
 
-          # Convert to PDF if requested, trying two routes so it works with or
-          # without a LaTeX install:
+          # Convert to PDF if requested, best route first:
           #   1. pandoc + a real PDF engine (LaTeX/TinyTeX/wkhtmltopdf) - best
           #      typography when it is available.
           #   2. headless Chrome/Edge printing the rendered HTML - needs no
           #      LaTeX and no extra R packages, just an installed browser.
-          # If neither route yields a PDF, fall back to delivering the Markdown
-          # file so the export still succeeds (and still downloads).
+          #   3. R's own PDF device - needs nothing, so it always runs.
+          # Only if all three fail is the Markdown file delivered instead.
           if (isTRUE(input$export_as_pdf)) {
             pdf_file <- sub("\\.md$", ".pdf", output_file)
             own("export", pdf_file)
@@ -7674,14 +7673,21 @@ server <- function(input, output, session) {
                   markdown_to_pdf_via_chrome(output_file, pdf_file, chrome = chrome)
                   file.exists(pdf_file) && file.info(pdf_file)$size > 0
                 },
-                error = function(e) {
-                  showNotification(
-                    paste0("Browser-based PDF failed (", conditionMessage(e), ")."),
-                    type = "warning",
-                    duration = 8
-                  )
-                  FALSE
-                }
+                error = function(e) FALSE
+              )
+            }
+
+            # Route 3: R's own PDF device (dta_markdown_to_pdf(), the same
+            # renderer dta_export_pdf() falls back to). Needs no external
+            # tool, so a server with neither LaTeX nor a browser -- Posit
+            # Connect, typically -- still gets a PDF, in a simpler layout.
+            if (!isTRUE(pdf_ok)) {
+              pdf_ok <- tryCatch(
+                {
+                  dta_markdown_to_pdf(readLines(output_file, warn = FALSE), pdf_file)
+                  dta_is_pdf(pdf_file)
+                },
+                error = function(e) FALSE
               )
             }
 
@@ -7690,10 +7696,7 @@ server <- function(input, output, session) {
               filename <- sub("\\.md$", ".pdf", filename)
             } else {
               showNotification(
-                paste0(
-                  "PDF export needs a LaTeX engine or a Chrome/Edge browser, ",
-                  "and neither produced a PDF. Exporting Markdown instead."
-                ),
+                "Could not produce a PDF on this server. Exporting Markdown instead.",
                 type = "warning",
                 duration = 10
               )
