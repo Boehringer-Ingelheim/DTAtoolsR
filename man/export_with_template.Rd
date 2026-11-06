@@ -65,7 +65,10 @@ and reported via a warning.
 \code{{RECEIVER_EMAIL}}, \code{{RECEIVER_PHONE}}, \code{{RECEIVER_CONTACTS}}}
 \item{Transmission}{\code{{TRANSMISSION_TYPE}}, \code{{TRANSMISSION_FREQUENCY}},
 \code{{TRANSMISSION_NOTIFICATION}}, \code{{TRANSMISSION_FIRST_TRANSFER}},
-\code{{TRANSMISSION_LAST_TRANSFER}}, \code{{TEST_UPLOAD}}, \code{{BLINDED_TRANSFER}}}
+\code{{TRANSMISSION_LAST_TRANSFER}}, \code{{TEST_UPLOAD}}, \code{{BLINDED_TRANSFER}},
+\code{{TRANSMISSION_EXTENT}}, \code{{TRANSMISSION_SCOPE}}, \code{{TRANSMISSION_PACKAGING}},
+\code{{TRANSMISSION_SECURITY}}, \code{{TRANSMISSION_CHECKSUM}},
+\code{{TRANSMISSION_TEST_REQUIREMENTS}}, \code{{TRANSMISSION_BLINDING_REQUIREMENTS}}}
 \item{Data content}{\code{{DATASET_COUNT}}, \code{{DATASET_IDS}}, \code{{DATASET_NAMES}}
 (each dataset's name, or its id where no name is set),
 \code{{DATASET_TYPES}}, \code{{TOTAL_COLUMNS}}, \code{{TOTAL_RULES}}}
