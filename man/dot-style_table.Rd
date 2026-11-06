@@ -17,4 +17,9 @@ Applying one function to all of them is the point: before this, each table
 set its own font size, header fill and padding, so the document showed
 several table designs at once.
 }
+\details{
+The style is deliberately light: a tinted header row closed by a brand-green
+rule, hairlines between body rows and no zebra fill. Solid dark header bars
+and alternating stripes made every table shout equally loud.
+}
 \keyword{internal}

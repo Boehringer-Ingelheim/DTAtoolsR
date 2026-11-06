@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The built-in Word/PDF layout of `write_dta()` is redesigned. Every page after
+  the cover carries a running header (DTA title, study ID, "Page X of Y") and
+  footer (document name, version, date of the current version, and in small
+  print the template the document was generated from, e.g. "Template: Biomarker
+  GF DTS (biomarker_gf) · version 1.0 · 2026-11-05"). Headings are numbered
+  flush left (`1`, `1.1`, `1.1.1`) and each chapter is a top-level heading, so
+  datasets no longer sink to `1.10.1.2`. The cover shows a summary of version,
+  date, study, parties and template. Tables share one width and a lighter
+  style, key/value tables lose their "Item | Details" header row, and each
+  party's contacts form one table. The trailing "Generated: …" line is gone.
+- The Word export now shows data it used to drop: template provenance, every
+  contact field (address, company, …), dataset type and template
+  source/version/date, how each tabular file is to be parsed (delimiter,
+  header row, quote, missing values, encoding, line breaks in values), column
+  length, SAS format and R class, every allowed value (no longer cut off after
+  ten), and nested transmission extension values. Transmission fields carry
+  readable labels ("First transfer" rather than `date_first_transfer`).
+
 - The Shiny app's "Export DTA YAML" file name keeps the dots in the version
   (`..._v1.2.0_<date>.yaml`) instead of turning them into underscores.
 - A DTA created from a template no longer records the option answers
