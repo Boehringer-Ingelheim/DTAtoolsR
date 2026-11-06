@@ -6,7 +6,7 @@
 monospace section. Leading spaces are converted to non-breaking spaces so the
 YAML indentation survives Word's whitespace collapsing.}
 \usage{
-.add_embedded_yaml_section(doc, yaml_text)
+.add_embedded_yaml_section(doc, yaml_text, level = 2)
 }
 \description{
 Append the machine-readable YAML specification as a final, very small-font

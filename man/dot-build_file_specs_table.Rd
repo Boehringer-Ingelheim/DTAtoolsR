@@ -5,7 +5,7 @@
 \title{Build the expected-files table (flextable). Shared by the built-in layout and
 by the \code{{FILE_SPECS}} template block.}
 \usage{
-.build_file_specs_table(files)
+.build_file_specs_table(files, width = TEXT_WIDTH$portrait)
 }
 \description{
 Build the expected-files table (flextable). Shared by the built-in layout and

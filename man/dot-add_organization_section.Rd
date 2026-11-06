@@ -8,7 +8,7 @@ authorised signatories are collected into the single "Approval & Signatures"
 table at the front of the document, so repeating an underline per contact
 would be a second, competing place to sign.}
 \usage{
-.add_organization_section(doc, title, org_list)
+.add_organization_section(doc, title, org_list, level = 2)
 }
 \description{
 Add a full organization section (affiliation + individual contact blocks).

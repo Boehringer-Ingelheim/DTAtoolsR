@@ -310,7 +310,7 @@
       doc <- .tv_block_heading(doc, paste0("Column Specifications \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_column_specs_table(sets[[nm]]@specs),
+      doc, .build_column_specs_table(sets[[nm]]@specs, width = NULL),
       "No column specifications available."
     )
   }
@@ -330,7 +330,7 @@
       doc <- .tv_block_heading(doc, paste0("Validation Rules \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_rules_table(sets[[nm]]@specs@rules),
+      doc, .build_rules_table(sets[[nm]]@specs@rules, width = NULL),
       "No validation rules specified."
     )
   }
@@ -350,7 +350,7 @@
       doc <- .tv_block_heading(doc, paste0("Files \u2014 ", dta_dataset_heading(sets[[nm]])), level = 2)
     }
     doc <- .tv_block_table(
-      doc, .build_file_specs_table(sets[[nm]]@files),
+      doc, .build_file_specs_table(sets[[nm]]@files, width = NULL),
       "No files specified."
     )
   }
@@ -379,17 +379,17 @@
     }
 
     doc <- .tv_block_heading(doc, "Files", level = 3)
-    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files), "No files specified.")
+    doc <- .tv_block_table(doc, .build_file_specs_table(ds@files, width = NULL), "No files specified.")
 
     if (inherits(ds, "DTAtools::DTADataSetTabular")) {
       doc <- .tv_block_heading(doc, "Column Specifications", level = 3)
       doc <- .tv_block_table(
-        doc, .build_column_specs_table(ds@specs),
+        doc, .build_column_specs_table(ds@specs, width = NULL),
         "No column specifications available."
       )
       doc <- .tv_block_heading(doc, "Validation Rules", level = 3)
       doc <- .tv_block_table(
-        doc, .build_rules_table(ds@specs@rules),
+        doc, .build_rules_table(ds@specs@rules, width = NULL),
         "No validation rules specified."
       )
     }

@@ -13,7 +13,8 @@ styles).}
   doc,
   dataset,
   include_rules = TRUE,
-  heading_level = 2
+  heading_level = 2,
+  furniture_meta = NULL
 )
 }
 \description{

@@ -56,7 +56,9 @@ test_that("OQ-EXPORT-045 | default documents include study and ordered agreement
         grepl(transmission[[field]], text, fixed = TRUE)
       )
     }
-    for (flag in c("test_upload", "blinded_transfer")) {
+    # Word labels the decisions for readers; Markdown keeps the YAML key.
+    flags <- if (format == "docx") c("Test upload", "Blinded transfer") else c("test_upload", "blinded_transfer")
+    for (flag in flags) {
       qa_check(paste(format, "does not invent an absent decision", flag), !grepl(flag, text, fixed = TRUE))
     }
     # Markdown escapes the dataset id's `_`, Word shows it as written.
@@ -80,8 +82,9 @@ test_that("OQ-EXPORT-045 | default documents include study and ordered agreement
   summary <- qa_docx_summary(false_word)
   cells <- summary$text[summary$content_type == "table cell"]
   false_markdown_lines <- readLines(false_markdown, warn = FALSE)
+  word_labels <- c(test_upload = "Test upload", blinded_transfer = "Blinded transfer")
   for (flag in c("test_upload", "blinded_transfer")) {
-    qa_step(paste("Word renders explicit FALSE as No for", flag), "No", cells[match(flag, cells) + 1L])
+    qa_step(paste("Word renders explicit FALSE as No for", flag), "No", cells[match(word_labels[[flag]], cells) + 1L])
     qa_check(
       paste("Markdown renders explicit FALSE as No for", flag),
       paste0("- **", flag, ":** No") %in% false_markdown_lines
@@ -146,4 +149,66 @@ test_that("OQ-EXPORT-046 | custom layouts opt into study and agreement blocks | 
   print(officer::body_add_par(officer::read_docx(), "Custom layout"), target = plain)
   export_with_template(dta, template = plain, output = plain_output, fallback = FALSE)
   qa_step("custom layouts are not implicitly extended", "Custom layout", qa_docx_text(plain_output))
+})
+
+# Visible text (runs and field codes) of every header or footer part of a docx.
+qagreement_furniture_texts <- function(path, kind) {
+  dir <- qa_tempdir()
+  files <- utils::unzip(path, exdir = dir)
+  parts <- files[grepl(paste0("^", kind, "[0-9]+[.]xml$"), basename(files))]
+  vapply(parts, function(f) {
+    xml <- xml2::read_xml(f)
+    nodes <- xml2::xml_find_all(xml, ".//*[local-name()='t' or local-name()='instrText']")
+    paste(trimws(xml2::xml_text(nodes)), collapse = " ")
+  }, character(1), USE.NAMES = FALSE)
+}
+
+test_that("OQ-EXPORT-050 | default Word documents carry a running header and footer after the cover | REQ-EXPORT-035", {
+  dta <- qagreement_export_dta()
+  dta@metadata@version <- "2.4"
+  dta@metadata@date <- as.Date("2025-03-07")
+  dta@metadata@template <- list(id = "probe_template", label = "Probe Template", version = "3.1", date = "2024-12-24")
+  dir <- qa_tempdir()
+  word <- file.path(dir, "furniture.docx")
+  write_dta(dta, file = word, format = "docx")
+
+  headers <- qagreement_furniture_texts(word, "header")
+  footers <- qagreement_furniture_texts(word, "footer")
+  qa_check("the document has header parts", length(headers) > 0L)
+  qa_check("the document has footer parts", length(footers) > 0L)
+  for (h in headers) {
+    qa_check("header names the DTA title", grepl("Agreement export probe", h, fixed = TRUE), h)
+    qa_check("header names the study", grepl("Study DEMO-001", h, fixed = TRUE), h)
+    qa_check("header holds page X of Y fields", grepl("Page PAGE of NUMPAGES", h, fixed = TRUE), h)
+  }
+  for (f in footers) {
+    qa_check("footer names the document", grepl("Agreement export probe", f, fixed = TRUE), f)
+    qa_check("footer names the version", grepl("Version 2.4", f, fixed = TRUE), f)
+    qa_check("footer names the ISO version date", grepl("2025-03-07", f, fixed = TRUE), f)
+    qa_check(
+      "footer names the template, its version and date",
+      grepl("Probe Template (probe_template) \u00b7 version 3.1 \u00b7 2024-12-24", f, fixed = TRUE), f
+    )
+  }
+
+  body <- utils::unzip(word, files = "word/document.xml", exdir = qa_tempdir())
+  sections <- xml2::xml_find_all(xml2::read_xml(body), ".//*[local-name()='sectPr']")
+  refs <- vapply(sections, function(s) {
+    length(xml2::xml_find_all(s, "./*[local-name()='headerReference' or local-name()='footerReference']"))
+  }, integer(1))
+  qa_step("the cover section has no header or footer", 0L, refs[[1]])
+  qa_check("every later section has header and footer references", length(refs) > 1L && all(refs[-1] > 0L))
+
+  dta@metadata@template <- list()
+  dta@metadata@study <- list()
+  bare <- file.path(dir, "furniture-bare.docx")
+  write_dta(dta, file = bare, format = "docx")
+  qa_check(
+    "without a template the footer names the built-in layout",
+    all(grepl("Built-in layout \u00b7 DTAtools", qagreement_furniture_texts(bare, "footer"), fixed = TRUE))
+  )
+  qa_check(
+    "without a study the header names none",
+    !any(grepl("Study", qagreement_furniture_texts(bare, "header"), fixed = TRUE))
+  )
 })

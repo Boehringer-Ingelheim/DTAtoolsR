@@ -214,118 +214,135 @@ write_dta <- function(
   # 1 / 1.1 / 1.1.1 / 1.1.1.1 (true Word fields that renumber if edited).
   doc <- .new_numbered_docx()
 
-  # Extract metadata - note that DTA object stores metadata, not direct properties
   meta <- dta@metadata
 
-  # Title section
-  doc <- .add_title_section(
-    doc,
-    title = meta@title,
-    subtitle = "Data Transfer Agreement Metadata",
-    date = if (!is.null(meta@date)) meta@date else Sys.Date(),
-    version = meta@version
-  )
+  # Cover page: its own section, without running header or footer. Every later
+  # section carries the header (DTA title, study, page X of Y) and footer
+  # (document name, version, version date, template) explicitly.
+  doc <- .add_cover_page(doc, meta)
 
-  # Single top-level chapter that anchors the multilevel heading numbering, so
-  # every section below renders as 1.x (and datasets as 1.x.y.z).
-  doc <- .add_heading(doc, "Data Transfer Agreement", level = 1)
+  # Each chapter is a top-level heading (1, 2, 3 ...), so the numbering stays
+  # shallow: a dataset's column table is 7.1.2, not 1.10.1.2.
 
-  # Approval comes first: the signature block is what a reader has to act on,
-  # so it is the opening chapter rather than an appendix buried behind the
-  # process description.
+  # Approval comes first: the signature block is what a reader has to act on.
   if (isTRUE(include_signatures)) {
     doc <- .add_signature_section(
       doc,
-      signatories = .extract_signatories(meta, signature_list = signature_list)
+      signatories = .extract_signatories(meta, signature_list = signature_list),
+      level = 1
     )
   }
 
-  # Metadata overview
-  metadata <- list()
-  if (!is.null(meta@header)) metadata[["Header"]] <- meta@header
-  if (!is.null(meta@version)) metadata[["Version"]] <- meta@version
-  if (!is.null(meta@date)) metadata[["Date"]] <- as.character(meta@date)
+  # Document information, including where the document came from.
+  info <- c(
+    Title = .dta_display_title(meta@title),
+    `Document header` = meta@header %||% "",
+    Version = meta@version %||% "",
+    Date = .format_document_date(.current_version_date(meta))
+  )
+  if (length(meta@template) > 0) {
+    tpl <- meta@template
+    info <- c(info,
+      Template = if (!is.null(tpl$label) && !identical(tpl$label, tpl$id)) paste0(tpl$label, " (", tpl$id, ")") else tpl$id,
+      `Template version` = tpl$version %||% "",
+      `Template date` = .format_document_date(tpl$date)
+    )
+  }
+  info <- info[nzchar(info)]
+  doc <- .add_heading(doc, "Document Information", level = 1)
+  doc <- flextable::body_add_flextable(doc, .kv_table(data.frame(key = names(info), value = unname(info))), align = "left")
+  doc <- .add_spacer(doc)
 
-  doc <- .add_metadata_section(doc, "Document Information", metadata)
-  doc <- .add_study_section(doc, meta@study)
-
-  # Version history
   ft_history <- .build_version_history_table(meta@version_history)
   if (!is.null(ft_history)) {
     doc <- .add_heading(doc, "Version History", level = 2)
-    doc <- flextable::body_add_flextable(doc, ft_history)
+    doc <- flextable::body_add_flextable(doc, ft_history, align = "left")
     doc <- .add_spacer(doc)
   }
 
-  # Supplier and Receiver information (affiliation + individually listed
-  # contacts). Supplier comes first: the data flows supplier -> receiver, so
-  # that is the order the parties are introduced in.
-  if (length(meta@supplier) > 0) {
-    doc <- .add_organization_section(doc, "Supplier Information", meta@supplier)
+  doc <- .add_study_section(doc, meta@study, level = 1)
+
+  # Parties. Supplier comes first: the data flows supplier -> receiver, so that
+  # is the order the parties are introduced in.
+  if (length(meta@supplier) > 0 || length(meta@receiver) > 0) {
+    doc <- .add_heading(doc, "Parties", level = 1)
+    if (length(meta@supplier) > 0) {
+      doc <- .add_organization_section(doc, "Supplier", meta@supplier, level = 2)
+    }
+    if (length(meta@receiver) > 0) {
+      doc <- .add_organization_section(doc, "Receiver", meta@receiver, level = 2)
+    }
   }
 
-  if (length(meta@receiver) > 0) {
-    doc <- .add_organization_section(doc, "Receiver Information", meta@receiver)
-  }
-
-  # Process Information precedes the agreement clauses and dataset details.
-  # Signatures are no longer part of it (they open the document), so this
-  # chapter appears only when there is genuine process content to show.
+  # Process Information precedes the agreement clauses and dataset details,
+  # and appears only when there is genuine process content to show.
   has_process_information <- length(meta@transmission) > 0 ||
     !is.null(meta@error_handling) ||
     length(.format_authorized_for_corrections_lines(meta@authorized_for_corrections)) > 0
 
   if (has_process_information) {
-    doc <- .add_heading(doc, "Process Information", level = 2)
+    doc <- .add_heading(doc, "Process Information", level = 1)
 
     if (length(meta@transmission) > 0) {
-      doc <- .add_heading(doc, "Transmission Details", level = 3)
-      trans_meta <- as.list(meta@transmission)
-      doc <- .add_metadata_section(doc, "", trans_meta, truncate = FALSE)
+      doc <- .add_heading(doc, "Transmission Details", level = 2)
+      trans <- as.list(meta@transmission)
+      ft <- .kv_table(data.frame(
+        key = .transmission_label(names(trans)),
+        value = vapply(trans, .format_any_value, character(1))
+      ))
+      doc <- flextable::body_add_flextable(doc, ft, align = "left")
+      doc <- .add_spacer(doc)
     }
 
     if (!is.null(meta@error_handling)) {
-      doc <- .add_heading(doc, "Error Handling", level = 3)
+      doc <- .add_heading(doc, "Error Handling", level = 2)
       doc <- .add_body_par(doc, meta@error_handling)
       doc <- .add_spacer(doc)
     }
 
-    doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections)
+    doc <- .add_authorized_for_corrections_section(doc, meta@authorized_for_corrections, level = 2)
   }
 
-  doc <- .add_agreement_sections(doc, meta@sections)
+  doc <- .add_agreement_sections(doc, meta@sections, level = 1)
 
-  # Datasets: file specifications, column specifications, and validation rules per dataset
+  # Datasets: facts, files, column specifications and validation rules.
   if (length(dta@datasets) > 0) {
-    doc <- .add_heading(doc, "Datasets", level = 2)
+    doc <- .add_heading(doc, "Datasets", level = 1)
 
     for (ds_name in names(dta@datasets)) {
       dataset <- dta@datasets[[ds_name]]
 
-      doc <- .add_heading(doc, dta_dataset_heading(dataset), level = 3)
+      doc <- .add_heading(doc, dta_dataset_heading(dataset), level = 2)
       if (!is.null(dataset@description) && nzchar(dataset@description)) {
         doc <- .add_body_par(doc, dataset@description)
         doc <- .add_spacer(doc)
       }
+      facts <- c(
+        ID = dataset@id,
+        Type = .title_case_field(dataset@type %||% ""),
+        `Template source` = dataset@template_source %||% "",
+        `Template version` = dataset@template_version %||% "",
+        `Template date` = dataset@template_date %||% ""
+      )
+      facts <- facts[nzchar(facts)]
+      doc <- flextable::body_add_flextable(doc, .kv_table(data.frame(key = names(facts), value = unname(facts))), align = "left")
+      doc <- .add_spacer(doc)
 
-      # <chapter>.<section>.<dataset>.1 Files
-      doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 4)
-
-      # <chapter>.<section>.<dataset>.2 Dataset Specifications
-      # (Column Specifications + Validation Rules nested as bold subheadings).
-      doc <- .add_heading(doc, "Dataset Specifications", level = 4)
-      doc <- .add_dataset_specs_section(doc, dataset, include_rules = TRUE, heading_level = NULL)
+      doc <- .add_file_specifications(doc, dataset@files, title = "Files", heading_level = 3)
+      doc <- .add_dataset_specs_section(doc, dataset,
+        include_rules = TRUE, heading_level = 3, furniture_meta = meta
+      )
     }
   }
 
-  # Embedded machine-readable YAML, appended as a final small-font section.
+  # Embedded machine-readable YAML, appended as a final small-font chapter.
   if (isTRUE(include_yaml)) {
     has_yaml <- !is.null(yaml_text) &&
       length(yaml_text) > 0 &&
       !anyNA(yaml_text) &&
       any(nzchar(yaml_text))
     if (has_yaml) {
-      doc <- .add_embedded_yaml_section(doc, yaml_text)
+      doc <- .add_embedded_yaml_section(doc, yaml_text, level = 1)
     } else {
       cli::cli_warn(c(
         "{.arg include_yaml} is {.code TRUE} but {.arg yaml_text} is empty; no specification was embedded.",
@@ -334,15 +351,8 @@ write_dta <- function(
     }
   }
 
-  # Footer
-  doc <- .add_footer_section(
-    doc,
-    version = meta@version,
-    template_version = NULL,
-    document_date = if (!is.null(meta@date)) meta@date else Sys.Date()
-  )
-
-  doc
+  # The final section (portrait) carries the running header and footer too.
+  officer::body_set_default_section(doc, .section_props(doc, "portrait", meta, type = "nextPage"))
 }
 
 #' @keywords internal
