@@ -41,6 +41,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - In "New DTA from template", an option with a single suggestion (and free
   text allowed) is a text field pre-filled with that suggestion, edited in
   place, instead of a one-entry dropdown.
+- In "New DTA from template", a text option with several suggestions is now an
+  editable text field with a "Choose a suggestion" picker that fills it, instead
+  of one dropdown that hid the fact that you could type your own value. The
+  bundled Biomarker GF template's "Error handling" is a multi-line field, and its
+  "Authorized for corrections" offers only "Trial Data Manager (TDM)" (the
+  duplicate "TDM" choice is gone, and it is the new default).
+- In the same dialog, a party dropdown starts on the template's own party,
+  shown by its name, instead of a "(template default: …)" row.
 
 ### Fixed
 

@@ -658,7 +658,7 @@ test_that("party slot selection reaches the created document's supplier block", 
   })
 })
 
-test_that("leaving a party slot on '(use template default)' does not touch its target", {
+test_that("leaving a party slot on the template's own party does not touch its target", {
   local_clean_template_env()
   app_fn("dta_template_index_invalidate")()
   root <- withr::local_tempdir()
@@ -669,7 +669,7 @@ test_that("leaving a party slot on '(use template default)' does not touch its t
   shiny::testServer(app_server_dir(), {
     pick_template_step1(session, output, "party_tpl", "1.0")
     # tmpl_party_supplier_choice deliberately left unset (its default choice
-    # value is "", the "(use template default)" sentinel).
+    # value is "", the template's-own-party row).
     session$setInputs(tmpl_party_supplier_choice = "")
     session$setInputs(tmpl_carry_source = "none")
     session$setInputs(template_create_confirm = 1)
