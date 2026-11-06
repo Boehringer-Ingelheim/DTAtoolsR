@@ -61,6 +61,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   a title no longer prints an empty `**Title:**` line in Markdown.
 - The app's validation summary heading is now the document name, with
   "Validation Summary" beneath it.
+- In the template options dialog, a free-text option with exactly one
+  suggestion is now a vertically resizable text box instead of a one-line
+  field.
 - The app's footer no longer shows "Boehringer Ingelheim" by default. Set
   `organisation.name` (or `branding.footer_label`) in the library's
   `dta-app.yaml` to show an organisation.
