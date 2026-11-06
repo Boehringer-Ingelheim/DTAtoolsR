@@ -1056,7 +1056,7 @@ A new vocabulary version affects future documents that resolve to it. It does no
 ### Template version history
 
 The template picker shows a creation template's history. It is computed, not written: each library version is built with its defaults and
-compared with the one before it, across the template's own interface (label, description, lineage, options, slots, `required`, `sealed`),
+compared with the one before it, across the template's own interface (label, description, lineage, mixins, options, slots, `required`, `sealed`),
 the metadata and the datasets it builds. A dependency the template follows unpinned (a bare `id` or `id@latest` in `extends:`, a
 `datasets:` import, a vocabulary) gets its own entry when it publishes a version that changes what the template builds. A pinned dependency
 does not. Because every published version is its own immutable file, there is no changelog to keep in step for library versions.
