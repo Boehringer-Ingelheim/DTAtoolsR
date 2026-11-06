@@ -735,6 +735,7 @@ my-templates/
   README.md
   .gitignore
   templates/
+    dta-app.yaml
     starter.dta-template.yaml
     starter_dataset.dta-dataset-template.yaml
     starter_supplier.dta-party.yaml
@@ -746,6 +747,14 @@ my-templates/
 `templates/` automatically and rejects template files left at the root.
 The app's `dir:`/`pkg:`/`git:` sources and `DTAtools.template_dir` use the same
 auto-detection; legacy root-layout libraries remain readable.
+
+The optional `templates/dta-app.yaml` customises the app that serves the library:
+organisation, title, logo, colours, links, which features and export formats are
+offered (including a read-only mode) and the library's own Word templates. With no
+file the app looks as before, except that no organisation name is shown until you
+set `organisation.name`. `validate_template()` checks the file too. See
+"Customising the app from the library" in the
+[private templates vignette](vignettes/private-templates.Rmd).
 
 See the [private templates vignette](vignettes/private-templates.Rmd)
 (`vignette("private-templates")`) for the full variable reference, the

@@ -6,8 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- A template library can customise the Shiny app that serves it with a
+  `dta-app.yaml` in the library directory: organisation name and unit, app and
+  window title, footer text, a logo, the colour scheme, the report-issue, about,
+  repository and documentation links, which start buttons, the raw YAML tab and
+  YAML downloads are offered, a read-only mode (`features.editing: false`),
+  which export formats and validation downloads are offered, and the library's
+  own Word templates for "Export DTA". Disabled features are refused by the
+  server, not only hidden. Colours, links and file paths are validated, and a
+  bad value falls back to its default with a warning instead of stopping the
+  app. With several template sources the first `dta-app.yaml` wins as a whole.
+  Every key is optional, and a library without the file looks as before.
+- `validate_template()` checks `dta-app.yaml` with the app's own parser and
+  reports `app_config_invalid` (error), `app_config_unknown_key` and
+  `app_config_warning` (warnings), `app_config_duplicate` (error, both `.yaml`
+  and `.yml` present) and `app_config_outside_library_dir` (error, for a copy
+  left at the repository root).
+- `create_template_repo()` scaffolds a `templates/dta-app.yaml` with every key
+  commented out next to its default, and its README documents the file.
+
 ### Changed
 
+- The app's footer no longer shows "Boehringer Ingelheim" by default. Set
+  `organisation.name` (or `branding.footer_label`) in the library's
+  `dta-app.yaml` to show an organisation.
 - The Shiny app's "Export DTA YAML" file name keeps the dots in the version
   (`..._v1.2.0_<date>.yaml`) instead of turning them into underscores.
 - A DTA created from a template no longer records the option answers

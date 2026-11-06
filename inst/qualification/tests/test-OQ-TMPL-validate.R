@@ -577,3 +577,43 @@ test_that("OQ-TMPL-073 | a malformed prior_versions entry is prior_versions_inva
   qa_check("the entry not older than 5.0 is named", any(grepl("entry 3 (5.0)", rows$message, fixed = TRUE)))
   qa_check("the well-formed entry is not reported", !any(grepl("(4.0)", rows$message, fixed = TRUE)))
 })
+
+# ---- REQ-TMPL-037: app configuration (dta-app.yaml) -------------------------
+
+test_that("OQ-TMPL-074 | a valid app configuration adds no rows, and is not read as a template | REQ-TMPL-037", {
+  result <- validate_template(tmpl_fixture("appconfig", "valid"))
+  qa_step("no issue is reported for a valid dta-app.yaml", 0L, nrow(result))
+})
+
+test_that("OQ-TMPL-075 | a colour that could break out of the stylesheet is app_config_invalid | REQ-TMPL-037", {
+  result <- validate_template(tmpl_fixture("appconfig", "invalid"))
+  rows <- result[result$code == "app_config_invalid", , drop = FALSE]
+  qa_step("exactly one rejected value", 1L, nrow(rows))
+  qa_step("at severity error", "error", rows$severity)
+  qa_check("naming the key", grepl("colors.primary", rows$message, fixed = TRUE))
+  qa_step(
+    "and nothing else is reported",
+    character(0), setdiff(result$code, "app_config_invalid")
+  )
+})
+
+test_that("OQ-TMPL-076 | an unknown app configuration key is a warning, not an error | REQ-TMPL-037", {
+  result <- validate_template(tmpl_fixture("appconfig", "unknown_key"))
+  qa_step("severity", "warning", tmpl_severity(result, "app_config_unknown_key"))
+  qa_check("naming the misspelled section", grepl("colours", tmpl_message(result, "app_config_unknown_key"), fixed = TRUE))
+  qa_step(
+    "strict validation does not abort on it", "no condition",
+    tryCatch(
+      {
+        validate_template(tmpl_fixture("appconfig", "unknown_key"), strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+})
+
+test_that("OQ-TMPL-077 | a dta-app.yaml left at the root of a templates/ layout is app_config_outside_library_dir | REQ-TMPL-037", {
+  result <- validate_template(tmpl_fixture("appconfig", "outside"))
+  qa_step("severity", "error", tmpl_severity(result, "app_config_outside_library_dir"))
+})

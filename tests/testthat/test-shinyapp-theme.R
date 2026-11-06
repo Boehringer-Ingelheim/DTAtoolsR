@@ -210,3 +210,83 @@ test_that("bi_css keeps exactly one prefers-reduced-motion block", {
   m <- gregexpr("@media \\(prefers-reduced-motion: reduce\\)", txt)[[1]]
   expect_equal(if (identical(m, -1L)) 0L else length(m), 1L)
 })
+
+# ---- Colours from the library's app config ------------------------------------
+
+test_that("bi_css writes the configured colours and derives the glow from them", {
+  colors <- app_fn("dta_app_config_defaults")()$colors
+  colors[["primary"]] <- "#AA0011"
+  colors[["accent"]] <- "#0A141E" # rgb(10, 20, 30)
+  colors[["warning"]] <- "#050505"
+  colors[["nodata_border"]] <- "#B4B4B4"
+
+  txt <- as.character(app_fn("bi_css")(colors))
+
+  expect_match(txt, "--bi-green: #AA0011;", fixed = TRUE)
+  expect_match(txt, "--bi-accent: #0A141E;", fixed = TRUE)
+  expect_match(txt, "--bi-accent-glow: rgba(10,20,30,.25);", fixed = TRUE)
+  expect_match(txt, "--bi-warn-border: #B4B4B4;", fixed = TRUE) # its own colour, not derived
+  # The brand literals are gone from the rules: they read the variables.
+  expect_no_match(txt, "#00625B", fixed = TRUE)
+  expect_no_match(txt, "rgba(0,168,134", fixed = TRUE)
+  expect_no_match(txt, "#C77700", fixed = TRUE)
+  expect_match(txt, "var(--bi-accent-glow)", fixed = TRUE)
+})
+
+test_that("bi_css with no argument is the stock palette", {
+  txt <- as.character(app_fn("bi_css")())
+  expect_match(txt, "--bi-green: #00625B;", fixed = TRUE)
+  expect_match(txt, "--bi-accent-glow: rgba(0,168,134,.25);", fixed = TRUE)
+  expect_match(txt, "--bi-warn: #C77700;", fixed = TRUE)
+  expect_match(txt, "--bi-surface: #FFFFFF;", fixed = TRUE)
+})
+
+test_that("bi_css re-validates colours and falls back to the default for anything but hex", {
+  colors <- app_fn("dta_app_config_defaults")()$colors
+  colors[["primary"]] <- "red;}body{injected-marker:1"
+  colors[["surface"]] <- "javascript:alert(1)"
+  colors[["muted"]] <- NA_character_
+
+  txt <- as.character(app_fn("bi_css")(colors))
+
+  expect_no_match(txt, "injected-marker", fixed = TRUE)
+  expect_no_match(txt, "javascript", fixed = TRUE)
+  expect_match(txt, "--bi-green: #00625B;", fixed = TRUE)
+  expect_match(txt, "--bi-surface: #FFFFFF;", fixed = TRUE)
+  expect_match(txt, "--bi-grey: #5B6B6A;", fixed = TRUE)
+  # A partial vector keeps the rest at the defaults.
+  partial <- as.character(app_fn("bi_css")(c(primary = "#123456")))
+  expect_match(partial, "--bi-green: #123456;", fixed = TRUE)
+  expect_match(partial, "--bi-accent: #00A886;", fixed = TRUE)
+})
+
+test_that("bi_theme takes the configured colours", {
+  skip_if_not_installed("bslib")
+  colors <- app_fn("dta_app_config_defaults")()$colors
+  colors[["primary"]] <- "#AA0011"
+  theme <- app_fn("bi_theme")(colors)
+  expect_s3_class(theme, "bs_theme")
+  expect_identical(bslib::bs_get_variables(theme, "primary")[[1]], "#AA0011")
+})
+
+test_that("the default bi_css keeps the amber literals the stylesheet had before it was configurable", {
+  txt <- as.character(app_fn("bi_css")())
+  # Values taken from the stylesheet as released before the colours became
+  # configurable, not from the current output.
+  expect_match(txt, "--bi-warn-border: #EBD9B6;", fixed = TRUE)
+  expect_match(txt, "--bi-unknown: #b8860b;", fixed = TRUE)
+  expect_match(txt, ".status-nodata  { border-color: var(--bi-warn-border); }", fixed = TRUE)
+  expect_match(txt, ".loaded-file-row .file-unknown { color: var(--bi-unknown); }", fixed = TRUE)
+  expect_match(txt, ".inspect-badge.columnspec { background: var(--bi-unknown); }", fixed = TRUE)
+  expect_match(txt, ".loaded-file-row:has(.file-unknown) { border-left-color: var(--bi-unknown); }", fixed = TRUE)
+})
+
+test_that("nodata_border and unknown are configurable colours, validated like the others", {
+  f <- withr::local_tempfile(fileext = ".yaml")
+  writeLines(c("colors:", "  nodata_border: \"#112233\"", "  unknown: red"), f)
+  res <- app_fn("parse_dta_app_config")(f)
+  expect_identical(res$config$colors[["nodata_border"]], "#112233")
+  expect_identical(res$config$colors[["unknown"]], "#b8860b")
+  expect_identical(res$problems$key, "colors.unknown")
+  expect_match(as.character(app_fn("bi_css")(res$config$colors)), "--bi-warn-border: #112233;", fixed = TRUE)
+})

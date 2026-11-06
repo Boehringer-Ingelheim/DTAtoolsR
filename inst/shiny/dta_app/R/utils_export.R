@@ -220,40 +220,69 @@ template_has_placeholders <- function(path) {
   any(grepl(.template_placeholder_pattern, texts, perl = TRUE))
 }
 
-# List available custom templates from the templates directory
-list_available_templates <- function() {
+# Word templates the Export dialog may offer: a named character vector whose
+# values are what the dialog sends back and whose names are the labels shown.
+#   * bundled templates (inst/extdata/templates, only those with placeholders),
+#     value = file name -- unless the library config switches them off;
+#   * the library's own .docx files from dta-app.yaml, value = "library:<file
+#     name>" (the prefix keeps the two namespaces apart), label from the config.
+# `cfg` is the normalised app config (R/app_config.R); the default reproduces
+# the stock app.
+list_available_templates <- function(cfg = dta_app_config_defaults()) {
+  out <- character(0)
   templates_dir <- system.file("extdata", "templates", package = "DTAtools")
-  if (!dir.exists(templates_dir)) {
-    return(character(0))
+  if (isTRUE(cfg$exports$bundled_word_templates) && dir.exists(templates_dir)) {
+    files <- list.files(templates_dir, pattern = "\\.docx$", full.names = FALSE)
+    keep <- vapply(
+      files,
+      function(f) isTRUE(template_has_placeholders(file.path(templates_dir, f))),
+      logical(1)
+    )
+    files <- sort(files[keep], method = "radix")
+    out <- stats::setNames(files, files)
   }
-  files <- list.files(templates_dir, pattern = "\\.docx$", full.names = FALSE)
-  keep <- vapply(
-    files,
-    function(f) isTRUE(template_has_placeholders(file.path(templates_dir, f))),
-    logical(1)
-  )
-  sort(files[keep], method = "radix")
+  lib <- cfg$exports$word_templates
+  if (!is.null(lib) && nrow(lib) > 0) {
+    values <- paste0("library:", basename(lib$path))
+    first <- !duplicated(values) # two files of one name: the first wins
+    if (!all(first)) {
+      dup <- unique(basename(lib$path)[!first])
+      cli::cli_warn(c(
+        "Word templates with the same file name in the library: only the first is offered.",
+        "i" = "Duplicate file name{?s}: {.file {dup}}."
+      ))
+    }
+    out <- c(out, stats::setNames(values[first], lib$label[first]))
+  }
+  out
 }
 
 # Get full path to a template by name.
 # `template_name` arrives from a selectInput, but a Shiny client is not bound by
 # the offered choices and can send any string over the websocket, so the name is
-# checked for membership in the bundled set rather than pasted into a path. The
+# checked for membership in the offered set rather than pasted into a path. The
 # match is exact, not basename()-normalised: the client must echo one of the
-# offered names verbatim, so any string carrying a path separator fails outright
+# offered values verbatim, so any string carrying a path separator fails outright
 # instead of being silently repaired into a hit. Without this, a traversal would
 # resolve to an arbitrary server-side file that export_with_template() then
-# renders and hands back as a download.
-get_template_path <- function(template_name) {
+# renders and hands back as a download. Library templates resolve to the path
+# the config parser already confined to the library folder.
+get_template_path <- function(template_name, cfg = dta_app_config_defaults()) {
   if (is.null(template_name) || length(template_name) != 1L ||
     is.na(template_name) || !nzchar(template_name)) {
     return(NULL)
   }
-  if (!(template_name %in% list_available_templates())) {
+  if (!(template_name %in% unname(list_available_templates(cfg)))) {
     return(NULL)
   }
-  templates_dir <- system.file("extdata", "templates", package = "DTAtools")
-  full_path <- file.path(templates_dir, template_name)
+  if (startsWith(template_name, "library:")) {
+    lib <- cfg$exports$word_templates
+    hit <- which(paste0("library:", basename(lib$path)) == template_name)
+    full_path <- lib$path[hit[[1]]]
+  } else {
+    templates_dir <- system.file("extdata", "templates", package = "DTAtools")
+    full_path <- file.path(templates_dir, template_name)
+  }
   if (file.exists(full_path)) full_path else NULL
 }
 
@@ -313,5 +342,71 @@ format_datasets_summary <- function(dta) {
   paste0(
     length(dta_names), " dataset", if (length(dta_names) > 1) "s" else "",
     " (", type_summary, ")"
+  )
+}
+
+# What the Export dialog may offer under an app config. `exports.document`
+# lists the allowed kinds: markdown, markdown_pdf (Markdown rendered to PDF),
+# word (the built-in layout) and word_template (a template picked from the
+# list). A word_template with no template to pick counts as not offered.
+# Returns the dialog's choices plus `allowed()`, the same rule applied to the
+# values export_do receives, so the dialog and the server cannot disagree.
+export_document_options <- function(cfg = dta_app_config_defaults()) {
+  doc <- cfg$exports$document
+  templates <- list_available_templates(cfg)
+  md_plain <- "markdown" %in% doc
+  md_pdf <- "markdown_pdf" %in% doc
+  word_builtin <- "word" %in% doc
+  word_tmpl <- "word_template" %in% doc && length(templates) > 0
+  has_md <- md_plain || md_pdf
+  has_word <- word_builtin || word_tmpl
+
+  fmt_choices <- c(
+    if (has_md) c("Markdown" = "markdown"),
+    if (has_word) c("Word Document" = "word")
+  )
+  mode_choices <- c(
+    if (word_builtin) c("Use built-in template" = "builtin"),
+    if (word_tmpl) c("Use custom template" = "custom")
+  )
+
+  dd <- cfg$exports$default_document
+  default_format <- if (isTRUE(dd %in% c("markdown", "markdown_pdf")) && has_md) {
+    "markdown"
+  } else if (isTRUE(dd %in% c("word", "word_template")) && has_word) {
+    "word"
+  } else if (length(fmt_choices) > 0) {
+    unname(fmt_choices[[1]])
+  } else {
+    NA_character_
+  }
+  list(
+    any = length(fmt_choices) > 0,
+    format_choices = fmt_choices,
+    default_format = default_format,
+    # The PDF checkbox is shown only if both Markdown kinds are allowed; with
+    # markdown_pdf alone the PDF is forced, with markdown alone it is off.
+    pdf_choice = md_plain && md_pdf,
+    pdf_forced = md_pdf && !md_plain,
+    default_pdf = identical(dd, "markdown_pdf") || (md_pdf && !md_plain),
+    mode_choices = mode_choices,
+    default_mode = if (identical(dd, "word_template") && word_tmpl) {
+      "custom"
+    } else if (word_builtin) {
+      "builtin"
+    } else {
+      "custom"
+    },
+    templates = templates,
+    # Is this combination of the dialog's inputs one the config allows?
+    allowed = function(format, as_pdf = FALSE, word_mode = "builtin") {
+      if (identical(format, "markdown")) {
+        if (isTRUE(as_pdf)) md_pdf else md_plain
+      } else if (identical(format, "word")) {
+        if (identical(word_mode, "custom")) word_tmpl else word_builtin
+      } else {
+        FALSE
+      }
+    }
   )
 }

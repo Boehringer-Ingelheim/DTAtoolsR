@@ -1,0 +1,9 @@
+kind: dta_app_config
+organisation:
+  name: Example Institute
+colors:
+  primary: "#112233"
+links:
+  report_issue: false
+features:
+  editing: false

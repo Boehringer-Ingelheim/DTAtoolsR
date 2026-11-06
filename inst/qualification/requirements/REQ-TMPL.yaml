@@ -638,3 +638,31 @@ requirements:
       prior_versions: records the versions a template went through before it
       entered the library. Those have no file to diff, so the app shows the
       author's text as written; this check keeps a malformed entry out of CI.
+
+  - id: REQ-TMPL-037
+    text: >
+      A library's app configuration file (dta-app.yaml or dta-app.yml in the
+      library directory) shall not be treated as a template. When it holds a
+      value the app would reject -- a colour that is not a #RGB or #RRGGBB hex
+      value, a link that is not an http(s) or mailto URL, a missing logo or
+      Word template file, a path that leaves the library folder, a wrong kind
+      or YAML that does not parse -- validate_template() shall report
+      app_config_invalid at severity "error", one row per rejected value naming
+      its key. A key the app does not know shall be reported
+      app_config_unknown_key at severity "warning". An app configuration file
+      at the repository root while templates/ is the library directory shall
+      be reported app_config_outside_library_dir at severity "error". A valid
+      configuration, or none, shall add no rows.
+    risk: medium
+    category: functional
+    covers: [validate_template]
+    source: >
+      R/validateTemplate.R (.dta_template_check_app_config);
+      inst/shiny/dta_app/R/app_config.R (parse_dta_app_config);
+      inst/extdata/template-repo-skeleton/README.md section "App
+      configuration (dta-app.yaml)"
+    notes: >
+      The validator shares the app's parser, so the rule it enforces is the
+      rule the app applies at start-up. The app itself never fails over a
+      bad value: it warns and keeps that key's default. This check exists so
+      the mistake fails CI instead of being found in production.

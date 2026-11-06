@@ -759,3 +759,57 @@ template_provenance_block <- function(prov) {
     if (length(ds_rows) > 0) tagList(div(class = "section-label", "Datasets"), ds_rows)
   )
 }
+
+# ---- Brand bar and footer -------------------------------------------------------
+# Both are built from the app config (R/app_config.R), so a template library can
+# rename the app, swap the logo and drop or repoint the links. Text goes through
+# htmltools (escaped); nothing from the config is ever passed to HTML(). The
+# config parser has already restricted links to http(s)/mailto and the logo to a
+# data: URI or the packaged file name.
+
+brand_link <- function(href, label) {
+  if (is.null(href)) {
+    return(NULL)
+  }
+  tags$a(
+    class = "brand-link", href = href,
+    target = "_blank", rel = "noopener noreferrer", label
+  )
+}
+
+brandbar_ui <- function(cfg = dta_app_config_defaults()) {
+  b <- cfg$branding
+  div(
+    class = "app-brandbar",
+    tags$img(class = "brand-logo", src = b$logo, alt = b$logo_alt),
+    div(
+      div(class = "brand-title", b$app_title),
+      if (nzchar(b$app_subtitle)) div(class = "brand-sub", b$app_subtitle)
+    ),
+    div(
+      class = "app-actions",
+      uiOutput("edit_gate", inline = TRUE),
+      brand_link(cfg$links$report_issue, "Report issues"),
+      brand_link(cfg$links$about, "About"),
+      brand_link(cfg$links$documentation, "Documentation")
+    )
+  )
+}
+
+app_footer_ui <- function(cfg = dta_app_config_defaults(), version = "") {
+  sep <- tags$span(class = "foot-sep", `aria-hidden` = "true")
+  label <- cfg$branding$footer_label
+  repo <- cfg$links$repository
+  tags$footer(
+    class = "app-footer",
+    tags$span(class = "foot-name", "DTAtools"),
+    if (nzchar(version)) tags$span(class = "foot-ver", version),
+    if (nzchar(label)) tagList(sep, tags$span(label)),
+    if (!is.null(repo)) {
+      tagList(sep, tags$a(
+        href = repo, target = "_blank", rel = "noopener noreferrer",
+        "GitHub repository"
+      ))
+    }
+  )
+}

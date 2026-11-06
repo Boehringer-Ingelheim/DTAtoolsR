@@ -726,5 +726,8 @@ dta_template_index_cached <- function(refresh = FALSE) {
 dta_template_index_invalidate <- function() {
   .dta_template_index_cache$index <- NULL
   .dta_template_index_cache$built_at <- NA_real_
+  # The library's dta-app.yaml lives beside its templates, so a refresh must
+  # pick up an edited config too (see app_config.R).
+  dta_app_config_invalidate()
   invisible(NULL)
 }

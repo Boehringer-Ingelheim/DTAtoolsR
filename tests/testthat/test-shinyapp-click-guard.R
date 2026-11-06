@@ -64,7 +64,7 @@ test_that("the guard is registered in the app's head", {
   # before any button exists, so a click landing during the first render is
   # guarded like any other.
   src <- app_source("app.R")
-  head_block <- sub("(?s)^.*?tags\\$head\\((.*?)\\n  \\),.*$", "\\1", src, perl = TRUE)
+  head_block <- sub("(?s)^.*?tags\\$head\\((.*?)\\n *\\),.*$", "\\1", src, perl = TRUE)
 
   expect_false(identical(head_block, src)) # the head block was actually found
   expect_match(head_block, "click_guard_script()", fixed = TRUE)

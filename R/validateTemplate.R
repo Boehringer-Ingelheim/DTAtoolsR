@@ -1343,6 +1343,67 @@
   .dta_template_bind_rows(rows)
 }
 
+# ---- App configuration (dta-app.yaml) --------------------------------------
+
+# The app's per-library configuration file is not a template (it matches none
+# of the four template suffixes), so it gets its own check. It always runs for
+# a directory, whatever `kinds` says: `kinds` only narrows template files.
+# parse_dta_app_config() is the app's own parser, so what is reported here is
+# exactly what the app would do with the file.
+.dta_template_check_app_config <- function(path, lib) {
+  kind <- "dta_app_config"
+  names_cfg <- .dta_template_engine_get("dta_app_config_filenames")()
+  in_lib <- file.path(lib, names_cfg)
+  in_lib <- in_lib[file.exists(in_lib) & !dir.exists(in_lib)]
+  rows <- list()
+  row <- function(file, severity, code, message) {
+    rows[[length(rows) + 1]] <<- .dta_template_row(
+      file, kind, NA_character_, NA_character_, severity, code, message
+    )
+  }
+
+  if (length(in_lib) > 1) {
+    for (f in in_lib) {
+      row(
+        f, "error", "app_config_duplicate",
+        sprintf(
+          "Both %s are present in this library; the app would read only one. Keep a single file.",
+          paste(sprintf("'%s'", names_cfg), collapse = " and ")
+        )
+      )
+    }
+  }
+  parse <- .dta_template_engine_get("parse_dta_app_config")
+  for (f in in_lib) {
+    problems <- parse(f)$problems
+    for (i in seq_len(nrow(problems))) {
+      msg <- sprintf("'%s' %s", problems$key[[i]], problems$message[[i]])
+      if (problems$severity[[i]] == "error") {
+        row(f, "error", "app_config_invalid", msg)
+      } else if (identical(problems$type[[i]], "unknown_key")) {
+        row(f, "warning", "app_config_unknown_key", msg)
+      } else {
+        row(f, "warning", "app_config_warning", msg)
+      }
+    }
+  }
+
+  if (lib != path) {
+    for (f in file.path(path, names_cfg)) {
+      if (file.exists(f) && !dir.exists(f)) {
+        row(
+          f, "error", "app_config_outside_library_dir",
+          sprintf(
+            "App configuration file sits at the repository root, but this library keeps its files in '%s/'; the app reads only that folder, so this file is invisible. Move it into '%s/' (or delete it).",
+            .dta_template_library_subdir, .dta_template_library_subdir
+          )
+        )
+      }
+    }
+  }
+  .dta_template_bind_rows(rows)
+}
+
 # ---- strict = TRUE --------------------------------------------------------
 
 .dta_template_strict_check <- function(result) {
@@ -1419,7 +1480,12 @@
 #' example longer than its declared length), `vocabulary_invalid`,
 #' `vocabulary_extends_failed`, `no_templates`, `template_outside_library_dir`,
 #' `variant_invalid`, `prior_versions_invalid` (a malformed entry in a
-#' creation template's hand-written `prior_versions:`), and the [lint_dta()] errors `rule_invalid`,
+#' creation template's hand-written `prior_versions:`), the app-configuration
+#' errors `app_config_invalid` (a bad value in `dta-app.yaml`, or a missing
+#' logo or Word template it names), `app_config_duplicate` (both
+#' `dta-app.yaml` and `dta-app.yml` in the library) and
+#' `app_config_outside_library_dir` (a `dta-app.yaml` at the repository root
+#' while `templates/` is the library folder), and the [lint_dta()] errors `rule_invalid`,
 #' `rule_id_duplicate`, `rule_column_undeclared`, `rule_range_non_numeric`,
 #' `rule_condition_operator_invalid`, `rule_condition_numeric_on_text`,
 #' `rule_condition_value_unfit`, `rule_condition_value_outside_values` (only for `equals`/`in`; the negated
@@ -1432,7 +1498,10 @@
 #' `vocab_slot_unresolved`, `dataset_template_unresolved`, `patch_incoherent`,
 #' `extends_unresolved`, `extends_cycle`, `sealed_violation`,
 #' `sealed_path_unknown`, `values_and_values_from`, `values_from_unresolved`,
-#' `vocabulary_unresolved`, `duplicate_id_version`, `template_in_subdirectory`.
+#' `vocabulary_unresolved`, `duplicate_id_version`, `template_in_subdirectory`, plus the
+#' app-configuration warnings `app_config_unknown_key` and
+#' `app_config_warning`. The app-configuration checks run on every directory
+#' scan regardless of `kinds`.
 #'
 #' @param path A template file, a library directory, or a repository root. For a
 #'   directory, templates are read from its `templates/` sub-folder when that
@@ -1504,9 +1573,11 @@ validate_template <- function(path, strict = FALSE, kinds = NULL) {
   nested_rows <- .dta_template_check_nested(path, lib, is_dir, all_files, all_kinds)
   outside_rows <- if (is_dir) .dta_template_check_outside_library(path, lib) else .dta_template_validation_empty()
 
+  app_rows <- if (is_dir) .dta_template_check_app_config(path, lib) else .dta_template_validation_empty()
+
   result <- do.call(rbind, c(
     list(.dta_template_validation_empty()), file_rows,
-    list(dup_rows, no_templates_rows, nested_rows, outside_rows)
+    list(dup_rows, no_templates_rows, nested_rows, outside_rows, app_rows)
   ))
   if (nrow(result) > 0) {
     # Deterministic order across locales/OSes -- see the "locale collation

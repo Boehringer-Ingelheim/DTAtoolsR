@@ -25,6 +25,7 @@ test_that("OQ-TMPL-049 | the defaults write the scaffolding, the four skeleton t
     "templates/starter_dataset.dta-dataset-template.yaml",
     "templates/starter_supplier.dta-party.yaml",
     "templates/starter_terms.dta-vocabulary.yaml",
+    "templates/dta-app.yaml",
     ".github/workflows/validate-templates.yml"
   ))
   qa_step("exactly the documented default file set is written", expected, written)

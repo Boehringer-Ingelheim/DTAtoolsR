@@ -10,36 +10,21 @@
 # same mechanism as before, just a different family. --bs-font-monospace is
 # the single monospace stack the rest of this sheet uses.
 
-BI <- list(
-  green = "#00625B", # primary brand green/teal (deep)
-  green_dark = "#003D38",
-  green_light = "#E6F1EF",
-  accent = "#00A886", # brighter accent green
-  ink = "#1A2B2A", # near-black text
-  grey = "#5B6B6A",
-  grey_light = "#F4F7F6",
-  # Semantic status colors (harmonized with the BI green family)
-  pass = "#1E8E5A",
-  pass_bg = "#E5F4EC",
-  pass_border = "#9BD3B4",
-  fail = "#C0392B",
-  fail_bg = "#FBEAE7",
-  fail_border = "#E9B4AC",
-  pending = "#5B6B6A",
-  pending_bg = "#EEF1F1",
-  pending_border = "#CDD5D4"
-)
+# The palette itself lives in R/app_config.R (dta_app_config_defaults()$colors)
+# so a template library's dta-app.yaml can replace it; bi_theme() and bi_css()
+# take the (already validated) colour vector and default to the stock palette.
 
 # bslib theme --------------------------------------------------------------
-bi_theme <- function() {
+bi_theme <- function(colors = dta_app_config_defaults()$colors) {
+  colors <- bi_colors(colors)
   bslib::bs_theme(
     version = 5,
-    bg = "#FFFFFF",
-    fg = BI$ink,
-    primary = BI$green,
-    secondary = BI$grey,
-    success = BI$pass,
-    danger = BI$fail,
+    bg = colors[["surface"]],
+    fg = colors[["text"]],
+    primary = colors[["primary"]],
+    secondary = colors[["muted"]],
+    success = colors[["pass"]],
+    danger = colors[["fail"]],
     base_font = bslib::font_collection(
       bslib::font_google("IBM Plex Sans", wght = c(400, 500, 600), local = FALSE),
       "Segoe UI", "system-ui", "-apple-system", "Roboto", "sans-serif"
@@ -62,20 +47,50 @@ bi_theme <- function() {
 }
 
 # Extra CSS ----------------------------------------------------------------
-bi_css <- function() {
+bi_colors <- function(colors) {
+  # Defence in depth: the config parser already rejects anything but #RGB /
+  # #RRGGBB, but these values are pasted into a stylesheet, so each one is
+  # re-checked here and falls back to the stock colour (as do missing names).
+  defaults <- dta_app_config_defaults()$colors
+  out <- defaults
+  for (nm in names(defaults)) {
+    v <- if (nm %in% names(colors)) colors[[nm]] else NULL
+    if (is.character(v) && length(v) == 1 && !is.na(v) &&
+      grepl("^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$", v)) {
+      out[[nm]] <- v
+    }
+  }
+  out
+}
+
+# "#RGB" / "#RRGGBB" -> c(r, g, b)
+bi_rgb <- function(hex) {
+  h <- sub("^#", "", hex)
+  if (nchar(h) == 3) h <- paste(rep(strsplit(h, "")[[1]], each = 2), collapse = "")
+  strtoi(substring(h, c(1, 3, 5), c(2, 4, 6)), 16L)
+}
+
+bi_css <- function(colors = dta_app_config_defaults()$colors) {
+  colors <- bi_colors(colors)
+  # Derived, not configurable: the focus glow is the accent at 25% alpha.
+  glow <- sprintf("rgba(%s,.25)", paste(bi_rgb(colors[["accent"]]), collapse = ","))
   root <- sprintf(
     ":root {
       --bi-green: %s; --bi-green-dark: %s; --bi-green-light: %s;
       --bi-accent: %s; --bi-ink: %s; --bi-grey: %s; --bi-grey-light: %s;
+      --bi-surface: %s; --bi-warn: %s; --bi-warn-dark: %s;
+      --bi-warn-border: %s; --bi-unknown: %s; --bi-accent-glow: %s;
       --bi-pass: %s; --bi-pass-bg: %s; --bi-pass-border: %s;
       --bi-fail: %s; --bi-fail-bg: %s; --bi-fail-border: %s;
       --bi-pending: %s; --bi-pending-bg: %s; --bi-pending-border: %s;
     }",
-    BI$green, BI$green_dark, BI$green_light,
-    BI$accent, BI$ink, BI$grey, BI$grey_light,
-    BI$pass, BI$pass_bg, BI$pass_border,
-    BI$fail, BI$fail_bg, BI$fail_border,
-    BI$pending, BI$pending_bg, BI$pending_border
+    colors[["primary"]], colors[["primary_dark"]], colors[["primary_light"]],
+    colors[["accent"]], colors[["text"]], colors[["muted"]], colors[["page_background"]],
+    colors[["surface"]], colors[["warning"]], colors[["warning_dark"]],
+    colors[["nodata_border"]], colors[["unknown"]], glow,
+    colors[["pass"]], colors[["pass_bg"]], colors[["pass_border"]],
+    colors[["fail"]], colors[["fail_bg"]], colors[["fail_border"]],
+    colors[["pending"]], colors[["pending_bg"]], colors[["pending_border"]]
   )
   shiny::HTML(paste0(root, "
     body { background: var(--bi-grey-light); color: var(--bi-ink); }
@@ -93,7 +108,7 @@ bi_css <- function() {
       outline: 2px solid var(--bi-accent); outline-offset: 2px; box-shadow: none;
     }
     .form-control:focus, .form-select:focus {
-      border-color: var(--bi-accent); box-shadow: 0 0 0 3px rgba(0,168,134,.25);
+      border-color: var(--bi-accent); box-shadow: 0 0 0 3px var(--bi-accent-glow);
     }
     /* Flat deep green, no gradient; the accent rule along the bottom edge is
        the logo's own frame colour, carried down into the bar it sits on. */
@@ -237,7 +252,7 @@ bi_css <- function() {
     }
     .landing-lede { font-size: 1rem; color: var(--bi-grey); line-height: 1.55; max-width: 62ch; margin: 0 auto; }
     .landing-drop {
-      background: #fff; border: 1px solid var(--bi-pending-border); border-radius: .75rem;
+      background: var(--bi-surface); border: 1px solid var(--bi-pending-border); border-radius: .75rem;
       padding: 28px 28px 24px; text-align: center;
     }
     .landing-drop-glyph { width: 44px; height: 44px; display: block; margin: 0 auto 10px; }
@@ -259,7 +274,7 @@ bi_css <- function() {
        another session's to change), but none of them gets the solid fill
        here, or the eye lands on the secondary row before the target. */
     .landing-alt-actions .btn-primary {
-      --bs-btn-color: var(--bi-green); --bs-btn-bg: #fff; --bs-btn-border-color: var(--bi-green);
+      --bs-btn-color: var(--bi-green); --bs-btn-bg: var(--bi-surface); --bs-btn-border-color: var(--bi-green);
       --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-green); --bs-btn-hover-border-color: var(--bi-green);
       --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-green-dark); --bs-btn-active-border-color: var(--bi-green-dark);
     }
@@ -276,26 +291,26 @@ bi_css <- function() {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 2px 9px; border-radius: 999px; font-size: .75rem;
       font-weight: 500; border: 1px solid var(--bi-pending-border);
-      background: #fff; color: var(--bi-ink); white-space: nowrap;
+      background: var(--bi-surface); color: var(--bi-ink); white-space: nowrap;
     }
     .status-pass    { border-color: var(--bi-pass-border); }
     .status-fail    { border-color: var(--bi-fail-border); }
     .status-pending { border-color: var(--bi-pending-border); }
-    .status-nodata  { border-color: #EBD9B6; }
+    .status-nodata  { border-color: var(--bi-warn-border); }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
     .status-pass .status-dot    { background: var(--bi-pass); }
     .status-fail .status-dot    { background: var(--bi-fail); }
     .status-pending .status-dot { background: var(--bi-pending); }
-    .status-nodata .status-dot  { background: #C77700; }
+    .status-nodata .status-dot  { background: var(--bi-warn); }
 
     /* Upload slot */
-    .slot-card { background: #fff; }
+    .slot-card { background: var(--bi-surface); }
     .slot-meta { font-size: .8125rem; color: var(--bi-grey); }
     .slot-expected { font-family: var(--bs-font-monospace); font-size: .8125rem;
       background: var(--bi-green-light); color: var(--bi-green-dark);
       padding: 1px 6px; border-radius: 6px; }
     .slot-ok    { color: var(--bi-pass); font-weight: 600; }
-    .slot-warn  { color: #B26A00; font-weight: 600; }
+    .slot-warn  { color: var(--bi-warn-dark); font-weight: 600; }
     .slot-example .control-label { font-size: .8125rem; color: var(--bi-grey); font-weight: 500; }
     .slot-card .card-header strong { font-weight: 600; }
     /* Replaces the old bullet-plus-count text appended to .slot-expected
@@ -321,7 +336,7 @@ bi_css <- function() {
     .dropzone .input-group {
       display: flex; align-items: center; gap: 10px; width: 100%;
       padding: 14px 16px; border: 2px dashed rgba(0,98,91,.7);
-      border-radius: .625rem; background: #fff;
+      border-radius: .625rem; background: var(--bi-surface);
       transition: background .12s ease, border-color .12s ease;
     }
     .dropzone .input-group:hover { border-color: var(--bi-green); }
@@ -332,7 +347,7 @@ bi_css <- function() {
     .dropzone .input-group-btn { margin: 0; }
     .dropzone .btn-file {
       border: 1px solid var(--bi-green) !important; color: var(--bi-green);
-      background: #fff; border-radius: .375rem !important; font-weight: 500;
+      background: var(--bi-surface); border-radius: .375rem !important; font-weight: 500;
       font-size: .875rem; padding: .35rem .8rem;
     }
     .dropzone .btn-file:hover { background: var(--bi-green-light); }
@@ -359,10 +374,10 @@ bi_css <- function() {
        the main tab card each be its own panel instead. */
     .bslib-sidebar-layout {
       border: 0; background: transparent; border-radius: 0;
-      --bslib-sidebar-bg: #fff; --bslib-sidebar-fg: var(--bi-ink);
+      --bslib-sidebar-bg: var(--bi-surface); --bslib-sidebar-fg: var(--bi-ink);
     }
     .bslib-sidebar-layout > .sidebar {
-      border: 1px solid var(--bi-pending-border); border-radius: .75rem; background: #fff;
+      border: 1px solid var(--bi-pending-border); border-radius: .75rem; background: var(--bi-surface);
     }
     .bslib-sidebar-layout > .sidebar > .sidebar-content { padding: 44px 18px 18px; gap: 10px; }
     /* The 44px above only exists to clear bslib's collapse toggle, which
@@ -401,9 +416,9 @@ bi_css <- function() {
       --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-pass); --bs-btn-active-border-color: var(--bi-pass);
     }
     .bslib-sidebar-layout > .sidebar #dl_validation_summary.btn-warning {
-      --bs-btn-color: #B26A00; --bs-btn-border-color: #C77700;
-      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #C77700; --bs-btn-hover-border-color: #C77700;
-      --bs-btn-active-color: #fff; --bs-btn-active-bg: #B26A00; --bs-btn-active-border-color: #B26A00;
+      --bs-btn-color: var(--bi-warn-dark); --bs-btn-border-color: var(--bi-warn);
+      --bs-btn-hover-color: #fff; --bs-btn-hover-bg: var(--bi-warn); --bs-btn-hover-border-color: var(--bi-warn);
+      --bs-btn-active-color: #fff; --bs-btn-active-bg: var(--bi-warn-dark); --bs-btn-active-border-color: var(--bi-warn-dark);
     }
     .bslib-sidebar-layout > .main { padding: 0 0 0 20px; }
     @media (max-width: 767px) { .bslib-sidebar-layout > .main { padding: 12px 0 0; } }
@@ -414,7 +429,7 @@ bi_css <- function() {
     .bslib-sidebar-layout > .main > .card { border: 1px solid var(--bi-pending-border); border-radius: .75rem; box-shadow: none; }
     .card { border-color: var(--bi-pending-border); }
     .card > .card-header {
-      background: #fff; color: var(--bi-ink); font-weight: 600; font-size: .9375rem;
+      background: var(--bi-surface); color: var(--bi-ink); font-weight: 600; font-size: .9375rem;
       padding: 10px 16px; border-bottom: 1px solid var(--bi-pending-border);
     }
     .card-header .card-header-tabs { margin: -10px -16px; }
@@ -459,7 +474,7 @@ bi_css <- function() {
     .status-seg { display: block; min-width: 6px; }
     .seg-pass { background: var(--bi-pass); }
     .seg-fail { background: var(--bi-fail); }
-    .seg-nodata { background: #C77700; }
+    .seg-nodata { background: var(--bi-warn); }
     .seg-pending { background: var(--bi-pending-border); }
     /* Before anything has been checked the bar would be one grey segment on
        a grey track -- a rule carrying no information -- so it stays hidden
@@ -477,7 +492,7 @@ bi_css <- function() {
     .status-item .status-dot { width: 7px; height: 7px; border-radius: 50%; }
     .st-pass .status-dot { background: var(--bi-pass); }
     .st-fail .status-dot { background: var(--bi-fail); }
-    .st-nodata .status-dot { background: #C77700; }
+    .st-nodata .status-dot { background: var(--bi-warn); }
     .st-pending .status-dot { background: var(--bi-pending-border); }
 
     /* Metadata import errors: DTA-level, so they appear nowhere else in the UI
@@ -519,7 +534,7 @@ bi_css <- function() {
          point (app.R), nothing else is needed for the drag itself. */
       min-height: 70vh; overflow: auto;
     }
-    textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px rgba(0,168,134,.25); }
+    textarea#raw_yaml_editor:focus { border-color: var(--bi-accent); box-shadow: 0 0 0 2px var(--bi-accent-glow); }
     .yaml-valid { font-size: .82rem; padding: 7px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid transparent; }
     .yaml-valid.ok  { color: var(--bi-pass); background: var(--bi-pass-bg); border-color: var(--bi-pass-border); }
     .yaml-valid.err { color: var(--bi-fail); background: var(--bi-fail-bg); border-color: var(--bi-fail-border); white-space: pre-wrap; }
@@ -531,13 +546,13 @@ bi_css <- function() {
       display: flex; align-items: center; gap: 10px;
       padding: 7px 10px; margin-bottom: 6px;
       border: 1px solid var(--bi-pending-border); border-left-width: 4px;
-      border-radius: .5rem; background: #fff;
+      border-radius: .5rem; background: var(--bi-surface);
     }
     /* :has() reads the status icon's own class for the rail colour; browsers
        without :has() support just keep the neutral border-left above. */
     .loaded-file-row:has(.file-ok) { border-left-color: var(--bi-pass); }
     .loaded-file-row:has(.file-fail) { border-left-color: var(--bi-fail); }
-    .loaded-file-row:has(.file-unknown) { border-left-color: #b8860b; }
+    .loaded-file-row:has(.file-unknown) { border-left-color: var(--bi-unknown); }
     .loaded-file-row .file-name { font-weight: 600; color: var(--bi-ink); word-break: break-all; }
     .loaded-file-row .file-table {
       font-family: var(--bs-font-monospace); font-size: .8rem;
@@ -550,7 +565,7 @@ bi_css <- function() {
     .loaded-file-row .file-pending { color: var(--bi-grey); }
     /* Validated, but the import axis was never checked -- amber, so it reads
        as neither the green pass nor the red fail. */
-    .loaded-file-row .file-unknown { color: #b8860b; }
+    .loaded-file-row .file-unknown { color: var(--bi-unknown); }
     .loaded-file-row .file-remove {
       margin-left: auto; flex: none; color: var(--bi-fail);
       border: none; background: transparent; padding: 2px 7px; line-height: 1; font-size: 1rem;
@@ -576,7 +591,7 @@ bi_css <- function() {
       display: flex; align-items: center; gap: 8px;
       padding: 6px 6px 6px 10px;
       border: 1px solid transparent; border-left: 4px solid var(--bi-pending-border);
-      border-radius: .5rem; background: #fff;
+      border-radius: .5rem; background: var(--bi-surface);
       transition: background .12s ease, border-color .12s ease;
     }
     .dataset-nav-row:hover { background: var(--bi-grey-light); }
@@ -588,7 +603,7 @@ bi_css <- function() {
     .dataset-nav-row.nav-st-pending { border-left-color: var(--bi-pending-border); }
     .dataset-nav-row.nav-st-pass    { border-left-color: var(--bi-pass); }
     .dataset-nav-row.nav-st-fail    { border-left-color: var(--bi-fail); }
-    .dataset-nav-row.nav-st-nodata  { border-left-color: #C77700; }
+    .dataset-nav-row.nav-st-nodata  { border-left-color: var(--bi-warn); }
     .dataset-nav-row .nav-select {
       flex: 1 1 auto; display: flex; align-items: center; gap: 8px;
       text-decoration: none; color: var(--bi-ink); font-weight: 600; overflow: hidden;
@@ -610,14 +625,14 @@ bi_css <- function() {
     .nav-ic { flex: none; width: 1.15em; text-align: center; font-weight: 600; font-size: .95rem; }
     .nav-ic-pass    { color: var(--bi-pass); }
     .nav-ic-fail    { color: var(--bi-fail); }
-    .nav-ic-nodata  { color: #C77700; }
+    .nav-ic-nodata  { color: var(--bi-warn); }
     .nav-ic-pending { color: var(--bi-pending); }
     .dataset-nav-row .nav-check {
       flex: none; color: var(--bi-green); border: 1px solid transparent;
       background: transparent; padding: 1px 7px; line-height: 1.3;
       border-radius: .375rem; font-size: .8rem;
     }
-    .dataset-nav-row .nav-check:hover { background: #fff; border-color: var(--bi-pass-border); }
+    .dataset-nav-row .nav-check:hover { background: var(--bi-surface); border-color: var(--bi-pass-border); }
 
     /* Add dataset sits directly above Check all datasets (btn-primary, the
        sidebar's actual call to action) -- btn-sm + btn-outline-secondary
@@ -639,7 +654,7 @@ bi_css <- function() {
        normal document flow at the bottom of the page (never fixed/floating). */
     .app-footer {
       margin-top: 32px; padding: 16px 24px; border-top: 1px solid var(--bi-pending-border);
-      background: #fff; color: var(--bi-grey); font-size: .8125rem;
+      background: var(--bi-surface); color: var(--bi-grey); font-size: .8125rem;
       display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
     }
     .app-footer .foot-name { font-weight: 600; color: var(--bi-green-dark); }
@@ -663,7 +678,7 @@ bi_css <- function() {
     .ds-head-block { border-left: 4px solid var(--bi-pending-border); padding: 2px 0 2px 12px; margin: 4px 0 16px -1rem; }
     .ds-head-block.ds-st-pass { border-left-color: var(--bi-pass); }
     .ds-head-block.ds-st-fail { border-left-color: var(--bi-fail); }
-    .ds-head-block.ds-st-nodata { border-left-color: #C77700; }
+    .ds-head-block.ds-st-nodata { border-left-color: var(--bi-warn); }
     /* Dataset detail header: dataset NAME as the heading (its id when unnamed),
        the id as a chip below, the long description under both. */
     .ds-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
@@ -719,7 +734,7 @@ bi_css <- function() {
       width: 30px; height: 30px; border-radius: 8px;
       background: var(--bi-grey-light); font-size: 15px; line-height: 1;
     }
-    .ds-edit-item:hover .ds-edit-icon, .ds-edit-item:focus .ds-edit-icon { background: #fff; }
+    .ds-edit-item:hover .ds-edit-icon, .ds-edit-item:focus .ds-edit-icon { background: var(--bi-surface); }
     .ds-edit-text { display: flex; flex-direction: column; min-width: 0; }
     .ds-edit-title { font-weight: 600; color: var(--bi-ink); line-height: 1.25; }
     .ds-edit-item:hover .ds-edit-title, .ds-edit-item:focus .ds-edit-title {
@@ -752,12 +767,12 @@ bi_css <- function() {
     .modal-body h3, .modal-body h4, .modal-body h5 { font-size: 1rem; font-weight: 600; color: var(--bi-ink); margin: 14px 0 8px; }
     .modal-footer { padding: 12px 24px 18px; border-top: 1px solid var(--bi-pending-border); }
     #shiny-notification-panel .shiny-notification {
-      background: #fff; color: var(--bi-ink); border: 1px solid var(--bi-pending-border);
+      background: var(--bi-surface); color: var(--bi-ink); border: 1px solid var(--bi-pending-border);
       border-left: 4px solid var(--bi-green); border-radius: .625rem;
       box-shadow: 0 12px 28px rgba(26,43,42,.16);
     }
     #shiny-notification-panel .shiny-notification-error { border-left-color: var(--bi-fail); }
-    #shiny-notification-panel .shiny-notification-warning { border-left-color: #C77700; }
+    #shiny-notification-panel .shiny-notification-warning { border-left-color: var(--bi-warn); }
 
     /* Wider inspect modal + a body that wraps/scrolls instead of overflowing. */
     .modal-xl { max-width: 92vw; }
@@ -819,7 +834,7 @@ bi_css <- function() {
     .reorder-off-hint { display: none; margin-bottom: 6px; }
     .dta-reorder-off .reorder-off-hint { display: block; }
     .dta-reorder-off .dta-move-btn { visibility: hidden; }
-    .spec-form { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 12px; background: #fff; margin-top: 10px; }
+    .spec-form { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 12px; background: var(--bi-surface); margin-top: 10px; }
     .spec-form .form-group { margin-bottom: 8px; }
     .cond-builder { border: 1px solid var(--bi-pending-border); border-radius: .5rem; padding: 10px; margin-bottom: 10px; background: var(--bi-grey-light); }
     .cond-builder .cond-title { font-weight: 600; font-size: .78rem; text-transform: none; letter-spacing: 0; color: var(--bi-grey); margin-bottom: 6px; }
@@ -898,7 +913,7 @@ bi_css <- function() {
     .slot-example-btn {
       white-space: nowrap;
       border: 1px solid rgba(0,98,91,.7) !important;
-      background: #fff !important; color: var(--bi-green-dark) !important;
+      background: var(--bi-surface) !important; color: var(--bi-green-dark) !important;
       border-radius: .5rem; padding: .45rem 1rem; font-weight: 500;
     }
     .slot-example-btn:hover {
@@ -910,13 +925,13 @@ bi_css <- function() {
        Collapsed shows only the bar; expanded reveals the messages table. */
     .msgs-dock {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 1030;
-      background: #fff; border-top: 3px solid var(--bi-green);
+      background: var(--bi-surface); border-top: 3px solid var(--bi-green);
       box-shadow: 0 -8px 24px rgba(26,43,42,.10);
       display: flex; flex-direction: column; max-height: 62vh;
     }
     .msgs-dock-bar {
       display: flex; align-items: center; gap: 12px; cursor: pointer;
-      padding: 8px 20px; background: #fff;
+      padding: 8px 20px; background: var(--bi-surface);
       border-bottom: 1px solid transparent; user-select: none;
     }
     /* The bar only draws its divider once the body below it is actually
@@ -970,7 +985,7 @@ bi_css <- function() {
        12px chevron on the page ground. Below 768px it is the only way back
        to the sidebar (and to Check all datasets), so it gets an edge. */
     .bslib-sidebar-layout .collapse-toggle {
-      border: 1px solid var(--bi-pending-border); background: #fff; color: var(--bi-green-dark);
+      border: 1px solid var(--bi-pending-border); background: var(--bi-surface); color: var(--bi-green-dark);
     }
 
     /* Rule editor: the type is locked (read-only) when editing an existing
@@ -994,7 +1009,7 @@ bi_css <- function() {
       font-size: .72rem; font-weight: 600; color: #fff;
     }
     .inspect-badge.rule { background: var(--bi-fail); }
-    .inspect-badge.columnspec { background: #b8860b; }
+    .inspect-badge.columnspec { background: var(--bi-unknown); }
     /* Third validation axis (a value unrepresentable in its declared type).
        Its own hue so it is never mistaken for a rule or schema failure. */
     .inspect-badge.import { background: #1f6feb; }
@@ -1022,9 +1037,9 @@ bi_css <- function() {
     .inspect-none { color: var(--bi-grey); }
     .inspect-hl-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
     .inspect-hl-table th, .inspect-hl-table td { border: 1px solid var(--bi-pending-border); padding: 3px 7px; text-align: left; }
-    .inspect-hl-table th { background: #fff; color: var(--bi-grey); font-weight: 600; }
-    .inspect-hl-table td.inspect-hl-val { background: #fff; font-weight: 600; color: var(--bi-fail); }
-    .inspect-hl-table td.inspect-hl-row { background: #fff; color: var(--bi-grey); white-space: nowrap; }
+    .inspect-hl-table th { background: var(--bi-surface); color: var(--bi-grey); font-weight: 600; }
+    .inspect-hl-table td.inspect-hl-val { background: var(--bi-surface); font-weight: 600; color: var(--bi-fail); }
+    .inspect-hl-table td.inspect-hl-row { background: var(--bi-surface); color: var(--bi-grey); white-space: nowrap; }
     .inspect-details { margin-top: 4px; }
     .inspect-details > summary { cursor: pointer; color: var(--bi-grey); font-size: .82rem; margin-bottom: 6px; }
 
@@ -1124,7 +1139,7 @@ bi_css <- function() {
     }
     .tmpl-picker-list {
       border: 1px solid var(--bi-pending-border); border-radius: 8px;
-      padding: 0; background: #fff;
+      padding: 0; background: var(--bi-surface);
     }
     .tmpl-picker-list > p.msg-hint:not(.tmpl-count) { padding: 16px; margin: 0; }
     .tmpl-picker-side {
@@ -1166,7 +1181,7 @@ bi_css <- function() {
        others in the app. Bootstrap's .badge is white text with no fill of its
        own, which made it invisible on the selected row's light wash. */
     .badge.tmpl-source {
-      background: #fff; color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
+      background: var(--bi-surface); color: var(--bi-green-dark); border: 1px solid rgba(0,98,91,.45);
       font-weight: 500; font-size: .72rem; padding: 2px 8px; border-radius: 999px;
     }
     /* Library filter: each library is a pill with its template count; a
@@ -1179,7 +1194,7 @@ bi_css <- function() {
       position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 0;
       min-height: calc(1.5em + .75rem + 2px); padding: 0 14px;
       border: 1px solid var(--bi-pending-border); border-radius: 999px;
-      background: #fff; cursor: pointer; line-height: 1.3;
+      background: var(--bi-surface); cursor: pointer; line-height: 1.3;
     }
     .tmpl-source-filter label.checkbox-inline:hover { border-color: var(--bi-green); }
     .tmpl-source-filter label.checkbox-inline:has(input:checked) {
@@ -1200,7 +1215,7 @@ bi_css <- function() {
       content: '\\2713\\00a0'; font-weight: 600;
     }
     .tmpl-chip-count { margin-left: 6px; color: var(--bi-grey); font-size: .78rem; }
-    .tmpl-source-status { color: #B26A00; margin-bottom: 6px; }
+    .tmpl-source-status { color: var(--bi-warn-dark); margin-bottom: 6px; }
     /* A CSS hex escape swallows one following space, so the gap after the
        caret has to be a non-breaking space of its own. */
     .tmpl-variants::before { content: '\\25B8\\00a0'; }
@@ -1272,7 +1287,7 @@ bi_css <- function() {
     .tmpl-ds-list { list-style: none; margin: 0; padding: 0; }
     .tmpl-ds-list li {
       font-family: var(--bs-font-monospace); font-size: .8125rem; overflow-wrap: anywhere;
-      padding: 5px 10px; margin-bottom: 4px; background: #fff;
+      padding: 5px 10px; margin-bottom: 4px; background: var(--bi-surface);
       border: 1px solid var(--bi-pending-border); border-radius: .5rem;
     }
     .tmpl-toc { display: flex; flex-direction: column; gap: 2px; }
@@ -1283,7 +1298,7 @@ bi_css <- function() {
     }
     .tmpl-toc-link:hover { background: rgba(0,98,91,.06); color: var(--bi-green-dark); }
     .tmpl-toc-link.active {
-      background: #fff; border-left-color: var(--bi-green); color: var(--bi-green-dark); font-weight: 600;
+      background: var(--bi-surface); border-left-color: var(--bi-green); color: var(--bi-green-dark); font-weight: 600;
       box-shadow: 0 1px 2px rgba(26,43,42,.08);
     }
     .tmpl-toc-link:focus-visible { outline: 2px solid var(--bi-green); outline-offset: 1px; }
@@ -1334,7 +1349,7 @@ bi_css <- function() {
     }
     .tmpl-switch input[type=checkbox]::before {
       content: ''; position: absolute; top: 3px; left: 3px; width: calc(1.4rem - 6px); height: calc(1.4rem - 6px);
-      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(26,43,42,.3); transition: transform .15s ease;
+      border-radius: 50%; background: var(--bi-surface); box-shadow: 0 1px 2px rgba(26,43,42,.3); transition: transform .15s ease;
     }
     .tmpl-switch input[type=checkbox]:checked { background: var(--bi-green); }
     .tmpl-switch input[type=checkbox]:checked::before { transform: translateX(1.1rem); }
@@ -1353,7 +1368,7 @@ bi_css <- function() {
     .tmpl-segmented .shiny-options-group input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
     .tmpl-segmented .shiny-options-group .radio-inline:hover { color: var(--bi-ink); }
     .tmpl-segmented .shiny-options-group .radio-inline:has(input:checked) {
-      background: #fff; color: var(--bi-green-dark); box-shadow: 0 1px 3px rgba(26,43,42,.14);
+      background: var(--bi-surface); color: var(--bi-green-dark); box-shadow: 0 1px 3px rgba(26,43,42,.14);
     }
     .tmpl-segmented .shiny-options-group input:checked + span { color: var(--bi-green-dark); }
     .tmpl-segmented .shiny-options-group .radio-inline:focus-within { outline: 2px solid var(--bi-green); outline-offset: 1px; }
