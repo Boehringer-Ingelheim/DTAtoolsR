@@ -254,33 +254,83 @@
   }
 }
 
+#' Text width, in inches, of the section a table added at the cursor lands in
+#'
+#' `officer::docx_dim()` cannot be used for this: its XPath ends in a
+#' `//w:sectPr` alternative, which matches every section and so always yields
+#' the document's *first* one, wherever the cursor is. The section is therefore
+#' looked up here. officer adds a block directly after the cursor's body child
+#' (`/w:document/w:body/*[which]`), and a section is ended by the paragraph
+#' whose `w:pPr` carries its `w:sectPr` (the last section by the body-level
+#' `w:sectPr`), so the table belongs to the first section break after the
+#' cursor.
+#'
+#' Columns are honoured: the width of a table inside a `w:cols num = "n"`
+#' section is that of one column, `(w - (n - 1) * space) / n`. Unequal columns
+#' (`w:col` children or `w:equalWidth = "0"`) have no single width.
+#' @param doc An `rdocx`.
+#' @return The width in inches, or `NA_real_` when the section has no page size
+#'   or margins, or has unequal columns.
+#' @keywords internal
+.tv_cursor_text_width <- function(doc) {
+  cursor <- doc$officer_cursor$which
+  after <- if (length(cursor) == 1L && !is.na(cursor)) cursor else 0L
+  later <- paste0("/*[local-name()='document']/*[local-name()='body']/*[position() > ", after, "]")
+  sect <- xml2::xml_find_first(
+    officer::docx_body_xml(doc),
+    paste0(
+      "(", later, "/self::*[local-name()='sectPr']",
+      " | ", later, "/*[local-name()='pPr']/*[local-name()='sectPr'])[1]"
+    )
+  )
+  if (inherits(sect, "xml_missing")) {
+    return(NA_real_)
+  }
+  num <- function(node, attr) suppressWarnings(as.numeric(xml2::xml_attr(node, attr)))
+  child <- function(name) xml2::xml_find_first(sect, paste0("./*[local-name()='", name, "']"))
+  page <- num(child("pgSz"), "w")
+  margin <- c(num(child("pgMar"), "left"), num(child("pgMar"), "right"))
+  if (anyNA(c(page, margin))) {
+    return(NA_real_)
+  }
+  twips <- page - sum(margin)
+  cols <- child("cols")
+  n <- num(cols, "num")
+  if (!is.na(n) && n > 1) {
+    unequal <- length(xml2::xml_find_all(cols, "./*[local-name()='col']")) > 0 ||
+      xml2::xml_attr(cols, "equalWidth") %in% c("0", "false")
+    if (unequal) {
+      return(NA_real_)
+    }
+    space <- num(cols, "space")
+    twips <- (twips - (n - 1) * (if (is.na(space)) 720 else space)) / n
+  }
+  twips / 1440
+}
+
 #' Fit a table to the template's text column rather than a fixed inch width
 #'
 #' The built-in layout gives its widest tables landscape pages of their own.
 #' A user template's page geometry is not ours to change -- inserting section
 #' breaks would re-orient content that is not ours -- so the builder's column
-#' widths are scaled, in proportion, to the page width minus the margins of the
-#' template's section. The layout is fixed so Word keeps those widths: an
-#' autofit table is written without a column grid and Word sizes the columns
-#' from their content, which squeezes a narrow column beside a long one.
+#' widths are scaled, in proportion, to the text width of the section the table
+#' lands in (see [.tv_cursor_text_width()]). The layout is fixed so Word keeps
+#' those widths: an autofit table is written without a column grid and Word
+#' sizes the columns from their content, which squeezes a narrow column beside
+#' a long one.
 #'
-#' `officer::docx_dim()` always measures the document's first section, whatever
-#' section the table lands in. A template with several sections therefore keeps
-#' the width-adaptive layout (100% of the text column of the section it lands
-#' in), because widths baked in from the wrong section could run off the page.
+#' When that section's width cannot be determined the table keeps the
+#' width-adaptive layout (100% of the text column), which suits any page
+#' geometry but leaves the column sizing to Word.
 #' @param ft A flextable.
-#' @param doc The `rdocx` the table is going into.
+#' @param doc The `rdocx` the table is going into; the table is added at its
+#'   cursor.
 #' @keywords internal
 .tv_block_fit <- function(ft, doc) {
-  sections <- xml2::xml_find_all(
-    officer::docx_body_xml(doc),
-    "//*[local-name()='sectPr']"
-  )
-  if (length(sections) != 1L) {
+  text_w <- .tv_cursor_text_width(doc)
+  if (is.na(text_w)) {
     return(flextable::set_table_properties(ft, layout = "autofit", width = 1))
   }
-  d <- officer::docx_dim(doc)
-  text_w <- d$page[["width"]] - d$margins[["left"]] - d$margins[["right"]]
   w <- dim(ft)$widths
   ft <- flextable::width(ft, width = w * text_w / sum(w))
   flextable::set_table_properties(ft, layout = "fixed")

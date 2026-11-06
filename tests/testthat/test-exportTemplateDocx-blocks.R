@@ -155,83 +155,216 @@ test_that("{COLUMN_SPECS} renders a real table in place, between the surrounding
   expect_false(grepl("{COLUMN_SPECS}", .docx_text(out), fixed = TRUE))
 })
 
-# Per body-level table of a docx: its layout type, its column grid (dxa) and
-# its first cell's text, plus the text width (dxa) of the document's final
-# section -- taken from the file's own page size and margins, not from the
-# renderer under test.
+# Per body-level table of a docx: its layout type, its width attribute, its
+# column grid (dxa) and its first cell's text, plus the text width (dxa) of the
+# section THE TABLE LIES IN -- the next paragraph-level w:sectPr after the
+# table, else the body-level one (a section break ends the section that holds
+# everything before it). Taken from the file's own page size, margins and
+# columns, not from the renderer under test; a section of equal columns offers
+# a table one column's width.
 .block_table_grids <- function(path) {
   doc <- xml2::read_xml(.read_docx_body_xml(path))
   body <- xml2::xml_find_first(doc, ".//*[local-name()='body']")
-  sect <- xml2::xml_find_first(body, "./*[local-name()='sectPr']")
   num <- function(node, attr) as.numeric(xml2::xml_attr(node, attr))
-  pg <- xml2::xml_find_first(sect, "./*[local-name()='pgSz']")
-  mar <- xml2::xml_find_first(sect, "./*[local-name()='pgMar']")
+  sect_width <- function(sect) {
+    pg <- xml2::xml_find_first(sect, "./*[local-name()='pgSz']")
+    mar <- xml2::xml_find_first(sect, "./*[local-name()='pgMar']")
+    cols <- xml2::xml_find_first(sect, "./*[local-name()='cols']")
+    width <- num(pg, "w") - num(mar, "left") - num(mar, "right")
+    n <- num(cols, "num")
+    if (!is.na(n) && n > 1) {
+      width <- (width - (n - 1) * num(cols, "space")) / n
+    }
+    width
+  }
+  # The sectPr that ends the section containing `node`.
+  section_of <- function(node) {
+    brk <- xml2::xml_find_first(
+      node,
+      "./following-sibling::*[local-name()='p'][./*[local-name()='pPr']/*[local-name()='sectPr']][1]/*[local-name()='pPr']/*[local-name()='sectPr']"
+    )
+    if (inherits(brk, "xml_missing")) {
+      brk <- xml2::xml_find_first(body, "./*[local-name()='sectPr']")
+    }
+    brk
+  }
   tables <- xml2::xml_find_all(body, "./*[local-name()='tbl']")
   list(
-    text_dxa = num(pg, "w") - num(mar, "left") - num(mar, "right"),
+    # Text width of the document's first section, for tests that must tell
+    # the section a table lies in from the first one.
+    first_dxa = sect_width(xml2::xml_find_first(body, ".//*[local-name()='sectPr']")),
     tables = lapply(tables, function(tbl) {
       layout <- xml2::xml_find_first(tbl, "./*[local-name()='tblPr']/*[local-name()='tblLayout']")
+      width <- xml2::xml_find_first(tbl, "./*[local-name()='tblPr']/*[local-name()='tblW']")
       list(
         layout = xml2::xml_attr(layout, "type"),
+        width_type = xml2::xml_attr(width, "type"),
+        width = xml2::xml_attr(width, "w"),
         grid = as.numeric(xml2::xml_attr(
           xml2::xml_find_all(tbl, "./*[local-name()='tblGrid']/*[local-name()='gridCol']"),
           "w"
         )),
-        first = xml2::xml_text(xml2::xml_find_first(tbl, ".//*[local-name()='tc']"))
+        first = xml2::xml_text(xml2::xml_find_first(tbl, ".//*[local-name()='tc']")),
+        text_dxa = sect_width(section_of(tbl))
       )
     })
   )
 }
 
-test_that("block tables use a fixed grid that fills the template's text column", {
+# A DTA whose first dataset carries one rule, so {VALIDATION_RULES} and
+# {DATASETS} each emit a "Rule ID" table.
+.block_rules_dta <- function() {
   ds <- create_example_DTADataSetTabular(2)
   ds@specs@rules <- list(DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65))
-  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+  DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+}
 
+# Export a template built with officer and return the grids of its tables.
+.block_export_grids <- function(doc, dta = .block_rules_dta()) {
+  template <- tempfile(fileext = ".docx")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
+  print(doc, target = template)
+  export_with_template(dta, template, out, quiet = TRUE)
+  .block_table_grids(out)
+}
+
+# Every table's grid must sum to its section's text width, losing at most one
+# twip per column to rounding, under a fixed layout.
+.expect_block_tables_fill_section <- function(g) {
+  expect_gte(length(g$tables), 1L)
+  for (tb in g$tables) {
+    expect_identical(tb$layout, "fixed")
+    expect_lte(sum(tb$grid), tb$text_dxa)
+    expect_gte(sum(tb$grid), tb$text_dxa - length(tb$grid))
+  }
+}
+
+test_that("block tables use a fixed grid that fills the template's text column", {
   template <- .make_template("{DATASETS}")
   on.exit(unlink(template, force = TRUE), add = TRUE)
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
-  export_with_template(dta, template, out, quiet = TRUE)
+  export_with_template(.block_rules_dta(), template, out, quiet = TRUE)
 
   g <- .block_table_grids(out)
   expect_gt(length(g$tables), 1L)
-  for (tb in g$tables) {
-    expect_identical(tb$layout, "fixed")
-    # Rounding to whole twips may lose at most one per column.
-    expect_lte(sum(tb$grid), g$text_dxa)
-    expect_gte(sum(tb$grid), g$text_dxa - length(tb$grid))
-  }
+  .expect_block_tables_fill_section(g)
   rules <- Filter(function(tb) identical(tb$first, "Rule ID"), g$tables)
   expect_length(rules, 1L)
   # The id column must stay readable beside the long Definition column.
   expect_gte(rules[[1]]$grid[[1]], 1440)
 })
 
-test_that("block tables in a multi-section template stay 100% wide instead of baking in one section's width", {
-  ds <- create_example_DTADataSetTabular(2)
-  ds@specs@rules <- list(DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65))
-  dta <- DTA(datasets = list(ds), metadata = create_example_DTAMetaData())
+test_that("a template shaped like the clinical one sizes tables to the section the placeholder lies in", {
+  # Placeholder in a first section that a paragraph-level section break ends,
+  # then a continuous two-column section with other margins. The break and the
+  # final section share a page size; the margins differ, so a grid measured
+  # from the wrong section misses the first section's text width.
+  portrait <- officer::page_size(orient = "portrait", width = 8.27, height = 11.69)
+  doc <- officer::body_set_default_section(
+    officer::read_docx(),
+    officer::prop_section(
+      page_size = portrait,
+      page_margins = officer::page_mar(left = 1.5, right = 1.5),
+      type = "continuous",
+      section_columns = officer::section_columns(widths = c(2.4, 2.4), space = 0.5)
+    )
+  )
+  doc <- officer::body_add_par(doc, "Intro")
+  doc <- officer::body_add_par(doc, "{VALIDATION_RULES}")
+  doc <- officer::body_end_block_section(doc, officer::block_section(
+    officer::prop_section(
+      page_size = portrait,
+      page_margins = officer::page_mar(left = 0.8, right = 0.8)
+    )
+  ))
+  doc <- officer::body_add_par(doc, "Appendix")
 
-  # A landscape first section followed by a portrait body: the first section's
-  # width must not be applied to tables that land in the portrait section.
+  g <- .block_export_grids(doc)
+  .expect_block_tables_fill_section(g)
+  # The tables lie in the first section (the premise of the test) ...
+  expect_equal(g$tables[[1]]$text_dxa, g$first_dxa)
+  # ... and the rules table keeps a readable id column.
+  rules <- Filter(function(tb) identical(tb$first, "Rule ID"), g$tables)
+  expect_length(rules, 1L)
+  expect_gte(rules[[1]]$grid[[1]], 1440)
+})
+
+test_that("block tables in a portrait section after a landscape cover use the portrait text width", {
   doc <- officer::body_add_par(officer::read_docx(), "cover")
   doc <- officer::body_end_section_landscape(doc)
   doc <- officer::body_add_par(doc, "{VALIDATION_RULES}")
-  template <- tempfile(fileext = ".docx")
-  print(doc, target = template)
-  out <- tempfile(fileext = ".docx")
-  on.exit(unlink(c(template, out), force = TRUE), add = TRUE)
-  export_with_template(dta, template, out, quiet = TRUE)
 
-  xml <- xml2::read_xml(.read_docx_body_xml(out))
-  tables <- xml2::xml_find_all(xml, ".//*[local-name()='tbl']")
-  expect_gte(length(tables), 1L)
-  for (tbl in tables) {
-    width <- xml2::xml_find_first(tbl, "./*[local-name()='tblPr']/*[local-name()='tblW']")
-    expect_identical(xml2::xml_attr(width, "type"), "pct")
-    expect_identical(xml2::xml_attr(width, "w"), "5000")
+  g <- .block_export_grids(doc)
+  .expect_block_tables_fill_section(g)
+  # The first section is the wider, landscape one; the tables must not take
+  # its width.
+  expect_lt(g$tables[[1]]$text_dxa, g$first_dxa)
+})
+
+test_that("block tables in a landscape section followed by a portrait one use the landscape text width", {
+  doc <- officer::body_add_par(officer::read_docx(), "{VALIDATION_RULES}")
+  doc <- officer::body_end_section_landscape(doc)
+  doc <- officer::body_add_par(doc, "portrait body")
+
+  g <- .block_export_grids(doc)
+  .expect_block_tables_fill_section(g)
+  expect_equal(g$tables[[1]]$text_dxa, g$first_dxa)
+})
+
+test_that("block tables keep the 100% autofit layout in a section of unequal columns", {
+  # officer writes explicit w:col widths with equalWidth = 0, so there is no
+  # single column width to bake in.
+  doc <- officer::body_set_default_section(
+    officer::read_docx(),
+    officer::prop_section(section_columns = officer::section_columns(widths = c(2, 3), space = 0.5))
+  )
+  doc <- officer::body_add_par(doc, "{VALIDATION_RULES}")
+
+  g <- .block_export_grids(doc)
+  expect_gte(length(g$tables), 1L)
+  for (tb in g$tables) {
+    expect_identical(tb$layout, "autofit")
+    expect_identical(tb$width_type, "pct")
+    expect_identical(tb$width, "5000")
   }
+})
+
+test_that("block tables in a section of equal columns fit one column", {
+  doc <- officer::body_set_default_section(
+    officer::read_docx(),
+    officer::prop_section(section_columns = officer::section_columns(widths = c(2, 2), space = 0.5))
+  )
+  doc <- officer::body_add_par(doc, "{VALIDATION_RULES}")
+  template <- tempfile(fileext = ".docx")
+  patched <- tempfile(fileext = ".docx")
+  out <- tempfile(fileext = ".docx")
+  ex <- tempfile("block_cols_")
+  on.exit(unlink(c(template, patched, out), force = TRUE), add = TRUE)
+  on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
+  print(doc, target = template)
+  # Word's own two-column section: equal columns, no w:col children.
+  utils::unzip(template, exdir = ex)
+  doc_xml <- file.path(ex, "word", "document.xml")
+  txt <- paste(readLines(doc_xml, warn = FALSE), collapse = "")
+  txt <- sub("<w:cols .*?</w:cols>", '<w:cols w:num="2" w:space="720"/>', txt, perl = TRUE)
+  writeLines(txt, doc_xml, useBytes = TRUE)
+  .zip_docx_dir(ex, patched)
+  export_with_template(.block_rules_dta(), patched, out, quiet = TRUE)
+
+  g <- .block_table_grids(out)
+  .expect_block_tables_fill_section(g)
+  # The width on offer is one of two columns: (text width - gap) / 2.
+  sect <- xml2::xml_find_first(
+    xml2::read_xml(.read_docx_body_xml(out)),
+    ".//*[local-name()='sectPr']"
+  )
+  attr <- function(name, a) {
+    as.numeric(xml2::xml_attr(xml2::xml_find_first(sect, paste0("./*[local-name()='", name, "']")), a))
+  }
+  page_text <- attr("pgSz", "w") - attr("pgMar", "left") - attr("pgMar", "right")
+  expect_equal(g$tables[[1]]$text_dxa, (page_text - 720) / 2)
 })
 
 test_that("block tables follow the template's own margins", {
@@ -256,7 +389,7 @@ test_that("block tables follow the template's own margins", {
     on.exit(unlink(out, force = TRUE), add = TRUE)
     export_with_template(dta, tpl, out, quiet = TRUE)
     g <- .block_table_grids(out)
-    expect_lte(sum(g$tables[[1]]$grid), g$text_dxa)
+    expect_lte(sum(g$tables[[1]]$grid), g$tables[[1]]$text_dxa)
     sum(g$tables[[1]]$grid)
   }, numeric(1))
   expect_lt(widths[[1]], widths[[2]])
@@ -558,6 +691,37 @@ test_that("the bundled clinical template renders the dataset section from plain 
   expect_false(grepl("{DATASETS_DETAIL}", txt, fixed = TRUE))
   # {YAML_EMBEDDED} is a caller-supplied inline value, not a block token, and
   # nobody supplied template_variables here -- it is expected to survive.
+})
+
+test_that("the bundled clinical template gets a fixed grid sized to its own section", {
+  # The template has two sections: the placeholders sit in the first (one
+  # column), a continuous two-column section holds only the appendix. Tables
+  # must be sized to the first, not left at the autofit fallback.
+  dta <- create_example_DTA()
+  dta@datasets[[1]]@specs@rules <- list(
+    DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65)
+  )
+  tmpl <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out, force = TRUE), add = TRUE)
+  # {YAML_EMBEDDED} is a caller-supplied value nobody supplies here.
+  expect_warning(
+    export_with_template(dta, tmpl, out, quiet = TRUE),
+    "YAML_EMBEDDED",
+    fixed = TRUE
+  )
+
+  g <- .block_table_grids(out)
+  rules <- Filter(function(tb) identical(tb$first, "Rule ID"), g$tables)
+  expect_gte(length(rules), 1L)
+  # The expected width is read from the exported file's own first section.
+  for (tb in rules) {
+    expect_identical(tb$layout, "fixed")
+    expect_equal(tb$text_dxa, g$first_dxa)
+    expect_lte(sum(tb$grid), g$first_dxa)
+    expect_gte(sum(tb$grid), g$first_dxa - length(tb$grid))
+    expect_gte(tb$grid[[1]], 1440)
+  }
 })
 
 test_that("SIGNATURES_TABLE, VERSION_HISTORY_TABLE, SUPPLIER_CONTACTS_TABLE, AUTHORIZED_CORRECTIONS_LIST and FILE_SPECS each render identifiable fixture content", {

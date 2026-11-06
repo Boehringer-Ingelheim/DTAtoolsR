@@ -9,21 +9,22 @@
 \arguments{
 \item{ft}{A flextable.}
 
-\item{doc}{The \code{rdocx} the table is going into.}
+\item{doc}{The \code{rdocx} the table is going into; the table is added at its
+cursor.}
 }
 \description{
 The built-in layout gives its widest tables landscape pages of their own.
 A user template's page geometry is not ours to change -- inserting section
 breaks would re-orient content that is not ours -- so the builder's column
-widths are scaled, in proportion, to the page width minus the margins of the
-template's section. The layout is fixed so Word keeps those widths: an
-autofit table is written without a column grid and Word sizes the columns
-from their content, which squeezes a narrow column beside a long one.
+widths are scaled, in proportion, to the text width of the section the table
+lands in (see \code{\link[=.tv_cursor_text_width]{.tv_cursor_text_width()}}). The layout is fixed so Word keeps
+those widths: an autofit table is written without a column grid and Word
+sizes the columns from their content, which squeezes a narrow column beside
+a long one.
 }
 \details{
-\code{officer::docx_dim()} always measures the document's first section, whatever
-section the table lands in. A template with several sections therefore keeps
-the width-adaptive layout (100\% of the text column of the section it lands
-in), because widths baked in from the wrong section could run off the page.
+When that section's width cannot be determined the table keeps the
+width-adaptive layout (100\% of the text column), which suits any page
+geometry but leaves the column sizing to Word.
 }
 \keyword{internal}

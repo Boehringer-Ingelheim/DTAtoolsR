@@ -32,8 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `{DATASETS}` and `{VALIDATION_RULES}` now have a fixed column grid scaled to
   the template's text width. Before, Word sized the columns from their
   content, which squeezed the `Rule ID` column next to the long `Definition`
-  column in portrait templates. A template with several sections keeps tables
-  at 100% of the text column, as before.
+  column in portrait templates. In a template with several sections, the grid
+  is scaled to the section the table lands in (one column's width in a section
+  of equal columns); a section whose width cannot be determined, such as one
+  with unequal columns, keeps tables at 100% of the text column.
 - The built-in Word/PDF layout of `write_dta()` is redesigned. Every page after
   the cover carries a running header (DTA title, study ID, "Page X of Y") and
   footer (document name, version, date of the current version, and in small
