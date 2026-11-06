@@ -1,0 +1,6 @@
+kind: dta_creation_template
+id: mi_shape
+version: "1.0"
+abstract: true
+mixins: [dup_ref@1.0, dup_ref@1.0]
+base: {}

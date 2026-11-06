@@ -397,13 +397,29 @@ template_lineage_text <- function(lineage, index) {
   if (length(refs) == 0) {
     return("")
   }
-  refs <- rev(refs)
-  parts <- vapply(refs, function(ref) {
+  paste0("based on ", paste(tmpl_ref_labels(rev(refs), index), collapse = " › "))
+}
+
+# "Label (id@v)" for each resolved "id@version" ref, labels from the index.
+tmpl_ref_labels <- function(refs, index) {
+  vapply(refs, function(ref) {
     id <- sub("@.*$", "", ref)
     version <- if (grepl("@", ref, fixed = TRUE)) sub("^[^@]*@", "", ref) else ""
     paste0(tmpl_index_label(index, id, version), " (", ref, ")")
   }, character(1), USE.NAMES = FALSE)
-  paste0("based on ", paste(parts, collapse = " › "))
+}
+
+# "mixes in Label (id@v), Label2 (id2@v)" for a template's resolved mixins, or
+# "" when it has none. Unlike the lineage, mixins are siblings and not a chain,
+# so they keep the order the template LISTS them in (resolve_template_inheritance()
+# returns this level's first, then the ancestors').
+template_mixins_text <- function(mixins, index) {
+  refs <- as.character(mixins %||% character(0))
+  refs <- refs[!is.na(refs) & nzchar(refs)]
+  if (length(refs) == 0) {
+    return("")
+  }
+  paste0("mixes in ", paste(tmpl_ref_labels(refs, index), collapse = ", "))
 }
 
 # The names of the datasets a definition builds -- one per `datasets:` entry,
@@ -491,6 +507,7 @@ template_picker_detail_ui <- function(loaded, versions, selected_version, index)
   def <- value$def
   source_name <- as.character(value$source_name %||% "")
   lineage <- template_lineage_text(value$lineage, index)
+  mixins <- template_mixins_text(value$mixins, index)
   description <- as.character(def$description %||% "")
 
   div(
@@ -506,6 +523,7 @@ template_picker_detail_ui <- function(loaded, versions, selected_version, index)
     ),
     version_ui,
     if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
+    if (nzchar(mixins)) p(class = "tmpl-lineage msg-hint", mixins),
     if (nzchar(description)) p(class = "tmpl-detail-desc", description),
     div(class = "section-label", "What it creates"),
     p(class = "tmpl-summary", tmpl_detail_summary(def)),
@@ -1146,6 +1164,7 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
   source_name <- as.character(value$source_name %||% "")
   version <- as.character(value$version %||% def$version %||% "")
   lineage <- template_lineage_text(value$lineage, index)
+  mixins <- template_mixins_text(value$mixins, index)
   description <- as.character(def$description %||% "")
   datasets <- tmpl_dataset_names(def)
 
@@ -1348,6 +1367,7 @@ template_options_modal_body <- function(def, loaded, index, vocab_specs, has_ope
         if (nzchar(source_name)) span(class = "badge tmpl-source", source_name)
       ),
       if (nzchar(lineage)) p(class = "tmpl-lineage msg-hint", lineage),
+      if (nzchar(mixins)) p(class = "tmpl-lineage msg-hint", mixins),
       if (nzchar(description)) p(class = "tmpl-aside-desc", description)
     ),
     if (length(datasets) > 0) {

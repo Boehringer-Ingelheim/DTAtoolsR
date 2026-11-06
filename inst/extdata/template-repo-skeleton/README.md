@@ -145,6 +145,7 @@ Creation templates may use:
 - `extends` to inherit from another creation template.
 - `abstract: true` to make a creation template available only as a parent, not as an item that can be instantiated directly.
 - `sealed` to prevent descendants from changing selected template paths.
+- `mixins` to compose the template from abstract, flat building blocks; see Mixins below.
 - `required` to require selected paths to be filled before a document is created.
 
 Vocabularies may use `extends` to build on another vocabulary, with the vocabulary-specific `add_terms` and `remove_terms` operations described
@@ -189,10 +190,10 @@ party_slots:
     profiles: [starter_supplier]
 ```
 
-A non-inheriting creation template needs a `base:` mapping. A concrete template
-must have at least one dataset after inheritance; an abstract base may provide
-metadata only. A child with `extends:` may omit sections to inherit them, but
-must supply datasets if its parent has none. A template may omit top-level
+A creation template that uses neither `extends:` nor `mixins:` needs a `base:` mapping. A concrete template
+must have at least one dataset after inheritance (through `extends:` or `mixins:`); an abstract base may provide
+metadata only. A child with `extends:` or `mixins:` may omit sections to inherit them, but
+must supply datasets if its parent and mixins have none. A template may omit top-level
 `datasets:` when every `variants:` choice supplies its own.
 
 ### `base:` metadata
@@ -959,7 +960,70 @@ A path may be satisfied by the template's base, an inherited or selected party p
 This is not an option-level required flag. A party slot's own `required: true` makes that slot selection mandatory; the top-level creation template `required` paths express a separate path-filling requirement.
 
 Creation-template inheritance is limited to a maximum chain depth. Cycles and unresolved references cannot produce a concrete document; the
-validator reports `extends_cycle` or `extends_unresolved`, and a concrete template also receives `instantiate_failed`.
+validator reports `extends_cycle` or `extends_unresolved`, and a concrete template also receives `instantiate_failed`. The same holds for
+`mixin_unresolved`, `mixin_invalid` and `mixin_conflict`, described below.
+
+### Mixins: composing abstract building blocks
+
+`extends:` takes exactly one parent, so a template that needs a shared standard plus an assay block plus a privacy block cannot be built from
+parents alone. A mixin is a small abstract template that only adds content, and `mixins:` lists the ones to fold in. Use `extends:` for "this is a
+variant of that template", where the child may change anything the parent says; use `mixins:` for "this also contains these pieces", where
+nothing may silently override anything else. Because a mixin can only add, the order of the list never changes the result.
+
+A mixin file:
+
+```yaml
+kind: dta_creation_template
+id: assay_smrnaseq
+label: smRNA-seq assay block
+version: "1.0"
+abstract: true
+
+base: {}
+
+options:
+  - id: panel
+    label: Panel
+    type: text
+
+datasets:
+  - template: smrnaseq_counts@1.0
+    as: smrnaseq_counts
+```
+
+A template that extends a standard and mixes the block in:
+
+```yaml
+kind: dta_creation_template
+id: study_x
+label: Study X DTS
+version: "1.0"
+extends: company_standard@2.0
+mixins:
+  - privacy_eu@1.0
+  - assay_smrnaseq@1.0
+```
+
+`mixins:` is a list of references in the same form as `extends:` (`id`, `id@version`, `id@latest`); a single string counts as a one-element list.
+The rules:
+
+- A mixin must be `abstract: true`, and it still needs `base:` like any abstract template (`base: {}` is enough).
+- A mixin may not declare `extends`, `mixins`, `sealed`, `required`, `variants` or `order`. It references nothing, so mixins do not nest.
+- Its collections (`options`, `datasets`, `party_slots`, `vocabulary_slots`) use the bare list form, with no `remove:` on any entry, and no
+  section or `base:` value may be `null`. A mixin only adds, which is why the "`key: null` removes the inherited key" rule from the table above does
+  not apply to it.
+- Only `base`, `options`, `datasets`, `party_slots` and `vocabulary_slots` are contributed. Header fields such as `label` and `description` are
+  not copied.
+- `base:` mappings merge key by key. Any key contributed twice, whether by the `extends:` chain and a mixin or by two mixins, is a conflict, as is
+  an option, dataset, party slot or vocabulary slot with the same identity. This is deliberately not the "same identity modifies" rule from
+  above, which applies only to the child over the already folded result. The child resolves a conflict by writing the value itself.
+- The child may then modify or remove any mixin-provided entry with the usual four states and collection verbs.
+- Mixin content is checked against the `sealed:` paths of the template's ancestors, as if it had been written in the child.
+- Descendants inherit the mixed-in content but not the `mixins:` key. Listing a mixin that an ancestor already mixes in is a conflict.
+- Mixins do not count toward the depth limit and cannot create cycles.
+
+A template that uses only `mixins:` may omit `base:` and `datasets:`, as one that uses `extends:` may. Problems are reported as `mixin_invalid`
+(a malformed `mixins:` value, or a named template that is not a valid mixin), `mixin_conflict` and `mixin_unresolved`.
 
 ## Versioning
 
@@ -1004,7 +1068,7 @@ block is the one shown, so a later release can correct it. It is not inherited t
 ## Provenance and upgrading documents
 
 When a document is built from a creation template, the app records a `metadata.template` provenance record. It can include the template ID and
-version, source information, resolved Git commit, file path, a hash of the resolved definition, creation date, inheritance lineage, the author's
+version, source information, resolved Git commit, file path, a hash of the resolved definition, creation date, inheritance lineage and the mixins, the author's
 selections, and dataset-template provenance.
 
 `metadata.template` is machine-owned. Template authors must not set it in `base.metadata` or through an option effect. The app relies on its
@@ -1335,6 +1399,9 @@ literal severity reported in the result. A concrete template can receive `instan
 | `vocabulary_extends_failed` | error | Vocabulary inheritance fails, including a cycle or invalid removal. | Repair the extension chain and term operations. |
 | `extends_cycle` | warning | A creation-template inheritance chain cycles or exceeds its depth limit. | Break the cycle and keep the inheritance chain within the limit. |
 | `extends_unresolved` | warning | A creation template's parent cannot be resolved in the validated library. | Add the parent or correct its reference. |
+| `mixin_unresolved` | warning | A `mixins:` reference cannot be resolved in the validated library. | Add the mixin or correct its reference. |
+| `mixin_invalid` | error | `mixins:` is malformed, or a named template is not a valid mixin (not abstract, or declares `extends`, `mixins`, `sealed`, `required`, `variants` or `order`, uses `remove:` or `null`). | Make `mixins:` a list of references, and fix the mixin to be abstract, flat and add-only. |
+| `mixin_conflict` | error | A key, option, dataset or slot is contributed twice by the `extends:` chain and the mixins, or a mixin is already mixed in by an ancestor. | Write the value in the child itself, or drop the duplicate mixin. |
 | `sealed_violation` | warning | A descendant changes a path sealed by an ancestor. | Remove the descendant change or revise the parent's seal. |
 | `sealed_path_unknown` | warning | A sealed path does not match a value in the resolved template. | Correct the path or remove the ineffective seal. |
 | `variant_invalid` | error | A creation template's `variants:` block is malformed: missing id or choices, an invalid or repeated choice value, a choice without datasets, or an id that collides with an option id. | Correct the block as described under `variants:`. |

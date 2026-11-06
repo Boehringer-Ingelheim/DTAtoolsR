@@ -697,10 +697,12 @@ rebase_plan <- function(current, to_version, index = NULL) {
     # whatever the target version's `extends:` chain looks like today. That
     # is what "preserving lineage" means: the
     # document's inheritance trail is a fact about ITS history, unaffected
-    # by which template version it happens to be rebased onto.
+    # by which template version it happens to be rebased onto. The same goes
+    # for `mixins`, the document's other record of what it was composed from.
     target_provenance <- template_provenance(
       target_loaded$value$def, target_loaded$value,
-      lineage = prov$lineage %||% character(0)
+      lineage = prov$lineage %||% character(0),
+      mixins = prov$mixins %||% character(0)
     )
 
     # A missing ancestor -- e.g. 1.0 was pruned from the source after this

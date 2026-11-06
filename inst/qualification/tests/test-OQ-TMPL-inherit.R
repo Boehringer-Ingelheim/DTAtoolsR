@@ -267,3 +267,147 @@ test_that("OQ-TMPL-048 | a child vocabulary's terms are the parent's, minus remo
     grepl("\"A\", \"B\", and \"D\"", msg, fixed = TRUE)
   )
 })
+
+# ---- REQ-TMPL-038 / REQ-TMPL-039: mixins: composition -----------------------
+#
+# Expected values come from the requirements, not from a run: a composed child
+# is valid iff the mixins supplied what it needs, and the negative control
+# (the same parent without mixins) shows that they really did.
+
+test_that("OQ-TMPL-079 | a child composed from disjoint mixins carries their content and is valid | REQ-TMPL-038", {
+  result <- validate_template(tmpl_fixture("inherit", "mixins"))
+
+  child_rows <- tmpl_rows_for(result, "child.dta-template.yaml")
+  qa_step(
+    "extends + two disjoint mixins (a base leaf, an option, a dataset): zero issues",
+    0L, nrow(child_rows)
+  )
+  qa_step(
+    "the mixin templates themselves (abstract, partial) are clean too",
+    c(0L, 0L),
+    c(
+      nrow(tmpl_rows_for(result, "mixin_privacy.dta-template.yaml")),
+      nrow(tmpl_rows_for(result, "mixin_assay.dta-template.yaml"))
+    )
+  )
+
+  # Content check: the parent has no dataset and the child writes none, so the
+  # concrete-dataset requirement can only be met by the mixin's dataset.
+  bare_rows <- tmpl_rows_for(result, "child_bare.dta-template.yaml")
+  qa_step(
+    "the same parent WITHOUT the mixins has no dataset and fails the build",
+    "instantiate_failed", bare_rows$code
+  )
+
+  qa_step(
+    "a descendant of the composed child inherits the content without listing the mixins",
+    0L, nrow(tmpl_rows_for(result, "grandchild.dta-template.yaml"))
+  )
+  qa_step(
+    "a template using only mixins (single-string form, no extends) needs no datasets of its own",
+    0L, nrow(tmpl_rows_for(result, "mixins_only.dta-template.yaml"))
+  )
+  qa_step("no row anywhere in the directory is an error other than the control", 1L, sum(result$severity == "error"))
+})
+
+test_that("OQ-TMPL-080 | two mixins providing the same dataset key conflict, an error not an override | REQ-TMPL-039 REQ-TMPL-038", {
+  result <- validate_template(tmpl_fixture("codes", "mixin_conflict"))
+  qa_step("mixin_conflict is an error", "error", tmpl_severity(result, "mixin_conflict"))
+  qa_step("and the concrete template also fails the build", "error", tmpl_severity(result, "instantiate_failed"))
+  msg <- tmpl_message(result, "mixin_conflict")
+  qa_check(
+    "naming the section, the key, and both contributors",
+    grepl("datasets", msg, fixed = TRUE) && grepl("obs", msg, fixed = TRUE) &&
+      grepl("mc_a@1.0", msg, fixed = TRUE) && grepl("mc_b@1.0", msg, fixed = TRUE)
+  )
+})
+
+test_that("OQ-TMPL-081 | a non-abstract mixin and a malformed mixins: value are mixin_invalid errors | REQ-TMPL-039", {
+  result <- validate_template(tmpl_fixture("codes", "mixin_invalid"))
+
+  child <- tmpl_rows_for(result, "child.dta-template.yaml")
+  qa_step("naming a concrete template as a mixin: error", "error", tmpl_severity(child, "mixin_invalid"))
+  qa_step("and the concrete child also fails the build", "error", tmpl_severity(child, "instantiate_failed"))
+  qa_check("naming the offending mixin", grepl("mi_concrete@1.0", tmpl_message(child, "mixin_invalid"), fixed = TRUE))
+
+  qa_step(
+    "a duplicated reference in the file itself: error",
+    "error", tmpl_severity(tmpl_rows_for(result, "bad_shape.dta-template.yaml"), "mixin_invalid")
+  )
+  qa_step(
+    "a mapping where a list belongs: error",
+    "error", tmpl_severity(tmpl_rows_for(result, "bad_shape_mapping.dta-template.yaml"), "mixin_invalid")
+  )
+  qa_check(
+    "an abstract template with a malformed mixins: gets no instantiate_failed",
+    is.na(tmpl_severity(tmpl_rows_for(result, "bad_shape.dta-template.yaml"), "instantiate_failed"))
+  )
+})
+
+test_that("OQ-TMPL-082 | an unresolvable mixin is a warning, and only a concrete template also fails the build | REQ-TMPL-039", {
+  result <- validate_template(tmpl_fixture("codes", "mixin_unresolved"))
+  concrete <- tmpl_rows_for(result, "concrete.dta-template.yaml")
+  abstract <- tmpl_rows_for(result, "abstract.dta-template.yaml")
+
+  qa_step("concrete: mixin_unresolved is a warning", "warning", tmpl_severity(concrete, "mixin_unresolved"))
+  qa_step("concrete: also instantiate_failed, an error", "error", tmpl_severity(concrete, "instantiate_failed"))
+  qa_check(
+    "naming the missing reference",
+    grepl("nonexistent_mixin@1.0", tmpl_message(concrete, "mixin_unresolved"), fixed = TRUE)
+  )
+  qa_step("abstract: mixin_unresolved is still a warning", "warning", tmpl_severity(abstract, "mixin_unresolved"))
+  qa_check("abstract: but no instantiate_failed", is.na(tmpl_severity(abstract, "instantiate_failed")))
+  qa_step("abstract: exactly one row", 1L, nrow(abstract))
+})
+
+test_that("OQ-TMPL-083 | mixin content reaching an ancestor's sealed path is a sealed violation | REQ-TMPL-039", {
+  # Nothing in the child or the parent changes base.metadata.title: only the
+  # mixin's option targets it, so the seal has to be enforced on what the
+  # mixins add, not only on the child's own text.
+  result <- validate_template(tmpl_fixture("codes", "sealed_violation_mixin"))
+  qa_step("severity is warning", "warning", tmpl_severity(result, "sealed_violation"))
+  qa_step("and also error, on instantiate_failed", "error", tmpl_severity(result, "instantiate_failed"))
+  qa_check(
+    "naming the sealed path and the child",
+    grepl("base.metadata.title", tmpl_message(result, "sealed_violation"), fixed = TRUE) &&
+      grepl("sm_c", tmpl_message(result, "sealed_violation"), fixed = TRUE)
+  )
+  qa_check("and it is not reported as a mixin code", all(!grepl("^mixin_", result$code)))
+})
+
+test_that("OQ-TMPL-084 | a child may modify and remove mixin-provided entries like any inherited entry | REQ-TMPL-038", {
+  result <- validate_template(tmpl_fixture("inherit", "mixin_edit"))
+
+  # Both mixin datasets (obs, extra) are keyed entries of the folded parent.
+  # child_ok restates obs (same key, so a modification rather than an addition
+  # colliding with the mixin) and removes extra; a mixin entry that could not be
+  # modified or removed would surface as an error here.
+  qa_step(
+    "modifying one mixin dataset and removing another: zero issues",
+    0L, nrow(tmpl_rows_for(result, "child_ok.dta-template.yaml"))
+  )
+
+  # Control: removing every mixin dataset leaves none, which only holds if the
+  # removals took effect on mixin-provided entries.
+  gone <- tmpl_rows_for(result, "child_remove_all.dta-template.yaml")
+  qa_step("removing every mixin-provided dataset fails the build", "instantiate_failed", gone$code)
+  qa_step("as an error", "error", gone$severity)
+  qa_check("because no dataset remains", grepl("at least one dataset", gone$message, fixed = TRUE))
+})
+
+test_that("OQ-TMPL-085 | re-listing a mixin an ancestor already mixes in is a conflict | REQ-TMPL-038 REQ-TMPL-039", {
+  result <- validate_template(tmpl_fixture("codes", "mixin_relist"))
+
+  child <- tmpl_rows_for(result, "child.dta-template.yaml")
+  qa_step("mixin_conflict is an error", "error", tmpl_severity(child, "mixin_conflict"))
+  qa_step("and the concrete grandchild also fails the build", "error", tmpl_severity(child, "instantiate_failed"))
+  qa_check(
+    "naming the mixin, as already mixed in by an ancestor",
+    grepl("rl_m@1.0", tmpl_message(child, "mixin_conflict"), fixed = TRUE) &&
+      grepl("ancestor", tmpl_message(child, "mixin_conflict"), fixed = TRUE)
+  )
+  qa_step(
+    "control: the same descendant without the redundant line is clean",
+    0L, nrow(tmpl_rows_for(result, "child_ok.dta-template.yaml"))
+  )
+})

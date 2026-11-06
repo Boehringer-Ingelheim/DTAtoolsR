@@ -1,0 +1,4 @@
+kind: dta_creation_template
+id: mx_grandchild
+version: "1.0"
+extends: mx_child@1.0

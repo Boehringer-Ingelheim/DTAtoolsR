@@ -756,6 +756,14 @@ template_provenance_block <- function(prov) {
         ""
       }
     ),
+    meta_field_text(
+      "Mixins",
+      if (length(prov$mixins %||% character(0)) > 0) {
+        paste(as.character(prov$mixins), collapse = ", ")
+      } else {
+        ""
+      }
+    ),
     if (length(ds_rows) > 0) tagList(div(class = "section-label", "Datasets"), ds_rows)
   )
 }

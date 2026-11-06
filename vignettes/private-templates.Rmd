@@ -911,6 +911,50 @@ in your repository's CI. And rebasing a document onto a new template version
 does not consult `sealed:`, so a seal is a constraint on template *authors*,
 not yet a guarantee about every document.
 
+### Composing with mixins
+
+`extends:` takes one parent. When a template should also carry an assay block
+and a privacy block, list them under `mixins:`: abstract, flat templates that
+only **add** content.
+
+```yaml
+# assay_smrnaseq@1.0 -- a mixin
+kind: dta_creation_template
+id: assay_smrnaseq
+version: "1.0"
+abstract: true
+base: {}
+datasets:
+  - template: smrnaseq_counts@1.0
+    as: smrnaseq_counts
+```
+
+```yaml
+# a template that uses it
+kind: dta_creation_template
+id: study_x
+version: "1.0"
+extends: company_standard@2.0
+mixins:
+  - privacy_eu@1.0
+  - assay_smrnaseq@1.0
+```
+
+Because a mixin can only add, nothing overrides anything and the order of the
+list does not matter. Anything contributed twice — a `base:` key, an option, a
+dataset, a slot — by the `extends:` chain and a mixin, or by two mixins, is an
+error (`mixin_conflict`); the child resolves it by writing the value itself,
+and may modify or remove any mixin-provided entry with the usual four states
+and verbs. A mixin must be `abstract: true` and may not declare `extends`,
+`mixins`, `sealed`, `required`, `variants` or `order`; its collections are bare
+lists with no `remove:`, and it contains no `null`, so the "`null` removes the
+inherited key" rule does not reach it. Only `base`, `options`, `datasets`,
+`party_slots` and `vocabulary_slots` are contributed, never header fields such
+as `label`. Mixin content is checked against ancestors' `sealed:` paths.
+Descendants inherit the content but not the `mixins:` key, and listing a mixin
+an ancestor already mixes in is a conflict. A template that uses only mixins
+may omit `base:` and `datasets:`.
+
 ## Versioning
 
 Every template — creation, dataset, or party profile — declares its own
@@ -1281,7 +1325,7 @@ Every document built from a creation template — through the app, or via
 a `metadata.template` record: which template `id`/`version` built it, which
 source it came from (`source`, `source_kind`, `resolved_commit` for a `git:`
 source), the resolved file path, a content hash of the fully `extends:`-merged
-definition it was built from, the creation date, its `extends:` lineage, the
+definition it was built from, the creation date, its `extends:` lineage (and the `mixins:` it folded in), the
 `selections` the user actually made, and — for any dataset built from a
 dataset template — that dataset's own template provenance.
 
@@ -1322,7 +1366,9 @@ The limits are worth stating plainly, not glossing over:
 
 `validate_template(path, strict = TRUE)` runs the same structural checks the
 app's own "Create new from template" picker relies on — an unresolvable
-`extends:`, an option `target:` that does not resolve to a real metadata
+`extends:` or `mixins:` entry (`extends_unresolved`, `mixin_unresolved`), a
+mixin that is not abstract and add-only, or a key two mixins both contribute
+(`mixin_invalid`, `mixin_conflict`), an option `target:` that does not resolve to a real metadata
 field (or, worse, one that names a machine-owned field like
 `metadata.template`), a party slot naming a profile id that does not exist, a
 dataset patch naming an absent column, an unquoted `version:`, a vocabulary

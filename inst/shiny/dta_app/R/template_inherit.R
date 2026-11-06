@@ -1,5 +1,8 @@
 # -----------------------------------------------------------------------------
-# `extends:` inheritance for creation templates.
+# `extends:` inheritance and `mixins:` composition for creation templates.
+#
+# A template may also list `mixins:` -- abstract, flat, add-only templates folded
+# into the effective parent with any overlap an error (see "Mixins" below).
 #
 # Purpose: let a supplier- or study-specific DEVIATION template state only
 # what differs from a standard parent, instead of copy-pasting the whole
@@ -824,6 +827,256 @@ dta_template_merge_collection_section <- function(def, key, parent_items, merge_
   merge_fn(parent_items, def[[key]])
 }
 
+# -----------------------------------------------------------------------------
+# Mixins.
+#
+# `extends:` is single inheritance, so a template that wants a privacy block AND
+# an assay block has to pick one as its parent and copy the other. `mixins:`
+# composes reusable pieces instead, and stays auditable by being deliberately
+# weaker than inheritance: a mixin is ABSTRACT, FLAT (it extends and mixes in
+# nothing), and ADD-ONLY. Its content is folded into the effective parent and
+# ANY overlap with the chain or another mixin is an error, so nothing depends
+# on the order mixins are listed, there is no precedence to explain, and no
+# diamond can form. The child then merges over the folded parent with the
+# ordinary rules, so it can still modify or remove what a mixin supplied.
+
+# The only sections a mixin contributes (its header fields never travel).
+dta_template_mixin_sections <- c("options", "datasets", "party_slots", "vocabulary_slots")
+
+# The `mixins:` list of a definition as a character vector (character(0) when
+# absent). A bare string is a one-element list. Presence is read off names():
+# `mixins: null` is an absent list, but `mixins: 7` or `[a, a]` is an error.
+dta_template_mixin_refs <- function(def) {
+  raw <- if ("mixins" %in% names(def)) def[["mixins"]] else NULL
+  if (is.null(raw)) {
+    return(character(0))
+  }
+  is_string <- function(x) is.character(x) && length(x) == 1 && !is.na(x) && nzchar(x)
+  valid <- if (is.character(raw)) {
+    all(vapply(as.list(raw), is_string, logical(1)))
+  } else {
+    is.list(raw) && is.null(names(raw)) && all(vapply(raw, is_string, logical(1)))
+  }
+  if (!valid) {
+    cli::cli_abort(
+      c(
+        "{.field mixins} must be a list of non-empty template references.",
+        i = "Write it as {.code mixins: [id@1.0, other@latest]}."
+      ),
+      class = "dta_template_mixin_invalid"
+    )
+  }
+  refs <- as.character(unlist(raw))
+  duplicated_refs <- paste(unique(refs[duplicated(refs)]), collapse = ", ")
+  if (nzchar(duplicated_refs)) {
+    cli::cli_abort(
+      "{.field mixins} lists the same reference more than once: {duplicated_refs}.",
+      class = "dta_template_mixin_invalid"
+    )
+  }
+  refs
+}
+
+# Does `x` contain a NULL anywhere inside it? (A key written as `k: null`.)
+dta_template_has_null <- function(x) {
+  is.list(x) && any(vapply(seq_along(x), function(i) {
+    is.null(x[[i]]) || dta_template_has_null(x[[i]])
+  }, logical(1)))
+}
+
+# M2: is `mdef` a legal mixin? Aborts "dta_template_mixin_invalid" listing every
+# problem at once, so an author fixes the mixin in one pass. Keys are detected
+# with names(), because a key written as `null` is still present.
+dta_template_check_mixin_shape <- function(mdef, ref_key, child_id) {
+  present <- names(mdef)
+  problems <- character(0)
+  if (!isTRUE(mdef[["abstract"]])) {
+    problems <- c(problems, "it is not abstract")
+  }
+  forbidden <- intersect(c("extends", "mixins", "sealed", "required", "variants", "order"), present)
+  if (length(forbidden) > 0) {
+    problems <- c(problems, paste0("it must not contain ", paste(forbidden, collapse = ", ")))
+  }
+  for (section in dta_template_mixin_sections) {
+    if (!(section %in% present)) next
+    value <- mdef[[section]]
+    if (is.null(value)) {
+      problems <- c(problems, paste0(section, " is null"))
+    } else if (dta_template_is_mapping(value)) {
+      problems <- c(problems, paste0(section, " uses the verb form, only a plain sequence is allowed"))
+    } else if (any(vapply(value, function(e) is.list(e) && "remove" %in% names(e), logical(1)))) {
+      problems <- c(problems, paste0(section, " contains an entry with remove"))
+    }
+  }
+  if ("base" %in% present) {
+    base <- mdef[["base"]]
+    if (is.null(base)) {
+      problems <- c(problems, "base is null")
+    } else {
+      if (length(base) > 0 && !dta_template_is_mapping(base)) {
+        problems <- c(problems, "base is not a mapping")
+      }
+      if (dta_template_has_null(base)) {
+        problems <- c(problems, "base contains a null value")
+      }
+      if (is.list(base) && "datasets" %in% names(base)) {
+        problems <- c(problems, "base.datasets is not allowed, use a top-level datasets")
+      }
+    }
+  }
+  if (length(problems) > 0) {
+    why <- paste(problems, collapse = "; ")
+    cli::cli_abort(
+      c(
+        "Template {.val {child_id}} mixes in {.val {ref_key}}, which is not a valid mixin: {why}.",
+        i = "A mixin is abstract, flat and add-only."
+      ),
+      class = "dta_template_mixin_invalid"
+    )
+  }
+  invisible(mdef)
+}
+
+# Every leaf path of a nested mapping, dotted. A non-mapping value (scalar,
+# sequence, or an empty {}) is one leaf.
+dta_template_leaf_paths <- function(x, prefix = character(0)) {
+  if (!dta_template_is_mapping(x)) {
+    return(if (length(prefix) > 0) paste(prefix, collapse = ".") else character(0))
+  }
+  unlist(lapply(names(x), function(k) dta_template_leaf_paths(x[[k]], c(prefix, k))),
+    use.names = FALSE
+  ) %||% character(0)
+}
+
+# Disjoint deep merge of `add` into `acc`: two mappings under one key recurse,
+# ANY other collision is a conflict. Returns list(value, conflict) where
+# `conflict` is the dotted path of the first collision, or NULL.
+dta_template_merge_disjoint <- function(acc, add, prefix = character(0)) {
+  result <- acc
+  for (k in names(add)) {
+    here <- c(prefix, k)
+    if (!(k %in% names(result))) {
+      result[[k]] <- add[[k]]
+      next
+    }
+    a <- result[[k]]
+    b <- add[[k]]
+    if (!(dta_template_is_mapping(a) && dta_template_is_mapping(b))) {
+      return(list(value = NULL, conflict = paste(here, collapse = ".")))
+    }
+    sub <- dta_template_merge_disjoint(a, b, here)
+    if (!is.null(sub$conflict)) {
+      return(sub)
+    }
+    result[[k]] <- sub$value
+  }
+  list(value = result, conflict = NULL)
+}
+
+# Fold the mixins named by `refs` into `chain_def` (the resolved `extends:`
+# chain, or list()). Returns list(def, keys): the folded definition and the
+# resolved "id@version" of each mixin, in listed order.
+#
+# `inherited_mixins` are the "id@version" the chain already mixed in. Re-listing
+# one is its own error rather than a collision, because the collision message
+# ("section X key Y") would send the author hunting for a clash that is really
+# a redundant line.
+dta_template_fold_mixins <- function(chain_def, refs, resolve_ref, child_id,
+                                     inherited_mixins = character(0)) {
+  folded <- chain_def
+  chain_label <- "the extends chain"
+
+  # Who supplied what, so a conflict can name BOTH sides: a named character
+  # vector per collection (key -> contributor), and one for base leaf paths.
+  key_fns <- list(
+    options = dta_template_option_key, party_slots = dta_template_option_key,
+    vocabulary_slots = dta_template_option_key, datasets = dta_template_dataset_key
+  )
+  owners <- lapply(names(key_fns), function(section) {
+    keys <- vapply(chain_def[[section]] %||% list(), key_fns[[section]], character(1))
+    keys <- keys[!is.na(keys)]
+    stats::setNames(rep(chain_label, length(keys)), keys)
+  })
+  names(owners) <- names(key_fns)
+  base_owners <- stats::setNames(
+    rep(chain_label, length(dta_template_leaf_paths(chain_def$base))),
+    dta_template_leaf_paths(chain_def$base)
+  )
+
+  abort_conflict <- function(mixin_key, section, where, earlier) {
+    cli::cli_abort(
+      c(
+        "Template {.val {child_id}} cannot mix in {.val {mixin_key}}: {.field {section}} {.val {where}} is already provided by {earlier}.",
+        i = "Mixins are add-only, so what they provide must not overlap. Remove one of them, or resolve the overlap in the template that lists them."
+      ),
+      class = "dta_template_mixin_conflict"
+    )
+  }
+
+  keys <- character(0)
+  for (ref in refs) {
+    m <- resolve_ref(ref)
+    if (is.null(m)) {
+      cli::cli_abort(
+        "Template {.val {child_id}} mixes in unresolvable reference {.val {ref}}.",
+        class = "dta_template_mixin_unresolved"
+      )
+    }
+    mixin_key <- paste0(m$id, "@", m$version)
+    dta_template_check_mixin_shape(m$def, mixin_key, child_id)
+
+    if (mixin_key %in% inherited_mixins) {
+      cli::cli_abort(
+        "Template {.val {child_id}} mixes in {.val {mixin_key}}, which is already mixed in by an ancestor.",
+        class = "dta_template_mixin_conflict"
+      )
+    }
+    if (mixin_key %in% keys) {
+      cli::cli_abort(
+        "Template {.val {child_id}} mixes in {.val {mixin_key}} more than once.",
+        class = "dta_template_mixin_conflict"
+      )
+    }
+    contributor <- paste0("mixin ", mixin_key)
+
+    # base: disjoint deep merge.
+    madd <- m$def$base
+    if (length(madd) > 0) {
+      merged_base <- dta_template_merge_disjoint(folded$base %||% list(), madd)
+      if (!is.null(merged_base$conflict)) {
+        path <- merged_base$conflict
+        hit <- which(names(base_owners) == path | startsWith(names(base_owners), paste0(path, ".")))
+        earlier <- if (length(hit) > 0) base_owners[[hit[[1]]]] else chain_label
+        abort_conflict(mixin_key, "base", path, earlier)
+      }
+      folded$base <- merged_base$value
+      new_paths <- dta_template_leaf_paths(madd)
+      base_owners <- c(base_owners, stats::setNames(rep(contributor, length(new_paths)), new_paths))
+    }
+
+    # Collections: key disjointness, appended after what is already there.
+    for (section in names(key_fns)) {
+      items <- m$def[[section]] %||% list()
+      if (length(items) == 0) next
+      dta_template_assert_unique_keys(items, section, key_fns[[section]])
+      acc <- folded[[section]] %||% list()
+      for (entry in items) {
+        k <- key_fns[[section]](entry)
+        if (!is.na(k)) {
+          if (k %in% names(owners[[section]])) {
+            abort_conflict(mixin_key, section, k, owners[[section]][[k]])
+          }
+          owners[[section]][[k]] <- contributor
+        }
+        acc[[length(acc) + 1L]] <- entry
+      }
+      folded[[section]] <- acc
+    }
+    keys <- c(keys, mixin_key)
+  }
+  list(def = folded, keys = keys)
+}
+
 # Resolve a template's `extends:` chain into one fully-merged definition.
 #
 # `resolve_ref` is `function(ref) -> list(def = <parent definition list>, id =
@@ -847,32 +1100,62 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   }
 
   ref <- def$extends
-  if (is.null(ref) || !nzchar(as.character(ref))) {
-    return(list(def = def, lineage = character(0)))
+  has_extends <- !(is.null(ref) || !nzchar(as.character(ref)))
+  mixin_refs <- dta_template_mixin_refs(def)
+  if (!has_extends && length(mixin_refs) == 0) {
+    return(list(def = def, lineage = character(0), mixins = character(0)))
   }
 
-  if (.depth >= dta_template_max_inheritance_depth) {
-    cli::cli_abort(
-      "Template inheritance chain exceeds the depth limit of {dta_template_max_inheritance_depth}: {paste(c(.seen, own_key), collapse = ' -> ')}."
+  if (has_extends) {
+    if (.depth >= dta_template_max_inheritance_depth) {
+      cli::cli_abort(
+        "Template inheritance chain exceeds the depth limit of {dta_template_max_inheritance_depth}: {paste(c(.seen, own_key), collapse = ' -> ')}."
+      )
+    }
+
+    parent <- resolve_ref(as.character(ref))
+    if (is.null(parent)) {
+      cli::cli_abort(
+        "Template {.val {as.character(def$id %||% '<unknown>')}} extends unresolvable reference {.val {as.character(ref)}}."
+      )
+    }
+
+    # Recurse into the PARENT first, so a grandparent is merged into the parent
+    # before the parent (now fully resolved) is merged into this child -- that
+    # ordering is what makes "the parent overrides the grandparent" hold no
+    # matter how many levels away the grandparent is.
+    parent_resolved <- resolve_template_inheritance(
+      parent$def, resolve_ref,
+      .depth = .depth + 1L, .seen = c(.seen, own_key)
     )
+    parent_def <- parent_resolved$def
+    lineage <- c(paste0(parent$id, "@", parent$version), parent_resolved$lineage)
+    inherited_mixins <- parent_resolved$mixins %||% character(0)
+  } else {
+    # Mixins without `extends:`: the child merges over an EMPTY parent that the
+    # mixins then fill, so the merge code below needs no second code path.
+    parent_def <- list()
+    lineage <- character(0)
+    inherited_mixins <- character(0)
   }
 
-  parent <- resolve_ref(as.character(ref))
-  if (is.null(parent)) {
-    cli::cli_abort(
-      "Template {.val {as.character(def$id %||% '<unknown>')}} extends unresolvable reference {.val {as.character(ref)}}."
+  # Mixins are folded into the parent BEFORE the child merges over it, so the
+  # child sees mixin content exactly as it sees inherited content (it may modify
+  # or remove it) and a mixin can never override the child. Mixins do not count
+  # toward the depth limit and cannot cycle: they are flat (see the shape check).
+  own_mixins <- character(0)
+  if (length(mixin_refs) > 0) {
+    child_id <- as.character(def$id %||% "<unknown>")
+    folded <- dta_template_fold_mixins(
+      parent_def, mixin_refs, resolve_ref, child_id, inherited_mixins
     )
+    # A mixin is not exempt from an ancestor's seal: content it adds that
+    # reaches a sealed path, directly or through an option's effects, is a
+    # violation. The mixin's own contribution is judged against the chain alone.
+    dta_template_check_sealed(parent_def, folded$def, paste0(child_id, " (via its mixins)"))
+    parent_def <- folded$def
+    own_mixins <- folded$keys
   }
-
-  # Recurse into the PARENT first, so a grandparent is merged into the parent
-  # before the parent (now fully resolved) is merged into this child -- that
-  # ordering is what makes "the parent overrides the grandparent" hold no
-  # matter how many levels away the grandparent is.
-  parent_resolved <- resolve_template_inheritance(
-    parent$def, resolve_ref,
-    .depth = .depth + 1L, .seen = c(.seen, own_key)
-  )
-  parent_def <- parent_resolved$def
 
   merged <- parent_def
 
@@ -950,7 +1233,10 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
   merged$abstract <- def$abstract
   # `extends`/`order` are merge INSTRUCTIONS consumed above, not template
   # content -- neither belongs in the merged shape.
+  # `mixins` is a merge instruction too: descendants inherit the CONTENT, and
+  # their own `mixins:` apply at their own level.
   merged$extends <- NULL
+  merged$mixins <- NULL
   merged$order <- NULL
 
   # Sealed is checked against `merged` while it still carries only the PARENT's
@@ -982,6 +1268,7 @@ resolve_template_inheritance <- function(def, resolve_ref, .depth = 0L, .seen = 
 
   list(
     def = merged,
-    lineage = c(paste0(parent$id, "@", parent$version), parent_resolved$lineage)
+    lineage = lineage,
+    mixins = c(own_mixins, inherited_mixins)
   )
 }

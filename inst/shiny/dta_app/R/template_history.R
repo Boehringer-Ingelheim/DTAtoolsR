@@ -57,7 +57,10 @@ template_history_build <- function(ref, index) {
       if (!isTRUE(built$ok)) {
         stop(built$error)
       }
-      list(def = def, lineage = loaded$value$lineage, dta = built$value)
+      list(
+        def = def, lineage = loaded$value$lineage,
+        mixins = loaded$value$mixins, dta = built$value
+      )
     }
     if (is.null(def$variants)) {
       build(def)
@@ -80,7 +83,10 @@ template_history_build <- function(ref, index) {
         }
         variants[[paste(spec$id, choice$value, sep = "\n")]] <- built$value
       }
-      list(def = def, lineage = loaded$value$lineage, variants = variants)
+      list(
+        def = def, lineage = loaded$value$lineage,
+        mixins = loaded$value$mixins, variants = variants
+      )
     }
   })
 }
@@ -124,11 +130,12 @@ template_history_by_id <- function(x) {
 }
 
 # The "Template" area: what a template is beyond what it builds.
-template_history_def_leaves <- function(def, lineage) {
+template_history_def_leaves <- function(def, lineage, mixins = character(0)) {
   .dta_leaf_flatten(list(
     label = def$label,
     description = def$description,
     based_on = if (length(lineage) > 0) paste(lineage, collapse = " < ") else NULL,
+    mixes_in = if (length(mixins) > 0) paste(mixins, collapse = ", ") else NULL,
     options = template_history_by_id(def$options),
     party_slots = template_history_by_id(def$party_slots),
     vocabulary_slots = template_history_by_id(def$vocabulary_slots),
@@ -140,7 +147,7 @@ template_history_def_leaves <- function(def, lineage) {
 # Every leaf of one built template, per area.
 template_history_leaves <- function(b) {
   list(
-    Template = template_history_def_leaves(b$def, b$lineage),
+    Template = template_history_def_leaves(b$def, b$lineage, b$mixins),
     Metadata = dta_metadata_leaves(DTAtools::metadata(b$dta)),
     Datasets = dta_dataset_leaves(b$dta)
   )

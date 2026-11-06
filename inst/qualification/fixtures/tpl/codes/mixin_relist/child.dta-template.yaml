@@ -1,0 +1,5 @@
+kind: dta_creation_template
+id: rl_c
+version: "1.0"
+extends: rl_p@1.0
+mixins: [rl_m@1.0]

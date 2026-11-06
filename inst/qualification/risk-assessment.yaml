@@ -142,7 +142,10 @@ assessment:
       Inheritance decides what a specification actually says. A wrongly
       resolved template produces a plausible-looking specification that checks
       the wrong thing, and the four-way distinction between absent, null, empty
-      and set is easy to get wrong.
+      and set is easy to get wrong. Mixins compose a template from several
+      sources at once, so an overlap that is silently resolved would let one
+      source win unnoticed; overlap is therefore an error, and the cases
+      check that it is reported rather than merged.
     depth: One case per validation code; explicit cases for each value state.
 
   - area: ENV
