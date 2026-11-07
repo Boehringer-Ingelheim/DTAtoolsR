@@ -1,4 +1,4 @@
-# Rebuild inst/extdata/templates/clinical_dta_template.docx from source.
+# Rebuild inst/extdata/word-templates/clinical_dta_template.docx from source.
 #
 #   Rscript .github/scripts/build_clinical_template.R
 #
@@ -14,7 +14,7 @@
 # After rebuilding, re-run .github/scripts/sync_qualification_manifest.R: the
 # file is under inst/, so the qualification manifest pins its checksum.
 
-out <- file.path("inst", "extdata", "templates", "clinical_dta_template.docx")
+out <- file.path("inst", "extdata", "word-templates", "clinical_dta_template.docx")
 
 # ---- Palette (R/formattingHelpers.R) ---------------------------------------
 green <- "00625B"

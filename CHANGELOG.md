@@ -9,12 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - A template library can customise the Shiny app that serves it with a
-  `dta-app.yaml` in the library directory: organisation name and unit, app and
+  `dta-app.yaml` at the library root: organisation name and unit, app and
   window title, footer text, a logo, the colour scheme, the report-issue, about,
   repository and documentation links, which start buttons, the raw YAML tab and
   YAML downloads are offered, a read-only mode (`features.editing: false`),
-  which export formats and validation downloads are offered, and the library's
-  own Word templates for "Export DTA". Disabled features are refused by the
+  which export formats and validation downloads are offered, and the label and
+  order of the library's own Word templates for "Export DTA". Disabled features are refused by the
   server, not only hidden. Colours, links and file paths are validated, and a
   bad value falls back to its default with a warning instead of stopping the
   app. With several template sources the first `dta-app.yaml` wins as a whole.
@@ -39,10 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `validate_template()` checks `dta-app.yaml` with the app's own parser and
   reports `app_config_invalid` (error), `app_config_unknown_key` and
   `app_config_warning` (warnings), `app_config_duplicate` (error, both `.yaml`
-  and `.yml` present) and `app_config_outside_library_dir` (error, for a copy
-  left at the repository root).
-- `create_template_repo()` scaffolds a `templates/dta-app.yaml` with every key
-  commented out next to its default, and its README documents the file.
+  and `.yml` present) and `app_config_misplaced` (error, for a copy anywhere
+  but the library root).
+- `create_template_repo()` scaffolds a `dta-app.yaml` at the repository root
+  with every key commented out next to its default, and its README documents
+  the file.
 - Seven Word template placeholders for the free-text `transmission` fields,
   which no template could reach before: `{TRANSMISSION_EXTENT}`,
   `{TRANSMISSION_SCOPE}`, `{TRANSMISSION_PACKAGING}`,
@@ -75,9 +76,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   `write_dataset_metadata()` and `write_template_guide()` keep their running
   headers and footers and have their page-number fields updated when Word is
   installed; the TinyTeX and pandoc routes re-typeset the document and lose them.
+- Word templates for export are discovered automatically: every `.docx` in a
+  library's `export-templates/` folder that contains at least one
+  `{PLACEHOLDER}` marker is offered in the app's export dialog, labelled with
+  its file name without the extension, from every configured source. A `.docx`
+  without markers (a styles-only reference document, which would export a Word
+  file without the DTA in it) or one that cannot be read is skipped with a
+  warning naming it; a file listed under `exports.word_templates` is offered
+  whatever it contains. Other files, dotfiles and Word lock files (`~$x.docx`)
+  are ignored.
+  `exports.word_templates` in `dta-app.yaml` is now only an optional override
+  for label and order, with `file:` paths relative to `dta-app.yaml`'s folder
+  (the library root), for example `export-templates/report.docx`.
+- The app reports template files in the wrong folder: a warning in the log and
+  a note in the template picker ("starter: templates/starter_supplier.dta-party.yaml -
+  a party profile belongs in parties/ (library layout: ...)"), naming the
+  source and the path relative to its root, never an absolute path. A source
+  pointed at a kind folder is reported once, with the advice to move the files
+  of a flat library into `templates/`, `parties/` and `vocabulary/`. An empty
+  picker now explains the folder layout.
+- `validate_template()` reports `template_misplaced` (error, a template file
+  outside its kind's folder, for example at the root or a party in
+  `templates/`), `library_subfolder_given` (error, the path given is itself
+  `templates/`, `parties/` or `vocabulary/`; validate its parent) and
+  `export_template_invalid` (warning, a file in `export-templates/` that is not
+  a `.docx`; `README`, `README.md` and `README.txt` are not reported, other
+  `README*` files are). The messages note that folder names are case-sensitive
+  on the server.
 
 ### Changed
 
+- **Breaking:** template libraries are now read from `templates/` (creation
+  and dataset templates), `parties/` (`*.dta-party.yaml`), `vocabulary/`
+  (`*.dta-vocabulary.yaml`) and `export-templates/` (Word `.docx`), with
+  `dta-app.yaml` at the library root. A flat library, the layout of released
+  versions, is no longer read and must be reorganised: move each file into its
+  folder and run `validate_template(".", strict = TRUE)`. The app warns about
+  misplaced files and `validate_template()` reports them. An older app does
+  not read the new layout either, so reorganise on a branch and merge it when
+  the new version goes live.
 - The document name is now the main title of every document-style export, with
   the DTA's own title beneath it: the Word/PDF cover, the Markdown top
   heading (`# Data Transfer Agreement`, formerly `# Data Transfer Agreement
@@ -150,8 +187,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `metadata.template` now records the template's `label` and the `date` of the
   template version (a new optional `date:` field on creation templates, never
   inherited through `extends:`). `source_ref` holds the full file path only for
-  a local `dir:` source; for git, package and bundled templates it is the file
-  name within the source rather than a machine-specific cache path.
+  a local `dir:` source; for git, package and bundled templates it is the path
+  within the source (`templates/<file name>`, or the folder of the template's
+  kind) rather than a machine-specific cache path.
 - In "New DTA from template", an option with a single suggestion (and free
   text allowed) is a text field pre-filled with that suggestion, edited in
   place, instead of a one-entry dropdown.
@@ -544,11 +582,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   properties omitted. Study identity carries over by default when drafting a
   revision; agreement sections require explicit opt-in.
 
-- template libraries can keep their templates in a `templates/` folder;
-  `validate_template()`, the Shiny app's `dir:`/`pkg:`/`git:` sources and
-  `DTAtools.template_dir` read it automatically. New `validate_template()`
-  error `template_outside_library_dir` rejects template files left at the
-  root of such a library.
+- template libraries are organised into folders by file kind: `templates/`
+  (creation and dataset templates), `parties/`, `vocabulary/` and
+  `export-templates/`, with the optional `dta-app.yaml` at the library root.
+  `validate_template()`, the Shiny app's `dir:`/`pkg:`/`git:` sources, a
+  package's `inst/dta-templates`, `./dta-templates` and
+  `DTAtools.template_dir` all read this layout. The bundled demo library is
+  `system.file("extdata", "library", package = "DTAtools")`; the CI workflow
+  files moved to `extdata/ci/` and the bundled Word templates to
+  `extdata/word-templates/`.
 
 - **A qualification suite that produces audit-grade evidence for an installed
   copy of the package.** `run_qualification()` runs an installation,
@@ -778,9 +820,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Two templates that both extend a template not in the list (an abstract
   base, or one in a filtered-out library) are separate families again: each
   counts and expands only its own variants.
-- `create_template_repo()` writes starter templates to `templates/` and ships
-  a comprehensive README documenting every template feature, app configuration
-  and validation codes.
+- `create_template_repo()` writes the starter files into `templates/`,
+  `parties/`, `vocabulary/` and `export-templates/` and ships a comprehensive
+  README documenting every template feature, app configuration and validation
+  codes.
 - `template_in_subdirectory` messages name the library folder to move files to.
 
 - **Choosing a template is now a search, not a dropdown.** "Create new from

@@ -31,13 +31,15 @@ local_packaged_templates_only <- function(.local_envir = parent.frame()) {
 
 # ---- dta_creation_templates_dir / list_dta_creation_templates / get_dta_creation_template_path ----
 
-test_that("dta_creation_templates_dir() resolves to a directory that exists", {
+test_that("dta_creation_templates_dir() resolves to a library root that exists", {
   fn <- app_fn("dta_creation_templates_dir")
   dir <- fn()
 
   expect_true(nzchar(dir))
   expect_true(dir.exists(dir))
-  expect_true(file.exists(file.path(dir, "biomarker_gf.dta-template.yaml")))
+  # A library ROOT: the template sits in its templates/ folder, not beside it.
+  expect_true(file.exists(file.path(dir, "templates", "biomarker_gf.dta-template.yaml")))
+  expect_false(file.exists(file.path(dir, "biomarker_gf.dta-template.yaml")))
 })
 
 test_that("list_dta_creation_templates() finds the real bundled template", {
@@ -56,7 +58,7 @@ test_that("get_dta_creation_template_path() resolves the real bundled template t
   expect_equal(
     normalizePath(result, winslash = "/"),
     normalizePath(
-      system.file("extdata", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools"),
+      system.file("extdata", "library", "templates", "biomarker_gf.dta-template.yaml", package = "DTAtools"),
       winslash = "/"
     )
   )
@@ -77,7 +79,7 @@ test_that("get_dta_creation_template_path() returns NULL for an unknown template
 
 test_that("read_dta_creation_template() parses the real bundled template", {
   real_path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   expect_true(nzchar(real_path))
@@ -364,7 +366,8 @@ test_that("get_dta_creation_template_path() prefers an earlier directory and can
   tmp <- tempfile()
   dir.create(tmp)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
-  shadow <- file.path(tmp, "biomarker_gf.dta-template.yaml")
+  dir.create(file.path(tmp, "templates"))
+  shadow <- file.path(tmp, "templates", "biomarker_gf.dta-template.yaml")
   writeLines("kind: dta_creation_template", shadow)
 
   old <- options(DTAtools.template_dir = tmp)
@@ -666,7 +669,7 @@ test_that("apply_template_metadata_path() rejects an unsupported metadata top-le
 test_that("create_dta_from_template() builds a DTA from the real bundled template", {
   local_packaged_templates_only()
   real_path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   read_fn <- app_fn("read_dta_creation_template")

@@ -1,0 +1,8 @@
+# A party profile in templates/: the folder of its kind is parties/.
+kind: dta_party_profile
+id: stray_party
+version: "1.0"
+role: supplier
+label: Stray party
+affiliation:
+  name: Example Supplier

@@ -15,8 +15,9 @@
 #' Building blocks (abstract templates) get no document of their own: what they
 #' contribute is part of the guide of every template based on them.
 #'
-#' @param path The template library: its root folder, its `templates/` folder,
-#'   or a single template file (the guide then covers that template only).
+#' @param path The template library: its root folder (the one holding
+#'   `templates/`, `parties/` and `vocabulary/`), or a single template file
+#'   inside one of those folders (the guide then covers that template only).
 #' @param dir Folder to write the guides to. It is created when missing.
 #' @param templates Optional template ids. `NULL` (default) writes a guide for
 #'   the newest version of every usable, non-abstract DTA template. An id that
@@ -41,7 +42,7 @@
 #' @examples
 #' out_dir <- file.path(tempdir(), "template-guides")
 #' write_template_guide(
-#'   system.file("extdata", "templates", package = "DTAtools"),
+#'   system.file("extdata", "library", package = "DTAtools"),
 #'   out_dir,
 #'   templates = "biomarker_gf",
 #'   quiet = TRUE

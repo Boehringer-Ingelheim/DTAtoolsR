@@ -2,6 +2,23 @@
 # computed by building consecutive versions and diffing them -- and for the
 # history section of the picker's detail panel (template_ui.R).
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 local_clean_template_env <- function(..., .local_envir = parent.frame()) {
   withr::local_envvar(
     c(
@@ -69,7 +86,7 @@ write_ct <- function(root, id, version, header = "Header A",
       body,
       opt_lines
     ),
-    file.path(root, sprintf("%s_%s.dta-template.yaml", id, gsub(".", "_", version, fixed = TRUE)))
+    lib_path(root, sprintf("%s_%s.dta-template.yaml", id, gsub(".", "_", version, fixed = TRUE)))
   )
 }
 
@@ -170,7 +187,7 @@ test_that("a release of a dataset template imported via @latest appears, as one 
         sprintf("    - { id: %s, label: %s, type: SAS Char }", columns, columns),
         "  rules: []"
       ),
-      file.path(root, sprintf("shared_%s.dta-dataset-template.yaml", gsub(".", "_", version, fixed = TRUE)))
+      lib_path(root, sprintf("shared_%s.dta-dataset-template.yaml", gsub(".", "_", version, fixed = TRUE)))
     )
   }
   write_dst("1.0", "COL_A")
@@ -181,7 +198,7 @@ test_that("a release of a dataset template imported via @latest appears, as one 
       "base:", "  metadata:", "    title: Demo",
       "datasets:", "  - template: shared_ds@latest", "options: []"
     ),
-    file.path(root, "user_ct.dta-template.yaml")
+    lib_path(root, "user_ct.dta-template.yaml")
   )
   idx <- index_over(root)
 
@@ -200,7 +217,7 @@ test_that("an option that is nothing but its id is still reported when added", {
   write_ct(root, "demo", "1.0")
   write_ct(root, "demo", "1.1")
   # Rewrite 1.1's options block as a bare id.
-  f <- file.path(root, "demo_1_1.dta-template.yaml")
+  f <- lib_path(root, "demo_1_1.dta-template.yaml")
   writeLines(c(sub("^options: \\[\\]$", "options:", readLines(f)), "  - id: bare"), f)
   idx <- index_over(root)
 
@@ -269,7 +286,7 @@ history_variant_definition <- function(version = "1.0") {
 }
 
 write_history_definition <- function(root, def, suffix = ".dta-template.yaml") {
-  yaml::write_yaml(def, file.path(root, paste0(def$id, "_", def$version, suffix)))
+  yaml::write_yaml(def, lib_path(root, paste0(def$id, "_", def$version, suffix)))
 }
 
 test_that("variant history builds every choice and reports only the changed realization", {
@@ -508,7 +525,7 @@ test_that("ordinary history builds retain their original result and comparison s
 
 # Append a `prior_versions:` block to a file written by write_ct().
 add_prior <- function(root, id, version, lines) {
-  path <- file.path(root, sprintf("%s_%s.dta-template.yaml", id, gsub(".", "_", version, fixed = TRUE)))
+  path <- lib_path(root, sprintf("%s_%s.dta-template.yaml", id, gsub(".", "_", version, fixed = TRUE)))
   write(c("prior_versions:", lines), path, append = TRUE)
 }
 
@@ -601,7 +618,7 @@ test_that("an empty prior_versions in a newer file does not hide an older file's
   write_ct(root, "demo", "5.0")
   add_prior(root, "demo", "5.0", "  - { version: \"4.0\", changes: Kept. }")
   write_ct(root, "demo", "5.1")
-  write("prior_versions: []", file.path(root, "demo_5_1.dta-template.yaml"), append = TRUE)
+  write("prior_versions: []", lib_path(root, "demo_5_1.dta-template.yaml"), append = TRUE)
   idx <- index_over(root)
 
   manual <- Filter(function(e) e$type == "manual", app_fn("template_history")(idx, "demo"))

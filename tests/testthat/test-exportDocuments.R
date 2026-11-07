@@ -120,7 +120,7 @@ test_that("write_dataset_metadata and alias export metadata documents", {
 # .read_docx_body_xml() and .docx_paragraphs() live in helper-docx.R.
 
 test_that("bundled numbered template ships a 'heading 4' style", {
-  tp <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  tp <- system.file("extdata", "word-templates", "dta_numbered_template.docx", package = "DTAtools")
   expect_true(nzchar(tp) && file.exists(tp))
 
   si <- officer::styles_info(officer::read_docx(path = tp))
@@ -134,7 +134,7 @@ test_that("write_dta docx uses numbered heading hierarchy", {
   write_dta(dta, file = out_docx, format = "docx", overwrite = TRUE, quiet = TRUE)
 
   # Assert on style_name, not on the underlying styleId. The checked-in template
-  # inst/extdata/templates/dta_numbered_template.docx was saved by a French Word
+  # inst/extdata/word-templates/dta_numbered_template.docx was saved by a French Word
   # install, so its ids happen to be "Titre1".."Titre4"; regenerating it on an
   # English install would yield "Heading1".. with no functional change.
   # .add_heading() (R/documentBuilders.R:61-64) requests "heading <level>", and
@@ -1213,7 +1213,7 @@ test_that("the bundled template renders headings in the brand green", {
   # Heading colour comes from the template's own styles, not from anything the
   # package writes per paragraph, so it has to be pinned on the asset itself --
   # otherwise Word draws black headings above brand-green tables.
-  tmpl <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  tmpl <- system.file("extdata", "word-templates", "dta_numbered_template.docx", package = "DTAtools")
   expect_true(nzchar(tmpl))
 
   ex <- tempfile()

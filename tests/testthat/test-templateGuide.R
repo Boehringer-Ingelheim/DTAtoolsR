@@ -3,10 +3,29 @@
 # spelled out), never from the software. Messages are never asserted on, only
 # condition classes (R and cli translate them).
 
-tg_lib <- function() system.file("extdata", "templates", package = "DTAtools")
+tg_lib <- function() system.file("extdata", "library", package = "DTAtools")
+
+# Library files live in kind folders: templates/, parties/, vocabulary/.
+tg_path <- function(root, folder, name) {
+  dir.create(file.path(root, folder), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, folder, name)
+}
+tg_folder_of <- function(name) {
+  if (grepl("\\.dta-vocabulary\\.yaml$", name)) {
+    "vocabulary"
+  } else if (grepl("\\.dta-party\\.yaml$", name)) {
+    "parties"
+  } else {
+    "templates"
+  }
+}
+# A scratch copy of the bundled kind folders.
+tg_copy_lib <- function(to) {
+  file.copy(file.path(tg_lib(), c("templates", "parties", "vocabulary")), to, recursive = TRUE)
+}
 
 tg_yaml <- function(id) {
-  yaml::read_yaml(file.path(tg_lib(), paste0(id, ".dta-template.yaml")))
+  yaml::read_yaml(file.path(tg_lib(), "templates", paste0(id, ".dta-template.yaml")))
 }
 
 # Bundled guides are written once per test file.
@@ -89,7 +108,7 @@ tg_tables <- function(file) {
 test_that("one file per non-abstract template, named from the YAML", {
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
   written <- tg_written()
-  files <- list.files(tg_lib(), "\\.dta-template\\.yaml$", full.names = TRUE)
+  files <- list.files(file.path(tg_lib(), "templates"), "\\.dta-template\\.yaml$", full.names = TRUE)
   y <- lapply(files, yaml::read_yaml)
   y <- Filter(function(d) !isTRUE(d$abstract), y)
   expected <- vapply(y, function(d) sprintf("%s_v%s_template_guide.docx", d$id, d$version), character(1))
@@ -110,8 +129,8 @@ test_that("a building block has no guide of its own", {
       paste0("label: ", label), ..., "base:", "  metadata:", "    title: T"
     )
   }
-  writeLines(tpl("shared", "Shared", "abstract: true"), file.path(dir, "shared.dta-template.yaml"))
-  writeLines(tpl("child", "Child", "extends: shared@1.0"), file.path(dir, "child.dta-template.yaml"))
+  writeLines(tpl("shared", "Shared", "abstract: true"), tg_path(dir, "templates", "shared.dta-template.yaml"))
+  writeLines(tpl("child", "Child", "extends: shared@1.0"), tg_path(dir, "templates", "child.dta-template.yaml"))
   out <- withr::local_tempdir()
   expect_error(
     write_template_guide(dir, out, templates = "shared", quiet = TRUE),
@@ -158,7 +177,7 @@ test_that("a bad format is refused before any work, and a single file selects it
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
   out <- withr::local_tempdir()
   got <- write_template_guide(
-    file.path(tg_lib(), "biomarker_gf_acme.dta-template.yaml"), out,
+    file.path(tg_lib(), "templates", "biomarker_gf_acme.dta-template.yaml"), out,
     quiet = TRUE
   )
   expect_identical(names(got), "biomarker_gf_acme")
@@ -216,7 +235,7 @@ test_that("cover title, properties, header and footer come from the template", {
 test_that("the organisation comes from the library unless given, and '' shows none", {
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
   lib <- withr::local_tempdir()
-  file.copy(list.files(tg_lib(), "\\.ya?ml$", full.names = TRUE), lib)
+  tg_copy_lib(lib)
   writeLines(
     c("kind: dta_app_config", "organisation:", "  name: Library Org", "  unit: Library Unit"),
     file.path(lib, "dta-app.yaml")
@@ -276,7 +295,7 @@ test_that("datasets sit in one landscape section", {
 test_that("every question and every built column is in the document", {
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
   written <- tg_written()
-  ds <- yaml::read_yaml(file.path(tg_lib(), "gf_smrnaseq.dta-dataset-template.yaml"))$dataset
+  ds <- yaml::read_yaml(file.path(tg_lib(), "templates", "gf_smrnaseq.dta-dataset-template.yaml"))$dataset
   ids <- vapply(ds$columns, function(cl) cl$id, character(1))
 
   gf <- tg_text(written[["biomarker_gf"]])
@@ -320,7 +339,7 @@ test_that("a template that cannot be built still gets a document and a warning",
       "kind: dta_creation_template", "id: broken", "version: '1.0'", "label: Broken one",
       "extends: missing_parent@1.0", "base:", "  metadata:", "    title: T"
     ),
-    file.path(dir, "broken.dta-template.yaml")
+    tg_path(dir, "templates", "broken.dta-template.yaml")
   )
   out <- withr::local_tempdir()
   expect_warning(
@@ -363,8 +382,8 @@ test_that("a PDF is a real PDF when a backend exists", {
 # Bundled library plus extra files, in a scratch folder.
 tg_scratch <- function(extra = list()) {
   dir <- withr::local_tempdir(.local_envir = parent.frame())
-  file.copy(list.files(tg_lib(), "\\.ya?ml$", full.names = TRUE), dir)
-  for (n in names(extra)) writeLines(extra[[n]], file.path(dir, n))
+  tg_copy_lib(dir)
+  for (n in names(extra)) writeLines(extra[[n]], tg_path(dir, tg_folder_of(n), n))
   dir
 }
 
@@ -390,7 +409,7 @@ test_that("a building block parent gets no 'everything else is the same' promise
   dir <- tg_scratch(list(
     "biomarker_gf.dta-template.yaml" = sub(
       "^id: biomarker_gf$", "id: biomarker_gf\nabstract: true",
-      readLines(file.path(tg_lib(), "biomarker_gf.dta-template.yaml")),
+      readLines(file.path(tg_lib(), "templates", "biomarker_gf.dta-template.yaml")),
       perl = TRUE
     )
   ))
@@ -405,7 +424,7 @@ test_that("a building block parent gets no 'everything else is the same' promise
 
 test_that("a term list is documented once, in the version the template pins", {
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
-  v1 <- readLines(file.path(tg_lib(), "gf_tstdtl.dta-vocabulary.yaml"))
+  v1 <- readLines(file.path(tg_lib(), "vocabulary", "gf_tstdtl.dta-vocabulary.yaml"))
   v2 <- sub("^version: .*$", "version: \"2.0\"", v1)
   v2 <- sub("code: FRAGMENT COUNT", "code: NEWER ONLY", v2, fixed = TRUE)
   dir <- tg_scratch(list("gf_tstdtl_2.dta-vocabulary.yaml" = v2))
@@ -420,13 +439,13 @@ test_that("a term list is documented once, in the version the template pins", {
 
 test_that("a single template file documents that file's version, not the newest", {
   skip_if(!nzchar(tg_lib()), "bundled templates not installed")
-  old <- readLines(file.path(tg_lib(), "biomarker_gf.dta-template.yaml"))
+  old <- readLines(file.path(tg_lib(), "templates", "biomarker_gf.dta-template.yaml"))
   newer <- sub("^version: .*$", "version: \"2.0\"", old)
   dir <- tg_scratch(list("biomarker_gf_2.dta-template.yaml" = newer))
   out <- withr::local_tempdir()
-  got <- write_template_guide(file.path(dir, "biomarker_gf.dta-template.yaml"), out, quiet = TRUE)
+  got <- write_template_guide(file.path(dir, "templates", "biomarker_gf.dta-template.yaml"), out, quiet = TRUE)
   expect_identical(basename(got[["biomarker_gf"]]), "biomarker_gf_v1.0_template_guide.docx")
-  got2 <- write_template_guide(file.path(dir, "biomarker_gf_2.dta-template.yaml"), out, quiet = TRUE)
+  got2 <- write_template_guide(file.path(dir, "templates", "biomarker_gf_2.dta-template.yaml"), out, quiet = TRUE)
   expect_identical(basename(got2[["biomarker_gf"]]), "biomarker_gf_v2.0_template_guide.docx")
 })
 
@@ -473,8 +492,8 @@ test_that("file names that differ only in case collide", {
     )
   }
   dir <- withr::local_tempdir()
-  writeLines(mk("Case_tpl"), file.path(dir, "a.dta-template.yaml"))
-  writeLines(mk("case_tpl"), file.path(dir, "b.dta-template.yaml"))
+  writeLines(mk("Case_tpl"), tg_path(dir, "templates", "a.dta-template.yaml"))
+  writeLines(mk("case_tpl"), tg_path(dir, "templates", "b.dta-template.yaml"))
   out <- withr::local_tempdir()
   expect_error(write_template_guide(dir, out, quiet = TRUE), class = "dta_template_guide_exists")
   expect_length(list.files(out), 0L)
@@ -530,7 +549,7 @@ test_that("a required question reads 'Must be answered' in the intro and the car
     "datasets:", "  - id: tiny", "    name: Tiny", "    type: tabular",
     "    files: {filename: t.csv, type: csv}",
     "    columns:", "      - {id: AA, type: SAS Char}", "    rules: []"
-  ), file.path(dir, "req.dta-template.yaml"))
+  ), tg_path(dir, "templates", "req.dta-template.yaml"))
   out <- withr::local_tempdir()
   got <- write_template_guide(dir, out, quiet = TRUE)
   txt <- tg_text(got[[1]])
@@ -576,4 +595,77 @@ test_that("contact widths follow the review", {
   ct <- tbls[[which(grepl("Signs the DTA", txt, fixed = TRUE))[[1]]]]
   g <- as.numeric(xml2::xml_attr(xml2::xml_find_all(ct, "./*[local-name()='tblGrid']/*[local-name()='gridCol']"), "w"))
   expect_equal(g / sum(g), c(1.6, 1.6, 2.2, 0.9) / 6.3, tolerance = 0.02)
+})
+
+# ---- library layout ----------------------------------------------------------
+
+# A scratch library ROOT: a copy of the bundled kind folders, plus an
+# unrelated template and the two things the guide must leave alone.
+tg_scratch_library <- function(.local_envir = parent.frame()) {
+  root <- withr::local_tempdir(.local_envir = .local_envir)
+  tg_copy_lib(root)
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: zeta_unrelated", "version: '1.0'",
+      "label: Unrelated Zeta Template",
+      "base:", "  metadata:", "    title: Zeta",
+      "datasets:",
+      "  - id: z", "    name: Zeta", "    type: tabular",
+      "    files: {filename: z.csv, type: csv}",
+      "    columns:", "      - {id: ZZ, type: SAS Char}", "    rules: []"
+    ),
+    tg_path(root, "templates", "zeta.dta-template.yaml")
+  )
+  writeLines("not a template", tg_path(root, "export-templates", "README.md"))
+  writeLines("kind: dta_app_config", file.path(root, "dta-app.yaml"))
+  root
+}
+
+test_that("a library root is guided across its kind folders", {
+  skip_if(!nzchar(tg_lib()), "bundled library not installed")
+  root <- tg_scratch_library()
+  out <- withr::local_tempdir()
+  got <- write_template_guide(root, out, quiet = TRUE)
+  expect_true(all(c("biomarker_gf", "biomarker_gf_acme", "zeta_unrelated") %in% names(got)))
+})
+
+test_that("a single template file in its kind folder guides that template from the library root", {
+  skip_if(!nzchar(tg_lib()), "bundled library not installed")
+  root <- tg_scratch_library()
+  out <- withr::local_tempdir()
+  file <- file.path(root, "templates", "biomarker_gf_acme.dta-template.yaml")
+  got <- write_template_guide(file, out, quiet = TRUE)
+  expect_identical(names(got), "biomarker_gf_acme")
+  # The parties and term lists it uses come from their own folders.
+  expect_match(tg_text(got[[1]]), "ACME Labs", fixed = TRUE)
+})
+
+test_that("a single template file outside the folder of its kind aborts with dta_template_guide_no_templates", {
+  skip_if(!nzchar(tg_lib()), "bundled library not installed")
+  root <- tg_scratch_library()
+  src <- file.path(root, "templates", "biomarker_gf_acme.dta-template.yaml")
+  stray <- c(
+    file.path(root, "biomarker_gf_acme.dta-template.yaml"),
+    file.path(root, "parties", "biomarker_gf_acme.dta-template.yaml")
+  )
+  file.copy(src, stray)
+  for (f in stray) {
+    out <- tempfile("guides")
+    expect_error(
+      write_template_guide(f, out, quiet = TRUE),
+      class = "dta_template_guide_no_templates", info = f
+    )
+    expect_false(dir.exists(out), info = f)
+  }
+})
+
+test_that("a kind folder given as the library aborts with dta_template_guide_no_templates", {
+  skip_if(!nzchar(tg_lib()), "bundled library not installed")
+  root <- tg_scratch_library()
+  out <- tempfile("guides")
+  expect_error(
+    write_template_guide(file.path(root, "templates"), out, quiet = TRUE),
+    class = "dta_template_guide_no_templates"
+  )
+  expect_false(dir.exists(out))
 })

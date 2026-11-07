@@ -3,7 +3,7 @@
 # straight from the YAML (or spelled out), never from the collector.
 
 bundled_library <- function() {
-  system.file("extdata", "templates", package = "DTAtools")
+  system.file("extdata", "library", package = "DTAtools")
 }
 
 # The bundled library is read once per test file; building every template is
@@ -22,15 +22,36 @@ entry_by_id <- function(entries, id) {
   hit[[1]]
 }
 
-# A scratch library holding a copy of the bundled templates.
+# A scratch library ROOT holding a copy of the bundled library's kind folders.
 copy_bundled_library <- function() {
   dir <- withr::local_tempdir(.local_envir = parent.frame())
-  file.copy(list.files(bundled_library(), pattern = "\\.ya?ml$", full.names = TRUE), dir)
+  file.copy(
+    file.path(bundled_library(), c("templates", "parties", "vocabulary")),
+    dir,
+    recursive = TRUE
+  )
   dir
 }
 
+# The kind folder of a library root that holds `name`, by its kind suffix; a
+# name with no kind suffix lands directly in the root.
+kind_folder_of <- function(name) {
+  if (grepl("[.]dta-(dataset-)?template[.]ya?ml$", name)) {
+    "templates"
+  } else if (grepl("[.]dta-party[.]ya?ml$", name)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", name)) {
+    "vocabulary"
+  } else {
+    ""
+  }
+}
+
+# Writes `lines` as `name` into its kind folder under library root `dir`.
 write_lines <- function(dir, name, lines) {
-  path <- file.path(dir, name)
+  folder <- file.path(dir, kind_folder_of(name))
+  dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+  path <- file.path(folder, name)
   writeLines(lines, path)
   path
 }
@@ -65,7 +86,7 @@ test_that("the guide has the documented shape, with a data frame for every table
 
 test_that("biomarker_gf lists every option of the YAML as a question", {
   e <- entry_by_id(bundled_guide()$creation, "biomarker_gf")
-  yaml_def <- yaml::read_yaml(file.path(bundled_library(), "biomarker_gf.dta-template.yaml"))
+  yaml_def <- yaml::read_yaml(file.path(bundled_library(), "templates", "biomarker_gf.dta-template.yaml"))
   labels <- vapply(yaml_def[["options"]], function(o) o[["label"]], character(1))
   expect_setequal(e$questions$Question, labels)
   expect_identical(nrow(e$questions), 12L)
@@ -140,7 +161,7 @@ test_that("the party and term-list choices and the pre-filled fields are listed"
   expect_identical(pre[["Document date"]], "(the date the DTA is created)")
   expect_identical(by_q[["Document date"]], "")
   # The first version history entry says where each part comes from.
-  y <- yaml::read_yaml(file.path(bundled_library(), "biomarker_gf.dta-template.yaml"))
+  y <- yaml::read_yaml(file.path(bundled_library(), "templates", "biomarker_gf.dta-template.yaml"))
   vh <- pre[["Version history (first entry)"]]
   expect_match(vh, "Version: your answer to question 'Document version'", fixed = TRUE)
   expect_match(vh, "Date: the day the DTA is created", fixed = TRUE)
@@ -377,20 +398,90 @@ test_that("`templates` keeps the chosen templates and what they reference", {
 
 test_that("a single template file means its directory restricted to that id and its references", {
   dir <- copy_bundled_library()
-  g <- .template_guide_collect(file.path(dir, "biomarker_gf_acme.dta-template.yaml"))
+  g <- .template_guide_collect(file.path(dir, "templates", "biomarker_gf_acme.dta-template.yaml"))
   expect_true(all(c("biomarker_gf_acme", "biomarker_gf", "gf_smrnaseq") %in% g$overview$ID))
   expect_identical(normalizePath(g$library$path, "/"), normalizePath(dir, "/"))
 })
 
-test_that("a library root with a templates/ subfolder is found", {
-  root <- withr::local_tempdir()
-  dir.create(file.path(root, "templates"))
-  file.copy(
-    list.files(bundled_library(), pattern = "\\.ya?ml$", full.names = TRUE),
-    file.path(root, "templates")
-  )
+test_that("a library root is read from its kind folders, one chapter list across all of them", {
+  root <- copy_bundled_library()
+  # Folders the guide does not read must not disturb it.
+  dir.create(file.path(root, "export-templates"))
+  writeLines("x", file.path(root, "export-templates", "README.md"))
+  writeLines("kind: dta_app_config", file.path(root, "dta-app.yaml"))
+
   g <- .template_guide_collect(root)
   expect_identical(nrow(g$overview), 7L)
+  expect_identical(nrow(g$problems), 0L)
+  expect_setequal(g$overview$Kind, c("DTA template", "Dataset template", "Term list", "Party profile"))
+  by_kind <- split(g$overview$ID, g$overview$Kind)
+  expect_setequal(by_kind[["DTA template"]], c("biomarker_gf", "biomarker_gf_acme"))
+  expect_setequal(by_kind[["Dataset template"]], "gf_smrnaseq")
+  expect_setequal(by_kind[["Term list"]], c("gf_test", "gf_tstdtl"))
+  expect_setequal(by_kind[["Party profile"]], c("supplier_acme", "receiver_ourco"))
+  expect_identical(normalizePath(g$library$path, "/"), normalizePath(root, "/"))
+})
+
+test_that("a flat directory of template files is not a library", {
+  flat <- withr::local_tempdir()
+  src <- copy_bundled_library()
+  file.copy(
+    list.files(src, pattern = "[.]ya?ml$", recursive = TRUE, full.names = TRUE),
+    flat
+  )
+  # The message says what a library is (cli wraps it, so match across whitespace).
+  expect_error(
+    .template_guide_collect(flat),
+    class = "dta_template_guide_no_templates",
+    regexp = "templates/,\\s+parties/\\s+and\\s+vocabulary/\\s+folders;\\s+pass\\s+the\\s+library\\s+root"
+  )
+})
+
+test_that("a kind folder given instead of the library root finds no templates", {
+  root <- copy_bundled_library()
+  for (sub in c("templates", "parties", "vocabulary")) {
+    expect_error(
+      .template_guide_collect(file.path(root, sub)),
+      class = "dta_template_guide_no_templates", info = sub
+    )
+  }
+})
+
+test_that("a single template file is located through its kind folder; the library root is its parent", {
+  root <- copy_bundled_library()
+  party <- file.path(root, "parties", "supplier_acme.dta-party.yaml")
+  g <- .template_guide_collect(party)
+  expect_identical(g$overview$ID, "supplier_acme")
+  expect_identical(normalizePath(g$library$path, "/"), normalizePath(root, "/"))
+
+  vocab <- file.path(root, "vocabulary", "gf_test.dta-vocabulary.yaml")
+  expect_identical(.template_guide_collect(vocab)$overview$ID, "gf_test")
+})
+
+test_that("a single template file outside the folder of its kind is refused with a classed error", {
+  root <- copy_bundled_library()
+  src <- file.path(root, "templates", "biomarker_gf.dta-template.yaml")
+
+  # in the library root
+  at_root <- file.path(root, "biomarker_gf.dta-template.yaml")
+  file.copy(src, at_root)
+  expect_error(.template_guide_collect(at_root), class = "dta_template_guide_no_templates")
+
+  # in another kind's folder
+  in_parties <- file.path(root, "parties", "biomarker_gf.dta-template.yaml")
+  file.copy(src, in_parties)
+  expect_error(.template_guide_collect(in_parties), class = "dta_template_guide_no_templates")
+
+  # below its own folder
+  dir.create(file.path(root, "templates", "archive"))
+  nested <- file.path(root, "templates", "archive", "biomarker_gf.dta-template.yaml")
+  file.copy(src, nested)
+  expect_error(.template_guide_collect(nested), class = "dta_template_guide_no_templates")
+
+  # a file with no kind suffix at all
+  plain <- file.path(root, "templates", "biomarker_gf.yaml")
+  file.copy(src, plain)
+  expect_error(.template_guide_collect(plain), class = "dta_template_guide_no_templates")
 })
 
 test_that("a template with variants is built once per choice", {
@@ -676,7 +767,10 @@ tiny_dataset_lines <- c(
 
 test_that("a creation entry carries its identity, counts, lineage and offered references", {
   g <- bundled_guide()
-  yaml_of <- function(file) yaml::read_yaml(file.path(bundled_library(), file))
+  yaml_of <- function(file) {
+    folder <- if (grepl("vocabulary", file)) "vocabulary" else if (grepl("party", file)) "parties" else "templates"
+    yaml::read_yaml(file.path(bundled_library(), folder, file))
+  }
   gf <- yaml_of("biomarker_gf.dta-template.yaml")
   e <- entry_by_id(g$creation, "biomarker_gf")
   expect_false(e$abstract)

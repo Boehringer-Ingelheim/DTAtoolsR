@@ -2,9 +2,11 @@
 # The parsing rules themselves are pinned in test-shinyapp-app-config.R; this
 # file covers how the validator reports them.
 
-# A library directory with one valid template, so no_templates never fires.
+# A library root with one valid template in templates/, so no_templates never
+# fires. dta-app.yaml belongs directly in the root.
 app_config_library <- function(config_lines = NULL, filename = "dta-app.yaml") {
   dir <- withr::local_tempdir(.local_envir = parent.frame())
+  dir.create(file.path(dir, "templates"))
   writeLines(
     c(
       "kind: dta_creation_template", "id: clean_tpl", "version: \"1.0\"",
@@ -13,7 +15,7 @@ app_config_library <- function(config_lines = NULL, filename = "dta-app.yaml") {
       "    files: {filename: x.csv, type: csv}",
       "    columns:", "      - {id: COL1, type: SAS Char}"
     ),
-    file.path(dir, "clean.dta-template.yaml")
+    file.path(dir, "templates", "clean.dta-template.yaml")
   )
   if (!is.null(config_lines)) writeLines(config_lines, file.path(dir, filename))
   dir
@@ -84,23 +86,70 @@ test_that("both dta-app.yaml and dta-app.yml are an app_config_duplicate error o
   expect_equal(unique(rows$severity), "error")
 })
 
-test_that("a config at the repository root while templates/ is active is app_config_outside_library_dir", {
-  root <- withr::local_tempdir()
-  dir.create(file.path(root, "templates"))
-  lib <- app_config_library()
-  file.copy(
-    file.path(lib, "clean.dta-template.yaml"),
-    file.path(root, "templates", "clean.dta-template.yaml")
-  )
-  writeLines("kind: dta_app_config", file.path(root, "dta-app.yaml"))
-  rows <- app_rows(validate_template(root))
-  expect_equal(rows$code, "app_config_outside_library_dir")
-  expect_equal(rows$severity, "error")
-  expect_match(rows$message, "templates/", fixed = TRUE)
+test_that("a config in the library root is valid; the same file in a kind folder is app_config_misplaced", {
+  dir <- app_config_library(c("kind: dta_app_config"))
+  expect_equal(nrow(validate_template(dir)), 0)
 
-  # The same file inside templates/ is fine.
-  file.rename(file.path(root, "dta-app.yaml"), file.path(root, "templates", "dta-app.yaml"))
-  expect_equal(nrow(app_rows(validate_template(root))), 0)
+  # Moved into templates/: the app reads only the root, so the file is
+  # invisible, and the root no longer has one.
+  file.rename(file.path(dir, "dta-app.yaml"), file.path(dir, "templates", "dta-app.yaml"))
+  result <- validate_template(dir)
+  rows <- app_rows(result)
+  expect_equal(rows$code, "app_config_misplaced")
+  expect_equal(rows$severity, "error")
+  expect_equal(rows$kind, "dta_app_config")
+  expect_equal(rows$file, file.path(dir, "templates", "dta-app.yaml"))
+  expect_match(rows$message, "repository root", fixed = TRUE)
+  expect_equal(nrow(result), 1)
+  expect_error(
+    validate_template(dir, strict = TRUE),
+    class = "rlang_error", regexp = "app_config_misplaced"
+  )
+})
+
+test_that("a root dta-app.yaml is not an error, while one in any other folder is, wherever it sits", {
+  dir <- app_config_library(c("kind: dta_app_config"))
+  for (sub in c("parties", "vocabulary", "export-templates", "templates/archive", "elsewhere/deep")) {
+    at <- file.path(dir, sub)
+    dir.create(at, recursive = TRUE, showWarnings = FALSE)
+    writeLines("kind: dta_app_config", file.path(at, "dta-app.yml"))
+  }
+  rows <- app_rows(validate_template(dir))
+  expect_equal(rows$code, rep("app_config_misplaced", 5))
+  expect_setequal(
+    sub(paste0(dir, "/"), "", rows$file, fixed = TRUE),
+    file.path(c("parties", "vocabulary", "export-templates", "templates/archive", "elsewhere/deep"), "dta-app.yml")
+  )
+  expect_equal(unique(rows$severity), "error")
+})
+
+test_that("a dta-app.yaml under a dot directory is not reported", {
+  dir <- app_config_library(c("kind: dta_app_config"))
+  dir.create(file.path(dir, ".git", "x"), recursive = TRUE)
+  writeLines("kind: dta_app_config", file.path(dir, ".git", "x", "dta-app.yaml"))
+  expect_equal(nrow(app_rows(validate_template(dir))), 0)
+})
+
+test_that("a misplaced config is reported when the root has none", {
+  # No root file at all and one in templates/: exactly one row, no duplicate.
+  dir <- app_config_library()
+  writeLines("kind: dta_app_config", file.path(dir, "templates", "dta-app.yaml"))
+  rows <- app_rows(validate_template(dir))
+  expect_equal(rows$code, "app_config_misplaced")
+})
+
+test_that("a valid root config plus a misplaced copy reports only the copy", {
+  dir <- app_config_library(c("kind: dta_app_config"))
+  writeLines("kind: dta_app_config", file.path(dir, "templates", "dta-app.yaml"))
+  rows <- app_rows(validate_template(dir))
+  expect_equal(rows$code, "app_config_misplaced")
+  expect_equal(rows$file, file.path(dir, "templates", "dta-app.yaml"))
+})
+
+test_that("a single template file gets no app-config rows", {
+  dir <- app_config_library(c("kind: dta_app_config"))
+  writeLines("kind: dta_app_config", file.path(dir, "templates", "dta-app.yaml"))
+  expect_equal(nrow(validate_template(file.path(dir, "templates", "clean.dta-template.yaml"))), 0)
 })
 
 test_that("the app-config check runs whatever `kinds` is", {

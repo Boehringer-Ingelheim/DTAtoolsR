@@ -1,13 +1,18 @@
 # -----------------------------------------------------------------------------
-# Versioned template index over every library directory returned by
+# Versioned template index over every library root returned by
 # dta_template_source_roots() (template_sources.R).
 #
-# Four kinds of file live side by side in the same directories:
+# A library root has one sub-folder per kind of authored file:
 #
-#   dta_creation_template  *.dta-template.yaml / .yml
-#   dta_dataset_template   *.dta-dataset-template.yaml / .yml
-#   dta_party_profile      *.dta-party.yaml / .yml
-#   dta_vocabulary         *.dta-vocabulary.yaml / .yml
+#   templates/    dta_creation_template  *.dta-template.yaml / .yml
+#                 dta_dataset_template   *.dta-dataset-template.yaml / .yml
+#   parties/      dta_party_profile      *.dta-party.yaml / .yml
+#   vocabulary/   dta_vocabulary         *.dta-vocabulary.yaml / .yml
+#
+# (plus export-templates/ for Word templates and dta-app.yaml at the
+# root, neither of which is indexed here). Files are looked up ONLY in their
+# own kind's folder; a file of a kind sitting anywhere else is not indexed but
+# reported (dta_template_misplaced_files()).
 #
 # This file turns that filesystem layout into one data frame the picker UI can
 # filter/sort, plus a small `id[@version]` reference resolver so a template can
@@ -51,26 +56,81 @@ dta_template_kind_pattern <- function(kind) {
   paste0("\\.", suffix, "\\.ya?ml$")
 }
 
-# The conventional sub-folder for a template library's authored files.
-dta_template_library_subdir <- function() "templates"
-
-# Prefer a populated conventional folder, otherwise preserve root-layout
-# libraries. Keep paths byte-identical to source metadata (no normalisation).
-dta_template_library_dir <- function(root) {
-  if (!is.character(root) || length(root) != 1L || is.na(root) || !nzchar(root)) {
-    return(root)
-  }
-  sub <- file.path(root, dta_template_library_subdir())
-  if (!dir.exists(sub)) {
-    return(root)
-  }
-  patterns <- vapply(dta_template_all_kinds(), dta_template_kind_pattern, character(1))
-  hits <- list.files(sub,
-    pattern = paste(patterns, collapse = "|"),
-    ignore.case = TRUE, full.names = TRUE, recursive = FALSE
+# The sub-folder of a library root that holds one kind of file. Creation and
+# dataset templates share "templates/".
+dta_template_kind_subdir <- function(kind) {
+  switch(kind,
+    dta_creation_template = ,
+    dta_dataset_template = "templates",
+    dta_party_profile = "parties",
+    dta_vocabulary = "vocabulary",
+    cli::cli_abort("Unknown template kind {.val {kind}}.")
   )
-  hits <- hits[!dir.exists(hits)]
-  if (length(hits)) sub else root
+}
+
+# The distinct indexed sub-folders of a library root.
+dta_template_kind_subdirs <- function() c("templates", "parties", "vocabulary")
+
+# Directory under library root `root` that holds `kind`. Paths are not
+# normalised, so they stay byte-identical to the source metadata.
+dta_template_kind_dir <- function(root, kind) {
+  file.path(root, dta_template_kind_subdir(kind))
+}
+
+# Sub-folder holding the Word templates (not indexed).
+dta_export_templates_subdir <- function() "export-templates"
+
+# Kind-suffix files that sit directly in `root` or directly in a kind sub-folder
+# other than their own. Non-recursive. One row per file; `expected_dir` is the
+# sub-folder the file belongs in.
+dta_template_misplaced_files <- function(root) {
+  files <- character(0)
+  found <- character(0)
+  want <- character(0)
+  if (is.character(root) && length(root) == 1L && !is.na(root) && nzchar(root)) {
+    for (sub in c("", dta_template_kind_subdirs())) {
+      dir <- if (nzchar(sub)) file.path(root, sub) else root
+      if (!dir.exists(dir)) next
+      for (kind in dta_template_all_kinds()) {
+        expected <- dta_template_kind_subdir(kind)
+        if (identical(sub, expected)) next
+        hits <- list.files(dir,
+          pattern = dta_template_kind_pattern(kind),
+          ignore.case = TRUE, full.names = TRUE, recursive = FALSE
+        )
+        hits <- hits[!dir.exists(hits)]
+        files <- c(files, hits)
+        found <- c(found, rep(kind, length(hits)))
+        want <- c(want, rep(expected, length(hits)))
+      }
+    }
+  }
+  ord <- order(files, method = "radix")
+  data.frame(
+    file = files[ord], kind = found[ord], expected_dir = want[ord],
+    stringsAsFactors = FALSE
+  )
+}
+
+# The library root of ONE kind-suffix file: the parent of the kind folder it
+# sits in, or NA_character_ when its folder is not that kind's folder.
+dta_template_locate_root <- function(path) {
+  kind <- NA_character_
+  for (k in dta_template_all_kinds()) {
+    if (grepl(dta_template_kind_pattern(k), basename(path), ignore.case = TRUE)) {
+      kind <- k
+      break
+    }
+  }
+  if (is.na(kind)) {
+    return(NA_character_)
+  }
+  parent <- dirname(path)
+  if (identical(basename(parent), dta_template_kind_subdir(kind))) {
+    dirname(parent)
+  } else {
+    NA_character_
+  }
 }
 
 # ---- Header reading ------------------------------------------------------
@@ -185,8 +245,66 @@ dta_template_source_for_root <- function(sources, root) {
   list(name = "builtin", scheme = "dir", resolved_commit = NA_character_)
 }
 
+# Human name of a template kind, for messages shown to people (the picker, the
+# validator): the internal kind id is never shown.
+dta_template_kind_label <- function(kind) {
+  switch(kind,
+    dta_creation_template = "creation template",
+    dta_dataset_template = "dataset template",
+    dta_party_profile = "party profile",
+    dta_vocabulary = "vocabulary",
+    kind
+  )
+}
+
+# Layout warnings for one root: one entry per kind-suffix file that is not in
+# its own kind's folder, or a single entry when the root itself is one of the
+# kind folders (the source was pointed one level too deep). `source_name` is
+# the source's configured name (dta_template_source_for_root()$name). The text
+# is shown to people who cannot see the server, so it carries the source name
+# and a path relative to the source root, never an absolute path or a kind id.
+dta_template_layout_warnings <- function(root, source_name = "builtin") {
+  bad <- dta_template_misplaced_files(root)
+  if (!nrow(bad)) {
+    return(character(0))
+  }
+  subs <- dta_template_kind_subdirs()
+  if (basename(root) %in% subs && !any(dir.exists(file.path(root, subs)))) {
+    return(sprintf(
+      paste0(
+        "%s: %s/ looks like a library sub-folder; ",
+        "point the source at its parent directory. ",
+        "If this is a flat library (files directly in it), move its files into ",
+        "templates/, parties/ and vocabulary/ sub-folders instead ",
+        "(see 'Reorganising an older repository' in the README)."
+      ),
+      source_name, basename(root)
+    ))
+  }
+  # bad$file is file.path(root, [sub,] name), so the root prefix is exact.
+  rel <- substring(bad$file, nchar(root) + 2L)
+  sprintf(
+    paste0(
+      "%s: %s - a %s belongs in %s/ ",
+      "(library layout: templates/, parties/, vocabulary/, export-templates/)"
+    ),
+    source_name, rel, vapply(bad$kind, dta_template_kind_label, character(1)),
+    bad$expected_dir
+  )
+}
+
+# One aggregated cli warning for all layout problems of a build. The messages
+# are referenced by index, so braces in file names are never interpolated.
+dta_template_warn_layout <- function(msgs) {
+  bullets <- stats::setNames(
+    sprintf("{msgs[%d]}", seq_along(msgs)),
+    rep("!", length(msgs))
+  )
+  cli::cli_warn(c("Template library layout problems found:", bullets))
+}
+
 # Build the full template index by scanning every root, in precedence order,
-# for all four kinds.
+# for all four kinds (each in its own sub-folder, see dta_template_kind_dir()).
 #
 # Collision policy: the same kind + id + version found under two different
 # roots keeps the file from the EARLIER root and drops the later one, with a
@@ -209,13 +327,14 @@ build_template_index <- function(refresh = FALSE) {
   # syntax for one there.
   seen <- new.env(parent = emptyenv())
   rows <- list()
+  layout_acc <- character(0)
 
   for (root in src$roots) {
     source_meta <- dta_template_source_for_root(src$sources, root)
 
     for (kind in dta_template_all_kinds()) {
       files <- list.files(
-        root,
+        dta_template_kind_dir(root, kind),
         pattern = dta_template_kind_pattern(kind),
         ignore.case = TRUE, full.names = TRUE, recursive = FALSE
       )
@@ -268,11 +387,24 @@ build_template_index <- function(refresh = FALSE) {
         )
       }
     }
+
+    layout_acc <- c(
+      layout_acc,
+      dta_template_layout_warnings(root, source_meta$name)
+    )
+  }
+
+  if (length(layout_acc)) {
+    warnings_acc <- c(warnings_acc, layout_acc)
+    dta_template_warn_layout(layout_acc)
   }
 
   out <- if (length(rows) > 0) do.call(rbind, rows) else dta_template_index_empty()
   rownames(out) <- NULL
 
+  # The layout problems are in "warnings" too (the older, catch-all attribute);
+  # the picker reads this one, so it never has to recognise them by their text.
+  attr(out, "layout_warnings") <- layout_acc
   attr(out, "warnings") <- warnings_acc
   attr(out, "sources") <- src$sources
   out
@@ -726,7 +858,7 @@ dta_template_index_cached <- function(refresh = FALSE) {
 dta_template_index_invalidate <- function() {
   .dta_template_index_cache$index <- NULL
   .dta_template_index_cache$built_at <- NA_real_
-  # The library's dta-app.yaml lives beside its templates, so a refresh must
+  # The library's dta-app.yaml lives at the library root, so a refresh must
   # pick up an edited config too (see app_config.R).
   dta_app_config_invalidate()
   invisible(NULL)

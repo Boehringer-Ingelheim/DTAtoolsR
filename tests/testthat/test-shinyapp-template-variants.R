@@ -1,3 +1,20 @@
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 variant_creation_fixture <- function() {
   dataset <- function(id, type) {
     list(
@@ -285,7 +302,7 @@ test_that("the server requires platform selection before collecting its options"
   ))
   app_fn("dta_template_index_invalidate")()
   def <- variant_creation_fixture()
-  yaml::write_yaml(def, file.path(root, "adjudication.dta-template.yaml"))
+  yaml::write_yaml(def, lib_path(root, "adjudication.dta-template.yaml"))
   shiny::testServer(.shiny_app_dir(), {
     session$setInputs(create_from_template = 1)
     output$template_picker_ui
@@ -311,7 +328,7 @@ test_that("the server requires platform selection before collecting its options"
 test_that("strict validation dry-runs every platform rather than an arbitrary default", {
   root <- withr::local_tempdir()
   def <- variant_creation_fixture()
-  path <- file.path(root, "adjudication.dta-template.yaml")
+  path <- lib_path(root, "adjudication.dta-template.yaml")
   yaml::write_yaml(def, path)
   expect_identical(nrow(validate_template(root, strict = TRUE)), 0L)
   def$variants$choices[[2]]$datasets <- list(list(template = "missing_records@1.0"))

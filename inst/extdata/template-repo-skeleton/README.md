@@ -3,7 +3,8 @@
 ## What this repository is
 
 This repository is a library of reusable YAML templates for creating Data Transfer Specifications (DTS) with DTAtools. Its layout is deliberately
-simple: README and repository automation live at the root; the four kinds of template files live directly inside `templates/`.
+simple: README, the optional `dta-app.yaml` and repository automation live at the root; each kind of template file lives directly inside its own folder
+(`templates/`, `parties/`, `vocabulary/`), and Word export documents live in `export-templates/`.
 
 This README is intended for both template authors maintaining this repository and people using the DTAtools app to create a document from it.
 Authors edit and validate the YAML. App users choose a creation template, answer its options, and save the generated DTA. Dataset templates,
@@ -22,7 +23,7 @@ validation rules.
 ### Quick start for authors
 
 1. Clone this repository.
-2. Edit or add template files directly in `templates/`.
+2. Edit or add template files directly in the folder for their kind: `templates/`, `parties/` or `vocabulary/`.
 3. Validate from the repository root:
 
    ```sh
@@ -42,12 +43,16 @@ Use this structure for a template library (only the CI file of each chosen provi
 ```text
 repository/
 ├── README.md
+├── dta-app.yaml
 ├── templates/
-│   ├── dta-app.yaml
 │   ├── starter.dta-template.yaml
-│   ├── starter_dataset.dta-dataset-template.yaml
-│   ├── starter_supplier.dta-party.yaml
+│   └── starter_dataset.dta-dataset-template.yaml
+├── parties/
+│   └── starter_supplier.dta-party.yaml
+├── vocabulary/
 │   └── starter_terms.dta-vocabulary.yaml
+├── export-templates/
+│   └── README.md
 ├── .github/
 │   └── workflows/
 │       └── validate-templates.yml
@@ -55,37 +60,54 @@ repository/
 └── Jenkinsfile
 ```
 
-Only template-library files, the optional `dta-app.yaml` app configuration, and files referenced by their `source:` entries (or by
-`dta-app.yaml`, such as a logo or Word template) belong in `templates/`. Keep README, CI files, scripts, tests, Docker
-files, charts, and deployment configuration at the repository root or in their own repository folders.
+Each kind of file lives in its own folder, directly inside it:
 
-### Keep the library flat
+| Folder | Holds |
+| --- | --- |
+| `templates/` | Creation templates (`*.dta-template.yaml`) and dataset templates (`*.dta-dataset-template.yaml`), plus any data file a dataset `source:` refers to. |
+| `parties/` | Party profiles (`*.dta-party.yaml`). |
+| `vocabulary/` | Controlled vocabularies (`*.dta-vocabulary.yaml`). |
+| `export-templates/` | Word templates (`*.docx` containing `{PLACEHOLDER}` markers) used for Word export. |
+| repository root | The optional `dta-app.yaml` app configuration, plus README, CI files, scripts, tests, Docker files, charts, and deployment configuration. |
 
-Every recognized template file must be directly inside `templates/`. The loader scans that directory non-recursively; it does not search
+Keep README, CI files, scripts, tests, Docker files, charts, and deployment configuration at the repository root or in their own repository
+folders; they are not part of the library. A library needs none of the folders it does not use, but it must hold at least one file in one of the
+four (`templates/`, `parties/`, `vocabulary/`, `export-templates/`).
+
+### Keep each folder flat
+
+Every recognized file must be directly inside the folder for its kind. The loader scans each folder non-recursively; it does not search
 arbitrary subfolders. A file under `templates/by-study/` or `templates/archive/` is not part of the active catalogue.
 
 The validator reports a template-shaped file in a subfolder as `template_in_subdirectory` with warning severity. The warning is a reminder that
-the app will not load it, not evidence that recursive lookup occurred. Move an active file to the top level of `templates/`.
+the app will not load it, not evidence that recursive lookup occurred. Move an active file to the top level of its folder.
 
-Do not leave a template-shaped file at the repository root. Once the conventional `templates/` directory contains template files, it is the
-library directory and root-level template files are not merged into it. The validator reports root-level leftovers as
-`template_outside_library_dir` with error severity. This catches migration leftovers that would otherwise be invisible to the app.
+A file in the wrong folder is not loaded either. The validator reports it as `template_misplaced` with error severity: a template file at the
+repository root, a party profile in `templates/`, a vocabulary in `parties/`, and so on. At runtime the app also logs a warning for such a
+file and adds a note to the template picker (for example, "starter: templates/starter_supplier.dta-party.yaml - a party profile belongs in
+parties/ (library layout: templates/, parties/, vocabulary/, export-templates/)", naming the source and the path relative to its root), and an
+empty picker explains the folder layout. Folder names are case-sensitive on the server (Linux): `Templates/` is not `templates/`, even where your
+local file system finds it, so it is misplaced there. Nothing of an older flat layout, or of an older layout that kept every kind in `templates/`, is read any more; see "Reorganising an
+older repository" below.
 
-Supporting files named by a dataset entry's `source:` must be stored inside `templates/` as well. Keep the path relative to the template that
-refers to it. The resolver prevents a template from using `..` or an absolute path to read arbitrary files outside its own folder.
+Supporting files named by a dataset entry's `source:` must be stored in `templates/`, beside the template that refers to them. Keep the path
+relative to that template. The resolver prevents a template from using `..` or an absolute path to read arbitrary files outside its own folder.
 
-A `chart/templates/` directory is not the library directory. The convention is the root-level `templates/` folder; other application or chart
+A `chart/templates/` directory is not the library's `templates/` folder. Only the folders at the library root count; other application or chart
 folders are irrelevant to template discovery.
 
-### How the directory is selected
+### How the library root is selected
 
-`validate_template('.')` and the app's template sources recognize the conventional `templates/` folder when it contains at least one recognized
-template file at its top level. If it does not, the root-layout fallback keeps older libraries working. A source may also point directly at a
-template folder; in that case the folder itself is scanned.
+The library root is the directory that holds these folders: the repository root of a clone, a `dir:` source's path, a `git:` source's checkout,
+or the folder `validate_template()` is pointed at. `validate_template('.')` and the app's template sources scan `templates/`, `parties/`,
+`vocabulary/` and `export-templates/` below it, and read `dta-app.yaml` from it.
 
-DTAtools version support matters. The first release after 0.25.0 recognizes the repository-root `templates/` convention automatically. Earlier
-releases expect template files at the root of the configured directory. For those releases, configure a `dir:` source pointing directly at
-`<checkout>/templates` rather than at the repository root.
+Point the validator or a source at the repository root, not at one of the folders. `validate_template('templates')` (or `parties` or
+`vocabulary`) is rejected with `library_subfolder_given` and error severity; validate the parent instead. If the folder is in fact a
+flat library (template files directly in it), move its files into `templates/`, `parties/` and `vocabulary/` sub-folders instead; see
+"Reorganising an older repository" below.
+
+This layout needs a DTAtools release that reads it, and older releases cannot read it. Reorganise on a branch and merge it when the new package version goes live.
 
 ## File naming conventions
 
@@ -401,8 +423,7 @@ datasets:
 - `options` supplies values for the dataset template's options; these are static values for that dataset build, not additional creation-dialog
   controls.
 - `patch` modifies the dataset template's result.
-- `source` names a finished dataset YAML relative to the creation-template file. Keep such supporting files inside `templates/` and inside the
-  template's own directory.
+- `source` names a finished dataset YAML relative to the creation-template file. Keep such supporting files in `templates/`, beside the creation template that names them.
 
 A bare string or `{source: ...}` reads a finished dataset YAML. An inline mapping contains the dataset definition itself. In a private library,
 prefer `template:` when sharing a reusable dataset schema and use `source:` only when a ready-made dataset specification is actually the intended
@@ -1109,8 +1130,8 @@ semicolon-separated entries in this grammar:
 [name=]scheme:locator[#ref]; [name=]scheme:locator[#ref]
 ```
 
-The optional name labels the source. Supported schemes are `dir:`, `pkg:`, and `git:`. Each source root uses the conventional `templates/`
-directory automatically when present and populated with template files. A `dir:` value may instead point directly at the template directory.
+The optional name labels the source. Supported schemes are `dir:`, `pkg:`, and `git:`. Each source points at a library root: the directory that
+holds `templates/`, `parties/`, `vocabulary/`, `export-templates/` and, optionally, `dta-app.yaml`. Do not point a source at one of those folders.
 
 ### Source examples
 
@@ -1120,7 +1141,7 @@ A local directory source:
 DTATOOLS_TEMPLATE_SOURCES=site=dir:/srv/dta-library
 ```
 
-The directory must exist and be readable. With this new layout, a repository root is detected and its `templates/` child is used.
+The directory must exist and be readable, and it must be the library root, for example the root of a clone of this repository.
 
 A companion R package source:
 
@@ -1128,8 +1149,8 @@ A companion R package source:
 DTATOOLS_TEMPLATE_SOURCES=site=pkg:company.dta.templates
 ```
 
-The package must be installed and expose its template files in `inst/dta-templates`. The conventional nested `templates/` folder may hold the
-templates within that source root.
+The package must be installed and expose a library root in `inst/dta-templates`, with the same folders as above (`templates/`, `parties/`,
+`vocabulary/`, `export-templates/`). Empty folders do not survive `R CMD build`, so ship at least one file in each folder you use.
 
 A Git source:
 
@@ -1137,8 +1158,8 @@ A Git source:
 DTATOOLS_TEMPLATE_SOURCES=company=git:https://example.org/group/dta-library.git#main
 ```
 
-The optional `#ref` selects a branch or tag; if omitted, Git uses `HEAD`. The template library itself should have the repository-root
-`templates/` folder. The locator is an HTTPS Git URL; do not put credentials in the URL.
+The optional `#ref` selects a branch or tag; if omitted, Git uses `HEAD`. The template folders (`templates/`, `parties/`,
+`vocabulary/`, `export-templates/`) belong at the root of the repository. The locator is an HTTPS Git URL; do not put credentials in the URL.
 
 ### Environment variables
 
@@ -1173,17 +1194,17 @@ print or log the token while troubleshooting.
 ### Local alternatives
 
 During local development, the app also checks `options(DTAtools.template_dir)` and a `./dta-templates/` directory, before the packaged template
-directory. These are useful for a developer's local copy and do not replace the repository's canonical `templates/` location.
+directory. These are useful for a developer's local copy and do not replace the repository as the canonical library.
 
 To test the source resolution without changing deployment settings, configure a local `dir:` source for the clone and run the app with that
-environment value. Remember that earlier DTAtools releases need the `dir:` locator to point directly at `<checkout>/templates`.
+environment value.
 
 ## App configuration (`dta-app.yaml`)
 
 A library can also describe the app that serves it: who runs it, how it looks, which links and features it offers, and which Word templates it
-exports to. Put one file named `dta-app.yaml` (or `dta-app.yml`) in the library directory, next to the templates. It is not a template kind, so
+exports to. Put one file named `dta-app.yaml` (or `dta-app.yml`) at the root of the library, beside the `templates/` folder, not inside it. It is not a template kind, so
 the template scan ignores it and it never appears in the picker. Every key is optional; an absent file, or one that only holds comments, means
-"the stock app". The scaffolded `templates/dta-app.yaml` lists every key, commented out, with its default.
+"the stock app". The scaffolded `dta-app.yaml` lists every key, commented out, with its default.
 
 ```yaml
 kind: dta_app_config
@@ -1202,9 +1223,11 @@ features:
 exports:
   document: [word_template]
   word_templates:
-    - file: our_dta.docx
+    - file: export-templates/our_dta.docx
       label: Our DTA template
 ```
+
+The `exports.word_templates` list is optional. Without it, every `.docx` in `export-templates/` is offered in the export dialog anyway.
 
 The value of `kind:` must be `dta_app_config` when present. Each section is a mapping of `key: value` pairs.
 
@@ -1234,7 +1257,7 @@ Both are plain text. The organisation (`organisation.name`, `organisation.unit`)
 | `app_subtitle` | the stock tag line | Line under the title. |
 | `window_title` | the value of `app_title` | Browser tab title. |
 | `footer_label` | `<name> · <unit>`, or empty without a name | Text in the footer. `""` hides it. |
-| `logo` | the DTAtools logo | Image file in the library directory (see "Files the configuration refers to"). |
+| `logo` | the DTAtools logo | Image file in the library, with a path relative to `dta-app.yaml` (see "Files the configuration refers to"). |
 | `logo_alt` | `<app_title> logo` | Alternative text for the logo. |
 | `landing_headline` | the stock headline | Heading on the start page. |
 | `landing_lede` | the stock paragraph | Paragraph under the heading on the start page. |
@@ -1284,7 +1307,7 @@ Each link is an `http://`, `https://` or `mailto:` URL without spaces or quotes.
 | --- | --- | --- |
 | `document` | `[markdown, markdown_pdf, word, word_template]` | Formats offered by "Export DTA". `[]` hides the button. |
 | `default_document` | `word` | Format preselected in the export dialog. It must be offered; otherwise the first listed format is used (with a warning if you set it explicitly). |
-| `word_templates` | none | List of `{file, label}` entries naming `.docx` templates in the library directory. `label` defaults to the file name without extension. |
+| `word_templates` | none | Optional override for the label and order of the Word templates. A list of `{file, label}` entries whose `file` is a path relative to `dta-app.yaml`'s folder (the library root), for example `export-templates/report.docx`. `label` defaults to the file name without extension. Every `.docx` in `export-templates/` is offered even without an entry. |
 | `bundled_word_templates` | `true` | Keep the Word templates shipped with DTAtools in the list next to yours. |
 | `validation_messages` | `[csv, tsv, xlsx, html]` | Download buttons for the validation messages. `[]` removes them. |
 | `validation_summary` | `true` | The "Validation summary" HTML download. |
@@ -1306,12 +1329,15 @@ described below.
 
 ### Files the configuration refers to
 
-The logo and the Word templates are files in the library directory, referenced by a relative path. An absolute path, a drive letter, `~`, `..`,
-or a path that resolves (for example through a symbolic link) outside the library directory is rejected. The library folder itself is never
+The logo and any Word template named in `exports.word_templates` are files in the library, referenced by a path relative to the folder holding
+`dta-app.yaml` (the library root). An absolute path, a drive letter, `~`, `..`,
+or a path that resolves (for example through a symbolic link) outside the library is rejected. The library folder itself is never
 served over HTTP.
 
 - **Logo:** `png`, `jpg`, `jpeg`, `gif`, `svg` or `webp`, at most 1 MB. It is embedded into the page.
-- **Word template:** a `.docx` file. The app does not check library files for markers (it does check the ones shipped with DTAtools): markers are
+- **Word template:** a `.docx` file in `export-templates/`. Every `.docx` there is offered automatically in the app's export dialog, from every
+  configured source, labelled with the file name without its extension; non-`.docx` files, dotfiles and Word lock files (`~$x.docx`) are ignored.
+  The app does not check library files for markers (it does check the ones shipped with DTAtools): markers are
   replaced wherever they appear, and a file without any is exported with nothing substituted. A marker is
   an upper-case name in single braces, for example `{DTA_TITLE}` or `{SUPPLIER_NAME}`, and `{#DATASETS}` ... `{/DATASETS}` repeats a span once
   per dataset. In R, `?DTAtools::export_with_template` documents the full set and `DTAtools::dta_template_placeholders()` lists it. The
@@ -1336,11 +1362,12 @@ The app reads the configuration together with the template index: after "Refresh
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
-| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library directory. |
+| `app_config_invalid` | error | A value the app would reject: unreadable YAML, wrong `kind`, a bad colour, link or format, or a logo or `.docx` that is missing, too large, of the wrong type or outside the library. |
 | `app_config_unknown_key` | warning | A key the app does not know. |
 | `app_config_warning` | warning | A value the app accepts but adjusts, such as `create_blank: true` with `editing: false`. |
-| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library directory. Keep one. |
-| `app_config_outside_library_dir` | error | A `dta-app.yaml` at the repository root while `templates/` is the library directory. Move it into `templates/`. |
+| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` in the library. Keep one. |
+| `app_config_misplaced` | error | A `dta-app.yaml` anywhere but the library root, for example inside `templates/`. Move it to the root. |
+| `export_template_invalid` | warning | A file in `export-templates/` that is not a `.docx`; it is ignored. |
 
 ## Validating
 
@@ -1350,9 +1377,9 @@ Run validation from the repository root after changing any template file:
 Rscript -e "DTAtools::validate_template('.', strict = TRUE)"
 ```
 
-The directory form scans its selected library directory, checks recognized files and cross-file references, and dry-runs each concrete creation
-template. The scan is non-recursive. Calling `validate_template('templates', strict = TRUE)` explicitly is also useful when testing a folder
-directly.
+The directory form scans the `templates/`, `parties/`, `vocabulary/` and `export-templates/` folders of the library root, checks recognized files
+and cross-file references, and dry-runs each concrete creation template. The scan is non-recursive. Always pass the library root; passing one of
+the folders (`validate_template('templates')`) is rejected with `library_subfolder_given`.
 
 For an interactive report rather than a strict failure, omit `strict = TRUE`:
 
@@ -1371,14 +1398,14 @@ fail. The CI examples shipped with DTAtools use strict validation so a structura
 ### CI
 
 Use the GitHub Actions, Bitbucket Pipelines, or Jenkins validation file that matches the repository host. Each runs the same DTAtools validator;
-keep its working directory at the repository root so `validate_template('.')` selects `templates/`.
+keep its working directory at the repository root so `validate_template('.')` sees the library folders.
 
 `create_template_repo()` can scaffold validation CI for supported providers. If the repository uses more than one CI system, keep each
 configuration focused on the same validation command and avoid maintaining different validation rules per provider.
 
 ### Validator codes
 
-This table lists every code emitted by `validate_template()` in the current validator, including the new-library layout errors. Severity is the
+This table lists every code emitted by `validate_template()` in the current validator, including the library-layout codes. Severity is the
 literal severity reported in the result. A concrete template can receive `instantiate_failed` in addition to a more specific inheritance code.
 
 | Code | Severity | Meaning | Typical fix |
@@ -1390,9 +1417,10 @@ literal severity reported in the result. A concrete template can receive `instan
 | `version_unquoted` | error | A numeric-looking version was not quoted and may have lost precision. | Quote it, for example `version: "1.10"`. |
 | `version_unparseable` | warning | The version does not parse as a `numeric_version`. | Use a numeric-version-compatible string such as `"1.0"`. |
 | `duplicate_id_version` | warning | Another file has the same kind, ID, and version. | Keep one authoritative file or assign a new version. |
-| `no_templates` | error | The requested directory has no recognized template files at its scanned level. | Check the path and put the files directly in the library directory. |
-| `template_in_subdirectory` | warning | A template-shaped file is below the scan level and will not be loaded. | Move active files directly into `templates/`. |
-| `template_outside_library_dir` | error | A template-shaped file is at the repository root while `templates/` is the selected library. | Move it into `templates/` and update related paths. |
+| `no_templates` | error | None of `templates/`, `parties/`, `vocabulary/` and `export-templates/` holds a file. | Check the path and put the files directly in the folder for their kind. |
+| `template_in_subdirectory` | warning | A template-shaped file is below the scan level of its folder and will not be loaded. | Move active files directly into the folder for their kind. |
+| `template_misplaced` | error | A template file is outside the folder for its kind, for example at the repository root, or a party profile in `templates/`. | Move it into `templates/`, `parties/` or `vocabulary/` as its kind requires, and update related paths. |
+| `library_subfolder_given` | error | The path given to the validator is itself `templates/`, `parties/` or `vocabulary/`. | Validate its parent, the library root; if it is a flat library, move its files into the kind sub-folders instead. |
 | `target_invalid` | warning | An option target is unknown, malformed, or does not resolve in its dataset body. | Correct the target path and use a supported metadata or dataset field. |
 | `target_machine_owned` | error | An option targets `metadata.template` or `metadata.import_issues`. | Remove the option/effect; these fields are written by DTAtools. |
 | `prior_versions_invalid` | error | A `prior_versions:` entry lacks a version or changes text, has a bad date or unknown key, repeats a version, or is not older than the template's first version in the library. | Fix the entry; see "Versions from before the library: `prior_versions:`". |
@@ -1424,8 +1452,9 @@ literal severity reported in the result. A concrete template can receive `instan
 | `app_config_invalid` | error | The library's `dta-app.yaml` holds a value the app would reject. | Correct the named key; see "App configuration". |
 | `app_config_unknown_key` | warning | `dta-app.yaml` holds a key the app does not know. | Fix the spelling or remove the key. |
 | `app_config_warning` | warning | `dta-app.yaml` holds a value the app adjusts. | Make the setting say what the app will do. |
-| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` exist in the library directory. | Delete one of them. |
-| `app_config_outside_library_dir` | error | A `dta-app.yaml` sits at the repository root while `templates/` is the library. | Move it into `templates/`. |
+| `app_config_duplicate` | error | Both `dta-app.yaml` and `dta-app.yml` exist in the library. | Delete one of them. |
+| `app_config_misplaced` | error | A `dta-app.yaml` sits anywhere but the library root, for example inside `templates/`. | Move it to the repository root. |
+| `export_template_invalid` | warning | A file in `export-templates/` is not a `.docx` and is ignored. | Remove it, or convert it to a `.docx`. |
 
 A validator code names a detected issue; the message column adds the actual file, path, or reference involved. For warnings on unresolved
 references, remember that validation is scoped to the directory passed to the validator. A reference available only in a separate app source may
@@ -1437,7 +1466,7 @@ Use a small, reviewable change process for each template update.
 
 1. Create a branch from the repository's normal development branch.
 2. Add a new template file or increment the version of a released contract.
-3. Keep all template and `source:` files in the top level of `templates/`.
+3. Keep each file directly inside the folder for its kind, and `source:` data files beside the template that uses them in `templates/`.
 4. Check every ID and version reference against the files in the library.
 5. Run strict validation from the repository root.
 6. Configure a local app source and preview the document when the change affects what authors see or what metadata is built.
@@ -1459,7 +1488,7 @@ shell history or repository files.
 
 - Does each file's `kind` match its filename suffix?
 - Is every `version` quoted?
-- Is the file directly under `templates/`?
+- Is the file directly inside the folder for its kind (`templates/`, `parties/`, `vocabulary/`)?
 - Are IDs stable, unique within kind, and consistently referenced?
 - Are every `extends`, `template`, `values_from`, and party-profile reference resolvable?
 - Does a creation template have the intended base, datasets, and author choices?
@@ -1482,28 +1511,33 @@ structure and template construction; it does not prove that every business inter
 
 Check these items in order:
 
-1. The file is inside the selected library folder, directly at its top level.
+1. The file is directly inside the folder for its kind (`templates/` for creation and dataset templates, `parties/`, `vocabulary/`), not in a
+   subfolder, at the root, or in the folder of another kind. The app logs a warning for a misplaced file and the template picker notes it
+   ("<source>: <path> - a party profile belongs in parties/ ...").
 2. The suffix is one of the four supported suffixes and matches `kind`.
 3. The file parses as a YAML mapping and has non-empty `kind`, `id`, and quoted `version` fields.
-4. The app's configured source points to the repository root when using the new convention, or directly to the templates folder for an older
-   release.
+4. The app's configured source points to the library root (the directory holding `templates/`), not to one of the folders inside it.
 5. The configured source name and scheme are spelled correctly.
 6. No earlier source already supplies the same kind, ID, and version; source precedence can retain the first one.
 7. A private-source configuration has not replaced packaged examples unless `DTATOOLS_TEMPLATE_INCLUDE_BUILTIN` is enabled.
 8. For a Git source, allow the refresh interval to expire or trigger the normal refresh operation, then inspect the app's source warnings.
 
-A nested file is not promoted into the catalogue merely because validation can report it. Move it into `templates/`.
+A nested file is not promoted into the catalogue merely because validation can report it. Move it up into its folder.
+
+An empty template picker explains the expected folder layout; when it appears, check the folders first.
 
 ### The validator reports no templates
 
 Confirm the current working directory, the path passed to `validate_template()`, and whether the files are one directory deeper than expected.
-With the new layout, validate the repository root or explicitly validate the `templates/` folder. A typo or an empty directory is an error, not a
-successful empty check.
+Validate the repository root, which holds `templates/`, `parties/`, `vocabulary/` and `export-templates/`. A typo or a library whose four folders
+are all empty is an error (`no_templates`), not a successful empty check. If the path you gave is itself `templates/`, `parties/` or
+`vocabulary/`, the validator reports `library_subfolder_given`: validate its parent instead.
 
-### The validator reports root-level leftovers
+### The validator reports misplaced files
 
-If `templates/` contains recognized template files, it is the active library directory. Move all remaining template files from the repository
-root into `templates/`. Do not expect the app to merge root files with that folder.
+`template_misplaced` means a template file is outside the folder for its kind, for example at the repository root or a party profile in
+`templates/`. The app does not merge files from other places into a folder. Move each one into `templates/`, `parties/` or `vocabulary/`; see
+"Reorganising an older repository". `app_config_misplaced` means `dta-app.yaml` is somewhere other than the repository root.
 
 ### A version appears to change unexpectedly
 
@@ -1555,48 +1589,44 @@ writable cache if cold-start availability is required.
 ### The Word export template is missing
 
 Word `.docx` export templates are not template kinds: the library's four indexed kinds are creation templates, dataset templates, party
-profiles, and vocabularies, and a `.docx` in `templates/` is not scanned. To offer one in the app, list it under `exports.word_templates` in
-`dta-app.yaml` (see "App configuration"), keep `word_template` in `exports.document`, and run `validate_template()`; a missing or misplaced file is
-reported as `app_config_invalid`.
+profiles, and vocabularies. A `.docx` is picked up only from `export-templates/`, directly in it; one anywhere else is not offered. Every `.docx`
+there is offered automatically (non-`.docx` files, dotfiles and Word lock files such as `~$x.docx` are ignored, and the validator warns
+`export_template_invalid` about a non-`.docx` file). Keep `word_template` in `exports.document`. List a file under `exports.word_templates` in
+`dta-app.yaml` (see "App configuration") only to override its label or order, with a path relative to the root such as
+`export-templates/report.docx`; a missing or misplaced file named there is reported as `app_config_invalid`.
 
-## Migrating a root-layout repository
+## Reorganising an older repository
 
-This section applies to an existing repository whose template YAML files are currently at its root.
+This section applies to an existing repository that keeps its template files at the root (the older flat layout), or keeps every kind of file
+in one `templates/` folder. Nothing of those layouts is read any more: the files must sit in the folder for their kind.
 
-1. Create the conventional folder:
-
-   ```sh
-   mkdir templates
-   ```
-
-2. Move each template file into it. For example:
+1. Create the folders you need and move each file into the one for its kind:
 
    ```sh
-   git mv starter.dta-template.yaml templates/
-   git mv starter_dataset.dta-dataset-template.yaml templates/
-   git mv starter_supplier.dta-party.yaml templates/
-   git mv starter_terms.dta-vocabulary.yaml templates/
+   mkdir -p templates parties vocabulary export-templates
+   git mv *.dta-template.yaml *.dta-dataset-template.yaml templates/
+   git mv *.dta-party.yaml parties/
+   git mv *.dta-vocabulary.yaml vocabulary/
+   git mv *.docx export-templates/
    ```
 
-Include `.yml` files and every other recognized template file as well.
+   If every kind is currently inside `templates/`, move only the parties and vocabularies out of it: `git mv templates/*.dta-party.yaml parties/`
+   and `git mv templates/*.dta-vocabulary.yaml vocabulary/`. Include the `.yml` variants. Skip any command with nothing to move.
 
-3. Move files referenced through dataset `source:` entries into `templates/`. Keep each referenced file inside the directory containing its
-   template, and update the relative `source:` value if needed.
-4. Update repository scripts, tests, and CI commands that explicitly name template file paths. Commands that validate the repository root can
-   keep using `validate_template('.')`; update any script that assumes YAML files remain at the root.
-5. Validate from the repository root and inspect the report. Resolve `template_outside_library_dir`, `template_in_subdirectory`, and every cross-
-   file or instantiation issue before merging.
-6. Preview the source in the app and confirm that all expected creation templates appear.
+2. Move `dta-app.yaml` to the repository root. In unreleased development builds it was kept inside `templates/`.
+3. Keep each file referenced through a dataset `source:` entry beside the template that uses it, in `templates/`, and update the relative
+   `source:` value if needed.
+4. Word templates move to `export-templates/`. Every `.docx` there that contains a `{PLACEHOLDER}` marker is offered in the export dialog. If `dta-app.yaml` has an
+   `exports.word_templates` list, change each `file:` to a path relative to the root, for example `export-templates/report.docx`.
+5. Update repository scripts, tests, and CI commands that explicitly name template file paths. Commands that validate the repository root keep
+   using `validate_template('.')`.
+6. Validate from the repository root and inspect the report:
 
-### Deployment ordering warning
+   ```sh
+   Rscript -e "DTAtools::validate_template('.', strict = TRUE)"
+   ```
 
-A running app on a DTAtools release without `templates/` auto-detection will look for files at the repository root. If the repository is migrated
-first, a source configured at the repository root appears to contain no templates. With a private source configured, this does not safely fall
-back to the packaged examples; the catalogue can be empty or source loading can fail.
-
-Deploy the DTAtools release that supports this convention first. Only after that release is running should the repository migration be merged and
-published to the app. This order avoids a window in which the old app and new repository layout disagree.
-
-For an older release that must use the migrated repository before it can be upgraded, configure a `dir:` source directly at
-`<checkout>/templates`. The `git:` source grammar has no subpath option, so that workaround does not apply to a Git source. Upgrade and deploy
-DTAtools before migrating a repository consumed through `git:`.
+   Resolve every `template_misplaced`, `template_in_subdirectory`, `app_config_misplaced` and `library_subfolder_given` row, and every cross-file
+   or instantiation issue, before merging.
+7. Preview the source in the app and confirm that all expected creation templates appear.
+8. Merge the reorganised library at the moment the new DTAtools package version goes live; an older app cannot read it.

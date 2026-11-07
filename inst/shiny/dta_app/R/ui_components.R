@@ -682,23 +682,54 @@ template_source_status_row <- function(source) {
 # ever reaches here, so this never has to know how to strip a credential
 # itself. NULL when nothing failed, so a call site can splice this straight
 # into a tagList() without an extra length() check first.
-template_source_diagnostics_ui <- function(sources) {
+#
+# The library-layout warnings (a file outside its kind's folder, or a source
+# pointed at a kind folder, see build_template_index()), shown as a compact
+# list. `x` is the template index, whose "layout_warnings" attribute is read,
+# or that attribute's value itself (a character vector); the picker never has
+# to recognise a layout problem by its message text.
+template_layout_warnings <- function(x) {
+  if (is.data.frame(x)) x <- attr(x, "layout_warnings")
+  as.character(x %||% character(0))
+}
+
+template_source_diagnostics_ui <- function(sources, layout_warnings = character(0)) {
   failed <- Filter(function(s) !isTRUE(s$ok), sources %||% list())
-  if (length(failed) == 0) {
+  layout <- template_layout_warnings(layout_warnings)
+  if (length(failed) == 0 && length(layout) == 0) {
     return(NULL)
   }
+  shown <- utils::head(layout, 10L)
   tagList(
-    div(
-      class = "msg-hint", style = "color:#b91c1c;",
-      tags$strong("Some template sources could not be loaded:")
-    ),
-    tags$ul(lapply(failed, function(s) {
-      tags$li(sprintf(
-        "%s (%s): %s",
-        as.character(s$name %||% ""), as.character(s$scheme %||% ""),
-        as.character(s$error %||% "unknown error")
-      ))
-    }))
+    if (length(failed) > 0) {
+      tagList(
+        div(
+          class = "msg-hint", style = "color:#b91c1c;",
+          tags$strong("Some template sources could not be loaded:")
+        ),
+        tags$ul(lapply(failed, function(s) {
+          tags$li(sprintf(
+            "%s (%s): %s",
+            as.character(s$name %||% ""), as.character(s$scheme %||% ""),
+            as.character(s$error %||% "unknown error")
+          ))
+        }))
+      )
+    },
+    if (length(layout) > 0) {
+      tagList(
+        div(
+          class = "msg-hint", style = "color:#b91c1c;",
+          tags$strong("Some template files are in the wrong folder:")
+        ),
+        tags$ul(
+          lapply(shown, tags$li),
+          if (length(layout) > length(shown)) {
+            tags$li(sprintf("… and %d more", length(layout) - length(shown)))
+          }
+        )
+      )
+    }
   )
 }
 

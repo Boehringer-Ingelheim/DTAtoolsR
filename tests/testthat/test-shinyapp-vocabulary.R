@@ -3,6 +3,23 @@
 # app's helper files are auto-sourced by Shiny at launch and are not part of
 # the package namespace).
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # cli wraps a long condition message at the console width, which breaks a naive
 # substring match the moment the wrap lands inside the text being asserted on.
 # Same helper, same rationale, as test-shinyapp-template-parties.R and
@@ -43,7 +60,7 @@ write_vocabulary_fixture <- function(
   filename = NULL
 ) {
   filename <- filename %||% paste0(id, ".dta-vocabulary.yaml")
-  path <- file.path(dir, filename)
+  path <- lib_path(dir, filename)
   writeLines(
     c(
       kind_line,
@@ -319,7 +336,7 @@ vocab_resolver_for <- function(dir) {
   read_vocabulary <- app_fn("read_vocabulary")
   function(ref) {
     id <- sub("@.*$", "", ref)
-    path <- file.path(dir, paste0(id, ".dta-vocabulary.yaml"))
+    path <- lib_path(dir, paste0(id, ".dta-vocabulary.yaml"))
     if (!file.exists(path)) {
       return(NULL)
     }
@@ -1117,7 +1134,7 @@ vocab_slot_source_dir <- function(slot_lines, dataset_id_line = "  id: ds1") {
       "      type: SAS Char",
       "      values_from: visit@1.0"
     ),
-    file.path(dir, "bound_ds.dta-dataset-template.yaml")
+    lib_path(dir, "bound_ds.dta-dataset-template.yaml")
   )
 
   writeLines(
@@ -1132,7 +1149,7 @@ vocab_slot_source_dir <- function(slot_lines, dataset_id_line = "  id: ds1") {
       "  - template: bound_ds@1.0",
       slot_lines
     ),
-    file.path(dir, "with_slot.dta-template.yaml")
+    lib_path(dir, "with_slot.dta-template.yaml")
   )
 
   dir

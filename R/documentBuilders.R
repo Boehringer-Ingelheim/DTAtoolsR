@@ -312,7 +312,7 @@ NULL
 # mocking base::system.file, which officer calls internally as well.
 .numbered_docx_path <- function() {
   system.file(
-    "extdata", "templates", "dta_numbered_template.docx",
+    "extdata", "word-templates", "dta_numbered_template.docx",
     package = "DTAtools"
   )
 }

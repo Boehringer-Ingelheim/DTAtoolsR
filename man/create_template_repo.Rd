@@ -13,8 +13,10 @@ Aborts via \code{\link[cli:cli_abort]{cli::cli_abort()}} if \code{path} names an
 than a directory.}
 
 \item{examples}{A single \code{TRUE}/\code{FALSE} (default \code{TRUE}). When \code{TRUE},
-writes the four starter templates into \verb{templates/} beneath \code{path}.
-\code{README.md} stays at the repository root. When \code{FALSE}, only \code{README.md},
+writes the four starter templates into \verb{templates/}, \verb{parties/} and
+\verb{vocabulary/} beneath \code{path}, plus the commented-out \code{dta-app.yaml} and
+\code{export-templates/README.md}. \code{README.md} stays at the repository root.
+When \code{FALSE}, only \code{README.md},
 \code{.gitignore} and (if \code{ci} asks for any provider) its CI file(s) are
 written -- no template files, for a caller who wants the scaffolding
 without the worked example. Such a repository has no templates yet, so
@@ -49,8 +51,10 @@ Invisibly, the normalised absolute path to \code{path} (see
 \description{
 Creates a directory laid out the way a private DTAtools template
 repository is meant to be: a small, self-consistent worked example of the
-four template kinds (a creation template, a dataset template, a party
-profile, a controlled vocabulary) under \verb{templates/}, a root-level
+four template kinds (a creation template and a dataset template in
+\verb{templates/}, a party profile in \verb{parties/}, a controlled vocabulary in
+\verb{vocabulary/}), an app configuration \code{dta-app.yaml} and an
+\verb{export-templates/} folder for Word templates, a root-level
 \code{README.md} with the full authoring guide, a
 \code{.gitignore}, and -- by default -- a GitHub Actions workflow that runs
 \code{\link[=validate_template]{validate_template()}} against the repository on every push and pull
@@ -61,22 +65,24 @@ creates.
 }
 \details{
 The scaffold mirrors the bundled skeleton, with the full authoring guide
-at the root and the starter templates under \verb{templates/}:
+at the root and one folder per kind of file:
 
 \if{html}{\out{<div class="sourceCode text">}}\preformatted{<path>/README.md
 <path>/.gitignore
+<path>/dta-app.yaml                            (app configuration, all commented out)
 <path>/templates/starter.dta-template.yaml
 <path>/templates/starter_dataset.dta-dataset-template.yaml
-<path>/templates/starter_supplier.dta-party.yaml
-<path>/templates/starter_terms.dta-vocabulary.yaml
-<path>/templates/dta-app.yaml                  (app configuration, all commented out)
+<path>/parties/starter_supplier.dta-party.yaml
+<path>/vocabulary/starter_terms.dta-vocabulary.yaml
+<path>/export-templates/README.md              (drop Word .docx templates here)
 <path>/.github/workflows/validate-templates.yml  (ci = "github", default)
 <path>/bitbucket-pipelines.yml                 (ci = "bitbucket")
 <path>/Jenkinsfile                             (ci = "jenkins")
 }\if{html}{\out{</div>}}
 
-Only the selected CI files are written. \code{\link[=validate_template]{validate_template()}} automatically
-detects \verb{templates/} when called on the repository root.
+Only the selected CI files are written. \code{\link[=validate_template]{validate_template()}} detects the
+layout from the repository root: point it (and the app's template sources)
+at \verb{<path>} itself, never at one of the folders inside it.
 }
 \examples{
 dir <- file.path(tempdir(), "my-templates")

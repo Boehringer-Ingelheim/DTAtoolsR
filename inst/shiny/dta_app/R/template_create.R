@@ -114,6 +114,7 @@ load_template_definition <- function(ref, index = NULL, kind = "dta_creation_tem
       def = def,
       lineage = resolved$lineage,
       mixins = resolved$mixins,
+      kind = row$kind[[1]],
       path = row$path[[1]],
       source_name = row$source_name[[1]],
       source_kind = row$source_kind[[1]],
@@ -466,14 +467,23 @@ template_provenance <- function(def, meta,
 
 # Which file, exactly. A full path only means something for a `dir:` source
 # the user configured themselves; a git clone, an installed package or the
-# bundled templates sit at a machine-specific path, so those record the file
-# name -- which IS its path within the source, because a library directory is
-# scanned non-recursively (build_template_index()).
+# bundled templates sit at a machine-specific path, so those record the file's
+# path within the source: <kind folder>/<file name> (templates/, parties/,
+# vocabulary/), because a library keeps each kind in its own folder and scans
+# it non-recursively (build_template_index()). `meta$kind` is the template's
+# kind; a `meta` without one (hand-built) is a creation template.
 template_provenance_source_ref <- function(meta) {
   path <- meta$path
   if (.template_provenance_is_empty(path)) {
     return(NULL)
   }
   user_dir <- identical(meta$source_kind, "dir") && !identical(meta$source_name, "builtin")
-  if (user_dir) path else basename(path)
+  if (user_dir) {
+    path
+  } else {
+    file.path(
+      dta_template_kind_subdir(meta$kind %||% "dta_creation_template"),
+      basename(path)
+    )
+  }
 }

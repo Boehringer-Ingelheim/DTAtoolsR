@@ -168,7 +168,7 @@ pandoc_no_images_filter <- function() {
 
 # Does this .docx contain at least one {PLACEHOLDER} marker?
 #
-# The templates directory also holds dta_numbered_template.docx, which is not a
+# The word-templates directory also holds dta_numbered_template.docx, which is not a
 # fill-in template at all: it is the reference document the *built-in* layout
 # opens for its numbered heading styles, and it contains no placeholders. Offered
 # in the export dialog it produces a Word file with none of the user's DTA in it,
@@ -222,7 +222,7 @@ template_has_placeholders <- function(path) {
 
 # Word templates the Export dialog may offer: a named character vector whose
 # values are what the dialog sends back and whose names are the labels shown.
-#   * bundled templates (inst/extdata/templates, only those with placeholders),
+#   * bundled templates (inst/extdata/word-templates, only those with placeholders),
 #     value = file name -- unless the library config switches them off;
 #   * the library's own .docx files from dta-app.yaml, value = "library:<file
 #     name>" (the prefix keeps the two namespaces apart), label from the config.
@@ -230,7 +230,7 @@ template_has_placeholders <- function(path) {
 # the stock app.
 list_available_templates <- function(cfg = dta_app_config_defaults()) {
   out <- character(0)
-  templates_dir <- system.file("extdata", "templates", package = "DTAtools")
+  templates_dir <- system.file("extdata", "word-templates", package = "DTAtools")
   if (isTRUE(cfg$exports$bundled_word_templates) && dir.exists(templates_dir)) {
     files <- list.files(templates_dir, pattern = "\\.docx$", full.names = FALSE)
     keep <- vapply(
@@ -280,7 +280,7 @@ get_template_path <- function(template_name, cfg = dta_app_config_defaults()) {
     hit <- which(paste0("library:", basename(lib$path)) == template_name)
     full_path <- lib$path[hit[[1]]]
   } else {
-    templates_dir <- system.file("extdata", "templates", package = "DTAtools")
+    templates_dir <- system.file("extdata", "word-templates", package = "DTAtools")
     full_path <- file.path(templates_dir, template_name)
   }
   if (file.exists(full_path)) full_path else NULL

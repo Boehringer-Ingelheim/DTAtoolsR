@@ -16,7 +16,8 @@
 #   * colours must be #RGB / #RRGGBB -- the guard against CSS injection;
 #   * links must be http(s)/mailto and free of whitespace, quotes and <>;
 #   * the logo and Word templates must be relative paths that resolve (after
-#     normalizePath, so symlinks count) inside the config's own directory;
+#     normalizePath, so symlinks count) inside the config's own directory --
+#     the library root, where dta-app.yaml lives;
 #   * the logo is embedded as a base64 data: URI, so the library folder is
 #     never registered with addResourcePath() and never served over HTTP.
 # The app must never fail to start over this file: parse_dta_app_config() does
@@ -513,6 +514,55 @@ dta_app_config_find <- function(roots) {
 # fill rather than once per call; same TTL as the template index.
 .dta_app_config_cache <- new.env(parent = emptyenv())
 
+# Word templates found by convention in <root>/export-templates/*.docx, across
+# `roots` in precedence order, as the same (label, path) frame as
+# cfg$exports$word_templates. `listed_paths` are the ones dta-app.yaml already
+# lists; they are not repeated. A file whose basename was already taken by an
+# earlier file at a DIFFERENT path is skipped with a warning, never silently.
+# A discovered file must also hold at least one {PLACEHOLDER} marker
+# (template_has_placeholders(), utils_export.R): a styles-only reference document
+# would export a Word file without the user's DTA in it, so it is skipped with a
+# warning. Files listed in dta-app.yaml are the library author's explicit choice
+# and are not filtered.
+# Every candidate passes the same containment check as a configured file, so a
+# symlink out of the library is skipped.
+dta_app_config_discover_word_templates <- function(roots, listed_paths = character(0)) {
+  out <- data.frame(label = character(), path = character(), stringsAsFactors = FALSE)
+  norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+  taken <- list()
+  for (p in listed_paths) taken[[tolower(basename(p))]] <- norm(p)
+
+  roots <- roots[!is.na(roots) & nzchar(roots)]
+  for (root in roots) {
+    sub <- dta_export_templates_subdir()
+    if (!dir.exists(file.path(root, sub))) next
+    files <- list.files(file.path(root, sub), pattern = "\\.docx$", ignore.case = TRUE)
+    files <- files[!startsWith(files, ".") & !startsWith(files, "~$")]
+    for (f in sort(files, method = "radix")) {
+      r <- .cfg_file_in_dir(file.path(sub, f), root)
+      if (!r$ok) next
+      key <- tolower(basename(r$value))
+      if (!is.null(taken[[key]])) {
+        if (!identical(taken[[key]], r$value)) {
+          cli::cli_warn(
+            "Ignoring Word template {.path {r$value}}: {.file {basename(r$value)}} is already provided by {.path {taken[[key]]}}."
+          )
+        }
+        next
+      }
+      if (!isTRUE(template_has_placeholders(r$value))) {
+        cli::cli_warn(
+          "Not offering Word template {.path {r$value}}: it contains no {{PLACEHOLDER}} markers, or cannot be read as a Word document."
+        )
+        next
+      }
+      taken[[key]] <- r$value
+      out[nrow(out) + 1L, ] <- list(tools::file_path_sans_ext(basename(r$value)), r$value)
+    }
+  }
+  out
+}
+
 .dta_app_config_build <- function() {
   roots <- tryCatch(dta_template_source_roots()$roots, error = function(e) character(0))
   found <- dta_app_config_find(roots)
@@ -535,6 +585,11 @@ dta_app_config_find <- function(roots) {
     kept <- found$path
     cli::cli_warn("Ignoring {.path {extra}}: only the first app config found ({.path {kept}}) is used.")
   }
+  # Configured Word templates keep their label and order; files dropped into
+  # <root>/export-templates/ follow them (no dta-app.yaml needed).
+  found_wt <- dta_app_config_discover_word_templates(roots, cfg$exports$word_templates$path)
+  cfg$exports$word_templates <- rbind(cfg$exports$word_templates, found_wt)
+  rownames(cfg$exports$word_templates) <- NULL
   cfg
 }
 

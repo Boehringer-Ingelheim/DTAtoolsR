@@ -13,21 +13,23 @@
 # - future-friendly option model (select/boolean/text/number)
 # -----------------------------------------------------------------------------
 
-# Built-in creation template directory (inside package extdata).
+# Built-in template library root (inside package extdata): holds templates/,
+# parties/ and vocabulary/ folders.
 dta_creation_templates_dir <- function() {
-  system.file("extdata", "templates", package = "DTAtools")
+  system.file("extdata", "library", package = "DTAtools")
 }
 
-# Every directory searched for creation templates, in precedence order:
+# Every library ROOT searched for creation templates, in precedence order
+# (creation templates live in <root>/templates/):
 #
-# 1. getOption("DTAtools.template_dir") -- one or more directories, so a site
+# 1. getOption("DTAtools.template_dir") -- one or more library roots, so a site
 #    or a project can ship its own template family
-# 2. ./dta-templates, for a template kept next to the data it describes
-# 3. the packaged directory
+# 2. ./dta-templates, a library root kept next to the data it describes
+# 3. the packaged library
 #
-# The packaged directory sits inside the installed library, which users cannot
+# The packaged library sits inside the installed library, which users cannot
 # write to and which a reinstall wipes, so it cannot be the only place a
-# template may live. Earlier directories win a basename collision.
+# template may live. Earlier roots win a basename collision.
 dta_creation_template_dirs <- function() {
   dirs <- c(
     as.character(getOption("DTAtools.template_dir") %||% character(0)),
@@ -36,17 +38,17 @@ dta_creation_template_dirs <- function() {
   )
   dirs <- dirs[nzchar(dirs)]
   dirs <- dirs[dir.exists(dirs)]
-  unique(vapply(dirs, dta_template_library_dir, character(1), USE.NAMES = FALSE))
+  unique(dirs)
 }
 
-# List available creation-template files by basename, across every search
-# directory. Templates end in ".dta-template.yaml" or ".dta-template.yml". A
-# basename present in more than one directory is listed once and resolves to
-# the earliest.
+# List available creation-template files by basename, across every library
+# root's templates/ folder. Templates end in ".dta-template.yaml" or
+# ".dta-template.yml". A basename present in more than one root is listed once
+# and resolves to the earliest.
 list_dta_creation_templates <- function() {
   files <- unlist(
     lapply(
-      dta_creation_template_dirs(),
+      file.path(dta_creation_template_dirs(), "templates"),
       list.files,
       pattern = "\\.dta-template\\.ya?ml$",
       ignore.case = TRUE,
@@ -66,7 +68,7 @@ get_dta_creation_template_path <- function(template_name) {
   }
   nm <- basename(template_name)
   for (dir in dta_creation_template_dirs()) {
-    full <- file.path(dir, nm)
+    full <- file.path(dir, "templates", nm)
     if (file.exists(full)) {
       return(full)
     }
@@ -424,8 +426,8 @@ dta_template_list_fields <- function() {
 # Resolution order:
 # 1) relative to template file directory, and still inside it
 # 2) package extdata root, by basename only
-# source: is relative to the template file's folder, inside templates/ for a
-# conventional library; supporting files must stay inside that folder too.
+# source: is relative to the template file's folder (<library root>/templates/);
+# supporting files must stay inside that folder too.
 resolve_template_dataset_path <- function(ref, template_path) {
   if (is.null(ref) || !nzchar(ref)) {
     return("")

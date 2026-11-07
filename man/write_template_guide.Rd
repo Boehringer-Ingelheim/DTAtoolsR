@@ -16,8 +16,9 @@ write_template_guide(
 )
 }
 \arguments{
-\item{path}{The template library: its root folder, its \verb{templates/} folder,
-or a single template file (the guide then covers that template only).}
+\item{path}{The template library: its root folder (the one holding
+\verb{templates/}, \verb{parties/} and \verb{vocabulary/}), or a single template file
+inside one of those folders (the guide then covers that template only).}
 
 \item{dir}{Folder to write the guides to. It is created when missing.}
 
@@ -62,7 +63,7 @@ Write a readable guide for each template of a library
 \examples{
 out_dir <- file.path(tempdir(), "template-guides")
 write_template_guide(
-  system.file("extdata", "templates", package = "DTAtools"),
+  system.file("extdata", "library", package = "DTAtools"),
   out_dir,
   templates = "biomarker_gf",
   quiet = TRUE

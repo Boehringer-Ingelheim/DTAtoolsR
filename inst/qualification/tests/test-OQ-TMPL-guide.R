@@ -5,13 +5,16 @@
 # (qa_read_yaml) or taken from the requirement text -- never from the function
 # under qualification or its internals. Output goes to qa_tempdir() only.
 
-guide_lib <- function() system.file("extdata", "templates", package = "DTAtools")
-guide_yaml <- function(name) qa_read_yaml(file.path(guide_lib(), name))
+guide_lib <- function() system.file("extdata", "library", package = "DTAtools")
+guide_folder <- function(name) {
+  if (grepl("[.]dta-vocabulary[.]", name)) "vocabulary" else if (grepl("[.]dta-party[.]", name)) "parties" else "templates"
+}
+guide_yaml <- function(name) qa_read_yaml(file.path(guide_lib(), guide_folder(name), name))
 
 # The usable (non-abstract) creation templates of the bundled library, with the
 # file name each must be written to: `<id>_v<version>_template_guide.docx`.
 guide_templates <- function() {
-  files <- list.files(guide_lib(), pattern = "[.]dta-template[.]yaml$")
+  files <- list.files(file.path(guide_lib(), "templates"), pattern = "[.]dta-template[.]yaml$")
   docs <- Filter(function(d) !isTRUE(d[["abstract"]]), lapply(files, guide_yaml))
   stats::setNames(
     vapply(docs, function(d) sprintf("%s_v%s_template_guide.docx", d[["id"]], d[["version"]]), ""),
@@ -108,13 +111,13 @@ test_that("OQ-TMPL-089 | every column of a dataset template is listed, and a col
 
 test_that("OQ-TMPL-090 | an abstract template gets no document of its own and is refused when asked for | REQ-TMPL-040", {
   lib <- file.path(qa_tempdir(), "abstractlib")
-  dir.create(lib)
-  src <- readLines(file.path(guide_lib(), "biomarker_gf.dta-template.yaml"), encoding = "UTF-8")
+  dir.create(file.path(lib, "templates"), recursive = TRUE)
+  src <- readLines(file.path(guide_lib(), "templates", "biomarker_gf.dta-template.yaml"), encoding = "UTF-8")
   writeLines(
     sub("^id: biomarker_gf$", "id: building_block\nabstract: true", src),
-    file.path(lib, "building_block.dta-template.yaml")
+    file.path(lib, "templates", "building_block.dta-template.yaml")
   )
-  file.copy(file.path(guide_lib(), "biomarker_gf.dta-template.yaml"), lib)
+  file.copy(file.path(guide_lib(), "templates", "biomarker_gf.dta-template.yaml"), file.path(lib, "templates"))
   dir <- file.path(qa_tempdir(), "abstractout")
 
   err <- tryCatch(write_template_guide(lib, dir, templates = "building_block", quiet = TRUE), error = function(e) e)
@@ -140,4 +143,31 @@ test_that("OQ-TMPL-092 | a format other than docx or pdf is refused | REQ-TMPL-0
   err <- tryCatch(write_template_guide(guide_lib(), dir, format = "html", quiet = TRUE), error = function(e) e)
   qa_check("html is refused with the format condition", inherits(err, "dta_template_guide_format"))
   qa_check("and nothing was written", length(list.files(dir)) == 0L)
+})
+
+# ---- REQ-TMPL-040: a single template file ------------------------------------
+
+test_that("OQ-TMPL-099 | one template file is guided from inside its library folder and refused anywhere else | REQ-TMPL-040", {
+  src <- file.path(guide_lib(), "templates", "biomarker_gf.dta-template.yaml")
+  labels <- vapply(guide_yaml("biomarker_gf.dta-template.yaml")[["options"]], function(o) as.character(o[["label"]]), "")
+  out_dir <- file.path(qa_tempdir(), "single")
+  got <- suppressMessages(write_template_guide(src, out_dir, quiet = TRUE))
+  text <- qa_docx_text(got[["biomarker_gf"]])
+  qa_check("the template declares options to look for", length(labels) > 0L)
+  qa_step(
+    "a file in templates/ of its library is guided, with every option label of that template",
+    character(0), labels[!vapply(labels, grepl, NA, x = text, fixed = TRUE)]
+  )
+
+  # The same file copied into the root of a directory sits in no kind folder.
+  stray_dir <- qa_tempdir()
+  stray <- file.path(stray_dir, "biomarker_gf.dta-template.yaml")
+  file.copy(src, stray)
+  out <- file.path(qa_tempdir(), "refused")
+  err <- tryCatch(write_template_guide(stray, out, quiet = TRUE), error = function(e) e)
+  qa_check(
+    "a file outside the folder of its kind is refused with the no-templates condition",
+    inherits(err, "dta_template_guide_no_templates")
+  )
+  qa_check("and nothing was written", !dir.exists(out))
 })

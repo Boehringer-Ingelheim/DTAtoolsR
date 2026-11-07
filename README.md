@@ -713,7 +713,7 @@ come from the same commit.
 
 ### Private templates
 
-The `dta-template.yaml` files packaged in `inst/extdata/templates` are
+The `dta-template.yaml` files packaged in `inst/extdata/library` are
 examples only — a real Data Transfer Specification names a real supplier and
 real contacts, and must never live in an open-source package. `run_dta_app()`
 can instead load its "Create new from template" family from a private git
@@ -722,37 +722,44 @@ through environment variables. On Posit Connect, one content variable is
 enough to switch the app to your own private templates:
 
 ```r
-# The repository keeps its template files directly under templates/ (auto-detected).
+# The repository root holds the library folders (templates/, parties/, vocabulary/, export-templates/).
 DTATOOLS_TEMPLATE_SOURCES = "acme=git:https://bitbucket.example.com/scm/proj/dta-templates.git#main"
 ```
 
 `create_template_repo()` scaffolds a new private template repository to point
 that variable at — a small, cross-referencing worked example of the four
-template kinds under `templates/`, a comprehensive authoring `README.md` at
-the root, and a ready-to-run validation CI workflow, not a blank directory
+template kinds, each in its own folder, a comprehensive authoring `README.md`
+at the root, and a ready-to-run validation CI workflow, not a blank directory
 to fill in from nothing:
 
 ```text
 my-templates/
   README.md
   .gitignore
+  dta-app.yaml
   templates/
-    dta-app.yaml
     starter.dta-template.yaml
     starter_dataset.dta-dataset-template.yaml
+  parties/
     starter_supplier.dta-party.yaml
+  vocabulary/
     starter_terms.dta-vocabulary.yaml
+  export-templates/
+    README.md
   .github/workflows/validate-templates.yml
 ```
 
-`validate_template(".", strict = TRUE)` at the repository root validates
-`templates/` automatically and rejects template files left at the root.
-The app's `dir:`/`pkg:`/`git:` sources and `DTAtools.template_dir` use the same
-auto-detection; legacy root-layout libraries remain readable.
+`validate_template(".", strict = TRUE)` at the repository root validates the
+four folders and reports a template file in the wrong place (for example a
+party profile left in `templates/`, or any template file at the root) as an
+error. The app's `dir:`/`pkg:`/`git:` sources use the same layout; the older
+flat and mixed-`templates/` layouts are no longer read, and the scaffolded
+`README.md` explains how to reorganise an existing repository.
 
-The optional `templates/dta-app.yaml` customises the app that serves the library:
+The optional `dta-app.yaml` at the repository root customises the app that serves the library:
 organisation, title, logo, colours, links, which features and export formats are
-offered (including a read-only mode) and the library's own Word templates. With no
+offered (including a read-only mode). Every `.docx` in `export-templates/` with a `{PLACEHOLDER}` marker is
+offered automatically as a Word export template. With no
 file the app looks as before, except that no organisation name is shown until you
 set `organisation.name`. `validate_template()` checks the file too. See
 "Customising the app from the library" in the

@@ -45,21 +45,47 @@ test_that("OQ-TMPL-001 | the result carries the documented columns and only two 
 
 # ---- REQ-TMPL-002: non-recursive scan ---------------------------------------
 
-test_that("OQ-TMPL-002 | a template kept one level down is reported, not silently dropped | REQ-TMPL-002", {
+test_that("OQ-TMPL-002 | a template kept below the folder of its kind is reported, not silently dropped | REQ-TMPL-002", {
+  # Fixture: templates/top.dta-template.yaml (id nest_top) and
+  # templates/archive/nested.dta-template.yaml (id nest_sub).
   dir <- tmpl_fixture("codes", "template_in_subdirectory")
   result <- validate_template(dir)
 
   qa_step(
-    "the top-level template is clean",
+    "the template directly in templates/ is clean",
     0L, sum(basename(result$file) == "top.dta-template.yaml")
   )
   qa_step(
-    "the nested one is reported template_in_subdirectory, at warning",
+    "exactly one row is reported, for the nested file",
+    "nested.dta-template.yaml", basename(result$file)
+  )
+  qa_step(
+    "it is reported template_in_subdirectory, at warning",
     "warning", tmpl_severity(result, "template_in_subdirectory")
   )
   qa_check(
     "naming the non-recursive scan as the reason",
     grepl("the template loader will not see it (the scan is non-recursive)", tmpl_message(result, "template_in_subdirectory"), fixed = TRUE)
+  )
+  qa_check(
+    "and the folder to move it to",
+    grepl("templates/", tmpl_message(result, "template_in_subdirectory"), fixed = TRUE)
+  )
+
+  # A reference into the nested file does not resolve: the scan does not see it.
+  root <- qa_tempdir()
+  dir.create(file.path(root, "templates", "archive"), recursive = TRUE)
+  yaml::write_yaml(list(
+    kind = "dta_creation_template", id = "nest_parent", version = "1.0", abstract = TRUE
+  ), file.path(root, "templates", "archive", "parent.dta-template.yaml"))
+  yaml::write_yaml(list(
+    kind = "dta_creation_template", id = "nest_child", version = "1.0",
+    abstract = TRUE, extends = "nest_parent@1.0"
+  ), file.path(root, "templates", "child.dta-template.yaml"))
+  nested_ref <- validate_template(root)
+  qa_step(
+    "a template extending the nested one finds no parent: the nested file takes no part in resolution",
+    "extends_unresolved", nested_ref$code[nested_ref$code == "extends_unresolved"]
   )
 })
 
@@ -97,7 +123,7 @@ test_that("OQ-TMPL-006 | a missing version is reported version_missing, alone | 
 # ---- REQ-TMPL-005: version_unquoted (the important one) --------------------
 
 test_that("OQ-TMPL-007 | an unquoted version is an error, because it silently loses precision | REQ-TMPL-005", {
-  path <- tmpl_fixture("codes", "version_unquoted", "v.dta-template.yaml")
+  path <- tmpl_fixture("codes", "version_unquoted", "templates", "v.dta-template.yaml")
 
   # Make the consequence concrete against the ACTUAL fixture file, not an
   # illustration: read it the naive way (no version-preserving handlers) and
@@ -113,7 +139,7 @@ test_that("OQ-TMPL-007 | an unquoted version is an error, because it silently lo
     "1.1", as.character(naive_version)
   )
 
-  result <- validate_template(dirname(path))
+  result <- validate_template(dirname(dirname(path)))
   qa_step(
     "validate_template() reports this as an error, not a warning",
     "error", tmpl_severity(result, "version_unquoted")
@@ -227,7 +253,7 @@ test_that("OQ-TMPL-015 | an unrecognised kind in `kinds` raises a condition nami
 })
 
 test_that("OQ-TMPL-016 | kinds has no effect when path names a single file | REQ-TMPL-010", {
-  file <- tmpl_fixture("codes_args", "kinds_filter", "t.dta-template.yaml")
+  file <- tmpl_fixture("codes_args", "kinds_filter", "templates", "t.dta-template.yaml")
   result <- validate_template(file, kinds = "dta_vocabulary")
   qa_step(
     "the explicitly named creation-template file is still checked",
@@ -391,19 +417,34 @@ test_that("OQ-TMPL-032 | include naming a code the vocabulary lacks is an error 
 })
 
 
-# ---- REQ-TMPL-031: conventional library folder -------------------------------
+# ---- REQ-TMPL-031: placement of template files -----------------------------
 # Fixture contents and expected findings are specified independently of the
-# engine: one clean abstract creation template per layout; mixed adds an
-# identical id/version at root to prove that file is excluded from resolution.
+# engine: one clean abstract creation template per layout (layout/folder adds
+# a dataset template, a party profile and a vocabulary, one per kind folder);
+# mixed adds a copy of the template with an identical id and version at the
+# root, to prove that file is excluded from resolution and the duplicate check.
 
-test_that("OQ-TMPL-062 | repository roots validate populated templates/ and direct folder paths identically | REQ-TMPL-031", {
+# A copy of a fixture library in a fresh temporary directory, so a test can
+# damage it without touching the committed fixture.
+tmpl_copy_library <- function(from) {
+  to <- qa_tempdir(parent.frame())
+  file.copy(list.files(from, full.names = TRUE, all.files = TRUE, no.. = TRUE), to, recursive = TRUE)
+  to
+}
+
+# Rewrite `version: "1.0"` to the unquoted `version: 1.10` in the given
+# files: a defect validate_template() reports as version_unquoted for every
+# file it actually reads, whatever that file's kind.
+tmpl_unquote_versions <- function(files) {
+  for (f in files) {
+    writeLines(sub('version: "1.0"', "version: 1.10", readLines(f), fixed = TRUE), f)
+  }
+}
+
+test_that("OQ-TMPL-062 | a library root with a folder per kind validates cleanly, and each kind is read from its own folder | REQ-TMPL-031", {
   root <- tmpl_fixture("layout", "folder")
   result <- validate_template(root)
-  qa_step("the conventional library has no findings", 0L, nrow(result))
-  qa_step(
-    "the explicit templates/ folder has no findings", 0L,
-    nrow(validate_template(file.path(root, "templates")))
-  )
+  qa_step("the four-folder library has no findings", 0L, nrow(result))
   strict <- tryCatch(
     {
       validate_template(root, strict = TRUE)
@@ -412,52 +453,91 @@ test_that("OQ-TMPL-062 | repository roots validate populated templates/ and dire
     error = function(e) conditionMessage(e)
   )
   qa_step("strict validation accepts the repository root", "no condition", strict)
+
+  # Proof that every folder is read, not merely that nothing was found: break
+  # the version of the one file in each of templates/ (a creation template and
+  # a dataset template), parties/ and vocabulary/, and each must be reported.
+  copy <- tmpl_copy_library(root)
+  files <- c(
+    file.path(copy, "templates", "example.dta-template.yaml"),
+    file.path(copy, "templates", "example_dataset.dta-dataset-template.yaml"),
+    file.path(copy, "parties", "example.dta-party.yaml"),
+    file.path(copy, "vocabulary", "example.dta-vocabulary.yaml")
+  )
+  tmpl_unquote_versions(files)
+  damaged <- validate_template(copy)
+  qa_step(
+    "each of the four kinds is read from the folder of its kind",
+    c("dta_creation_template", "dta_dataset_template", "dta_party_profile", "dta_vocabulary"),
+    damaged$kind[match(files, damaged$file)]
+  )
+  qa_step("each of the four is reported version_unquoted", rep("version_unquoted", 4L), damaged$code[match(files, damaged$file)])
 })
 
-test_that("OQ-TMPL-063 | root leftovers are errors and never duplicate candidates | REQ-TMPL-031", {
+test_that("OQ-TMPL-063 | a template left in the root is an error and never a duplicate candidate, while the folders are still read | REQ-TMPL-031", {
   root <- tmpl_fixture("layout", "mixed")
   result <- validate_template(root)
   qa_step("exactly one finding, not a duplicate or nested warning", 1L, nrow(result))
-  qa_step("the code identifies a root leftover", "template_outside_library_dir", result$code)
+  qa_step("the code identifies a misplaced file", "template_misplaced", result$code)
   qa_step("the severity fails CI", "error", result$severity)
   qa_step("the finding names the root file", file.path(root, "leftover.dta-template.yaml"), result$file)
   qa_step("the readable kind is retained", "dta_creation_template", result$kind)
   qa_step("the readable id is retained", "layout_example", result$id)
   qa_step("the readable version is retained", "1.0", result$version)
   qa_check(
-    "the message names the live folder and explains invisibility",
+    "the message names the folder the file belongs in and explains invisibility",
     grepl("templates/", result$message, fixed = TRUE) &&
       grepl("this file is invisible", result$message, fixed = TRUE)
+  )
+  qa_check(
+    "and says that folder names are case-sensitive on the server",
+    grepl("case-sensitive", result$message, fixed = TRUE)
   )
   err <- tryCatch(validate_template(root, strict = TRUE), error = function(e) e)
   qa_check("strict validation raises a package-authored condition", inherits(err, "rlang_error"))
   qa_check(
-    "the condition names the root-leftover code",
-    grepl("template_outside_library_dir", conditionMessage(err), fixed = TRUE)
+    "the condition names the misplaced-file code",
+    grepl("template_misplaced", conditionMessage(err), fixed = TRUE)
+  )
+
+  # The valid template in templates/ is still read: damaged, it is reported.
+  copy <- tmpl_copy_library(root)
+  tmpl_unquote_versions(file.path(copy, "templates", "example.dta-template.yaml"))
+  damaged <- validate_template(copy)
+  qa_step(
+    "a defect in the valid template is still found, beside the misplaced file",
+    c("template_misplaced", "version_unquoted"), sort(damaged$code)
   )
 })
 
-test_that("OQ-TMPL-064 | legacy root-layout libraries still validate cleanly | REQ-TMPL-031", {
+test_that("OQ-TMPL-064 | templates kept directly in the root are no library: each is misplaced and nothing else is reported | REQ-TMPL-031", {
   root <- tmpl_fixture("layout", "root")
-  qa_step("a root-layout library has no findings", 0L, nrow(validate_template(root)))
-  strict <- tryCatch(
-    {
-      validate_template(root, strict = TRUE)
-      "no condition"
-    },
-    error = function(e) conditionMessage(e)
+  result <- validate_template(root)
+  qa_step("exactly one finding for the one root-level template", 1L, nrow(result))
+  qa_step("it is template_misplaced", "template_misplaced", result$code)
+  qa_step("at severity error", "error", result$severity)
+  qa_step(
+    "and no_templates is not reported on top: the misplaced row already explains the empty library",
+    NA_character_, tmpl_severity(result, "no_templates")
   )
-  qa_step("strict validation accepts the legacy layout", "no condition", strict)
+  err <- tryCatch(validate_template(root, strict = TRUE), error = function(e) e)
+  qa_check("strict validation rejects the old layout", inherits(err, "rlang_error"))
 })
 
-test_that("OQ-TMPL-065 | empty or unrelated templates/ folders do not hide root templates | REQ-TMPL-031", {
+test_that("OQ-TMPL-065 | kind folders holding nothing of their kind are no_templates, and a template in the root turns that into template_misplaced | REQ-TMPL-031", {
   root <- qa_tempdir()
-  file.copy(file.path(tmpl_fixture("layout", "root"), "example.dta-template.yaml"), root)
-  lib <- file.path(root, "templates")
-  dir.create(lib)
-  qa_step("an empty templates/ folder preserves root validation", 0L, nrow(validate_template(root)))
-  writeLines("Supporting notes, not a template.", file.path(lib, "notes.txt"))
-  qa_step("a folder holding only notes preserves root validation", 0L, nrow(validate_template(root)))
+  dir.create(file.path(root, "templates"))
+  qa_step("an empty templates/ folder is no_templates", "no_templates", validate_template(root)$code)
+  writeLines("Supporting notes, not a template.", file.path(root, "templates", "notes.txt"))
+  qa_step("a folder holding only notes is still no_templates", "no_templates", validate_template(root)$code)
+  file.copy(
+    file.path(tmpl_fixture("layout", "root"), "example.dta-template.yaml"),
+    file.path(root, "example.dta-template.yaml")
+  )
+  qa_step(
+    "a template in the root does not make the library non-empty: it is misplaced",
+    "template_misplaced", validate_template(root)$code
+  )
 })
 
 # ---- REQ-TMPL-033: dataset_id_missing / dataset_field_invalid --------------
@@ -548,12 +628,12 @@ test_that("OQ-TMPL-071 | a dataset template's rules are checked against its colu
   qa_step("at severity warning", "warning", by_file("c.")$severity)
 
   only_warning <- tryCatch(
-    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "c.dta-dataset-template.yaml"), strict = TRUE),
+    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "templates", "c.dta-dataset-template.yaml"), strict = TRUE),
     error = function(e) e
   )
   qa_check("strict = TRUE does not abort on a warning alone", is.data.frame(only_warning))
   aborted <- tryCatch(
-    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "a.dta-dataset-template.yaml"), strict = TRUE),
+    validate_template(file.path(tmpl_fixture("codes", "lint_rules"), "templates", "a.dta-dataset-template.yaml"), strict = TRUE),
     error = function(e) e
   )
   qa_check("but aborts on the error", inherits(aborted, "error"))
@@ -620,15 +700,25 @@ test_that("OQ-TMPL-076 | an unknown app configuration key is a warning, not an e
   )
 })
 
-test_that("OQ-TMPL-077 | a dta-app.yaml left at the root of a templates/ layout is app_config_outside_library_dir | REQ-TMPL-037", {
+test_that("OQ-TMPL-077 | a dta-app.yaml kept in templates/ instead of the library root is app_config_misplaced | REQ-TMPL-037", {
   result <- validate_template(tmpl_fixture("appconfig", "outside"))
-  qa_step("severity", "error", tmpl_severity(result, "app_config_outside_library_dir"))
+  rows <- result[result$code == "app_config_misplaced", , drop = FALSE]
+  qa_step("exactly one misplaced configuration file", 1L, nrow(rows))
+  qa_step("severity", "error", rows$severity)
+  qa_step(
+    "the finding names the file in templates/",
+    file.path(tmpl_fixture("appconfig", "outside"), "templates", "dta-app.yaml"), rows$file
+  )
+  qa_step(
+    "and the library's one template is clean",
+    character(0), setdiff(result$code, "app_config_misplaced")
+  )
 })
 
 test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yaml is app_config_invalid naming its key | REQ-TMPL-037", {
   lib <- file.path(qa_tempdir(), "doclib")
-  dir.create(lib)
-  file.copy(tmpl_fixture("appconfig", "invalid", "t.dta-template.yaml"), lib)
+  dir.create(file.path(lib, "templates"), recursive = TRUE)
+  file.copy(tmpl_fixture("appconfig", "invalid", "templates", "t.dta-template.yaml"), file.path(lib, "templates"))
   writeLines(c(
     "kind: dta_app_config",
     "document:",
@@ -646,8 +736,8 @@ test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yam
   qa_check("naming document.abbreviation", any(grepl("document.abbreviation", rows$message, fixed = TRUE)))
 
   ok <- file.path(qa_tempdir(), "doclib_ok")
-  dir.create(ok)
-  file.copy(tmpl_fixture("appconfig", "invalid", "t.dta-template.yaml"), ok)
+  dir.create(file.path(ok, "templates"), recursive = TRUE)
+  file.copy(tmpl_fixture("appconfig", "invalid", "templates", "t.dta-template.yaml"), file.path(ok, "templates"))
   writeLines(c(
     "kind: dta_app_config",
     "document:",
@@ -655,4 +745,210 @@ test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yam
     "  abbreviation: [DTA, DTS]"
   ), file.path(ok, "dta-app.yaml"))
   qa_step("a valid pair of lists adds no rows", 0L, nrow(validate_template(ok)))
+})
+
+# ---- REQ-TMPL-031 / REQ-TMPL-037 / REQ-TMPL-042: the layout codes ----------
+
+test_that("OQ-TMPL-100 | a template in the wrong folder is template_misplaced and invisible, a single file is not placed | REQ-TMPL-031", {
+  # Fixture: templates/ok.dta-template.yaml (id misplaced_ok, in its folder),
+  # templates/stray.dta-party.yaml (a party profile in templates/) and
+  # stray_root.dta-vocabulary.yaml (a vocabulary directly in the root).
+  root <- tmpl_fixture("codes", "template_misplaced")
+  result <- validate_template(root)
+
+  qa_step(
+    "one row per misplaced file, and none for the file in its own folder",
+    c("stray.dta-party.yaml", "stray_root.dta-vocabulary.yaml"), sort(basename(result$file))
+  )
+  qa_step("both are template_misplaced", c("template_misplaced", "template_misplaced"), result$code)
+  qa_step("both at severity error", c("error", "error"), result$severity)
+  rows <- result[order(basename(result$file)), , drop = FALSE]
+  qa_step(
+    "the readable kind of each file is retained",
+    c("dta_party_profile", "dta_vocabulary"), rows$kind
+  )
+  qa_step("and its readable id", c("stray_party", "stray_terms"), rows$id)
+  qa_check(
+    "the party profile's message names parties/, the folder it belongs in",
+    grepl("parties/", rows$message[[1]], fixed = TRUE)
+  )
+  qa_check(
+    "the vocabulary's message names vocabulary/",
+    grepl("vocabulary/", rows$message[[2]], fixed = TRUE)
+  )
+  qa_step(
+    "no_templates is not reported: the file in templates/ is a template, and the misplaced rows explain the rest",
+    NA_character_, tmpl_severity(result, "no_templates")
+  )
+  err <- tryCatch(validate_template(root, strict = TRUE), error = function(e) e)
+  qa_check(
+    "strict validation rejects the library and names the code",
+    inherits(err, "rlang_error") && grepl("template_misplaced", conditionMessage(err), fixed = TRUE)
+  )
+
+  # A single file is checked in isolation: it is not placed, whatever folder
+  # it sits in.
+  single <- validate_template(file.path(root, "templates", "stray.dta-party.yaml"))
+  qa_step("a misplaced file given by itself adds no placement row", 0L, nrow(single))
+
+  # Invisible means invisible to resolution too: a creation template in the
+  # root cannot be the parent another template extends.
+  lib <- qa_tempdir()
+  dir.create(file.path(lib, "templates"))
+  yaml::write_yaml(list(
+    kind = "dta_creation_template", id = "root_parent", version = "1.0", abstract = TRUE
+  ), file.path(lib, "root_parent.dta-template.yaml"))
+  yaml::write_yaml(list(
+    kind = "dta_creation_template", id = "folder_child", version = "1.0",
+    abstract = TRUE, extends = "root_parent@1.0"
+  ), file.path(lib, "templates", "folder_child.dta-template.yaml"))
+  hidden <- validate_template(lib)
+  qa_step(
+    "a template extending one that sits in the root finds no parent",
+    c("extends_unresolved", "template_misplaced"), sort(hidden$code)
+  )
+})
+
+test_that("OQ-TMPL-101 | a kind folder given instead of the library root is one library_subfolder_given error | REQ-TMPL-031", {
+  # Fixture: codes/library_subfolder_given/templates/t.dta-template.yaml. The
+  # directory handed over is the templates/ folder itself.
+  lib_root <- tmpl_fixture("codes", "library_subfolder_given")
+  folder <- file.path(lib_root, "templates")
+  result <- validate_template(folder)
+  qa_step("exactly one row, not one per file", 1L, nrow(result))
+  qa_step("it is library_subfolder_given", "library_subfolder_given", result$code)
+  qa_step("at severity error", "error", result$severity)
+  qa_check(
+    "the message says to validate the parent directory",
+    grepl("Validate its parent directory instead", result$message, fixed = TRUE)
+  )
+  qa_check(
+    "and advises a flat library to move its files into the kind sub-folders, noting that folder names are case-sensitive",
+    grepl("flat library", result$message, fixed = TRUE) &&
+      grepl("Reorganising an older repository", result$message, fixed = TRUE) &&
+      grepl("case-sensitive", result$message, fixed = TRUE)
+  )
+  err <- tryCatch(validate_template(folder, strict = TRUE), error = function(e) e)
+  qa_check(
+    "strict validation rejects it and names the code",
+    inherits(err, "rlang_error") && grepl("library_subfolder_given", conditionMessage(err), fixed = TRUE)
+  )
+  qa_step("the parent directory of the same folder is a clean library", 0L, nrow(validate_template(lib_root)))
+
+  # The same mistake with parties/ and vocabulary/.
+  copy <- qa_tempdir()
+  dir.create(file.path(copy, "parties"))
+  file.copy(
+    file.path(tmpl_fixture("layout", "folder"), "parties", "example.dta-party.yaml"),
+    file.path(copy, "parties")
+  )
+  dir.create(file.path(copy, "vocabulary"))
+  file.copy(
+    file.path(tmpl_fixture("layout", "folder"), "vocabulary", "example.dta-vocabulary.yaml"),
+    file.path(copy, "vocabulary")
+  )
+  qa_step(
+    "parties/ given by itself is the same error",
+    "library_subfolder_given", validate_template(file.path(copy, "parties"))$code
+  )
+  qa_step(
+    "so is vocabulary/",
+    "library_subfolder_given", validate_template(file.path(copy, "vocabulary"))$code
+  )
+})
+
+test_that("OQ-TMPL-102 | a dta-app.yaml outside the root is app_config_misplaced and unread; both spellings in the root are app_config_duplicate | REQ-TMPL-037", {
+  # Fixture: dta-app.yaml in templates/ holding a bad colour, dta-app.yml in
+  # parties/ holding nothing but its kind line, and one creation template.
+  root <- tmpl_fixture("codes", "app_config_misplaced")
+  result <- validate_template(root)
+  rows <- result[result$code == "app_config_misplaced", , drop = FALSE]
+  qa_step(
+    "both files are reported, one row each, whichever folder and spelling",
+    c(file.path(root, "parties", "dta-app.yml"), file.path(root, "templates", "dta-app.yaml")),
+    sort(rows$file)
+  )
+  qa_step("at severity error", c("error", "error"), rows$severity)
+  qa_step(
+    "the bad colour in the misplaced file is not parsed: no app_config_invalid",
+    0L, sum(result$code == "app_config_invalid")
+  )
+
+  # Both spellings directly in the root.
+  lib <- qa_tempdir()
+  dir.create(file.path(lib, "templates"))
+  file.copy(
+    file.path(tmpl_fixture("layout", "folder"), "templates", "example.dta-template.yaml"),
+    file.path(lib, "templates")
+  )
+  writeLines("kind: dta_app_config", file.path(lib, "dta-app.yaml"))
+  writeLines("kind: dta_app_config", file.path(lib, "dta-app.yml"))
+  dup <- validate_template(lib)
+  qa_step(
+    "each of the two spellings in the root is reported",
+    c(file.path(lib, "dta-app.yaml"), file.path(lib, "dta-app.yml")),
+    sort(dup$file[dup$code == "app_config_duplicate"])
+  )
+  qa_step("at severity error", "error", unique(dup$severity[dup$code == "app_config_duplicate"]))
+  qa_step("and nothing else is reported", character(0), setdiff(dup$code, "app_config_duplicate"))
+})
+
+test_that("OQ-TMPL-103 | a file in export-templates/ that is not a .docx is an export_template_invalid warning, clutter files are not | REQ-TMPL-042", {
+  # Fixture export-templates/: notes.txt, legacy.doc, README.md. The ".keep"
+  # dotfile is added here, not committed: R CMD check flags hidden files
+  # inside the package.
+  root <- qa_tempdir()
+  file.copy(
+    list.files(tmpl_fixture("codes", "export_template_invalid"), full.names = TRUE),
+    root,
+    recursive = TRUE
+  )
+  writeLines("", file.path(root, "export-templates", ".keep"))
+  result <- validate_template(root)
+  qa_step(
+    "exactly the two files the app would ignore are reported",
+    c("legacy.doc", "notes.txt"), sort(basename(result$file))
+  )
+  qa_step("as export_template_invalid", c("export_template_invalid", "export_template_invalid"), result$code)
+  qa_step("at severity warning", c("warning", "warning"), result$severity)
+  qa_step("with the export-template kind", c("dta_export_template", "dta_export_template"), result$kind)
+  qa_step(
+    "strict validation does not abort on warnings alone", "no condition",
+    tryCatch(
+      {
+        validate_template(root, strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+  qa_step(
+    "the check runs whatever kinds says",
+    2L, nrow(validate_template(root, kinds = "dta_vocabulary"))
+  )
+
+  # Names that are never reported: .docx files (also in capitals), Word's
+  # "~$" lock files, a dotfile, files named README (.md, .txt), and a sub-folder.
+  copy <- qa_tempdir()
+  file.copy(list.files(root, full.names = TRUE, all.files = TRUE, no.. = TRUE), copy, recursive = TRUE)
+  folder <- file.path(copy, "export-templates")
+  file.remove(file.path(folder, c("notes.txt", "legacy.doc")))
+  writeLines("x", file.path(folder, "good.docx"))
+  writeLines("x", file.path(folder, "CAPITALS.DOCX"))
+  writeLines("x", file.path(folder, "~$good.tmp"))
+  dir.create(file.path(folder, "sub"))
+  writeLines("x", file.path(folder, "readme.TXT"))
+  writeLines("x", file.path(folder, "sub", "inner.txt"))
+  qa_step("none of those is reported", 0L, nrow(validate_template(copy)))
+  writeLines("x", file.path(folder, "README_old.pdf"))
+  qa_step(
+    "but a file that merely begins with README is",
+    "README_old.pdf", basename(validate_template(copy)$file)
+  )
+  file.remove(file.path(folder, "README_old.pdf"))
+  qa_check(
+    "the base fixture library has no export-templates/ folder",
+    !dir.exists(file.path(tmpl_fixture("base"), "export-templates"))
+  )
+  qa_step("and a library without that folder adds no row", 0L, nrow(validate_template(tmpl_fixture("base"))))
 })

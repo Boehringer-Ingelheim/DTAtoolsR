@@ -8,7 +8,7 @@
 # These are the Boehringer Ingelheim brand palette, kept deliberately in step
 # with the Shiny app's own theme (inst/shiny/dta_app/R/theme.R, the `BI` list),
 # so a DTA exported from the app looks like the app it came from. The bundled
-# reference template (inst/extdata/templates/dta_numbered_template.docx) is
+# reference template (inst/extdata/word-templates/dta_numbered_template.docx) is
 # themed to match: its heading styles carry the same deep green, so Word's
 # own heading colour cannot reintroduce a second, unrelated hue.
 THEME_COLORS <- list(
