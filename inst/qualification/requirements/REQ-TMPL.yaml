@@ -797,10 +797,14 @@ requirements:
 
   - id: REQ-TMPL-040
     text: >
-      write_template_guide() shall write a DOCX document for a template
-      library in which, for every creation template, each option's label and
-      its pre-filled answer appear as text, and each column a dataset template
-      adds appears; an existing output file shall not be replaced unless
+      write_template_guide() shall write one readable document per usable
+      (non-abstract) creation template of a library into a folder, named from
+      the template's id and version. Each document shall show every question
+      with its pre-filled answer, every column of the datasets it creates
+      (tagging those the template adds), and a running header and footer on
+      every page carrying the organisation, the template id and version, and
+      "Page X of Y" as page fields. An abstract template shall be refused when
+      requested by id, an existing output file shall not be replaced unless
       overwrite = TRUE, and a format other than docx or pdf shall be refused.
       The library is given as its root directory (REQ-TMPL-002), or as one
       template file, which the guide then covers together with what it refers

@@ -60,7 +60,7 @@ optional and its absence is recorded rather than fatal:
 | Optional | What it adds | Without it |
 | --- | --- | --- |
 | `rmarkdown` + pandoc | HTML and Word reports | Markdown report only |
-| a PDF backend (LibreOffice, TinyTeX, LaTeX) | PDF report | no PDF |
+| a PDF backend (Microsoft Word on Windows, LibreOffice, TinyTeX, LaTeX) | PDF report | no PDF |
 | `R6` | the live event log during the run | results are unaffected |
 | `shiny`, `bslib`, `DT` | the application tests | reported as not executed |
 | `shinytest2`, `chromote` + Chrome | browser tests of the application | reported as not executed |

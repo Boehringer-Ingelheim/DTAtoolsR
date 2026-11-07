@@ -638,10 +638,10 @@ test_that("dta_pdf_backend reports a usable backend or NULL", {
   } else {
     expect_type(backend, "list")
     expect_named(backend, c("name", "engine", "available"))
-    expect_true(backend$name %in% c("libreoffice", "tinytex", "pandoc"))
+    expect_true(backend$name %in% c("word", "libreoffice", "tinytex", "pandoc"))
     # The reported backend is the first choice, not an arbitrary one.
     expect_identical(backend$name, backend$available[[1]])
-    expect_true(all(backend$available %in% c("libreoffice", "tinytex", "pandoc")))
+    expect_true(all(backend$available %in% c("word", "libreoffice", "tinytex", "pandoc")))
     expect_true(nzchar(backend$engine))
     expect_true(.pdf_conversion_available())
   }
@@ -920,6 +920,108 @@ test_that(".tinytex_docx_to_pdf typesets a character pdflatex cannot (retry with
 
   .tinytex_docx_to_pdf(docx, pdf)
   expect_true(.is_pdf_file(pdf))
+})
+
+test_that("word is a backend only when Word is found, and then comes first", {
+  local_mocked_bindings(.find_word = function() "")
+  expect_false("word" %in% .pdf_backends_available())
+
+  local_mocked_bindings(.find_word = function() "C:/fake/WINWORD.EXE")
+  expect_identical(.pdf_backends_available()[[1]], "word")
+})
+
+test_that(".find_word returns \"\" for a registry path that does not exist, and the path of one that does", {
+  skip_if_not(.Platform$OS.type == "windows")
+  real <- tempfile(fileext = ".exe")
+  file.create(real)
+  on.exit(unlink(real), add = TRUE)
+
+  local_mocked_bindings(
+    readRegistry = function(...) list(`(Default)` = "C:/no/such/dir/WINWORD.EXE"),
+    .package = "utils"
+  )
+  expect_identical(.find_word(), "")
+
+  local_mocked_bindings(
+    readRegistry = function(...) list(`(Default)` = paste0("\"", real, "\"")),
+    .package = "utils"
+  )
+  expect_identical(.find_word(), normalizePath(real, winslash = "/"))
+})
+
+test_that(".find_word is empty off Windows", {
+  skip_if(.Platform$OS.type == "windows")
+  expect_identical(.find_word(), "")
+})
+
+.word_pids <- function() {
+  out <- suppressWarnings(system2("tasklist",
+    c("/FO", "CSV", "/NH", "/FI", shQuote("IMAGENAME eq WINWORD.EXE", type = "cmd")),
+    stdout = TRUE, stderr = TRUE
+  ))
+  hit <- grep("WINWORD.EXE", out, fixed = TRUE, value = TRUE)
+  as.integer(vapply(strsplit(hit, "\",\"", fixed = TRUE), `[`, "", 2))
+}
+
+.word_test_docx <- function() {
+  docx <- tempfile(fileext = ".docx")
+  doc <- officer::body_add_par(officer::read_docx(), "Body text")
+  print(doc, target = docx)
+  docx
+}
+
+test_that(".word_docx_to_pdf writes a PDF of plausible size and leaves no Word behind", {
+  skip_if_not(.Platform$OS.type == "windows")
+  skip_if(!nzchar(.find_word()), "Microsoft Word is not installed")
+  skip_if(length(.word_pids()) > 0, "a Word session is already open; see the attach test")
+
+  docx <- .word_test_docx()
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(docx, pdf), force = TRUE), add = TRUE)
+
+  .word_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+  expect_gt(file.info(pdf)$size, 1000)
+  expect_identical(.word_pids(), integer(0))
+})
+
+test_that(".word_docx_to_pdf never ends a Word session that was already running", {
+  skip_if_not(.Platform$OS.type == "windows")
+  skip_if(!nzchar(.find_word()), "Microsoft Word is not installed")
+  skip_if(length(.word_pids()) > 0, "a Word session is already open; will not disturb it")
+
+  # A separate PowerShell holds a Word instance for a minute, as a user's
+  # session would be; Word 2013+ may hand it to our New-Object call.
+  holder <- tempfile(fileext = ".ps1")
+  writeLines(
+    c(
+      "$w = New-Object -ComObject Word.Application",
+      "Start-Sleep -Seconds 60"
+    ),
+    holder
+  )
+  docx <- .word_test_docx()
+  pdf <- tempfile(fileext = ".pdf")
+  on.exit(unlink(c(holder, docx, pdf), force = TRUE), add = TRUE)
+  system2("powershell",
+    c("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", shQuote(holder, type = "cmd")),
+    wait = FALSE
+  )
+  existing <- integer(0)
+  for (i in seq_len(40)) {
+    existing <- .word_pids()
+    if (length(existing) > 0) break
+    Sys.sleep(0.5)
+  }
+  on.exit(
+    for (p in .word_pids()) tools::pskill(p),
+    add = TRUE, after = FALSE
+  )
+  skip_if(length(existing) == 0, "could not start a stand-in Word session")
+
+  .word_docx_to_pdf(docx, pdf)
+  expect_true(.is_pdf_file(pdf))
+  expect_true(all(existing %in% .word_pids()))
 })
 
 test_that(".is_pdf_file recognises the PDF signature and nothing else", {

@@ -164,3 +164,38 @@ test_that("the bundled template numbers headings flush left", {
   expect_true(all(xml2::xml_attr(suff, "w:val", ns = xml2::xml_ns(xml)) == "space"))
   expect_length(suff, 9)
 })
+
+test_that("write_dta's header and footer parts match the golden fixture", {
+  # fixtures/write_dta-furniture.txt holds the serialized CHILDREN of the root
+  # element of every word/header*.xml and word/footer*.xml of a fixed write_dta()
+  # document (with and without an organisation line), captured before the
+  # furniture builder was generalised for the template guide. The root element
+  # itself is left out: its xmlns boilerplate is officer's and changes between
+  # officer releases. Regenerate only for a deliberate layout change.
+  golden_lines <- readLines(test_path("fixtures", "write_dta-furniture.txt"), warn = FALSE)
+  furniture_parts <- function(org) {
+    dta <- .layout_dta()
+    dta@metadata@template <- list(id = "biomarker_gf", label = "Biomarker GF DTS", version = "1.3", date = "2026-11-05")
+    out <- tempfile(fileext = ".docx")
+    on.exit(unlink(out), add = TRUE)
+    write_dta(dta, out,
+      quiet = TRUE, organisation = org,
+      organisation_unit = if (!is.null(org)) "Unit X"
+    )
+    ex <- tempfile()
+    on.exit(unlink(ex, recursive = TRUE), add = TRUE)
+    utils::unzip(out, exdir = ex)
+    f <- list.files(file.path(ex, "word"), "^(header|footer)[0-9]+[.]xml$", full.names = TRUE)
+    # Sections repeat the same furniture, so one line per distinct content.
+    lines <- paste0(
+      if (is.null(org)) "no-org" else "org", "\t",
+      sub("[0-9]+[.]xml$", "", basename(f)), "\t",
+      vapply(f, function(p) {
+        kids <- xml2::xml_children(xml2::read_xml(p))
+        paste(vapply(kids, as.character, "", options = "no_declaration"), collapse = "")
+      }, "")
+    )
+    sort(unique(lines), method = "radix")
+  }
+  expect_identical(c(furniture_parts("Acme Corp"), furniture_parts(NULL)), golden_lines)
+})

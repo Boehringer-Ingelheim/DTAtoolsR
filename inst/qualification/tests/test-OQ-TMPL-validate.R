@@ -749,7 +749,7 @@ test_that("OQ-TMPL-078 | an invalid document name or abbreviation in dta-app.yam
 
 # ---- REQ-TMPL-031 / REQ-TMPL-037 / REQ-TMPL-042: the layout codes ----------
 
-test_that("OQ-TMPL-090 | a template in the wrong folder is template_misplaced and invisible, a single file is not placed | REQ-TMPL-031", {
+test_that("OQ-TMPL-100 | a template in the wrong folder is template_misplaced and invisible, a single file is not placed | REQ-TMPL-031", {
   # Fixture: templates/ok.dta-template.yaml (id misplaced_ok, in its folder),
   # templates/stray.dta-party.yaml (a party profile in templates/) and
   # stray_root.dta-vocabulary.yaml (a vocabulary directly in the root).
@@ -809,7 +809,7 @@ test_that("OQ-TMPL-090 | a template in the wrong folder is template_misplaced an
   )
 })
 
-test_that("OQ-TMPL-091 | a kind folder given instead of the library root is one library_subfolder_given error | REQ-TMPL-031", {
+test_that("OQ-TMPL-101 | a kind folder given instead of the library root is one library_subfolder_given error | REQ-TMPL-031", {
   # Fixture: codes/library_subfolder_given/templates/t.dta-template.yaml. The
   # directory handed over is the templates/ folder itself.
   lib_root <- tmpl_fixture("codes", "library_subfolder_given")
@@ -857,7 +857,7 @@ test_that("OQ-TMPL-091 | a kind folder given instead of the library root is one 
   )
 })
 
-test_that("OQ-TMPL-092 | a dta-app.yaml outside the root is app_config_misplaced and unread; both spellings in the root are app_config_duplicate | REQ-TMPL-037", {
+test_that("OQ-TMPL-102 | a dta-app.yaml outside the root is app_config_misplaced and unread; both spellings in the root are app_config_duplicate | REQ-TMPL-037", {
   # Fixture: dta-app.yaml in templates/ holding a bad colour, dta-app.yml in
   # parties/ holding nothing but its kind line, and one creation template.
   root <- tmpl_fixture("codes", "app_config_misplaced")
@@ -893,7 +893,7 @@ test_that("OQ-TMPL-092 | a dta-app.yaml outside the root is app_config_misplaced
   qa_step("and nothing else is reported", character(0), setdiff(dup$code, "app_config_duplicate"))
 })
 
-test_that("OQ-TMPL-093 | a file in export-templates/ that is not a .docx is an export_template_invalid warning, clutter files are not | REQ-TMPL-042", {
+test_that("OQ-TMPL-103 | a file in export-templates/ that is not a .docx is an export_template_invalid warning, clutter files are not | REQ-TMPL-042", {
   # Fixture export-templates/: notes.txt, legacy.doc, README.md. The ".keep"
   # dotfile is added here, not committed: R CMD check flags hidden files
   # inside the package.

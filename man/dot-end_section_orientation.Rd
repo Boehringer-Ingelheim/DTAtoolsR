@@ -7,7 +7,8 @@
 .end_section_orientation(
   doc,
   orient = c("portrait", "landscape"),
-  furniture_meta = NULL
+  furniture_meta = NULL,
+  furniture = NULL
 )
 }
 \description{

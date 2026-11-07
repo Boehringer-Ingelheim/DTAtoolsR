@@ -104,12 +104,15 @@
     profiles = suppressWarnings(g("template_party_profiles")(index_df))
   )
 
+  org <- .tgc_organisation(unique(c(src$root, src$dir)))
   out <- list(
     library = list(
       name = basename(normalizePath(src$dir, winslash = "/", mustWork = FALSE)),
       path = src$dir,
       generated = format(Sys.Date(), "%Y-%m-%d"),
-      package_version = as.character(utils::packageVersion("DTAtools"))
+      package_version = as.character(utils::packageVersion("DTAtools")),
+      organisation = org$name,
+      organisation_unit = org$unit
     ),
     overview = .tgc_overview(index_df),
     creation = .tgc_collect_kind(index_df, "dta_creation_template", ctx, .tgc_creation, .tgc_creation_stub),
@@ -213,7 +216,7 @@
     )
   }
   if (dir.exists(path)) {
-    return(list(dir = path, only_id = NULL))
+    return(list(dir = path, root = path, only_id = NULL))
   }
   rec <- .dta_template_read_raw(path)
   if (!isTRUE(rec$ok) || is.na(rec$id)) {
@@ -240,7 +243,24 @@
       class = "dta_template_guide_no_templates"
     )
   }
-  list(dir = root, only_id = rec$id)
+  list(dir = root, root = root, only_id = rec$id)
+}
+
+# Organisation name and unit from the library's dta-app.yaml, "" for anything
+# missing or unreadable. Never throws: a bad config must not stop the guide.
+.tgc_organisation <- function(roots) {
+  none <- list(name = "", unit = "")
+  tryCatch(
+    {
+      f <- .dta_template_engine_get("dta_app_config_find")(roots)$path
+      if (is.na(f)) {
+        return(none)
+      }
+      org <- .dta_template_engine_get("parse_dta_app_config")(f)$config[["organisation"]]
+      list(name = .tgc_chr(org[["name"]]), unit = .tgc_chr(org[["unit"]]))
+    },
+    error = function(e) none
+  )
 }
 
 # Labels and the extra columns the engine's history/lineage helpers expect.
@@ -260,7 +280,7 @@
 
 # Template ids a raw definition points at (extends, mixins, dataset templates,
 # vocabularies, party profile allow-lists, column bindings), without versions.
-.tgc_refs <- function(def) {
+.tgc_refs <- function(def, versions = FALSE) {
   keys <- c("extends", "template", "vocabulary", "mixins", "values_from", "profiles")
   refs <- character(0)
   walk <- function(x) {
@@ -279,7 +299,53 @@
     invisible(NULL)
   }
   walk(def)
-  unique(sub("@.*$", "", refs))
+  if (versions) unique(refs) else unique(sub("@.*$", "", refs))
+}
+
+# id / version / label rows for references of one kind that resolve in the
+# index; a pinned "id@version" keeps its version, a bare id means the newest.
+.tgc_ref_frame <- function(ctx, refs, kind) {
+  hits <- lapply(unique(refs), function(r) ctx$g("resolve_template_ref")(ctx$index, r, kind = kind))
+  hits <- Filter(Negate(is.null), hits)
+  out <- .tgc_df(
+    c("id", "version", "label"),
+    lapply(hits, function(h) c(h$id[[1]], h$version[[1]], h$label[[1]]))
+  )
+  out <- out[!duplicated(out[c("id", "version")]), , drop = FALSE]
+  out <- out[order(out$label, out$id, out$version, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+# Same shape, in the order given (lineage / mixins); an entry that no longer
+# resolves keeps its id and version.
+.tgc_ref_chain <- function(ctx, refs, kind = "dta_creation_template") {
+  .tgc_df(c("id", "version", "label"), lapply(refs, function(r) {
+    hit <- ctx$g("resolve_template_ref")(ctx$index, r, kind = kind)
+    if (is.null(hit)) {
+      c(sub("@.*$", "", r), if (grepl("@", r, fixed = TRUE)) sub("^[^@]*@", "", r) else "", sub("@.*$", "", r))
+    } else {
+      c(hit$id[[1]], hit$version[[1]], hit$label[[1]])
+    }
+  }))
+}
+
+# The term lists, dataset templates and party profiles ONE creation template
+# offers: references in its resolved definition (variant choices included),
+# plus whatever the dataset templates it uses bind their columns to.
+.tgc_offered_refs <- function(def, parties, ctx) {
+  refs <- .tgc_refs(def, versions = TRUE)
+  ds <- .tgc_ref_frame(ctx, refs, "dta_dataset_template")
+  inner <- unlist(lapply(seq_len(nrow(ds)), function(i) {
+    p <- ctx$index$path[ctx$index$kind == "dta_dataset_template" & ctx$index$id == ds$id[[i]] &
+      ctx$index$version == ds$version[[i]]]
+    if (length(p) == 0) character(0) else .tgc_refs(ctx$records[[p[[1]]]]$def, versions = TRUE)
+  }))
+  list(
+    dataset_templates = ds,
+    vocabularies = .tgc_ref_frame(ctx, c(refs, inner), "dta_vocabulary"),
+    parties = parties
+  )
 }
 
 # Selected ids plus everything they reference, to a fixed point. Every version
@@ -356,14 +422,42 @@
   })
 }
 
+# "Parent (which is based on Grandparent, which is based on Root)": `labels`
+# nearest parent first.
+.tgc_based_text <- function(labels) {
+  labels <- as.character(labels)
+  if (length(labels) == 0) {
+    return("")
+  }
+  if (length(labels) == 1L) {
+    return(labels)
+  }
+  sprintf("%s (which is based on %s)", labels[[1]], paste(labels[-1], collapse = ", which is based on "))
+}
+
 .tgc_technical <- function(row) {
   sprintf("ID %s \u00b7 version %s \u00b7 file %s", row$id, row$version, basename(row$path))
 }
 
 .tgc_date <- function(def) .tgc_chr(def[["date"]], "\u2014")
 
-.tgc_stub <- function(row, rec, msg) {
+.tgc_ref_cols <- c("id", "version", "label")
+
+# The fields every entry carries beyond its kind's own, with empty defaults.
+.tgc_meta_empty <- function(row, rec) {
   list(
+    abstract = FALSE, status = "", date = .tgc_chr(rec$def[["date"]]),
+    file = basename(row$path), option_count = 0L, required_count = 0L,
+    lineage = .tgc_df(.tgc_ref_cols), mixins = .tgc_df(.tgc_ref_cols),
+    refs = list(
+      dataset_templates = .tgc_df(.tgc_ref_cols), vocabularies = .tgc_df(.tgc_ref_cols),
+      parties = .tgc_df(.tgc_ref_cols)
+    )
+  )
+}
+
+.tgc_stub <- function(row, rec, msg) {
+  c(list(
     title = row$label, id = row$id, version = row$version,
     description = .tgc_chr(rec$def[["description"]]),
     summary = "", at_a_glance = .tgc_kv(Version = row$version),
@@ -373,25 +467,25 @@
     columns = .tgc_df(.tgc_col_headers), rules = .tgc_df(c("Rule", "What it checks")),
     build_note = paste("This file could not be read:", msg),
     technical = .tgc_technical(row)
-  )
+  ), .tgc_meta_empty(row, rec))
 }
 
 .tgc_creation_stub <- function(row, rec, msg) {
   empty <- .tgc_df
-  list(
+  c(list(
     title = row$label, id = row$id, version = row$version,
     description = .tgc_chr(rec$def[["description"]]), summary = "",
     at_a_glance = .tgc_kv(Version = row$version), parent = "",
-    changes = empty(c("What", "Change")),
+    changes = empty(c("What", "Change")), changes_status = "none",
     questions = empty(.tgc_question_headers),
     variants = empty(c("Question", "Choice", "What it changes")),
     parties = empty(c("Party", "Appears in the DTA as", "Available profiles", "Must choose")),
     term_choices = empty(c("Choice", "Explanation", "Term list", "How it works", "Selected by default", "Minimum to select")),
-    prefilled = empty(c("Field", "Value")), locked = empty(c("Field", "Rule")),
+    prefilled = empty(c("Field", "Value", "Question")), locked = empty(c("Field", "Rule")),
     datasets = list(),
     build_note = paste("This template could not be read:", msg),
     technical = .tgc_technical(row)
-  )
+  ), .tgc_meta_empty(row, rec))
 }
 
 # ---- Paths and options (shared by creation and dataset templates) ---------------
@@ -401,11 +495,28 @@
   "Appears in the DTA as", "Explanation", "Must answer / fixed"
 )
 
+# Top-level metadata keys have plain document names.
+.tgc_field_words <- c(
+  title = "Document title", version = "Document version",
+  header = "Document header (organisation name)", date = "Document date",
+  error_handling = "Error handling section",
+  authorized_for_corrections = "Authorized for corrections section",
+  version_history = "Version history"
+)
+
+# Field name for a path split into parts: a lone top-level key is mapped,
+# nested paths read "A \u203a B".
+.tgc_field_name <- function(parts) {
+  if (length(parts) == 1L && parts[[1]] %in% names(.tgc_field_words)) {
+    return(unname(.tgc_field_words[[parts[[1]]]]))
+  }
+  paste(.tgc_humanise(parts), collapse = " \u203a ")
+}
+
 # "metadata.transmission.frequency" -> "Transmission \u203a Frequency".
 .tgc_path_text <- function(path, ds_titles = character(0)) {
   path <- sub("^base\\.", "", as.character(path))
   parts <- strsplit(path, ".", fixed = TRUE)[[1]]
-  sep <- " \u203a "
   m <- regmatches(path, regexec("^datasets?\\.(?:([^.]+)\\.)?columns\\.([^.]+)\\.values$", path, perl = TRUE))[[1]]
   if (length(m) == 3) {
     where <- if (nzchar(m[[2]])) {
@@ -419,7 +530,7 @@
   if (length(parts) > 1 && identical(parts[[1]], "metadata")) {
     parts <- parts[-1]
   }
-  paste(.tgc_humanise(parts), collapse = sep)
+  .tgc_field_name(parts)
 }
 
 .tgc_option_paths <- function(opt, ds_titles = character(0)) {
@@ -547,7 +658,7 @@
       }
     )
     for (b in built) {
-      datasets <- c(datasets, .tgc_built_datasets(b$dta, b$variant, ctx))
+      datasets <- c(datasets, .tgc_built_datasets(b$dta, b$variant, ctx, b$overrides))
     }
     ds_titles <- .tgc_titles(datasets)
   }
@@ -561,20 +672,38 @@
   parent_abstract <- length(lineage) > 0 && any(
     index$abstract[index$id == sub("@.*$", "", lineage[[1]]) & index$version == sub("^[^@]*@", "", lineage[[1]])]
   )
-  changes <- if (abstract || length(lineage) == 0 || parent_abstract) {
+  changes_status <- if (abstract || length(lineage) == 0) {
+    "none"
+  } else if (parent_abstract) {
+    "parent_abstract"
+  } else {
+    "compared"
+  }
+  changes <- if (changes_status != "compared") {
     .tgc_df(c("What", "Change"))
   } else {
     tryCatch(
       .tgc_changes(sprintf("%s@%s", row$id, row$version), lineage[[1]], def, datasets, ctx),
       error = function(e) {
         ctx$problem(row$path, paste("Could not compare with the parent template:", conditionMessage(e)))
+        changes_status <<- "failed"
         .tgc_df(c("What", "Change"))
       }
     )
   }
 
+  opts <- Filter(is.list, def[["options"]] %||% list())
   list(
     title = row$label, id = row$id, version = row$version,
+    abstract = abstract,
+    status = if (abstract) "Building block" else "Ready to use",
+    date = .tgc_chr(rec$def[["date"]]),
+    file = basename(row$path),
+    option_count = length(opts),
+    required_count = sum(grepl("Must answer", questions[["Must answer / fixed"]], fixed = TRUE)),
+    lineage = .tgc_ref_chain(ctx, lineage),
+    mixins = .tgc_ref_chain(ctx, mixins),
+    refs = .tgc_offered_refs(def, .tgc_party_refs(def, ctx), ctx),
     description = .tgc_chr(def[["description"]]),
     summary = .tgc_creation_summary(abstract, datasets, spec, nrow(questions), parties, terms, variants$changes_questions),
     at_a_glance = do.call(.tgc_kv, c(
@@ -584,7 +713,7 @@
         "Ready to use"
       }),
       list(`Based on` = if (length(lineage) > 0) {
-        paste(vapply(rev(lineage), ref_label, character(1)), collapse = " \u203a ")
+        .tgc_based_text(vapply(lineage, ref_label, character(1)))
       } else {
         "\u2014"
       }),
@@ -592,7 +721,7 @@
       list(Version = row$version, Date = .tgc_date(rec$def))
     )),
     parent = parent,
-    changes = changes,
+    changes = changes, changes_status = changes_status,
     questions = questions,
     variants = variants$table,
     parties = parties,
@@ -609,19 +738,29 @@
   g <- ctx$g
   one <- function(sel) {
     sdef <- g("resolve_template_variant")(def, sel)
-    b <- g("create_dta_from_template")(sdef, path, sel,
-      index = ctx$index, vocab_selections = .dta_template_vocab_dry_selections(sdef, ctx$index)
-    )
+    vsel <- .dta_template_vocab_dry_selections(sdef, ctx$index)
+    b <- g("create_dta_from_template")(sdef, path, sel, index = ctx$index, vocab_selections = vsel)
     if (!isTRUE(b$ok)) cli::cli_abort("{b$error}")
-    b$value
+    # The same term-list narrowing, to lay over the dataset template when the
+    # built dataset is compared with it.
+    overrides <- tryCatch(
+      g("resolve_vocabulary_slot_overrides")(
+        suppressWarnings(g("normalise_vocabulary_slots")(sdef[["vocabulary_slots"]] %||% list())),
+        vsel, ctx$vocab
+      ),
+      error = function(e) list()
+    )
+    list(dta = b$value, overrides = overrides)
   }
   if (is.null(spec)) {
-    return(list(list(dta = one(list()), variant = "")))
+    r <- one(list())
+    return(list(list(dta = r$dta, overrides = r$overrides, variant = "")))
   }
   lapply(spec[["choices"]], function(choice) {
     sel <- stats::setNames(list(choice[["value"]]), spec[["id"]])
+    r <- one(sel)
     list(
-      dta = one(sel),
+      dta = r$dta, overrides = r$overrides,
       variant = sprintf("For choice '%s'", .tgc_chr(choice[["label"]], choice[["value"]]))
     )
   })
@@ -710,12 +849,11 @@
     )
     Filter(function(p) any(vapply(mine, overlap, logical(1), b = p)), paths)
   }
+  # A required path is checked on the finished document, so a question that
+  # writes to one must be answered even when it starts pre-filled: clearing it
+  # aborts the creation.
   rows <- lapply(opts, function(opt) {
-    open <- any(vapply(
-      matched(must, opt), .tgc_required_open, logical(1),
-      def = def, opts = opts, base_md = base_md, g = g
-    ))
-    flag <- c(if (open) "Must answer", if (length(matched(sealed, opt)) > 0) "Fixed")
+    flag <- c(if (length(matched(must, opt)) > 0) "Must answer", if (length(matched(sealed, opt)) > 0) "Fixed")
     .tgc_question_row(opt, base_md, g, .tgc_join(flag, ", "), ds_titles)
   })
   .tgc_df(.tgc_question_headers, rows)
@@ -843,6 +981,23 @@
   .tgc_df(c("Party", "Appears in the DTA as", "Available profiles", "Must choose"), rows)
 }
 
+# id / version / label of every profile the template's party slots offer.
+.tgc_party_refs <- function(def, ctx) {
+  profs <- unlist(lapply(.tgc_slots(def, ctx, "party"), function(slot) {
+    lapply(ctx$g("party_profiles_for_slot")(ctx$profiles, slot), function(p) {
+      c(
+        .tgc_chr(p[["id"]]), .tgc_chr(p[["version"]]),
+        .tgc_chr(p[["label"]], .tgc_chr(p[["id"]]))
+      )
+    })
+  }), recursive = FALSE)
+  out <- .tgc_df(.tgc_ref_cols, profs)
+  out <- out[!duplicated(out[c("id", "version")]), , drop = FALSE]
+  out <- out[order(out$label, out$id, out$version, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
 .tgc_term_choices <- function(def, ctx) {
   slots <- .tgc_slots(def, ctx, "vocabulary")
   rows <- lapply(slots, function(slot) {
@@ -857,11 +1012,11 @@
   .tgc_df(c("Choice", "Explanation", "Term list", "How it works", "Selected by default", "Minimum to select"), rows)
 }
 
-# base.metadata as Field / Value rows, as the finished DTA will hold it before
-# anyone answers a question: each option's pre-filled answer is laid over its
-# target first (the same value the Questions table shows), a field a party or
-# term-list choice fills is marked as chosen at creation, and a field a
-# question can change says which one.
+# base.metadata as Field / Value / Question rows, as the finished DTA will hold
+# it before anyone answers a question: each option's pre-filled answer is laid
+# over its target first (the same value the Questions table shows), a field a
+# term-list choice fills is marked as chosen at creation, a party's fields are
+# one row, and a field a question can change names that question in `Question`.
 .tgc_prefilled <- function(def, ctx, annotate = TRUE) {
   g <- ctx$g
   md <- def[["base"]][["metadata"]]
@@ -883,53 +1038,79 @@
       }
     }
   }
+  party_slots <- .tgc_slots(def, ctx, "party")
+  vocab_slots <- .tgc_slots(def, ctx, "vocabulary")
+  n_party <- length(party_slots)
   slot_targets <- c(
-    vapply(.tgc_slots(def, ctx, "party"), function(s) as.character(s$target), character(1)),
-    vapply(.tgc_slots(def, ctx, "vocabulary"), function(s) as.character(s$target %||% "")[[1]], character(1))
+    vapply(party_slots, function(s) as.character(s$target), character(1)),
+    vapply(vocab_slots, function(s) as.character(s$target %||% "")[[1]], character(1))
   )
   slot_labels <- c(
-    vapply(.tgc_slots(def, ctx, "party"), function(s) as.character(s$label), character(1)),
-    vapply(.tgc_slots(def, ctx, "vocabulary"), function(s) as.character(s$label), character(1))
+    vapply(party_slots, function(s) as.character(s$label), character(1)),
+    vapply(vocab_slots, function(s) as.character(s$label), character(1))
   )
   covered_by <- function(path) {
     hit <- which(vapply(slot_targets, function(t) nzchar(t) && (identical(path, t) || startsWith(path, paste0(t, "."))), logical(1)))
-    if (length(hit) == 0) NA_character_ else slot_labels[[hit[[1]]]]
+    if (length(hit) == 0) NA_integer_ else hit[[1]]
   }
   overlap <- g("dta_template_paths_overlap")
+  # The question that sets the document version, for the version history row.
+  is_version <- vapply(by_path, function(b) identical(.tgc_clean_path(b[["path"]]), "metadata.version"), logical(1))
+  version_q <- if (any(is_version)) by_path[[which(is_version)[[1]]]][["label"]] else ""
 
   rows <- list()
+  party_done <- character(0)
   add <- function(prefix, value) {
     path <- paste(c("metadata", prefix), collapse = ".")
+    question <- ""
     if (annotate) {
-      slot <- covered_by(path)
-      if (!is.na(slot)) {
-        value <- sprintf("(chosen when the DTA is created: %s)", slot)
-      } else {
-        who <- unique(vapply(
-          Filter(function(b) overlap(path, b[["path"]]), by_path),
-          function(b) b[["label"]], character(1)
-        ))
-        if (length(who) > 0) {
-          value <- paste0(
-            value, "\n(can be changed by ", if (length(who) == 1L) "question " else "questions ",
-            paste0("'", who, "'", collapse = ", "), ")"
+      hit <- covered_by(path)
+      if (!is.na(hit) && hit <= n_party) {
+        # One row per party, not one per field of the profile.
+        lab <- slot_labels[[hit]]
+        if (!lab %in% party_done) {
+          party_done <<- c(party_done, lab)
+          rows[[length(rows) + 1L]] <<- c(
+            sprintf("%s: organisation and contacts", lab),
+            sprintf("From the %s profile you choose", sub("^the ", "", tolower(lab))), ""
           )
         }
+        return(invisible(NULL))
+      }
+      if (!is.na(hit)) {
+        value <- sprintf("(chosen when the DTA is created: %s)", slot_labels[[hit]])
+      } else {
+        question <- paste(unique(vapply(
+          Filter(function(b) overlap(path, b[["path"]]), by_path),
+          function(b) b[["label"]], character(1)
+        )), collapse = ", ")
       }
     }
-    rows[[length(rows) + 1L]] <<- c(paste(.tgc_humanise(prefix), collapse = " \u203a "), value)
+    rows[[length(rows) + 1L]] <<- c(.tgc_field_name(prefix), value, question)
   }
   walk <- function(x, prefix) {
-    name <- paste(.tgc_humanise(prefix), collapse = " \u203a ")
+    name <- .tgc_field_name(prefix)
     last <- prefix[[length(prefix)]]
     if (identical(last, "version_history") && is.list(x) && length(x) > 0) {
       for (i in seq_along(x)) {
         e <- x[[i]]
+        raw_v <- .tgc_chr(e[["version"]])
+        raw_d <- .tgc_chr(e[["date"]])
+        ver <- if (!nzchar(raw_v) || identical(raw_v, "${version}")) {
+          if (nzchar(version_q)) sprintf("your answer to question '%s'", version_q) else "the version you enter"
+        } else {
+          raw_v
+        }
+        day <- if (identical(raw_d, "${today}")) "the day the DTA is created" else raw_d
+        com <- .tgc_chr(e[["changes"]])
         rows[[length(rows) + 1L]] <<- c(
-          paste(name, i),
-          paste(c(.tgc_value_text(e[["version"]]), .tgc_value_text(e[["date"]]), .tgc_value_text(e[["changes"]])),
-            collapse = " \u00b7 "
-          )
+          if (i == 1L) paste0(name, " (first entry)") else sprintf("%s (entry %d)", name, i),
+          paste(c(
+            paste0("Version: ", ver),
+            if (nzchar(day)) paste0("Date: ", day),
+            if (nzchar(com)) paste0("Comment: ", com)
+          ), collapse = " \u00b7 "),
+          ""
         )
       }
     } else if (identical(last, "contacts") && is.list(x) && length(x) > 0) {
@@ -949,7 +1130,7 @@
   if (is.list(shown)) {
     for (n in names(shown)) walk(shown[[n]], n)
   }
-  .tgc_df(c("Field", "Value"), rows)
+  .tgc_df(c("Field", "Value", "Question"), rows)
 }
 
 # Fixed paths cannot be changed by templates based on this one; required paths
@@ -1044,7 +1225,8 @@
       return(whole %||% paste("Changed:", moved))
     }
     if (field == "description" && change == "changed") {
-      return("Description changed")
+      now <- trimws(.tgc_chr(r$to[[1]]))
+      return(if (nzchar(now) && nchar(now) <= 200) sprintf("Description now: \"%s\"", now) else "Description changed")
     }
     if (change == "changed") paste0(field_text(field), ": ", moved) else paste0(field_text(field), " ", tolower(whole), if (nzchar(moved)) paste0(": ", moved) else "")
   }
@@ -1053,7 +1235,7 @@
     return(NULL)
   }
   if (identical(what, "description")) {
-    return(c("Template description", "Description changed"))
+    return(NULL)
   }
   m <- regmatches(what, regexec("^(Option|Party slot|Vocabulary slot) '([^']*)'(?:: (.*))?$", what, perl = TRUE))[[1]]
   if (length(m) == 4) {
@@ -1090,7 +1272,7 @@
     vals <- as.character(unlist(cl@values))
     pat <- .tgc_chr(cl@pattern)
     allowed <- if (length(vals) > 0) {
-      paste(vals, collapse = ", ")
+      paste(vals, collapse = "\n")
     } else if (nzchar(pat)) {
       paste("Must match pattern", pat)
     } else {
@@ -1111,11 +1293,22 @@
   list(id = ids, rows = rows)
 }
 
+# The plain sentence of a rule; the IF/THEN line that repeats it is dropped.
+.tgc_rule_text <- function(txt) {
+  lines <- strsplit(as.character(txt), "\n", fixed = TRUE)[[1]]
+  if (length(lines) > 1L && !grepl("^\\s*(IF|THEN)\\b", lines[[1]]) &&
+    any(grepl("^\\s*IF\\b", lines[-1]))) {
+    lines[[1]]
+  } else {
+    as.character(txt)
+  }
+}
+
 .tgc_rule_rows <- function(ds) {
   rules <- ds@specs@rules
   list(
     id = vapply(rules, function(r) r@id, character(1)),
-    rows = lapply(rules, function(r) c(r@id, translate_rule_to_human(r)))
+    rows = lapply(rules, function(r) c(r@id, .tgc_rule_text(translate_rule_to_human(r))))
   )
 }
 
@@ -1141,7 +1334,7 @@
 }
 
 # The dataset template (as a DTADataSet) a built dataset came from, or NULL.
-.tgc_template_dataset <- function(ds, ctx) {
+.tgc_template_dataset <- function(ds, ctx, overrides = list()) {
   src <- .tgc_chr(ds@template_source)
   if (!nzchar(src)) {
     return(NULL)
@@ -1153,71 +1346,117 @@
   if (is.null(hit)) {
     return(NULL)
   }
-  built <- .tgc_build_dataset_template(hit$path[[1]], ctx)
-  if (is.null(built)) NULL else list(ds = built, label = hit$label[[1]])
+  built <- .tgc_build_dataset_template(hit$path[[1]], ctx, ds@id, overrides)
+  if (is.null(built)) {
+    NULL
+  } else {
+    list(ds = built, label = hit$label[[1]], version = hit$version[[1]])
+  }
 }
 
-.tgc_build_dataset_template <- function(path, ctx) {
+# `as_name` and `overrides` make the template side go through the same
+# term-list narrowing as the dataset the creation template built, so a narrowed
+# term list is not reported as a change.
+.tgc_build_dataset_template <- function(path, ctx, as_name = NULL, overrides = list()) {
   g <- ctx$g
   rd <- g("read_dataset_template")(path)
   if (!isTRUE(rd$ok)) {
     return(NULL)
   }
-  b <- g("build_dataset_from_template")(rd$value, selections = list(), resolve_vocab = ctx$vocab)
+  b <- g("build_dataset_from_template")(
+    rd$value,
+    selections = list(), as_name = as_name, resolve_vocab = ctx$vocab
+  )
   if (!isTRUE(b$ok)) {
     return(NULL)
   }
-  tryCatch(dta_dataset_from_list(b$value$dataset), error = function(e) NULL)
+  plain <- tryCatch(g("apply_vocabulary_slot_overrides")(b$value$dataset, overrides), error = function(e) b$value$dataset)
+  tryCatch(dta_dataset_from_list(plain), error = function(e) NULL)
 }
 
-.tgc_built_datasets <- function(dta, variant, ctx) {
+# "Added" when the id is not in the template, "Changed" when its row differs.
+.tgc_change_marks <- function(ids, keys, tpl_ids, tpl_keys) {
+  hit <- match(ids, tpl_ids)
+  ifelse(is.na(hit), "Added", ifelse(keys == tpl_keys[hit], "", "Changed"))
+}
+
+.tgc_built_datasets <- function(dta, variant, ctx, overrides = list()) {
   unname(lapply(dta@datasets, function(ds) {
     cols <- .tgc_col_rows(ds)
     rules <- .tgc_rule_rows(ds)
-    keep_c <- rep(TRUE, length(cols$id))
-    keep_r <- rep(TRUE, length(rules$id))
-    same_c <- ""
-    same_r <- ""
+    cmark <- rep("", length(cols$id))
+    rmark <- rep("", length(rules$id))
     removed <- character(0)
+    removed_rules <- character(0)
     source <- ""
-    tpl <- .tgc_template_dataset(ds, ctx)
+    source_version <- ""
+    tpl <- .tgc_template_dataset(ds, ctx, overrides)
     if (!is.null(tpl)) {
       source <- tpl$label
+      source_version <- tpl$version
       tc <- .tgc_col_rows(tpl$ds)
       tr <- .tgc_rule_rows(tpl$ds)
       key <- function(x) vapply(x$rows, paste, character(1), collapse = "\r")
-      same <- cols$id %in% tc$id & key(cols) == key(tc)[match(cols$id, tc$id)]
-      keep_c <- !same
+      cmark <- .tgc_change_marks(cols$id, key(cols), tc$id, key(tc))
       removed <- setdiff(tc$id, cols$id)
-      if (any(same)) {
-        same_c <- sprintf(
-          "%s exactly as in the dataset template '%s' (chapter Dataset templates).",
-          if (any(keep_c)) sprintf("All other %d columns are", sum(same)) else sprintf("All %d columns are", sum(same)),
-          source
-        )
-      }
-      rsame <- paste(rules$id, vapply(rules$rows, `[[`, character(1), 2)) %in%
-        paste(tr$id, vapply(tr$rows, `[[`, character(1), 2))
-      keep_r <- !rsame
-      if (any(rsame)) {
-        same_r <- sprintf(
-          "%s exactly as in the dataset template '%s'.",
-          if (any(keep_r)) sprintf("All other %d rules are", sum(rsame)) else sprintf("All %d rules are", sum(rsame)),
-          source
-        )
-      }
+      rkey <- function(x) vapply(x$rows, `[[`, character(1), 2)
+      rmark <- .tgc_change_marks(rules$id, rkey(rules), tr$id, rkey(tr))
+      removed_rules <- setdiff(tr$id, rules$id)
     }
     list(
       name = ds@id, title = .tgc_chr(ds@name, ds@id), variant = variant,
       about = .tgc_about(ds, length(cols$id), length(rules$id)),
-      source = source,
-      columns = .tgc_df(.tgc_col_headers, cols$rows[keep_c]),
-      same_columns = same_c,
+      source = source, source_version = source_version,
+      columns = .tgc_df(c(.tgc_col_headers, "Change"), Map(c, cols$rows, cmark)),
       removed_columns = removed,
-      rules = .tgc_df(c("Rule", "What it checks"), rules$rows[keep_r]),
-      same_rules = same_r
+      rules = .tgc_df(c("Rule", "What it checks", "Change"), Map(c, rules$rows, rmark)),
+      removed_rules = removed_rules
     )
   }))
+}
+
+# Which ids to document: the newest version of every non-abstract creation
+# template, or of the ids named in `templates`. Returns the row index into
+# guide$creation of each chosen entry, named by id, so a renderer can pick
+# the entry itself. A named abstract template aborts.
+.tgc_select_ids <- function(guide, templates = NULL) {
+  ents <- guide$creation
+  ids <- vapply(ents, function(e) e$id, character(1))
+  vers <- vapply(ents, function(e) e$version, character(1))
+  abstract <- vapply(ents, function(e) isTRUE(e$abstract), logical(1))
+  newest <- vapply(seq_along(ents), function(i) {
+    same <- which(ids == ids[[i]])
+    same[[which.max(.tgc_rank(vers[same]))]] == i
+  }, logical(1))
+  want <- if (is.null(templates)) {
+    ids[newest & !abstract]
+  } else {
+    templates <- unique(as.character(templates))
+    unknown <- setdiff(templates, ids)
+    if (length(unknown) > 0) {
+      cli::cli_abort(
+        "Unknown template id{?s}: {.val {unknown}}.",
+        class = "dta_template_guide_unknown"
+      )
+    }
+    for (id in templates) {
+      if (isTRUE(abstract[newest & ids == id])) {
+        based <- vapply(ents, function(e) id %in% c(e$lineage$id, e$mixins$id), logical(1))
+        users <- vapply(ents[!abstract & newest & based], function(e) e$title, character(1))
+        users <- sort(unique(users), method = "radix")
+        cli::cli_abort(
+          c(
+            "{.val {id}} is a building block and cannot be documented on its own.",
+            "i" = if (length(users) > 0) "Templates based on it: {.val {users}}."
+          ),
+          class = "dta_template_guide_abstract"
+        )
+      }
+    }
+    templates
+  }
+  pos <- which(newest)
+  stats::setNames(pos[match(want, ids[pos])], want)
 }
 
 # ---- Dataset templates ----------------------------------------------------------------
@@ -1250,7 +1489,7 @@
         paste(c(.tgc_chr(cl[["id"]]), .tgc_chr(cl[["label"]])[nzchar(.tgc_chr(cl[["label"]]))]), collapse = "\n"),
         paste(c(.tgc_chr(cl[["type"]]), sub("^\\S+ ", "", .tgc_chr(cl[["format"]]))[nzchar(.tgc_chr(cl[["format"]]))]), collapse = "\n"),
         if (isTRUE(cl[["nullable"]])) "Yes" else "No",
-        .tgc_join(cl[["values"]], ", ", "Any"), .tgc_chr(cl[["description"]])
+        .tgc_join(cl[["values"]], "\n", "Any"), .tgc_chr(cl[["description"]])
       )
     }))
     rules <- .tgc_df(c("Rule", "What it checks"))

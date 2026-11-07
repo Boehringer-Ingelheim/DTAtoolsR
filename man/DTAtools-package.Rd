@@ -47,7 +47,8 @@ and \code{\link{write_dataset_metadata}()} does the same for one dataset.
 \code{\link{export_with_template}()} fills a Word template the reader
 authored instead of the built-in layout;
 \code{\link{dta_template_placeholders}()} lists what such a template may
-refer to. PDF output needs an external converter --
+refer to. PDF output needs an external converter (Microsoft Word on Windows,
+LibreOffice, TinyTeX or pandoc) --
 \code{\link{dta_pdf_backend}()} reports which one this machine will use.
 }
 
