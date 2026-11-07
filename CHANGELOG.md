@@ -58,13 +58,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   mixins, and `validate_template()` reports `mixin_unresolved` (warning),
   `mixin_invalid` and `mixin_conflict` (errors).
 
-- `write_template_guide()` writes a handbook of a template library as a Word
-  (or PDF) document for readers who never open the app or a YAML file. For each
-  DTA template it lists the questions asked, their answer types and choices, the
-  pre-filled answers, where each answer lands in the DTA, the parties and term
-  lists to choose, the datasets and columns it creates, and what it changes
-  compared with the template it is based on. Dataset templates, term lists and
-  party profiles get their own chapters.
+- `write_template_guide(path, dir)` writes one Word (or PDF) document per usable
+  DTA template into a folder, named `<id>_v<version>_template_guide.<ext>`, for
+  readers who never open the app or a YAML file. Each document has a cover
+  titled with the template, a running header (organisation, "Page X of Y") and
+  footer (template id, version and date; generation date and package version),
+  a question card for every option with its answer type, choices, pre-filled
+  answer and where the answer lands in the DTA, the parties and term lists to
+  choose, the datasets it creates with landscape column tables (columns the
+  template adds or changes are tagged), and what it changes compared with the
+  template it extends. Abstract building blocks get no document and are refused
+  by id; an existing file is not replaced unless `overwrite = TRUE`. The
+  function returns the written paths, named by template id.
+- Microsoft Word is now the preferred PDF backend on Windows, tried before
+  LibreOffice, TinyTeX and pandoc. PDFs from `write_dta()`,
+  `write_dataset_metadata()` and `write_template_guide()` keep their running
+  headers and footers and have their page-number fields updated when Word is
+  installed; the TinyTeX and pandoc routes re-typeset the document and lose them.
 
 ### Changed
 

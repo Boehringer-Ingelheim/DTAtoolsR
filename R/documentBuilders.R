@@ -178,52 +178,73 @@ NULL
 #' @keywords internal
 .page_furniture <- function(meta, width = TEXT_WIDTH$portrait) {
   title <- .dta_display_title(meta@title)
+  study <- meta@study$id %||% ""
+  version_bits <- c(
+    if (!is.null(meta@version) && nzchar(meta@version)) paste("Version", meta@version),
+    .format_document_date(.current_version_date(meta))
+  )
+  version_bits <- version_bits[nzchar(version_bits)]
+  .running_furniture(
+    header_title = title,
+    header_right_prefix = if (nzchar(study)) paste0("Study ", study, "    |    ") else "",
+    footer_left = title,
+    footer_right = paste(version_bits, collapse = paste0("  ", intToUtf8(0xB7), "  ")),
+    footer_small = .template_provenance_text(meta@template),
+    width = width
+  )
+}
+
+#' Generic running header and footer
+#'
+#' Header: optional organisation line (small), then `header_title` on the left
+#' and `header_right_prefix` plus "Page X of Y" (real PAGE / NUMPAGES fields)
+#' right-aligned at `width`. Footer: `footer_left` and `footer_right` on one
+#' line, an optional small second line. `.page_furniture()` and the template
+#' guide are both thin callers.
+#' @param org_line Organisation line; `""` or `NULL` means none.
+#' @return A list with `header` and `footer` officer block lists.
+#' @keywords internal
+.running_furniture <- function(header_title, header_right_prefix = "", footer_left,
+                               footer_right, footer_small = NULL,
+                               org_line = .export_org_line(), width = TEXT_WIDTH$portrait) {
   ink <- .house_fp_text(size = FONT_SIZES$footer, bold = TRUE, color = THEME_COLORS$primary_dark)
   muted <- .house_fp_text(size = FONT_SIZES$footer, color = THEME_COLORS$gray_mid)
   tiny <- .house_fp_text(size = FONT_SIZES$footer - 1, color = THEME_COLORS$gray_mid)
   tabs <- officer::fp_tabs(officer::fp_tab(pos = width, style = "right"))
   hairline <- officer::fp_border(color = THEME_COLORS$gray_border, width = 0.75)
 
-  study <- meta@study$id %||% ""
   right <- list(
     officer::ftext("Page ", muted),
     officer::run_word_field("PAGE", prop = muted),
     officer::ftext(" of ", muted),
     officer::run_word_field("NUMPAGES", prop = muted)
   )
-  if (nzchar(study)) {
-    right <- c(list(officer::ftext(paste0("Study ", study, "    |    "), muted)), right)
+  if (nzchar(header_right_prefix %||% "")) {
+    right <- c(list(officer::ftext(header_right_prefix, muted)), right)
   }
   header_blocks <- list(do.call(officer::fpar, c(
-    list(officer::ftext(title, ink), officer::run_tab()),
+    list(officer::ftext(header_title, ink), officer::run_tab()),
     right,
     list(fp_p = officer::fp_par(tabs = tabs, border.bottom = hairline, padding.bottom = 4))
   )))
-  org_line <- .export_org_line()
-  if (nzchar(org_line)) {
+  if (nzchar(org_line %||% "")) {
     header_blocks <- c(list(officer::fpar(officer::ftext(org_line, tiny))), header_blocks)
   }
   header <- do.call(officer::block_list, header_blocks)
 
-  version_bits <- c(
-    if (!is.null(meta@version) && nzchar(meta@version)) paste("Version", meta@version),
-    .format_document_date(.current_version_date(meta))
-  )
-  version_bits <- version_bits[nzchar(version_bits)]
-  footer <- officer::block_list(
-    officer::fpar(
-      officer::ftext(title, ink),
-      officer::run_tab(),
-      officer::ftext(paste(version_bits, collapse = paste0("  ", intToUtf8(0xB7), "  ")), muted),
-      fp_p = officer::fp_par(tabs = tabs, border.top = hairline, padding.top = 4)
-    ),
-    officer::fpar(
-      officer::ftext(.template_provenance_text(meta@template), tiny),
+  footer_blocks <- list(officer::fpar(
+    officer::ftext(footer_left, ink),
+    officer::run_tab(),
+    officer::ftext(footer_right, muted),
+    fp_p = officer::fp_par(tabs = tabs, border.top = hairline, padding.top = 4)
+  ))
+  if (nzchar(footer_small %||% "")) {
+    footer_blocks <- c(footer_blocks, list(officer::fpar(
+      officer::ftext(footer_small, tiny),
       fp_p = officer::fp_par(padding.top = 1)
-    )
-  )
-
-  list(header = header, footer = footer)
+    )))
+  }
+  list(header = header, footer = do.call(officer::block_list, footer_blocks))
 }
 
 #' Cover page of the built-in DTA layout, closed as its own section without
@@ -871,11 +892,12 @@ NULL
 #' type is `nextPage` rather than officer's `oddPage` default, which would pad
 #' the document with blank pages.
 #' @keywords internal
-.end_section_orientation <- function(doc, orient = c("portrait", "landscape"), furniture_meta = NULL) {
+.end_section_orientation <- function(doc, orient = c("portrait", "landscape"), furniture_meta = NULL,
+                                     furniture = NULL) {
   orient <- match.arg(orient)
   officer::body_end_block_section(
     doc,
-    officer::block_section(.section_props(doc, orient, furniture_meta, type = "nextPage"))
+    officer::block_section(.section_props(doc, orient, furniture_meta, type = "nextPage", furniture = furniture))
   )
 }
 
@@ -885,7 +907,8 @@ NULL
 #' Every section after the cover carries the furniture explicitly. Word only
 #' inherits a header from the *previous* section, and the cover has none.
 #' @keywords internal
-.section_props <- function(doc, orient = c("portrait", "landscape"), furniture_meta = NULL, type = "nextPage") {
+.section_props <- function(doc, orient = c("portrait", "landscape"), furniture_meta = NULL, type = "nextPage",
+                           furniture = NULL) {
   orient <- match.arg(orient)
 
   dims <- officer::docx_dim(doc)
@@ -911,12 +934,18 @@ NULL
     gutter = gutter
   )
 
-  if (is.null(furniture_meta)) {
+  if (is.null(furniture_meta) && is.null(furniture)) {
     return(officer::prop_section(page_size = size, page_margins = margins, type = type))
   }
   page_w <- if (identical(orient, "landscape")) long_side else short_side
   text_w <- page_w - dims$margins[["left"]] - dims$margins[["right"]]
-  furniture <- .page_furniture(furniture_meta, width = text_w)
+  # `furniture` is function(width) -> list(header, footer); it is used when no
+  # DTA metadata is given (the template guide).
+  furniture <- if (!is.null(furniture_meta)) {
+    .page_furniture(furniture_meta, width = text_w)
+  } else {
+    furniture(text_w)
+  }
   # officer switches on Word's "different odd and even pages" setting
   # (evenAndOddHeaders) as soon as a section has a header, so even pages need
   # the same furniture explicitly or they print bare.

@@ -1883,14 +1883,18 @@ dta_pdf_backend()
 #> [1] "tinytex" "pandoc"
 ```
 
-Three backends are tried in order:
+Four backends are tried in order:
 
-1. **LibreOffice** — a `soffice` binary on the `PATH`. Preferred, because it
-   renders the document as Word does and keeps table shading, column widths and
-   heading numbering.
-2. **TinyTeX** — pandoc converts to LaTeX and `tinytex::latexmk()` compiles it,
-   installing any missing LaTeX packages on demand.
-3. **pandoc** with some other PDF engine already installed.
+1. **Microsoft Word** — Windows only, when Word is installed. Preferred, because
+   it renders the document as Word does and keeps table shading, column widths,
+   heading numbering and running headers and footers with updated page fields.
+2. **LibreOffice** — a `soffice` binary on the `PATH`; equally faithful to the
+   Word layout.
+3. **TinyTeX** — pandoc converts to LaTeX and `tinytex::latexmk()` compiles it,
+   installing any missing LaTeX packages on demand. The document is
+   re-typeset, so running headers and footers are lost.
+4. **pandoc** with some other PDF engine already installed; it re-typesets
+   too, with the same losses.
 
 If none is present, install one from R — no administrator rights required:
 
@@ -1940,16 +1944,27 @@ write_validation_report(dta_from_file, "validation_report.html", max_repeats = I
 
 A template library (see `create_template_repo()` and `validate_template()`) is
 a directory of YAML files. `write_template_guide()` turns it into one Word (or
-PDF) handbook that a study or data manager can read without YAML or the app:
-what each template asks, what it pre-fills, where the answers land in the DTA,
-and which datasets and columns it creates.
+PDF) document per usable template, written to a folder, that a study or data
+manager can read without YAML or the app. Building blocks marked `abstract` get
+no document.
 
 ```{r template_guide}
 write_template_guide(
   system.file("extdata", "templates", package = "DTAtools"),
-  tempfile(fileext = ".docx")
+  tempdir(),
+  templates = "biomarker_gf",
+  quiet = TRUE
 )
 ```
+
+One document (`<id>_v<version>_template_guide.docx`) has a cover titled with the
+template, and on every page a running header ("Template guide: ...", the
+organisation, "Page X of Y") and a footer with the template id, version and
+date. It lists a question card for each option (what is asked, the choices, the
+pre-filled answer and where the answer lands in the DTA), the parties and term
+lists to choose, and the datasets the template creates with their columns on
+landscape pages, tagging the columns the template adds or changes. The call
+returns the written paths, named by template id.
 
 ## The Shiny Application
 

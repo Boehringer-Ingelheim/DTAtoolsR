@@ -518,6 +518,37 @@ write_dta <- function(
   lines
 }
 
+#' Locate Microsoft Word (`WINWORD.EXE`)
+#'
+#' Windows only. Reads the default value of the `App Paths` registry key that
+#' Office registers, in the 64-bit then 32-bit view of `HKEY_LOCAL_MACHINE`,
+#' then of `HKEY_CURRENT_USER`.
+#' @return The path to `WINWORD.EXE`, or `""` when Word is not installed or the
+#'   platform is not Windows.
+#' @keywords internal
+.find_word <- function() {
+  if (.Platform$OS.type != "windows") {
+    return("")
+  }
+  key <- "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Winword.exe"
+  for (hive in c("HLM", "HCU")) {
+    for (view in c("64-bit", "32-bit")) {
+      value <- tryCatch(
+        utils::readRegistry(key, hive = hive, view = view)[["(Default)"]],
+        error = function(e) NULL,
+        warning = function(w) NULL
+      )
+      if (is.character(value) && length(value) == 1 && !is.na(value)) {
+        value <- gsub("\"", "", value, fixed = TRUE)
+        if (nzchar(value) && file.exists(value)) {
+          return(normalizePath(value, winslash = "/", mustWork = FALSE))
+        }
+      }
+    }
+  }
+  ""
+}
+
 #' Locate a LibreOffice (`soffice`) binary
 #'
 #' Searches the `PATH` first, then the conventional install locations on
@@ -597,7 +628,9 @@ write_dta <- function(
 #' The single seam every other PDF function consults, so backend detection can
 #' be exercised (and mocked) independently of the conversion itself.
 #'
-#' LibreOffice comes first: it renders the DOCX the way Word does, preserving
+#' Microsoft Word comes first (Windows only): it is the native renderer, keeps
+#' running headers and footers, and updates the table of contents and page
+#' fields. LibreOffice is next: it renders the DOCX the way Word does, preserving
 #' the flextable column widths, shading and the auto-numbered headings. The
 #' pandoc routes re-parse the DOCX into pandoc's AST and re-lay it out through
 #' LaTeX, which is a faithful *text* conversion but loses much of the layout.
@@ -608,10 +641,13 @@ write_dta <- function(
 #' `pdflatex` directly aborts on the first document that needs one.
 #'
 #' @return A character vector of backend names in priority order, possibly
-#'   empty. One or more of `"libreoffice"`, `"tinytex"` and `"pandoc"`.
+#'   empty. One or more of `"word"`, `"libreoffice"`, `"tinytex"` and `"pandoc"`.
 #' @keywords internal
 .pdf_backends_available <- function() {
   backends <- character(0)
+  if (nzchar(.find_word())) {
+    backends <- c(backends, "word")
+  }
   if (nzchar(.find_soffice())) {
     backends <- c(backends, "libreoffice")
   }
@@ -641,15 +677,20 @@ write_dta <- function(
 #' tool, which R cannot supply on its own. Call this to check the setup *before*
 #' relying on a PDF export -- for example at the top of a batch script.
 #'
-#' Three backends are supported, tried in this order:
+#' Four backends are supported, tried in this order:
 #'
+#' * **Microsoft Word** -- Windows only, found through the registry. Preferred
+#'   because it is the native renderer: it keeps running page headers and
+#'   footers and updates the table of contents and page-number fields.
 #' * **LibreOffice** -- a `soffice` binary on the `PATH` or in a standard
-#'   install location. Preferred, because it renders the document as Word does
-#'   and preserves table shading, column widths and heading numbering.
+#'   install location. It renders the document much as Word does and preserves
+#'   table shading, column widths and heading numbering.
 #' * **TinyTeX** -- pandoc converts the DOCX to LaTeX and [tinytex::latexmk()]
-#'   compiles it, installing any missing LaTeX packages on demand.
+#'   compiles it, installing any missing LaTeX packages on demand. Page headers
+#'   and footers are lost.
 #' * **pandoc** -- pandoc driving some other PDF engine already on the `PATH`
-#'   (a full LaTeX distribution, `typst`, `wkhtmltopdf`, ...).
+#'   (a full LaTeX distribution, `typst`, `wkhtmltopdf`, ...). Page headers and
+#'   footers are lost.
 #'
 #' If none is present, install a LaTeX engine from R with
 #' `tinytex::install_tinytex()`; it needs no administrator rights and works on
@@ -657,8 +698,8 @@ write_dta <- function(
 #'
 #' @return `NULL` when no backend is available. Otherwise a list with:
 #'   \describe{
-#'     \item{`name`}{`"libreoffice"`, `"tinytex"` or `"pandoc"`.}
-#'     \item{`engine`}{The `soffice` path, the TinyTeX binary directory, or the
+#'     \item{`name`}{`"word"`, `"libreoffice"`, `"tinytex"` or `"pandoc"`.}
+#'     \item{`engine`}{The Word or `soffice` path, the TinyTeX binary directory, or the
 #'       pandoc PDF engine name.}
 #'     \item{`available`}{Every usable backend, in priority order.}
 #'   }
@@ -680,6 +721,7 @@ dta_pdf_backend <- function() {
   list(
     name = backends[[1]],
     engine = switch(backends[[1]],
+      word = .find_word(),
       libreoffice = .find_soffice(),
       tinytex = .tinytex_bin_dir(),
       .pandoc_pdf_engine()
@@ -705,7 +747,7 @@ dta_pdf_backend <- function() {
   profile_dir <- tempfile("dta_lo_profile_")
   on.exit(unlink(profile_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
-  system2(
+  suppressWarnings(system2(
     soffice,
     c(
       paste0(
@@ -719,7 +761,7 @@ dta_pdf_backend <- function() {
     stdout = TRUE,
     stderr = TRUE,
     timeout = 180
-  )
+  ))
 
   produced <- file.path(
     out_dir,
@@ -732,6 +774,120 @@ dta_pdf_backend <- function() {
     cli::cli_abort("Could not move the converted PDF to {.file {pdf_file}}.")
   }
   invisible(pdf_file)
+}
+
+#' Run the Microsoft Word DOCX -> PDF conversion
+#'
+#' Drives Word through COM from a throw-away PowerShell script. Word updates the
+#' table of contents and the page fields while exporting, and keeps the running
+#' headers and footers.
+#'
+#' Word 2013+ may hand `New-Object -ComObject Word.Application` the instance the
+#' user already has open, so the script compares the `WINWORD` processes before
+#' and after. A *new* process is ours: it is hidden, silenced and quit. If none
+#' appeared the script attached to the user's session, whose `Visible` and
+#' `DisplayAlerts` it leaves alone; it opens the document invisibly, closes only
+#' that document and never quits Word. Our process id goes to a file so that R
+#' can kill a Word that outlives a timeout or a failure.
+#' @param docx_file Character. Existing `.docx` to convert.
+#' @param pdf_file Character. Path of the `.pdf` to create.
+#' @return Invisibly returns `pdf_file`.
+#' @keywords internal
+.word_docx_to_pdf <- function(docx_file, pdf_file) {
+  ps1 <- tempfile("dta_word_", fileext = ".ps1")
+  tmp_pdf <- tempfile("dta_word_", fileext = ".pdf")
+  pid_file <- tempfile("dta_word_", fileext = ".pid")
+  on.exit(.kill_created_word(pid_file), add = TRUE)
+  on.exit(unlink(c(ps1, tmp_pdf, pid_file), force = TRUE), add = TRUE)
+  writeLines(
+    c(
+      "param([string]$In, [string]$Out, [string]$PidFile)",
+      "$ErrorActionPreference = 'Stop'",
+      "$m = [Type]::Missing",
+      "$before = @(Get-Process WINWORD -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })",
+      "$w = $null",
+      "$d = $null",
+      "$ours = $false",
+      "try {",
+      "  $w = New-Object -ComObject Word.Application",
+      "  $new = @(Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id })",
+      "  if ($new.Count -gt 0) {",
+      "    $ours = $true",
+      "    ($new | ForEach-Object { $_.Id }) | Set-Content -Path $PidFile -Encoding ASCII",
+      "    $w.Visible = $false",
+      "    $w.DisplayAlerts = 0",
+      "  }",
+      "  $d = $w.Documents.Open($In, $false, $true, $false, $m, $m, $m, $m, $m, $m, $m, $false)",
+      "  foreach ($t in $d.TablesOfContents) { $t.Update() }",
+      "  $d.Fields.Update() | Out-Null",
+      "  $d.ExportAsFixedFormat($Out, 17)",
+      "  $d.Close(0)",
+      "  $d = $null",
+      "} catch {",
+      "  [Console]::Error.WriteLine($_.Exception.Message)",
+      "  exit 1",
+      "} finally {",
+      "  if ($d -ne $null) { try { $d.Close(0) } catch {} }",
+      "  if ($w -ne $null) {",
+      "    if ($ours) { try { $w.Quit() } catch {} }",
+      "    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($w)",
+      "  }",
+      "}"
+    ),
+    ps1
+  )
+  # suppressWarnings: a non-zero exit (or the 124 of a timeout) would leak a
+  # localized warning even when the next backend succeeds; status is checked below.
+  out <- suppressWarnings(system2(
+    "powershell",
+    c(
+      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+      "-File", shQuote(ps1, type = "cmd"),
+      "-In", shQuote(normalizePath(docx_file, winslash = "\\", mustWork = TRUE), type = "cmd"),
+      "-Out", shQuote(normalizePath(tmp_pdf, winslash = "\\", mustWork = FALSE), type = "cmd"),
+      "-PidFile", shQuote(normalizePath(pid_file, winslash = "\\", mustWork = FALSE), type = "cmd")
+    ),
+    stdout = TRUE,
+    stderr = TRUE,
+    timeout = 300
+  ))
+  status <- attr(out, "status")
+  if ((!is.null(status) && status != 0) || !file.exists(tmp_pdf)) {
+    cli::cli_abort(c(
+      "Microsoft Word did not write a PDF for {.file {docx_file}}.",
+      x = paste(.cli_escape(out), collapse = "\n")
+    ))
+  }
+  if (!file.copy(tmp_pdf, pdf_file, overwrite = TRUE)) {
+    cli::cli_abort("Could not move the converted PDF to {.file {pdf_file}}.")
+  }
+  invisible(pdf_file)
+}
+
+#' Kill the Word process a conversion started, if it is still alive
+#'
+#' Reads the process ids the PowerShell script recorded and ends each one that
+#' is still a `WINWORD.EXE`, so a timed-out or failed conversion cannot leave an
+#' invisible Word behind. A Word the user already had is never in the file.
+#' @param pid_file Character. File of process ids, one per line; may not exist.
+#' @return Invisibly `NULL`.
+#' @keywords internal
+.kill_created_word <- function(pid_file) {
+  if (!file.exists(pid_file)) {
+    return(invisible(NULL))
+  }
+  pids <- suppressWarnings(as.integer(readLines(pid_file, warn = FALSE)))
+  for (pid in pids[!is.na(pids)]) {
+    listing <- suppressWarnings(system2(
+      "tasklist",
+      c("/FI", shQuote(paste("PID eq", pid), type = "cmd"), "/FI", shQuote("IMAGENAME eq WINWORD.EXE", type = "cmd")),
+      stdout = TRUE, stderr = TRUE
+    ))
+    if (any(grepl("WINWORD.EXE", listing, fixed = TRUE))) {
+      tools::pskill(pid)
+    }
+  }
+  invisible(NULL)
 }
 
 #' Run the TinyTeX DOCX -> PDF conversion
@@ -881,8 +1037,8 @@ dta_pdf_backend <- function() {
   bullets <- c(
     "Cannot export to PDF: no DOCX to PDF conversion backend is available.",
     x = paste(
-      "{.pkg DTAtools} builds a Word document and converts it with LibreOffice,",
-      "or with pandoc plus a PDF engine. Neither was found."
+      "{.pkg DTAtools} builds a Word document and converts it with Microsoft Word",
+      "(Windows), LibreOffice, or pandoc plus a PDF engine. None was found."
     )
   )
   if (pandoc_but_no_engine) {
@@ -894,6 +1050,7 @@ dta_pdf_backend <- function() {
   c(
     bullets,
     i = "Easiest fix, from R and without administrator rights: {.run tinytex::install_tinytex()}.",
+    i = "Or use a Windows machine with Microsoft Word installed.",
     i = "Or install LibreOffice ({.url https://www.libreoffice.org/}) so {.code soffice} is on the PATH.",
     i = "Check the result with {.run DTAtools::dta_pdf_backend()}.",
     i = "Or export with {.code format = \"docx\"} or {.code format = \"md\"}, which need no external tools."
@@ -929,6 +1086,7 @@ dta_pdf_backend <- function() {
           pdf_file,
           write = function(stage) {
             switch(backend,
+              word = .word_docx_to_pdf(docx_file, stage),
               libreoffice = .soffice_docx_to_pdf(docx_file, stage),
               tinytex = .tinytex_docx_to_pdf(docx_file, stage),
               .pandoc_docx_to_pdf(docx_file, stage)

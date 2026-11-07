@@ -667,7 +667,9 @@ paragraph, or that has no counterpart to open or close it, is left as written
 and named in the warning above.
 
 PDF output builds the Word document and converts it, which needs an external
-tool: LibreOffice (`soffice`), TinyTeX, or pandoc with another PDF engine.
+tool: Microsoft Word (Windows) or LibreOffice (`soffice`), which keep the
+layout and running headers and footers, or TinyTeX, or pandoc with another PDF
+engine, which re-typeset the document and lose them.
 `dta_pdf_backend()` reports which will be used, or `NULL` if none is installed —
 in which case `tinytex::install_tinytex()` adds one from R without
 administrator rights. `write_dta(format = "pdf")` verifies the `%PDF` signature

@@ -2,19 +2,24 @@
 % Please edit documentation in R/templateGuide.R
 \name{.template_guide_docx}
 \alias{.template_guide_docx}
-\title{Render the template guide data (see \code{.template_guide_collect()}) as a Word
-document. Pure rendering: no file I/O.}
+\title{Render ONE creation template of the collected guide (see
+\code{.template_guide_collect()}) as a Word document. Pure rendering: no file I/O.}
 \usage{
-.template_guide_docx(guide)
+.template_guide_docx(guide, entry, organisation = "", organisation_unit = "")
 }
 \arguments{
 \item{guide}{The list returned by \code{.template_guide_collect()}.}
+
+\item{entry}{One element of \code{guide$creation}.}
+
+\item{organisation, organisation_unit}{Shown on the cover and in the page
+header; \code{""} shows none.}
 }
 \value{
 An \code{rdocx} object.
 }
 \description{
-Render the template guide data (see \code{.template_guide_collect()}) as a Word
-document. Pure rendering: no file I/O.
+Render ONE creation template of the collected guide (see
+\code{.template_guide_collect()}) as a Word document. Pure rendering: no file I/O.
 }
 \keyword{internal}
