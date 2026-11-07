@@ -9,8 +9,8 @@ dta_pdf_backend()
 \value{
 \code{NULL} when no backend is available. Otherwise a list with:
 \describe{
-\item{\code{name}}{\code{"libreoffice"}, \code{"tinytex"} or \code{"pandoc"}.}
-\item{\code{engine}}{The \code{soffice} path, the TinyTeX binary directory, or the
+\item{\code{name}}{\code{"word"}, \code{"libreoffice"}, \code{"tinytex"} or \code{"pandoc"}.}
+\item{\code{engine}}{The Word or \code{soffice} path, the TinyTeX binary directory, or the
 pandoc PDF engine name.}
 \item{\code{available}}{Every usable backend, in priority order.}
 }
@@ -22,15 +22,20 @@ tool, which R cannot supply on its own. Call this to check the setup \emph{befor
 relying on a PDF export -- for example at the top of a batch script.
 }
 \details{
-Three backends are supported, tried in this order:
+Four backends are supported, tried in this order:
 \itemize{
+\item \strong{Microsoft Word} -- Windows only, found through the registry. Preferred
+because it is the native renderer: it keeps running page headers and
+footers and updates the table of contents and page-number fields.
 \item \strong{LibreOffice} -- a \code{soffice} binary on the \code{PATH} or in a standard
-install location. Preferred, because it renders the document as Word does
-and preserves table shading, column widths and heading numbering.
+install location. It renders the document much as Word does and preserves
+table shading, column widths and heading numbering.
 \item \strong{TinyTeX} -- pandoc converts the DOCX to LaTeX and \code{\link[tinytex:latexmk]{tinytex::latexmk()}}
-compiles it, installing any missing LaTeX packages on demand.
+compiles it, installing any missing LaTeX packages on demand. Page headers
+and footers are lost.
 \item \strong{pandoc} -- pandoc driving some other PDF engine already on the \code{PATH}
-(a full LaTeX distribution, \code{typst}, \code{wkhtmltopdf}, ...).
+(a full LaTeX distribution, \code{typst}, \code{wkhtmltopdf}, ...). Page headers and
+footers are lost.
 }
 
 If none is present, install a LaTeX engine from R with

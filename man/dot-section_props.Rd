@@ -9,7 +9,8 @@ margins, plus the running header/footer when \code{furniture_meta} is given.}
   doc,
   orient = c("portrait", "landscape"),
   furniture_meta = NULL,
-  type = "nextPage"
+  type = "nextPage",
+  furniture = NULL
 )
 }
 \description{

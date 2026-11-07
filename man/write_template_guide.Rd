@@ -2,60 +2,72 @@
 % Please edit documentation in R/templateGuide.R
 \name{write_template_guide}
 \alias{write_template_guide}
-\title{Write a readable guide to a template library}
+\title{Write a readable guide for each template of a library}
 \usage{
 write_template_guide(
   path,
-  file,
-  format = NULL,
+  dir,
   templates = NULL,
+  format = c("docx", "pdf"),
+  organisation = NULL,
+  organisation_unit = NULL,
   overwrite = FALSE,
   quiet = FALSE
 )
 }
 \arguments{
 \item{path}{The template library: its root folder, its \verb{templates/} folder,
-or a single template file (the guide then covers that template and
-everything it refers to).}
+or a single template file (the guide then covers that template only).}
 
-\item{file}{Where to write the guide. The extension (\code{.docx} or \code{.pdf})
-decides the format unless \code{format} is given.}
+\item{dir}{Folder to write the guides to. It is created when missing.}
 
-\item{format}{\code{"docx"} or \code{"pdf"}. \code{NULL} (default) uses the extension of
-\code{file}, and Word when there is none. PDF needs a converter; see
-\code{\link[=dta_pdf_backend]{dta_pdf_backend()}}.}
+\item{templates}{Optional template ids. \code{NULL} (default) writes a guide for
+the newest version of every usable, non-abstract DTA template. An id that
+names a building block is an error.}
 
-\item{templates}{Optional template ids. Only these templates are described,
-together with everything they refer to (the template they are based on,
-building blocks, dataset templates, term lists and party profiles).}
+\item{format}{\code{"docx"} (default) or \code{"pdf"}. PDF needs a converter; see
+\code{\link[=dta_pdf_backend]{dta_pdf_backend()}}. Only Microsoft Word and LibreOffice keep the running
+header, the footer and the column widths; the other routes re-typeset the
+document, and a warning says so.}
 
-\item{overwrite}{Replace \code{file} if it already exists? Default \code{FALSE}.}
+\item{organisation, organisation_unit}{Name of the organisation (and unit)
+shown on the cover and in the page header. \code{NULL} (default) uses the one
+set in the library's \code{dta-app.yaml}, if any; \code{""} shows none.}
+
+\item{overwrite}{Replace guides that already exist? Default \code{FALSE}.}
 
 \item{quiet}{Suppress the confirmation message? Default \code{FALSE}.}
 }
 \value{
-\code{file}, invisibly.
+A named character vector, invisibly: the template ids are the names,
+the paths of the written guides the values. The files are named
+\verb{<id>_v<version>_template_guide.<format>}.
 }
 \description{
-Turns a folder of DTA templates into one Word (or PDF) handbook that anyone
-can read, without starting the DTAtools app and without reading YAML. For
-every template the guide says what it is for, what it will ask the person
-creating a DTA, what it fills in automatically, what is fixed, and which
-datasets and columns it produces. Dataset templates, term lists and party
-profiles get their own chapters. Files that could not be read are listed in
-a final chapter instead of stopping the guide.
+Turns the DTA templates of a template library into Word (or PDF) documents
+that anyone can read, without starting the DTAtools app and without reading
+YAML. One document is written per usable template. It says what the template
+is for, what it asks the person creating a DTA, what it fills in
+automatically, what is fixed, and which datasets, columns and rules it
+produces. The term lists and party profiles the template offers are
+described in the same document. Every page after the cover carries a running
+header and footer with the template name, its version and "Page X of Y".
+
+Building blocks (abstract templates) get no document of their own: what they
+contribute is part of the guide of every template based on them.
 }
 \details{
-Write a readable guide to a template library
+Write a readable guide for each template of a library
 }
 \examples{
-guide_file <- tempfile(fileext = ".docx")
+out_dir <- file.path(tempdir(), "template-guides")
 write_template_guide(
   system.file("extdata", "templates", package = "DTAtools"),
-  guide_file,
+  out_dir,
+  templates = "biomarker_gf",
   quiet = TRUE
 )
-file.exists(guide_file)
+list.files(out_dir)
 }
 \seealso{
 \code{\link[=validate_template]{validate_template()}}, \code{\link[=write_dta]{write_dta()}}, \code{\link[=dta_pdf_backend]{dta_pdf_backend()}}

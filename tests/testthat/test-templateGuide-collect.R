@@ -42,7 +42,7 @@ dash <- intToUtf8(0x2014)
 test_that("the guide has the documented shape, with a data frame for every table", {
   g <- bundled_guide()
   expect_named(g, c("library", "overview", "creation", "datasets", "vocabularies", "parties", "problems"))
-  expect_named(g$library, c("name", "path", "generated", "package_version"))
+  expect_named(g$library, c("name", "path", "generated", "package_version", "organisation", "organisation_unit"))
   expect_match(g$library$generated, "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
   expect_named(g$overview, c("Name", "Kind", "ID", "Version", "What it is"))
   expect_named(g$problems, c("File", "Problem"))
@@ -90,14 +90,21 @@ test_that("biomarker_gf lists every option of the YAML as a question", {
   expect_identical(q("Document version")[["Answer type"]], "Free text")
 })
 
-test_that("biomarker_gf shows its dataset once and does not repeat the dataset template", {
+test_that("biomarker_gf lists every column and rule of its dataset, none marked as changed", {
   e <- entry_by_id(bundled_guide()$creation, "biomarker_gf")
   expect_length(e$datasets, 1L)
   ds <- e$datasets[[1]]
   expect_identical(ds$source, "GF domain smrnaseq")
-  expect_identical(nrow(ds$columns), 0L)
-  expect_match(ds$same_columns, "All 33 columns are exactly as in the dataset template 'GF domain smrnaseq'", fixed = TRUE)
-  expect_match(ds$same_rules, "All 7 rules", fixed = TRUE)
+  expect_identical(ds$source_version, "3.0")
+  expect_identical(nrow(ds$columns), 33L)
+  expect_identical(nrow(ds$rules), 7L)
+  expect_named(ds$columns, c(.tgc_col_headers, "Change"))
+  expect_named(ds$rules, c("Rule", "What it checks", "Change"))
+  expect_true(all(ds$columns$Change == ""))
+  expect_true(all(ds$rules$Change == ""))
+  expect_length(ds$removed_columns, 0L)
+  expect_length(ds$removed_rules, 0L)
+  expect_null(ds$same_columns)
   about <- stats::setNames(ds$about$value, ds$about$key)
   expect_identical(about[["Columns"]], "33")
   expect_identical(about[["File type"]], "TSV")
@@ -120,14 +127,88 @@ test_that("the party and term-list choices and the pre-filled fields are listed"
   expect_identical(tc[["How it works"]], "Pick from the list only")
   expect_identical(tc[["Selected by default"]], "FRAGMENT COUNT\nNORMALIZED LEVEL")
   expect_identical(tc[["Minimum to select"]], "1")
+  expect_named(e$prefilled, c("Field", "Value", "Question"))
   pre <- stats::setNames(e$prefilled$Value, e$prefilled$Field)
-  expect_identical(pre[["Header"]], "Test Company 1\n(can be changed by question 'Header / organization')")
-  expect_identical(pre[[paste0("Receiver ", right_angle, " Contacts")]], "(chosen when the DTA is created: Receiver)")
-  expect_identical(pre[["Date"]], "(the date the DTA is created)")
-  expect_match(pre[["Version history 1"]], "Initial template-generated version", fixed = TRUE)
+  # The value no longer carries the question; its own column names it.
+  expect_identical(pre[["Document header (organisation name)"]], "Test Company 1")
+  by_q <- stats::setNames(e$prefilled$Question, e$prefilled$Field)
+  expect_identical(by_q[["Document header (organisation name)"]], "Header / organization")
+  # A party's fields are one row.
+  expect_identical(pre[["Receiver: organisation and contacts"]], "From the receiver profile you choose")
+  expect_identical(pre[["Supplier: organisation and contacts"]], "From the supplier profile you choose")
+  expect_false(any(grepl("Contacts|Affiliation", names(pre))))
+  expect_identical(pre[["Document date"]], "(the date the DTA is created)")
+  expect_identical(by_q[["Document date"]], "")
+  # The first version history entry says where each part comes from.
+  y <- yaml::read_yaml(file.path(bundled_library(), "biomarker_gf.dta-template.yaml"))
+  vh <- pre[["Version history (first entry)"]]
+  expect_match(vh, "Version: your answer to question 'Document version'", fixed = TRUE)
+  expect_match(vh, "Date: the day the DTA is created", fixed = TRUE)
+  expect_match(vh, paste0("Comment: ", y$base$metadata$version_history[[1]]$changes), fixed = TRUE)
 })
 
-test_that("ACME shows its pre-filled header and only the columns it adds or changes", {
+test_that("top-level metadata keys have document names, nested paths keep the arrow", {
+  expect_identical(.tgc_path_text("metadata.title"), "Document title")
+  expect_identical(.tgc_path_text("metadata.version"), "Document version")
+  expect_identical(.tgc_path_text("metadata.header"), "Document header (organisation name)")
+  expect_identical(.tgc_path_text("metadata.date"), "Document date")
+  expect_identical(.tgc_path_text("metadata.error_handling"), "Error handling section")
+  expect_identical(.tgc_path_text("metadata.authorized_for_corrections"), "Authorized for corrections section")
+  expect_identical(.tgc_path_text("metadata.version_history"), "Version history")
+  expect_identical(.tgc_path_text("metadata.transmission.frequency"), paste0("Transmission ", right_angle, " Frequency"))
+})
+
+test_that("the inheritance chain reads nearest parent first", {
+  expect_identical(.tgc_based_text("P"), "P")
+  expect_identical(.tgc_based_text(c("P", "G")), "P (which is based on G)")
+  expect_identical(.tgc_based_text(c("P", "G", "R")), "P (which is based on G, which is based on R)")
+})
+
+test_that("changes_status says whether the differences were compared", {
+  g <- bundled_guide()
+  expect_identical(entry_by_id(g$creation, "biomarker_gf_acme")$changes_status, "compared")
+  expect_identical(entry_by_id(g$creation, "biomarker_gf")$changes_status, "none")
+  # An abstract parent cannot be built, so nothing is compared with it.
+  dir <- withr::local_tempdir()
+  write_lines(dir, "abs_parent.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: abs_parent", "version: '1.0'",
+    "label: Shared base", "abstract: true", "base:", "  metadata:", "    title: Parent title"
+  ))
+  write_lines(dir, "abs_child.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: abs_child", "version: '1.0'",
+    "label: Concrete child", "extends: abs_parent@1.0",
+    "datasets:", "  - id: tiny", "    name: Tiny", "    type: tabular",
+    "    files: {filename: tiny.csv, type: csv}",
+    "    columns:", "      - {id: AA, type: SAS Char}", "    rules: []"
+  ))
+  e <- entry_by_id(.template_guide_collect(dir)$creation, "abs_child")
+  expect_identical(e$changes_status, "parent_abstract")
+  expect_identical(nrow(e$changes), 0L)
+})
+
+test_that("a rule keeps its plain sentence and drops the IF/THEN line that repeats it", {
+  expect_identical(.tgc_rule_text("Plain sentence\nIF 'A' = 1 THEN 'B' = 2"), "Plain sentence")
+  expect_identical(.tgc_rule_text("IF 'A' = 1 THEN 'B' = 2"), "IF 'A' = 1 THEN 'B' = 2")
+  expect_identical(.tgc_rule_text("Two\nplain lines"), "Two\nplain lines")
+  for (e in bundled_guide()$creation) {
+    for (d in e$datasets) expect_false(any(grepl("\nIF ", d$rules[["What it checks"]], fixed = TRUE)))
+  }
+})
+
+test_that("a list of allowed values is one value per line", {
+  dir <- withr::local_tempdir()
+  write_lines(dir, "vals.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: vals_tpl", "version: '1.0'", "label: Values",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - id: tiny", "    name: Tiny", "    type: tabular",
+    "    files: {filename: t.csv, type: csv}",
+    "    columns:", "      - {id: AA, type: SAS Char, values: [red, green, blue]}", "    rules: []"
+  ))
+  e <- entry_by_id(.template_guide_collect(dir)$creation, "vals_tpl")
+  expect_identical(e$datasets[[1]]$columns[["Allowed values"]], "red\ngreen\nblue")
+})
+
+test_that("ACME shows its pre-filled header and marks only the columns it adds or changes", {
   e <- entry_by_id(bundled_guide()$creation, "biomarker_gf_acme")
   header <- e$questions[e$questions$Question == "Header / organization", ]
   expect_identical(header[["Pre-filled answer"]], "ACME Labs")
@@ -142,10 +223,15 @@ test_that("ACME shows its pre-filled header and only the columns it adds or chan
   expect_identical(added$Change, "Added")
 
   ds <- e$datasets[[1]]
-  expect_setequal(sub("\n.*$", "", ds$columns$Column), c("GFNAM", "ACMEID"))
+  expect_identical(nrow(ds$columns), 34L)
+  id <- sub("\n.*$", "", ds$columns$Column)
+  marks <- stats::setNames(ds$columns$Change, id)
+  expect_identical(marks[["GFNAM"]], "Changed")
+  expect_identical(marks[["ACMEID"]], "Added")
+  expect_true(all(marks[!id %in% c("GFNAM", "ACMEID")] == ""))
+  expect_true(all(ds$rules$Change == ""))
   gfnam <- ds$columns[startsWith(ds$columns$Column, "GFNAM"), ]
   expect_identical(gfnam[["Allowed values"]], "ACME Labs")
-  expect_match(ds$same_columns, "All other 32 columns", fixed = TRUE)
   expect_identical(e$at_a_glance$key[1:2], c("Status", "Based on"))
 })
 
@@ -235,7 +321,7 @@ test_that("an abstract template is a building block with no datasets and no prob
   expect_identical(cols$Column, "AA\nFirst")
   expect_identical(cols$Type, "SAS Char\n$5.")
   expect_identical(cols[["Allowed values"]], "Any")
-  expect_identical(child$datasets[[1]]$same_columns, "")
+  expect_true(all(child$datasets[[1]]$columns$Change == ""))
 })
 
 test_that("a broken file becomes a problem row and never aborts the guide", {
@@ -362,15 +448,17 @@ test_that("required and fixed paths mark questions and fill the fixed table", {
   ))
   e <- entry_by_id(.template_guide_collect(dir)$creation, "locked_tpl")
   flags <- stats::setNames(e$questions[["Must answer / fixed"]], e$questions$Question)
-  # Header has neither a pre-filled answer nor a base value: the only one to answer.
+  # Every question that writes to a required path must be answered, pre-filled
+  # or not: the finished document is checked, and clearing the field aborts.
   expect_identical(flags[["Header"]], "Must answer")
-  expect_identical(flags[["Errors"]], dash)
-  expect_identical(flags[["Corrections"]], dash)
+  expect_identical(flags[["Errors"]], "Must answer")
+  expect_identical(flags[["Corrections"]], "Must answer")
   expect_identical(flags[["Frequency"]], dash)
+  expect_identical(e$required_count, 3L)
   expect_identical(e$questions[["Answer type"]][4], "Pick one from the list")
-  expect_setequal(e$locked$Field, c("Title", "Header"))
-  expect_match(e$locked$Rule[e$locked$Field == "Title"], "^Fixed: templates based on this one cannot change it")
-  expect_match(e$locked$Rule[e$locked$Field == "Header"], "^Must be filled in")
+  expect_setequal(e$locked$Field, c("Document title", "Document header (organisation name)"))
+  expect_match(e$locked$Rule[e$locked$Field == "Document title"], "^Fixed: templates based on this one cannot change it")
+  expect_match(e$locked$Rule[e$locked$Field == "Document header (organisation name)"], "^Must be filled in")
   expect_false(any(grepl("ocked", c(names(e$questions), e$locked$Rule, e$questions[["Must answer / fixed"]]))))
 })
 
@@ -437,16 +525,17 @@ test_that("every answer-type branch mirrors the app's input", {
   expect_identical(inherited[[4]], "Base header")
 })
 
-test_that("Filled in automatically shows the pre-filled answer, marked as changeable", {
+test_that("Filled in automatically shows the pre-filled answer and the question that sets it", {
   e <- entry_by_id(bundled_guide()$creation, "biomarker_gf_acme")
   pre <- stats::setNames(e$prefilled$Value, e$prefilled$Field)
-  expect_true(startsWith(pre[["Header"]], "ACME Labs"))
-  expect_false(grepl("Test Company 1", pre[["Header"]], fixed = TRUE))
-  expect_match(pre[["Header"]], "\n(can be changed by question 'Header / organization')", fixed = TRUE)
-  # Supplier and receiver are filled by choosing a party profile.
-  sup <- pre[startsWith(names(pre), "Supplier")]
-  expect_gt(length(sup), 0L)
-  expect_true(all(startsWith(sup, "(chosen when the DTA is created: Supplier")))
+  by_q <- stats::setNames(e$prefilled$Question, e$prefilled$Field)
+  hdr <- "Document header (organisation name)"
+  expect_identical(pre[[hdr]], "ACME Labs")
+  expect_identical(by_q[[hdr]], "Header / organization")
+  expect_false(any(grepl("can be changed by", e$prefilled$Value, fixed = TRUE)))
+  # Supplier and receiver are one row each, filled by choosing a party profile.
+  expect_identical(sum(startsWith(names(pre), "Supplier")), 1L)
+  expect_identical(pre[["Supplier: organisation and contacts"]], "From the supplier profile you choose")
 })
 
 test_that("a field a term-list choice or party fills is not shown with the base value", {
@@ -464,9 +553,10 @@ test_that("a field a term-list choice or party fills is not shown with the base 
   ))
   e <- entry_by_id(.template_guide_collect(dir)$creation, "slots_tpl")
   pre <- stats::setNames(e$prefilled$Value, e$prefilled$Field)
-  hit <- pre[startsWith(names(pre), "Supplier")]
-  expect_gt(length(hit), 0L)
-  expect_identical(unname(hit), rep("(chosen when the DTA is created: The supplier)", length(hit)))
+  expect_identical(
+    pre[["The supplier: organisation and contacts"]], "From the supplier profile you choose"
+  )
+  expect_identical(sum(grepl("upplier", names(pre))), 1L)
   expect_false(any(grepl("Base Supplier", e$prefilled$Value, fixed = TRUE)))
 })
 
@@ -518,7 +608,7 @@ test_that("each variant choice lists the datasets, questions and answers it chan
   expect_true("Creates dataset: 'Small table'" %in% small)
   expect_true("Adds question 'Extra'" %in% small)
   expect_true("Removes question 'Errors'" %in% small)
-  expect_true(paste0("Header: H0 ", arrow, " H-small") %in% small)
+  expect_true(paste0("Document header (organisation name): H0 ", arrow, " H-small") %in% small)
   large <- strsplit(cell[["Large"]], "\n", fixed = TRUE)[[1]]
   expect_identical(large, "Creates datasets: 'Large table', 'Second large table'")
   expect_match(e$summary, "Some answers to 'Study size' change the questions; see Variants.", fixed = TRUE)
@@ -575,4 +665,140 @@ test_that("bad input is refused with a classed error", {
     .template_guide_collect(bundled_library(), templates = "no_such_template"),
     class = "dta_template_guide_unknown"
   )
+})
+
+tiny_dataset_lines <- c(
+  "datasets:",
+  "  - id: tiny", "    name: Tiny", "    type: tabular",
+  "    files: {filename: t.csv, type: csv}",
+  "    columns:", "      - {id: AA, type: SAS Char}", "    rules: []"
+)
+
+test_that("a creation entry carries its identity, counts, lineage and offered references", {
+  g <- bundled_guide()
+  yaml_of <- function(file) yaml::read_yaml(file.path(bundled_library(), file))
+  gf <- yaml_of("biomarker_gf.dta-template.yaml")
+  e <- entry_by_id(g$creation, "biomarker_gf")
+  expect_false(e$abstract)
+  expect_identical(e$status, "Ready to use")
+  expect_identical(e$date, gf[["date"]])
+  expect_identical(e$file, "biomarker_gf.dta-template.yaml")
+  expect_identical(e$option_count, length(gf[["options"]]))
+  expect_identical(e$required_count, 0L)
+  expect_identical(nrow(e$lineage), 0L)
+  expect_named(e$lineage, c("id", "version", "label"))
+  expect_identical(nrow(e$mixins), 0L)
+
+  ds <- yaml_of("gf_smrnaseq.dta-dataset-template.yaml")
+  expect_identical(e$refs$dataset_templates$id, ds[["id"]])
+  expect_identical(e$refs$dataset_templates$version, ds[["version"]])
+  expect_identical(e$refs$dataset_templates$label, ds[["label"]])
+  expect_setequal(
+    e$refs$vocabularies$id,
+    c(yaml_of("gf_tstdtl.dta-vocabulary.yaml")[["id"]], yaml_of("gf_test.dta-vocabulary.yaml")[["id"]])
+  )
+  expect_setequal(
+    e$refs$parties$id,
+    c(yaml_of("supplier_acme.dta-party.yaml")[["id"]], yaml_of("receiver_ourco.dta-party.yaml")[["id"]])
+  )
+  expect_identical(e$refs$parties$version[e$refs$parties$id == "supplier_acme"], "1.0")
+  expect_identical(e$refs$parties$label[e$refs$parties$id == "supplier_acme"], "ACME Labs")
+
+  acme <- entry_by_id(g$creation, "biomarker_gf_acme")
+  expect_identical(acme$lineage$id, gf[["id"]])
+  expect_identical(acme$lineage$version, gf[["version"]])
+  expect_identical(acme$lineage$label, gf[["label"]])
+})
+
+test_that("a dataset template's term lists are offered, and a narrowed term list is not a change", {
+  dir <- copy_bundled_library()
+  write_lines(dir, "narrow.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: narrow", "version: '1.0'", "label: Narrow",
+    "base:", "  metadata:", "    title: T",
+    "datasets:", "  - template: gf_smrnaseq@3.0", "    as: gf_data_specs_pattern",
+    "vocabulary_slots:",
+    "  - id: detail", "    label: Detail",
+    "    target: datasets.gf_data_specs_pattern.columns.GFTSTDTL.values",
+    "    vocabulary: gf_tstdtl@1.0", "    mode: closed",
+    "    default: [FRAGMENT COUNT]", "    min: 1"
+  ))
+  g <- .template_guide_collect(dir)
+  expect_identical(nrow(g$problems), 0L)
+  e <- entry_by_id(g$creation, "narrow")
+  ds <- e$datasets[[1]]
+  detail <- ds$columns[startsWith(ds$columns$Column, "GFTSTDTL"), ]
+  expect_identical(detail[["Allowed values"]], "FRAGMENT COUNT")
+  expect_true(all(ds$columns$Change == ""))
+  expect_true("gf_test" %in% e$refs$vocabularies$id)
+  expect_identical(nrow(e$refs$parties), 0L)
+})
+
+test_that("the library carries the organisation from dta-app.yaml, and empty strings without", {
+  expect_identical(bundled_guide()$library$organisation, "")
+  expect_identical(bundled_guide()$library$organisation_unit, "")
+
+  dir <- copy_bundled_library()
+  write_lines(dir, "dta-app.yaml", c(
+    "kind: dta_app_config", "organisation:", "  name: Example Pharma", "  unit: Biometrics"
+  ))
+  lib <- .template_guide_collect(dir)$library
+  expect_identical(lib$organisation, "Example Pharma")
+  expect_identical(lib$organisation_unit, "Biometrics")
+
+  # A config the app cannot read never stops the guide.
+  bad <- copy_bundled_library()
+  write_lines(bad, "dta-app.yaml", c("organisation: [unclosed"))
+  lib <- .template_guide_collect(bad)$library
+  expect_identical(lib$organisation, "")
+  expect_identical(lib$organisation_unit, "")
+})
+
+test_that("stub entries carry every new field with empty defaults", {
+  row <- data.frame(id = "x", version = "1.0", label = "X", path = "x.dta-template.yaml")
+  for (stub in list(.tgc_stub, .tgc_creation_stub)) {
+    s <- stub(row, list(def = list(date = "2026-01-02")), "boom")
+    expect_false(s$abstract)
+    expect_identical(s$status, "")
+    expect_identical(s$date, "2026-01-02")
+    expect_identical(s$file, "x.dta-template.yaml")
+    expect_identical(s$option_count, 0L)
+    expect_identical(s$required_count, 0L)
+    for (f in list(s$lineage, s$mixins, s$refs$dataset_templates, s$refs$vocabularies, s$refs$parties)) {
+      expect_identical(nrow(f), 0L)
+      expect_named(f, c("id", "version", "label"))
+    }
+  }
+  expect_identical(.tgc_creation_stub(row, list(def = NULL), "boom")$date, "")
+})
+
+test_that(".tgc_select_ids picks the newest version of every non-abstract template", {
+  dir <- withr::local_tempdir()
+  tpl <- function(id, version, extra = character(0)) {
+    c(
+      "kind: dta_creation_template", sprintf("id: %s", id), sprintf("version: '%s'", version),
+      sprintf("label: %s", id), extra, "base:", "  metadata:", "    title: T", tiny_dataset_lines
+    )
+  }
+  write_lines(dir, "a9.dta-template.yaml", tpl("ver_tpl", "1.9"))
+  write_lines(dir, "a10.dta-template.yaml", tpl("ver_tpl", "1.10"))
+  write_lines(dir, "other.dta-template.yaml", tpl("other_tpl", "1.0"))
+  write_lines(dir, "abs.dta-template.yaml", c(
+    "kind: dta_creation_template", "id: abs_tpl", "version: '1.0'", "label: Abs", "abstract: true",
+    "base:", "  metadata:", "    title: T"
+  ))
+  write_lines(dir, "child.dta-template.yaml", tpl("child_tpl", "1.0", "extends: abs_tpl@1.0"))
+  g <- .template_guide_collect(dir)
+
+  sel <- .tgc_select_ids(g)
+  expect_setequal(names(sel), c("ver_tpl", "other_tpl", "child_tpl"))
+  expect_identical(g$creation[[sel[["ver_tpl"]]]]$version, "1.10")
+  expect_identical(g$creation[[sel[["other_tpl"]]]]$id, "other_tpl")
+
+  one <- .tgc_select_ids(g, "ver_tpl")
+  expect_identical(names(one), "ver_tpl")
+  expect_identical(g$creation[[one[["ver_tpl"]]]]$version, "1.10")
+
+  err <- expect_error(.tgc_select_ids(g, "abs_tpl"), class = "dta_template_guide_abstract")
+  expect_match(conditionMessage(err), "child_tpl", fixed = TRUE)
+  expect_error(.tgc_select_ids(g, "no_such"), class = "dta_template_guide_unknown")
 })
