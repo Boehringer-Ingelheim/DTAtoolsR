@@ -11,6 +11,23 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # The app directory testServer() runs.
 app_server_dir <- function() .shiny_app_dir()
 
@@ -573,7 +590,7 @@ test_that("the vocabulary picker opens on the vocabulary that names the column",
   # "AAA first" sorts first, so it is what the picker would open on unguided.
   writeLines(
     c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
-    file.path(dir, "aaa.dta-vocabulary.yaml")
+    lib_path(dir, "aaa.dta-vocabulary.yaml")
   )
   writeLines(
     c(
@@ -583,7 +600,7 @@ test_that("the vocabulary picker opens on the vocabulary that names the column",
       "  - code: TRNSCPTN", "    label: Transcription",
       "  - code: METHYL", "    label: Methylation"
     ),
-    file.path(dir, "gf_test.dta-vocabulary.yaml")
+    lib_path(dir, "gf_test.dta-vocabulary.yaml")
   )
   withr::local_envvar(c(
     DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),
@@ -641,7 +658,7 @@ test_that("the vocabulary button says so when a vocabulary declares the column",
   dir <- withr::local_tempdir()
   writeLines(
     c("kind: dta_vocabulary", "id: aaa", 'version: "1.0"', "label: AAA first", "terms: [X, Y]"),
-    file.path(dir, "aaa.dta-vocabulary.yaml")
+    lib_path(dir, "aaa.dta-vocabulary.yaml")
   )
   writeLines(
     c(
@@ -651,7 +668,7 @@ test_that("the vocabulary button says so when a vocabulary declares the column",
       "  - code: TRNSCPTN", "    label: Transcription",
       "  - code: METHYL", "    label: Methylation"
     ),
-    file.path(dir, "gf_test.dta-vocabulary.yaml")
+    lib_path(dir, "gf_test.dta-vocabulary.yaml")
   )
   withr::local_envvar(c(
     DTATOOLS_TEMPLATE_SOURCES = paste0("t=dir:", dir),

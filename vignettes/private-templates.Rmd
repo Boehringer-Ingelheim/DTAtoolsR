@@ -22,8 +22,8 @@ knitr::opts_chunk$set(eval = FALSE, collapse = TRUE, comment = "#>")
 
 ## Why private templates
 
-The `dta-template.yaml` files packaged in `inst/extdata/templates` — including
-`biomarker_gf.dta-template.yaml` — are worked *examples*. They ship in an
+The template files packaged in `inst/extdata/library` — including
+`templates/biomarker_gf.dta-template.yaml` — are worked *examples*. They ship in an
 open-source repository, which means anyone who installs DTAtools can read
 them. A real Data Transfer Specification names a real supplier, a real
 receiving organisation, and real contact people. That content must never live
@@ -98,13 +98,14 @@ is an easy way to get silently mangled in transit. The grammar is:
 [name=]scheme:locator[#ref]; [name=]scheme:locator[#ref]; ...
 ```
 
-Each source resolves a library directory independently: if its root contains
-`templates/` with at least one template-kind file directly inside it, that
-folder is read; otherwise the root itself is read. This applies to `dir:`,
-the installed `dta-templates` directory of a `pkg:` source, and the checkout
-of a `git:` source. No source syntax or subpath argument is needed. A git
-refresh that brings in a migration to `templates/` uses it on the next
-resolution; Git commit and refresh operations still use the checkout root.
+Each source points at a **library root**: the directory that holds the
+library's folders (`templates/`, `parties/`, `vocabulary/` and
+`export-templates/`, plus an optional `dta-app.yaml`; see "Where templates
+live" below). This applies to `dir:`, the installed `dta-templates` directory
+of a `pkg:` source, and the checkout of a `git:` source. No source syntax or
+subpath argument is needed. The layout is the same for every scheme, and
+only these folders are read: a flat library, with template files directly at
+the root, is not.
 
 ### `dir:` — a local directory
 
@@ -115,8 +116,9 @@ DTATOOLS_TEMPLATE_SOURCES = "site=dir:/srv/dta-templates"
 The locator is a path that must already exist and be readable; `dir:` sources
 are resolved with no network or credential involved at all. Useful for a
 template family kept on the same host as the app, or mounted into the
-container. The path may name the repository root or its `templates/` folder
-directly; both select the same files for a conventional library.
+container. The path names the library root, the folder that contains
+`templates/`, `parties/` and the rest; it must not be one of those folders
+itself.
 
 ### `pkg:` — a companion R package
 
@@ -126,9 +128,12 @@ DTATOOLS_TEMPLATE_SOURCES = "acme=pkg:acme.dta.templates"
 
 The locator is an R package name. It must be installed and expose an
 `inst/dta-templates` directory (i.e. `system.file("dta-templates", package =
-"acme.dta.templates")` must resolve). This is the right shape when your
-templates are versioned and released the same way any other internal R
-package is.
+"acme.dta.templates")` must resolve). That directory is a library root with the
+same folders as any other library, for example
+`inst/dta-templates/templates/` and `inst/dta-templates/parties/`. Empty
+folders do not survive `R CMD build`, so ship at least one file in every folder
+you use. This is the right shape when your templates are versioned and released
+the same way any other internal R package is.
 
 ### `git:` — a private git repository
 
@@ -187,27 +192,35 @@ exist) and writes:
 my-templates/
   README.md
   .gitignore
+  dta-app.yaml
   templates/
-    dta-app.yaml
     starter.dta-template.yaml
     starter_dataset.dta-dataset-template.yaml
+  parties/
     starter_supplier.dta-party.yaml
+  vocabulary/
     starter_terms.dta-vocabulary.yaml
+  export-templates/
+    README.md
   .github/workflows/validate-templates.yml
 ```
 
 - `README.md` — the comprehensive authoring guide: all template features,
   app configuration, validation codes, troubleshooting and migration.
 - `.gitignore`
+- `dta-app.yaml` — the optional app configuration, at the repository root (see
+  "Customising the app from the library" below).
 - `templates/starter.dta-template.yaml` — a creation template (`kind:
   dta_creation_template`).
 - `templates/starter_dataset.dta-dataset-template.yaml` — the dataset it imports
   (`kind: dta_dataset_template`).
-- `templates/starter_supplier.dta-party.yaml` — a party profile (`kind:
+- `parties/starter_supplier.dta-party.yaml` — a party profile (`kind:
   dta_party_profile`) offered by one of the creation template's party slots.
-- `templates/starter_terms.dta-vocabulary.yaml` — a controlled vocabulary (`kind:
-  dta_vocabulary`) that one of the dataset's columns binds to with
+- `vocabulary/starter_terms.dta-vocabulary.yaml` — a controlled vocabulary
+  (`kind: dta_vocabulary`) that one of the dataset's columns binds to with
   `values_from:`.
+- `export-templates/README.md` — says where Word templates (`.docx` files with `{PLACEHOLDER}` markers) for
+  export go; drop `.docx` files into this folder.
 - CI scaffolding, controlled by the `ci` argument (default `TRUE`, meaning
   `"github"` only): `"github"` writes `.github/workflows/validate-templates.yml`
   (GitHub Actions); `"bitbucket"` writes `bitbucket-pipelines.yml`; `"jenkins"`
@@ -224,8 +237,8 @@ placeholder metadata, keeping the `id@version` references between the files
 whatever you rename.
 
 Pass `examples = FALSE` for a bare scaffold — `README.md`, `.gitignore` and
-whichever CI file(s) `ci` asks for, with none of the four starter template
-files. Until you add a template, such a repository (and its CI) fails
+whichever CI file(s) `ci` asks for, with none of the starter files and none of
+the folders. Until you add a template, such a repository (and its CI) fails
 validation with `no_templates`. Pass `ci = FALSE` to skip CI scaffolding
 entirely. By default,
 `create_template_repo()` refuses to touch a directory where any file it would
@@ -236,35 +249,64 @@ them.
 
 ### Where templates live
 
-Keep template files directly inside `templates/` at the repository root.
-The app and `validate_template()` automatically select that folder when it
-holds at least one template file; their library scan is **non-recursive**.
-The same auto-detection applies to `options(DTAtools.template_dir = ...)`
-and the local `./dta-templates` directory. Root-layout libraries remain
-supported: when `templates/` is absent, empty or holds only unrelated files,
-the root itself is scanned. Passing `templates/` directly also works.
+A library root holds one folder per kind of file, and an optional app
+configuration:
 
-In a mixed layout, `templates/` wins: root-level template files are ignored
-by the app, not merged into the library. `validate_template()` reports each
-as `template_outside_library_dir` at severity `"error"`, so strict validation
-fails CI instead of silently overlooking a migration leftover.
+```text
+<library root>/
+  dta-app.yaml          optional app configuration
+  templates/            *.dta-template.yaml and *.dta-dataset-template.yaml
+  parties/              *.dta-party.yaml
+  vocabulary/           *.dta-vocabulary.yaml
+  export-templates/     *.docx Word templates with {PLACEHOLDER} markers, for Word export
+```
 
-Other nested template files, such as `templates/by-study/example.dta-template.yaml`,
-remain invisible to the loader. The validator reports them as
-`template_in_subdirectory` at severity `"warning"` and names the library
-folder to move them to. Archives and work-in-progress sub-folders do not
-fail CI on their own. An unrelated Helm `chart/templates/` folder does not
-become a template library just because it has the same folder name.
+The library root is the directory a `dir:`, `pkg:` or `git:` source points at
+and the directory you give `validate_template()`. The same layout applies to
+`options(DTAtools.template_dir = ...)` and the local `./dta-templates`
+directory. The scan of each folder is **non-recursive**, and a file in the
+wrong place is not loaded. The packaged demo library,
+`system.file("extdata", "library", package = "DTAtools")`, uses this layout
+too (without a `dta-app.yaml`).
 
 A dataset entry's `source:` is relative to the creation-template file's
-folder and cannot escape it. Move supporting files referenced by `source:`
-inside `templates/` too, preserving their relative paths.
+folder and cannot escape it, so a data file that a dataset template names must
+sit in `templates/`, beside the template that uses it, preserving its
+relative path.
+
+Misplaced files are reported rather than silently ignored. At runtime the app
+writes a warning to the log and shows a note in the template picker (for
+example "starter: templates/starter_supplier.dta-party.yaml - a party profile
+belongs in parties/ (library layout: …)", naming the source and the path
+relative to its root), and an empty picker explains the folder layout.
+Folder names are case-sensitive on the server (Linux), so a `Templates/` folder
+is misplaced there even where your local file system finds it.
+`validate_template()` reports them as rows:
+
+- `template_misplaced` (severity `"error"`): a template file outside its
+  kind's folder, such as one at the root or a party profile in `templates/`.
+  Strict validation therefore fails CI instead of overlooking a migration
+  leftover.
+- `template_in_subdirectory` (`"warning"`): a file below the right folder, for
+  example `templates/by-study/example.dta-template.yaml`. It is invisible to
+  the loader. Archives and work-in-progress sub-folders do not fail CI on
+  their own.
+- `library_subfolder_given` (`"error"`): the path you gave is itself
+  `templates/`, `parties/` or `vocabulary/`. Validate its parent, the library
+  root; if the folder is a flat library (files directly in it), move its files
+  into `templates/`, `parties/` and `vocabulary/` sub-folders instead.
+- `app_config_misplaced` (`"error"`): a `dta-app.yaml` anywhere but the root.
+
+An unrelated Helm `chart/templates/` folder does not become a template library
+just because it has the same folder name: only the directory you point a
+source or the validator at is treated as a library root.
 
 ### Customising the app from the library
 
 A library can carry the look and feature set of the app that serves it. Put a
-`dta-app.yaml` next to the templates in `templates/`; it is not a template, so
-the scan ignores it. Every key is optional, and with no file the app looks as
+`dta-app.yaml` at the **root** of the library, next to the `templates/` folder;
+it is not a template, so the scans ignore it, and a copy anywhere else is
+reported as `app_config_misplaced`. Every key is optional, and with no file the app looks as
 it always did, except that no organisation name appears until you set
 `organisation.name`. A realistic example for a read-only deployment that exports
 only to the institute's own Word template:
@@ -276,7 +318,7 @@ organisation:
   unit: Data Management
 branding:
   app_title: DTA Viewer
-  logo: logo.png          # a file in templates/, at most 1 MB
+  logo: logo.png          # a file beside dta-app.yaml, at most 1 MB
 colors:
   primary: "#1F4E79"      # always quote a hex colour: a bare # starts a comment
   primary_dark: "#12304D"
@@ -290,10 +332,26 @@ features:
 exports:
   document: [word_template]
   bundled_word_templates: false
-  word_templates:
-    - file: our_dta.docx  # a .docx; {DTA_TITLE}-style markers are filled in
+  word_templates:         # optional: only to relabel or reorder (see below)
+    - file: export-templates/our_dta.docx  # relative to dta-app.yaml
       label: Our DTA template
 ```
+
+**Word templates need no configuration.** Every `.docx` in the library's
+`export-templates/` folder that contains at least one `{PLACEHOLDER}` marker is
+offered automatically in the app's export dialog, labelled with its file name
+without the extension, and the dialog collects them from every configured
+source. These are Word *templates*, filled with the DTA by Word export only
+(PDF goes through Markdown and pandoc): inside a `.docx`, `{DTA_TITLE}`-style
+markers are replaced. A styles-only reference document with no marker would
+export a Word file without your DTA in it, so the app skips a discovered
+`.docx` that has none (and one it cannot read) and logs a warning that names
+the file. Non-`.docx` files, dotfiles and Word lock files (`~$x.docx`) are
+ignored. `exports.word_templates` is only an optional override for label and
+order, and a file listed there is offered whatever it contains; its `file:`
+paths are relative to the folder of `dta-app.yaml`, which is the library root,
+so they start with `export-templates/`. A non-`.docx` file in `export-templates/` is reported by
+`validate_template()` as `export_template_invalid` (a warning).
 
 `document.name` and `document.abbreviation` rename what the app calls its
 documents (for example `DTS` instead of `DTA`); the name becomes the main title
@@ -301,7 +359,8 @@ of every export, with the document's own title beneath it, and the organisation
 appears on the front page and in the running header.
 
 Links must be `http`, `https` or `mailto` URLs. The logo and Word templates are
-files in the library folder, named by a relative path that must not leave it.
+files in the library, named by a path relative to `dta-app.yaml` that must not
+leave the library root.
 Disabled features are refused by the server, not merely hidden. A bad value
 never stops the app: it warns and keeps that key's default, and
 `validate_template()` reports the same problem as `app_config_invalid` (an
@@ -316,45 +375,58 @@ library's config or the defaults apply instead. Changes are picked up
 with the template index, that is after "Refresh templates" or
 `DTATOOLS_TEMPLATE_REFRESH_SECONDS`.
 
-The scaffolded `templates/dta-app.yaml` lists every key, commented out with its
+The scaffolded `dta-app.yaml` lists every key, commented out with its
 default, and the scaffolded `README.md` section "App configuration
 (`dta-app.yaml`)" is the full key reference.
 
 ### Migrating an existing repository
 
-First deploy a DTAtools release with this auto-detection: **the first release
-after 0.25.0**. Then migrate the library and merge its migration branch:
+Libraries written for DTAtools 0.25.0 and earlier are **flat**: every file sits
+at the repository root. That layout is no longer read, and neither is the
+mixed layout of an unreleased development build (templates, parties and
+vocabularies together in `templates/`, `dta-app.yaml` inside it). Reorganise
+the repository into the folders above and merge the migration branch:
 
 ```sh
-mkdir templates
-git mv *.dta-*.yaml templates/
-# Move any .yml templates and source: supporting files too.
+mkdir -p templates parties vocabulary export-templates
+git mv *.dta-party.yaml parties/
+git mv *.dta-vocabulary.yaml vocabulary/
+git mv *.dta-template.yaml *.dta-dataset-template.yaml templates/
+# Move any .yml spellings and the data files that a dataset `source:` names
+# into templates/ as well (beside the template that uses them).
+git mv our_dta.docx export-templates/      # Word templates ({PLACEHOLDER} markers)
 Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
 ```
 
-Update scripts and tests that name individual template paths. Remove all
-root-level template leftovers; only the files under `templates/` will be live.
+If your repository was in the mixed `templates/` layout, move the party,
+vocabulary and Word files out of `templates/` into their folders, and move
+`templates/dta-app.yaml` to the repository root, in the same way. Update
+`exports.word_templates:` paths in `dta-app.yaml` to
+`export-templates/<file>.docx` or delete the key (see below).
 
-**Deployment order matters:** release and deploy DTAtools with auto-detection
-**before** merging or serving the migrated repository. An older app pointed
-at the repository root sees no templates and, with private sources configured,
-will not substitute the packaged demo. As an interim workaround, `dir:` can
-point directly at `<checkout>/templates`; `git:` cannot express a subpath,
-so it requires the app upgrade first. Library validation scripts pinned to
-DTAtools 0.25.0 can use `validate_template("templates", strict = TRUE)` during
-the transition.
+Update scripts and tests that name individual template paths. Anything left
+in a wrong place is not loaded; `validate_template()` names each such file.
+
+**Deployment needs a switch-over, not an order:** an older app pointed at a
+reorganised repository sees no templates (it scans the root), and a new app
+pointed at an unreorganised one sees none either; with private sources
+configured neither falls back to the packaged demo. Reorganise on a branch,
+test it with a `git:` source that names the branch (`#<branch>`) against the
+new DTAtools version, and merge the branch at the moment the new version goes
+live.
 
 ### The four file kinds
 
 Every file's `kind:` field and its filename suffix must agree; the suffix is
-what a directory scan actually keys off:
+what a directory scan actually keys off, and each kind has a folder it must
+live in:
 
-| Kind | Filename suffix |
-| --- | --- |
-| `dta_creation_template` | `*.dta-template.yaml` |
-| `dta_dataset_template` | `*.dta-dataset-template.yaml` |
-| `dta_party_profile` | `*.dta-party.yaml` |
-| `dta_vocabulary` | `*.dta-vocabulary.yaml` |
+| Kind | Filename suffix | Folder |
+| --- | --- | --- |
+| `dta_creation_template` | `*.dta-template.yaml` | `templates/` |
+| `dta_dataset_template` | `*.dta-dataset-template.yaml` | `templates/` |
+| `dta_party_profile` | `*.dta-party.yaml` | `parties/` |
+| `dta_vocabulary` | `*.dta-vocabulary.yaml` | `vocabulary/` |
 
 (The `.yml` spelling of each suffix is accepted too.)
 
@@ -1063,7 +1135,9 @@ retyping (or worse, drifting copies of) the same affiliation/contacts block.
 `biomarker_gf.dta-template.yaml`'s `party_slots:` (shown above) declares two
 slots, one per metadata target; a **party profile** (`kind:
 dta_party_profile`) supplies the actual content one of those dropdowns can
-pick. Here is the real `supplier_acme.dta-party.yaml` in full:
+pick. Party profiles live in the library's `parties/` folder; one left
+anywhere else is not loaded and is reported as `template_misplaced`. Here is
+the real `parties/supplier_acme.dta-party.yaml` in full:
 
 ```yaml
 kind: dta_party_profile
@@ -1136,8 +1210,9 @@ A column's permitted values — `values:` — are already enforced: they become 
 JSON-Schema `enum`, and validation fails every row that is not one of them.
 What was missing was a way to write that list *once* and reuse it. A
 **controlled vocabulary** (`kind: dta_vocabulary`, `*.dta-vocabulary.yaml`) is
-that list, versioned and indexed like everything else in the family. The
-shipped `gf_test.dta-vocabulary.yaml`, in full:
+that list, versioned and indexed like everything else in the family.
+Vocabularies live in the library's `vocabulary/` folder. The shipped
+`vocabulary/gf_test.dta-vocabulary.yaml`, in full:
 
 ```yaml
 kind: dta_vocabulary
@@ -1381,21 +1456,24 @@ that will not read or whose `extends:` chain cycles, a `values_from:` naming a
 vocabulary that is not there or an `include:` code that is not in it — and, as a
 final and most comprehensive check, actually builds a DTA from every
 non-abstract creation template using its own default selections. `path` may
-be a single file, a library directory, or a repository root. A directory
-uses its populated `templates/` folder when present, otherwise the directory
-itself, scanned non-recursively for
-`*.dta-template.yaml`, `*.dta-dataset-template.yaml`, `*.dta-party.yaml`, and
-`*.dta-vocabulary.yaml` (and their `.yml` spellings).
+be a single file or a library root. A directory is scanned non-recursively in
+each of its folders: `templates/` for `*.dta-template.yaml` and
+`*.dta-dataset-template.yaml`, `parties/` for `*.dta-party.yaml`, and
+`vocabulary/` for `*.dta-vocabulary.yaml` (and their `.yml` spellings),
+plus `export-templates/` for the Word files and `dta-app.yaml` at the root.
 
 ```r
 DTAtools::validate_template(".", strict = TRUE)
 ```
 
-Run from the repository root, this validates `templates/` automatically and
-rejects root-level template leftovers with `template_outside_library_dir`.
-The shipped CI assets use this same root command; pointing directly at
-`templates/` validates that folder but cannot diagnose files left at its
-parent root.
+Run from the repository root, this validates every folder and reports files in
+the wrong place: `template_misplaced` (error) for a template file outside its
+kind's folder, `template_in_subdirectory` (warning) for one below the right
+folder, `app_config_misplaced` (error) for a `dta-app.yaml` that is not at the
+root, and `export_template_invalid` (warning) for a non-`.docx` file in
+`export-templates/`. Pointing it at `templates/`, `parties/` or `vocabulary/`
+itself is refused with `library_subfolder_given` (error); validate the parent.
+The shipped CI assets use this same root command.
 
 With `strict = TRUE`, `validate_template()` raises a single error naming every
 row of severity `"error"` and stays silent when there are none — the one line
@@ -1405,14 +1483,14 @@ for a human to inspect interactively.
 
 This is also why an otherwise-empty directory is an `"error"` (code
 `no_templates`), not silence. A workflow pointed at the wrong path — a typo, a
-stale working directory, or templates kept in an unrecognised sub-folder —
-used to return zero rows and pass `strict = TRUE` cleanly, which is the worst
+stale working directory, or templates kept in an unrecognised folder — used to
+return zero rows and pass `strict = TRUE` cleanly, which is the worst
 outcome a linter can produce: green, having validated nothing. It now fails,
 naming the directory it found nothing in.
 
 A ready-to-copy GitHub Actions workflow — checkout, install DTAtools from your
 internal package source, run the check above — ships at
-`system.file("extdata", "templates", "validate-templates.yml", package =
+`system.file("extdata", "ci", "validate-templates.yml", package =
 "DTAtools")`. Copy it to `.github/workflows/validate-templates.yml` in the
 repository that holds your own templates and fill in the one placeholder step
 that installs DTAtools from wherever your organisation hosts it.

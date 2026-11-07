@@ -1,4 +1,7 @@
-# DTATOOLS_LOCAL_LIBRARY accepts a repository root or its templates/ folder.
+# DTATOOLS_LOCAL_LIBRARY names a library ROOT: the repository root holding
+# dta-app.yaml and the templates/, parties/, vocabulary/ and export-templates/
+# folders. Never one of those folders itself (validate_template() reports that
+# as library_subfolder_given).
 # Opt-in coverage for a template library kept OUTSIDE this repository, on the
 # developer's own machine. Everything else in the suite tests the template
 # engine against fixtures it writes itself; this file tests it against a real,

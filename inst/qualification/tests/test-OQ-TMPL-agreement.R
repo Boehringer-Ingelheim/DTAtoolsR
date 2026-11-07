@@ -1,5 +1,6 @@
 test_that("OQ-TMPL-067 | structured metadata inherits and carries over without replacing new clauses by default | REQ-TMPL-032 | tags: white-box", {
   dir <- qa_tempdir()
+  dir.create(file.path(dir, "templates"))
   parent <- list(
     kind = "dta_creation_template", id = "agreement_base", version = "1.0",
     abstract = TRUE,
@@ -27,8 +28,8 @@ test_that("OQ-TMPL-067 | structured metadata inherits and carries over without r
       columns = list(list(id = "SUBJECT", type = "SAS Char"))
     ))
   )
-  yaml::write_yaml(parent, file.path(dir, "base.dta-template.yaml"))
-  yaml::write_yaml(child, file.path(dir, "child.dta-template.yaml"))
+  yaml::write_yaml(parent, file.path(dir, "templates", "base.dta-template.yaml"))
+  yaml::write_yaml(child, file.path(dir, "templates", "child.dta-template.yaml"))
   qa_step("structured metadata templates pass strict validation", 0L, nrow(validate_template(dir, strict = TRUE)))
   withr::local_envvar(c(
     DTATOOLS_TEMPLATE_SOURCES = paste0("qualification=dir:", dir),

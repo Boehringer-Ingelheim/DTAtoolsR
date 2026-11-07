@@ -14,7 +14,7 @@ tmpl_fixture <- function(...) file.path(qa_suite_root(), "fixtures", "tpl", ...)
 
 # ---- REQ-TMPL-026: the default write set, and examples = FALSE ------------
 
-test_that("OQ-TMPL-049 | the defaults write the scaffolding, the four skeleton templates and a GitHub workflow | REQ-TMPL-026", {
+test_that("OQ-TMPL-049 | the defaults write the scaffolding, the skeleton library files and a GitHub workflow | REQ-TMPL-026", {
   dir <- qa_tempdir()
   out <- suppressMessages(create_template_repo(dir))
 
@@ -23,16 +23,17 @@ test_that("OQ-TMPL-049 | the defaults write the scaffolding, the four skeleton t
     ".gitignore", "README.md",
     "templates/starter.dta-template.yaml",
     "templates/starter_dataset.dta-dataset-template.yaml",
-    "templates/starter_supplier.dta-party.yaml",
-    "templates/starter_terms.dta-vocabulary.yaml",
-    "templates/dta-app.yaml",
+    "parties/starter_supplier.dta-party.yaml",
+    "vocabulary/starter_terms.dta-vocabulary.yaml",
+    "dta-app.yaml",
+    "export-templates/README.md",
     ".github/workflows/validate-templates.yml"
   ))
   qa_step("exactly the documented default file set is written", expected, written)
   qa_step("the return value names the directory just written to", normalizePath(dir, winslash = "/"), out)
 })
 
-test_that("OQ-TMPL-050 | examples = FALSE omits the four templates but keeps the scaffolding | REQ-TMPL-026", {
+test_that("OQ-TMPL-050 | examples = FALSE omits the library files but keeps the scaffolding | REQ-TMPL-026", {
   dir <- qa_tempdir()
   suppressMessages(create_template_repo(dir, examples = FALSE))
 
@@ -91,6 +92,17 @@ test_that("OQ-TMPL-054 | without overwrite, one conflicting file aborts the whol
     "nothing else was written -- not even the files that did NOT conflict",
     ".gitignore", list.files(dir, all.files = TRUE, no.. = TRUE)
   )
+
+  # A conflict at a destination inside the library root (the app configuration
+  # file) aborts in the same way and writes nothing else.
+  dir2 <- qa_tempdir()
+  writeLines("pre-existing", file.path(dir2, "dta-app.yaml"))
+  err2 <- tryCatch(create_template_repo(dir2), error = function(e) e)
+  qa_check("a conflicting dta-app.yaml raises a condition naming it", inherits(err2, "condition") && grepl("dta-app.yaml", conditionMessage(err2), fixed = TRUE))
+  qa_step(
+    "and nothing else was written there either",
+    "dta-app.yaml", list.files(dir2, all.files = TRUE, no.. = TRUE)
+  )
 })
 
 test_that("OQ-TMPL-055 | overwrite = TRUE replaces every conflicting file | REQ-TMPL-028", {
@@ -138,20 +150,25 @@ test_that("OQ-TMPL-058 | a freshly scaffolded repository validates cleanly, unmo
   qa_step("strict = TRUE raises nothing against what create_template_repo() itself just wrote", "no condition", outcome)
 })
 
-test_that("OQ-TMPL-059 | every template bundled under inst/extdata/templates validates with zero errors and zero warnings | REQ-TMPL-030", {
-  result <- validate_template(system.file("extdata", "templates", package = "DTAtools"))
+test_that("OQ-TMPL-059 | the packaged demo library under inst/extdata/library validates with zero errors and zero warnings | REQ-TMPL-030", {
+  result <- validate_template(system.file("extdata", "library", package = "DTAtools"))
   qa_step("zero rows of any severity", 0L, nrow(result))
 })
 
-test_that("OQ-TMPL-060 | the bundled skeleton itself validates cleanly under strict = TRUE | REQ-TMPL-030", {
+test_that("OQ-TMPL-060 | the bundled skeleton validates cleanly as a library root under strict = TRUE, and a kind folder of it does not | REQ-TMPL-030", {
   skeleton_dir <- system.file("extdata", "template-repo-skeleton", package = "DTAtools")
   outcome <- tryCatch(
     {
       validate_template(skeleton_dir, strict = TRUE)
-      validate_template(file.path(skeleton_dir, "templates"), strict = TRUE)
       "no condition"
     },
     error = function(e) conditionMessage(e)
   )
   qa_step("the packaged skeleton is not itself the broken example it warns others against", "no condition", outcome)
+
+  folder <- validate_template(file.path(skeleton_dir, "templates"))
+  qa_step(
+    "validating its templates/ folder instead of the root is the sub-folder error, not a clean pass",
+    "library_subfolder_given", folder$code
+  )
 })

@@ -53,7 +53,10 @@ write_template_fixture <- function(dir, filename, kind, id, version, label = NUL
   if (!is.null(label)) {
     lines <- c(lines, sprintf("label: %s", label))
   }
-  writeLines(c(lines, extra_lines), file.path(dir, filename))
+  # `dir` is the library ROOT; the file lands in its kind's folder.
+  kind_dir <- file.path(dir, app_fn("dta_template_kind_subdir")(kind))
+  dir.create(kind_dir, showWarnings = FALSE, recursive = TRUE)
+  writeLines(c(lines, extra_lines), file.path(kind_dir, filename))
 }
 
 # ---- dta_template_kind_pattern() --------------------------------------------
@@ -239,8 +242,8 @@ test_that("build_template_index() keeps the EARLIER root on a kind+id+version co
   expect_equal(nrow(idx), 1)
   expect_equal(idx$label[[1]], "First")
 
-  first_path <- normalizePath(file.path(root1, "dup.dta-template.yaml"), winslash = "/")
-  second_path <- normalizePath(file.path(root2, "dup.dta-template.yaml"), winslash = "/")
+  first_path <- normalizePath(file.path(root1, "templates", "dup.dta-template.yaml"), winslash = "/")
+  second_path <- normalizePath(file.path(root2, "templates", "dup.dta-template.yaml"), winslash = "/")
   expect_equal(normalizePath(idx$path[[1]], winslash = "/"), first_path)
 
   msgs <- attr(idx, "warnings")
@@ -257,7 +260,7 @@ test_that("build_template_index() skips a malformed file (warning) while the goo
   write_template_fixture(root, "good.dta-template.yaml", "dta_creation_template", "good", "1.0", "Good")
   writeLines(
     c("kind: dta_creation_template", "id: [", "version: 1.0"),
-    file.path(root, "bad.dta-template.yaml")
+    file.path(root, "templates", "bad.dta-template.yaml")
   )
 
   withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
@@ -512,4 +515,395 @@ test_that("dta_template_index_cached(refresh = TRUE) re-scans even within the TT
 
   refreshed <- cached_fn(refresh = TRUE)
   expect_equal(nrow(refreshed), 2)
+})
+
+# ---- library layout: kind -> sub-folder table -------------------------------
+
+# Run `expr`, muffling and returning every warning it signalled, so a test can
+# count them (expect_warning() only sees the first match).
+collect_warnings <- function(expr) {
+  caught <- list()
+  value <- withCallingHandlers(
+    expr,
+    warning = function(w) {
+      caught[[length(caught) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+  list(value = value, warnings = caught)
+}
+
+# Write `filename` (a stub body is fine for layout-only checks) under
+# `root/<sub>`, creating the folder; `sub = ""` means the root itself.
+touch_in <- function(root, sub, filename) {
+  dir <- if (nzchar(sub)) file.path(root, sub) else root
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  path <- file.path(dir, filename)
+  writeLines("x: 1", path)
+  path
+}
+
+test_that("the layout table maps every kind to its library sub-folder", {
+  subdir <- app_fn("dta_template_kind_subdir")
+
+  expect_identical(subdir("dta_creation_template"), "templates")
+  expect_identical(subdir("dta_dataset_template"), "templates")
+  expect_identical(subdir("dta_party_profile"), "parties")
+  expect_identical(subdir("dta_vocabulary"), "vocabulary")
+
+  # The distinct indexed folders are exactly the image of the four kinds, and
+  # the Word templates' folder is not one of them.
+  expect_setequal(
+    app_fn("dta_template_kind_subdirs")(),
+    vapply(app_fn("dta_template_all_kinds")(), subdir, character(1))
+  )
+  expect_identical(app_fn("dta_export_templates_subdir")(), "export-templates")
+  expect_false("export-templates" %in% app_fn("dta_template_kind_subdirs")())
+})
+
+test_that("the layout table refuses a kind it does not know", {
+  # The message is authored by the package (cli), not translated by R.
+  expect_error(app_fn("dta_template_kind_subdir")("dta_nonsense"), "Unknown template kind")
+  expect_error(app_fn("dta_template_kind_dir")("/some/root", "dta_nonsense"), "Unknown template kind")
+  expect_error(app_fn("dta_template_kind_subdir")(NA_character_), "Unknown template kind")
+})
+
+test_that("dta_template_kind_dir() joins the library root and the kind's folder", {
+  kind_dir <- app_fn("dta_template_kind_dir")
+
+  expect_identical(kind_dir("/lib", "dta_creation_template"), file.path("/lib", "templates"))
+  expect_identical(kind_dir("/lib", "dta_dataset_template"), file.path("/lib", "templates"))
+  expect_identical(kind_dir("/lib", "dta_party_profile"), file.path("/lib", "parties"))
+  expect_identical(kind_dir("/lib", "dta_vocabulary"), file.path("/lib", "vocabulary"))
+})
+
+# ---- dta_template_misplaced_files() -----------------------------------------
+
+test_that("dta_template_misplaced_files() is empty for a correctly laid-out library", {
+  root <- withr::local_tempdir()
+  touch_in(root, "templates", "a.dta-template.yaml")
+  touch_in(root, "templates", "b.dta-dataset-template.yaml")
+  touch_in(root, "parties", "c.dta-party.yaml")
+  touch_in(root, "vocabulary", "d.dta-vocabulary.yaml")
+  touch_in(root, "export-templates", "e.docx")
+  touch_in(root, "", "dta-app.yaml")
+  touch_in(root, "", "README.md")
+
+  bad <- app_fn("dta_template_misplaced_files")(root)
+
+  expect_s3_class(bad, "data.frame")
+  expect_identical(colnames(bad), c("file", "kind", "expected_dir"))
+  expect_identical(nrow(bad), 0L)
+})
+
+test_that("dta_template_misplaced_files() finds a kind-suffix file lying directly in the root", {
+  root <- withr::local_tempdir()
+  flat <- touch_in(root, "", "flat.dta-template.yaml")
+
+  bad <- app_fn("dta_template_misplaced_files")(root)
+
+  expect_identical(nrow(bad), 1L)
+  expect_identical(bad$file, flat)
+  expect_identical(bad$kind, "dta_creation_template")
+  expect_identical(bad$expected_dir, "templates")
+})
+
+test_that("dta_template_misplaced_files() finds a file sitting in another kind's folder", {
+  root <- withr::local_tempdir()
+  party <- touch_in(root, "templates", "p.dta-party.yaml")
+  vocab <- touch_in(root, "parties", "v.dta-vocabulary.yml")
+  tmpl <- touch_in(root, "vocabulary", "t.dta-template.yaml")
+  dset <- touch_in(root, "parties", "s.dta-dataset-template.yaml")
+
+  bad <- app_fn("dta_template_misplaced_files")(root)
+
+  expect_identical(nrow(bad), 4L)
+  want_dir <- stats::setNames(bad$expected_dir, bad$file)
+  expect_identical(want_dir[[party]], "parties")
+  expect_identical(want_dir[[vocab]], "vocabulary")
+  expect_identical(want_dir[[tmpl]], "templates")
+  expect_identical(want_dir[[dset]], "templates")
+  want_kind <- stats::setNames(bad$kind, bad$file)
+  expect_identical(want_kind[[party]], "dta_party_profile")
+  expect_identical(want_kind[[dset]], "dta_dataset_template")
+})
+
+test_that("a dataset template in templates/ is not mistaken for a misplaced creation template", {
+  root <- withr::local_tempdir()
+  touch_in(root, "templates", "s.dta-dataset-template.yaml")
+
+  expect_identical(nrow(app_fn("dta_template_misplaced_files")(root)), 0L)
+})
+
+test_that("dta_template_misplaced_files() ignores directories named like a template file", {
+  root <- withr::local_tempdir()
+  dir.create(file.path(root, "looks-like.dta-template.yaml"))
+  dir.create(file.path(root, "templates", "looks-like.dta-party.yaml"), recursive = TRUE)
+
+  expect_identical(nrow(app_fn("dta_template_misplaced_files")(root)), 0L)
+})
+
+test_that("dta_template_misplaced_files() is not recursive", {
+  root <- withr::local_tempdir()
+  touch_in(root, "templates/deeper", "p.dta-party.yaml")
+  touch_in(root, "other", "q.dta-template.yaml")
+
+  expect_identical(nrow(app_fn("dta_template_misplaced_files")(root)), 0L)
+})
+
+test_that("dta_template_misplaced_files() lists files in radix (byte) order", {
+  root <- withr::local_tempdir()
+  # Upper case sorts before lower case under radix; a locale collation would
+  # interleave them, which is what the committed-output rule forbids.
+  b <- touch_in(root, "", "b.dta-template.yaml")
+  upper <- touch_in(root, "", "Z.dta-template.yaml")
+  a <- touch_in(root, "", "a.dta-template.yaml")
+
+  bad <- app_fn("dta_template_misplaced_files")(root)
+
+  expect_identical(bad$file, c(upper, a, b))
+})
+
+test_that("dta_template_misplaced_files() copes with a missing or non-path root", {
+  fn <- app_fn("dta_template_misplaced_files")
+
+  expect_identical(nrow(fn(file.path(withr::local_tempdir(), "nope"))), 0L)
+  expect_identical(nrow(fn(NA_character_)), 0L)
+  expect_identical(nrow(fn("")), 0L)
+  expect_identical(nrow(fn(NULL)), 0L)
+})
+
+# ---- dta_template_locate_root() ----------------------------------------------
+
+test_that("dta_template_locate_root() returns the library root of a file in its own kind folder", {
+  fn <- app_fn("dta_template_locate_root")
+  root <- file.path(normalizePath(withr::local_tempdir(), winslash = "/"), "lib")
+
+  expect_identical(fn(file.path(root, "templates", "a.dta-template.yaml")), root)
+  expect_identical(fn(file.path(root, "templates", "a.dta-dataset-template.yml")), root)
+  expect_identical(fn(file.path(root, "parties", "a.dta-party.yaml")), root)
+  expect_identical(fn(file.path(root, "vocabulary", "a.dta-vocabulary.yaml")), root)
+})
+
+test_that("dta_template_locate_root() is NA for a file in the wrong folder", {
+  fn <- app_fn("dta_template_locate_root")
+  root <- file.path(normalizePath(withr::local_tempdir(), winslash = "/"), "lib")
+
+  expect_true(is.na(fn(file.path(root, "parties", "a.dta-template.yaml"))))
+  expect_true(is.na(fn(file.path(root, "templates", "a.dta-vocabulary.yaml"))))
+  expect_true(is.na(fn(file.path(root, "a.dta-template.yaml"))))
+  expect_true(is.na(fn(file.path(root, "other", "a.dta-party.yaml"))))
+  expect_type(fn(file.path(root, "a.dta-template.yaml")), "character")
+})
+
+test_that("dta_template_locate_root() is NA for a file whose name is not a template name", {
+  fn <- app_fn("dta_template_locate_root")
+  root <- file.path(normalizePath(withr::local_tempdir(), winslash = "/"), "lib")
+
+  expect_true(is.na(fn(file.path(root, "templates", "notes.txt"))))
+  expect_true(is.na(fn(file.path(root, "templates", "a.yaml"))))
+  expect_true(is.na(fn(file.path(root, "templates", "a.dta-template.json"))))
+})
+
+# ---- build_template_index() and the layout ----------------------------------
+
+test_that("build_template_index() indexes files in the correct folders of all four kinds", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root <- withr::local_tempdir()
+  write_template_fixture(root, "ct.dta-template.yaml", "dta_creation_template", "ct", "1.0", "CT")
+  write_template_fixture(root, "dt.dta-dataset-template.yaml", "dta_dataset_template", "dt", "1.0", "DT")
+  write_template_fixture(root, "pp.dta-party.yaml", "dta_party_profile", "pp", "1.0", "PP")
+  write_template_fixture(root, "vv.dta-vocabulary.yaml", "dta_vocabulary", "vv", "1.0", "VV")
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+  idx <- res$value
+
+  expect_length(res$warnings, 0)
+  expect_identical(nrow(idx), 4L)
+  expect_setequal(idx$kind, app_fn("dta_template_all_kinds")())
+  expect_length(attr(idx, "warnings"), 0)
+  # Each row's path is inside the folder its kind belongs to.
+  parent <- stats::setNames(basename(dirname(idx$path)), idx$id)
+  expect_identical(parent[["ct"]], "templates")
+  expect_identical(parent[["dt"]], "templates")
+  expect_identical(parent[["pp"]], "parties")
+  expect_identical(parent[["vv"]], "vocabulary")
+})
+
+test_that("build_template_index() skips misplaced files, reports each in attr 'warnings' and warns once", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root <- withr::local_tempdir()
+  write_template_fixture(root, "ok.dta-template.yaml", "dta_creation_template", "ok", "1.0", "OK")
+  # Valid, parseable files -- only their location is wrong.
+  flat <- file.path(root, "flat.dta-template.yaml")
+  writeLines(c("kind: dta_creation_template", "id: flat", "version: 1.0"), flat)
+  wrong_dir <- file.path(root, "templates", "pp.dta-party.yaml")
+  writeLines(c("kind: dta_party_profile", "id: pp", "version: 1.0"), wrong_dir)
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+  idx <- res$value
+
+  # Only the correctly placed file is indexed.
+  expect_identical(idx$id, "ok")
+
+  # One entry per skipped file, naming the file, its kind and the right folder.
+  msgs <- attr(idx, "warnings")
+  flat_msg <- msgs[grepl("flat.dta-template.yaml", msgs, fixed = TRUE)]
+  pp_msg <- msgs[grepl("pp.dta-party.yaml", msgs, fixed = TRUE)]
+  expect_length(flat_msg, 1)
+  expect_length(pp_msg, 1)
+  expect_match(flat_msg, "belongs in templates/", fixed = TRUE)
+  expect_match(pp_msg, "belongs in parties/", fixed = TRUE)
+  # People read this in the picker: the human kind label, never the kind id,
+  # and the source name plus a path relative to the source root, never the
+  # absolute server path.
+  src_name <- basename(root)
+  expect_identical(
+    flat_msg,
+    paste0(
+      src_name, ": flat.dta-template.yaml - a creation template belongs in templates/ ",
+      "(library layout: templates/, parties/, vocabulary/, export-templates/)"
+    )
+  )
+  expect_identical(
+    pp_msg,
+    paste0(
+      src_name, ": templates/pp.dta-party.yaml - a party profile belongs in parties/ ",
+      "(library layout: templates/, parties/, vocabulary/, export-templates/)"
+    )
+  )
+  expect_no_match(c(flat_msg, pp_msg), "dta_party_profile|dta_creation_template")
+  expect_no_match(c(flat_msg, pp_msg), root, fixed = TRUE)
+  # The same entries, kept apart for the picker.
+  expect_setequal(attr(idx, "layout_warnings"), c(flat_msg, pp_msg))
+
+  # ... and exactly ONE aggregated condition carries all of them.
+  layout <- Filter(function(w) grepl("belongs in", conditionMessage(w)), res$warnings)
+  expect_length(layout, 1)
+  expect_s3_class(layout[[1]], "warning")
+  expect_match(conditionMessage(layout[[1]]), "flat.dta-template.yaml", fixed = TRUE)
+  expect_match(conditionMessage(layout[[1]]), "pp.dta-party.yaml", fixed = TRUE)
+})
+
+test_that("build_template_index() warns with the package's own layout text", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root <- withr::local_tempdir()
+  writeLines(
+    c("kind: dta_vocabulary", "id: v", "version: 1.0"),
+    file.path(root, "v.dta-vocabulary.yaml")
+  )
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  expect_warning(idx <- app_fn("build_template_index")(), "belongs in vocabulary/")
+  expect_identical(nrow(idx), 0L)
+})
+
+test_that("build_template_index() does not warn about layout for a correct library", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root <- withr::local_tempdir()
+  write_template_fixture(root, "ok.dta-template.yaml", "dta_creation_template", "ok", "1.0", "OK")
+  dir.create(file.path(root, "export-templates"))
+  writeLines("x", file.path(root, "export-templates", "w.docx"))
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+
+  expect_length(res$warnings, 0)
+  expect_identical(nrow(res$value), 1L)
+})
+
+test_that("a source root that is itself a kind folder yields one 'library sub-folder' warning", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  lib <- withr::local_tempdir()
+  # A source pointed one level too deep: the root IS templates/, with the
+  # files directly inside it and no kind folders beneath.
+  deep <- file.path(lib, "templates")
+  dir.create(deep)
+  writeLines(c("kind: dta_creation_template", "id: a", "version: 1.0"), file.path(deep, "a.dta-template.yaml"))
+  writeLines(c("kind: dta_creation_template", "id: b", "version: 1.0"), file.path(deep, "b.dta-template.yaml"))
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", deep))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+  idx <- res$value
+
+  expect_identical(nrow(idx), 0L)
+  msgs <- attr(idx, "warnings")
+  # One entry for the root, not one per file.
+  expect_length(msgs, 1)
+  expect_match(msgs, "looks like a library sub-folder", fixed = TRUE)
+  expect_match(msgs, "parent directory", fixed = TRUE)
+  expect_match(msgs, "flat library", fixed = TRUE)
+  expect_match(msgs, "Reorganising an older repository", fixed = TRUE)
+  expect_identical(attr(idx, "layout_warnings"), msgs)
+  # The source name and the folder's own name -- not its absolute path.
+  expect_match(msgs, "^templates: templates/ looks like")
+  expect_no_match(msgs, deep, fixed = TRUE)
+  expect_length(res$warnings, 1)
+  expect_match(conditionMessage(res$warnings[[1]]), "library sub-folder", fixed = TRUE)
+})
+
+test_that("a misplaced file never shadows a correctly placed one from a later root", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root1 <- withr::local_tempdir()
+  root2 <- withr::local_tempdir()
+  # Same kind+id+version; root1's copy is misplaced (flat), root2's is fine.
+  writeLines(
+    c("kind: dta_creation_template", "id: dup", "version: 1.0", "label: Misplaced"),
+    file.path(root1, "dup.dta-template.yaml")
+  )
+  write_template_fixture(root2, "dup.dta-template.yaml", "dta_creation_template", "dup", "1.0", "Proper")
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root1, ";dir:", root2))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+  idx <- res$value
+
+  expect_identical(nrow(idx), 1L)
+  expect_identical(idx$label, "Proper")
+  # The skip is reported as a layout problem, not as a duplicate.
+  msgs <- attr(idx, "warnings")
+  expect_false(any(grepl("Duplicate", msgs, fixed = TRUE)))
+  expect_true(any(grepl("belongs in templates/", msgs, fixed = TRUE)))
+})
+
+test_that("the same kind+id+version in two correctly laid-out roots keeps the earlier root", {
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+
+  root1 <- withr::local_tempdir()
+  root2 <- withr::local_tempdir()
+  suffixes <- c(
+    dta_creation_template = "dta-template", dta_dataset_template = "dta-dataset-template",
+    dta_party_profile = "dta-party", dta_vocabulary = "dta-vocabulary"
+  )
+  for (kind in names(suffixes)) {
+    file <- paste0("x.", suffixes[[kind]], ".yaml")
+    write_template_fixture(root1, file, kind, "x", "1.0", "First")
+    write_template_fixture(root2, file, kind, "x", "1.0", "Second")
+  }
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root1, ";dir:", root2))
+
+  res <- collect_warnings(app_fn("build_template_index")())
+  idx <- res$value
+
+  expect_identical(nrow(idx), 4L)
+  expect_true(all(idx$label == "First"))
+  expect_true(all(startsWith(
+    normalizePath(idx$path, winslash = "/"),
+    normalizePath(root1, winslash = "/")
+  )))
+  expect_identical(sum(grepl("Duplicate", attr(idx, "warnings"), fixed = TRUE)), 4L)
 })

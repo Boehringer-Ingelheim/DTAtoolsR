@@ -844,7 +844,7 @@ test_that("the free-text transmission fields resolve and the bundled clinical te
     expect_identical(vars[[paste0("{TRANSMISSION_", toupper(f), "}")]], fields[[f]])
   }
 
-  tmpl <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  tmpl <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
   export_with_template(

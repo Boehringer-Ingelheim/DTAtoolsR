@@ -12,6 +12,23 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 app_server_dir <- function() .shiny_app_dir()
 
 # Local copy of the isolation helper defined in test-shinyapp-template-
@@ -84,7 +101,7 @@ write_min_template <- function(root, id, version, label = id, filename = NULL,
       "options: []",
       extra_lines
     ),
-    file.path(root, paste0(fname, ".dta-template.yaml"))
+    lib_path(root, paste0(fname, ".dta-template.yaml"))
   )
 }
 
@@ -100,7 +117,7 @@ write_party_profile <- function(root, id = "supplier_x", label = "Supplier X", r
       "  name: Party Affiliation Name",
       "  country: DE"
     ),
-    file.path(root, paste0(id, ".dta-party.yaml"))
+    lib_path(root, paste0(id, ".dta-party.yaml"))
   )
 }
 
@@ -125,7 +142,7 @@ write_template_with_party_slot <- function(root, id = "party_tpl") {
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
     ),
-    file.path(root, paste0(id, ".dta-template.yaml"))
+    lib_path(root, paste0(id, ".dta-template.yaml"))
   )
 }
 
@@ -359,7 +376,7 @@ test_that("a source filter that no longer names a source is ignored, not applied
     session$setInputs(template_select_source = "two")
     expect_match(ui_text(output$template_picker_list), "Gone Template", fixed = TRUE)
 
-    unlink(file.path(root_b, "gone_tpl_10.dta-template.yaml"))
+    unlink(lib_path(root_b, "gone_tpl_10.dta-template.yaml"))
     session$setInputs(tmpl_refresh_templates = 1)
 
     html <- ui_text(output$template_picker_list)
@@ -621,7 +638,7 @@ test_that("a creation failure leaves the modal open instead of losing the user's
       "  - does-not-exist.yaml",
       "options: []"
     ),
-    file.path(root, "broken_tpl.dta-template.yaml")
+    lib_path(root, "broken_tpl.dta-template.yaml")
   )
 
   shiny::testServer(app_server_dir(), {
@@ -825,7 +842,7 @@ test_that("'Refresh templates' picks up a template added to the source directory
 
 test_that("with no private source configured, the picker opens and offers the packaged template(s)", {
   # Deliberately does NOT assert on any specific template's id/label/
-  # description -- inst/extdata/templates/*.dta-template.yaml is owned and
+  # description -- inst/extdata/library/templates/*.dta-template.yaml is owned and
   # concurrently edited elsewhere; this only pins the STRUCTURAL guarantee
   # that dta_template_include_builtin() defaults to TRUE with nothing private
   # configured (template_sources.R), so the packaged directory is scanned
@@ -927,7 +944,7 @@ write_vocab_slot_fixture <- function(root) {
       "  - code: TERM_B",
       "    label: Second term"
     ),
-    file.path(root, "visit.dta-vocabulary.yaml")
+    lib_path(root, "visit.dta-vocabulary.yaml")
   )
   writeLines(
     c(
@@ -951,7 +968,7 @@ write_vocab_slot_fixture <- function(root) {
       "    files: { filename: mini.csv, type: csv }",
       "options: []"
     ),
-    file.path(root, "vocab_tpl.dta-template.yaml")
+    lib_path(root, "vocab_tpl.dta-template.yaml")
   )
 }
 

@@ -1,3 +1,20 @@
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # Ordered agreement sections are a single rebase value, unlike the ordinary
 # nested metadata fields. All fixtures are synthetic.
 atomic_rebase_sections <- function() {
@@ -39,7 +56,7 @@ atomic_rebase_family <- function(ancestor, target, .local_envir = parent.frame()
       )),
       options = list()
     )
-    yaml::write_yaml(def, file.path(root, paste0(version, ".dta-template.yaml")))
+    yaml::write_yaml(def, lib_path(root, paste0(version, ".dta-template.yaml")))
   }
   index <- app_fn("build_template_index")()
   loaded <- app_fn("load_template_definition")("atomic_agreement@1.0", index)

@@ -5,6 +5,23 @@
 # app_env()/app_fn() harness in helper-shinyapp.R (see that file for why the
 # app's helper files must be sourced into a private environment for testing).
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # Local copy of the isolation helper defined in test-shinyapp-template-
 # sources.R -- deliberately duplicated rather than shared, per that file's own
 # guidance, so this file does not depend on another test file's internals.
@@ -73,7 +90,7 @@ write_gf_dataset_template <- function(root) {
       "    - { id: GFNAM, label: Vendor Name, type: SAS Char }",
       "  rules: []"
     ),
-    file.path(root, "gf_dt.dta-dataset-template.yaml")
+    lib_path(root, "gf_dt.dta-dataset-template.yaml")
   )
 }
 
@@ -98,7 +115,7 @@ write_base_ct <- function(root) {
       "    as: gf_from_template",
       "options: []"
     ),
-    file.path(root, "base_ct.dta-template.yaml")
+    lib_path(root, "base_ct.dta-template.yaml")
   )
 }
 
@@ -136,7 +153,7 @@ write_child_ct <- function(root) {
       "    label: Title",
       "    target: metadata.title"
     ),
-    file.path(root, "child_ct.dta-template.yaml")
+    lib_path(root, "child_ct.dta-template.yaml")
   )
 }
 
@@ -152,18 +169,20 @@ write_supplier_profile <- function(root) {
       "  name: Party Supplier",
       "  country: DE"
     ),
-    file.path(root, "supplier_acme.dta-party.yaml")
+    lib_path(root, "supplier_acme.dta-party.yaml")
   )
 }
 
+# Plain dataset YAMLs: referenced by path relative to the template file, so they
+# sit in templates/ beside it.
 write_standalone_dataset_files <- function(root) {
   writeLines(
     c("id: plain_path_ds", "type: file", "files: { filename: a.csv, type: csv }"),
-    file.path(root, "plain_path_ds.yaml")
+    lib_path(root, "plain_path_ds.yaml")
   )
   writeLines(
     c("id: plain_source_ds", "type: file", "files: { filename: b.csv, type: csv }"),
-    file.path(root, "plain_source_ds.yaml")
+    lib_path(root, "plain_source_ds.yaml")
   )
 }
 
@@ -242,7 +261,7 @@ test_that("load_template_definition() resolves 'id@version' and reports source m
   expect_true(res$ok)
   expect_equal(res$value$id, "child_ct")
   expect_equal(res$value$version, "1.0")
-  expect_equal(normalizePath(res$value$path), normalizePath(file.path(root, "child_ct.dta-template.yaml")))
+  expect_equal(normalizePath(res$value$path), normalizePath(lib_path(root, "child_ct.dta-template.yaml")))
   expect_true(nzchar(res$value$source_name))
 })
 
@@ -274,8 +293,8 @@ test_that("an abstract template cannot be instantiated directly", {
 test_that("a metadata-only abstract base supports a concrete child's own dataset", {
   for (reusable in c(FALSE, TRUE)) {
     root <- withr::local_tempdir()
-    parent_path <- file.path(root, "metadata_base.dta-template.yaml")
-    child_path <- file.path(root, "metadata_child.dta-template.yaml")
+    parent_path <- lib_path(root, "metadata_base.dta-template.yaml")
+    child_path <- lib_path(root, "metadata_child.dta-template.yaml")
     metadata <- list(title = "Shared transfer title", header = "Shared header")
     yaml::write_yaml(list(
       kind = "dta_creation_template", id = "metadata_base", version = "1.0",
@@ -290,7 +309,7 @@ test_that("a metadata-only abstract base supports a concrete child's own dataset
       yaml::write_yaml(list(
         kind = "dta_dataset_template", id = "child_dataset", version = "1.0",
         dataset = dataset
-      ), file.path(root, "child.dta-dataset-template.yaml"))
+      ), lib_path(root, "child.dta-dataset-template.yaml"))
     }
     entry <- if (reusable) list(template = "child_dataset@1.0") else dataset
     yaml::write_yaml(list(
@@ -336,12 +355,12 @@ test_that("a concrete child must have a dataset after inheritance resolves", {
     kind = "dta_creation_template", id = "metadata_base", version = "1.0",
     abstract = TRUE, base = list(metadata = list(title = "Shared title"))
   )
-  yaml::write_yaml(parent, file.path(root, "metadata_base.dta-template.yaml"))
+  yaml::write_yaml(parent, lib_path(root, "metadata_base.dta-template.yaml"))
   # Also check that explicitly clearing a dataset-bearing parent cannot evade
   # the concrete dataset requirement.
   parent$id <- "dataset_base"
   parent$datasets <- list(mini_dataset_entry())
-  yaml::write_yaml(parent, file.path(root, "dataset_base.dta-template.yaml"))
+  yaml::write_yaml(parent, lib_path(root, "dataset_base.dta-template.yaml"))
   children <- list(
     absent = list(extends = "metadata_base"),
     empty = list(extends = "metadata_base", datasets = list()),
@@ -349,7 +368,7 @@ test_that("a concrete child must have a dataset after inheritance resolves", {
     cleared = list(extends = "dataset_base", datasets = list())
   )
   for (id in names(children)) {
-    path <- file.path(root, paste0(id, ".dta-template.yaml"))
+    path <- lib_path(root, paste0(id, ".dta-template.yaml"))
     yaml::write_yaml(c(list(
       kind = "dta_creation_template", id = id, version = "1.0"
     ), children[[id]]), path)
@@ -374,7 +393,7 @@ test_that("a concrete child must have a dataset after inheritance resolves", {
 
 test_that("dataset-free abstract bases still need a base mapping and concrete roots need datasets", {
   root <- withr::local_tempdir()
-  path <- file.path(root, "root.dta-template.yaml")
+  path <- lib_path(root, "root.dta-template.yaml")
   def <- list(kind = "dta_creation_template", id = "root", abstract = TRUE)
   yaml::write_yaml(def, path)
   expect_match(app_fn("read_dta_creation_template")(path)$error, "'base' section")
@@ -414,7 +433,7 @@ test_that("a child of an abstract template is concrete unless it says otherwise"
       "  metadata:",
       "    error_handling: Child-added handling note"
     ),
-    file.path(root, "plain_child_ct.dta-template.yaml")
+    lib_path(root, "plain_child_ct.dta-template.yaml")
   )
   writeLines(
     c(
@@ -428,7 +447,7 @@ test_that("a child of an abstract template is concrete unless it says otherwise"
       "  metadata:",
       "    error_handling: Still abstract"
     ),
-    file.path(root, "abstract_child_ct.dta-template.yaml")
+    lib_path(root, "abstract_child_ct.dta-template.yaml")
   )
   idx <- index_over(root)
   fn <- app_fn("load_template_definition")
@@ -515,7 +534,7 @@ test_that("an unresolvable template: dataset ref errors naming the ref and the r
     datasets = list(list(template = "does_not_exist@9.9"))
   )
   create_fn <- app_fn("create_dta_from_template")
-  res <- create_fn(def, file.path(root, "bad_ref_ct.dta-template.yaml"), selections = list(), index = idx)
+  res <- create_fn(def, lib_path(root, "bad_ref_ct.dta-template.yaml"), selections = list(), index = idx)
 
   expect_false(res$ok)
   expect_true(nzchar(res$error))
@@ -594,7 +613,7 @@ test_that("all three datasets: forms build the identical DTA whether or not an i
       list(id = "plain_inline_ds", type = "file", files = list(filename = "inline.csv", type = "csv"))
     )
   )
-  template_path <- file.path(root, "forms_ct.dta-template.yaml") # need not exist on disk
+  template_path <- lib_path(root, "forms_ct.dta-template.yaml") # need not exist on disk
 
   create_fn <- app_fn("create_dta_from_template")
   res_no_index <- create_fn(def_forms, template_path, selections = list())
@@ -747,11 +766,19 @@ test_that("template_provenance() keeps a full source_ref only for a user's own d
   }
 
   # A git clone, an installed package or the bundled templates sit at a
-  # machine-specific path: only the file within the source is recorded.
-  expect_identical(ref_for("git", "lib"), "t1.dta-template.yaml")
-  expect_identical(ref_for("pkg", "lib"), "t1.dta-template.yaml")
-  expect_identical(ref_for("dir", "builtin"), "t1.dta-template.yaml")
+  # machine-specific path: only the file's path within the source is
+  # recorded, which includes the folder of its kind.
+  expect_identical(ref_for("git", "lib"), "templates/t1.dta-template.yaml")
+  expect_identical(ref_for("pkg", "lib"), "templates/t1.dta-template.yaml")
+  expect_identical(ref_for("dir", "builtin"), "templates/t1.dta-template.yaml")
   expect_identical(ref_for("dir", "mine"), "C:/cache/clone-abc/templates/t1.dta-template.yaml")
+
+  # The folder follows the template's kind.
+  party <- fn(def, list(
+    id = "p1", version = "1.0", source_kind = "git", source_name = "lib",
+    kind = "dta_party_profile", path = "C:/cache/clone-abc/parties/p1.dta-party.yaml"
+  ))
+  expect_identical(party$source_ref, "parties/p1.dta-party.yaml")
 })
 
 test_that("template_provenance()'s content_hash changes when the underlying definition changes", {
@@ -952,7 +979,7 @@ test_that("create_dta_from_template() builds the full extends: family through th
 
 test_that("create_dta_from_template() with none of the four new arguments behaves exactly as before", {
   real_path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   read_fn <- app_fn("read_dta_creation_template")
@@ -984,7 +1011,7 @@ write_mixin_fixture <- function(root) {
       "    label: Privacy",
       "    target: metadata.title"
     ),
-    file.path(root, "mx_privacy.dta-template.yaml")
+    lib_path(root, "mx_privacy.dta-template.yaml")
   )
   writeLines(
     c(
@@ -998,7 +1025,7 @@ write_mixin_fixture <- function(root) {
       "    type: file",
       "    files: { filename: mini.csv, type: csv }"
     ),
-    file.path(root, "mx_assay.dta-template.yaml")
+    lib_path(root, "mx_assay.dta-template.yaml")
   )
   writeLines(
     c(
@@ -1011,7 +1038,7 @@ write_mixin_fixture <- function(root) {
       "  metadata:",
       "    title: T"
     ),
-    file.path(root, "mx_child.dta-template.yaml")
+    lib_path(root, "mx_child.dta-template.yaml")
   )
 }
 
@@ -1037,14 +1064,14 @@ test_that("load_template_definition() reports a conflicting mixin as a non-throw
       "kind: dta_creation_template", "id: mx_clash", 'version: "1.0"', "abstract: true",
       "base: {}", "options:", "  - id: privacy_opt"
     ),
-    file.path(root, "mx_clash.dta-template.yaml")
+    lib_path(root, "mx_clash.dta-template.yaml")
   )
   writeLines(
     c(
       "kind: dta_creation_template", "id: mx_bad_child", 'version: "1.0"',
       "mixins: [mx_privacy, mx_clash]", "base:", "  metadata:", "    title: T"
     ),
-    file.path(root, "mx_bad_child.dta-template.yaml")
+    lib_path(root, "mx_bad_child.dta-template.yaml")
   )
   idx <- index_over(root)
 
@@ -1072,4 +1099,100 @@ test_that("template_provenance() records the mixins next to the lineage, and omi
   expect_identical(fn(def, meta, mixins = "x@1.0")$mixins, "x@1.0")
   expect_false("mixins" %in% names(fn(def, list(id = "t1", version = "1.0"))))
   expect_false("mixins" %in% names(fn(def, meta, mixins = character(0))))
+})
+
+# ---- Cross-folder references in a library ------------------------------------
+
+test_that("a creation template in templates/ builds from files in all three kind folders", {
+  root <- withr::local_tempdir()
+  # parties/ -- the supplier the party slot offers
+  writeLines(
+    c(
+      "kind: dta_party_profile", "id: xf_supplier", 'version: "1.0"', "role: supplier",
+      "label: XF Labs", "affiliation:", "  name: Cross Folder Labs", "  country: DE"
+    ),
+    lib_path(root, "xf_supplier.dta-party.yaml")
+  )
+  # vocabulary/ -- the term list the dataset column is bound to
+  writeLines(
+    c(
+      "kind: dta_vocabulary", "id: xf_visits", 'version: "1.0"', "label: Visits", "type: text",
+      "terms:", "  - code: SCR", "    label: Screening", "  - code: C1D1", "    label: Cycle 1 Day 1",
+      "  - code: EOT", "    label: End of treatment"
+    ),
+    lib_path(root, "xf_visits.dta-vocabulary.yaml")
+  )
+  # templates/ -- a dataset template using the vocabulary ...
+  writeLines(
+    c(
+      "kind: dta_dataset_template", "id: xf_ds", 'version: "1.0"', "label: XF dataset",
+      "dataset:", "  id: xf_ds", "  type: tabular", "  files: {filename: xf.csv, type: csv}",
+      "  columns:", "    - id: VISIT", "      type: SAS Char", "      values_from: xf_visits@1.0"
+    ),
+    lib_path(root, "xf_ds.dta-dataset-template.yaml")
+  )
+  # ... and a creation template importing it, with a party slot and a
+  # vocabulary slot reaching into the other two folders.
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: xf_ct", 'version: "1.0"', "label: XF creation",
+      "base:", "  metadata:", "    title: Cross folder",
+      "datasets:", "  - template: xf_ds@1.0", "    as: xf_built",
+      "party_slots:", "  - id: supplier_choice", "    target: metadata.supplier",
+      "vocabulary_slots:", "  - id: visit_choice", "    label: Visits",
+      "    target: datasets.xf_built.columns.VISIT.values",
+      "    vocabulary: xf_visits@1.0", "    default: [SCR, C1D1]"
+    ),
+    lib_path(root, "xf_ct.dta-template.yaml")
+  )
+  idx <- index_over(root)
+
+  # Everything is found where the layout says, and nothing is reported misplaced.
+  expect_length(attr(idx, "warnings"), 0)
+  expect_setequal(idx$id, c("xf_supplier", "xf_visits", "xf_ds", "xf_ct"))
+  expect_identical(nrow(app_fn("dta_template_misplaced_files")(root)), 0L)
+
+  loaded <- app_fn("load_template_definition")("xf_ct@1.0", index = idx)
+  expect_true(loaded$ok, info = loaded$error)
+  create <- app_fn("create_dta_from_template")
+
+  res <- create(
+    loaded$value$def, loaded$value$path,
+    index = idx, party_selections = list(supplier_choice = "xf_supplier")
+  )
+
+  expect_true(res$ok, info = res$error)
+  # The dataset came from templates/, its default term selection from vocabulary/ ...
+  col <- res$value@datasets[["xf_built"]]@specs@columns[[1]]
+  expect_identical(col@id, "VISIT")
+  expect_identical(col@values, c("SCR", "C1D1"))
+  # ... and the supplier from parties/.
+  expect_identical(DTAtools::metadata(res$value)@supplier$affiliation$name, "Cross Folder Labs")
+  expect_identical(DTAtools::metadata(res$value)@title, "Cross folder")
+
+  chosen <- create(
+    loaded$value$def, loaded$value$path,
+    index = idx, vocab_selections = list(visit_choice = "EOT")
+  )
+  expect_true(chosen$ok, info = chosen$error)
+  expect_identical(chosen$value@datasets[["xf_built"]]@specs@columns[[1]]@values, "EOT")
+})
+
+test_that("a reference to a file that was left outside its kind folder does not resolve", {
+  root <- withr::local_tempdir()
+  setup_fixture(root)
+  # A second party profile, lying in templates/ instead of parties/.
+  writeLines(
+    c("kind: dta_party_profile", "id: stray_party", 'version: "1.0"', "role: supplier", "label: Stray"),
+    file.path(root, "templates", "stray_party.dta-party.yaml")
+  )
+  local_clean_template_env()
+  app_fn("dta_template_index_invalidate")()
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", root))
+
+  expect_warning(idx <- app_fn("build_template_index")(), "belongs in parties/")
+
+  expect_false("stray_party" %in% idx$id)
+  expect_true("supplier_acme" %in% idx$id)
+  expect_null(app_fn("template_index_resolver")(idx)("stray_party"))
 })

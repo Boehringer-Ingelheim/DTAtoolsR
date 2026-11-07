@@ -24,8 +24,10 @@
 # back to the "biomarker_gf" example, or someone will author a real
 # specification from a demo file by mistake.
 #
-# Whether a source root's templates/ subfolder is used is decided elsewhere,
-# by dta_template_library_dir() in template_index.R.
+# A source's `root` is the configured / cloned / package directory as is -- a
+# library root holding templates/, parties/, vocabulary/ and export-templates/
+# folders (plus an optional dta-app.yaml); see template_index.R. `checkout` is
+# kept as a field and always equals `root`.
 #
 # `%||%` is already bound in the app helper environment (see utils_dta.R) --
 # it is not redefined here.
@@ -542,7 +544,7 @@ resolve_template_source <- function(src, refresh = FALSE) {
   if (src$scheme == "dir") {
     if (dir.exists(src$locator)) {
       base$checkout <- normalizePath(src$locator, winslash = "/", mustWork = TRUE)
-      base$root <- dta_template_library_dir(base$checkout)
+      base$root <- base$checkout
       base$ok <- TRUE
     } else {
       base$error <- paste0("Template directory does not exist: ", src$locator)
@@ -561,7 +563,7 @@ resolve_template_source <- function(src, refresh = FALSE) {
       return(base)
     }
     base$checkout <- normalizePath(dir, winslash = "/", mustWork = TRUE)
-    base$root <- dta_template_library_dir(base$checkout)
+    base$root <- base$checkout
     base$ok <- TRUE
     return(base)
   }
@@ -569,7 +571,7 @@ resolve_template_source <- function(src, refresh = FALSE) {
   # scheme == "git"
   git_result <- resolve_git_source(src, refresh = refresh)
   base$checkout <- if (nzchar(git_result$root %||% "")) git_result$root else NA_character_
-  base$root <- dta_template_library_dir(base$checkout)
+  base$root <- base$checkout
   base$ok <- isTRUE(git_result$ok)
   base$stale <- isTRUE(git_result$stale)
   base$stale_age <- git_result$stale_age %||% NA_real_

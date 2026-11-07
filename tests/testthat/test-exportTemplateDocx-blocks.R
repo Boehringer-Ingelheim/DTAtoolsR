@@ -677,7 +677,7 @@ test_that("the bundled clinical template renders the dataset section from plain 
   # literally and the dataset section empty. {DATASETS_DETAIL} is a block
   # alias for {DATASETS}, so this must now render for real.
   dta <- read_dta_from_yaml(system.file("extdata", "clinical_dta.yaml", package = "DTAtools"))
-  tmpl <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  tmpl <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
 
@@ -701,7 +701,7 @@ test_that("the bundled clinical template gets a fixed grid sized to its own sect
   dta@datasets[[1]]@specs@rules <- list(
     DTARuleColRange(id = "age_range_check", columns = "AGE", min = 18, max = 65)
   )
-  tmpl <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  tmpl <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out, force = TRUE), add = TRUE)
   # {YAML_EMBEDDED} is a caller-supplied value nobody supplies here.

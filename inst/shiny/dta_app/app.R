@@ -1842,26 +1842,35 @@ server <- function(input, output, session) {
     sources <- attr(idx, "sources") %||% list()
     rows <- template_picker_rows()
 
-    diagnostics <- template_source_diagnostics_ui(sources)
+    diagnostics <- template_source_diagnostics_ui(sources, attr(idx, "layout_warnings"))
 
     if (nrow(rows) == 0) {
       # Private-replaces-public (template_sources.R): with a private source
       # configured and nothing usable in it, the packaged demo is NOT offered
       # as a fallback -- say so plainly, backed by the diagnostics above
-      # naming exactly which source(s) failed and why.
-      msg <- if (dta_template_private_configured()) {
+      # naming exactly which source(s) failed and why. When the sources loaded
+      # but hold no template files, the usual cause is the folder layout.
+      all_failed <- length(sources) > 0 &&
+        !any(vapply(sources, function(s) isTRUE(s$ok), logical(1)))
+      msg <- if (dta_template_private_configured() && all_failed) {
         p(
           class = "msg-hint",
           paste(
             "No templates are available: every configured private template",
             "source failed to load, and the packaged demo template is not",
-            "used as a fallback while a private source is configured.",
-            "(templates are read from <root>/templates/ when that folder holds",
-            "template files, otherwise from <root> itself)"
+            "used as a fallback while a private source is configured."
           )
         )
       } else {
-        p("No creation templates found.")
+        p(
+          class = "msg-hint",
+          paste(
+            "No creation templates were found. A template library keeps its",
+            "files in templates/, parties/ and vocabulary/ folders (Word",
+            "references in export-templates/, dta-app.yaml at the root) --",
+            "check the folder layout of the template source."
+          )
+        )
       }
       return(tagList(diagnostics, msg))
     }
@@ -1948,9 +1957,11 @@ server <- function(input, output, session) {
       # exactly today's pre-index behaviour: a notification, no modal.
       showNotification(
         paste(
-          "No creation templates found. Add *.dta-template.yaml files to a",
-          "./dta-templates folder, or point options(DTAtools.template_dir=) at",
-          "a directory of your own (a templates/ sub-folder inside it is used automatically)."
+          "No creation templates found. Add *.dta-template.yaml files to the",
+          "templates/ folder of a library at ./dta-templates, or point",
+          "options(DTAtools.template_dir=) at a library directory of your own",
+          "(templates/, parties/, vocabulary/ and export-templates/ folders,",
+          "dta-app.yaml at its root)."
         ),
         type = "warning", duration = 8
       )

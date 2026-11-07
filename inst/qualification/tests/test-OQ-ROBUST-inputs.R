@@ -343,9 +343,10 @@ test_that("OQ-ROBUST-016 | specification-derived text in a condition message is 
   # (.cli_escape(), R/validateTemplate.R) and the visible misbehaviour if it
   # were skipped are the same.
   tdir <- qa_tempdir()
+  dir.create(file.path(tdir, "templates"))
   writeLines(
     c("kind: dta_creation_template", "id: cli_inj", "version: 1.10", "abstract: true"),
-    file.path(tdir, "bad_{1+1}_version.dta-template.yaml")
+    file.path(tdir, "templates", "bad_{1+1}_version.dta-template.yaml")
   )
   tmpl_err <- tryCatch(validate_template(tdir, strict = TRUE), error = function(e) e)
 

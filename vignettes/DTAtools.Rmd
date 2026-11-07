@@ -1939,14 +1939,14 @@ write_validation_report(dta_from_file, "validation_report.html", max_repeats = I
 ## Template Guide for Non-Programmers
 
 A template library (see `create_template_repo()` and `validate_template()`) is
-a directory of YAML files. `write_template_guide()` turns it into one Word (or
+a directory of YAML files, kept in `templates/`, `parties/` and `vocabulary/` folders. `write_template_guide()` turns it into one Word (or
 PDF) handbook that a study or data manager can read without YAML or the app:
 what each template asks, what it pre-fills, where the answers land in the DTA,
 and which datasets and columns it creates.
 
 ```{r template_guide}
 write_template_guide(
-  system.file("extdata", "templates", package = "DTAtools"),
+  system.file("extdata", "library", package = "DTAtools"),
   tempfile(fileext = ".docx")
 )
 ```

@@ -11,8 +11,9 @@
 #' profiles get their own chapters. Files that could not be read are listed in
 #' a final chapter instead of stopping the guide.
 #'
-#' @param path The template library: its root folder, its `templates/` folder,
-#'   or a single template file (the guide then covers that template and
+#' @param path The template library: its root folder (the one holding
+#'   `templates/`, `parties/` and `vocabulary/`), or a single template file
+#'   inside one of those folders (the guide then covers that template and
 #'   everything it refers to).
 #' @param file Where to write the guide. The extension (`.docx` or `.pdf`)
 #'   decides the format unless `format` is given.
@@ -33,7 +34,7 @@
 #' @examples
 #' guide_file <- tempfile(fileext = ".docx")
 #' write_template_guide(
-#'   system.file("extdata", "templates", package = "DTAtools"),
+#'   system.file("extdata", "library", package = "DTAtools"),
 #'   guide_file,
 #'   quiet = TRUE
 #' )

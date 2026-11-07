@@ -5,8 +5,8 @@
 # (qa_read_yaml) or taken from the requirement text -- never from the function
 # under qualification or its internals. Output goes to qa_tempdir() only.
 
-guide_lib <- function() system.file("extdata", "templates", package = "DTAtools")
-guide_yaml <- function(name) qa_read_yaml(file.path(guide_lib(), name))
+guide_lib <- function() system.file("extdata", "library", package = "DTAtools")
+guide_yaml <- function(name) qa_read_yaml(file.path(guide_lib(), "templates", name))
 
 # ---- REQ-TMPL-040: what the guide says ---------------------------------------
 
@@ -63,4 +63,31 @@ test_that("OQ-TMPL-089 | a format other than docx or pdf is refused | REQ-TMPL-0
   err <- tryCatch(write_template_guide(guide_lib(), file, format = "html", quiet = TRUE), error = function(e) e)
   qa_check("html is refused with the format condition", inherits(err, "dta_template_guide_format"))
   qa_check("and nothing was written", !file.exists(file))
+})
+
+# ---- REQ-TMPL-040: a single template file ------------------------------------
+
+test_that("OQ-TMPL-099 | one template file is guided from inside its library folder and refused anywhere else | REQ-TMPL-040", {
+  src <- file.path(guide_lib(), "templates", "biomarker_gf.dta-template.yaml")
+  labels <- vapply(guide_yaml("biomarker_gf.dta-template.yaml")[["options"]], function(o) as.character(o[["label"]]), "")
+  file <- file.path(qa_tempdir(), "guide.docx")
+  suppressMessages(write_template_guide(src, file, quiet = TRUE))
+  text <- qa_docx_text(file)
+  qa_check("the template declares options to look for", length(labels) > 0L)
+  qa_step(
+    "a file in templates/ of its library is guided, with every option label of that template",
+    character(0), labels[!vapply(labels, grepl, NA, x = text, fixed = TRUE)]
+  )
+
+  # The same file copied into the root of a directory sits in no kind folder.
+  stray_dir <- qa_tempdir()
+  stray <- file.path(stray_dir, "biomarker_gf.dta-template.yaml")
+  file.copy(src, stray)
+  out <- file.path(qa_tempdir(), "refused.docx")
+  err <- tryCatch(write_template_guide(stray, out, quiet = TRUE), error = function(e) e)
+  qa_check(
+    "a file outside the folder of its kind is refused with the no-templates condition",
+    inherits(err, "dta_template_guide_no_templates")
+  )
+  qa_check("and nothing was written", !file.exists(out))
 })

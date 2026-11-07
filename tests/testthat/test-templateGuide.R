@@ -208,8 +208,8 @@ test_that("write_template_guide leaves an existing file untouched without overwr
 # ---- end to end on the bundled library --------------------------------------
 
 test_that("the bundled library produces a readable guide", {
-  lib <- system.file("extdata", "templates", package = "DTAtools")
-  skip_if(!nzchar(lib), "bundled templates not installed")
+  lib <- system.file("extdata", "library", package = "DTAtools")
+  skip_if(!nzchar(lib), "bundled library not installed")
   out <- tempfile(fileext = ".docx")
   on.exit(unlink(out), add = TRUE)
   expect_identical(write_template_guide(lib, out, quiet = TRUE), out)
@@ -228,10 +228,96 @@ test_that("the bundled library produces a readable guide", {
 
 test_that("a .pdf extension writes a real PDF", {
   skip_if(is.null(dta_pdf_backend()), "no PDF backend on this machine")
-  lib <- system.file("extdata", "templates", package = "DTAtools")
-  skip_if(!nzchar(lib), "bundled templates not installed")
+  lib <- system.file("extdata", "library", package = "DTAtools")
+  skip_if(!nzchar(lib), "bundled library not installed")
   out <- tempfile(fileext = ".pdf")
   on.exit(unlink(out), add = TRUE)
   write_template_guide(lib, out, quiet = TRUE)
   expect_identical(rawToChar(readBin(out, "raw", 4)), "%PDF")
+})
+
+# ---- library layout ----------------------------------------------------------
+
+# A scratch library ROOT: a copy of the bundled kind folders, plus an
+# unrelated template and the two folders the guide must leave alone.
+tg_scratch_library <- function(.local_envir = parent.frame()) {
+  root <- withr::local_tempdir(.local_envir = .local_envir)
+  src <- system.file("extdata", "library", package = "DTAtools")
+  file.copy(file.path(src, c("templates", "parties", "vocabulary")), root, recursive = TRUE)
+  writeLines(
+    c(
+      "kind: dta_creation_template", "id: zeta_unrelated", "version: '1.0'",
+      "label: Unrelated Zeta Template",
+      "base:", "  metadata:", "    title: Zeta",
+      "datasets:",
+      "  - id: z", "    name: Zeta", "    type: tabular",
+      "    files: {filename: z.csv, type: csv}",
+      "    columns:", "      - {id: ZZ, type: SAS Char}", "    rules: []"
+    ),
+    file.path(root, "templates", "zeta.dta-template.yaml")
+  )
+  dir.create(file.path(root, "export-templates"))
+  writeLines("not a template", file.path(root, "export-templates", "README.md"))
+  writeLines("kind: dta_app_config", file.path(root, "dta-app.yaml"))
+  root
+}
+
+tg_headings <- function(file) {
+  s <- officer::docx_summary(officer::read_docx(file))
+  s$text[!is.na(s$style_name) & grepl("^heading", s$style_name)]
+}
+
+test_that("a library root is guided across its kind folders, with a chapter per kind", {
+  root <- tg_scratch_library()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out), add = TRUE)
+  expect_identical(write_template_guide(root, out, quiet = TRUE), out)
+  heads <- tg_headings(out)
+  expect_true(all(c("DTA templates", "Dataset templates", "Term lists", "Party profiles") %in% heads))
+  expect_true("Unrelated Zeta Template" %in% heads)
+  expect_false("Problems found" %in% heads)
+})
+
+test_that("a single template file located in its kind folder guides its closure from the library root", {
+  root <- tg_scratch_library()
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out), add = TRUE)
+  file <- file.path(root, "templates", "biomarker_gf_acme.dta-template.yaml")
+  expect_identical(write_template_guide(file, out, quiet = TRUE), out)
+  heads <- tg_headings(out)
+  # The template, what it is based on and what it uses ...
+  expect_true("DTA templates" %in% heads)
+  expect_true("Dataset templates" %in% heads)
+  expect_true("Party profiles" %in% heads)
+  # ... but not an unrelated template of the same library.
+  expect_false("Unrelated Zeta Template" %in% heads)
+})
+
+test_that("a single template file outside the folder of its kind aborts with dta_template_guide_no_templates", {
+  root <- tg_scratch_library()
+  src <- file.path(root, "templates", "biomarker_gf_acme.dta-template.yaml")
+  stray <- c(
+    file.path(root, "biomarker_gf_acme.dta-template.yaml"),
+    file.path(root, "parties", "biomarker_gf_acme.dta-template.yaml")
+  )
+  file.copy(src, stray[[1]])
+  file.copy(src, stray[[2]])
+  for (f in stray) {
+    out <- tempfile(fileext = ".docx")
+    expect_error(
+      write_template_guide(f, out, quiet = TRUE),
+      class = "dta_template_guide_no_templates", info = f
+    )
+    expect_false(file.exists(out), info = f)
+  }
+})
+
+test_that("a kind folder given as the library aborts with dta_template_guide_no_templates", {
+  root <- tg_scratch_library()
+  out <- tempfile(fileext = ".docx")
+  expect_error(
+    write_template_guide(file.path(root, "templates"), out, quiet = TRUE),
+    class = "dta_template_guide_no_templates"
+  )
+  expect_false(file.exists(out))
 })

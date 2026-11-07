@@ -26,9 +26,10 @@ local_clean_template_env <- function(..., .local_envir = parent.frame()) {
 }
 
 # A local bare git repo (no network) with one committed template file, used
-# by the resolve_git_source()/resolve_template_source() tests below. Returns
-# the bare repo path.
-make_bare_template_repo <- function(library_subdir = FALSE) {
+# by the resolve_git_source()/resolve_template_source() tests below. The repo
+# is a library: the file sits in its templates/ folder. `flat = TRUE` commits
+# it at the repo root instead (the retired layout). Returns the bare repo path.
+make_bare_template_repo <- function(flat = FALSE) {
   bare_dir <- withr::local_tempdir(.local_envir = parent.frame())
   work_dir <- withr::local_tempdir(.local_envir = parent.frame())
 
@@ -48,7 +49,7 @@ make_bare_template_repo <- function(library_subdir = FALSE) {
   run_git(c("clone", "--quiet", bare_dir, work_dir), dirname(work_dir))
   run_git(c("config", "user.email", "test@example.com"), work_dir)
   run_git(c("config", "user.name", "Test User"), work_dir)
-  template_dir <- if (library_subdir) file.path(work_dir, "templates") else work_dir
+  template_dir <- if (flat) work_dir else file.path(work_dir, "templates")
   dir.create(template_dir, showWarnings = FALSE)
   writeLines(
     c("kind: dta_creation_template", "id: example", 'version: "1.0"'),
@@ -285,9 +286,9 @@ test_that("resolve_template_source() resolves pkg:DTAtools", {
   src <- parse_fn("pkg:DTAtools")[[1]]
   result <- fn(src)
 
-  # DTAtools ships its templates under extdata/templates, not
-  # inst/dta-templates, so a package source resolves but reports the (real)
-  # absence of that specific directory rather than crashing.
+  # DTAtools ships its library under extdata/library, not inst/dta-templates,
+  # so a package source resolves but reports the (real) absence of that
+  # specific directory rather than crashing.
   expect_false(result$ok)
   expect_true(grepl("DTAtools", result$error, fixed = TRUE))
 })
@@ -327,7 +328,7 @@ test_that("git: sources resolve, cache, and degrade to stale without network", {
   first <- resolve_git_fn(src)
   expect_true(first$ok)
   expect_false(first$stale)
-  expect_true(file.exists(file.path(first$root, "example.dta-template.yaml")))
+  expect_true(file.exists(file.path(first$root, "templates", "example.dta-template.yaml")))
 
   # Make the origin unreachable by renaming the bare repo away.
   moved_dir <- paste0(bare_dir, "-moved")
@@ -419,70 +420,63 @@ test_that("dta_template_source_roots() fails hard when the only private source i
 })
 
 
-# ---- Conventional library folder -------------------------------------------
+# ---- Library layout: the source root is the library root --------------------
 
-test_that("library directory detection preserves root layout and invalid inputs", {
-  fn <- app_fn("dta_template_library_dir")
-  expect_identical(app_fn("dta_template_library_subdir")(), "templates")
-  expect_identical(fn(NA_character_), NA_character_)
-  expect_identical(fn(""), "")
-  expect_identical(fn(NULL), NULL)
-  expect_identical(fn(c("a", "b")), c("a", "b"))
-  root <- withr::local_tempdir()
-  expect_identical(fn(root), root)
-  lib <- file.path(root, "templates")
-  dir.create(lib)
-  expect_identical(fn(root), root)
-  writeLines("notes", file.path(lib, "notes.txt"))
-  expect_identical(fn(root), root)
-  dir.create(file.path(lib, "not-a-file.dta-template.yaml"))
-  expect_identical(fn(root), root)
-  for (kind in app_fn("dta_template_all_kinds")()) {
-    suffix <- switch(kind,
-      dta_creation_template = "dta-template",
-      dta_dataset_template = "dta-dataset-template",
-      dta_party_profile = "dta-party",
-      dta_vocabulary = "dta-vocabulary"
-    )
-    for (extension in c("yaml", "yml")) {
-      file <- file.path(lib, paste0("x.", suffix, ".", extension))
-      writeLines(paste0("kind: ", kind), file)
-      expect_identical(fn(root), lib)
-      unlink(file)
-    }
-  }
+# A library root is used as configured: there is no templates/ guessing, no
+# "templates/ wins over the root" rule. The kind folders live inside it.
+
+test_that("the library layout table is the one the sources resolve against", {
+  # templates/ holds creation AND dataset templates; parties/ and vocabulary/
+  # one kind each. Pinned literally so a renamed folder fails here.
+  subdir <- app_fn("dta_template_kind_subdir")
+  expect_identical(
+    vapply(app_fn("dta_template_all_kinds")(), subdir, character(1), USE.NAMES = FALSE),
+    c("templates", "templates", "parties", "vocabulary")
+  )
+  expect_identical(app_fn("dta_template_kind_subdirs")(), c("templates", "parties", "vocabulary"))
+  expect_identical(app_fn("dta_export_templates_subdir")(), "export-templates")
+  # The retired helpers are gone, not merely unused.
+  expect_error(app_fn("dta_template_library_dir"), "not defined")
+  expect_error(app_fn("dta_template_library_subdir"), "not defined")
 })
 
-test_that("dir sources separate the library root from the checkout", {
+test_that("dir sources use the configured directory as the library root", {
   local_clean_template_env()
   root <- withr::local_tempdir()
+  # Even with a templates/ folder inside, the root stays the directory itself.
   lib <- file.path(root, "templates")
   dir.create(lib)
   writeLines("kind: dta_creation_template", file.path(lib, "x.dta-template.yaml"))
   parse <- app_fn("parse_template_sources")
   resolve <- app_fn("resolve_template_source")
+
   result <- resolve(parse(paste0("dir:", root))[[1]])
+
   expect_true(result$ok)
   expect_identical(result$checkout, normalizePath(root, winslash = "/"))
-  expect_identical(result$root, file.path(result$checkout, "templates"))
+  expect_identical(result$root, result$checkout)
+
+  # Pointing at the kind folder itself is NOT corrected to its parent.
   direct <- resolve(parse(paste0("dir:", lib))[[1]])
-  expect_identical(direct$root, result$root)
+  expect_true(direct$ok)
+  expect_identical(direct$root, normalizePath(lib, winslash = "/"))
   expect_identical(direct$checkout, direct$root)
+  expect_false(identical(direct$root, result$root))
 })
 
-test_that("git sources use templates/ while commit lookups and refresh use the checkout", {
+test_that("git sources use the checkout as the library root, for commit lookups and refresh alike", {
   skip_if(!nzchar(Sys.which("git")), "git not on PATH")
   local_clean_template_env()
   withr::local_envvar(DTATOOLS_TEMPLATE_CACHE_DIR = withr::local_tempdir())
-  bare <- make_bare_template_repo(library_subdir = TRUE)
+  bare <- make_bare_template_repo()
   src <- app_fn("parse_template_sources")(paste0("git:", bare, "#main"))[[1]]
   resolve <- app_fn("resolve_template_source")
   first <- resolve(src)
   expect_true(first$ok)
   expect_false(first$stale)
-  expect_identical(first$root, file.path(first$checkout, "templates"))
+  expect_identical(first$root, first$checkout)
   expect_true(dir.exists(file.path(first$checkout, ".git")))
-  expect_true(file.exists(file.path(first$root, "example.dta-template.yaml")))
+  expect_true(file.exists(file.path(first$root, "templates", "example.dta-template.yaml")))
   expect_match(first$resolved_commit, "^[0-9a-f]{40}$")
   expect_identical(first$resolved_commit, app_fn(".dta_template_git_commit")(first$checkout))
   refreshed <- resolve(src, refresh = TRUE)
@@ -499,7 +493,21 @@ test_that("git sources use templates/ while commit lookups and refresh use the c
   expect_identical(stale$resolved_commit, first$resolved_commit)
 })
 
-test_that("source roots and the index load only templates/ in mixed layouts", {
+test_that("a git repository with the retired flat layout resolves but indexes nothing", {
+  skip_if(!nzchar(Sys.which("git")), "git not on PATH")
+  local_clean_template_env()
+  withr::local_envvar(DTATOOLS_TEMPLATE_CACHE_DIR = withr::local_tempdir())
+  bare <- make_bare_template_repo(flat = TRUE)
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("git:", bare, "#main"))
+  app_fn("dta_template_index_invalidate")()
+
+  expect_warning(index <- app_fn("build_template_index")(), "belongs in templates/")
+
+  expect_identical(nrow(index), 0L)
+  expect_true(any(grepl("example.dta-template.yaml", attr(index, "warnings"), fixed = TRUE)))
+})
+
+test_that("source roots and the index load only the kind folders of the root", {
   local_clean_template_env()
   root <- withr::local_tempdir()
   lib <- file.path(root, "templates")
@@ -510,27 +518,40 @@ test_that("source roots and the index load only templates/ in mixed layouts", {
   )
   withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("test=dir:", root))
   roots <- app_fn("dta_template_source_roots")()
-  expect_identical(roots$roots, file.path(normalizePath(root, winslash = "/"), "templates"))
+  expect_identical(roots$roots, normalizePath(root, winslash = "/"))
   index <- app_fn("build_template_index")()
   expect_identical(index$id, "live")
+  expect_identical(basename(dirname(index$path)), "templates")
+
+  # A template lying beside the kind folders is not indexed; it is reported.
   writeLines(
     c("kind: dta_creation_template", "id: invisible", 'version: "1.0"'),
     file.path(root, "invisible.dta-template.yaml")
   )
-  expect_identical(app_fn("build_template_index")()$id, "live")
+  expect_warning(index <- app_fn("build_template_index")(), "belongs in templates/")
+  expect_identical(index$id, "live")
+  expect_true(any(grepl("invisible.dta-template.yaml", attr(index, "warnings"), fixed = TRUE)))
 })
 
-test_that("legacy template directories autodetect populated templates/ without changing order", {
+test_that("template_dir roots are kept as given, with no templates/ autodetection", {
   local_clean_template_env()
   root <- withr::local_tempdir()
   lib <- file.path(root, "templates")
   dir.create(lib)
   writeLines("kind: dta_creation_template", file.path(lib, "x.dta-template.yaml"))
   withr::local_options(list(DTAtools.template_dir = c(root, lib)))
+
   dirs <- app_fn("dta_creation_template_dirs")()
-  expect_identical(dirs[[1]], lib)
-  expect_equal(sum(dirs == lib), 1)
-  expect_false(root %in% dirs)
+
+  expect_identical(dirs[1:2], c(root, lib))
+  expect_true(root %in% dirs)
+  expect_true(lib %in% dirs)
+  # Only <root>/templates is searched for a creation template, so listing the
+  # root finds the file and listing the (wrongly given) templates/ dir does not.
+  withr::local_options(list(DTAtools.template_dir = root))
+  expect_true("x.dta-template.yaml" %in% app_fn("list_dta_creation_templates")())
+  withr::local_options(list(DTAtools.template_dir = lib))
+  expect_false("x.dta-template.yaml" %in% app_fn("list_dta_creation_templates")())
 })
 
 test_that("parse_template_sources() rejects a git locator or ref that git would read as an option", {

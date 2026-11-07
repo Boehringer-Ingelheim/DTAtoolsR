@@ -21,7 +21,8 @@
 
 #' Collect everything the template guide prints
 #'
-#' @param path Library root, its `templates/` directory, or one template file.
+#' @param path Library root (the directory holding `templates/`, `parties/` and
+#'   `vocabulary/`), or one template file inside one of those folders.
 #' @param templates Optional template ids; restricts the guide to those plus
 #'   everything they reference.
 #' @return A plain list; see the header of this file.
@@ -34,7 +35,13 @@
   files <- .dta_template_list_dir(src$dir, g("dta_template_all_kinds")())
   if (length(files) == 0) {
     cli::cli_abort(
-      "No template files found in {.path {path}}.",
+      c(
+        "No template files found in {.path {path}}.",
+        i = paste0(
+          "A template library is a directory with templates/, parties/ and ",
+          "vocabulary/ folders; pass the library root, not one of the folders."
+        )
+      ),
       class = "dta_template_guide_no_templates"
     )
   }
@@ -206,7 +213,7 @@
     )
   }
   if (dir.exists(path)) {
-    return(list(dir = g("dta_template_library_dir")(path), only_id = NULL))
+    return(list(dir = path, only_id = NULL))
   }
   rec <- .dta_template_read_raw(path)
   if (!isTRUE(rec$ok) || is.na(rec$id)) {
@@ -215,7 +222,25 @@
       class = "dta_template_guide_no_templates"
     )
   }
-  list(dir = dirname(path), only_id = rec$id)
+  # A file is only understood together with its library: the root is found from
+  # where the file sits, and only when it sits in the folder of its kind.
+  root <- g("dta_template_locate_root")(path)
+  if (is.na(root)) {
+    expected <- if (rec$kind %in% g("dta_template_all_kinds")()) {
+      paste0(g("dta_template_kind_subdir")(rec$kind), "/")
+    } else {
+      "templates/, parties/ or vocabulary/"
+    }
+    cli::cli_abort(
+      c(
+        "Cannot find the template library of {.path {path}}.",
+        "i" = "A template file must sit in the folder of its kind ({expected}) of the library root, with a name ending in its kind suffix (such as {.val .dta-template.yaml}).",
+        "i" = "Pass the library root directory to cover the whole library."
+      ),
+      class = "dta_template_guide_no_templates"
+    )
+  }
+  list(dir = root, only_id = rec$id)
 }
 
 # Labels and the extra columns the engine's history/lineage helpers expect.

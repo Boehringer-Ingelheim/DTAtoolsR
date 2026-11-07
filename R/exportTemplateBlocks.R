@@ -28,7 +28,7 @@
 
 #' Legacy block token spellings, mapped to their canonical name
 #'
-#' `{DATASETS_DETAIL}` is what `inst/extdata/templates/clinical_dta_template.docx`
+#' `{DATASETS_DETAIL}` is what `inst/extdata/word-templates/clinical_dta_template.docx`
 #' contains, and what the Shiny app used to supply as a markdown string.
 #' @keywords internal
 .tv_block_aliases <- function() {

@@ -97,11 +97,11 @@ test_that("get_template_path refuses a name that escapes the templates directory
   # A traversal that ends in a real bundled template name must not be repaired
   # into a hit either -- it is simply not the offered name. The name has to be
   # one the listing actually offers, or this asserts nothing about traversal.
-  expect_null(get_template_path("../templates/clinical_dta_template.docx"))
+  expect_null(get_template_path("../word-templates/clinical_dta_template.docx"))
 })
 
 test_that("template_has_placeholders is TRUE for the real bundled fill-in template", {
-  path <- app_fixture_path("templates/clinical_dta_template.docx")
+  path <- app_fixture_path("word-templates/clinical_dta_template.docx")
   expect_true(app_fn("template_has_placeholders")(path))
 })
 
@@ -112,7 +112,7 @@ test_that("template_has_placeholders is FALSE for the numbered-heading styles re
   # the regression list_available_templates() must no longer offer it for --
   # before the fix, a user who picked it got a Word document containing none
   # of their DTA, with no warning.
-  path <- app_fixture_path("templates/dta_numbered_template.docx")
+  path <- app_fixture_path("word-templates/dta_numbered_template.docx")
   expect_false(app_fn("template_has_placeholders")(path))
 })
 
@@ -761,16 +761,17 @@ test_that("when the Markdown export fails too, the PDF export fails instead of w
 # ---- Library word templates and the config-driven export options -------------
 
 app_fixture_template <- function() {
-  path <- system.file("extdata", "templates", "clinical_dta_template.docx", package = "DTAtools")
+  path <- system.file("extdata", "word-templates", "clinical_dta_template.docx", package = "DTAtools")
   expect_true(nzchar(path))
   path
 }
 
-# A normalised app config built from a real dta-app.yaml in a temp library that
-# holds a copy of the packaged Word template as "our_dta.docx".
+# A normalised app config built from a real dta-app.yaml in a temp library ROOT
+# that holds a copy of the packaged Word template as export-templates/our_dta.docx.
 library_cfg <- function(yaml_lines, .local_envir = parent.frame()) {
   lib <- withr::local_tempdir(.local_envir = .local_envir)
-  expect_true(file.copy(app_fixture_template(), file.path(lib, "our_dta.docx")))
+  dir.create(file.path(lib, "export-templates"))
+  expect_true(file.copy(app_fixture_template(), file.path(lib, "export-templates", "our_dta.docx")))
   writeLines(yaml_lines, file.path(lib, "dta-app.yaml"))
   list(dir = lib, cfg = app_fn("parse_dta_app_config")(file.path(lib, "dta-app.yaml"))$config)
 }
@@ -786,7 +787,7 @@ test_that("list_available_templates adds library templates after the bundled one
   lc <- library_cfg(c(
     "exports:",
     "  word_templates:",
-    "    - file: our_dta.docx",
+    "    - file: export-templates/our_dta.docx",
     "      label: Our DTA template"
   ))
   got <- app_fn("list_available_templates")(lc$cfg)
@@ -801,7 +802,7 @@ test_that("bundled_word_templates: false leaves only the library templates", {
     "exports:",
     "  bundled_word_templates: false",
     "  word_templates:",
-    "    - file: our_dta.docx"
+    "    - file: export-templates/our_dta.docx"
   ))
   got <- app_fn("list_available_templates")(lc$cfg)
 
@@ -814,14 +815,14 @@ test_that("get_template_path resolves a library template inside the library and 
     "exports:",
     "  bundled_word_templates: false",
     "  word_templates:",
-    "    - file: our_dta.docx"
+    "    - file: export-templates/our_dta.docx"
   ))
   get_path <- app_fn("get_template_path")
 
   path <- get_path("library:our_dta.docx", lc$cfg)
   expect_identical(
     normalizePath(path, winslash = "/"),
-    normalizePath(file.path(lc$dir, "our_dta.docx"), winslash = "/")
+    normalizePath(file.path(lc$dir, "export-templates", "our_dta.docx"), winslash = "/")
   )
   # Not offered by the stock config, so not resolvable there.
   expect_null(get_path("library:our_dta.docx"))
@@ -830,7 +831,7 @@ test_that("get_template_path resolves a library template inside the library and 
   expect_null(get_path("library:other.docx", lc$cfg))
   expect_null(get_path("../our_dta.docx", lc$cfg))
   expect_null(get_path("our_dta.docx", lc$cfg))
-  expect_null(get_path(file.path(lc$dir, "our_dta.docx"), lc$cfg))
+  expect_null(get_path(file.path(lc$dir, "export-templates", "our_dta.docx"), lc$cfg))
 })
 
 test_that("export_document_options offers only what exports.document allows", {
@@ -872,7 +873,7 @@ test_that("word_template counts as offered only when a template exists to pick",
     "  document: [word_template]",
     "  bundled_word_templates: false",
     "  word_templates:",
-    "    - file: our_dta.docx"
+    "    - file: export-templates/our_dta.docx"
   ))
   o <- app_fn("export_document_options")(lc$cfg)
   expect_identical(unname(o$mode_choices), "custom")
@@ -918,7 +919,8 @@ test_that("two library Word templates with one file name: the first is offered a
   )
   expect_identical(got, c(First = "library:same.docx"))
   expect_match(
-    normalizePath(app_fn("get_template_path")("library:same.docx", cfg), winslash = "/"),
+    # get_template_path() re-lists, so it repeats the duplicate warning asserted above.
+    normalizePath(suppressWarnings(app_fn("get_template_path")("library:same.docx", cfg)), winslash = "/"),
     "/a/same.docx",
     fixed = TRUE
   )

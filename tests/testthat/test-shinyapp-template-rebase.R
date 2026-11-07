@@ -5,6 +5,23 @@
 # helper-shinyapp.R (see that file for why the app's helper files must be
 # sourced into a private environment for testing).
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # Local copy of the isolation helper defined in test-shinyapp-template-
 # sources.R / test-shinyapp-template-create.R -- deliberately duplicated
 # rather than shared, per those files' own guidance, so this file does not
@@ -68,7 +85,7 @@ index_over <- function(root) {
 # dataset-template machinery this file has nothing to do with.
 write_demo_ct <- function(root, version, header, error_handling, supplier_name,
                           title = "Ancestor Title") {
-  path <- file.path(root, paste0("demo_ct_", gsub("[.]", "_", version, fixed = FALSE), ".dta-template.yaml"))
+  path <- lib_path(root, paste0("demo_ct_", gsub("[.]", "_", version, fixed = FALSE), ".dta-template.yaml"))
   writeLines(
     c(
       "kind: dta_creation_template",
@@ -425,7 +442,7 @@ test_that("rebase_plan() re-derives option answers from the document, so they su
       "    type: text",
       "    target: metadata.header",
       sprintf('    default: "Default %s"', v)
-    ), file.path(root, paste0("opt_ct_", sub(".", "_", v, fixed = TRUE), ".dta-template.yaml")))
+    ), lib_path(root, paste0("opt_ct_", sub(".", "_", v, fixed = TRUE), ".dta-template.yaml")))
   }
   idx <- index_over(root)
 
@@ -632,7 +649,7 @@ test_that("dta_template_provenance() returns NULL when absent and the record whe
 # packaged biomarker_gf template does via `version: "${version}"`, and it is the
 # shape that produces a `version_history.1.version` leaf on any rebase.
 write_vh_ct <- function(root, version, header) {
-  path <- file.path(root, sprintf("vh_ct_%s.dta-template.yaml", gsub("[.]", "_", version)))
+  path <- lib_path(root, sprintf("vh_ct_%s.dta-template.yaml", gsub("[.]", "_", version)))
   writeLines(
     c(
       "kind: dta_creation_template",

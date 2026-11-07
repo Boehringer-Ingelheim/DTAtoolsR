@@ -1,5 +1,5 @@
 # Coverage for the biomarker_gf template FAMILY as it actually ships in
-# inst/extdata/templates/: the gf_smrnaseq dataset template extracted out of
+# inst/extdata/library/: the gf_smrnaseq dataset template extracted out of
 # what used to be a ~300-line inline `datasets:` block in
 # biomarker_gf.dta-template.yaml, the creation template now importing it via
 # `template:`/`as:`, its supplier-deviation child biomarker_gf_acme, and the
@@ -40,11 +40,11 @@ local_clean_template_env <- function(..., .local_envir = parent.frame()) {
   )
 }
 
-# The real, installed/loaded package templates directory -- never a temp
+# The real, installed/loaded package library ROOT -- never a temp
 # fixture -- because this whole file is about what actually ships.
-bundled_templates_dir <- function() {
-  dir <- system.file("extdata", "templates", package = "DTAtools")
-  expect_true(nzchar(dir), info = "inst/extdata/templates missing from the package")
+bundled_library_dir <- function() {
+  dir <- system.file("extdata", "library", package = "DTAtools")
+  expect_true(nzchar(dir), info = "inst/extdata/library missing from the package")
   dir
 }
 
@@ -57,7 +57,7 @@ bundled_templates_dir <- function() {
 # temp one.
 bundled_templates_index <- function() {
   local_clean_template_env()
-  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", bundled_templates_dir()))
+  withr::local_envvar(DTATOOLS_TEMPLATE_SOURCES = paste0("dir:", bundled_library_dir()))
   app_fn("build_template_index")()
 }
 
@@ -72,7 +72,7 @@ test_that("the gf_smrnaseq dataset template resolves via the index and stamps pr
 
   read_tpl <- app_fn("read_dta_creation_template")
   create_fn <- app_fn("create_dta_from_template")
-  path <- file.path(bundled_templates_dir(), "biomarker_gf.dta-template.yaml")
+  path <- file.path(bundled_library_dir(), "templates", "biomarker_gf.dta-template.yaml")
   parsed <- read_tpl(path)
   expect_true(parsed$ok)
 
@@ -95,7 +95,7 @@ test_that("building biomarker_gf with no index still works", {
   read_tpl <- app_fn("read_dta_creation_template")
   create_fn <- app_fn("create_dta_from_template")
   path <- system.file(
-    "extdata", "templates", "biomarker_gf.dta-template.yaml",
+    "extdata", "library", "templates", "biomarker_gf.dta-template.yaml",
     package = "DTAtools"
   )
   parsed <- read_tpl(path)
@@ -115,7 +115,7 @@ test_that("the vendor_name option flows into GFNAM's values", {
   idx <- bundled_templates_index()
   read_tpl <- app_fn("read_dta_creation_template")
   create_fn <- app_fn("create_dta_from_template")
-  path <- file.path(bundled_templates_dir(), "biomarker_gf.dta-template.yaml")
+  path <- file.path(bundled_library_dir(), "templates", "biomarker_gf.dta-template.yaml")
   parsed <- read_tpl(path)
   expect_true(parsed$ok)
 
@@ -128,7 +128,7 @@ test_that("the vendor_name option flows into GFNAM's values", {
 
   # Directly building the dataset template with an explicit selection
   # confirms the option, not just its default, reaches the column.
-  ds_tpl_path <- file.path(bundled_templates_dir(), "gf_smrnaseq.dta-dataset-template.yaml")
+  ds_tpl_path <- file.path(bundled_library_dir(), "templates", "gf_smrnaseq.dta-dataset-template.yaml")
   read_ds_tpl <- app_fn("read_dataset_template")
   build_ds <- app_fn("build_dataset_from_template")
   ds_def <- read_ds_tpl(ds_tpl_path)
@@ -211,8 +211,8 @@ test_that("biomarker_gf_acme inherits the parent's base and options, and its pat
 
 test_that("both party profiles load and are eligible for their own slot only", {
   read_party <- app_fn("read_party_profile")
-  supplier <- read_party(file.path(bundled_templates_dir(), "supplier_acme.dta-party.yaml"))
-  receiver <- read_party(file.path(bundled_templates_dir(), "receiver_ourco.dta-party.yaml"))
+  supplier <- read_party(file.path(bundled_library_dir(), "parties", "supplier_acme.dta-party.yaml"))
+  receiver <- read_party(file.path(bundled_library_dir(), "parties", "receiver_ourco.dta-party.yaml"))
   expect_true(supplier$ok, info = supplier$error %||% "")
   expect_true(receiver$ok, info = receiver$error %||% "")
   expect_equal(supplier$value$role, "supplier")
@@ -245,7 +245,7 @@ test_that("biomarker_gf's own party_slots resolve to exactly these two profiles 
   party_profiles <- app_fn("template_party_profiles")
   for_slot <- app_fn("party_profiles_for_slot")
 
-  path <- file.path(bundled_templates_dir(), "biomarker_gf.dta-template.yaml")
+  path <- file.path(bundled_library_dir(), "templates", "biomarker_gf.dta-template.yaml")
   parsed <- read_tpl(path)
   expect_true(parsed$ok)
 
@@ -269,11 +269,57 @@ test_that("biomarker_gf's own party_slots resolve to exactly these two profiles 
 
 # ---- validate_template(): zero errors on the shipped directory --------------
 
-test_that("validate_template() reports zero severity-'error' rows for the packaged templates directory", {
-  result <- validate_template(bundled_templates_dir())
+test_that("validate_template() reports zero severity-'error' rows for the packaged library", {
+  result <- validate_template(bundled_library_dir())
   errors <- result[result$severity == "error", , drop = FALSE]
   expect_equal(
     nrow(errors), 0,
     info = paste(utils::capture.output(print(errors)), collapse = "\n")
   )
+})
+
+# ---- The packaged assets sit where the layout says -------------------------
+
+test_that("the packaged library has one folder per kind, each holding only its own kind", {
+  root <- bundled_library_dir()
+  expect_setequal(
+    list.files(file.path(root, "templates")),
+    c(
+      "biomarker_gf.dta-template.yaml", "biomarker_gf_acme.dta-template.yaml",
+      "gf_smrnaseq.dta-dataset-template.yaml"
+    )
+  )
+  expect_setequal(
+    list.files(file.path(root, "parties")),
+    c("receiver_ourco.dta-party.yaml", "supplier_acme.dta-party.yaml")
+  )
+  expect_setequal(
+    list.files(file.path(root, "vocabulary")),
+    c("gf_test.dta-vocabulary.yaml", "gf_tstdtl.dta-vocabulary.yaml")
+  )
+  # Nothing template-shaped sits flat in the root: that would be misplaced.
+  expect_length(list.files(root, pattern = "[.]dta-[a-z-]+[.]ya?ml$"), 0)
+  result <- validate_template(root)
+  expect_false(any(result$code %in% c("template_misplaced", "template_in_subdirectory", "library_subfolder_given")))
+})
+
+test_that("the Word reference templates and CI assets are shipped outside the library", {
+  word <- system.file("extdata", "word-templates", package = "DTAtools")
+  expect_true(nzchar(word))
+  expect_true(all(c("clinical_dta_template.docx", "dta_numbered_template.docx") %in% list.files(word)))
+
+  ci <- system.file("extdata", "ci", package = "DTAtools")
+  expect_true(nzchar(ci))
+  expect_setequal(
+    list.files(ci),
+    c("validate-templates.yml", "bitbucket-pipelines.yml", "Jenkinsfile")
+  )
+
+  # None of it is inside the library root, which is what gets scanned.
+  root <- bundled_library_dir()
+  expect_length(list.files(root, pattern = "[.](docx|yml)$", recursive = TRUE), 0)
+  # ... and nothing is left in the old flat directory (a bare empty folder
+  # may linger in a working tree; git does not track it).
+  old <- system.file("extdata", "templates", package = "DTAtools")
+  expect_true(!nzchar(old) || length(list.files(old, recursive = TRUE, all.files = TRUE, no.. = TRUE)) == 0)
 })

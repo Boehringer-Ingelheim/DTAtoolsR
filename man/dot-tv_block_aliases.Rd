@@ -7,7 +7,7 @@
 .tv_block_aliases()
 }
 \description{
-\code{{DATASETS_DETAIL}} is what \code{inst/extdata/templates/clinical_dta_template.docx}
+\code{{DATASETS_DETAIL}} is what \code{inst/extdata/word-templates/clinical_dta_template.docx}
 contains, and what the Shiny app used to supply as a markdown string.
 }
 \keyword{internal}

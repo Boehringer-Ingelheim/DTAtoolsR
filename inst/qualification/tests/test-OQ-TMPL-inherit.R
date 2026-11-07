@@ -77,10 +77,11 @@ test_that("OQ-TMPL-036 | an abstract template is exempt from the dry-run, even w
 
 test_that("OQ-TMPL-066 | metadata-only abstract bases require concrete children to provide datasets | REQ-TMPL-020", {
   root <- qa_tempdir()
+  dir.create(file.path(root, "templates"))
   yaml::write_yaml(list(
     kind = "dta_creation_template", id = "shared_metadata", version = "1.0",
     abstract = TRUE, base = list(metadata = list(title = "Shared transfer title"))
-  ), file.path(root, "base.dta-template.yaml"))
+  ), file.path(root, "templates", "base.dta-template.yaml"))
   child <- list(
     kind = "dta_creation_template", id = "child", version = "1.0",
     extends = "shared_metadata@1.0",
@@ -90,7 +91,7 @@ test_that("OQ-TMPL-066 | metadata-only abstract bases require concrete children 
       columns = list(list(id = "SUBJECT", label = "Subject", type = "SAS Char"))
     ))
   )
-  path <- file.path(root, "child.dta-template.yaml")
+  path <- file.path(root, "templates", "child.dta-template.yaml")
   yaml::write_yaml(child, path)
 
   valid <- validate_template(root, strict = TRUE)

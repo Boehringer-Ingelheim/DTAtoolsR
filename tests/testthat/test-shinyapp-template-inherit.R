@@ -11,6 +11,23 @@
 # around, so the not-yet-written template index never has to exist for this
 # suite to run.
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # cli wraps a long condition message across lines at the console width, which
 # breaks a naive substring/regexp match the moment the wrap lands inside the
 # very text being asserted on (verified empirically while writing this file --
@@ -1013,7 +1030,7 @@ test_that("validate_template() reports sealed_violation, and fails instantiation
       "datasets:",
       "  - id: placeholder"
     ),
-    file.path(dir, "parent.dta-template.yaml")
+    lib_path(dir, "parent.dta-template.yaml")
   )
   writeLines(
     c(
@@ -1027,7 +1044,7 @@ test_that("validate_template() reports sealed_violation, and fails instantiation
       "    target: metadata.title",
       "    default: Sneaky"
     ),
-    file.path(dir, "child.dta-template.yaml")
+    lib_path(dir, "child.dta-template.yaml")
   )
 
   result <- validate_template(dir)

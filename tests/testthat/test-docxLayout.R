@@ -148,7 +148,7 @@ test_that("the column table lists every allowed value and the length", {
 })
 
 test_that("the bundled template numbers headings flush left", {
-  tpl <- system.file("extdata", "templates", "dta_numbered_template.docx", package = "DTAtools")
+  tpl <- system.file("extdata", "word-templates", "dta_numbered_template.docx", package = "DTAtools")
   ex <- tempfile()
   on.exit(unlink(ex, recursive = TRUE, force = TRUE), add = TRUE)
   utils::unzip(tpl, files = "word/numbering.xml", exdir = ex)

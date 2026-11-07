@@ -1,0 +1,9 @@
+# REQ-TMPL-031: a structurally valid controlled vocabulary.
+kind: dta_vocabulary
+id: layout_terms
+version: "1.0"
+label: Layout qualification terms
+type: text
+terms:
+  - code: A
+    label: Alpha

@@ -8,9 +8,14 @@
 # line as well. With everything commented out the app looks and behaves like
 # the stock DTAtools app.
 #
-# The logo and any Word templates are files that sit next to this file, in
-# this folder, and are referenced by a relative path (no "..", no absolute
-# path). A bad value never stops the app: it is reported and that setting
+# This file belongs in the repository root, next to the templates/, parties/,
+# vocabulary/ and export-templates/ folders; the app reads it nowhere else.
+# The logo is a file that sits next to this file, in the repository root. Word
+# templates sit in export-templates/: every .docx there that holds a {PLACEHOLDER}
+# marker is offered in the export dialog without being listed here (see exports.word_templates for
+# an optional label and order). Files are referenced by a relative path from
+# this folder (no "..", no absolute path). A bad value never stops the app: it
+# is reported and that setting
 # keeps its default. A file that cannot be parsed at all is different: the app
 # warns and uses the defaults for EVERYTHING, so restrictions such as
 # "editing: false" are not enforced. Run validate_template(".", strict = TRUE)
@@ -38,7 +43,7 @@ kind: dta_app_config
 #   app_subtitle: Validation and authoring of Data Transfer Agreements (DTA) and Data Transmission Specifications (DTS)  # Line under the title.
 #   window_title: DTAtools    # Browser tab title; defaults to app_title.
 #   footer_label: ""          # Footer text; defaults to "<name> · <unit>"; "" hides it.
-#   logo: logo.png            # Image file in this folder (png, jpg, jpeg, gif, svg, webp; at most 1 MB). Default: the DTAtools logo.
+#   logo: logo.png            # Image file in the repository root (png, jpg, jpeg, gif, svg, webp; at most 1 MB). Default: the DTAtools logo.
 #   logo_alt: DTAtools logo   # Alternative text for the logo; defaults to "<app_title> logo".
 #   landing_headline: Check a data transfer against its specification.  # Large headline on the start page.
 #   landing_lede: Open a DTA or DTS YAML file, load the data files it expects, run the checks, and export the agreement.  # Paragraph under the headline.
@@ -92,9 +97,9 @@ kind: dta_app_config
 # exports:
 #   document: [markdown, markdown_pdf, word, word_template]  # Formats offered under "Export DTA"; [] hides the button.
 #   default_document: word        # Preselected format; must be one of the formats above.
-#   word_templates:               # Your own Word templates (.docx files in this folder).
-#     - file: our_dta.docx        # File name, relative to this folder.
-#       label: Our DTA template   # Name shown in the list; defaults to the file name.
+#   word_templates:               # Optional label and order for the .docx files in export-templates/ (every .docx there with a {PLACEHOLDER} marker is offered anyway).
+#     - file: export-templates/our_dta.docx  # Path relative to the repository root.
+#       label: Our DTA template   # Name shown in the list; defaults to the file name without extension.
 #   bundled_word_templates: true  # Keep the packaged clinical Word template in the list.
 #   validation_messages: [csv, tsv, xlsx, html]  # Download buttons for validation messages; [] hides them.
 #   validation_summary: true      # Offer the HTML validation summary in the sidebar.

@@ -8,6 +8,23 @@ skip_if_not_installed("bslib")
 skip_if_not_installed("DT")
 skip_if_not_installed("shinyjs")
 
+# Path of `filename` inside library root `root`, routed by its kind suffix:
+# parties/ for *.dta-party.*, vocabulary/ for *.dta-vocabulary.*, templates/
+# for everything else (creation and dataset templates, and the plain data
+# files that sit beside them, which resolve relative to the template).
+# Creates the folder, so a fixture can write straight to the returned path.
+lib_path <- function(root, filename) {
+  sub <- if (grepl("[.]dta-party[.]ya?ml$", filename)) {
+    "parties"
+  } else if (grepl("[.]dta-vocabulary[.]ya?ml$", filename)) {
+    "vocabulary"
+  } else {
+    "templates"
+  }
+  dir.create(file.path(root, sub), showWarnings = FALSE, recursive = TRUE)
+  file.path(root, sub, filename)
+}
+
 # Local copy of the isolation helper defined in test-shinyapp-template-
 # sources.R, -create.R and -ui.R -- deliberately duplicated (per those files'
 # own stated convention) so this file does not depend on another test file's
@@ -104,7 +121,7 @@ write_vocabulary_file <- function(root) {
       "  - code: EOT",
       "    label: End of treatment"
     ),
-    file.path(root, "visit.dta-vocabulary.yaml")
+    lib_path(root, "visit.dta-vocabulary.yaml")
   )
 }
 
@@ -120,7 +137,7 @@ write_supplier_profile_file <- function(root) {
       "  name: ACME Laboratories",
       "  country: DE"
     ),
-    file.path(root, "supplier_acme.dta-party.yaml")
+    lib_path(root, "supplier_acme.dta-party.yaml")
   )
 }
 
@@ -136,7 +153,7 @@ write_chain_files <- function(root) {
       "  metadata:",
       "    title: T"
     ),
-    file.path(root, "root_tpl.dta-template.yaml")
+    lib_path(root, "root_tpl.dta-template.yaml")
   )
   writeLines(
     c(
@@ -149,7 +166,7 @@ write_chain_files <- function(root) {
       "  metadata:",
       "    title: T"
     ),
-    file.path(root, "mid_tpl.dta-template.yaml")
+    lib_path(root, "mid_tpl.dta-template.yaml")
   )
 }
 

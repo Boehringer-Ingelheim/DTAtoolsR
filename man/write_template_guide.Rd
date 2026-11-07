@@ -14,8 +14,9 @@ write_template_guide(
 )
 }
 \arguments{
-\item{path}{The template library: its root folder, its \verb{templates/} folder,
-or a single template file (the guide then covers that template and
+\item{path}{The template library: its root folder (the one holding
+\verb{templates/}, \verb{parties/} and \verb{vocabulary/}), or a single template file
+inside one of those folders (the guide then covers that template and
 everything it refers to).}
 
 \item{file}{Where to write the guide. The extension (\code{.docx} or \code{.pdf})
@@ -51,7 +52,7 @@ Write a readable guide to a template library
 \examples{
 guide_file <- tempfile(fileext = ".docx")
 write_template_guide(
-  system.file("extdata", "templates", package = "DTAtools"),
+  system.file("extdata", "library", package = "DTAtools"),
   guide_file,
   quiet = TRUE
 )

@@ -25,18 +25,24 @@ requirements:
 
   - id: REQ-TMPL-002
     text: >
-      A directory shall be read from its templates/ sub-folder when that
-      holds template files, otherwise from the directory itself. That library
-      directory shall be scanned non-recursively for the four template kinds
-      (and their .yml spellings). A template file below the library's top
-      level shall be reported as template_in_subdirectory at severity warning,
-      naming the library folder to move it to, because it is invisible to the
-      app's picker. Root leftovers in a templates/ layout are instead errors
-      as specified by REQ-TMPL-031.
+      A template library shall be a root directory holding dta-app.yaml
+      directly in it and one folder per kind of file: templates/ for creation
+      templates and dataset templates, parties/ for party profiles,
+      vocabulary/ for vocabularies and export-templates/ for Word templates.
+      validate_template() given a directory shall read each kind
+      only from the folder of its kind, directly below the root, by the
+      kind's file suffix (and its .yml spelling), and every such scan shall be
+      non-recursive. A template file below the folder of its kind (for example
+      templates/archive/x.dta-template.yaml) shall be reported as
+      template_in_subdirectory at severity warning, naming the folder to move
+      it to, and shall be neither validated nor used to resolve a reference,
+      because the scan does not see it. A file in the wrong folder is an error
+      as specified by REQ-TMPL-031. There is no fallback layout: nothing is
+      read from the root itself or from any other folder.
     risk: medium
     category: functional
     covers: [validate_template]
-    source: R/validateTemplate.R (.dta_template_list_dir, .dta_template_check_nested, validate_template); inst/shiny/dta_app/R/template_index.R (dta_template_library_dir)
+    source: R/validateTemplate.R (.dta_template_list_dir, .dta_template_list_nested, .dta_template_check_placement, validate_template); inst/shiny/dta_app/R/template_index.R (dta_template_kind_subdir, dta_template_kind_subdirs, dta_template_kind_dir, dta_export_templates_subdir)
 
   - id: REQ-TMPL-003
     text: >
@@ -113,11 +119,15 @@ requirements:
 
   - id: REQ-TMPL-008
     text: >
-      A directory containing no file of any of the four recognised kinds
-      shall be reported no_templates at severity "error", even when the
-      directory is non-empty (holds an unrelated file), because a typo'd
-      path and a genuinely empty template repository are visually
-      indistinguishable and the latter is a CI job that validated nothing.
+      A directory in whose kind folders (REQ-TMPL-002) no file of any of the
+      four recognised kinds is found shall be reported no_templates at
+      severity "error", even when the directory is non-empty (holds an
+      unrelated file), because a typo'd path and a genuinely empty template
+      repository are visually indistinguishable and the latter is a CI job
+      that validated nothing. When the directory instead holds template files
+      that are reported template_misplaced or library_subfolder_given
+      (REQ-TMPL-031), those rows already explain why nothing was found and
+      no_templates shall not be reported on top of them.
     risk: high
     category: functional
     covers: [validate_template]
@@ -163,7 +173,10 @@ requirements:
       DTATOOLS_TEMPLATE_GIT_TOKEN, DTATOOLS_TEMPLATE_GIT_USER or
       DTATOOLS_TEMPLATE_GIT_AUTH -- the environment variables that govern
       where the bundled Shiny app itself looks for a private template
-      family.
+      family. Each source those variables configure names a library root in
+      the sense of REQ-TMPL-002 (a directory holding the kind folders), not a
+      folder of one kind; validate_template() reads none of them and takes
+      the library root from its path argument alone.
     risk: medium
     category: functional
     covers: [validate_template]
@@ -181,8 +194,10 @@ requirements:
       them is read by template_sources.R, which validate_template() never
       sources; the engine files it does source -- template_core.R,
       template_index.R, template_inherit.R, dataset_template.R,
-      party_profiles.R, vocabulary.R -- never call dta_template_env() or
-      dta_template_source_roots()). Confirmed empirically too: setting
+      party_profiles.R, vocabulary.R -- are called only for their layout,
+      reader and resolver helpers: template_index.R also defines
+      build_template_index(), which does call dta_template_source_roots(),
+      but validate_template() never calls it). Confirmed empirically too: setting
       DTATOOLS_TEMPLATE_SOURCES to a nonexistent path and
       DTATOOLS_TEMPLATE_INCLUDE_BUILTIN to "0" changes nothing about a
       validate_template() call naming an explicit directory. No network
@@ -452,15 +467,20 @@ requirements:
     text: >
       create_template_repo(path, examples = TRUE, ci = TRUE, overwrite =
       FALSE) shall write .gitignore and README.md at the repository root,
-      and -- when examples is TRUE -- the four bundled skeleton template
-      files (one of each kind) directly under templates/, discovered from
-      inst/extdata/template-repo-skeleton/templates/ rather than a hard-coded
-      list. examples = FALSE shall write only the scaffolding (.gitignore,
-      README.md, and any CI file ci asks for), with no templates/ entries.
+      and -- when examples is TRUE -- every file of the bundled skeleton
+      inst/extdata/template-repo-skeleton/ at the same relative path,
+      discovered from the skeleton rather than a hard-coded list: dta-app.yaml
+      in the root, starter.dta-template.yaml and
+      starter_dataset.dta-dataset-template.yaml in templates/,
+      starter_supplier.dta-party.yaml in parties/,
+      starter_terms.dta-vocabulary.yaml in vocabulary/, and README.md in
+      export-templates/. examples = FALSE shall write only the scaffolding
+      (.gitignore, README.md, and any CI file ci asks for), with no
+      dta-app.yaml and no folder of any template kind.
     risk: medium
     category: functional
     covers: [create_template_repo]
-    source: R/createTemplateRepo.R (.dta_create_repo_example_files, .dta_create_repo_targets, create_template_repo); inst/extdata/template-repo-skeleton/templates/
+    source: R/createTemplateRepo.R (.dta_create_repo_example_files, .dta_create_repo_targets, create_template_repo); inst/extdata/template-repo-skeleton/
 
   - id: REQ-TMPL-027
     text: >
@@ -470,7 +490,7 @@ requirements:
       provider shall write its own file to its own destination --
       .github/workflows/validate-templates.yml, bitbucket-pipelines.yml, and
       Jenkinsfile respectively -- copied from the packaged CI assets under
-      inst/extdata/templates/. Any other value for ci shall raise a
+      inst/extdata/ci/. Any other value for ci shall raise a
       condition naming the known providers.
     risk: medium
     category: interface
@@ -481,7 +501,8 @@ requirements:
     text: >
       Without overwrite = TRUE, create_template_repo() shall raise a
       condition naming every file it would have written that already exists
-      at path (including templates/ destinations), and shall write nothing
+      at path (including the destinations in dta-app.yaml, templates/,
+      parties/, vocabulary/ and export-templates/), and shall write nothing
       at all in that case -- not even the
       files that did not conflict -- because a partially-written repository
       of cross-referencing templates would leave a caller unable to tell
@@ -505,41 +526,64 @@ requirements:
 
   - id: REQ-TMPL-030
     text: >
-      Every template file bundled under inst/extdata/templates/ shall
-      validate with zero errors and zero warnings, and the bundled
-      template-repository skeleton (templates under
-      inst/extdata/template-repo-skeleton/templates/, README.md at its parent
-      root), including a repository freshly created from it by
-      create_template_repo(), shall validate with zero errors under strict =
-      TRUE -- because a broken shipped example is copied, unmodified, into
-      every repository a user creates from it.
+      The packaged demo library inst/extdata/library/ (a library root with
+      templates/, parties/ and vocabulary/ folders) shall validate with zero
+      rows, errors and warnings alike. The bundled template-repository
+      skeleton inst/extdata/template-repo-skeleton/ is a library root in its
+      own right (dta-app.yaml and README.md in the root, and the folders
+      templates/, parties/, vocabulary/ and export-templates/); it, and a
+      repository freshly created from it by create_template_repo(), shall
+      validate with zero errors under strict = TRUE -- because a broken shipped
+      example is copied, unmodified, into every repository a user creates from
+      it. Validating one of the skeleton's kind folders instead of its root
+      shall be the library_subfolder_given error of REQ-TMPL-031, never a
+      clean pass.
     risk: high
     category: integrity
     covers: [validate_template, create_template_repo]
     source: >
-      inst/extdata/templates/; inst/extdata/template-repo-skeleton/templates/;
+      inst/extdata/library/; inst/extdata/template-repo-skeleton/;
       R/createTemplateRepo.R (create_template_repo documentation);
-      R/validateTemplate.R (validate_template library-directory resolution)
+      R/validateTemplate.R (validate_template, .dta_template_check_placement)
 
 
   - id: REQ-TMPL-031
     text: >
-      validate_template() given a repository root whose templates/ sub-folder
-      directly holds at least one template file shall validate that folder,
-      with the same findings as validating templates/ directly. Every template
-      file left at the repository root alongside it shall be reported exactly
-      once as template_outside_library_dir at severity error, with its path,
-      kind, id and version when readable, and shall not enter cross-file or
-      duplicate-id resolution; strict = TRUE shall reject that mixed layout.
-      If templates/ is absent, empty, or contains no template files, the
-      directory itself shall remain the library, preserving root-layout
-      compatibility without template_outside_library_dir findings.
+      validate_template() given a directory shall treat it as a library root
+      (REQ-TMPL-002) and apply this placement rule to every file of the four
+      template kinds found anywhere below it (dot-led directories excluded). A
+      file directly in the folder of its kind is loaded and adds no placement
+      row. A file in any other place -- directly in the root, or in the folder
+      of another kind, such as a party profile in templates/ -- shall be
+      reported exactly once as template_misplaced at severity "error", with its
+      path, kind, id and version when readable, and shall be invisible to the
+      validation: it shall not be validated as a template, shall not take part
+      in cross-file resolution and shall not count in the duplicate-id check
+      (the app's template index skips it, REQ-TMPL-043); strict = TRUE shall
+      reject it. The valid files of the same library shall still be loaded and
+      checked. A file below the folder of its kind is the warning of
+      REQ-TMPL-002 instead. There is no legacy layout in which templates sit
+      directly in the root: such a root reports template_misplaced for each
+      of them. When the directory given is itself one of the folders
+      templates/, parties/ or vocabulary/ and none of the folders templates/,
+      parties/, vocabulary/ exists inside it, validate_template() shall report
+      exactly one library_subfolder_given row at severity "error" in place of
+      one row per file, naming the mistake as a sub-folder given instead of
+      its parent, and advising that the files of a flat library be moved into
+      templates/, parties/ and vocabulary/ sub-folders instead; strict = TRUE
+      shall reject it. The messages of template_misplaced and
+      library_subfolder_given shall say that folder names are case-sensitive
+      on the server. The placement rule applies
+      to a directory only: a single file given as path is checked in
+      isolation, with no placement row and no resolution of references to
+      other files.
     risk: high
     category: functional
     covers: [validate_template]
     source: >
-      R/validateTemplate.R (validate_template, .dta_template_check_outside_library);
-      inst/shiny/dta_app/R/template_index.R (dta_template_library_dir);
+      R/validateTemplate.R (validate_template, .dta_template_check_placement);
+      inst/shiny/dta_app/R/template_index.R (dta_template_kind_subdir,
+      dta_template_kind_subdirs, dta_template_misplaced_files);
       vignettes/private-templates.Rmd (Where templates live)
 
   - id: REQ-TMPL-032
@@ -645,8 +689,8 @@ requirements:
 
   - id: REQ-TMPL-037
     text: >
-      A library's app configuration file (dta-app.yaml or dta-app.yml in the
-      library directory) shall not be treated as a template. When it holds a
+      A library's app configuration file (dta-app.yaml or dta-app.yml, directly
+      in the library root) shall not be treated as a template. When it holds a
       value the app would reject -- a colour that is not a #RGB or #RRGGBB hex
       value, a link that is not an http(s) or mailto URL, a missing logo or
       Word template file, a path that leaves the library folder, a
@@ -658,15 +702,19 @@ requirements:
       app_config_invalid at severity "error", one row per rejected value naming
       its key. A key the app does not know shall be reported
       app_config_unknown_key at severity "warning". An app configuration file
-      at the repository root while templates/ is the library directory shall
-      be reported app_config_outside_library_dir at severity "error". A valid
-      configuration, or none, shall add no rows.
+      anywhere but directly in the library root (for example in templates/)
+      shall be reported app_config_misplaced at severity "error", once per
+      such file, because the app reads only the root and the file is invisible;
+      it shall not be parsed. Both spellings, dta-app.yaml and dta-app.yml,
+      directly in the root shall be reported app_config_duplicate at severity
+      "error", once per file. A valid configuration, or none, shall add no rows.
     risk: medium
     category: functional
     covers: [validate_template]
     source: >
       R/validateTemplate.R (.dta_template_check_app_config);
-      inst/shiny/dta_app/R/app_config.R (parse_dta_app_config);
+      inst/shiny/dta_app/R/app_config.R (parse_dta_app_config,
+      dta_app_config_filenames);
       inst/extdata/template-repo-skeleton/README.md section "App
       configuration (dta-app.yaml)"
     notes: >
@@ -754,7 +802,112 @@ requirements:
       its pre-filled answer appear as text, and each column a dataset template
       adds appears; an existing output file shall not be replaced unless
       overwrite = TRUE, and a format other than docx or pdf shall be refused.
+      The library is given as its root directory (REQ-TMPL-002), or as one
+      template file, which the guide then covers together with what it refers
+      to; the library of a file is the parent of the folder the file sits in,
+      and only when that folder is the folder of the file's kind. A file
+      anywhere else shall be refused with a condition of class
+      dta_template_guide_no_templates and nothing shall be written.
     risk: medium
     category: functional
     covers: [write_template_guide]
     source: "R/templateGuide.R; R/templateGuide-collect.R"
+    notes: >
+      Added with the single-file rule: the library root of one template file is
+      the parent of the folder it sits in, found only when that folder is the
+      folder of the file's kind (REQ-TMPL-002). Pinned in OQ-TMPL-099.
+
+  # ---- app: Word templates, layout reporting at run time --------------------
+
+  - id: REQ-TMPL-041
+    text: >
+      The app shall offer as Word export templates every .docx file directly
+      in the export-templates/ folder of each template library root it uses
+      that contains at least one {PLACEHOLDER} marker, with or without a
+      dta-app.yaml in that library. A discovered .docx that contains no
+      placeholder marker, or cannot be read as a Word document, shall not be
+      offered, and a warning shall name it; a file listed under
+      exports.word_templates in dta-app.yaml is offered whatever it contains.
+      An offered template is labelled with its file name without the extension.
+      Within one root the files are taken in file-name order (byte order); across roots they follow
+      the roots' precedence order. A file whose name starts with "." or is a
+      Word lock file (name starting with a tilde followed by a dollar sign),
+      a file that is not a .docx, and a file in a sub-folder of
+      export-templates/ shall not be offered. When two roots provide a file with
+      the same file name, only the file from the earlier root shall be offered,
+      and a warning shall name both files. Entries listed under
+      exports.word_templates in dta-app.yaml shall keep their label and order,
+      come first, and shall not be offered a second time as discovered files.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/app_config.R (dta_app_config_discover_word_templates,
+      .dta_app_config_build); inst/shiny/dta_app/R/template_index.R
+      (dta_export_templates_subdir)
+    notes: >
+      Pinned in OQ-TMPL-094 (discovery, labels, order, the ignored files, and
+      the skip of a file without placeholder markers or an unreadable one),
+      OQ-TMPL-095 (precedence between two roots) and OQ-TMPL-096 (configured
+      entries first, even without placeholders, and a library with no
+      dta-app.yaml).
+
+  - id: REQ-TMPL-042
+    text: >
+      validate_template() given a directory shall report every regular file
+      directly in its export-templates/ folder that is not a .docx file as
+      export_template_invalid at severity "warning", with kind
+      dta_export_template, because the app ignores it. A .docx file, a file
+      whose name starts with "." or is a Word lock file (a tilde followed by a
+      dollar sign), a file named README, README.md or
+      README.txt (in any letter case), and a sub-folder shall not be reported;
+      any other file whose name merely begins with README, such as
+      README_old.pdf, shall be. The check shall run whatever kinds is, shall not
+      make strict = TRUE abort on its own, and a library without an
+      export-templates/ folder shall add no row.
+    risk: low
+    category: functional
+    covers: [validate_template]
+    source: R/validateTemplate.R (.dta_template_check_export_templates)
+
+  - id: REQ-TMPL-043
+    text: >
+      When the app builds its template index, a template file that is not in
+      the folder of its kind -- directly in the library root, or in the folder
+      of another kind -- shall not be indexed, and shall be listed in the
+      "warnings" attribute of the index and, separately, in its
+      "layout_warnings" attribute. Each entry shall name the source, the path
+      of the file relative to the source root, the kind of the file in plain
+      words and the folder the file belongs in, and shall contain neither an
+      absolute path nor an internal kind identifier. All layout problems of one
+      build shall additionally be announced by one warning condition. A source
+      whose root is itself one of the folders templates/, parties/ or
+      vocabulary/ with none of the three folders inside it shall be reported
+      once, as a library sub-folder whose parent directory should be used,
+      with the advice to move the files of a flat library into templates/,
+      parties/ and vocabulary/ sub-folders instead. The files in the correct
+      folders of the same root shall still be indexed.
+    risk: medium
+    category: functional
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/template_index.R (build_template_index,
+      dta_template_misplaced_files, dta_template_layout_warnings,
+      dta_template_warn_layout)
+
+  - id: REQ-TMPL-044
+    text: >
+      A .docx file in export-templates/ that resolves, through a symbolic link,
+      to a location outside the library root shall not be offered as a Word
+      export template, while a regular .docx file in the same folder still is.
+    risk: medium
+    category: security
+    covers: [run_dta_app]
+    source: >
+      inst/shiny/dta_app/R/app_config.R (dta_app_config_discover_word_templates,
+      .cfg_file_in_dir)
+    notes: >
+      The test needs the platform to allow symbolic links and is skipped, with
+      its reason, where it does not (an unprivileged Windows account). It is
+      the only test of this requirement so that the skip leaves REQ-TMPL-041
+      verified.

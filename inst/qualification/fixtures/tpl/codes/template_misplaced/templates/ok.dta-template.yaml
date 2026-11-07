@@ -1,0 +1,9 @@
+# REQ-TMPL-031: a structurally valid abstract creation template.
+kind: dta_creation_template
+id: misplaced_ok
+version: "1.0"
+label: Misplaced qualification example
+abstract: true
+base:
+  metadata:
+    title: Misplaced qualification example
