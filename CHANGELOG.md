@@ -58,6 +58,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   mixins, and `validate_template()` reports `mixin_unresolved` (warning),
   `mixin_invalid` and `mixin_conflict` (errors).
 
+- `write_template_guide()` writes a handbook of a template library as a Word
+  (or PDF) document for readers who never open the app or a YAML file. For each
+  DTA template it lists the questions asked, their answer types and choices, the
+  pre-filled answers, where each answer lands in the DTA, the parties and term
+  lists to choose, the datasets and columns it creates, and what it changes
+  compared with the template it is based on. Dataset templates, term lists and
+  party profiles get their own chapters.
+
 ### Changed
 
 - The document name is now the main title of every document-style export, with
@@ -147,6 +155,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   shown by its name, instead of a "(template default: …)" row.
 
 ### Fixed
+
+- PDF export through the TinyTeX backend now retries with `xelatex` when
+  `pdflatex` cannot typeset a character, for example the "≠" in the
+  description of a not-equal rule. `write_dta(format = "pdf")` used to fail for
+  such a DTA.
 
 - `validate_template()` no longer rejects a creation template that writes
   `datasets:` in the verb form (`add:` / `modify:` / `remove:` / `order:`). It

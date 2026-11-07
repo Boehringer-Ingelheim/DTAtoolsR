@@ -112,6 +112,8 @@ Collate:
     'run_dta_app.R'
     'streamingScale.R'
     'streamingValidation.R'
+    'templateGuide-collect.R'
+    'templateGuide.R'
     'validateTemplate.R'
     'validationFunctions.R'
     'zzz.R'

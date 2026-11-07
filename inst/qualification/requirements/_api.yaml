@@ -118,4 +118,5 @@ exports:
   - write_dta
   - write_file_specification
   - write_table_to_file
+  - write_template_guide
   - write_validation_report
