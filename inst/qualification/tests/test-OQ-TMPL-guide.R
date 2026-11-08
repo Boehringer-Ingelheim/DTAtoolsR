@@ -181,7 +181,7 @@ test_that("OQ-TMPL-099 | one template file is guided from inside its library fol
 # c"). The guide's cell is then compared with the Word cell write_dataset_metadata()
 # writes for the same rule: REQ-EXPORT-039 asks for the same lines in both.
 
-test_that("OQ-TMPL-104 | the guide's rules table describes each rule in the same plain-English lines as the Word documents | REQ-TMPL-040 REQ-EXPORT-039", {
+test_that("OQ-TMPL-114 | the guide's rules table describes each rule in the same plain-English lines as the Word documents | REQ-TMPL-040 REQ-EXPORT-039", {
   rules <- guide_yaml("gf_smrnaseq.dta-dataset-template.yaml")[["dataset"]][["rules"]]
   rule <- function(id) Filter(function(r) identical(r[["id"]], id), rules)[[1]]
   eq <- rule("check_equals")

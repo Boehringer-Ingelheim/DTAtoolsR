@@ -56,7 +56,9 @@ own default selections -- WITHOUT starting the app. This lets a
 template repository (kept private, on Bitbucket Data Center in production
 and mirrored to GitHub for CI) run its own continuous integration against
 the templates it authors, with nothing more than an R installation of
-DTAtools. See \code{system.file("extdata", "ci", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow.
+DTAtools. See \code{system.file("extdata", "ci", "validate-templates.yml", package = "DTAtools")} for a ready-to-copy GitHub Actions workflow. For
+repository CI, \code{\link[=lint_template_repo]{lint_template_repo()}} runs these checks plus
+repository-format checks and prints every finding.
 }
 \details{
 A template library is a repository root with one folder per file kind:
@@ -97,7 +99,11 @@ template file outside the folder of its kind), \code{library_subfolder_given}
 creation template's hand-written \verb{prior_versions:}), \code{mixin_invalid} (a
 malformed \verb{mixins:} value, or a named template that is not a valid mixin),
 \code{mixin_conflict} (a key contributed twice, or a mixin an ancestor already
-mixes in), the app-configuration
+mixes in), \code{kind_suffix_mismatch} (the file name's kind suffix and the
+declared \verb{kind:} disagree; the app takes the kind from the name),
+\code{party_profile_invalid} (the app's party-profile reader rejects the file,
+for instance an unknown \verb{role:}; it never appears in the party picker; it
+may accompany \code{id_missing} or \code{version_missing}), the app-configuration
 errors \code{app_config_invalid} (a bad value in \code{dta-app.yaml}, or a missing
 logo or Word template it names), \code{app_config_duplicate} (both
 \code{dta-app.yaml} and \code{dta-app.yml} in the repository root) and
@@ -121,7 +127,10 @@ same reason as \code{extends_unresolved}), \code{sealed_violation},
 app-configuration warnings \code{app_config_unknown_key} and
 \code{app_config_warning}, and \code{export_template_invalid} (a file in
 \verb{export-templates/} that is not a \code{.docx} Word document, and is therefore
-ignored by the app). The app-configuration and \verb{export-templates/} checks
+ignored by the app) and \code{export_template_no_placeholders} (a \code{.docx} there
+with no \code{{PLACEHOLDER}} marker, or not a readable Word document, which the
+app does not offer unless \code{dta-app.yaml} lists it; a listed file is not
+reported). The app-configuration and \verb{export-templates/} checks
 run on every directory scan regardless of \code{kinds}.
 }
 \examples{

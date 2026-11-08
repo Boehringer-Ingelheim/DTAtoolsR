@@ -1780,8 +1780,8 @@ test_that("export_template_invalid flags a non-docx file in export-templates/ an
   write_clean_template(dir)
   exp_dir <- file.path(dir, "export-templates")
   dir.create(exp_dir)
-  writeLines("x", file.path(exp_dir, "good.docx"))
-  writeLines("x", file.path(exp_dir, "GOOD2.DOCX"))
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "good.docx"))
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "GOOD2.DOCX"))
   writeLines("x", file.path(exp_dir, "README.md"))
   writeLines("x", file.path(exp_dir, "readme.txt"))
   writeLines("x", file.path(exp_dir, ".gitkeep"))
@@ -1831,6 +1831,94 @@ test_that("a single file never gets export-template rows", {
   writeLines("x", file.path(dir, "export-templates", "notes.txt"))
   result <- validate_template(file.path(dir, "templates", "clean.dta-template.yaml"))
   expect_equal(nrow(result), 0)
+})
+
+test_that("export_template_no_placeholders flags a .docx the app would not offer", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(exp_dir)
+  file.copy(.make_template("{TITLE}"), file.path(exp_dir, "ok.docx"))
+  writeLines("x", file.path(exp_dir, "~$x.docx")) # Word lock file: clutter
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  file.copy(.make_template("No markers"), file.path(exp_dir, "plain.docx"))
+  writeLines("x", file.path(exp_dir, "broken.docx")) # not a zip at all
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "export_template_no_placeholders", "warning")
+  expect_setequal(basename(rows$file), c("plain.docx", "broken.docx"))
+  expect_true(all(rows$kind == "dta_export_template"))
+  expect_equal(nrow(result), 2)
+  # A warning: strict stays silent.
+  expect_no_error(validate_template(dir, strict = TRUE))
+})
+
+test_that("export_template_no_placeholders skips a marker-less .docx that dta-app.yaml lists", {
+  dir <- withr::local_tempdir()
+  write_clean_template(dir)
+  exp_dir <- file.path(dir, "export-templates")
+  dir.create(exp_dir)
+  file.copy(.make_template("No markers"), file.path(exp_dir, "listed.docx"))
+  file.copy(.make_template("No markers"), file.path(exp_dir, "unlisted.docx"))
+  writeLines(
+    c("exports:", "  word_templates:", "    - file: export-templates/listed.docx"),
+    file.path(dir, "dta-app.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "export_template_no_placeholders", "warning")
+  expect_identical(basename(rows$file), "unlisted.docx")
+  expect_equal(nrow(result), 1)
+
+  # Without a config file the listed file is reported again.
+  file.remove(file.path(dir, "dta-app.yaml"))
+  rows <- expect_code_row(validate_template(dir), "export_template_no_placeholders", "warning")
+  expect_setequal(basename(rows$file), c("listed.docx", "unlisted.docx"))
+})
+
+# ---- kind_suffix_mismatch / party_profile_invalid ---------------------------
+
+test_that("kind_suffix_mismatch flags a file whose name says another kind than `kind:`", {
+  dir <- withr::local_tempdir()
+  write_party_file(dir) # positive control: name and kind agree
+  expect_no_code_row(validate_template(dir), "kind_suffix_mismatch")
+
+  # A party profile saved under the creation-template suffix.
+  writeLines(party_lines("mismatch"), lib_file(dir, "mismatch.dta-template.yaml"))
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "kind_suffix_mismatch", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(basename(rows$file), "mismatch.dta-template.yaml")
+  expect_equal(rows$kind, "dta_party_profile")
+  expect_error(validate_template(dir, strict = TRUE), class = "rlang_error")
+})
+
+test_that("an unknown declared kind stays kind_unknown, not kind_suffix_mismatch", {
+  dir <- withr::local_tempdir()
+  writeLines(
+    c("kind: something_else", "id: x", "version: \"1.0\""),
+    lib_file(dir, "x.dta-template.yaml")
+  )
+  result <- validate_template(dir)
+  expect_code_row(result, "kind_unknown", "warning")
+  expect_no_code_row(result, "kind_suffix_mismatch")
+})
+
+test_that("party_profile_invalid flags a profile the app's reader rejects", {
+  dir <- withr::local_tempdir()
+  write_party_file(dir, "good_party")
+  expect_equal(nrow(validate_template(dir)), 0)
+
+  writeLines(
+    sub("role: supplier", "role: vendor", party_lines("bad_party"), fixed = TRUE),
+    lib_file(dir, "bad_party.dta-party.yaml")
+  )
+  result <- validate_template(dir)
+  rows <- expect_code_row(result, "party_profile_invalid", "error")
+  expect_equal(nrow(rows), 1)
+  expect_equal(basename(rows$file), "bad_party.dta-party.yaml")
+  expect_equal(rows$id, "bad_party")
+  expect_match(rows$message, "vendor", fixed = TRUE)
+  expect_error(validate_template(dir, strict = TRUE), class = "rlang_error")
 })
 
 # ---- The scaffold validates under the same layout --------------------------

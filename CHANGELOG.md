@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `lint_template_repo()` checks a template repository: every
+  `validate_template()` finding plus `folder_name_case`,
+  `id_filename_mismatch` and `file_ignored`, printed one per line, and an
+  error (class `dta_template_lint_error`) when a finding reaches `fail_on`.
+  The CI assets written by `create_template_repo()` (GitHub Actions,
+  Bitbucket Pipelines, Jenkins) now call it.
+
 ### Changed
 
 - **Breaking:** Word, PDF and Markdown exports (including the
@@ -66,6 +75,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   operator) is described as such instead of as a valid rule; `equals: true` is
   no longer worded as "is present"; a list of values is worded as "one of", not
   as all of them; large numbers are written in full instead of as `1e+08`.
+
+- `validate_template()` now reports `kind_suffix_mismatch`,
+  `party_profile_invalid` and `export_template_no_placeholders`, which the app
+  silently skipped while validation passed.
 
 ## [0.26.0] - 2026-11-07
 

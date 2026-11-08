@@ -17,6 +17,35 @@ tmpl_severity <- function(result, code) {
   if (length(hit) == 0) NA_character_ else hit[[1]]
 }
 
+# A Word file with the given paragraphs; its default is a fill-in template.
+tmpl_docx <- function(path, lines = c("Agreement {TITLE}", "{VERSION}")) {
+  doc <- officer::read_docx()
+  for (ln in lines) doc <- officer::body_add_par(doc, ln)
+  print(doc, target = path)
+  invisible(path)
+}
+
+# The text of a party profile with this id; role and kind are the free choices.
+tmpl_party_text <- function(id, role = "supplier", kind = "dta_party_profile") {
+  c(
+    sprintf("kind: %s", kind),
+    sprintf("id: %s", id),
+    'version: "1.0"',
+    sprintf("role: %s", role),
+    sprintf("label: Party %s", id),
+    "affiliation:",
+    "  name: Example Inc.",
+    "  country: DE"
+  )
+}
+
+# Write one file below a library root, creating its folder.
+tmpl_put <- function(root, rel, lines) {
+  dir.create(dirname(file.path(root, rel)), recursive = TRUE, showWarnings = FALSE)
+  writeLines(lines, file.path(root, rel))
+  invisible(file.path(root, rel))
+}
+
 tmpl_message <- function(result, code) {
   hit <- result$message[result$code == code]
   if (length(hit) == 0) NA_character_ else hit[[1]]
@@ -933,8 +962,10 @@ test_that("OQ-TMPL-103 | a file in export-templates/ that is not a .docx is an e
   file.copy(list.files(root, full.names = TRUE, all.files = TRUE, no.. = TRUE), copy, recursive = TRUE)
   folder <- file.path(copy, "export-templates")
   file.remove(file.path(folder, c("notes.txt", "legacy.doc")))
-  writeLines("x", file.path(folder, "good.docx"))
-  writeLines("x", file.path(folder, "CAPITALS.DOCX"))
+  # Real Word files with a marker: a .docx without one is its own finding
+  # (export_template_no_placeholders, OQ-TMPL-106).
+  tmpl_docx(file.path(folder, "good.docx"))
+  tmpl_docx(file.path(folder, "CAPITALS.DOCX"))
   writeLines("x", file.path(folder, "~$good.tmp"))
   dir.create(file.path(folder, "sub"))
   writeLines("x", file.path(folder, "readme.TXT"))
@@ -951,4 +982,111 @@ test_that("OQ-TMPL-103 | a file in export-templates/ that is not a .docx is an e
     !dir.exists(file.path(tmpl_fixture("base"), "export-templates"))
   )
   qa_step("and a library without that folder adds no row", 0L, nrow(validate_template(tmpl_fixture("base"))))
+})
+
+# ---- REQ-TMPL-045: findings the app answers by skipping the file --------------
+
+test_that("OQ-TMPL-104 | a file whose name says one kind and whose content declares another is kind_suffix_mismatch, an error | REQ-TMPL-045", {
+  root <- qa_tempdir()
+  tmpl_put(root, "templates/mismatch.dta-template.yaml", tmpl_party_text("mismatch"))
+  result <- validate_template(root)
+  hit <- result[result$code == "kind_suffix_mismatch", ]
+  qa_step("exactly one kind_suffix_mismatch row", 1L, nrow(hit))
+  qa_step("at severity error", "error", hit$severity)
+  qa_step("on the file with the wrong suffix", "mismatch.dta-template.yaml", basename(hit$file))
+  qa_step("recording the kind the file declares", "dta_party_profile", hit$kind)
+  qa_step(
+    "strict validation aborts with an error condition", "aborted",
+    tryCatch(
+      {
+        validate_template(root, strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+
+  # Positive control: the same content under its own suffix, in its own folder.
+  right <- qa_tempdir()
+  tmpl_put(right, "parties/mismatch.dta-party.yaml", tmpl_party_text("mismatch"))
+  qa_step(
+    "the same content under the party suffix has no kind_suffix_mismatch row",
+    0L, sum(validate_template(right)$code == "kind_suffix_mismatch")
+  )
+
+  # A declared kind that is not a known kind stays kind_unknown only.
+  unknown <- qa_tempdir()
+  tmpl_put(unknown, "templates/odd.dta-template.yaml", tmpl_party_text("odd", kind = "dta_nonsense"))
+  odd <- validate_template(unknown)
+  qa_step("an unknown declared kind adds no kind_suffix_mismatch row", 0L, sum(odd$code == "kind_suffix_mismatch"))
+  qa_step("and is reported as kind_unknown", 1L, sum(odd$code == "kind_unknown"))
+})
+
+test_that("OQ-TMPL-105 | a party profile the reader rejects is party_profile_invalid naming the reason; a valid one beside it is not | REQ-TMPL-045", {
+  root <- qa_tempdir()
+  tmpl_put(root, "parties/vendor_co.dta-party.yaml", tmpl_party_text("vendor_co", role = "vendor"))
+  tmpl_put(root, "parties/good_co.dta-party.yaml", tmpl_party_text("good_co"))
+  result <- validate_template(root)
+  hit <- result[result$code == "party_profile_invalid", ]
+  qa_step("exactly one party_profile_invalid row", 1L, nrow(hit))
+  qa_step("at severity error", "error", hit$severity)
+  qa_step("on the profile with the unknown role", "vendor_co.dta-party.yaml", basename(hit$file))
+  qa_check("whose message names the rejected value", grepl("vendor", hit$message, fixed = TRUE))
+  qa_step(
+    "the valid profile beside it has no row of any code",
+    0L, sum(basename(result$file) == "good_co.dta-party.yaml")
+  )
+
+  # The row is added to, not instead of, the missing-field findings.
+  bare <- qa_tempdir()
+  tmpl_put(bare, "parties/bare.dta-party.yaml", c("kind: dta_party_profile", "role: vendor"))
+  codes <- validate_template(bare)$code
+  qa_check("a rejected profile without id and version also reports id_missing", "id_missing" %in% codes)
+  qa_check("and version_missing", "version_missing" %in% codes)
+  qa_check("and party_profile_invalid", "party_profile_invalid" %in% codes)
+})
+
+test_that("OQ-TMPL-106 | a .docx in export-templates/ without a {PLACEHOLDER} marker, or not a Word document, is export_template_no_placeholders, a warning | REQ-TMPL-045", {
+  root <- qa_tempdir()
+  # A valid party profile, so that no_templates does not fire on a folder with
+  # nothing but Word files.
+  tmpl_put(root, "parties/ok_co.dta-party.yaml", tmpl_party_text("ok_co"))
+  folder <- file.path(root, "export-templates")
+  dir.create(folder)
+  tmpl_docx(file.path(folder, "no_markers.docx"), "Prose without any marker.")
+  writeLines("not a zip archive", file.path(folder, "corrupt.docx"))
+  tmpl_docx(file.path(folder, "fill_in.docx"))
+  writeLines("x", file.path(folder, "~$lock.docx"))
+
+  result <- validate_template(root)
+  hit <- result[result$code == "export_template_no_placeholders", ]
+  qa_step(
+    "the Word file without a marker and the unreadable one are reported",
+    c("corrupt.docx", "no_markers.docx"), sort(basename(hit$file))
+  )
+  qa_step("each at severity warning", c("warning", "warning"), hit$severity)
+  qa_step("the fill-in template and the lock file are not reported, so these are the only rows", 2L, nrow(result))
+  qa_step(
+    "strict validation does not abort on warnings alone", "no condition",
+    tryCatch(
+      {
+        validate_template(root, strict = TRUE)
+        "no condition"
+      },
+      error = function(e) "aborted"
+    )
+  )
+
+  # The app offers a file dta-app.yaml lists whatever it contains, so listing
+  # the marker-less file removes its row and leaves the unreadable one.
+  writeLines(
+    c("exports:", "  word_templates:", "    - file: export-templates/no_markers.docx"),
+    file.path(root, "dta-app.yaml")
+  )
+  listed <- validate_template(root)
+  qa_step(
+    "a marker-less file that dta-app.yaml lists is no longer reported",
+    "corrupt.docx",
+    basename(listed$file[listed$code == "export_template_no_placeholders"])
+  )
 })

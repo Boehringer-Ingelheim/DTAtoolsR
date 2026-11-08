@@ -676,7 +676,7 @@ requirements:
     notes: >
       The template guide was first left out until its own wording was final;
       it now sets the same lines in its Description column (labels in bold,
-      list items as bullets, no monospace) and is verified by OQ-TMPL-104.
+      list items as bullets, no monospace) and is verified by OQ-TMPL-114.
 
   - id: REQ-EXPORT-040
     text: >

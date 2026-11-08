@@ -6,13 +6,15 @@
 # Lives at `.github/workflows/validate-templates.yml` in the repository that
 # holds your `*.dta-template.yaml` / `*.dta-dataset-template.yaml` /
 # `*.dta-party.yaml` / `*.dta-vocabulary.yaml` files. It checks out the
-# repository, installs DTAtools, and runs `validate_template(".", strict =
-# TRUE)` -- the same structural checks (and, as a final step, an actual
-# dry-run build of every non-abstract creation template) the bundled Shiny
-# app's own "Create new from template" picker relies on, without starting the
-# app. `strict = TRUE` makes `validate_template()` raise an error naming every
-# problem found whenever any of them is severity "error", which is what turns
-# this workflow red.
+# repository, installs DTAtools, and runs `lint_template_repo(".")`. The
+# linter runs every `validate_template()` check -- the same structural checks
+# (and, as a final step, an actual dry-run build of every non-abstract
+# creation template) the bundled Shiny app's own "Create new from template"
+# picker relies on -- plus repository-format checks (folder-name case,
+# id/file-name agreement, YAML files the app would silently ignore), without
+# starting the app. It prints every finding and fails the build on any
+# severity "error", which is what turns this workflow red. A team that wants
+# warnings to fail it too passes `fail_on = "warning"`.
 #
 # Not on GitHub? `create_template_repo(path, ci = ...)` writes the same check
 # for other hosts:
@@ -63,5 +65,5 @@ jobs:
         run: |
           Rscript -e 'stop("Replace this step with an install of DTAtools from your internal package repository.")'
 
-      - name: Validate templates
-        run: Rscript -e 'DTAtools::validate_template(".", strict = TRUE)'
+      - name: Lint template repository
+        run: Rscript -e 'DTAtools::lint_template_repo(".")'

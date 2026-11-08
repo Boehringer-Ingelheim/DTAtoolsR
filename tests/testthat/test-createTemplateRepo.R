@@ -110,14 +110,14 @@ test_that("the starter creation template imports the starter dataset template by
 
 # ---- ci = TRUE / ci = FALSE --------------------------------------------------
 
-test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming validate_template", {
+test_that("ci = TRUE writes .github/workflows/validate-templates.yml, naming lint_template_repo", {
   dir <- withr::local_tempdir()
   create_template_repo(dir, ci = TRUE)
 
   workflow <- file.path(dir, ".github", "workflows", "validate-templates.yml")
   expect_true(file.exists(workflow))
   content <- paste(readLines(workflow), collapse = "\n")
-  expect_match(content, "validate_template", fixed = TRUE)
+  expect_match(content, "lint_template_repo", fixed = TRUE)
 })
 
 test_that("the GitHub workflow installs remotes, which its placeholder install examples call", {
@@ -135,7 +135,7 @@ test_that("the GitHub workflow installs remotes, which its placeholder install e
   expect_identical(deps, "any::remotes")
 
   runs <- vapply(steps, function(s) s$run %||% "", character(1))
-  expect_true(any(grepl("validate_template(\".\", strict = TRUE)", runs, fixed = TRUE)))
+  expect_true(any(grepl("lint_template_repo(\".\")", runs, fixed = TRUE)))
 })
 
 test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a writable user library", {
@@ -155,6 +155,19 @@ test_that("the Bitbucket and Jenkins assets install remotes, and Jenkins uses a 
   expect_match(jenkinsfile, "mkdir -p \"$R_LIBS\"", fixed = TRUE)
 })
 
+test_that("the Bitbucket and Jenkins assets run the repository linter", {
+  dir <- withr::local_tempdir()
+  create_template_repo(dir, examples = FALSE, ci = c("bitbucket", "jenkins"))
+
+  call <- "DTAtools::lint_template_repo(\".\")"
+  pipeline <- yaml::read_yaml(file.path(dir, "bitbucket-pipelines.yml"))
+  script <- unlist(pipeline$definitions$steps[[1]]$step$script)
+  expect_true(any(grepl(call, script, fixed = TRUE)))
+
+  jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
+  expect_match(jenkinsfile, call, fixed = TRUE)
+})
+
 test_that("examples = FALSE does not suggest a validate_template() call that must fail", {
   # Whitespace (including cli's wrapping and non-breaking spaces) is squeezed
   # out so the assertions do not depend on where cli breaks the line.
@@ -170,11 +183,15 @@ test_that("examples = FALSE does not suggest a validate_template() call that mus
     gsub("[[:space:] ]+", "", paste(msgs, collapse = ""))
   }
 
-  # Positive control: the default scaffold does suggest the strict call.
-  expect_match(scaffold_message(), "strict=TRUE", fixed = TRUE)
+  # Positive control: the default scaffold suggests the repository linter,
+  # not the strict validator.
+  default <- scaffold_message()
+  expect_match(default, "DTAtools::lint_template_repo(\"", fixed = TRUE)
+  expect_no_match(default, "strict=TRUE", fixed = TRUE)
 
   bare <- scaffold_message(examples = FALSE)
   expect_match(bare, "no_templates", fixed = TRUE)
+  expect_no_match(bare, "lint_template_repo", fixed = TRUE)
   expect_no_match(bare, "strict=TRUE", fixed = TRUE)
 })
 
@@ -254,7 +271,7 @@ test_that("ci = NA and ci = character(0) abort", {
   expect_error(create_template_repo(dir, ci = character(0)), class = "rlang_error")
 })
 
-test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfile is a declarative pipeline that runs validate_template", {
+test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfile is a declarative pipeline that runs lint_template_repo", {
   # Confirms the two new assets are what they claim to be, read back from the
   # files this function actually wrote -- never asserted via file.exists().
   dir <- withr::local_tempdir()
@@ -266,7 +283,7 @@ test_that("the written bitbucket-pipelines.yml parses as YAML and the Jenkinsfil
 
   jenkinsfile <- paste(readLines(file.path(dir, "Jenkinsfile")), collapse = "\n")
   expect_match(jenkinsfile, "pipeline {", fixed = TRUE)
-  expect_match(jenkinsfile, "validate_template", fixed = TRUE)
+  expect_match(jenkinsfile, "lint_template_repo", fixed = TRUE)
 })
 
 # ---- examples = FALSE --------------------------------------------------------
