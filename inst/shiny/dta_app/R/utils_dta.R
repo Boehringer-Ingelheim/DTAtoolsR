@@ -1434,10 +1434,12 @@ dta_markdown_to_pdf <- function(lines, file) {
 # The Markdown the package writes (write_dta(format = "md")) carries more than
 # plain text: a linked table of contents "[1 Title](#1-title)", entities such
 # as "&amp;" in headings and cells, backslash escapes ("clinical\_data",
-# "a\|b"), and "<br>" for a line break inside a table cell. The renderer below
-# draws text with R graphics and understands none of that on its own, so every
-# piece of text goes through these three steps first:
-#   dta_md_inline()      links -> their text, images -> alt text, <br> -> "\n",
+# "a\|b"), "<br>" for a line break inside a table cell, and autolinks such as
+# "<a@b.org>" or "<ftp://host/file>". The renderer below draws text with R
+# graphics and understands none of that on its own, so every piece of text goes
+# through these three steps first:
+#   dta_md_inline()      links -> their text, images -> alt text, autolinks ->
+#                        the address without "<>" and "mailto:", <br> -> "\n",
 #                        any other HTML tag dropped; escape pairs are skipped
 #                        so an escaped "\<" is never mistaken for a tag.
 #   dta_md_decode()      backslash escapes and entities -> the characters.
@@ -1463,11 +1465,15 @@ dta_md_inline <- function(x) {
     return("")
   }
   link_text <- "((?:[^\\]\\\\]|\\\\.)*)"
+  label <- "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+  email_local <- "[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
+  email_domain <- paste0(label, "(?:\\.", label, ")*")
   pattern <- paste0(
     "\\\\[[:punct:]]", # an escape pair: kept, decoded later
     "|!\\[", link_text, "\\]\\([^)]*\\)", # image
     "|\\[", link_text, "\\]\\([^)]*\\)", # link
-    "|<(?:https?://|mailto:)[^>\\s]+>", # autolink
+    "|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\\s]*>", # autolink: <scheme:...>
+    "|<", email_local, "@", email_domain, ">", # autolink: <a@b.org>
     "|<br\\s*/?>", # line break
     "|<!--.*?-->", # comment
     "|</?[A-Za-z][^>]*>" # any other tag
@@ -1476,11 +1482,14 @@ dta_md_inline <- function(x) {
     if (startsWith(h, "\\")) {
       return(h)
     }
-    if (grepl("^<br", h, ignore.case = TRUE)) {
+    if (grepl("^<br\\s*/?>$", h, ignore.case = TRUE)) {
       return("\n")
     }
-    if (grepl("^<(https?://|mailto:)", h)) {
-      return(sub("^<(?:mailto:)?(.*)>$", "\\1", h, perl = TRUE))
+    # An autolink shows its address; "mailto:" is dropped, other schemes
+    # (https:, ftp:, ...) stay because they are part of what is written.
+    if (grepl("^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\\s]*>$", h, perl = TRUE) ||
+      grepl("^<[^<>\\s:]+@[^<>\\s]+>$", h, perl = TRUE)) {
+      return(sub("^<(?:[Mm][Aa][Ii][Ll][Tt][Oo]:)?(.*)>$", "\\1", h, perl = TRUE))
     }
     if (startsWith(h, "<")) {
       return("")
@@ -1559,10 +1568,11 @@ dta_md_split_cells <- function(row) {
 }
 
 # Draw "compiled" Markdown onto the CURRENT graphics device, managing its own
-# A4 pages via plot.new(). Headings, inline **bold** labels, bullet lists,
-# `| pipe |` tables and `---` rules are rendered as formatted content -- never
-# dumped as raw source. `ascii` transliterates glyphs for devices whose fonts
-# lack full Unicode (identity for cairo). Kept separate from the device set-up
+# A4 pages via plot.new(). Headings (levels 1-6, graded in size), inline
+# **bold** and *italic* text, bullet and numbered lists, `| pipe |` tables and
+# `---` rules are rendered as formatted content -- never dumped as raw source.
+# `ascii` transliterates glyphs for devices whose fonts lack full Unicode
+# (identity for cairo). Kept separate from the device set-up
 # so it can also target other devices (e.g. PNG previews).
 dta_render_markdown <- function(lines, ascii = function(x) x) {
   lines <- as.character(lines)
@@ -1611,8 +1621,8 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     out
   }
 
-  # Draw a list of words (each list(text=, bold=)) with word-wrapping and proper
-  # per-word bold/italic; advances the y cursor.
+  # Draw a list of words (each list(text=, bold=, italic=)) with word-wrapping
+  # and proper per-word bold/italic; advances the y cursor.
   draw_words <- function(words, cex = 1, indent = 0, italic = FALSE, color = "black") {
     startX <- mL + indent
     maxX <- mL + contentW
@@ -1630,7 +1640,8 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
         started <- FALSE
         next
       }
-      font <- if (italic) 3 else if (isTRUE(w$bold)) 2 else 1
+      it <- isTRUE(italic) || isTRUE(w$italic)
+      font <- if (it && isTRUE(w$bold)) 4 else if (it) 3 else if (isTRUE(w$bold)) 2 else 1
       pieces <- break_token(ascii(w$text), cex, font, maxX - startX)
       for (pi in seq_along(pieces)) {
         piece <- pieces[[pi]]
@@ -1653,26 +1664,41 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - step
   }
 
-  # Split a line into **bold** / normal word tokens. Links, <br>, escapes and
-  # entities are resolved here (see dta_md_inline()/dta_md_decode()); a <br>
-  # becomes a list(br = TRUE) entry that draw_words() turns into a new line.
-  parse_rich <- function(text) {
-    text <- dta_md_inline(text)
-    segs <- list()
-    rest <- text
-    bold_re <- "(?<!\\\\)\\*\\*(.+?)(?<!\\\\)\\*\\*"
-    while (nzchar(rest)) {
-      m <- regexpr(bold_re, rest, perl = TRUE)
-      if (m[1] == -1L) {
-        segs[[length(segs) + 1L]] <- list(text = rest, bold = FALSE)
-        break
-      }
-      before <- substr(rest, 1L, m[1] - 1L)
-      if (nzchar(before)) segs[[length(segs) + 1L]] <- list(text = before, bold = FALSE)
-      chunk <- substr(rest, m[1], m[1] + attr(m, "match.length") - 1L)
-      segs[[length(segs) + 1L]] <- list(text = gsub("^\\*\\*|\\*\\*$", "", chunk), bold = TRUE)
-      rest <- substr(rest, m[1] + attr(m, "match.length"), nchar(rest))
+  # Split inline-Markdown text (links and tags already resolved by
+  # dta_md_inline()) into runs list(text=, bold=, italic=): **bold**, *italic*,
+  # and either inside the other. An escaped "\\*" is never an emphasis mark,
+  # and neither is a "*" with a space inside it ("5 * 3 * 2").
+  emph_segments <- function(text, bold = FALSE, italic = FALSE) {
+    if (!nzchar(text)) {
+      return(list())
     }
+    bold_re <- "(?s)(?<![\\\\*])\\*\\*(?=\\S)(.+?)(?<=\\S)(?<!\\\\)\\*\\*"
+    ital_re <- "(?s)(?<![\\\\*])\\*(?![\\s*])(.+?)(?<![\\s\\\\*])\\*(?!\\*)"
+    mb <- regexpr(bold_re, text, perl = TRUE)
+    mi <- regexpr(ital_re, text, perl = TRUE)
+    if (mb[1] == -1L && mi[1] == -1L) {
+      return(list(list(text = text, bold = bold, italic = italic)))
+    }
+    use_bold <- mb[1] != -1L && (mi[1] == -1L || mb[1] <= mi[1])
+    m <- if (use_bold) mb else mi
+    mark <- if (use_bold) 2L else 1L
+    len <- attr(m, "match.length")
+    before <- substr(text, 1L, m[1] - 1L)
+    inner <- substr(text, m[1] + mark, m[1] + len - 1L - mark)
+    after <- substr(text, m[1] + len, nchar(text))
+    c(
+      emph_segments(before, bold, italic),
+      emph_segments(inner, bold || use_bold, italic || !use_bold),
+      emph_segments(after, bold, italic)
+    )
+  }
+
+  # Split a line into word tokens carrying their bold/italic state. Links,
+  # <br>, escapes and entities are resolved here (see dta_md_inline() and
+  # dta_md_decode()); a <br> becomes a list(br = TRUE) entry that draw_words()
+  # turns into a new line.
+  parse_rich <- function(text) {
+    segs <- emph_segments(dta_md_inline(text))
     words <- list()
     for (s in segs) {
       parts <- strsplit(s$text, "\n", fixed = TRUE)[[1]]
@@ -1682,7 +1708,9 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
         toks <- strsplit(parts[[k]], "[ \t]+")[[1]]
         toks <- toks[nzchar(toks)]
         for (t in toks) {
-          words[[length(words) + 1L]] <- list(text = dta_md_decode(t), bold = s$bold)
+          words[[length(words) + 1L]] <- list(
+            text = dta_md_decode(t), bold = s$bold, italic = s$italic
+          )
         }
       }
     }
@@ -1717,11 +1745,18 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
   }
 
   draw_heading <- function(level, text) {
-    cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[min(level, 6)]
-    y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[min(level, 6)]
-    text <- dta_md_decode(gsub("(?<!\\\\)\\*\\*", "", dta_md_inline(text), perl = TRUE))
-    text <- gsub("\n", " ", text, fixed = TRUE)
-    words <- lapply(strsplit(text, "[ \t]+")[[1]], function(t) list(text = t, bold = TRUE))
+    level <- min(level, 6L)
+    cex <- c(1.7, 1.4, 1.22, 1.08, 1.0, 0.95)[level]
+    # Keep a heading together with the first line under it.
+    ensure(lh(cex) * 4)
+    y <<- y - lh(cex) * c(0.35, 0.85, 0.65, 0.5, 0.4, 0.3)[level]
+    # A closing run of "#" ("## Title ##") is not part of the title.
+    text <- sub("\\s+#+\\s*$", "", text)
+    words <- Filter(function(w) !isTRUE(w$br), parse_rich(text))
+    words <- lapply(words, function(w) {
+      w$bold <- TRUE
+      w
+    })
     draw_words(words, cex = cex, color = "#1b3a5b")
     if (level <= 2) {
       graphics::segments(mL, y + lh(cex) * 0.08, mL + contentW, y + lh(cex) * 0.08,
@@ -1738,17 +1773,26 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
     y <<- y - lh(1) * 0.45
   }
 
-  draw_bullet <- function(text, level = 0L) {
+  # One list item: a bullet (or its number, for an ordered list), then the
+  # wrapped text, indented past the marker.
+  draw_bullet <- function(text, level = 0L, marker = NULL) {
     ensure(lh(1))
     off <- 0.25 * level
-    graphics::text(mL + 0.08 + off, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
-    draw_words(parse_rich(text), cex = 1, indent = 0.26 + off)
+    if (is.null(marker)) {
+      graphics::text(mL + 0.08 + off, y, ascii("\u2022"), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+      indent <- 0.26 + off
+    } else {
+      graphics::text(mL + 0.04 + off, y, ascii(marker), adj = c(0, 1), cex = 1, font = 1, col = "#1b3a5b")
+      indent <- 0.34 + off
+    }
+    draw_words(parse_rich(text), cex = 1, indent = indent)
   }
 
   # One cell of a pipe table -> its lines of text: links, escapes and entities
   # resolved, and a <br> starting a new line.
   cell_lines <- function(cell) {
-    txt <- dta_md_decode(gsub("(?<!\\\\)\\*\\*", "", dta_md_inline(cell), perl = TRUE))
+    segs <- emph_segments(dta_md_inline(cell))
+    txt <- dta_md_decode(paste(vapply(segs, function(s) s$text, character(1)), collapse = ""))
     strsplit(paste0(txt, "\n"), "\n", fixed = TRUE)[[1]]
   }
 
@@ -1835,16 +1879,26 @@ dta_render_markdown <- function(lines, ascii = function(x) x) {
       i <- i + 1L
       next
     }
-    if (grepl("^\\s*[-*]\\s+\\S", ln)) {
+    if (grepl("^\\s*[-*+]\\s+\\S", ln)) {
       level <- nchar(sub("^(\\s*).*$", "\\1", ln)) %/% 2L
-      draw_bullet(sub("^\\s*[-*]\\s+", "", ln), level)
+      draw_bullet(sub("^\\s*[-*+]\\s+", "", ln), level)
       i <- i + 1L
       next
     }
-    if (grepl("^\\*[^*].*\\*$", ln) && !grepl("\\*\\*", ln)) {
-      txt <- dta_md_decode(dta_md_inline(sub("^\\*(.*)\\*$", "\\1", ln)))
-      txt <- gsub("\n", " ", txt, fixed = TRUE)
-      words <- lapply(strsplit(trimws(txt), "[ \t]+")[[1]], function(t) list(text = t, bold = FALSE))
+    if (grepl("^\\s*[0-9]{1,9}[.)]\\s+\\S", ln)) {
+      level <- nchar(sub("^(\\s*).*$", "\\1", ln)) %/% 2L
+      draw_bullet(
+        sub("^\\s*[0-9]{1,9}[.)]\\s+", "", ln), level,
+        marker = sub("^\\s*([0-9]{1,9}[.)]).*$", "\\1", ln)
+      )
+      i <- i + 1L
+      next
+    }
+    # A line that is one single italic span, such as a rule's type "*Range*":
+    # drawn smaller and grey, as a caption.
+    if (grepl("^\\s*\\*(?![\\s*])(?:[^*\\\\]|\\\\.)+(?<![\\s\\\\])\\*\\s*$", ln, perl = TRUE)) {
+      inner <- sub("^\\s*\\*(.*)\\*\\s*$", "\\1", ln)
+      words <- Filter(function(w) !isTRUE(w$br), parse_rich(inner))
       draw_words(words, cex = 0.9, italic = TRUE, color = "#555555")
       i <- i + 1L
       next
