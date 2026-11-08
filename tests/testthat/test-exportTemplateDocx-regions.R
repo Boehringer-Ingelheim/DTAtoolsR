@@ -572,3 +572,44 @@ test_that("brace protection round-trips and leaves non-text values alone", {
   expect_identical(.tv_protect_braces(3L), 3L)
   expect_null(.tv_protect_braces(NULL))
 })
+
+test_that("the rule reading guide goes with the first rules table in the document, region or not", {
+  # A region's blocks used to be rendered before the template's own blocks, so
+  # with a top-level {VALIDATION_RULES} above a region the guide landed after
+  # the first rules table. Blocks render in document order now.
+  rule <- DTARuleColUnique(id = "unique_subject", columns = "SUBJID")
+  dta <- create_example_DTA()
+  sets <- dta@datasets
+  for (nm in names(sets)) {
+    sets[[nm]]@specs@rules <- list(rule)
+  }
+  dta@datasets <- sets
+  guide <- .rule_reading_guide()
+  for (lines in list(
+    c("{VALIDATION_RULES}", "AFTER", "{#DATASETS}", "{VALIDATION_RULES}", "{/DATASETS}"),
+    c("{#DATASETS}", "{VALIDATION_RULES}", "{/DATASETS}", "AFTER", "{VALIDATION_RULES}")
+  )) {
+    info <- paste(lines, collapse = " ")
+    template <- .make_template(lines)
+    out <- tempfile(fileext = ".docx")
+    export_with_template(dta, template, out, quiet = TRUE)
+    summary <- .region_docx_summary(out)
+    unlink(c(template, out), force = TRUE)
+    paras <- summary[summary$content_type == "paragraph", ]
+    cells <- summary[summary$content_type == "table cell", ]
+    rule_tables <- unique(cells$table_index[cells$text == "Rule ID"])
+    expect_length(rule_tables, 4L)
+    first_table_at <- min(cells$doc_index[cells$table_index %in% rule_tables])
+    title_at <- paras$doc_index[paras$text == "How to read the rules"]
+    expect_length(title_at, 1L)
+    for (sentence in guide) {
+      expect_identical(sum(paras$text == sentence), 1L, info = info)
+    }
+    guide_at <- paras$doc_index[paras$text == guide[[1]]]
+    expect_lt(title_at, guide_at)
+    expect_lt(guide_at, first_table_at)
+    # Nothing but the guide between it and the first table.
+    between <- paras$text[paras$doc_index > guide_at & paras$doc_index < first_table_at]
+    expect_true(all(between %in% c(guide, "")), info = info)
+  }
+})

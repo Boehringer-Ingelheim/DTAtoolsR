@@ -84,7 +84,7 @@ test_that("rule messages use the shared plain wording and show offending rows", 
   expect_match(range_row$actual[[1]], "12", fixed = TRUE)
   # The author's text is a Purpose line; the notes follow the specification.
   expect_match(res_txt$text, "Purpose: Adults only", fixed = TRUE)
-  expect_match(res_txt$text, "Missing values are not checked.", fixed = TRUE)
+  expect_match(res_txt$text, "Missing values: Not checked.", fixed = TRUE)
 
   cond_row <- res[res$source == "rule" & grepl("^When SEX", res$should_be), ]
   expect_equal(nrow(cond_row), 1L)

@@ -553,6 +553,17 @@
   )
 }
 
+# The sentinels in the order their paragraphs appear in the document body;
+# a sentinel that is not found (it renders nothing) goes last.
+.tv_sentinels_in_document_order <- function(doc, sentinels) {
+  if (length(sentinels) < 2L) {
+    return(sentinels)
+  }
+  paras <- xml2::xml_find_all(officer::docx_body_xml(doc), ".//*[local-name()='p']")
+  pos <- match(sentinels, trimws(xml2::xml_text(paras)))
+  sentinels[order(is.na(pos), pos)]
+}
+
 #' Replace the stamped block-placeholder paragraphs with rendered Word content
 #'
 #' Runs only when [.tv_mark_block_paragraphs()] stamped something, so a template
@@ -576,7 +587,10 @@
 .tv_render_blocks <- function(docx_path, dta, blocks = character(0), quiet = FALSE, bare = character(0)) {
   if (length(blocks) > 0) {
     doc <- officer::read_docx(docx_path)
-    for (sentinel in names(blocks)) {
+    # Render in document order, whichever pass stamped a block: what a block
+    # adds once per document (the rule reading guide) belongs to the block
+    # that comes first in the document.
+    for (sentinel in .tv_sentinels_in_document_order(doc, names(blocks))) {
       token <- blocks[[sentinel]]
       anchored <- paste0("^\\s*", .tv_escape_regex(sentinel), "\\s*$")
       if (!isTRUE(officer::cursor_reach_test(doc, anchored))) {

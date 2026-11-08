@@ -1088,12 +1088,15 @@ et_rule_wording <- list(
   r_range = list(complete = TRUE, lines = list(
     et_line("Adults of working age only", "Purpose"),
     et_line("Every value in column AGE must be a number from 18 to 70, inclusive."),
-    et_line("Missing values are not checked.", "Missing values"),
+    et_line("Not checked.", "Missing values"),
     et_line("A value that is present but is not a number violates the rule.", "Non-numeric values")
   )),
   r_unique = list(complete = TRUE, lines = list(
     et_line("No two rows may have the same combination of values in columns USUBJID and VISIT."),
-    et_line("Two missing values count as the same value.", "Missing values")
+    et_line(
+      "Two missing values count as the same value; so do two NaN values, which are not missing.",
+      "Missing values"
+    )
   )),
   r_cond = list(complete = TRUE, lines = list(
     et_line("The active arm is dosed", "Purpose"),
@@ -1101,7 +1104,10 @@ et_rule_wording <- list(
     et_line("", "Missing values"),
     et_item("If ARM is missing, the condition is not met and the row is not checked."),
     et_item("If DOSE is missing in a row that meets the condition, the rule is violated."),
-    et_line("A value in DOSE that is not a number violates the rule.", "Non-numeric values")
+    et_line(
+      "A value in DOSE that is not a number, in a row that meets the condition, violates the rule.",
+      "Non-numeric values"
+    )
   )),
   r_group = list(complete = FALSE, lines = list(
     et_line("Failed results are documented", "Purpose"),
@@ -1116,13 +1122,13 @@ et_rule_wording <- list(
     et_line("", "Requirements"),
     et_item(paste0(
       "needs_not_done: If every row of a group meets condition failed, then at ",
-      "least one row of that group must meet condition not_done. If not, the ",
-      "message is ", et_q("A failure needs NOT DONE"), "."
+      "least one row of that group must meet condition not_done. A violation is ",
+      "reported with the message ", et_q("A failure needs NOT DONE"), "."
     )),
     et_item(paste0(
       "constraint_2: Within a group, it must not happen that at least one row ",
       "meets condition failed and also at least one row meets condition ",
-      "reported. If not, a message naming the group and its rows is reported."
+      "reported. A violation is reported with a message naming the group and its rows."
     ))
   ))
 )

@@ -379,30 +379,6 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
   val
 }
 
-#' Format metadata as key-value pairs for display
-#' @keywords internal
-.format_metadata_pairs <- function(metadata_list, truncate = TRUE) {
-  # Convert list to named vector of display strings
-  pairs <- data.frame(
-    key = character(),
-    value = character(),
-    stringsAsFactors = FALSE
-  )
-
-  for (name in names(metadata_list)) {
-    val <- metadata_list[[name]]
-    value_str <- .format_scalar_value(val, truncate = truncate)
-
-    pairs <- rbind(pairs, data.frame(
-      key = name,
-      value = value_str,
-      stringsAsFactors = FALSE
-    ))
-  }
-
-  pairs
-}
-
 #' Study identity rows shared by Word and Markdown exports
 #' @keywords internal
 .study_to_df <- function(study) {
@@ -452,7 +428,9 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     if (nchar(w) == 0) {
       return(w)
     }
-    paste0(toupper(substr(w, 1, 1)), substr(w, 2, nchar(w)))
+    # Unicode case rules whatever the session locale (toupper() leaves a
+    # non-ASCII letter alone under LC_CTYPE=C).
+    paste0(stringr::str_to_upper(substr(w, 1, 1), locale = "en"), substr(w, 2, nchar(w)))
   }, character(1))
   paste(words, collapse = " ")
 }
@@ -588,31 +566,4 @@ MISSING_VALUE_DISPLAY <- "(not specified)"
     auth <- unlist(auth)
   }
   as.character(auth)
-}
-
-#' Render a data.frame as a GitHub-flavored Markdown pipe table.
-#' @keywords internal
-.df_to_md_table <- function(df) {
-  if (is.null(df) || nrow(df) == 0) {
-    return(character(0))
-  }
-
-  # A pipe table is line-based, so a cell must survive as one line. Escaping the
-  # pipe alone was not enough: a description written as a YAML block scalar
-  # carries real newlines, and each one split the row in two -- the renderer
-  # then read the tail as a fresh table row, misattributing its text to the
-  # first column and dropping whatever followed the last pipe. Newlines become
-  # <br>, which GFM renders as a line break inside the cell.
-  df[] <- lapply(df, function(col) {
-    text <- as.character(col)
-    text <- gsub("|", "\\|", text, fixed = TRUE)
-    text <- gsub("\r\n|\r|\n", "<br>", text)
-    text
-  })
-
-  header <- paste0("| ", paste(names(df), collapse = " | "), " |")
-  sep <- paste0("|", paste(rep("---", ncol(df)), collapse = "|"), "|")
-  rows <- apply(df, 1, function(r) paste0("| ", paste(r, collapse = " | "), " |"))
-
-  c(header, sep, unname(rows))
 }

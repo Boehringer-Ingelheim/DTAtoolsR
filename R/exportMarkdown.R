@@ -25,6 +25,9 @@
   x[is.na(x)] <- ""
   x <- enc2utf8(x)
   x <- gsub("\r\n?", "\n", x)
+  # Other control characters (BEL, VT, FF, ESC, C1 controls ...) have no
+  # meaning in a text document and some readers end a line on them: a space.
+  x <- gsub("[\\x{01}-\\x{08}\\x{0B}\\x{0C}\\x{0E}-\\x{1F}\\x{7F}-\\x{9F}]", " ", x, perl = TRUE)
   unlist(strsplit(paste0(x, "\n"), "\n", fixed = TRUE), use.names = FALSE)
 }
 
@@ -37,60 +40,192 @@
   lines[keep[1L]:keep[length(keep)]]
 }
 
-# Escape one string (possibly several lines) as plain text. The escaping of
-# the bulk of the special characters is delegated to .plain_text_to_md(); this
-# adds what that function does not cover:
-#   * "$" (math), emoji short codes (":smile:"), and a list marker that ends
-#     its line ("1." or "2)" on a line of its own opens an empty list item);
-#   * trailing blanks are removed, because they would be a hard line break
-#     here and would be stripped by .md_write() anyway.
-.md_escape_text <- function(text) {
+# Web addresses and e-mail addresses in author text. They are written as
+# links (see .md_link()) instead of being escaped: a backslash escape inside
+# an address would either break it ("john\_doe@...") or, where a reader turns
+# bare addresses into links itself, show up in the link. A URL starts with
+# http://, https://, ftp:// or www.; an e-mail address follows the address
+# grammar of CommonMark autolinks, so the link is always recognised.
+.MD_URL_PATTERN <- paste0(
+  "(?<![A-Za-z0-9@._%+-])(?:(?:https?|ftp)://[^\\s<>\\p{Z}]+|www\\.[A-Za-z0-9][^\\s<>\\p{Z}]*)"
+)
+.MD_EMAIL_PATTERN <- paste0(
+  "(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@",
+  "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+",
+  "(?![A-Za-z0-9-]|\\.[A-Za-z0-9])"
+)
+
+# Punctuation that ends a sentence rather than a URL: trailing ".,:;!?'\"*_~"
+# and a closing ")" or "]" without its opening partner inside the URL are
+# left outside the link.
+.md_trim_url <- function(url) {
+  repeat {
+    last <- substr(url, nchar(url), nchar(url))
+    count <- function(ch) lengths(regmatches(url, gregexpr(ch, url, fixed = TRUE)))
+    if (last %in% c(".", ",", ":", ";", "!", "?", "'", "\"", "*", "_", "~") ||
+      (last == ")" && count(")") > count("(")) ||
+      (last == "]" && count("]") > count("["))) {
+      url <- substr(url, 1L, nchar(url) - 1L)
+    } else {
+      return(url)
+    }
+  }
+}
+
+# Start and end (character positions) of every URL and e-mail address in one
+# line, in order; a zero-row matrix when there is none.
+.md_link_spans <- function(line) {
+  spans <- matrix(integer(0), ncol = 2L)
+  m <- gregexpr(.MD_URL_PATTERN, line, perl = TRUE)[[1]]
+  if (m[[1]] > 0L) {
+    for (k in seq_along(m)) {
+      url <- .md_trim_url(substr(line, m[[k]], m[[k]] + attr(m, "match.length")[[k]] - 1L))
+      if (grepl("^(?:(?:https?|ftp)://[^/?#]|www\\.[A-Za-z0-9])", url, perl = TRUE)) {
+        spans <- rbind(spans, c(m[[k]], m[[k]] + nchar(url) - 1L))
+      }
+    }
+  }
+  m <- gregexpr(.MD_EMAIL_PATTERN, line, perl = TRUE)[[1]]
+  if (m[[1]] > 0L) {
+    for (k in seq_along(m)) {
+      start <- m[[k]]
+      end <- start + attr(m, "match.length")[[k]] - 1L
+      inside <- nrow(spans) > 0L && any(spans[, 1L] <= end & spans[, 2L] >= start)
+      if (!inside) spans <- rbind(spans, c(start, end))
+    }
+  }
+  spans[order(spans[, 1L]), , drop = FALSE]
+}
+
+# One URL or e-mail address as an autolink, "<...>". An autolink takes its
+# content literally -- no escapes apply in it -- so the address is written
+# unchanged; only in a table cell is "|" escaped, because the table splits its
+# cells before anything else is read. An address starting with "www." has no
+# scheme, which an autolink needs: it is linked as "http://www..." (the target
+# GitHub gives it too). Link text with escapes would not do: a reader that
+# links bare addresses itself (pandoc 3.13) shows the backslashes.
+.md_link <- function(token, table = FALSE) {
+  if (startsWith(token, "www.")) {
+    token <- paste0("http://", token)
+  }
+  if (isTRUE(table)) {
+    token <- gsub("|", "\\|", token, fixed = TRUE)
+  }
+  paste0("<", token, ">")
+}
+
+# Escape one line segment of plain text (no URLs in it). `line_start` adds the
+# rules for the start of a line: list markers, Setext underlines, indentation.
+#   * "\" and the characters that open inline syntax are backslash-escaped:
+#     ` * _ { } [ ] # ! ~ | and "$" (math);
+#   * "<" and ">" become entities; "&" is escaped only where it would start
+#     an entity ("&amp;", "&#169;"), so "R&D" stays as written;
+#   * an emoji short code (":smile:", ":+1:", ":100:") gets its first ":"
+#     escaped; a time such as "07:45:59" is no short code and stays as is.
+.md_escape_plain <- function(text, line_start = TRUE) {
+  text <- gsub("\\", "\\\\", text, fixed = TRUE)
+  text <- gsub("&(?=[#A-Za-z0-9]+;)", "\\\\&", text, perl = TRUE)
+  text <- gsub("<", "&lt;", text, fixed = TRUE)
+  text <- gsub(">", "&gt;", text, fixed = TRUE)
+  text <- gsub("([`*_{}\\[\\]#!~|$])", "\\\\\\1", text, perl = TRUE)
+  text <- gsub(":(?=(?:(?![0-9]+:)[A-Za-z0-9_+-]+|100|1234):)", "\\\\:", text, perl = TRUE)
+  if (!isTRUE(line_start)) {
+    return(text)
+  }
+  text <- sub("^([ \t]*)([-+])", "\\1\\\\\\2", text, perl = TRUE)
+  text <- sub("^([ \t]*[0-9]+)([.)])(?=[ \t]|$)", "\\1\\\\\\2", text, perl = TRUE)
+  # A line of "=" alone would underline the line above as a heading.
+  text <- sub("^([ \t]*)(=+[ \t]*)$", "\\1\\\\\\2", text, perl = TRUE)
+  # Visible indentation must not open an indented code block: non-breaking
+  # spaces of the same width (a tab reaches the next multiple of four).
+  indent <- regmatches(text, regexpr("^[ \t]+", text))
+  if (length(indent) == 1L) {
+    width <- 0L
+    for (char in strsplit(indent, "", fixed = TRUE)[[1]]) {
+      width <- if (char == "\t") (width %/% 4L + 1L) * 4L else width + 1L
+    }
+    text <- paste0(strrep("\u00a0", width), substring(text, nchar(indent) + 1L))
+  }
+  text
+}
+
+# Escape one line: its URLs and e-mail addresses become links (unless `links`
+# is FALSE, e.g. for the text of a link, which cannot hold another link), the
+# rest is escaped as plain text.
+.md_escape_line <- function(line, table = FALSE, links = TRUE) {
+  spans <- if (isTRUE(links)) .md_link_spans(line) else matrix(integer(0), ncol = 2L)
+  if (nrow(spans) == 0L) {
+    return(.md_escape_plain(line))
+  }
+  out <- character(0)
+  pos <- 1L
+  for (k in seq_len(nrow(spans))) {
+    if (spans[k, 1L] > pos) {
+      out <- c(out, .md_escape_plain(substr(line, pos, spans[k, 1L] - 1L), line_start = pos == 1L))
+    }
+    out <- c(out, .md_link(substr(line, spans[k, 1L], spans[k, 2L]), table = table))
+    pos <- spans[k, 2L] + 1L
+  }
+  if (pos <= nchar(line)) {
+    out <- c(out, .md_escape_plain(substr(line, pos, nchar(line)), line_start = FALSE))
+  }
+  paste(out, collapse = "")
+}
+
+# Escape one string (possibly several lines) as plain text, line by line.
+# Trailing blanks are removed, because they would be a hard line break here
+# and would be stripped by .md_write() anyway.
+.md_escape_text <- function(text, table = FALSE, links = TRUE) {
   lines <- .md_lines(text)
   lines <- sub("[ \t]+$", "", lines)
-  text <- paste(lines, collapse = "\n")
-  text <- .plain_text_to_md(text, table = FALSE)
-  text <- gsub("$", "\\$", text, fixed = TRUE)
-  text <- gsub("(?m)^([ \t\u00a0]*[0-9]+)([.)])$", "\\1\\\\\\2", text, perl = TRUE)
-  gsub(":(?=[A-Za-z0-9_+-]+:)", "\\\\:", text, perl = TRUE)
+  escaped <- vapply(lines, .md_escape_line, character(1), table = table, links = links, USE.NAMES = FALSE)
+  paste(escaped, collapse = "\n")
 }
 
 # Escape one string for a table cell: indentation is trimmed (no NBSP), line
 # breaks become "<br>" and "|" is escaped, so the cell can neither end early
 # nor add a cell.
-.md_escape_cell <- function(text) {
+.md_escape_cell <- function(text, links = TRUE) {
   lines <- .md_lines(text)
   lines <- sub("[ \t]+$", "", sub("^[ \t]+", "", lines))
   lines <- .md_trim_blank(lines)
   if (length(lines) == 0L) {
     return("")
   }
-  escaped <- vapply(lines, .md_escape_text, character(1), USE.NAMES = FALSE)
+  escaped <- vapply(lines, .md_escape_text, character(1), table = TRUE, links = links, USE.NAMES = FALSE)
   paste(escaped, collapse = "<br>")
 }
 
 # Escape text so that it is shown literally: Markdown and HTML syntax, line
 # starts that would open lists, quotes, headings or code, and "$" are all
-# neutralised. With `table = TRUE` the result is safe inside a table cell
-# (single line: breaks become "<br>", leading indentation is trimmed). NA
-# becomes "", NULL gives character(0).
-.md_escape <- function(x, table = FALSE) {
+# neutralised; web and e-mail addresses become links showing the same text.
+# With `table = TRUE` the result is safe inside a table cell (single line:
+# breaks become "<br>", leading indentation is trimmed). `links = FALSE`
+# escapes addresses like any other text (for text that is itself a link).
+# NA becomes "", NULL gives character(0).
+.md_escape <- function(x, table = FALSE, links = TRUE) {
   if (is.null(x)) {
     return(character(0))
   }
   x <- as.character(x)
   x[is.na(x)] <- ""
-  one <- if (isTRUE(table)) .md_escape_cell else .md_escape_text
-  vapply(x, one, character(1), USE.NAMES = FALSE)
+  if (isTRUE(table)) {
+    vapply(x, .md_escape_cell, character(1), links = links, USE.NAMES = FALSE)
+  } else {
+    vapply(x, .md_escape_text, character(1), links = links, USE.NAMES = FALSE)
+  }
 }
 
-# Reverse of .md_escape() for the characters it produces (ASCII punctuation
-# escapes and the three HTML entities). Used to recover the heading text that
-# a renderer sees, e.g. to compute an anchor.
+# Reverse of .md_escape() for what it produces (links, ASCII punctuation
+# escapes and the HTML entities). Used to recover the heading text that a
+# renderer sees, e.g. to compute an anchor.
 .md_unescape <- function(x) {
-  x <- gsub("\\\\([!-/:-@\\[-`{-~])", "\\1", x, perl = TRUE)
-  x <- gsub("&lt;", "<", x, fixed = TRUE)
-  x <- gsub("&gt;", ">", x, fixed = TRUE)
-  gsub("&amp;", "&", x, fixed = TRUE)
+  x <- gsub("<((?:(?:https?|ftp)://|[A-Za-z0-9._%+-]+@)[^<>]*)>", "\\1", x, perl = TRUE)
+  # Entities first, and only those .md_escape() wrote ("\\&lt;" is the
+  # author's literal text "&lt;").
+  x <- gsub("(?<!\\\\)&lt;", "<", x, perl = TRUE)
+  x <- gsub("(?<!\\\\)&gt;", ">", x, perl = TRUE)
+  gsub("\\\\([!-/:-@\\[-`{-~])", "\\1", x, perl = TRUE)
 }
 
 # One table cell value as a string (NA -> "", factors and list cells flattened).
@@ -109,10 +244,16 @@
 # A GFM pipe table: header row, delimiter row, one line per data row, every
 # line with the same number of cells. Every cell is escaped. A table without
 # rows or without columns gives character(0). `align` is NULL or a vector of
-# "left" / "right" / "center" (recycled over the columns).
-.md_table <- function(df, align = NULL) {
+# "left" / "right" / "center" (recycled over the columns). `drop_empty = TRUE`
+# leaves out every column whose cells are all empty (blank), header aside.
+.md_table <- function(df, align = NULL, drop_empty = FALSE) {
   if (!is.data.frame(df)) {
     cli::cli_abort("{.arg df} must be a data frame, not {.cls {class(df)}}.")
+  }
+  if (isTRUE(drop_empty) && ncol(df) > 0L) {
+    filled <- vapply(df, function(col) any(nzchar(trimws(.md_cell_chr(col)))), logical(1))
+    if (!is.null(align) && length(align) == ncol(df)) align <- align[filled]
+    df <- df[, filled, drop = FALSE]
   }
   if (nrow(df) == 0L || ncol(df) == 0L) {
     return(character(0))
@@ -237,7 +378,9 @@
   if (!is.character(text) || length(text) != 1L || is.na(text)) {
     cli::cli_abort("{.arg text} must be a single string.")
   }
-  slug <- tolower(enc2utf8(text))
+  # Lower case by the Unicode rules, whatever the locale of the session
+  # (tolower() leaves "\u00dc" alone under LC_CTYPE=C, the reader does not).
+  slug <- stringr::str_to_lower(enc2utf8(text), locale = "en")
   slug <- gsub("[^\\p{L}\\p{M}\\p{N}\\p{Pc} -]", "", slug, perl = TRUE)
   slug <- gsub(" ", "-", slug, fixed = TRUE)
   candidate <- slug
@@ -309,36 +452,42 @@
 }
 
 # Assemble the document: `head` lines, a "## Contents" list linking chapters
-# of levels 1 and 2, the numbered chapters (empty ones omitted, numbers close
-# the gaps), then `footer` lines. Anchors are those GitHub computes for the
-# rendered headings (number included), duplicates across the whole document
-# receiving "-1", "-2", ...
+# of levels 1 and 2 (only when there are at least two chapters of level 1: a
+# list with one entry guides nobody), the numbered chapters (empty ones
+# omitted, numbers close the gaps), then `footer` lines. Anchors are those
+# GitHub computes for the rendered headings (number included), in document
+# order -- unnumbered headings inside a chapter's text count too -- so
+# duplicates across the whole document receive "-1", "-2", ...
 .md_render <- function(head = character(), sections = list(), footer = character()) {
   sections <- .md_prune(sections)
   if (length(sections) == 0L) {
     return(.md_compose(head, footer))
   }
   entries <- .md_number(sections)
+  with_toc <- length(sections) >= 2L
 
   used <- character()
-  for (title in c(.md_head_titles(.md_lines(head)), "Contents")) {
+  for (title in c(.md_head_titles(.md_lines(head)), if (with_toc) "Contents")) {
     used <- .md_slug(title, used)$used
   }
   for (i in seq_along(entries)) {
     slugged <- .md_slug(paste(entries[[i]]$number, entries[[i]]$title), used)
     entries[[i]]$slug <- slugged$slug
     used <- slugged$used
+    for (title in .md_head_titles(entries[[i]]$body)) {
+      used <- .md_slug(title, used)$used
+    }
   }
 
   toc <- character(0)
   for (e in entries) {
-    if (e$depth > 2L) next
+    if (!with_toc || e$depth > 2L) next
     toc <- c(toc, paste0(
-      strrep("  ", e$depth - 1L), "- [", e$number, " ", .md_escape(e$title), "](#", e$slug, ")"
+      strrep("  ", e$depth - 1L), "- [", e$number, " ", .md_escape(e$title, links = FALSE), "](#", e$slug, ")"
     ))
   }
 
-  blocks <- list(head, "## Contents", toc)
+  blocks <- list(head, if (with_toc) "## Contents", toc)
   for (e in entries) {
     blocks <- c(blocks, list(
       paste0(strrep("#", e$depth + 1L), " ", e$number, " ", .md_escape(e$title)),

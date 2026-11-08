@@ -64,10 +64,11 @@
 
 # Rows of the "Document Information" table: title, header, version, date and,
 # for a DTA created from a template, where it came from. Empty values are
-# dropped. `meta` is a DTAMetaData.
+# dropped -- a DTA without a title has no Title row (the document name is not
+# its title). `meta` is a DTAMetaData.
 .document_info_pairs <- function(meta) {
   info <- c(
-    Title = .dta_display_title(meta@title),
+    Title = .dta_display_title(meta@title, fallback = ""),
     `Document header` = meta@header %||% "",
     Version = meta@version %||% "",
     Date = .format_document_date(.current_version_date(meta))
@@ -84,15 +85,15 @@
 }
 
 # Rows of a dataset's fact table inside write_dta(): id, type and the template
-# the dataset was taken from. Empty values are dropped. `dataset` is a
-# DTADataSet.
+# the dataset was taken from (its date formatted like every other document
+# date). Empty values are dropped. `dataset` is a DTADataSet.
 .dataset_facts <- function(dataset) {
   facts <- c(
     ID = dataset@id,
     Type = .title_case_field(dataset@type %||% ""),
     `Template source` = dataset@template_source %||% "",
     `Template version` = dataset@template_version %||% "",
-    `Template date` = dataset@template_date %||% ""
+    `Template date` = .format_document_date(dataset@template_date)
   )
   .pairs_df(facts[nzchar(facts)])
 }
@@ -353,9 +354,10 @@
 
 # The paragraph that introduces a dataset's file table: how many files are
 # expected in total (the sum over all file entries; "n to m files are" when the
-# minimum and maximum differ, "1 file is" for exactly one) and how to read the
-# file names. `files` is a list of DTAFile objects; "" when it is empty.
-.file_count_sentence <- function(files) {
+# minimum and maximum differ, "1 file is" for exactly one) and, with
+# `explain = TRUE`, how to read the file names. `files` is a list of DTAFile
+# objects; "" when it is empty.
+.file_count_sentence <- function(files, explain = TRUE) {
   if (is.null(files) || length(files) == 0) {
     return("")
   }
@@ -374,8 +376,13 @@
     paste(total_min, "files are")
   }
   paste0(
-    count_txt, " expected for this dataset in total. Each file name is given ",
-    "either as an exact name or as a regular-expression pattern that a ",
-    "delivered file must match; the expected count states how many files may match it."
+    count_txt, " expected for this dataset in total.",
+    if (isTRUE(explain)) {
+      paste0(
+        " Each file name is given ",
+        "either as an exact name or as a regular-expression pattern that a ",
+        "delivered file must match; the expected count states how many files may match it."
+      )
+    }
   )
 }

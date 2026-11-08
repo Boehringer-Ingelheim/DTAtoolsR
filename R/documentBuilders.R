@@ -438,7 +438,7 @@ NULL
 #' Build the version-history table (flextable). Shared by the built-in layout and
 #' by the `{VERSION_HISTORY_TABLE}` template block.
 #'
-#' The rows come from [.version_history_df()].
+#' The rows come from .version_history_df().
 #'
 #' @param version_history A list of `list(version =, date =, changes =)` records,
 #'   as `DTAMetaData@version_history` holds them, or `NULL`.
@@ -742,10 +742,24 @@ NULL
   if (.doc_has_rule_reading_guide(doc)) {
     return(doc)
   }
+  # A bold title, then one paragraph per point.
+  doc <- .add_body_par(doc, RULE_READING_GUIDE_TITLE, bold = TRUE)
   for (text in .rule_reading_guide()) {
     doc <- .add_body_par(doc, text)
   }
   .add_spacer(doc)
+}
+
+# Title of the rule reading guide, in Word and Markdown alike.
+RULE_READING_GUIDE_TITLE <- "How to read the rules"
+
+# Is the cursor on a section break, i.e. was nothing added since the last one?
+.doc_at_section_start <- function(doc) {
+  node <- officer::docx_current_block_xml(doc)
+  if (inherits(node, "xml_missing")) {
+    return(FALSE)
+  }
+  length(xml2::xml_find_all(node, "./*[local-name()='pPr']/*[local-name()='sectPr']")) > 0
 }
 
 #' Close the current document section with the given page orientation.
@@ -846,7 +860,12 @@ NULL
   # orphan). officer terminates a section for the content *already added*,
   # hence: close the preceding portrait content first, add the tables, then
   # close them as landscape.
-  doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
+  # Nothing added since the last section break (e.g. a dataset document with
+  # neither description, signatories nor file table after its title page):
+  # closing again would leave an empty portrait page.
+  if (!.doc_at_section_start(doc)) {
+    doc <- .end_section_orientation(doc, "portrait", furniture_meta, furniture = furniture)
+  }
 
   doc <- add_section_heading(doc, "Column Specifications")
   ft <- .build_column_specs_table(dataset@specs)

@@ -199,3 +199,48 @@ test_that("write_dta's header and footer parts match the golden fixture", {
   }
   expect_identical(c(furniture_parts("Acme Corp"), furniture_parts(NULL)), golden_lines)
 })
+
+test_that("a dataset document with nothing between title page and tables has no empty page", {
+  # No description, no signatories, no file table: the title page's section
+  # is followed directly by the landscape tables, not by an empty portrait
+  # section (which Word prints as a blank page).
+  ds <- create_example_DTADataSetTabular(2)
+  ds@description <- NULL
+  out <- tempfile(fileext = ".docx")
+  on.exit(unlink(out), add = TRUE)
+  write_dataset_metadata(ds, out, include_file_specs = FALSE, quiet = TRUE)
+  blocks <- .docx_blocks_with_orientation(out)
+  filled <- tapply(nzchar(trimws(blocks$text)), blocks$section, any)
+  # Every section that ends in a section break has text of its own.
+  expect_true(all(filled[-length(filled)]))
+  # Title page (portrait), then the column specifications in landscape.
+  expect_identical(.docx_orientation_of(out, "Column Specifications"), "landscape")
+  title_section <- blocks$section[blocks$text == "Dataset Specification: Demographics (demographics)"]
+  spec_section <- blocks$section[blocks$text == "Column Specifications"]
+  expect_identical(spec_section, title_section + 1L)
+
+  # With a description the description keeps its portrait page before the tables.
+  ds@description <- "One row per subject."
+  write_dataset_metadata(ds, out, include_file_specs = FALSE, quiet = TRUE, overwrite = TRUE)
+  blocks <- .docx_blocks_with_orientation(out)
+  filled <- tapply(nzchar(trimws(blocks$text)), blocks$section, any)
+  expect_true(all(filled[-length(filled)]))
+  expect_identical(.docx_orientation_of(out, "One row per subject."), "portrait")
+})
+
+test_that("the Word rule reading guide has a bold title and appears once", {
+  out <- .layout_docx()
+  on.exit(unlink(out), add = TRUE)
+  summary <- officer::docx_summary(officer::read_docx(out))
+  paras <- summary$text[summary$content_type == "paragraph"]
+  guide <- .rule_reading_guide()
+  at <- which(paras == "How to read the rules")
+  expect_length(at, 1L)
+  expect_identical(paras[at + seq_along(guide)], guide)
+  # The title is set in bold.
+  xml <- .read_docx_body_xml(out)
+  doc <- xml2::read_xml(xml)
+  runs <- xml2::xml_find_all(doc, ".//*[local-name()='r'][*[local-name()='t'][.='How to read the rules']]")
+  expect_length(runs, 1L)
+  expect_length(xml2::xml_find_all(runs[[1]], "./*[local-name()='rPr']/*[local-name()='b']"), 1L)
+})

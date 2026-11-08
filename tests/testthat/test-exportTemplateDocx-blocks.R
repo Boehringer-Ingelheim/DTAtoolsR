@@ -539,7 +539,8 @@ test_that("{VALIDATION_RULES} and {DATASETS} describe each rule in prose and nev
     grouped,
     paste(
       "\u2022 v01_adult: If at least one row of a group meets condition v01, then every row",
-      "of that group must meet condition old. If not, the message is \u201cv01: needs adult\u201d."
+      "of that group must meet condition old. A violation is reported with the message",
+      "\u201cv01: needs adult\u201d."
     ),
     fixed = TRUE
   )

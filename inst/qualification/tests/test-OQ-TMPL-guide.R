@@ -208,7 +208,10 @@ test_that("OQ-TMPL-104 | the guide's rules table describes each rule in the same
         paste(utils::head(unlist(uq[["columns"]]), -1), collapse = ", "), " and ",
         utils::tail(unlist(uq[["columns"]]), 1), "."
       ),
-      "Missing values: Two missing values count as the same value."
+      paste(
+        "Missing values: Two missing values count as the same value; so do two NaN values,",
+        "which are not missing."
+      )
     )
   )
 

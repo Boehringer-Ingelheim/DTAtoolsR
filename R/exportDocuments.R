@@ -7,10 +7,12 @@
 #'
 #' The Markdown output (`format = "md"`) is a complete GitHub-flavoured
 #' Markdown document with the chapters of the Word layout in the same order
-#' (Approval & Signatures, Document Information, Study, Parties, Process
-#' Information, Agreement Sections, Datasets), numbered 1, 1.1, 1.1.1 and
-#' listed in a linked table of contents. Chapters without content are left
-#' out and the numbers close up. Validation rules are described in plain
+#' (Approval and Signatures, Document Information, Study, Parties, Process
+#' Information, Agreement Sections, Datasets), numbered 1, 1.1, 1.1.1 and,
+#' with at least two chapters, listed in a linked table of contents. Chapters
+#' without content are left out and the numbers close up; what the head of
+#' the document shows (title, version, date) is not repeated in Document
+#' Information. Web and e-mail addresses become links. Validation rules are described in plain
 #' English, never as code. All text from the DTA is escaped, so it cannot
 #' change the structure of the document. The file is deterministic: UTF-8
 #' with LF line endings and no time stamp, so the same DTA always gives the
@@ -280,12 +282,19 @@ write_dta <- function(
     )
   }
 
-  # Document information, including where the document came from.
-  doc <- .add_heading(doc, "Document Information", level = 1)
-  doc <- flextable::body_add_flextable(doc, .kv_table(.document_info_pairs(meta)), align = "left")
-  doc <- .add_spacer(doc)
-
+  # Document information, including where the document came from. A DTA with
+  # neither title, header, version, date, template nor history (e.g. one built
+  # from a bare dataset) has nothing to show here, so the chapter is left out.
+  info <- .document_info_pairs(meta)
   ft_history <- .build_version_history_table(meta@version_history)
+  if (nrow(info) > 0 || !is.null(ft_history)) {
+    doc <- .add_heading(doc, "Document Information", level = 1)
+  }
+  if (nrow(info) > 0) {
+    doc <- flextable::body_add_flextable(doc, .kv_table(info), align = "left")
+    doc <- .add_spacer(doc)
+  }
+
   if (!is.null(ft_history)) {
     doc <- .add_heading(doc, "Version History", level = 2)
     doc <- flextable::body_add_flextable(doc, ft_history, align = "left")
@@ -377,13 +386,13 @@ write_dta <- function(
 
 # The Markdown document of write_dta(): a complete, numbered GitHub-flavoured
 # Markdown file with the chapters of the Word layout in the same order --
-# Approval & Signatures, Document Information (+ Version History), Study,
+# Approval and Signatures, Document Information (+ Version History), Study,
 # Parties, Process Information, Agreement Sections, Datasets -- a linked
 # "Contents" list, and a footer without any time stamp. Empty chapters are left
 # out and the numbers close up (.md_render()). Every piece of author text goes
 # through .md_escape() / .md_table(), so it cannot change the structure. The
 # facts come from the shared builders in R/documentData.R, which also feed the
-# Word layout.
+# Word layout; what the head already shows is not repeated in a chapter.
 #' @keywords internal
 .write_dta_markdown <- function(dta, file, include_signatures = TRUE, signature_list = NULL) {
   meta <- dta@metadata
@@ -391,15 +400,18 @@ write_dta <- function(
   sections <- .md_children(
     if (isTRUE(include_signatures)) {
       .md_section(
-        "Approval & Signatures",
+        "Approval and Signatures",
         .md_signature_table(.extract_signatories(meta, signature_list = signature_list))
       )
     },
     .md_section(
       "Document Information",
-      .md_kv_table(.document_info_pairs(meta)),
+      .md_kv_table(.md_document_info_pairs(meta)),
       children = .md_children(
-        .md_section("Version History", .md_table(.version_history_df(meta@version_history)))
+        .md_section(
+          "Version History",
+          .md_table(.version_history_df(meta@version_history), drop_empty = TRUE)
+        )
       )
     ),
     if (length(meta@study) > 0) {
@@ -457,34 +469,49 @@ write_dta <- function(
 }
 
 # Head of the DTA document: document name as the only level-1 heading, the
-# DTA title in bold, the organisation line, the document header and the cover
-# facts (version, date, study, parties, template) as a table.
+# DTA title in bold (left out when the DTA has none), the organisation line
+# and the cover facts (version, date, study, parties, template) as a table.
 .md_dta_head <- function(meta) {
-  title <- .dta_display_title(meta@title, fallback = "")
+  title <- .md_inline(.dta_display_title(meta@title, fallback = ""))
   .md_compose(
     paste("#", .md_inline(.export_document_name())),
-    if (nzchar(.md_inline(title))) paste0("**", .md_inline(title), "**"),
+    if (nzchar(title)) paste0("**", title, "**"),
     .md_inline(.export_org_line()),
-    .md_paragraphs(meta@header),
     .md_kv_table(.cover_facts(meta))
   )
 }
 
+# Rows of the Markdown "Document Information" chapter: .document_info_pairs()
+# without what the head already shows (title, version, date) -- the document
+# header and the template details remain. The Word layout keeps all rows: its
+# cover is a page of its own, the table a reference on a later page.
+.md_document_info_pairs <- function(meta) {
+  pairs <- .document_info_pairs(meta)
+  pairs[!pairs$key %in% c("Title", "Version", "Date"), , drop = FALSE]
+}
+
 # Footer of the DTA document, as in the Word footer: title, version and version
-# date, then the template the document was generated from. Nothing in it
-# depends on the time or the locale of the run.
+# date, then -- only for a DTA generated from a template -- that template.
+# Nothing in it depends on the time, the locale or the package version.
 .md_dta_footer <- function(meta) {
   bits <- c(
     .dta_display_title(meta@title),
     if (!is.null(meta@version) && nzchar(meta@version)) paste("Version", meta@version),
     .format_document_date(.current_version_date(meta))
   )
-  .md_footer(bits, .template_provenance_text(meta@template))
+  provenance <- if (.md_has_template(meta@template)) .template_provenance_text(meta@template) else ""
+  .md_footer(bits, provenance)
 }
 
-# A horizontal rule, then one line of facts joined by a middle dot and one
-# provenance line.
-.md_footer <- function(bits, provenance) {
+# TRUE for template provenance that names a template (not the built-in layout).
+.md_has_template <- function(template) {
+  id <- if (length(template) > 0) template$id else NULL
+  is.character(id) && length(id) >= 1L && !is.na(id[[1]]) && nzchar(id[[1]])
+}
+
+# A horizontal rule, then one line of facts joined by a middle dot and, when
+# given, one provenance line.
+.md_footer <- function(bits, provenance = "") {
   bits <- bits[nzchar(bits)]
   .md_compose(
     "---",
@@ -516,7 +543,8 @@ write_dta <- function(
 }
 
 # "Parties": Supplier, then Receiver (the direction the data flows), each with
-# its affiliation table and its contact table (backups last).
+# its affiliation table and its contact table (backups last; a column no
+# contact fills is left out).
 .md_parties_section <- function(meta) {
   party <- function(title, org) {
     if (length(org) == 0) {
@@ -524,7 +552,7 @@ write_dta <- function(
     }
     body <- .md_compose(
       .md_kv_table(.party_facts(org)),
-      .md_table(.party_contacts_df(org$contacts))
+      .md_table(.party_contacts_df(org$contacts), drop_empty = TRUE)
     )
     .md_section(title, if (length(body) > 0) body else "No contacts specified.")
   }
@@ -571,40 +599,63 @@ write_dta <- function(
   .md_section("Agreement Sections", children = children)
 }
 
-# "Datasets": per dataset its description, its fact table and the Files,
-# Column Specifications and Validation Rules sub-chapters. The rule reading
-# guide is shown once, before the first list of rules in the document.
+# "Datasets": per dataset its description, its facts and the Files, Column
+# Specifications and Validation Rules sub-chapters. The rule reading guide is
+# shown once, before the first list of rules in the document; how to read the
+# file table is explained once, in the first Files chapter.
 .md_datasets_section <- function(datasets) {
   if (length(datasets) == 0) {
     return(NULL)
   }
   guide <- TRUE
+  explain <- TRUE
   children <- list()
   for (ds_name in names(datasets)) {
     dataset <- datasets[[ds_name]]
-    parts <- .md_dataset_parts(dataset, guide = guide)
+    parts <- .md_dataset_parts(dataset, guide = guide, explain = explain, level = 5L)
     guide <- guide && !parts$guide_shown
+    explain <- explain && !parts$explained
     children[[length(children) + 1L]] <- .md_section(
       dta_dataset_heading(dataset),
-      .md_compose(.md_paragraphs(dataset@description), .md_kv_table(.dataset_facts(dataset))),
+      .md_compose(.md_paragraphs(dataset@description), .md_dataset_facts(.dataset_facts(dataset), drop = "ID")),
       children = parts$sections
     )
   }
   .md_section("Datasets", children = children)
 }
 
+# Facts of a dataset without the rows its heading already names (`drop`):
+# nothing; a sentence when only the type is left ("Type: Tabular."); otherwise
+# a table (e.g. with the template the dataset was taken from).
+.md_dataset_facts <- function(facts, drop = character()) {
+  facts <- facts[!facts$key %in% drop, , drop = FALSE]
+  if (nrow(facts) == 0) {
+    return(character(0))
+  }
+  if (nrow(facts) == 1 && identical(facts$key, "Type")) {
+    return(.md_escape(paste0("Type: ", facts$value, ".")))
+  }
+  .md_kv_table(facts)
+}
+
 # The Files, Column Specifications and Validation Rules chapters of one dataset
 # (the latter two only for a tabular dataset). `guide = TRUE` puts the rule
-# reading guide before the rules, if the dataset has any. Returns
-# list(sections =, guide_shown =).
-.md_dataset_parts <- function(dataset, include_file_specs = TRUE, include_rules = TRUE, guide = TRUE) {
+# reading guide before the rules, if the dataset has any; `explain = TRUE`
+# explains the file table. `level` is the heading level of the unnumbered
+# headings inside these chapters (one below the chapters' own). Returns
+# list(sections =, guide_shown =, explained =).
+.md_dataset_parts <- function(dataset, include_file_specs = TRUE, include_rules = TRUE, guide = TRUE,
+                              explain = TRUE, level = 5L) {
   tabular <- inherits(dataset, "DTAtools::DTADataSetTabular")
   rules <- if (tabular) dataset@specs@rules %||% list() else list()
-  guide_shown <- isTRUE(guide) && isTRUE(include_rules) && length(rules) > 0
+  guide_shown <- isTRUE(guide) && isTRUE(include_rules) && tabular && length(rules) > 0
+  explained <- isTRUE(explain) && isTRUE(include_file_specs) && length(dataset@files) > 0
 
-  columns <- if (tabular) .md_table(.column_specs_df(dataset@specs)) else character(0)
+  columns <- if (tabular) .md_table(.column_specs_df(dataset@specs), drop_empty = TRUE) else character(0)
   sections <- .md_children(
-    if (isTRUE(include_file_specs)) .md_section("Files", .md_files_body(dataset@files)),
+    if (isTRUE(include_file_specs)) {
+      .md_section("Files", .md_files_body(dataset@files, explain = explain, level = level))
+    },
     if (tabular) {
       .md_section(
         "Column Specifications",
@@ -612,23 +663,24 @@ write_dta <- function(
       )
     },
     if (tabular && isTRUE(include_rules)) {
-      .md_section("Validation Rules", .md_rules_body(rules, guide = guide_shown))
+      .md_section("Validation Rules", .md_rules_body(rules, guide = guide_shown, level = level))
     }
   )
-  list(sections = sections, guide_shown = guide_shown)
+  list(sections = sections, guide_shown = guide_shown, explained = explained)
 }
 
-# Body of a "Files" chapter: how many files are expected, the file table and,
-# for tabular files, how each file is to be parsed.
-.md_files_body <- function(files) {
+# Body of a "Files" chapter: how many files are expected (with how to read the
+# table when `explain`), the file table and, for tabular files, how each file
+# is to be parsed under an unnumbered "File format" heading of `level`.
+.md_files_body <- function(files, explain = TRUE, level = 5L) {
   if (is.null(files) || length(files) == 0) {
     return("No files specified.")
   }
   format_table <- .md_table(.file_format_df(files))
   .md_compose(
-    .md_escape(.file_count_sentence(files)),
-    .md_table(.md_file_specs_df(files)),
-    if (length(format_table) > 0) "**File format**",
+    .md_escape(.file_count_sentence(files, explain = explain)),
+    .md_table(.md_file_specs_df(files), drop_empty = TRUE),
+    if (length(format_table) > 0) paste(strrep("#", level), "File format"),
     format_table
   )
 }
@@ -673,24 +725,56 @@ write_dta <- function(
 
 # Body of a "Validation Rules" chapter: optionally the reading guide, then one
 # block per rule in the shared plain-English wording -- never as code.
-.md_rules_body <- function(rules, guide = FALSE) {
+.md_rules_body <- function(rules, guide = FALSE, level = 5L) {
   if (length(rules) == 0) {
     return("No validation rules specified.")
   }
   blocks <- c(
-    if (isTRUE(guide)) as.list(.md_escape(.rule_reading_guide())),
-    lapply(rules, .md_rule_block)
+    if (isTRUE(guide)) list(.md_rule_guide()),
+    lapply(rules, .md_rule_block, level = level)
   )
   do.call(.md_compose, blocks)
 }
 
-# One rule as Markdown: .rule_md() plus the two escapes .md_escape() adds to
-# the plain-text escaping .rule_md() applies ("$" and emoji short codes), so a
-# value in a rule is as literal as any other author text.
-.md_rule_block <- function(rule) {
-  text <- .rule_md(rule, heading = TRUE)
-  text <- gsub("$", "\\$", text, fixed = TRUE)
-  gsub(":(?=[A-Za-z0-9_+-]+:)", "\\\\:", text, perl = TRUE)
+# The rule reading guide: a bold title, then one bullet per point.
+.md_rule_guide <- function() {
+  .md_compose(paste0("**", .md_escape(RULE_READING_GUIDE_TITLE), "**"), .md_list(.rule_reading_guide()))
+}
+
+# One rule: an unnumbered heading of `level` with the rule id, the kind of rule
+# in italics, then the lines of .rule_lines() -- labelled lines as "**Label:**
+# text", list items as a "-" list, other lines as paragraphs. Text that spans
+# several lines keeps its line breaks (hard breaks) and blank lines, exactly
+# like any other author text (.md_paragraphs()); everything is escaped.
+.md_rule_block <- function(rule, level = 5L) {
+  lines <- .rule_lines(rule)
+  kind <- .rule_kind_label(rule)
+  id <- tryCatch(rule@id, error = function(e) NULL)
+  id <- if (is.character(id) && length(id) == 1L && !is.na(id)) .md_clean_title(id) else ""
+  blocks <- list(
+    paste(strrep("#", level), .md_escape(if (nzchar(id)) id else kind)),
+    if (nzchar(id)) paste0("*", .md_escape(kind), "*")
+  )
+  i <- 1L
+  n <- nrow(lines)
+  while (i <= n) {
+    if (lines$bullet[[i]]) {
+      j <- i
+      while (j < n && lines$bullet[[j + 1L]]) j <- j + 1L
+      blocks[[length(blocks) + 1L]] <- .md_list(lines$text[i:j])
+      i <- j + 1L
+      next
+    }
+    label <- lines$label[[i]]
+    text <- .md_paragraphs(lines$text[[i]])
+    if (nzchar(label)) {
+      lead <- paste0("**", .md_escape(label), ":**")
+      text <- if (length(text) > 0) c(paste(lead, text[[1]]), text[-1]) else lead
+    }
+    blocks[[length(blocks) + 1L]] <- text
+    i <- i + 1L
+  }
+  do.call(.md_compose, blocks)
 }
 
 #' Locate Microsoft Word (`WINWORD.EXE`)
@@ -1304,7 +1388,7 @@ dta_pdf_backend <- function() {
 #'
 #' The Markdown output (`format = "md"`) is a complete GitHub-flavoured
 #' Markdown document: a fact table, a linked table of contents and numbered
-#' chapters (Approval & Signatures, Description, Files, Column
+#' chapters (Approval and Signatures, Description, Files, Column
 #' Specifications, Validation Rules; chapters without content are left out).
 #' It is deterministic: UTF-8 with LF line endings and no time stamp.
 #'
@@ -1457,54 +1541,53 @@ write_dataset_metadata <- function(
 }
 
 # The Markdown document of write_dataset_metadata(): the same frame as the DTA
-# document -- head with a fact table, a linked "Contents" list, numbered
-# chapters and a footer without any time stamp. The chapters are Approval &
+# document -- head with the facts, a linked "Contents" list, numbered
+# chapters and a footer without any time stamp. The chapters are Approval and
 # Signatures (only with signatories), Description, Files, Column
 # Specifications and Validation Rules; `include_*` switch them as in Word.
 #' @keywords internal
 .write_dataset_markdown <- function(dataset, file, include_signatures = TRUE, signature_list = NULL,
                                     include_file_specs = TRUE, include_rules = TRUE) {
   heading <- dta_dataset_heading(dataset)
+  title <- paste0("Dataset Specification: ", heading)
   parts <- .md_dataset_parts(
     dataset,
-    include_file_specs = include_file_specs, include_rules = include_rules, guide = TRUE
+    include_file_specs = include_file_specs, include_rules = include_rules, guide = TRUE,
+    explain = TRUE, level = 3L
   )
   sections <- c(
     .md_children(
       if (isTRUE(include_signatures)) {
-        .md_section("Approval & Signatures", .md_signature_table(signature_list))
+        .md_section("Approval and Signatures", .md_signature_table(signature_list))
       },
       .md_section("Description", .md_paragraphs(dataset@description))
     ),
     parts$sections
   )
 
+  # The subtitle names the dataset (name and id): the fact table does not
+  # repeat them.
   head <- .md_compose(
     paste("#", .md_inline(.export_document_name())),
-    paste0("**", .md_inline(paste0("Dataset Specification: ", heading)), "**"),
+    paste0("**", .md_inline(title), "**"),
     .md_inline(.export_org_line()),
-    .md_kv_table(.dataset_document_facts(dataset))
+    .md_dataset_facts(.dataset_document_facts(dataset), drop = c("Dataset ID", "Name"))
   )
 
-  template <- if (!is.null(dataset@template_source) && nzchar(dataset@template_source)) {
-    list(
-      id = dataset@template_source,
-      version = dataset@template_version %||% "",
-      date = dataset@template_date
-    )
+  # One footer line: the document, then the template the dataset was taken
+  # from (or, without a named template, its version and date).
+  text <- function(x) if (is.null(x) || length(x) == 0 || is.na(x[[1]])) "" else as.character(x[[1]])
+  source <- text(dataset@template_source)
+  version <- text(dataset@template_version)
+  origin <- if (nzchar(source)) {
+    .template_provenance_text(list(id = source, version = version, date = dataset@template_date))
   } else {
-    list()
-  }
-  footer <- .md_footer(
     c(
-      paste0("Dataset Specification: ", heading),
-      if (!is.null(dataset@template_version) && nzchar(dataset@template_version)) {
-        paste("Template version", dataset@template_version)
-      },
+      if (nzchar(version)) paste("Template version", version),
       .format_document_date(dataset@template_date)
-    ),
-    .template_provenance_text(template)
-  )
+    )
+  }
+  footer <- .md_footer(c(title, origin))
 
   .md_write(.md_render(head, sections, footer), file)
 }

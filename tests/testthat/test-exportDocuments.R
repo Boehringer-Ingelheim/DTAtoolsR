@@ -215,7 +215,7 @@ test_that("the Markdown exports escape a dataset's name and description", {
   on.exit(unlink(out_ds, force = TRUE), add = TRUE)
   write_dataset_metadata(ds, file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
   ds_md <- readLines(out_ds, warn = FALSE)
-  expect_true("| Name | \\*Draft\\* \\#2 |" %in% ds_md)
+  expect_true("**Dataset Specification: \\*Draft\\* \\#2 (demographics)**" %in% ds_md)
   expect_true("\\# not a heading" %in% ds_md)
   expect_false("# not a heading" %in% ds_md)
 })
@@ -246,12 +246,12 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
   write_dataset_metadata(ds, file = out_md, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out_md, warn = FALSE)
 
-  # The dataset is named in the bold subtitle and listed in the fact table;
-  # the description is a chapter of its own.
+  # The dataset is named (name and id) in the bold subtitle only; with no
+  # template the remaining fact, its type, is one sentence. The description is
+  # a chapter of its own.
   expect_identical(md[3], "**Dataset Specification: Demographics (demographics)**")
-  expect_true(all(c(
-    "| Item | Details |", "| Dataset ID | demographics |", "| Name | Demographics |", "| Type | Tabular |"
-  ) %in% md))
+  expect_identical(md[5], "Type: Tabular.")
+  expect_false(any(grepl("^\\| (Dataset ID|Name|Type) \\|", md)))
   description_at <- match("## 1 Description", md)
   expect_false(is.na(description_at))
   expect_identical(md[description_at + 2], "One row per subject, as delivered by the CRO.")
@@ -269,8 +269,7 @@ test_that("write_dataset_metadata markdown lists the id, name and description of
     md_bare[3],
     "**Dataset Specification: example\\_container\\_specs\\_without\\_data**"
   )
-  expect_true("| Dataset ID | example\\_container\\_specs\\_without\\_data |" %in% md_bare)
-  expect_false(any(grepl("^\\| Name \\|", md_bare)))
+  expect_false(any(grepl("^\\| (Dataset ID|Name) \\|", md_bare)))
 })
 
 test_that("write_dataset_metadata docx titles a dataset by name and id and tables its facts", {
@@ -1431,12 +1430,13 @@ test_that("the bundled template renders headings in the brand green", {
       "\u2022 b: a row in which Y is equal to \u201cyes\u201d",
       paste(
         "\u2022 needs_b: If every row of a group meets condition a, then every row of that",
-        "group must meet condition b. If not, the message is \u201ca needs b: always\u201d."
+        "group must meet condition b. A violation is reported with the message",
+        "\u201ca needs b: always\u201d."
       ),
       paste(
         "Within a group, it must not happen that at least one row meets condition a and",
-        "also at least one row meets condition b. If not, a message naming the group and",
-        "its rows is reported."
+        "also at least one row meets condition b. A violation is reported with a message",
+        "naming the group and its rows."
       )
     )
   )
@@ -1637,7 +1637,10 @@ test_that("the Markdown exports describe each rule in prose, with no code", {
   write_dta(dta, file = out_dta, format = "md", overwrite = TRUE, quiet = TRUE)
   write_dataset_metadata(dta@datasets[[1]], file = out_ds, format = "md", overwrite = TRUE, quiet = TRUE)
 
-  for (path in c(out_dta, out_ds)) {
+  # Rule headings sit one level below the Validation Rules chapter: level 5
+  # in the DTA document (chapter 1.1.1), level 3 in the dataset document.
+  for (case in list(list(path = out_dta, level = 5L), list(path = out_ds, level = 3L))) {
+    path <- case$path
     md <- readLines(path, warn = FALSE, encoding = "UTF-8")
     text <- paste(md, collapse = "\n")
     .expect_no_rule_code(text, info = path)
@@ -1646,11 +1649,12 @@ test_that("the Markdown exports describe each rule in prose, with no code", {
     expect_false(any(grepl("Exact rule definitions", md, fixed = TRUE)), info = path)
     # One block per rule, and the reading guide once, before the first block.
     for (rule in rules) {
-      expect_true(grepl(.md_rule_block(rule), text, fixed = TRUE), info = paste(path, rule@id))
+      block <- paste(.md_rule_block(rule, level = case$level), collapse = "\n")
+      expect_true(grepl(block, text, fixed = TRUE), info = paste(path, rule@id))
     }
-    guide_at <- which(md == .md_escape(.rule_reading_guide()[[1]]))
+    guide_at <- which(md == paste("-", .md_escape(.rule_reading_guide()[[1]])))
     expect_length(guide_at, 1)
-    first_rule <- which(startsWith(md, paste0("**", .plain_text_to_md(rules[[1]]@id), "**")))[[1]]
+    first_rule <- which(md == paste(strrep("#", case$level), .md_escape(rules[[1]]@id)))[[1]]
     expect_lt(guide_at, first_rule)
   }
 })
@@ -1695,7 +1699,7 @@ test_that("every rule of the bundled clinical example is described in prose in d
   md <- paste(readLines(out_md, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
   .expect_no_rule_code(md)
   for (rule in rules) {
-    expect_true(grepl(.md_rule_block(rule), md, fixed = TRUE), info = rule@id)
+    expect_true(grepl(paste(.md_rule_block(rule), collapse = "\n"), md, fixed = TRUE), info = rule@id)
   }
 })
 
@@ -1706,8 +1710,8 @@ test_that("a generated version-history summary does not break the Markdown table
   # GFM pipe table -- dta_version_sanitise() already strips both before this
   # text goes anywhere near an export -- so this pins that the REST of that
   # punctuation still leaves the Version History table exactly one row per
-  # history entry, i.e. that .df_to_md_table() (R/exportDocuments.R ~line
-  # 333) is not confused by it.
+  # history entry, i.e. that .md_table() (R/exportMarkdown.R) is not
+  # confused by it.
   skip_if_not_installed("shiny")
 
   summary_fn <- app_fn("dta_version_change_summary")
@@ -1802,14 +1806,15 @@ test_that("a rule id with backticks or markup stays plain text in Markdown", {
   on.exit(unlink(out, force = TRUE), add = TRUE)
   write_dta(.prose_fixture_dta(rules), file = out, format = "md", overwrite = TRUE, quiet = TRUE)
   md <- readLines(out, warn = FALSE)
-  # Each id is escaped character by character inside the bold rule label;
-  # no code span, so no unescaped backtick anywhere.
+  # Each id is escaped character by character in the rule's heading (level 5,
+  # below chapter 1.1.3 Validation Rules), its kind in italics beneath; no
+  # code span, so no unescaped backtick anywhere.
   expected <- c(
-    "**a\\`b** \u00b7 Unique", "**\\`lead** \u00b7 Unique", "**trail\\`** \u00b7 Unique",
-    "**x\\`\\`y** \u00b7 Unique", "**a\\|b\\*c** \u00b7 Unique"
+    "##### a\\`b", "##### \\`lead", "##### trail\\`", "##### x\\`\\`y", "##### a\\|b\\*c"
   )
   for (label in expected) {
     expect_identical(sum(md == label), 1L, info = label)
+    expect_identical(md[match(label, md) + 2L], "*Unique*", info = label)
   }
   expect_false(any(grepl("(?<!\\\\)`", md, perl = TRUE)))
 })

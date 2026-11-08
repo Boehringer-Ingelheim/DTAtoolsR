@@ -88,10 +88,15 @@ test_that(".document_info_pairs gives title, header, version, date and template 
   expect_identical(nrow(same), 6L)
 })
 
-test_that(".document_info_pairs falls back to the document name without a title", {
+test_that(".document_info_pairs has no Title row without a title", {
+  # The document name ("Data Transfer Agreement") is not the DTA's title, so a
+  # DTA without one has no Title row -- and here no other row either.
   info <- .document_info_pairs(.dd_meta())
-  expect_identical(info$key, "Title")
-  expect_identical(info$value, "Data Transfer Agreement")
+  expect_identical(nrow(info), 0L)
+  m <- .dd_meta()
+  m@title <- "   "
+  m@version <- "2"
+  expect_identical(.document_info_pairs(m)$key, "Version")
 })
 
 test_that(".dataset_facts shows id, type and template origin", {
@@ -343,6 +348,28 @@ test_that(".file_count_sentence states the total count and how to read the names
 
   expect_identical(.file_count_sentence(list()), "")
   expect_identical(.file_count_sentence(NULL), "")
+
+  # explain = FALSE: the count alone, without how to read the names.
+  expect_identical(
+    .file_count_sentence(one, explain = FALSE),
+    "1 file is expected for this dataset in total."
+  )
+  expect_identical(
+    .file_count_sentence(ranged, explain = FALSE),
+    "2 to 4 files are expected for this dataset in total."
+  )
+})
+
+test_that(".dataset_facts shows the template date as the dataset document does", {
+  # Both go through .format_document_date(): a missing date is no row (it used
+  # to read "NA" here), a given one is shown as written.
+  gf <- read_dataset_from_yaml(system.file("extdata", "gf_dataset.yaml", package = "DTAtools"))
+  gf@template_date <- NA_character_
+  expect_false("Template date" %in% .dataset_facts(gf)$key)
+  expect_false("Template date" %in% .dataset_document_facts(gf)$key)
+  expect_false("NA" %in% .dataset_facts(gf)$value)
+  gf@template_date <- "2024-12-17"
+  expect_identical(.dataset_facts(gf)$value[.dataset_facts(gf)$key == "Template date"], "2024-12-17")
 })
 
 # ---- column specifications ---------------------------------------------------

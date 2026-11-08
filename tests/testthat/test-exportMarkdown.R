@@ -113,9 +113,12 @@ test_that(".md_escape neutralises every Markdown and HTML trigger", {
   expect_identical(.md_escape("`code`"), "\\`code\\`")
   expect_identical(.md_escape("$5 and $6"), "\\$5 and \\$6")
   expect_identical(.md_escape("x | y"), "x \\| y")
-  expect_identical(.md_escape("5 < 6 & 7 > 3"), "5 &lt; 6 &amp; 7 &gt; 3")
+  # "&" is escaped only where it would start an entity reference.
+  expect_identical(.md_escape("5 < 6 & 7 > 3"), "5 &lt; 6 & 7 &gt; 3")
+  expect_identical(.md_escape("R&D &amp; &#169; &x;"), "R&D \\&amp; \\&\\#169; \\&x;")
   expect_identical(.md_escape("[a](b) ![c](d)"), "\\[a\\](b) \\!\\[c\\](d)")
-  expect_identical(.md_escape("a~~b~~ c==d"), "a\\~\\~b\\~\\~ c\\=\\=d")
+  # "=" means nothing inside a line.
+  expect_identical(.md_escape("a~~b~~ c==d"), "a\\~\\~b\\~\\~ c==d")
   expect_identical(.md_escape("back\\slash"), "back\\\\slash")
   expect_identical(.md_escape("{x}"), "\\{x\\}")
 })
@@ -130,9 +133,12 @@ test_that(".md_escape protects line starts that would change the structure", {
   expect_identical(.md_escape("a\n12)"), "a\n12\\)")
   # Rules and Setext underlines.
   expect_identical(.md_escape("a\n---"), "a\n\\---")
-  expect_identical(.md_escape("a\n==="), "a\n\\=\\=\\=")
-  # Emoji short codes would be replaced by the emoji.
+  expect_identical(.md_escape("a\n==="), "a\n\\===")
+  expect_identical(.md_escape("a\n=== x"), "a\n=== x")
+  # Emoji short codes would be replaced by the emoji; a time is no short code.
   expect_identical(.md_escape(":smile: x"), "\\:smile: x")
+  expect_identical(.md_escape(":+1: :100: :8ball:"), "\\:+1: \\:100: \\:8ball:")
+  expect_identical(.md_escape("at 07:45:59 and 1:2:3"), "at 07:45:59 and 1:2:3")
   # Indentation is kept visible (non-breaking spaces), not turned into code.
   expect_identical(.md_escape("    code"), "\u00a0\u00a0\u00a0\u00a0code")
 })
@@ -521,7 +527,7 @@ test_that(".md_render numbers chapters, drops empty ones and closes the gaps", {
   expect_identical(headings, c(
     "# Doc",
     "## Contents",
-    "## 1 Approval &amp; Signatures",
+    "## 1 Approval & Signatures",
     "## 2 Parties",
     "### 2.1 Supplier",
     "### 2.2 Third\\_party \\[x\\]",
@@ -536,9 +542,9 @@ test_that(".md_render numbers chapters, drops empty ones and closes the gaps", {
 test_that(".md_render lists levels 1 and 2 in Contents", {
   out <- .md_render("# Doc", mdt_sample_sections())
   start <- which(out == "## Contents")
-  toc <- out[(start + 2):(which(out == "## 1 Approval &amp; Signatures") - 2)]
+  toc <- out[(start + 2):(which(out == "## 1 Approval & Signatures") - 2)]
   expect_identical(toc, c(
-    "- [1 Approval &amp; Signatures](#1-approval--signatures)",
+    "- [1 Approval & Signatures](#1-approval--signatures)",
     "- [2 Parties](#2-parties)",
     "  - [2.1 Supplier](#21-supplier)",
     "  - [2.2 Third\\_party \\[x\\]](#22-third_party-x)",
@@ -568,7 +574,7 @@ test_that(".md_section and .md_render reject bad structure", {
 })
 
 test_that("headings with line breaks or spaces collapse to one line", {
-  out <- .md_render("# D", list(.md_section("Two\n  words\tand   more", "x")))
+  out <- .md_render("# D", list(.md_section("Two\n  words\tand   more", "x"), .md_section("B", "y")))
   expect_true("## 1 Two words and more" %in% out)
   expect_true(any(grepl("(#1-two-words-and-more)", out, fixed = TRUE)))
 })
@@ -637,9 +643,10 @@ test_that("headings in the rendered file have the numbers that were promised", {
 })
 
 test_that("a heading in the head takes its anchor before the chapters", {
-  out <- .md_render(c("# 1 Parties"), list(.md_section("Parties", "x")))
+  two <- function(first) list(.md_section(first, "x"), .md_section("Other", "y"))
+  out <- .md_render(c("# 1 Parties"), two("Parties"))
   expect_true("- [1 Parties](#1-parties-1)" %in% out)
-  out2 <- .md_render(c("# Contents"), list(.md_section("Parties", "x")))
+  out2 <- .md_render(c("# Contents"), two("Parties"))
   expect_true("- [1 Parties](#1-parties)" %in% out2)
 })
 
@@ -746,4 +753,199 @@ test_that("a whole document round-trips through the file and pandoc", {
   kv <- mdt_table(blocks[[6]])
   expect_identical(kv[[3]], c("Note", "a|b $5"))
   expect_identical(kv[[2]], c("Study ID", "S_1"))
+})
+
+# ---- web and e-mail addresses ------------------------------------------------
+
+# Every pandoc on the machine that can read gfm: the addresses must survive
+# both older (3.1) and newer (3.13+) readers, which treat bare addresses
+# differently.
+mdt_pandocs <- function() {
+  found <- unique(normalizePath(
+    Filter(nzchar, c(Sys.which("pandoc"), "/usr/bin/pandoc", "/opt/r45/bin/pandoc", "/usr/local/bin/pandoc")),
+    mustWork = FALSE
+  ))
+  found[file.exists(found)]
+}
+
+mdt_ast_with <- function(pandoc, lines) {
+  inp <- tempfile(fileext = ".md")
+  out <- tempfile(fileext = ".json")
+  on.exit(unlink(c(inp, out), force = TRUE), add = TRUE)
+  writeBin(charToRaw(enc2utf8(paste0(paste(lines, collapse = "\n"), "\n"))), inp)
+  status <- system2(pandoc, c("-f", "gfm", "-t", "json", "-o", out, inp), stdout = FALSE, stderr = FALSE)
+  if (!identical(status, 0L)) stop("pandoc failed")
+  jsonlite::fromJSON(paste(readLines(out, encoding = "UTF-8", warn = FALSE), collapse = "\n"),
+    simplifyVector = FALSE
+  )$blocks
+}
+
+# Links (target and shown text) in a list of inlines, in order.
+mdt_links <- function(x) {
+  out <- list()
+  walk <- function(node) {
+    if (is.list(node) && identical(node$t, "Link")) {
+      out[[length(out) + 1L]] <<- list(target = node$c[[3]][[1]], inlines = node$c[[2]])
+    } else if (is.list(node)) {
+      for (child in node) walk(child)
+    }
+  }
+  walk(x)
+  out
+}
+
+# The text a reader sees for a list of inlines (Str/Space, through spans and
+# links).
+mdt_visible <- function(inl) {
+  parts <- character(0)
+  walk <- function(node) {
+    if (!is.list(node)) {
+      return()
+    }
+    if (!is.null(node$t)) {
+      if (node$t == "Str") parts <<- c(parts, node$c)
+      if (node$t %in% c("Space", "SoftBreak")) parts <<- c(parts, " ")
+      if (node$t == "Link") walk(node$c[[2]])
+      if (node$t == "Span") walk(node$c[[2]])
+      return()
+    }
+    for (child in node) walk(child)
+  }
+  walk(inl)
+  paste(parts, collapse = "")
+}
+
+test_that("URLs and e-mail addresses become links that are not escaped", {
+  expect_identical(.md_escape("Mail john_doe@ex-ample.org."), "Mail <john_doe@ex-ample.org>.")
+  expect_identical(
+    .md_escape("see https://example.org/my_file.csv?a=1&b=2, ok"),
+    "see <https://example.org/my_file.csv?a=1&b=2>, ok"
+  )
+  # A closing parenthesis without its partner belongs to the sentence.
+  expect_identical(.md_escape("(https://x.org/a_(b))"), "(<https://x.org/a_(b)>)")
+  # www. has no scheme, which an autolink needs: linked as http://www. ...
+  expect_identical(.md_escape("www.ex.org/a_b."), "<http://www.ex.org/a_b>.")
+  # In a table cell "|" is escaped even inside the link, or it would split the cell.
+  expect_identical(.md_escape("x|y https://a.org/p|q", table = TRUE), "x\\|y <https://a.org/p\\|q>")
+  expect_identical(.md_escape("x https://a.org/p|q"), "x <https://a.org/p|q>")
+  # Not an address: no scheme, no host, no valid domain.
+  expect_identical(.md_escape("http:// and a@b and a@b_c.org"), "http:// and a@b and a@b\\_c.org")
+  # links = FALSE escapes addresses like other text (text that is itself a link).
+  expect_identical(.md_escape("a_b@x.org", links = FALSE), "a\\_b@x.org")
+})
+
+test_that("pandoc links every address to exactly the author's text (every pandoc found)", {
+  pandocs <- mdt_pandocs()
+  skip_if(length(pandocs) == 0L, "pandoc is not installed")
+  texts <- c(
+    "Mail john_doe@ex-ample.org now.",
+    "Get https://example.org/my_file.csv?a=1&b=2&amp;c=*x*_y here",
+    "(see http://ex.org/a_(b)_c), then ftp://files.ex.org/x~y/.",
+    "Visit www.ex-ample.org/path_one/two_three.",
+    "Pipes: https://a.org/p|q and first.last+tag@sub.ex.org"
+  )
+  targets <- list(
+    "mailto:john_doe@ex-ample.org",
+    "https://example.org/my_file.csv?a=1&b=2&amp;c=*x*_y",
+    c("http://ex.org/a_(b)_c", "ftp://files.ex.org/x~y/"),
+    "http://www.ex-ample.org/path_one/two_three",
+    c("https://a.org/p|q", "mailto:first.last+tag@sub.ex.org")
+  )
+  for (pandoc in pandocs) {
+    for (as_table in c(FALSE, TRUE)) {
+      doc <- if (as_table) {
+        .md_table(data.frame(Text = texts, Other = "x"))
+      } else {
+        unlist(lapply(texts, function(t) c(.md_escape(t), "")))
+      }
+      blocks <- mdt_ast_with(pandoc, doc)
+      paragraphs <- if (as_table) {
+        rows <- blocks[[1]]$c[[5]][[1]][[4]]
+        lapply(rows, function(row) row[[2]][[1]][[5]][[1]]$c)
+      } else {
+        lapply(blocks, function(b) b$c)
+      }
+      expect_length(paragraphs, length(texts))
+      for (i in seq_along(texts)) {
+        info <- sprintf("%s, table = %s: %s", pandoc, as_table, texts[i])
+        got <- vapply(mdt_links(paragraphs[[i]]), function(l) l$target, character(1))
+        expect_identical(got, targets[[i]], info = info)
+        # What the reader sees is the author's text; an address starting with
+        # "www." is shown with the scheme it is linked with.
+        expect_identical(mdt_visible(paragraphs[[i]]), sub("www.", "http://www.", texts[i], fixed = TRUE), info = info)
+      }
+    }
+  }
+})
+
+# ---- escaping: minimal and readable ---------------------------------------------
+
+test_that("entities, times and '=' lines are escaped only where they mean something", {
+  mdt_skip_without_pandoc()
+  texts <- c(
+    "R&D & Co; &amp; &copy; &#169; &#x1F600; &nosuch; & ;", "07:45:59 and 12:00:00",
+    "a\n===", "a\n= = =", "c==d and ==x==", ":smile: :+1: :100: :1234: :8ball: :45:"
+  )
+  blocks <- mdt_ast(unlist(lapply(texts, function(t) c(.md_escape(t), ""))))
+  expect_length(blocks, length(texts))
+  for (i in seq_along(texts)) {
+    expect_identical(blocks[[i]]$t, "Para", info = texts[i])
+    expect_identical(mdt_norm(mdt_inlines(blocks[[i]]$c)), mdt_norm(texts[i]), info = texts[i])
+  }
+  # Readable source: no escape where none is needed.
+  expect_identical(.md_escape("07:45:59"), "07:45:59")
+  expect_identical(.md_escape("Q&A"), "Q&A")
+})
+
+test_that("control characters become spaces", {
+  expect_identical(.md_lines("a\ab\vc\fd\033e"), "a b c d e")
+  expect_identical(.md_escape("bell\a and\u0085next"), "bell  and next")
+  expect_identical(.md_lines("tab\tstays"), "tab\tstays")
+})
+
+# ---- anchors in any locale ---------------------------------------------------------
+
+test_that(".md_slug lower-cases non-ASCII letters whatever the locale", {
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_identical(.md_slug("\u00dcbersicht Labor")$slug, "\u00fcbersicht-labor")
+  expect_identical(.md_slug("\u00c9TAPE \u00c0 \u03a9")$slug, "\u00e9tape-\u00e0-\u03c9")
+  out <- .md_render("# D", list(.md_section("\u00dcbersicht Labor", "x"), .md_section("B", "y")))
+  expect_true("- [1 \u00dcbersicht Labor](#1-\u00fcbersicht-labor)" %in% out)
+})
+
+# ---- contents threshold, unnumbered headings ------------------------------------------
+
+test_that("Contents appears only with at least two level-1 chapters", {
+  one <- .md_render("# D", list(.md_section("Only", "x", list(.md_section("A", "a"), .md_section("B", "b")))))
+  expect_false("## Contents" %in% one)
+  expect_identical(grep("^#", one, value = TRUE), c("# D", "## 1 Only", "### 1.1 A", "### 1.2 B"))
+  two <- .md_render("# D", list(.md_section("One", "x"), .md_section("Two", "y")))
+  expect_identical(two[3:6], c("## Contents", "", "- [1 One](#1-one)", "- [2 Two](#2-two)"))
+})
+
+test_that("unnumbered headings in a chapter's text take their anchors in document order", {
+  sections <- list(
+    .md_section("Rules", c("##### 2 Notes", "", "text")),
+    .md_section("Notes", "y")
+  )
+  out <- .md_render("# D", sections)
+  # "##### 2 Notes" comes first, so the chapter "2 Notes" after it gets "-1".
+  expect_true("- [2 Notes](#2-notes-1)" %in% out)
+  mdt_skip_without_pandoc()
+  ids <- vapply(mdt_headers(mdt_ast(out)), function(h) h$c[[2]][[1]], character(1))
+  expect_true(all(c("2-notes", "2-notes-1") %in% ids))
+})
+
+# ---- empty columns ---------------------------------------------------------------
+
+test_that(".md_table(drop_empty = TRUE) leaves out columns without any content", {
+  df <- data.frame(A = c("x", "y"), B = c("", NA), C = c(" ", "z"), D = c(NA, " \n "), stringsAsFactors = FALSE)
+  expect_identical(.md_table(df, drop_empty = TRUE), c(
+    "| A | C |", "| --- | --- |", "| x |  |", "| y | z |"
+  ))
+  # Alignment follows the columns that are kept.
+  expect_identical(.md_table(df, align = c("left", "right", "center", "right"), drop_empty = TRUE)[2], "| :--- | :---: |")
+  # By default every column stays; a table whose columns are all empty is nothing.
+  expect_identical(.md_table(df)[1], "| A | B | C | D |")
+  expect_identical(.md_table(data.frame(B = c("", NA)), drop_empty = TRUE), character(0))
 })

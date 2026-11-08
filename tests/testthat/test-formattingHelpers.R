@@ -61,10 +61,6 @@ test_that(".format_scalar_value renders every flavour of NA as one display strin
     expect_equal(out, MISSING_VALUE_DISPLAY)
   }
 
-  pairs <- .format_metadata_pairs(list(x = NA_character_))
-  expect_equal(pairs$key, "x")
-  expect_equal(pairs$value, MISSING_VALUE_DISPLAY)
-
   # The bare text "NA" must never reach a rendered document.
   expect_false(grepl("NA", .format_scalar_value(NA), fixed = TRUE))
 })
@@ -127,42 +123,11 @@ test_that(".title_case_field normalizes snake and dotted field names", {
   expect_equal(.title_case_field("name"), "Name")
 })
 
-test_that("a markdown table cell survives an embedded newline as one row", {
-  # A GFM pipe table is line-based. A description authored as a YAML block
-  # scalar carries real newlines, and each one used to split the row in two --
-  # the renderer then read the tail as a fresh table row, misattributing its
-  # text to the first column and dropping everything after the last pipe.
-  df <- data.frame(
-    id = "age_range",
-    description = "Ages over 100 need:\nsupervisor sign-off | extra consent",
-    stringsAsFactors = FALSE
-  )
-
-  lines <- .df_to_md_table(df)
-
-  # Header, separator, and exactly one body line.
-  expect_length(lines, 3)
-  expect_false(any(grepl("\n", lines, fixed = TRUE)))
-
-  body <- lines[3]
-  expect_match(body, "supervisor sign-off", fixed = TRUE)
-  expect_match(body, "extra consent", fixed = TRUE)
-  # The pipe inside the text stays escaped, so it cannot open a new cell.
-  expect_match(body, "\\|", fixed = TRUE)
-  expect_match(body, "<br>", fixed = TRUE)
-})
-
-test_that("carriage returns are folded the same way as newlines", {
-  df <- data.frame(x = "a\r\nb", stringsAsFactors = FALSE)
-  lines <- .df_to_md_table(df)
-
-  expect_length(lines, 3)
-  expect_equal(lines[3], "| a<br>b |")
-})
-
-test_that("an empty table renders as nothing at all", {
-  expect_equal(.df_to_md_table(NULL), character(0))
-  expect_equal(.df_to_md_table(data.frame()), character(0))
+test_that(".title_case_field capitalises non-ASCII letters in any locale", {
+  # Under LC_CTYPE=C toupper() leaves a non-ASCII letter as it is.
+  withr::local_locale(c(LC_CTYPE = "C"))
+  expect_equal(.title_case_field("\u00fcbertragung_art"), "\u00dcbertragung Art")
+  expect_equal(.title_case_field("\u00e9tape"), "\u00c9tape")
 })
 
 # ---- translate_rule_to_human() ----------------------------------------------
@@ -203,7 +168,7 @@ test_that("a range rule reads as a sentence with its bounds and notes", {
     translate_rule_to_human(rule),
     paste(
       "Every value in column AGE must be a number from 18 to 65, inclusive.",
-      "Missing values: Missing values are not checked.",
+      "Missing values: Not checked.",
       "Non-numeric values: A value that is present but is not a number violates the rule.",
       sep = "\n"
     )
@@ -216,7 +181,10 @@ test_that("a unique rule over two columns reads as a combination", {
     translate_rule_to_human(rule),
     paste(
       "No two rows may have the same combination of values in columns A and B.",
-      "Missing values: Two missing values count as the same value.",
+      paste(
+        "Missing values: Two missing values count as the same value; so do two NaN values,",
+        "which are not missing."
+      ),
       sep = "\n"
     )
   )
@@ -233,7 +201,7 @@ test_that("a column-condition rule reads its operators, not their key names", {
     "Missing values:",
     "\u2022 If AGE is missing, the condition is not met and the row is not checked.",
     "\u2022 If STATUS is missing in a row that meets the condition, the rule is violated.",
-    "Non-numeric values: A value in AGE that is not a number does not exempt the row from the check.",
+    "Non-numeric values: A value in AGE that is not a number does not by itself exempt the row from the check.",
     sep = "\n"
   )
   expect_identical(translate_rule_to_human(rule), expected)
@@ -289,7 +257,7 @@ test_that("translate_rule_to_human expands a group_condition into its parts", {
       paste(
         "\u2022 needs_report: If at least one row of a group meets condition c_failed,",
         "then at least one row of that group must meet condition c_reported.",
-        "If not, the message is \u201cMissing report\u201d."
+        "A violation is reported with the message \u201cMissing report\u201d."
       ),
       "Missing values:",
       paste(
@@ -342,7 +310,7 @@ test_that("group_condition descriptions state mutual exclusivity, also under its
   expected <- paste(
     "x: Within a group, it must not happen that at least one row meets condition a",
     "and also at least one row meets condition b.",
-    "If not, a message naming the group and its rows is reported."
+    "A violation is reported with a message naming the group and its rows."
   )
   expect_match(mk("mutually_exclusive"), expected, fixed = TRUE)
   # The alias not_both normalises to the same wording.
